@@ -321,7 +321,7 @@ fn sort_invalid_argument(message: impl Into<String>) -> crate::RuntimeError {
 #[runtime_builtin(
     name = "sort",
     category = "array/sorting_sets",
-    summary = "Sort scalars, vectors, matrices, or N-D tensors along a dimension, with optional index outputs.",
+    summary = "Sort array elements along a dimension with optional index outputs.",
     keywords = "sort,ascending,descending,indices,comparisonmethod,gpu",
     accel = "sink",
     sink = true,

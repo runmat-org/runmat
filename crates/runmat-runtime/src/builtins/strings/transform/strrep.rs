@@ -164,7 +164,7 @@ fn strrep_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 #[runtime_builtin(
     name = "strrep",
     category = "strings/transform",
-    summary = "Replace substring occurrences with MATLAB-compatible semantics.",
+    summary = "Replace non-overlapping substring occurrences in text inputs.",
     keywords = "strrep,replace,strings,character array,text",
     accel = "sink",
     type_resolver(text_preserve_type),

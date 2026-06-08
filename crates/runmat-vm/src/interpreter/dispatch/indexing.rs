@@ -447,10 +447,62 @@ async fn execute_brace_operation(
                     .await?
                 }
                 Value::Cell(ca) => {
-                    let indices = resolve_cell_indices(raw_indices).await?;
-                    crate::ops::cells::assign_cell_value(ca, &indices, rhs, |oldv, newv| {
-                        runmat_gc::gc_record_write(oldv, newv);
-                    })?
+                    if raw_indices.len() > 1 {
+                        let indices = resolve_cell_indices(raw_indices).await?;
+                        match rhs {
+                            Value::OutputList(values) if values.len() == 1 => {
+                                crate::ops::cells::assign_cell_value(
+                                    ca,
+                                    &indices,
+                                    values.into_iter().next().unwrap_or(Value::Num(0.0)),
+                                    |oldv, newv| {
+                                        runmat_gc::gc_record_write(oldv, newv);
+                                    },
+                                )?
+                            }
+                            Value::OutputList(_) => {
+                                return Err(crate::interpreter::errors::mex(
+                                    "CellAssignmentArityMismatch",
+                                    "Cell brace assignment target count does not match source value count",
+                                ))
+                            }
+                            other => crate::ops::cells::assign_cell_value(
+                                ca,
+                                &indices,
+                                other,
+                                |oldv, newv| {
+                                    runmat_gc::gc_record_write(oldv, newv);
+                                },
+                            )?,
+                        }
+                    } else {
+                        let positions =
+                            crate::ops::cells::resolve_cell_assignment_positions(&ca, raw_indices)?;
+                        match rhs {
+                            Value::OutputList(values) => crate::ops::cells::assign_cell_value_multi(
+                                ca,
+                                &positions,
+                                &values,
+                                |oldv, newv| {
+                                    runmat_gc::gc_record_write(oldv, newv);
+                                },
+                            )?,
+                            other if positions.len() == 1 => crate::ops::cells::assign_cell_value(
+                                ca,
+                                &positions,
+                                other,
+                                |oldv, newv| {
+                                    runmat_gc::gc_record_write(oldv, newv);
+                                },
+                            )?,
+                            _ => {
+                                return Err(crate::interpreter::errors::mex(
+                                    "CellAssignmentArityMismatch",
+                                    "Cell brace assignment target count does not match source value count",
+                                ))
+                            }
+                        }
+                    }
                 }
                 _ => {
                     return Err(crate::interpreter::errors::mex(

@@ -162,7 +162,7 @@ pub const LOGSPACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "logspace",
     category = "array/creation",
-    summary = "Logarithmically spaced vector.",
+    summary = "Generate logarithmically spaced row vectors.",
     keywords = "logspace,logarithmic,vector,gpu",
     examples = "x = logspace(1, 3, 3)  % [10 100 1000]",
     accel = "array_construct",

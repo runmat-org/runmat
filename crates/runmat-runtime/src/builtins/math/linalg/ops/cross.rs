@@ -217,7 +217,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "cross",
     category = "math/linalg/ops",
-    summary = "Cross product of 3-element vectors along a matching dimension.",
+    summary = "Compute vector cross products.",
     keywords = "cross,vector product,3d vector,gpu,linear algebra",
     accel = "custom",
     type_resolver(cross_type),

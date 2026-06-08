@@ -94,6 +94,7 @@ pub struct HirFunction {
     pub params: Vec<BindingId>,
     pub outputs: Vec<BindingId>,
     pub abi: FunctionAbi,
+    pub argument_validations: Vec<FunctionArgumentValidation>,
     pub locals: Vec<BindingId>,
     pub captures: Vec<CapturedBinding>,
     pub modifiers: FunctionModifiers,
@@ -123,6 +124,55 @@ pub struct FunctionAbi {
     pub varargout: Option<BindingId>,
     pub implicit_nargin: Option<BindingId>,
     pub implicit_nargout: Option<BindingId>,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum FunctionArgDim {
+    Any,
+    Exact(usize),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct FunctionArgSizeSpec {
+    pub rows: FunctionArgDim,
+    pub cols: FunctionArgDim,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct FunctionArgumentValidation {
+    pub binding: BindingId,
+    pub size: Option<FunctionArgSizeSpec>,
+    pub class_name: Option<String>,
+    pub validators: Vec<FunctionArgValidator>,
+    pub default_value: Option<FunctionArgDefaultValue>,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum FunctionArgValidator {
+    Finite,
+    NumericOrLogical,
+    Text,
+    Nonempty,
+    ScalarOrEmpty,
+    Real,
+    Integer,
+    Positive,
+    Negative,
+    Nonnegative,
+    Nonzero,
+    Nonpositive,
+    GreaterThanOrEqual(f64),
+    LessThanOrEqual(f64),
+    GreaterThan(f64),
+    LessThan(f64),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum FunctionArgDefaultValue {
+    Number(f64),
+    Bool(bool),
+    String(String),
+    EmptyArray,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -301,6 +351,15 @@ pub enum HirCallableRef {
     Function(FunctionId),
     Builtin(BuiltinId),
     Imported(DefPath),
+    SuperConstructor {
+        current_class: SymbolName,
+        super_class: QualifiedName,
+    },
+    SuperMethod {
+        current_class: SymbolName,
+        super_class: QualifiedName,
+        method: SymbolName,
+    },
     DynamicExpr(Box<HirExpr>),
     Unresolved(QualifiedName),
 }
@@ -321,6 +380,7 @@ impl HirCallableRef {
             HirCallableRef::Function(function) => Some(CallableIdentity::BoundFunction(*function)),
             HirCallableRef::Builtin(builtin) => Some(CallableIdentity::Builtin(builtin.clone())),
             HirCallableRef::Imported(path) => Some(CallableIdentity::Imported(path.clone())),
+            HirCallableRef::SuperConstructor { .. } | HirCallableRef::SuperMethod { .. } => None,
             HirCallableRef::DynamicExpr(_) => None,
             HirCallableRef::Unresolved(name) => {
                 if name.0.len() == 1 {
@@ -503,8 +563,13 @@ impl CallableFallbackPolicy {
 }
 
 pub const FEVAL_BUILTIN_NAME: &str = "feval";
+pub const EVAL_BUILTIN_NAME: &str = "eval";
+pub const EVALIN_BUILTIN_NAME: &str = "evalin";
+pub const ASSIGNIN_BUILTIN_NAME: &str = "assignin";
 pub const NARGIN_BUILTIN_NAME: &str = "nargin";
 pub const NARGOUT_BUILTIN_NAME: &str = "nargout";
+pub const NARGINCHK_BUILTIN_NAME: &str = "narginchk";
+pub const NARGOUTCHK_BUILTIN_NAME: &str = "nargoutchk";
 pub const AWAIT_EXTENSION_NAME: &str = "await";
 pub const SPAWN_EXTENSION_NAME: &str = "spawn";
 pub const TEST_CLASS_REGISTRATION_BUILTIN_NAME: &str = "__register_test_classes";
@@ -548,6 +613,8 @@ pub struct HirClass {
     pub name: QualifiedName,
     pub super_class: Option<ClassId>,
     pub kind: ClassKind,
+    pub is_sealed: bool,
+    pub is_abstract: bool,
     pub properties: Vec<ClassProperty>,
     pub methods: Vec<ClassMethod>,
     pub events: Vec<ClassEvent>,
@@ -621,6 +688,7 @@ pub enum MemberAccess {
     #[default]
     Public,
     Private,
+    Protected,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -640,6 +708,7 @@ pub enum RequestedOutputCount {
     Zero,
     One,
     Exactly(usize),
+    CurrentFunctionNargout,
 }
 
 impl RequestedOutputCount {
@@ -648,6 +717,7 @@ impl RequestedOutputCount {
             RequestedOutputCount::Zero => 0,
             RequestedOutputCount::One => 1,
             RequestedOutputCount::Exactly(count) => *count,
+            RequestedOutputCount::CurrentFunctionNargout => 1,
         }
     }
 }
@@ -1146,6 +1216,7 @@ mod tests {
                 },
                 locals: vec![binding],
                 captures: vec![],
+                argument_validations: vec![],
                 modifiers: FunctionModifiers::default(),
                 body: HirBlock { statements: vec![] },
                 span: span(),
@@ -1228,6 +1299,7 @@ mod tests {
             },
             locals: vec![],
             captures: vec![capture],
+            argument_validations: vec![],
             modifiers: FunctionModifiers::default(),
             body: HirBlock { statements: vec![] },
             span: span(),

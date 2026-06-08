@@ -1,0 +1,125 @@
+{
+  "title": "patch",
+  "category": "plotting",
+  "keywords": [
+    "patch",
+    "polygon",
+    "filled polygon",
+    "faces",
+    "vertices",
+    "matlab patch",
+    "graphics primitive"
+  ],
+  "summary": "Create filled polygon patch graphics from coordinate data or Faces/Vertices definitions.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`patch` is a plotting sink. The initial implementation gathers GPU-resident coordinate inputs, triangulates polygon faces on the host, then renders through RunMat's shared GPU plotting renderer."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::patch::tests",
+    "integration": "runmat-plot/src/plots/patch.rs"
+  },
+  "description": "`patch` creates filled polygon graphics objects from coordinate arrays, faces/vertices inputs, or name-value property forms, with MATLAB-compatible plotting-handle behavior.",
+  "behaviors": [
+    "Vector coordinate inputs create one polygon.",
+    "Matrix coordinate inputs create one polygon per column.",
+    "Patch edges close automatically, matching MATLAB's open-polygon behavior.",
+    "`Faces` values are interpreted as MATLAB-style one-based vertex indices.",
+    "2-D vertices are accepted as N-by-2; 3-D vertices are accepted as N-by-3.",
+    "The returned value is a patch graphics handle that works with `get`, `set`, `ishandle`, and `isgraphics`.",
+    "Per-vertex or per-face `CData` colormap interpolation is not yet implemented; non-scalar color data is accepted only as compatibility input and currently falls back to the default face color unless `FaceColor` supplies a concrete RGB/color-name value."
+  ],
+  "options": [
+    "`FaceColor` accepts color names, RGB triples, `flat`, or `none`.",
+    "`EdgeColor` accepts color names, RGB triples, or `none`.",
+    "`FaceAlpha` and `EdgeAlpha` accept numeric values from 0 to 1.",
+    "`LineWidth`, `DisplayName`, and `Visible` use the shared plotting property model.",
+    "`FaceColor`, `EdgeColor`, alpha, line width, display name, visibility, `Faces`, `Vertices`, `XData`, `YData`, and `ZData` are the first supported patch property set. Lighting, normals, texture coordinates, and callback properties are deferred."
+  ],
+  "examples": [
+    {
+      "description": "Create a triangle patch",
+      "input": "x = [0 1 0];\ny = [0 0 1];\npatch(x, y, 'red');"
+    },
+    {
+      "description": "Create two rectangle patches from matrix columns",
+      "input": "X = [0 2; 1 3; 1 3; 0 2];\nY = [0 0; 0 0; 1 1; 1 1];\npatch(X, Y, 'cyan', 'EdgeColor', 'black');"
+    },
+    {
+      "description": "Create a patch from Faces and Vertices",
+      "input": "V = [0 0; 1 0; 1 1; 0 1];\nF = [1 2 3 4];\nh = patch('Faces', F, 'Vertices', V, 'FaceColor', [0.2 0.6 0.9]);\nget(h, 'Type')",
+      "output": "ans =\n    'patch'"
+    },
+    {
+      "description": "Create a 3-D patch",
+      "input": "V = [0 0 0; 1 0 0; 0.5 1 0.5];\nF = [1 2 3];\npatch('Faces', F, 'Vertices', V, 'FaceAlpha', 0.6);\nview(3);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does patch close polygons automatically?",
+      "answer": "Yes. You can provide open polygon coordinate lists; RunMat closes the edge loop when rendering the patch."
+    },
+    {
+      "question": "Are Faces indices zero-based or one-based?",
+      "answer": "They are one-based to match MATLAB. `Faces = [1 2 3]` references the first, second, and third rows of `Vertices`."
+    },
+    {
+      "question": "Does patch have a direct GPU-resident geometry path?",
+      "answer": "Not yet. RunMat gathers GPU-resident patch inputs for validation and triangulation, then submits the resulting geometry to the shared GPU renderer. A direct GPU triangulation/packing path can be added later for very large patch meshes."
+    }
+  ],
+  "links": [
+    {
+      "label": "surf",
+      "url": "./surf"
+    },
+    {
+      "label": "plot3",
+      "url": "./plot3"
+    },
+    {
+      "label": "fill",
+      "url": "./fill"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Graphics Handles",
+      "url": "/docs/plotting/graphics-handles"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/patch.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/patch.rs"
+  },
+  "gpu_residency": "`patch` gathers GPU-resident coordinate inputs in the first implementation because MATLAB-compatible patch parsing requires shape validation, one-based Faces handling, NaN padding, and polygon triangulation. The rendered geometry still flows through the shared GPU plotting renderer.",
+  "gpu_behavior": [
+    "Patch rendering is a plotting sink and fusion barrier.",
+    "Host and gathered-GPU inputs produce the same graphics object and handle behavior.",
+    "A future direct GPU path should preserve the same Faces/Vertices semantics and only replace the triangulation/packing step."
+  ]
+}

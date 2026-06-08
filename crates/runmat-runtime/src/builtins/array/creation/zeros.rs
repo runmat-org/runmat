@@ -265,7 +265,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "zeros",
     category = "array/creation",
-    summary = "Create arrays filled with zeros.",
+    summary = "Create arrays filled with zero values.",
     keywords = "zeros,array,logical,gpu,like",
     accel = "array_construct",
     type_resolver(zeros_type),

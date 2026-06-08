@@ -6,6 +6,8 @@ pub struct LoweringContext<'a> {
     pub variables: &'a HashMap<String, usize>,
     pub bound_functions: &'a HashMap<String, FunctionId>,
     pub known_project_symbols: &'a HashSet<String>,
+    pub private_function_owners: &'a HashMap<String, String>,
+    pub private_function_aliases: &'a HashMap<String, HashMap<String, String>>,
     pub runmat_extensions_enabled: bool,
     pub top_level_await_enabled: bool,
 }
@@ -16,6 +18,8 @@ impl<'a> LoweringContext<'a> {
             variables,
             bound_functions: empty_bound_functions(),
             known_project_symbols: empty_project_symbols(),
+            private_function_owners: empty_private_function_owners(),
+            private_function_aliases: empty_private_function_aliases(),
             runmat_extensions_enabled: true,
             top_level_await_enabled: true,
         }
@@ -31,6 +35,16 @@ impl<'a> LoweringContext<'a> {
 
     pub fn with_known_project_symbols(mut self, symbols: &'a HashSet<String>) -> Self {
         self.known_project_symbols = symbols;
+        self
+    }
+
+    pub fn with_private_functions(
+        mut self,
+        owners: &'a HashMap<String, String>,
+        aliases: &'a HashMap<String, HashMap<String, String>>,
+    ) -> Self {
+        self.private_function_owners = owners;
+        self.private_function_aliases = aliases;
         self
     }
 
@@ -50,6 +64,8 @@ impl<'a> LoweringContext<'a> {
             variables: EMPTY_VARS.get_or_init(HashMap::new),
             bound_functions: empty_bound_functions(),
             known_project_symbols: empty_project_symbols(),
+            private_function_owners: empty_private_function_owners(),
+            private_function_aliases: empty_private_function_aliases(),
             runmat_extensions_enabled: true,
             top_level_await_enabled: true,
         }
@@ -64,4 +80,15 @@ fn empty_bound_functions() -> &'static HashMap<String, FunctionId> {
 fn empty_project_symbols() -> &'static HashSet<String> {
     static EMPTY_PROJECT_SYMBOLS: OnceLock<HashSet<String>> = OnceLock::new();
     EMPTY_PROJECT_SYMBOLS.get_or_init(HashSet::new)
+}
+
+fn empty_private_function_owners() -> &'static HashMap<String, String> {
+    static EMPTY_PRIVATE_FUNCTION_OWNERS: OnceLock<HashMap<String, String>> = OnceLock::new();
+    EMPTY_PRIVATE_FUNCTION_OWNERS.get_or_init(HashMap::new)
+}
+
+fn empty_private_function_aliases() -> &'static HashMap<String, HashMap<String, String>> {
+    static EMPTY_PRIVATE_FUNCTION_ALIASES: OnceLock<HashMap<String, HashMap<String, String>>> =
+        OnceLock::new();
+    EMPTY_PRIVATE_FUNCTION_ALIASES.get_or_init(HashMap::new)
 }

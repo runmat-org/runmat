@@ -224,7 +224,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "integral",
     category = "math/optim",
-    summary = "Approximate a finite scalar definite integral using adaptive quadrature.",
+    summary = "Approximate finite scalar definite integrals using adaptive quadrature.",
     keywords = "integral,numerical integration,adaptive quadrature,quadrature,function handle",
     accel = "sink",
     type_resolver(numerical_integral_type),

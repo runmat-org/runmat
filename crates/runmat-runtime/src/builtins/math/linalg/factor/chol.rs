@@ -208,7 +208,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "chol",
     category = "math/linalg/factor",
-    summary = "Cholesky factorization with MATLAB-compatible upper and lower forms.",
+    summary = "Compute Cholesky factorizations.",
     keywords = "chol,cholesky,factorization,positive-definite",
     accel = "sink",
     sink = true,

@@ -199,7 +199,7 @@ fn impulse_error_with_message(
 #[runtime_builtin(
     name = "impulse",
     category = "control",
-    summary = "Compute or plot the impulse response of a supported dynamic system model.",
+    summary = "Compute or plot impulse responses.",
     keywords = "impulse,control system,transfer function,response,tf",
     type_resolver(impulse_type),
     descriptor(crate::builtins::control::impulse::IMPULSE_DESCRIPTOR),

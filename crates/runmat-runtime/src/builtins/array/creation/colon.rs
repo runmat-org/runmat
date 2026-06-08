@@ -259,7 +259,7 @@ fn colon_error_with_message(
 #[runtime_builtin(
     name = "colon",
     category = "array/creation",
-    summary = "Arithmetic progression that mirrors MATLAB's colon operator.",
+    summary = "Generate arithmetic progressions with MATLAB colon semantics.",
     keywords = "colon,sequence,range,step,gpu",
     accel = "array_construct",
     type_resolver(colon_type),

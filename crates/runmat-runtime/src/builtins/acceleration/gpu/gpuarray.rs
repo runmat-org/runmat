@@ -326,7 +326,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "gpuArray",
     category = "acceleration/gpu",
-    summary = "Move data to the GPU and return a gpuArray handle.",
+    summary = "Move data to the GPU as gpuArray values.",
     keywords = "gpuArray,gpu,accelerate,upload,dtype,like",
     examples = "G = gpuArray([1 2 3], 'single');",
     accel = "array_construct",

@@ -220,7 +220,7 @@ pub const EYE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "eye",
     category = "array/creation",
-    summary = "Identity matrix or N-D identity tensor.",
+    summary = "Create identity matrices and N-D identity tensors.",
     keywords = "eye,identity,matrix,gpu,like,logical",
     accel = "array_construct",
     type_resolver(eye_type),

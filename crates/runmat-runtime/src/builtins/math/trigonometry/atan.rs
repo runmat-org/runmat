@@ -193,7 +193,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "atan",
     category = "math/trigonometry",
-    summary = "Arctangent of scalars, vectors, matrices, or N-D tensors (element-wise).",
+    summary = "Element-wise inverse tangent.",
     keywords = "atan,arctangent,inverse tangent,trigonometry,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

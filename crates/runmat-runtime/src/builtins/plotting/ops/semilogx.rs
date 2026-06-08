@@ -152,7 +152,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "semilogx",
     category = "plotting",
-    summary = "Create a plot with logarithmic X axis.",
+    summary = "Plot data with a logarithmic X axis.",
     keywords = "semilogx,plotting,log",
     sink = true,
     suppress_auto_output = true,

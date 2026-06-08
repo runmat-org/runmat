@@ -1,6 +1,6 @@
 use crate::RuntimeError;
 use runmat_builtins::Value;
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity};
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, SourceId};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::future::Future;
@@ -10,6 +10,13 @@ use std::sync::Arc;
 pub type UserFunctionFuture = Pin<Box<dyn Future<Output = Result<Value, RuntimeError>>>>;
 pub type FunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture + Send + Sync;
 pub type FunctionResolver = dyn Fn(&str) -> Option<usize> + Send + Sync;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceFunctionInfo {
+    pub source_id: SourceId,
+    pub name: String,
+    pub function: usize,
+}
 
 #[derive(Debug, Clone)]
 pub struct CallableRequest {
@@ -49,6 +56,10 @@ runmat_thread_local! {
         const { RefCell::new(None) };
     static SEMANTIC_FUNCTION_RESOLVER: RefCell<Option<Arc<FunctionResolver>>> =
         const { RefCell::new(None) };
+    static SOURCE_FUNCTION_CATALOG: RefCell<Option<Arc<Vec<SourceFunctionInfo>>>> =
+        const { RefCell::new(None) };
+    static ACTIVE_SEMANTIC_FUNCTION_STACK: RefCell<Vec<usize>> =
+        const { RefCell::new(Vec::new()) };
 }
 
 pub struct FunctionInvokerGuard {
@@ -58,6 +69,12 @@ pub struct FunctionInvokerGuard {
 pub struct FunctionResolverGuard {
     previous: Option<Arc<FunctionResolver>>,
 }
+
+pub struct SourceFunctionCatalogGuard {
+    previous: Option<Arc<Vec<SourceFunctionInfo>>>,
+}
+
+pub struct ActiveSemanticFunctionGuard;
 
 impl Drop for FunctionInvokerGuard {
     fn drop(&mut self) {
@@ -73,6 +90,23 @@ impl Drop for FunctionResolverGuard {
         let previous = self.previous.take();
         SEMANTIC_FUNCTION_RESOLVER.with(|slot| {
             *slot.borrow_mut() = previous;
+        });
+    }
+}
+
+impl Drop for SourceFunctionCatalogGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        SOURCE_FUNCTION_CATALOG.with(|slot| {
+            *slot.borrow_mut() = previous;
+        });
+    }
+}
+
+impl Drop for ActiveSemanticFunctionGuard {
+    fn drop(&mut self) {
+        ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| {
+            slot.borrow_mut().pop();
         });
     }
 }
@@ -93,12 +127,46 @@ pub fn install_semantic_function_resolver(
     FunctionResolverGuard { previous }
 }
 
+pub fn install_source_function_catalog(
+    catalog: Option<Arc<Vec<SourceFunctionInfo>>>,
+) -> SourceFunctionCatalogGuard {
+    let previous =
+        SOURCE_FUNCTION_CATALOG.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), catalog));
+    SourceFunctionCatalogGuard { previous }
+}
+
+pub fn push_active_semantic_function(function: usize) -> ActiveSemanticFunctionGuard {
+    ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| {
+        slot.borrow_mut().push(function);
+    });
+    ActiveSemanticFunctionGuard
+}
+
 pub fn current_semantic_function_invoker() -> Option<Arc<FunctionInvoker>> {
     SEMANTIC_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
 }
 
 pub fn current_semantic_function_resolver() -> Option<Arc<FunctionResolver>> {
     SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone())
+}
+
+pub fn current_active_semantic_function() -> Option<usize> {
+    ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| slot.borrow().last().copied())
+}
+
+pub fn source_functions_for(source_id: SourceId) -> Vec<SourceFunctionInfo> {
+    SOURCE_FUNCTION_CATALOG.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|catalog| {
+                catalog
+                    .iter()
+                    .filter(|info| info.source_id == source_id)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    })
 }
 
 pub async fn try_call_semantic_function(
@@ -141,5 +209,12 @@ pub async fn try_call_semantic_descriptor(
         return None;
     }
     let name = fallback_policy.resolution_name_for(&identity)?;
+    if matches!(identity, CallableIdentity::DynamicName(_))
+        && runmat_builtins::get_class(&name).is_some()
+    {
+        // Constructor calls for class names must flow through runtime constructor dispatch,
+        // not generic semantic name resolution.
+        return None;
+    }
     try_call_semantic_function_by_name(&name, &args, requested_outputs).await
 }

@@ -1,0 +1,90 @@
+{
+  "title": "loglog",
+  "category": "plotting",
+  "keywords": [
+    "loglog",
+    "log-log plot",
+    "power law plot",
+    "matlab loglog",
+    "scaling analysis"
+  ],
+  "summary": "Plot data on logarithmic x and y axes in MATLAB and RunMat.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::loglog::tests"
+  },
+  "description": "`loglog(x, y, ...)` creates line plots and sets both axes to logarithmic scale. Argument handling, returned handles, and axis-scaling behavior follow MATLAB semantics.",
+  "behaviors": [
+    "The returned value is a numeric line handle.",
+    "Both x and y axes are switched to log scale on the active axes.",
+    "Axes scale state remains subplot-local.",
+    "Logarithmic axes are meaningful for positive-domain data on both x and y."
+  ],
+  "examples": [
+    {
+      "description": "Plot a power-law curve on logarithmic axes",
+      "input": "x = logspace(0, 3, 200);\nloglog(x, x.^(-1.5));"
+    },
+    {
+      "description": "Compare multiple scaling laws",
+      "input": "x = logspace(0, 3, 200);\nh1 = loglog(x, x.^(-1));\nset(h1, 'DisplayName', 'x^{-1}');\nhold on;\nh2 = loglog(x, x.^(-2));\nset(h2, 'DisplayName', 'x^{-2}');\nlegend;"
+    },
+    {
+      "description": "Inspect both axes after plotting",
+      "input": "x = logspace(0, 2, 50);\nloglog(x, x.^2);\nax = gca;\nxscale = get(ax, 'XScale');\nyscale = get(ax, 'YScale');",
+      "output": "% Both axes report 'log'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why do power-law relationships appear as straight lines on a log-log plot?",
+      "answer": "Taking the log of both sides of `y = a * x^b` gives `log(y) = log(a) + b * log(x)`, which is linear in log-space. The slope of the line equals the exponent `b`, and the y-intercept gives `log(a)`. That's why log-log is the standard way to identify and compare power laws."
+    },
+    {
+      "question": "How is loglog different from semilogx or semilogy?",
+      "answer": "`semilogx` only logs the x-axis (linear y), `semilogy` only logs the y-axis (linear x), and `loglog` logs both. Use `loglog` when both dimensions span orders of magnitude — spectrum plots, scaling benchmarks, fractal dimension analysis."
+    },
+    {
+      "question": "Can I mix loglog with other scale modes in a subplot layout?",
+      "answer": "Yes. Axes scale state is subplot-local, so `loglog` in one panel doesn't affect neighbors.\n\n```matlab\nsubplot(1, 2, 1);\nloglog(x, x.^(-2));\nsubplot(1, 2, 2);\nplot(x, x.^(-2)); % linear axes here\n```"
+    }
+  ],
+  "links": [
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "semilogx",
+      "url": "./semilogx"
+    },
+    {
+      "label": "semilogy",
+      "url": "./semilogy"
+    },
+    {
+      "label": "axis",
+      "url": "./axis"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/loglog.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/loglog.rs"
+  }
+}

@@ -302,7 +302,7 @@ fn token_to_limit(token: &ArgToken) -> crate::BuiltinResult<usize> {
 #[runtime_builtin(
     name = "find",
     category = "array/indexing",
-    summary = "Locate indices and values of nonzero elements.",
+    summary = "Locate nonzero indices and values.",
     keywords = "find,nonzero,indices,row,column,gpu",
     accel = "custom",
     type_resolver(find_type),

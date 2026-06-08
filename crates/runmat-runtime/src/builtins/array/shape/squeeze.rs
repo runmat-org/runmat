@@ -130,7 +130,7 @@ fn squeeze_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 #[runtime_builtin(
     name = "squeeze",
     category = "array/shape",
-    summary = "Remove singleton dimensions while preserving MATLAB row/column semantics.",
+    summary = "Remove singleton dimensions while preserving MATLAB vector orientation semantics.",
     keywords = "squeeze,singleton dimensions,array reshape,gpu",
     accel = "shape",
     type_resolver(squeeze_type),

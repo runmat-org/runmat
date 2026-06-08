@@ -1,0 +1,120 @@
+{
+  "title": "fgetl",
+  "category": "io/filetext",
+  "keywords": [
+    "fgetl",
+    "text file",
+    "line input",
+    "newline"
+  ],
+  "summary": "Read the next line without newline characters in MATLAB and RunMat.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host CPU. When the file identifier lives on the GPU, RunMat gathers it before performing host I/O."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::filetext::fgetl::tests"
+  },
+  "description": "`fgetl(fid)` reads the next line from a text file and removes trailing line terminators from the returned character row vector. End-of-file signaling and file-position behavior follow MATLAB semantics, so empty lines remain distinguishable from EOF.",
+  "behaviors": [
+    "`tline = fgetl(fid)` reads from the current file position to the next line terminator or to end-of-file when no terminator is found.",
+    "Line terminators are consumed but not included in the returned character row vector. RunMat recognises `\\n`, `\\r\\n`, and `\\r`.",
+    "When the file is empty or the file position indicator is already at end-of-file, `fgetl` returns the numeric sentinel `-1`.",
+    "An empty line returns an empty character row vector, not `-1`.",
+    "Lines are decoded using the text encoding recorded by `fopen`. UTF-8, US-ASCII, ISO-8859-1 (`latin1`), Windows-1252, Shift_JIS, and binary mode are recognised without additional user work."
+  ],
+  "examples": [
+    {
+      "description": "Read the first line of a file without the newline",
+      "input": "% Browser sandbox: you must be logged in\n% to save files for this example.\nfname = tempname;\nfid = fopen(fname, 'w');\nfprintf(fid, 'RunMat\\nSecond line\\n');\nfclose(fid);\n\nfid = fopen(fname, 'r');\nline = fgetl(fid);\nfclose(fid);\ndelete(fname);\n\nline",
+      "output": "line =\n    'RunMat'"
+    },
+    {
+      "description": "Read a file line by line",
+      "input": "% Browser sandbox: you must be logged in\n% to save files for this example.\nfname = tempname;\nfid = fopen(fname, 'w');\nfprintf(fid, 'one\\n');\nfprintf(fid, 'two\\n');\nfclose(fid);\n\nfid = fopen(fname, 'r');\ntline = fgetl(fid);\nwhile tline ~= -1\n    disp(tline);\n    tline = fgetl(fid);\nend\nfclose(fid);\ndelete(fname)",
+      "output": "one\ntwo"
+    },
+    {
+      "description": "Distinguish an empty line from end of file",
+      "input": "% Browser sandbox: you must be logged in\n% to save files for this example.\nfname = tempname;\nfid = fopen(fname, 'w');\nfprintf(fid, '\\nlast');\nfclose(fid);\n\nfid = fopen(fname, 'r');\nline1 = fgetl(fid);\nline2 = fgetl(fid);\nline3 = fgetl(fid);\nfclose(fid);\ndelete(fname);\n\nisempty(line1)\nline2\nline3",
+      "output": "ans =\n  logical\n   1\nline2 =\n    'last'\nline3 =\n    -1"
+    },
+    {
+      "description": "Read a final line without a trailing newline",
+      "input": "% Browser sandbox: you must be logged in\n% to save files for this example.\nfname = tempname;\nfid = fopen(fname, 'w');\nfprintf(fid, 'last line');\nfclose(fid);\n\nfid = fopen(fname, 'r');\nline1 = fgetl(fid);\nline2 = fgetl(fid);\nfclose(fid);\ndelete(fname);\n\nline1\nline2",
+      "output": "line1 =\n    'last line'\nline2 =\n    -1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does `fgetl` return at end-of-file?",
+      "answer": "When no characters can be read because the file position indicator is at end-of-file, `fgetl` returns the numeric value `-1`."
+    },
+    {
+      "question": "How does `fgetl` differ from `fgets`?",
+      "answer": "`fgetl` removes newline characters from the returned line, while `fgets` keeps them. Use `fgetl` for newline-free line processing and `fgets` when terminator bytes matter."
+    },
+    {
+      "question": "What happens for a blank line?",
+      "answer": "A blank line returns an empty character row vector. Only EOF before any characters are read returns `-1`."
+    },
+    {
+      "question": "Can I call `fgetl` on files opened for writing only?",
+      "answer": "No. The file must be opened with read permission (for example `'r'`, `'r+'`, or `'w+'`). Calling `fgetl` on a write-only identifier raises an error."
+    }
+  ],
+  "links": [
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    },
+    {
+      "label": "fclose",
+      "url": "./fclose"
+    },
+    {
+      "label": "feof",
+      "url": "./feof"
+    },
+    {
+      "label": "fgets",
+      "url": "./fgets"
+    },
+    {
+      "label": "fread",
+      "url": "./fread"
+    },
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/io/filetext/fgetl.rs",
+    "url": "crates/runmat-runtime/src/builtins/io/filetext/fgetl.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "line = fgetl(fileID)"
+    },
+    "points": [
+      "`fileID` is a file handle returned by `fopen`. The file must be opened with read permission (`'r'`, `'r+'`, `'w+'`, or `'a+'`).",
+      "`line` is a character row vector without the trailing line terminator. When the file position is already at end-of-file, `fgetl` returns the numeric sentinel `-1`."
+    ]
+  },
+  "gpu_behavior": [
+    "`fgetl` is a host-only operation. File identifiers live in the host registry created by `fopen`, so GPU-resident scalar arguments are gathered back to the CPU before the read occurs."
+  ]
+}

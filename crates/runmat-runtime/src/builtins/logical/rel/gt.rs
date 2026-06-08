@@ -139,7 +139,7 @@ fn gt_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 #[runtime_builtin(
     name = "gt",
     category = "logical/rel",
-    summary = "Element-wise greater-than comparison for scalars, arrays, and gpuArray inputs.",
+    summary = "Compute element-wise greater-than comparisons.",
     keywords = "gt,greater than,comparison,logical,gpu",
     accel = "elementwise",
     type_resolver(logical_binary_type),

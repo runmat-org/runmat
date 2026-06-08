@@ -217,7 +217,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "image",
     category = "plotting",
-    summary = "Render MATLAB-compatible image plots on the modern surface path.",
+    summary = "Display indexed or truecolor images.",
     keywords = "image,plotting,imshow,colormap",
     sink = true,
     suppress_auto_output = true,

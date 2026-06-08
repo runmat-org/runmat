@@ -946,7 +946,7 @@ function = "main"
     };
     assert_eq!(entrypoint, "server");
     assert!(matches!(
-        source,
+        *source,
         ProjectEntrypointResolveError::MissingModuleTarget { .. }
     ));
 }

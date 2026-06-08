@@ -19,7 +19,7 @@ use runmat_runtime::{
     RuntimeError,
 };
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Once;
 use tracing::{debug, info_span};
@@ -44,12 +44,9 @@ runmat_thread_local::runmat_thread_local! {
     static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
 }
 
-fn sync_initial_vars(initial: &mut [Value], vars: &[Value]) {
-    for (i, var) in vars.iter().enumerate() {
-        if i < initial.len() {
-            initial[i] = var.clone();
-        }
-    }
+fn sync_initial_vars(initial: &mut Vec<Value>, vars: &[Value]) {
+    initial.clear();
+    initial.extend_from_slice(vars);
 }
 
 fn ensure_workspace_resolver_registered() {
@@ -87,6 +84,22 @@ pub async fn invoke_semantic_function_value(
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
 ) -> Result<Value, RuntimeError> {
+    let (value, _) = invoke_semantic_function_value_with_capture_updates(
+        function,
+        args,
+        requested_outputs,
+        function_registry,
+    )
+    .await?;
+    Ok(value)
+}
+
+pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
+    function: usize,
+    args: &[Value],
+    requested_outputs: usize,
+    function_registry: &FunctionRegistry,
+) -> Result<(Value, Vec<Value>), RuntimeError> {
     let function_id = runmat_hir::FunctionId(function);
     let func = function_registry.get(function_id).ok_or_else(|| {
         let message = format!("Undefined semantic function: {function}");
@@ -136,11 +149,42 @@ pub async fn invoke_semantic_function_value(
             vars[*slot] = value.clone();
         }
     }
+    let default_values_by_slot: HashMap<usize, Value> = func
+        .argument_validations
+        .iter()
+        .filter_map(|validation| {
+            validation.default_value.as_ref().map(|value| {
+                let lowered = match value {
+                    crate::bytecode::program::FunctionArgDefaultValue::Number(value) => {
+                        Value::Num(*value)
+                    }
+                    crate::bytecode::program::FunctionArgDefaultValue::Bool(value) => {
+                        Value::Bool(*value)
+                    }
+                    crate::bytecode::program::FunctionArgDefaultValue::String(value) => {
+                        Value::String(value.clone())
+                    }
+                    crate::bytecode::program::FunctionArgDefaultValue::EmptyArray => Value::Tensor(
+                        runmat_builtins::Tensor::new(Vec::new(), vec![0, 0])
+                            .expect("empty default tensor"),
+                    ),
+                };
+                (validation.input_slot, lowered)
+            })
+        })
+        .collect();
     if runtime_arg_count < func.input_slots.len() {
         for slot in func.input_slots.iter().skip(runtime_arg_count) {
-            missing_input_slots.insert(*slot);
+            if let Some(default_value) = default_values_by_slot.get(slot) {
+                if *slot < vars.len() {
+                    vars[*slot] = default_value.clone();
+                }
+            } else {
+                missing_input_slots.insert(*slot);
+            }
         }
     }
+    validate_function_arguments(func, &vars, &missing_input_slots)?;
     if let Some(slot) = func.varargin_slot {
         let fixed_count = func.input_slots.len();
         let rest = if runtime_arg_count > fixed_count {
@@ -173,9 +217,13 @@ pub async fn invoke_semantic_function_value(
         }
     }
 
+    let _active_semantic_function_guard =
+        user_functions::push_active_semantic_function(function_id.0);
     let mut bytecode = Bytecode::with_instructions(func.instructions.clone(), func.var_count);
     bytecode.instr_spans = func.instr_spans.clone();
     bytecode.call_arg_spans = func.call_arg_spans.clone();
+    bytecode.source_id = func.source_id;
+    bytecode.var_names = func.var_names.clone();
     bytecode.bound_functions = function_registry.functions.clone();
     bytecode.function_registry = function_registry.clone();
     let result_vars = interpret_function_with_counts(
@@ -188,9 +236,527 @@ pub async fn invoke_semantic_function_value(
     )
     .await?;
     let output_values = collect_semantic_outputs(func, &result_vars, requested_outputs)?;
+    let updated_captures = func
+        .capture_slots
+        .iter()
+        .map(|slot| result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)))
+        .collect::<Vec<_>>();
     #[cfg(feature = "native-accel")]
     clear_semantic_function_temp_residency(&result_vars, &output_values);
-    Ok(output_value(output_values, requested_outputs))
+    Ok((
+        output_value(output_values, requested_outputs),
+        updated_captures,
+    ))
+}
+
+fn validate_function_arguments(
+    func: &crate::bytecode::program::FunctionBytecode,
+    vars: &[Value],
+    missing_input_slots: &HashSet<usize>,
+) -> Result<(), RuntimeError> {
+    for validation in &func.argument_validations {
+        if missing_input_slots.contains(&validation.input_slot) {
+            continue;
+        }
+        let Some(input_index) = func
+            .input_slots
+            .iter()
+            .position(|slot| *slot == validation.input_slot)
+        else {
+            continue;
+        };
+        let value = vars
+            .get(validation.input_slot)
+            .ok_or_else(|| mex("InvalidInputSlot", "function argument slot out of bounds"))?;
+
+        if let Some(size) = &validation.size {
+            let (rows, cols) = value_shape_2d(value);
+            if !dim_matches(&size.rows, rows) || !dim_matches(&size.cols, cols) {
+                return Err(mex(
+                    "ArgumentValidationSize",
+                    &format!(
+                        "Function '{}' argument #{} failed size validation",
+                        func.display_name,
+                        input_index + 1
+                    ),
+                ));
+            }
+        }
+
+        if let Some(class_name) = &validation.class_name {
+            if !value_matches_class(value, class_name) {
+                return Err(mex(
+                    "ArgumentValidationClass",
+                    &format!(
+                        "Function '{}' argument #{} failed class validation (expected {})",
+                        func.display_name,
+                        input_index + 1,
+                        class_name
+                    ),
+                ));
+            }
+        }
+        for validator in &validation.validators {
+            match validator {
+                crate::bytecode::program::FunctionArgValidator::Finite => {
+                    if !value_is_finite(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeFinite validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::NumericOrLogical => {
+                    if !value_is_numeric_or_logical(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeNumericOrLogical validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::Text => {
+                    if !value_is_text(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeText validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::Nonempty => {
+                    if value_is_empty(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeNonempty validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::ScalarOrEmpty => {
+                    if !value_is_scalar_or_empty(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeScalarOrEmpty validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::Real => {
+                    if !value_is_real(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeReal validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::Integer => {
+                    if !value_is_integer(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeInteger validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::Positive => {
+                    if !value_is_positive(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBePositive validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::Negative => {
+                    if !value_is_negative(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeNegative validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::Nonnegative => {
+                    if !value_is_nonnegative(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeNonnegative validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::Nonzero => {
+                    if !value_is_nonzero(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeNonzero validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::Nonpositive => {
+                    if !value_is_nonpositive(value) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeNonpositive validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::GreaterThanOrEqual(threshold) => {
+                    if !value_is_greater_than_or_equal(value, *threshold) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeGreaterThanOrEqual validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::LessThanOrEqual(threshold) => {
+                    if !value_is_less_than_or_equal(value, *threshold) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeLessThanOrEqual validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::GreaterThan(threshold) => {
+                    if !value_is_greater_than(value, *threshold) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeGreaterThan validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+                crate::bytecode::program::FunctionArgValidator::LessThan(threshold) => {
+                    if !value_is_less_than(value, *threshold) {
+                        return Err(mex(
+                            "ArgumentValidationFunction",
+                            &format!(
+                                "Function '{}' argument #{} failed mustBeLessThan validation",
+                                func.display_name,
+                                input_index + 1
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn dim_matches(dim: &crate::bytecode::program::FunctionArgDim, actual: usize) -> bool {
+    match dim {
+        crate::bytecode::program::FunctionArgDim::Any => true,
+        crate::bytecode::program::FunctionArgDim::Exact(expected) => *expected == actual,
+    }
+}
+
+fn value_shape_2d(value: &Value) -> (usize, usize) {
+    match value {
+        Value::Tensor(t) => {
+            let rows = t.shape.first().copied().unwrap_or(0);
+            let cols = t.shape.get(1).copied().unwrap_or(1);
+            (rows, cols)
+        }
+        Value::ComplexTensor(t) => {
+            let rows = t.shape.first().copied().unwrap_or(0);
+            let cols = t.shape.get(1).copied().unwrap_or(1);
+            (rows, cols)
+        }
+        Value::LogicalArray(a) => {
+            let rows = a.shape.first().copied().unwrap_or(0);
+            let cols = a.shape.get(1).copied().unwrap_or(1);
+            (rows, cols)
+        }
+        Value::Cell(c) => (c.rows, c.cols),
+        Value::CharArray(c) => (c.rows, c.cols),
+        Value::StringArray(s) => {
+            let rows = s.shape.first().copied().unwrap_or(0);
+            let cols = s.shape.get(1).copied().unwrap_or(1);
+            (rows, cols)
+        }
+        _ => (1, 1),
+    }
+}
+
+fn value_matches_class(value: &Value, class_name: &str) -> bool {
+    match class_name {
+        "double" => match value {
+            Value::Num(_) => true,
+            Value::Tensor(t) => t.dtype.class_name() == "double",
+            _ => false,
+        },
+        "single" => matches!(value, Value::Tensor(t) if t.dtype.class_name() == "single"),
+        "logical" => matches!(value, Value::Bool(_) | Value::LogicalArray(_)),
+        "char" => matches!(value, Value::CharArray(_) | Value::String(_)),
+        "string" => matches!(value, Value::String(_) | Value::StringArray(_)),
+        "cell" => matches!(value, Value::Cell(_)),
+        "struct" => matches!(value, Value::Struct(_)),
+        other => match value {
+            Value::Object(obj) => obj.class_name == other,
+            Value::HandleObject(handle) => handle.class_name == other,
+            Value::ClassRef(name) => name == other,
+            _ => false,
+        },
+    }
+}
+
+fn value_is_finite(value: &Value) -> bool {
+    match value {
+        Value::Num(v) => v.is_finite(),
+        Value::Int(_) | Value::Bool(_) => true,
+        Value::Complex(re, im) => re.is_finite() && im.is_finite(),
+        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite()),
+        Value::ComplexTensor(t) => t
+            .data
+            .iter()
+            .all(|(re, im)| re.is_finite() && im.is_finite()),
+        Value::LogicalArray(_) | Value::CharArray(_) => true,
+        _ => false,
+    }
+}
+
+fn value_is_numeric_or_logical(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Complex(_, _)
+            | Value::Tensor(_)
+            | Value::ComplexTensor(_)
+            | Value::Bool(_)
+            | Value::LogicalArray(_)
+    )
+}
+
+fn value_is_text(value: &Value) -> bool {
+    match value {
+        Value::String(_) | Value::StringArray(_) => true,
+        Value::CharArray(chars) => chars.rows == 1,
+        Value::Cell(cell) => cell.data.iter().all(|entry| match &**entry {
+            Value::CharArray(chars) => chars.rows == 1,
+            Value::String(_) => true,
+            _ => false,
+        }),
+        _ => false,
+    }
+}
+
+fn value_is_empty(value: &Value) -> bool {
+    match value {
+        Value::Tensor(t) => t.shape.iter().product::<usize>() == 0,
+        Value::ComplexTensor(t) => t.shape.iter().product::<usize>() == 0,
+        Value::LogicalArray(a) => a.shape.iter().product::<usize>() == 0,
+        Value::StringArray(s) => s.shape.iter().product::<usize>() == 0,
+        Value::CharArray(c) => c.rows * c.cols == 0,
+        Value::Cell(c) => c.shape.iter().product::<usize>() == 0,
+        _ => false,
+    }
+}
+
+fn value_is_scalar_or_empty(value: &Value) -> bool {
+    let (rows, cols) = value_shape_2d(value);
+    (rows == 1 && cols == 1) || (rows == 0 || cols == 0)
+}
+
+fn value_is_real(value: &Value) -> bool {
+    match value {
+        Value::Complex(_, im) => *im == 0.0,
+        Value::ComplexTensor(t) => t.data.iter().all(|(_, im)| *im == 0.0),
+        _ => true,
+    }
+}
+
+fn value_is_integer(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Num(v) => v.is_finite() && v.fract() == 0.0,
+        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && v.fract() == 0.0),
+        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && re.fract() == 0.0,
+        Value::ComplexTensor(t) => t
+            .data
+            .iter()
+            .all(|(re, im)| *im == 0.0 && re.is_finite() && re.fract() == 0.0),
+        _ => false,
+    }
+}
+
+fn value_is_positive(value: &Value) -> bool {
+    match value {
+        Value::Num(v) => v.is_finite() && *v > 0.0,
+        Value::Int(v) => v.to_i64() > 0,
+        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v > 0.0),
+        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re > 0.0,
+        Value::ComplexTensor(t) => t
+            .data
+            .iter()
+            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re > 0.0),
+        _ => false,
+    }
+}
+
+fn value_is_negative(value: &Value) -> bool {
+    match value {
+        Value::Num(v) => v.is_finite() && *v < 0.0,
+        Value::Int(v) => v.to_i64() < 0,
+        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v < 0.0),
+        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re < 0.0,
+        Value::ComplexTensor(t) => t
+            .data
+            .iter()
+            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re < 0.0),
+        _ => false,
+    }
+}
+
+fn value_is_nonnegative(value: &Value) -> bool {
+    match value {
+        Value::Num(v) => v.is_finite() && *v >= 0.0,
+        Value::Int(v) => v.to_i64() >= 0,
+        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v >= 0.0),
+        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re >= 0.0,
+        Value::ComplexTensor(t) => t
+            .data
+            .iter()
+            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re >= 0.0),
+        _ => false,
+    }
+}
+
+fn value_is_nonzero(value: &Value) -> bool {
+    match value {
+        Value::Num(v) => v.is_finite() && *v != 0.0,
+        Value::Int(v) => v.to_i64() != 0,
+        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v != 0.0),
+        Value::Complex(re, im) => re.is_finite() && im.is_finite() && (*re != 0.0 || *im != 0.0),
+        Value::ComplexTensor(t) => t
+            .data
+            .iter()
+            .all(|(re, im)| re.is_finite() && im.is_finite() && (*re != 0.0 || *im != 0.0)),
+        _ => false,
+    }
+}
+
+fn value_is_nonpositive(value: &Value) -> bool {
+    match value {
+        Value::Num(v) => v.is_finite() && *v <= 0.0,
+        Value::Int(v) => v.to_i64() <= 0,
+        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v <= 0.0),
+        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re <= 0.0,
+        Value::ComplexTensor(t) => t
+            .data
+            .iter()
+            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re <= 0.0),
+        _ => false,
+    }
+}
+
+fn value_is_greater_than_or_equal(value: &Value, threshold: f64) -> bool {
+    match value {
+        Value::Num(v) => v.is_finite() && *v >= threshold,
+        Value::Int(v) => (v.to_i64() as f64) >= threshold,
+        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v >= threshold),
+        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re >= threshold,
+        Value::ComplexTensor(t) => t
+            .data
+            .iter()
+            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re >= threshold),
+        _ => false,
+    }
+}
+
+fn value_is_less_than_or_equal(value: &Value, threshold: f64) -> bool {
+    match value {
+        Value::Num(v) => v.is_finite() && *v <= threshold,
+        Value::Int(v) => (v.to_i64() as f64) <= threshold,
+        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v <= threshold),
+        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re <= threshold,
+        Value::ComplexTensor(t) => t
+            .data
+            .iter()
+            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re <= threshold),
+        _ => false,
+    }
+}
+
+fn value_is_greater_than(value: &Value, threshold: f64) -> bool {
+    match value {
+        Value::Num(v) => v.is_finite() && *v > threshold,
+        Value::Int(v) => (v.to_i64() as f64) > threshold,
+        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v > threshold),
+        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re > threshold,
+        Value::ComplexTensor(t) => t
+            .data
+            .iter()
+            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re > threshold),
+        _ => false,
+    }
+}
+
+fn value_is_less_than(value: &Value, threshold: f64) -> bool {
+    match value {
+        Value::Num(v) => v.is_finite() && *v < threshold,
+        Value::Int(v) => (v.to_i64() as f64) < threshold,
+        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && *v < threshold),
+        Value::Complex(re, im) => *im == 0.0 && re.is_finite() && *re < threshold,
+        Value::ComplexTensor(t) => t
+            .data
+            .iter()
+            .all(|(re, im)| *im == 0.0 && re.is_finite() && *re < threshold),
+        _ => false,
+    }
 }
 
 fn collect_semantic_outputs(
@@ -254,7 +820,7 @@ fn clear_semantic_function_temp_residency(result_vars: &[Value], output_values: 
 
 pub async fn interpret_with_vars(
     bytecode: &Bytecode,
-    initial_vars: &mut [Value],
+    initial_vars: &mut Vec<Value>,
     current_function_name: Option<&str>,
 ) -> VmResult<InterpreterOutcome> {
     let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
@@ -276,7 +842,7 @@ pub async fn interpret_with_vars(
 
 async fn run_interpreter(
     state: Box<InterpreterState>,
-    initial_vars: &mut [Value],
+    initial_vars: &mut Vec<Value>,
 ) -> VmResult<InterpreterOutcome> {
     let state = *state;
     Box::pin(run_interpreter_inner(state, initial_vars)).await
@@ -284,7 +850,7 @@ async fn run_interpreter(
 
 async fn run_interpreter_inner(
     state: InterpreterState,
-    initial_vars: &mut [Value],
+    initial_vars: &mut Vec<Value>,
 ) -> VmResult<InterpreterOutcome> {
     let run_span = info_span!(
         "interpreter.run",
@@ -316,6 +882,12 @@ async fn run_interpreter_inner(
         fusion_accel_graph,
         bytecode,
     } = state;
+    let _source_context_guard =
+        runmat_runtime::source_context::replace_current_source_id(bytecode.source_id);
+    let _arity_call_counts_guard =
+        runmat_runtime::builtins::introspection::arity_check::replace_call_counts(
+            call_counts.clone(),
+        );
     let function_registry = Arc::new(bytecode.function_registry());
     let previous_semantic_invoker = user_functions::current_semantic_function_invoker();
     let registry_for_function_invoker = Arc::clone(&function_registry);
@@ -348,6 +920,17 @@ async fn run_interpreter_inner(
     let registry_for_function_resolver = Arc::clone(&function_registry);
     let _semantic_resolver_guard =
         user_functions::install_semantic_function_resolver(Some(Arc::new(move |name: &str| {
+            if let Some(active_function) = user_functions::current_active_semantic_function() {
+                if let Some(function) =
+                    registry_for_function_resolver.get(runmat_hir::FunctionId(active_function))
+                {
+                    if let Some(scoped_function) = registry_for_function_resolver
+                        .resolve_name_in_private_scope(&function.private_owner_scope, name)
+                    {
+                        return Some(scoped_function.0);
+                    }
+                }
+            }
             if let Some(function) = registry_for_function_resolver.resolve_name(name) {
                 return Some(function.0);
             }
@@ -355,10 +938,26 @@ async fn run_interpreter_inner(
                 .as_ref()
                 .and_then(|resolver| resolver(name))
         })));
+    let mut source_function_catalog = function_registry
+        .functions
+        .values()
+        .filter_map(|function| {
+            function.source_id.map(
+                |source_id| runmat_runtime::user_functions::SourceFunctionInfo {
+                    source_id,
+                    name: function.display_name.clone(),
+                    function: function.function.0,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    source_function_catalog.sort_by_key(|info| info.function);
+    let _source_function_catalog_guard =
+        user_functions::install_source_function_catalog(Some(Arc::new(source_function_catalog)));
     CALL_COUNTS.with(|cc| {
         *cc.borrow_mut() = call_counts.clone();
     });
-    let _workspace_guard = interp_engine::prepare_workspace_guard(&mut vars);
+    let _workspace_guard = interp_engine::prepare_workspace_guard(&bytecode.var_names, &mut vars);
     let thread_roots: Vec<Value> = runtime_globals::collect_thread_roots();
     let mut _gc_context = interp_engine::create_gc_context(&stack, &vars, thread_roots)?;
     let debug_stack = interp_engine::debug_stack_enabled();
@@ -446,6 +1045,10 @@ async fn run_interpreter_inner(
             Instr::StoreVar(_) => Some(global_aliases.clone()),
             _ => None,
         };
+        let store_local_global_aliases = match &bytecode.instructions[pc] {
+            Instr::StoreLocal(_) => Some(global_aliases.clone()),
+            _ => None,
+        };
         let mut clear_value_residency = |value: &Value| {
             #[cfg(feature = "native-accel")]
             clear_residency(value);
@@ -458,8 +1061,16 @@ async fn run_interpreter_inner(
         };
         let mut store_local_before_local_overwrite = |_current: &Value, _incoming: &Value| {};
         let mut store_local_before_var_overwrite = |_current: &Value, _incoming: &Value| {};
+        let mut store_local_after_store = |stored_offset: usize, stored_value: &Value| {
+            if let Some(ref aliases) = store_local_global_aliases {
+                runtime_globals::update_global_store(stored_offset, stored_value, aliases);
+            }
+        };
         let mut store_local_after_fallback_store =
             |func_name: &str, stored_offset: usize, stored_value: &Value| {
+                if let Some(ref aliases) = store_local_global_aliases {
+                    runtime_globals::update_global_store(stored_offset, stored_value, aliases);
+                }
                 runtime_globals::update_persistent_local_store(
                     func_name,
                     stored_offset,
@@ -494,6 +1105,7 @@ async fn run_interpreter_inner(
                 store_var_after_store: &mut store_var_after_store,
                 store_local_before_local_overwrite: &mut store_local_before_local_overwrite,
                 store_local_before_var_overwrite: &mut store_local_before_var_overwrite,
+                store_local_after_store: &mut store_local_after_store,
                 store_local_after_fallback_store: &mut store_local_after_fallback_store,
             },
         )
@@ -517,7 +1129,7 @@ async fn run_interpreter_inner(
         if let Some(decision) = dispatch_result {
             match decision {
                 interp_dispatch::DispatchHandled::Generic(DispatchDecision::ContinueLoop) => {
-                    continue
+                    continue;
                 }
                 interp_dispatch::DispatchHandled::Generic(DispatchDecision::FallThrough) => {
                     pc += 1;
@@ -529,7 +1141,7 @@ async fn run_interpreter_inner(
                 }
                 interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::ContinueLoop)
                 | interp_dispatch::DispatchHandled::Return(DispatchDecision::ContinueLoop) => {
-                    continue
+                    continue;
                 }
                 interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::Return) => {
                     interpreter_timing.flush_host_span("return_value", None);
@@ -604,17 +1216,29 @@ async fn run_interpreter_inner(
             | Instr::LoadStaticProperty(_, _)
             | Instr::RegisterClass { .. }
             | Instr::CallFevalMulti(_, _)
+            | Instr::CallFevalMultiUsingOutputSlot(_, _)
             | Instr::CallFevalExpandMultiOutput(_, _)
+            | Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _)
             | Instr::CreateSemanticFuture(_, _, _)
             | Instr::CreateSemanticFutureExpandMultiOutput(_, _, _)
             | Instr::Spawn
             | Instr::Await
             | Instr::CallBuiltinMulti(_, _, _)
+            | Instr::CallBuiltinMultiUsingOutputSlot(_, _, _)
+            | Instr::CallSuperConstructorMulti { .. }
+            | Instr::CallSuperMethodMulti { .. }
             | Instr::CallSemanticFunctionMulti(_, _, _)
+            | Instr::CallSemanticFunctionMultiUsingOutputSlot(_, _, _)
+            | Instr::CallSemanticNestedFunctionMulti { .. }
+            | Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { .. }
             | Instr::CallFunctionMulti { .. }
+            | Instr::CallFunctionMultiUsingOutputSlot { .. }
             | Instr::CallFunctionExpandMultiOutput { .. }
             | Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
+            | Instr::CallSemanticNestedFunctionExpandMultiOutput { .. }
             | Instr::CallBuiltinExpandMultiOutput(_, _, _)
+            | Instr::CallSuperConstructorExpandMultiOutput { .. }
+            | Instr::CallSuperMethodExpandMultiOutput { .. }
             | Instr::ExitScope(_)
             | Instr::RegisterImport { .. }
             | Instr::DeclareGlobal(_)
@@ -743,13 +1367,20 @@ pub async fn interpret_function_with_counts(
 mod tests {
     use super::{
         collect_semantic_outputs, interpret_with_vars, output_value, run_interpreter_inner,
+        value_is_empty, value_is_greater_than, value_is_greater_than_or_equal, value_is_integer,
+        value_is_less_than, value_is_less_than_or_equal, value_is_negative, value_is_nonnegative,
+        value_is_nonpositive, value_is_nonzero, value_is_numeric_or_logical, value_is_positive,
+        value_is_real, value_is_scalar_or_empty, value_is_text,
     };
     use crate::bytecode::program::{Bytecode, FunctionBytecode};
     use crate::bytecode::Instr;
     use crate::interpreter::api::InterpreterState;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, Closure, HandleRef, ObjectInstance, StructValue, Value};
+    use runmat_builtins::{
+        CellArray, Closure, HandleRef, ObjectInstance, StructValue, Tensor, Value,
+    };
     use runmat_hir::FunctionId;
+    use std::collections::HashMap;
     use std::sync::{atomic::AtomicBool, Arc};
     #[cfg(feature = "native-accel")]
     use {
@@ -778,6 +1409,7 @@ mod tests {
         FunctionBytecode {
             function: FunctionId(0),
             display_name: "f".into(),
+            private_owner_scope: String::new(),
             source_id: None,
             instructions: vec![Instr::Return],
             instr_spans: Vec::new(),
@@ -790,6 +1422,8 @@ mod tests {
             varargout_slot,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            var_names: HashMap::new(),
+            argument_validations: Vec::new(),
         }
     }
 
@@ -824,6 +1458,192 @@ mod tests {
             value,
             Value::OutputList(vec![Value::Num(1.0), Value::Num(2.0)])
         );
+    }
+
+    #[test]
+    fn numeric_or_logical_validator_accepts_expected_domains() {
+        assert!(value_is_numeric_or_logical(&Value::Num(1.0)));
+        assert!(value_is_numeric_or_logical(&Value::Bool(true)));
+        assert!(value_is_numeric_or_logical(&Value::Complex(1.0, 2.0)));
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+        assert!(value_is_numeric_or_logical(&Value::Tensor(tensor)));
+        assert!(!value_is_numeric_or_logical(&Value::String(
+            "x".to_string()
+        )));
+        assert!(!value_is_numeric_or_logical(&Value::CharArray(
+            runmat_builtins::CharArray::new("x".chars().collect(), 1, 1).expect("char")
+        )));
+    }
+
+    #[test]
+    fn text_validator_accepts_string_char_vector_and_cellstr() {
+        assert!(value_is_text(&Value::String("x".to_string())));
+        assert!(value_is_text(&Value::CharArray(
+            runmat_builtins::CharArray::new("abc".chars().collect(), 1, 3).expect("char")
+        )));
+        assert!(value_is_text(&Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::CharArray(
+                        runmat_builtins::CharArray::new("a".chars().collect(), 1, 1).expect("char"),
+                    ),
+                    Value::String("b".to_string()),
+                ],
+                1,
+                2,
+            )
+            .expect("cell"),
+        )));
+        assert!(!value_is_text(&Value::Num(1.0)));
+    }
+
+    #[test]
+    fn nonempty_validator_rejects_empty_arrays_and_cells() {
+        let empty_num = Tensor::new(Vec::new(), vec![0, 0]).expect("empty tensor");
+        assert!(value_is_empty(&Value::Tensor(empty_num)));
+        let empty_char =
+            runmat_builtins::CharArray::new(Vec::new(), 1, 0).expect("empty char array");
+        assert!(value_is_empty(&Value::CharArray(empty_char)));
+        let empty_cell = CellArray::new(Vec::new(), 0, 0).expect("empty cell");
+        assert!(value_is_empty(&Value::Cell(empty_cell)));
+        assert!(!value_is_empty(&Value::String("".to_string())));
+        assert!(!value_is_empty(&Value::Num(1.0)));
+    }
+
+    #[test]
+    fn scalar_or_empty_validator_accepts_scalar_or_empty_shapes() {
+        assert!(value_is_scalar_or_empty(&Value::Num(1.0)));
+        assert!(value_is_scalar_or_empty(&Value::Bool(true)));
+        let empty_num = Tensor::new(Vec::new(), vec![0, 0]).expect("empty tensor");
+        assert!(value_is_scalar_or_empty(&Value::Tensor(empty_num)));
+        let matrix = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("matrix");
+        assert!(!value_is_scalar_or_empty(&Value::Tensor(matrix)));
+    }
+
+    #[test]
+    fn real_validator_rejects_imaginary_values() {
+        assert!(value_is_real(&Value::Num(1.0)));
+        assert!(value_is_real(&Value::Complex(1.0, 0.0)));
+        assert!(!value_is_real(&Value::Complex(1.0, 2.0)));
+        let complex_real = runmat_builtins::ComplexTensor::new(vec![(1.0, 0.0)], vec![1, 1])
+            .expect("complex tensor");
+        let complex_imag = runmat_builtins::ComplexTensor::new(vec![(1.0, 2.0)], vec![1, 1])
+            .expect("complex tensor");
+        assert!(value_is_real(&Value::ComplexTensor(complex_real)));
+        assert!(!value_is_real(&Value::ComplexTensor(complex_imag)));
+    }
+
+    #[test]
+    fn integer_validator_accepts_integer_valued_numeric_inputs() {
+        assert!(value_is_integer(&Value::Int(
+            runmat_builtins::IntValue::I64(3)
+        )));
+        assert!(value_is_integer(&Value::Num(3.0)));
+        assert!(!value_is_integer(&Value::Num(3.5)));
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+        assert!(value_is_integer(&Value::Tensor(tensor)));
+        let non_integer = Tensor::new(vec![1.0, 2.5], vec![1, 2]).expect("tensor");
+        assert!(!value_is_integer(&Value::Tensor(non_integer)));
+        assert!(!value_is_integer(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn positive_validator_rejects_zero_and_negative_values() {
+        assert!(value_is_positive(&Value::Num(1.0)));
+        assert!(!value_is_positive(&Value::Num(0.0)));
+        assert!(!value_is_positive(&Value::Num(-1.0)));
+        assert!(value_is_positive(&Value::Int(
+            runmat_builtins::IntValue::I64(2)
+        )));
+        assert!(!value_is_positive(&Value::Int(
+            runmat_builtins::IntValue::I64(0)
+        )));
+        let positive = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+        assert!(value_is_positive(&Value::Tensor(positive)));
+        let mixed = Tensor::new(vec![1.0, 0.0], vec![1, 2]).expect("tensor");
+        assert!(!value_is_positive(&Value::Tensor(mixed)));
+    }
+
+    #[test]
+    fn negative_validator_rejects_zero_and_positive_values() {
+        assert!(value_is_negative(&Value::Num(-1.0)));
+        assert!(!value_is_negative(&Value::Num(0.0)));
+        assert!(!value_is_negative(&Value::Num(1.0)));
+        assert!(value_is_negative(&Value::Int(
+            runmat_builtins::IntValue::I64(-2)
+        )));
+        let ok = Tensor::new(vec![-1.0, -2.0], vec![1, 2]).expect("tensor");
+        assert!(value_is_negative(&Value::Tensor(ok)));
+        let bad = Tensor::new(vec![-1.0, 0.0], vec![1, 2]).expect("tensor");
+        assert!(!value_is_negative(&Value::Tensor(bad)));
+    }
+
+    #[test]
+    fn nonnegative_validator_accepts_zero_and_positive_values() {
+        assert!(value_is_nonnegative(&Value::Num(0.0)));
+        assert!(value_is_nonnegative(&Value::Num(2.0)));
+        assert!(!value_is_nonnegative(&Value::Num(-1.0)));
+        assert!(value_is_nonnegative(&Value::Int(
+            runmat_builtins::IntValue::I64(0)
+        )));
+        let ok = Tensor::new(vec![0.0, 1.0], vec![1, 2]).expect("tensor");
+        assert!(value_is_nonnegative(&Value::Tensor(ok)));
+        let bad = Tensor::new(vec![0.0, -1.0], vec![1, 2]).expect("tensor");
+        assert!(!value_is_nonnegative(&Value::Tensor(bad)));
+    }
+
+    #[test]
+    fn nonzero_validator_rejects_zero_values() {
+        assert!(value_is_nonzero(&Value::Num(1.0)));
+        assert!(!value_is_nonzero(&Value::Num(0.0)));
+        assert!(value_is_nonzero(&Value::Int(
+            runmat_builtins::IntValue::I64(2)
+        )));
+        assert!(!value_is_nonzero(&Value::Int(
+            runmat_builtins::IntValue::I64(0)
+        )));
+        assert!(value_is_nonzero(&Value::Complex(0.0, 1.0)));
+        assert!(!value_is_nonzero(&Value::Complex(0.0, 0.0)));
+        let ok = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+        assert!(value_is_nonzero(&Value::Tensor(ok)));
+        let bad = Tensor::new(vec![1.0, 0.0], vec![1, 2]).expect("tensor");
+        assert!(!value_is_nonzero(&Value::Tensor(bad)));
+    }
+
+    #[test]
+    fn nonpositive_validator_accepts_zero_and_negative_values() {
+        assert!(value_is_nonpositive(&Value::Num(0.0)));
+        assert!(value_is_nonpositive(&Value::Num(-2.0)));
+        assert!(!value_is_nonpositive(&Value::Num(1.0)));
+        assert!(value_is_nonpositive(&Value::Int(
+            runmat_builtins::IntValue::I64(0)
+        )));
+        let ok = Tensor::new(vec![0.0, -1.0], vec![1, 2]).expect("tensor");
+        assert!(value_is_nonpositive(&Value::Tensor(ok)));
+        let bad = Tensor::new(vec![0.0, 1.0], vec![1, 2]).expect("tensor");
+        assert!(!value_is_nonpositive(&Value::Tensor(bad)));
+    }
+
+    #[test]
+    fn greater_than_or_equal_validator_uses_numeric_threshold() {
+        assert!(value_is_greater_than_or_equal(&Value::Num(2.0), 0.0));
+        assert!(value_is_greater_than_or_equal(&Value::Num(0.0), 0.0));
+        assert!(!value_is_greater_than_or_equal(&Value::Num(-1.0), 0.0));
+    }
+
+    #[test]
+    fn less_than_or_equal_validator_uses_numeric_threshold() {
+        assert!(value_is_less_than_or_equal(&Value::Num(-1.0), 0.0));
+        assert!(value_is_less_than_or_equal(&Value::Num(0.0), 0.0));
+        assert!(!value_is_less_than_or_equal(&Value::Num(1.0), 0.0));
+    }
+
+    #[test]
+    fn greater_than_and_less_than_validators_use_numeric_threshold() {
+        assert!(value_is_greater_than(&Value::Num(2.0), 1.0));
+        assert!(!value_is_greater_than(&Value::Num(1.0), 1.0));
+        assert!(value_is_less_than(&Value::Num(-2.0), -1.0));
+        assert!(!value_is_less_than(&Value::Num(-1.0), -1.0));
     }
 
     #[cfg(feature = "native-accel")]
@@ -1505,8 +2325,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn store_local_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_other_local(
-    ) {
+    fn store_local_overwrite_preserves_nested_handle_object_provider_alias() {
         use runmat_accelerate::fusion_residency;
 
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
@@ -2034,8 +2853,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn spawn_await_completion_preserves_nested_handle_object_target_handle_when_alias_live_in_locals(
-    ) {
+    fn spawn_await_preserves_nested_handle_object_target_alias() {
         use runmat_accelerate::fusion_residency;
 
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));

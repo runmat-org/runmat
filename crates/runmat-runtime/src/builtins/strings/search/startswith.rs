@@ -237,7 +237,7 @@ fn remap_startswith_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "startsWith",
     category = "strings/search",
-    summary = "Return logical values indicating whether text inputs start with specific patterns.",
+    summary = "Test whether text inputs begin with specified prefix patterns.",
     keywords = "startswith,prefix,text,ignorecase,search",
     accel = "sink",
     type_resolver(logical_text_match_type),

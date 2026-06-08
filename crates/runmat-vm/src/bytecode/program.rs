@@ -36,6 +36,8 @@ pub struct FunctionBytecode {
     pub function: FunctionId,
     pub display_name: String,
     #[serde(default)]
+    pub private_owner_scope: String,
+    #[serde(default)]
     pub source_id: Option<runmat_hir::SourceId>,
     pub instructions: Vec<Instr>,
     #[serde(default)]
@@ -54,6 +56,85 @@ pub struct FunctionBytecode {
     #[serde(default)]
     pub implicit_nargout_slot: Option<usize>,
     pub capture_slots: Vec<usize>,
+    #[serde(default)]
+    pub var_names: HashMap<usize, String>,
+    #[serde(default)]
+    pub argument_validations: Vec<FunctionArgumentValidation>,
+}
+
+impl Default for FunctionBytecode {
+    fn default() -> Self {
+        Self {
+            function: FunctionId(0),
+            display_name: String::new(),
+            private_owner_scope: String::new(),
+            source_id: None,
+            instructions: Vec::new(),
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 0,
+            input_slots: Vec::new(),
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: Vec::new(),
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            var_names: HashMap::new(),
+            argument_validations: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FunctionArgDim {
+    Any,
+    Exact(usize),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionArgSizeSpec {
+    pub rows: FunctionArgDim,
+    pub cols: FunctionArgDim,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionArgumentValidation {
+    pub input_slot: usize,
+    pub size: Option<FunctionArgSizeSpec>,
+    pub class_name: Option<String>,
+    #[serde(default)]
+    pub validators: Vec<FunctionArgValidator>,
+    #[serde(default)]
+    pub default_value: Option<FunctionArgDefaultValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FunctionArgValidator {
+    Finite,
+    NumericOrLogical,
+    Text,
+    Nonempty,
+    ScalarOrEmpty,
+    Real,
+    Integer,
+    Positive,
+    Negative,
+    Nonnegative,
+    Nonzero,
+    Nonpositive,
+    GreaterThanOrEqual(f64),
+    LessThanOrEqual(f64),
+    GreaterThan(f64),
+    LessThan(f64),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FunctionArgDefaultValue {
+    Number(f64),
+    Bool(bool),
+    String(String),
+    EmptyArray,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -92,6 +173,18 @@ impl FunctionRegistry {
 
     pub fn resolve_name(&self, name: &str) -> Option<FunctionId> {
         self.names.get(name).copied()
+    }
+
+    pub fn resolve_name_in_private_scope(
+        &self,
+        private_owner_scope: &str,
+        name: &str,
+    ) -> Option<FunctionId> {
+        if private_owner_scope.is_empty() || name.contains('.') {
+            return None;
+        }
+        let scoped_name = format!("{private_owner_scope}.__private__.{name}");
+        self.names.get(&scoped_name).copied()
     }
 
     pub fn insert_replacing_name(&mut self, function: FunctionBytecode) {
@@ -399,6 +492,65 @@ impl Bytecode {
             Some(build_accel_graph(&self.instructions, &self.var_types)),
             RuntimeAccelGraphSource::RuntimeMaterializedFromInstructions,
         )
+    }
+}
+
+#[cfg(test)]
+mod function_registry_tests {
+    use super::{FunctionBytecode, FunctionRegistry};
+    use crate::Instr;
+    use runmat_hir::FunctionId;
+    use std::collections::HashMap;
+
+    fn test_function(id: usize, display_name: &str, private_owner_scope: &str) -> FunctionBytecode {
+        FunctionBytecode {
+            function: FunctionId(id),
+            display_name: display_name.to_string(),
+            private_owner_scope: private_owner_scope.to_string(),
+            source_id: None,
+            instructions: vec![Instr::Return],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 0,
+            input_slots: Vec::new(),
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: Vec::new(),
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            var_names: HashMap::new(),
+            argument_validations: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn function_registry_resolves_private_name_in_owner_scope() {
+        let mut functions = HashMap::new();
+        functions.insert(FunctionId(1), test_function(1, "helper", ""));
+        functions.insert(FunctionId(2), test_function(2, "C.__private__.helper", "C"));
+        let registry = FunctionRegistry::new(functions);
+
+        assert_eq!(
+            registry.resolve_name("helper"),
+            Some(FunctionId(1)),
+            "unscoped lookup should keep ordinary name resolution"
+        );
+        assert_eq!(
+            registry.resolve_name_in_private_scope("C", "helper"),
+            Some(FunctionId(2)),
+            "class owner scope should prefer its synthetic private helper"
+        );
+        assert_eq!(
+            registry.resolve_name_in_private_scope("", "helper"),
+            None,
+            "empty owner scope should not expose synthetic private helpers"
+        );
+        assert_eq!(
+            registry.resolve_name_in_private_scope("C", "pkg.helper"),
+            None,
+            "qualified names should not be rewritten as private-folder aliases"
+        );
     }
 }
 

@@ -15,12 +15,14 @@ pub enum SourceInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostExecutionPolicy {
     pub top_level_await: bool,
+    pub dynamic_eval: bool,
 }
 
 impl Default for HostExecutionPolicy {
     fn default() -> Self {
         Self {
             top_level_await: true,
+            dynamic_eval: true,
         }
     }
 }
@@ -52,6 +54,29 @@ impl ExecutionRequest {
             workspace,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExecutionSourceContext {
+    pub name: String,
+    pub text: Option<String>,
+    pub identity: Option<SourceIdentity>,
+}
+
+impl ExecutionSourceContext {
+    pub fn source_name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn source_text(&self) -> Option<&str> {
+        self.text.as_deref()
+    }
+}
+
+#[derive(Debug)]
+pub struct ExecutionResponse {
+    pub source_context: ExecutionSourceContext,
+    pub result: std::result::Result<ExecutionOutcome, crate::RunError>,
 }
 
 #[derive(Debug, Clone)]
@@ -192,6 +217,8 @@ pub struct RuntimeDiagnostic {
     pub severity: DiagnosticSeverity,
     pub message: String,
     pub span: Option<Span>,
+    pub callstack: Vec<String>,
+    pub callstack_elided: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -243,7 +243,7 @@ pub const ARGSORT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "argsort",
     category = "array/sorting_sets",
-    summary = "Return the permutation indices that would sort tensors along a dimension.",
+    summary = "Return permutation indices that sort arrays along a dimension.",
     keywords = "argsort,sort,indices,permutation,gpu",
     accel = "sink",
     sink = true,

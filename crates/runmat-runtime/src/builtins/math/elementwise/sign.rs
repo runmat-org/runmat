@@ -116,7 +116,7 @@ fn sign_error_with_detail(
 #[runtime_builtin(
     name = "sign",
     category = "math/elementwise",
-    summary = "Sign of scalars, vectors, matrices, or N-D tensors with real or complex values.",
+    summary = "Compute element-wise sign values for real or complex inputs.",
     keywords = "sign,signum,elementwise,complex,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

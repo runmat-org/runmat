@@ -211,6 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "input",
+    summary = "Prompt users for interactive input.",
     type_resolver(crate::builtins::io::type_resolvers::input_type),
     descriptor(crate::builtins::io::input::INPUT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::input"

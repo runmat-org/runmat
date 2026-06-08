@@ -477,6 +477,7 @@ fn ensure_datetime_class_registered() {
             PropertyDef {
                 name: FORMAT_FIELD.to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -502,6 +503,8 @@ fn ensure_datetime_class_registered() {
                 MethodDef {
                     name: name.to_string(),
                     is_static: false,
+                    is_abstract: false,
+                    is_sealed: false,
                     access: Access::Public,
                     function_name: format!("{DATETIME_CLASS}.{name}"),
                     implicit_class_argument: None,
@@ -1117,7 +1120,7 @@ async fn datetime_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
     descriptor(crate::builtins::datetime::DATETIME_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
-    summary = "Create MATLAB-compatible datetime arrays from text, components, or serial date numbers.",
+    summary = "Create datetime arrays from text, components, or serial date numbers.",
     keywords = "datetime,date,time,datenum,Format",
     related = "year,month,day,hour,minute,second,string,char,disp",
     examples = "t = datetime(2024, 4, 9, 13, 30, 0);"
@@ -1170,7 +1173,7 @@ async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     descriptor(crate::builtins::datetime::DATETIME_YEAR_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
-    summary = "Extract year numbers from datetime arrays.",
+    summary = "Extract calendar year components from datetime values.",
     keywords = "year,datetime,date component"
 )]
 async fn year_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -1194,7 +1197,7 @@ async fn month_builtin(value: Value) -> crate::BuiltinResult<Value> {
     descriptor(crate::builtins::datetime::DATETIME_DAY_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
-    summary = "Extract day-of-month numbers from datetime arrays.",
+    summary = "Extract day-of-month numbers from datetime values.",
     keywords = "day,datetime,date component"
 )]
 async fn day_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -1206,7 +1209,7 @@ async fn day_builtin(value: Value) -> crate::BuiltinResult<Value> {
     descriptor(crate::builtins::datetime::DATETIME_HOUR_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
-    summary = "Extract hour numbers from datetime arrays.",
+    summary = "Extract hour components from datetime values.",
     keywords = "hour,datetime,time component"
 )]
 async fn hour_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -1230,7 +1233,7 @@ async fn minute_builtin(value: Value) -> crate::BuiltinResult<Value> {
     descriptor(crate::builtins::datetime::DATETIME_SECOND_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
-    summary = "Extract second values from datetime arrays.",
+    summary = "Extract second components from datetime values.",
     keywords = "second,datetime,time component"
 )]
 async fn second_builtin(value: Value) -> crate::BuiltinResult<Value> {

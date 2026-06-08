@@ -203,7 +203,7 @@ fn plus_error_with_detail(
 #[runtime_builtin(
     name = "plus",
     category = "math/elementwise",
-    summary = "Element-wise addition with MATLAB-compatible implicit expansion.",
+    summary = "Compute element-wise addition.",
     keywords = "plus,element-wise addition,gpu,+",
     accel = "elementwise",
     type_resolver(numeric_binary_type),

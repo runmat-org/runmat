@@ -308,7 +308,7 @@ fn orderfields_error_with_message(
 #[runtime_builtin(
     name = "orderfields",
     category = "structs/core",
-    summary = "Reorder structure field definitions alphabetically or using a supplied order.",
+    summary = "Reorder struct field definitions alphabetically or by supplied order.",
     keywords = "orderfields,struct,reorder fields,alphabetical,struct array",
     type_resolver(orderfields_type),
     descriptor(crate::builtins::structs::core::orderfields::ORDERFIELDS_DESCRIPTOR),

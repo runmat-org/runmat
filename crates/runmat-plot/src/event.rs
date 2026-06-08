@@ -16,6 +16,8 @@ pub struct FigureEvent {
     pub handle: u32,
     pub kind: FigureEventKind,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub figure: Option<FigureSnapshot>,
 }
 
@@ -327,6 +329,19 @@ impl FigureSnapshot {
             metadata,
             plots,
         }
+    }
+
+    pub fn fingerprint(&self) -> String {
+        const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+        const FNV_PRIME: u64 = 0x100000001b3;
+
+        let bytes = serde_json::to_vec(self).unwrap_or_default();
+        let mut hash = FNV_OFFSET_BASIS;
+        for byte in bytes {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+        format!("fig:{hash:016x}")
     }
 }
 

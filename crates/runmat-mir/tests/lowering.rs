@@ -65,6 +65,42 @@ fn first_indexing(body: &MirBody) -> &runmat_mir::MirIndexing {
         .expect("expected at least one lowered index expression")
 }
 
+#[test]
+fn call_arg_spans_preserve_plain_call_argument_text() {
+    let source = "alpha = 1; y = f(alpha, alpha + 1);";
+    let mir = lower_mir(source);
+    let body = mir.bodies.values().next().unwrap();
+    let call = first_call(body);
+
+    assert_eq!(call.arg_spans.len(), 2);
+    assert_eq!(
+        &source[call.arg_spans[0].start..call.arg_spans[0].end],
+        "alpha"
+    );
+    assert_eq!(
+        &source[call.arg_spans[1].start..call.arg_spans[1].end],
+        "alpha + 1"
+    );
+}
+
+#[test]
+fn call_arg_spans_exclude_feval_handle_argument() {
+    let source = "alpha = 1; y = feval(@f, alpha, alpha + 1);";
+    let mir = lower_mir(source);
+    let body = mir.bodies.values().next().unwrap();
+    let call = first_call(body);
+
+    assert_eq!(call.arg_spans.len(), 2);
+    assert_eq!(
+        &source[call.arg_spans[0].start..call.arg_spans[0].end],
+        "alpha"
+    );
+    assert_eq!(
+        &source[call.arg_spans[1].start..call.arg_spans[1].end],
+        "alpha + 1"
+    );
+}
+
 fn patch_entrypoint_call_requested_outputs(
     source: &str,
     requested_outputs: RequestedOutputCount,
@@ -209,6 +245,77 @@ fn unresolved_nested_qualified_call_lowers_with_external_boundary_fallback_polic
         CallableFallbackPolicy::ExternalBoundary
     );
     assert!(matches!(call.syntax, CallSyntax::Plain));
+}
+
+#[test]
+fn scoped_private_function_alias_lowers_to_bound_function_identity() {
+    let mut ast = runmat_parser::parse(
+        r#"
+        function y = entry(x)
+            y = helper(x);
+        end
+        function y = helper(x)
+            y = x + 1;
+        end
+        "#,
+    )
+    .expect("parse");
+    for stmt in &mut ast.body {
+        if let runmat_parser::Stmt::Function { name, .. } = stmt {
+            if name == "entry" {
+                *name = "C.entry".to_string();
+            } else if name == "helper" {
+                *name = "C.__private__.helper".to_string();
+            }
+        }
+    }
+    let mut owners = std::collections::HashMap::new();
+    owners.insert("C.__private__.helper".to_string(), "C".to_string());
+    let mut class_aliases = std::collections::HashMap::new();
+    class_aliases.insert("helper".to_string(), "C.__private__.helper".to_string());
+    let mut aliases = std::collections::HashMap::new();
+    aliases.insert("C".to_string(), class_aliases);
+    let hir = lower(
+        &ast,
+        &LoweringContext::empty().with_private_functions(&owners, &aliases),
+    )
+    .expect("lower HIR");
+    let private_id = hir
+        .assembly
+        .functions
+        .iter()
+        .find(|function| function.name.0 == "C.__private__.helper")
+        .map(|function| function.id)
+        .expect("private function");
+    let entry_id = hir
+        .assembly
+        .functions
+        .iter()
+        .find(|function| function.name.0 == "C.entry")
+        .map(|function| function.id)
+        .expect("entry function");
+    let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+    let entry_body = mir.bodies.get(&entry_id).expect("entry MIR body");
+    let call = first_call(entry_body);
+
+    assert!(matches!(
+        call.callee,
+        MirCallee::Static(CallableIdentity::BoundFunction(id)) if id == private_id
+    ));
+}
+
+#[test]
+fn recursive_function_call_lowers_to_bound_function_identity() {
+    let mir = lower_mir("function y = fact(n); y = fact(n - 1); end");
+    let body = mir.bodies.values().next().expect("body");
+    let call = first_call(body);
+
+    assert!(matches!(
+        call.callee,
+        MirCallee::Static(CallableIdentity::BoundFunction(id)) if id == body.function
+    ));
+    assert_eq!(call.syntax, CallSyntax::Plain);
+    assert_eq!(call.fallback_policy, CallableFallbackPolicy::None);
 }
 
 #[test]
@@ -885,6 +992,7 @@ fn analyze_assembly_collects_semantic_marker_diagnostics() {
             indices: Vec::new(),
             expand_all: true,
         }],
+        arg_spans: vec![runmat_hir::Span::default()],
         syntax: runmat_hir::CallSyntax::Plain,
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         fallback_policy: runmat_hir::CallableFallbackPolicy::ExternalBoundary,

@@ -214,7 +214,7 @@ fn trapz_internal_error(detail: impl AsRef<str>) -> RuntimeError {
 #[runtime_builtin(
     name = "trapz",
     category = "math/reduction",
-    summary = "Trapezoidal numerical integration of sampled data.",
+    summary = "Approximate integrals of sampled data using the trapezoidal rule.",
     keywords = "trapz,trapezoidal integration,numerical integration,gpu",
     accel = "none",
     type_resolver(trapz_type),

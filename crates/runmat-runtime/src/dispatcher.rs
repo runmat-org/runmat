@@ -1,8 +1,40 @@
-use crate::{build_runtime_error, make_cell_with_shape, new_object_builtin, RuntimeError};
+use crate::{build_runtime_error, create_class_object, make_cell_with_shape, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
 use runmat_builtins::{
     builtin_functions, ComplexTensor, LogicalArray, NumericDType, Tensor, Value,
 };
+use std::cell::RefCell;
+
+thread_local! {
+    static CLASS_ACCESS_CONTEXT: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+pub struct ClassAccessContextGuard {
+    previous: Option<String>,
+}
+
+impl Drop for ClassAccessContextGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        CLASS_ACCESS_CONTEXT.with(|slot| {
+            *slot.borrow_mut() = previous;
+        });
+    }
+}
+
+pub fn push_class_access_context(class_name: Option<String>) -> ClassAccessContextGuard {
+    let previous =
+        CLASS_ACCESS_CONTEXT.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), class_name));
+    ClassAccessContextGuard { previous }
+}
+
+fn current_class_access_context() -> Option<String> {
+    CLASS_ACCESS_CONTEXT.with(|slot| slot.borrow().clone())
+}
+
+pub fn class_access_context() -> Option<String> {
+    current_class_access_context()
+}
 
 /// Return `true` when the passed value is a GPU-resident tensor handle.
 pub fn is_gpu_value(value: &Value) -> bool {
@@ -202,19 +234,15 @@ async fn call_builtin_async_impl(
     }
 
     if matching_builtins.is_empty() {
-        // Fallback: treat as class constructor if class is registered
+        if let Some(result) = try_call_registered_instance_method(name, args, output_count).await? {
+            return Ok(result);
+        }
+        if let Some(result) = try_call_registered_static_method(name, args, output_count).await? {
+            return Ok(result);
+        }
+        // Fallback: treat as class constructor if class is registered.
         if runmat_builtins::get_class(name).is_some() {
-            // Prefer explicit constructor method with the same name as class (static/public),
-            // including inherited metadata lookup.
-            if let Some((ctor, _owner)) = runmat_builtins::lookup_method(name, name) {
-                if !ctor.is_static || ctor.access == runmat_builtins::Access::Private {
-                    return new_object_builtin(name.to_string()).await;
-                }
-                // Dispatch to constructor builtin; pass args through
-                return call_builtin_async_impl(&ctor.function_name, args, output_count).await;
-            }
-            // Otherwise default-construct object
-            return new_object_builtin(name.to_string()).await;
+            return call_registered_class_constructor(name, args, output_count).await;
         }
         return Err(build_runtime_error(format!("Undefined function: {name}"))
             .with_identifier("RunMat:UndefinedFunction")
@@ -294,6 +322,198 @@ async fn call_builtin_async_impl(
     Err(builder.build())
 }
 
+async fn try_call_registered_instance_method(
+    method_name: &str,
+    args: &[Value],
+    output_count: Option<usize>,
+) -> Result<Option<Value>, RuntimeError> {
+    let Some(receiver) = args.first() else {
+        return Ok(None);
+    };
+    let class_name = match receiver {
+        Value::Object(obj) => obj.class_name.as_str(),
+        Value::HandleObject(handle) => handle.class_name.as_str(),
+        _ => return Ok(None),
+    };
+    let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) else {
+        return Ok(None);
+    };
+    if method.is_static {
+        return Ok(None);
+    }
+    let caller_class = current_class_access_context();
+    let access_allowed = match method.access {
+        runmat_builtins::Access::Public => true,
+        runmat_builtins::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
+        runmat_builtins::Access::Protected => caller_class
+            .as_deref()
+            .is_some_and(|caller| runmat_builtins::is_class_or_subclass(caller, &owner)),
+    };
+    if !access_allowed {
+        return Err(build_runtime_error(format!(
+            "Method '{}' is not accessible from current context.",
+            method_name
+        ))
+        .with_identifier("RunMat:MethodPrivate")
+        .build());
+    }
+    if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
+        &method.function_name,
+        args,
+        output_count.unwrap_or(1),
+    )
+    .await
+    {
+        return result.map(Some);
+    }
+    let owner_qualified = format!("{owner}.{method_name}");
+    if owner_qualified != method.function_name {
+        if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
+            &owner_qualified,
+            args,
+            output_count.unwrap_or(1),
+        )
+        .await
+        {
+            return result.map(Some);
+        }
+    }
+    Ok(None)
+}
+
+async fn try_call_registered_static_method(
+    qualified_name: &str,
+    args: &[Value],
+    output_count: Option<usize>,
+) -> Result<Option<Value>, RuntimeError> {
+    let Some((class_name, method_name)) = qualified_name.rsplit_once('.') else {
+        return Ok(None);
+    };
+    if class_name.trim().is_empty() || method_name.trim().is_empty() {
+        return Ok(None);
+    }
+    if runmat_builtins::get_class(class_name).is_none() {
+        return Ok(None);
+    }
+    let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) else {
+        return Ok(None);
+    };
+    if !method.is_static || method.access != runmat_builtins::Access::Public {
+        return Ok(None);
+    }
+    if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
+        &method.function_name,
+        args,
+        output_count.unwrap_or(1),
+    )
+    .await
+    {
+        return result.map(Some);
+    }
+    let owner_qualified = format!("{owner}.{method_name}");
+    if owner_qualified != method.function_name {
+        if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
+            &owner_qualified,
+            args,
+            output_count.unwrap_or(1),
+        )
+        .await
+        {
+            return result.map(Some);
+        }
+    }
+    Ok(None)
+}
+
+async fn call_registered_class_constructor(
+    class_name: &str,
+    args: &[Value],
+    output_count: Option<usize>,
+) -> Result<Value, RuntimeError> {
+    let requested_outputs = output_count.unwrap_or(1);
+    let default_object = create_class_object(class_name.to_string()).await?;
+    let constructor_method_name = class_name.rsplit('.').next().unwrap_or(class_name);
+    let Some((ctor, owner)) = runmat_builtins::lookup_method(class_name, constructor_method_name)
+        .or_else(|| runmat_builtins::lookup_method(class_name, class_name))
+    else {
+        return Ok(default_object);
+    };
+    let caller_class = current_class_access_context();
+    let ctor_access_allowed = match ctor.access {
+        runmat_builtins::Access::Public => true,
+        runmat_builtins::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
+        runmat_builtins::Access::Protected => caller_class
+            .as_deref()
+            .is_some_and(|caller| runmat_builtins::is_class_or_subclass(caller, &owner)),
+    };
+    if !ctor_access_allowed {
+        return Err(build_runtime_error(format!(
+            "Constructor '{}' is not accessible from current context.",
+            class_name
+        ))
+        .with_identifier("RunMat:MethodPrivate")
+        .build());
+    }
+    let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
+        &ctor.function_name,
+        args,
+        requested_outputs,
+    )
+    .await
+    else {
+        let owner_qualified = format!("{owner}.{constructor_method_name}");
+        let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
+            &owner_qualified,
+            args,
+            requested_outputs,
+        )
+        .await
+        else {
+            return Ok(default_object);
+        };
+        return normalize_constructor_result(default_object, result?, requested_outputs);
+    };
+    normalize_constructor_result(default_object, result?, requested_outputs)
+}
+
+fn normalize_constructor_result(
+    default_object: Value,
+    result: Value,
+    requested_outputs: usize,
+) -> Result<Value, RuntimeError> {
+    if requested_outputs != 1 {
+        return Ok(result);
+    }
+    match result {
+        Value::Struct(struct_value) => match default_object {
+            Value::Object(mut object) => {
+                for (field, value) in struct_value.fields {
+                    object.properties.insert(field, value);
+                }
+                Ok(Value::Object(object))
+            }
+            Value::HandleObject(handle) => {
+                let raw = unsafe { handle.target.as_raw_mut() };
+                if raw.is_null() {
+                    return Ok(Value::HandleObject(handle));
+                }
+                if let Value::Object(mut object) = unsafe { (&*raw).clone() } {
+                    for (field, value) in struct_value.fields {
+                        object.properties.insert(field, value);
+                    }
+                    unsafe {
+                        *raw = Value::Object(object);
+                    }
+                }
+                Ok(Value::HandleObject(handle))
+            }
+            _ => Ok(Value::Struct(struct_value)),
+        },
+        Value::Object(_) | Value::HandleObject(_) => Ok(result),
+        _ => Ok(default_object),
+    }
+}
+
 pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
     call_builtin_async_impl(name, args, None).await
 }
@@ -336,7 +556,9 @@ async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>
 mod tests {
     use super::{call_builtin, gather_if_needed_async, value_contains_gpu};
     use runmat_accelerate_api::{GpuTensorHandle, ThreadProviderGuard};
-    use runmat_builtins::{register_class, Access, ClassDef, Closure, MethodDef, Value};
+    use runmat_builtins::{
+        register_class, Access, ClassDef, Closure, MethodDef, StructValue, Value,
+    };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -409,9 +631,24 @@ mod tests {
     }
 
     #[test]
-    fn constructor_fallback_uses_inherited_static_constructor_metadata() {
+    fn constructor_fallback_uses_inherited_constructor_metadata_with_semantic_invoker() {
         let parent_name = unique_class_name("runtime_ctor_parent");
         let child_name = unique_class_name("runtime_ctor_child");
+        let ctor_fn_name = unique_class_name("runtime_ctor_fn");
+        let ctor_fn_name_for_resolver = ctor_fn_name.clone();
+        let ctor_fn_name_for_invoker = ctor_fn_name.clone();
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(Some(
+            std::sync::Arc::new(move |name| (name == ctor_fn_name_for_resolver).then_some(10101)),
+        ));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            std::sync::Arc::new(move |function, _args, requested_outputs| {
+                assert_eq!(function, 10101);
+                assert_eq!(requested_outputs, 1);
+                let mut sv = StructValue::new();
+                sv.fields.insert("x".to_string(), Value::Num(12.0));
+                Box::pin(async move { Ok(Value::Struct(sv)) })
+            }),
+        ));
 
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
@@ -419,8 +656,10 @@ mod tests {
             MethodDef {
                 name: child_name.clone(),
                 is_static: true,
+                is_abstract: false,
+                is_sealed: false,
                 access: Access::Public,
-                function_name: "Point.origin".to_string(),
+                function_name: ctor_fn_name_for_invoker,
                 implicit_class_argument: None,
             },
         );
@@ -442,40 +681,105 @@ mod tests {
         let Value::Object(obj) = out else {
             panic!("expected object from constructor dispatch");
         };
-        assert_eq!(obj.class_name, "Point");
+        assert_eq!(obj.class_name, child_name);
+        assert_eq!(obj.properties.get("x"), Some(&Value::Num(12.0)));
     }
 
     #[test]
-    fn constructor_fallback_skips_private_or_non_static_constructor_methods() {
-        for (prefix, is_static, access) in [
-            ("runtime_ctor_private", true, Access::Private),
-            ("runtime_ctor_nonstatic", false, Access::Public),
-        ] {
-            let class_name = unique_class_name(prefix);
-            let mut methods = HashMap::new();
-            methods.insert(
-                class_name.clone(),
-                MethodDef {
-                    name: class_name.clone(),
-                    is_static,
-                    access: access.clone(),
-                    function_name: "Point.origin".to_string(),
-                    implicit_class_argument: None,
-                },
-            );
-            register_class(ClassDef {
-                name: class_name.clone(),
-                parent: None,
-                properties: HashMap::new(),
-                methods,
-            });
+    fn constructor_fallback_defaults_when_constructor_is_private_or_unavailable() {
+        let private_class_name = unique_class_name("runtime_ctor_private");
+        let mut private_methods = HashMap::new();
+        private_methods.insert(
+            private_class_name.clone(),
+            MethodDef {
+                name: private_class_name.clone(),
+                is_static: true,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Private,
+                function_name: "Point.origin".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: private_class_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: private_methods,
+        });
+        let err = call_builtin(&private_class_name, &[])
+            .expect_err("private constructor should enforce access before default fallback");
+        assert_eq!(err.identifier(), Some("RunMat:MethodPrivate"));
 
-            let out = call_builtin(&class_name, &[])
-                .expect("fallback should default-construct when ctor metadata is not invokable");
-            let Value::Object(obj) = out else {
-                panic!("expected object result");
-            };
-            assert_eq!(obj.class_name, class_name);
-        }
+        let public_class_name = unique_class_name("runtime_ctor_public_no_semantic");
+        let mut public_methods = HashMap::new();
+        public_methods.insert(
+            public_class_name.clone(),
+            MethodDef {
+                name: public_class_name.clone(),
+                is_static: true,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: "Point.origin".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: public_class_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: public_methods,
+        });
+
+        let out = call_builtin(&public_class_name, &[])
+            .expect("public ctor metadata without semantic body should default-construct");
+        let Value::Object(obj) = out else {
+            panic!("expected object result");
+        };
+        assert_eq!(obj.class_name, public_class_name);
+    }
+
+    #[test]
+    fn dotted_static_method_name_dispatches_to_registered_class_method() {
+        let class_name = unique_class_name("runtime_static_dispatch");
+        let fn_name = unique_class_name("runtime_static_fn");
+        register_class(ClassDef {
+            name: class_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: {
+                let mut methods = HashMap::new();
+                methods.insert(
+                    "zero".to_string(),
+                    MethodDef {
+                        name: "zero".to_string(),
+                        is_static: true,
+                        is_abstract: false,
+                        is_sealed: false,
+                        access: Access::Public,
+                        function_name: fn_name.clone(),
+                        implicit_class_argument: None,
+                    },
+                );
+                methods
+            },
+        });
+
+        let fn_name_for_resolver = fn_name.clone();
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(Some(
+            std::sync::Arc::new(move |name| (name == fn_name_for_resolver).then_some(20202)),
+        ));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            std::sync::Arc::new(move |function, _args, requested_outputs| {
+                assert_eq!(function, 20202);
+                assert_eq!(requested_outputs, 1);
+                Box::pin(async { Ok(Value::Num(77.0)) })
+            }),
+        ));
+
+        let out = call_builtin(&format!("{class_name}.zero"), &[])
+            .expect("dotted static class method call should dispatch");
+        assert_eq!(out, Value::Num(77.0));
     }
 }

@@ -131,7 +131,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "ls",
     category = "io/repl_fs",
-    summary = "List files and folders in the current directory or matching a wildcard pattern.",
+    summary = "List files and folders in directories or wildcard paths.",
     keywords = "ls,list files,folder contents,wildcard listing,dir",
     accel = "cpu",
     suppress_auto_output = true,

@@ -279,7 +279,7 @@ where
 #[runtime_builtin(
     name = "assert",
     category = "diagnostics",
-    summary = "Throw a MATLAB-style error when a logical or numeric condition evaluates to false.",
+    summary = "Throw an error when a condition is false, matching MATLAB assert semantics.",
     keywords = "assert,diagnostics,validation,error",
     accel = "metadata",
     type_resolver(assert_type),

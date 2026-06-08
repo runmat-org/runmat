@@ -69,7 +69,7 @@ pub const GPU_INFO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "gpuInfo",
     category = "acceleration/gpu",
-    summary = "Return a formatted status string that describes the active GPU provider.",
+    summary = "Return formatted GPU provider status.",
     keywords = "gpu,gpuInfo,device,info,accelerate",
     examples = "disp(gpuInfo())",
     type_resolver(gpuinfo_type),

@@ -186,7 +186,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "savepath",
     category = "io/repl_fs",
-    summary = "Persist the current MATLAB search path to pathdef.m with status outputs.",
+    summary = "Write the current MATLAB search path to pathdef.m with status outputs.",
     keywords = "savepath,pathdef,search path,runmat path,persist path",
     accel = "cpu",
     suppress_auto_output = true,

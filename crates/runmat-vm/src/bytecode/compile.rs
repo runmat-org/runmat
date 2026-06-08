@@ -87,11 +87,20 @@ pub fn compile(
     };
     let async_metadata = derive_semantic_async_metadata(mir, entrypoint_target);
 
+    let source_id = entrypoint_target
+        .and_then(|function_id| {
+            hir.functions
+                .iter()
+                .find(|function| function.id == function_id)
+        })
+        .and_then(|function| hir.modules.get(function.module.0))
+        .map(|module| module.source_id);
+
     Ok(Bytecode {
         instructions: c.instructions,
         instr_spans: c.instr_spans,
         call_arg_spans: c.call_arg_spans,
-        source_id: None,
+        source_id,
         var_count: c.var_count,
         bound_functions,
         function_registry,
@@ -770,12 +779,17 @@ fn compile_semantic_functions(
         let function_layout = layout.functions.get(&function.id).ok_or_else(|| {
             CompileError::new(format!("missing VM layout for function {:?}", function.id))
         })?;
+        let source_id = hir
+            .modules
+            .get(function.module.0)
+            .map(|module| module.source_id);
         functions.insert(
             function.id,
             FunctionBytecode {
                 function: function.id,
                 display_name: function_layout.display_name.clone(),
-                source_id: None,
+                private_owner_scope: function_layout.private_owner_scope.clone(),
+                source_id,
                 instructions: compiler.instructions,
                 instr_spans: compiler.instr_spans,
                 call_arg_spans: compiler.call_arg_spans,
@@ -806,10 +820,128 @@ fn compile_semantic_functions(
                     .iter()
                     .map(|capture| capture.slot.0)
                     .collect(),
+                var_names: function_layout_var_names(hir, function_layout)?,
+                argument_validations: function
+                    .argument_validations
+                    .iter()
+                    .filter_map(|validation| {
+                        function_layout
+                            .binding_slots
+                            .get(&validation.binding)
+                            .map(|slot| crate::bytecode::program::FunctionArgumentValidation {
+                                input_slot: slot.0,
+                                size: validation.size.as_ref().map(|size| {
+                                    crate::bytecode::program::FunctionArgSizeSpec {
+                                        rows: match size.rows {
+                                            runmat_hir::FunctionArgDim::Any => {
+                                                crate::bytecode::program::FunctionArgDim::Any
+                                            }
+                                            runmat_hir::FunctionArgDim::Exact(value) => {
+                                                crate::bytecode::program::FunctionArgDim::Exact(value)
+                                            }
+                                        },
+                                        cols: match size.cols {
+                                            runmat_hir::FunctionArgDim::Any => {
+                                                crate::bytecode::program::FunctionArgDim::Any
+                                            }
+                                            runmat_hir::FunctionArgDim::Exact(value) => {
+                                                crate::bytecode::program::FunctionArgDim::Exact(value)
+                                            }
+                                        },
+                                    }
+                                }),
+                                class_name: validation.class_name.clone(),
+                                validators: validation
+                                    .validators
+                                    .iter()
+                                    .map(|validator| match validator {
+                                        runmat_hir::FunctionArgValidator::Finite => {
+                                            crate::bytecode::program::FunctionArgValidator::Finite
+                                        }
+                                        runmat_hir::FunctionArgValidator::NumericOrLogical => {
+                                            crate::bytecode::program::FunctionArgValidator::NumericOrLogical
+                                        }
+                                        runmat_hir::FunctionArgValidator::Text => {
+                                            crate::bytecode::program::FunctionArgValidator::Text
+                                        }
+                                        runmat_hir::FunctionArgValidator::Nonempty => {
+                                            crate::bytecode::program::FunctionArgValidator::Nonempty
+                                        }
+                                        runmat_hir::FunctionArgValidator::ScalarOrEmpty => {
+                                            crate::bytecode::program::FunctionArgValidator::ScalarOrEmpty
+                                        }
+                                        runmat_hir::FunctionArgValidator::Real => {
+                                            crate::bytecode::program::FunctionArgValidator::Real
+                                        }
+                                        runmat_hir::FunctionArgValidator::Integer => {
+                                            crate::bytecode::program::FunctionArgValidator::Integer
+                                        }
+                                        runmat_hir::FunctionArgValidator::Positive => {
+                                            crate::bytecode::program::FunctionArgValidator::Positive
+                                        }
+                                        runmat_hir::FunctionArgValidator::Negative => {
+                                            crate::bytecode::program::FunctionArgValidator::Negative
+                                        }
+                                        runmat_hir::FunctionArgValidator::Nonnegative => {
+                                            crate::bytecode::program::FunctionArgValidator::Nonnegative
+                                        }
+                                        runmat_hir::FunctionArgValidator::Nonzero => {
+                                            crate::bytecode::program::FunctionArgValidator::Nonzero
+                                        }
+                                        runmat_hir::FunctionArgValidator::Nonpositive => {
+                                            crate::bytecode::program::FunctionArgValidator::Nonpositive
+                                        }
+                                        runmat_hir::FunctionArgValidator::GreaterThanOrEqual(
+                                            threshold,
+                                        ) => crate::bytecode::program::FunctionArgValidator::GreaterThanOrEqual(*threshold),
+                                        runmat_hir::FunctionArgValidator::LessThanOrEqual(
+                                            threshold,
+                                        ) => crate::bytecode::program::FunctionArgValidator::LessThanOrEqual(*threshold),
+                                        runmat_hir::FunctionArgValidator::GreaterThan(
+                                            threshold,
+                                        ) => crate::bytecode::program::FunctionArgValidator::GreaterThan(*threshold),
+                                        runmat_hir::FunctionArgValidator::LessThan(
+                                            threshold,
+                                        ) => crate::bytecode::program::FunctionArgValidator::LessThan(*threshold),
+                                    })
+                                    .collect(),
+                                default_value: validation.default_value.as_ref().map(|default| {
+                                    match default {
+                                        runmat_hir::FunctionArgDefaultValue::Number(value) => {
+                                            crate::bytecode::program::FunctionArgDefaultValue::Number(*value)
+                                        }
+                                        runmat_hir::FunctionArgDefaultValue::Bool(value) => {
+                                            crate::bytecode::program::FunctionArgDefaultValue::Bool(*value)
+                                        }
+                                        runmat_hir::FunctionArgDefaultValue::String(value) => {
+                                            crate::bytecode::program::FunctionArgDefaultValue::String(value.clone())
+                                        }
+                                        runmat_hir::FunctionArgDefaultValue::EmptyArray => {
+                                            crate::bytecode::program::FunctionArgDefaultValue::EmptyArray
+                                        }
+                                    }
+                                }),
+                            })
+                    })
+                    .collect(),
             },
         );
     }
     Ok(functions)
+}
+
+fn function_layout_var_names(
+    hir: &HirAssembly,
+    function_layout: &crate::layout::VmFunctionLayout,
+) -> Result<HashMap<usize, String>, CompileError> {
+    let mut names = HashMap::new();
+    for (binding, slot) in &function_layout.binding_slots {
+        let hir_binding = hir.bindings.get(binding.0).ok_or_else(|| {
+            CompileError::new(format!("missing HIR binding for VM slot {:?}", binding))
+        })?;
+        names.insert(slot.0, hir_binding.name.0.clone());
+    }
+    Ok(names)
 }
 
 #[cfg(test)]
@@ -1266,10 +1398,7 @@ mod tests {
             "non-entrypoint helper MIR bodies should not drive entrypoint fusion signal metadata"
         );
         assert_eq!(
-            bytecode
-                .fusion_metadata
-                .mir_fusion_candidate_group_count,
-            0,
+            bytecode.fusion_metadata.mir_fusion_candidate_group_count, 0,
             "non-entrypoint helper MIR bodies should not drive entrypoint fusion candidate metadata"
         );
         assert!(
@@ -1391,7 +1520,11 @@ mod tests {
         ];
 
         assert!(
-            !super::fusion_group_within_semantic_candidate_spans(&group, &instr_spans, &split_candidates),
+            !super::fusion_group_within_semantic_candidate_spans(
+                &group,
+                &instr_spans,
+                &split_candidates
+            ),
             "expected rejection when bytecode group coverage requires unioning multiple semantic candidate spans"
         );
     }
@@ -2457,8 +2590,7 @@ mod tests {
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
 
         assert_eq!(
-            bytecode.async_metadata.mir_spawn_site_count,
-            0,
+            bytecode.async_metadata.mir_spawn_site_count, 0,
             "spawn sites in non-entrypoint helper bodies should not be attributed to the entrypoint bytecode artifact"
         );
         assert!(
@@ -2521,8 +2653,7 @@ mod tests {
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
 
         assert_eq!(
-            bytecode.async_metadata.mir_await_site_count,
-            0,
+            bytecode.async_metadata.mir_await_site_count, 0,
             "await sites in non-entrypoint helper bodies should not be attributed to the entrypoint bytecode artifact"
         );
         assert!(
@@ -6433,8 +6564,7 @@ mod tests {
 
     #[test]
     fn compile_lowers_async_expansion_call_to_future_expand_instruction() {
-        let source =
-            "async function y = inc(x); y = x + 1; end; args = {2}; t = inc(args{:}); z = await(t);";
+        let source = "async function y = inc(x); y = x + 1; end; args = {2}; t = inc(args{:}); z = await(t);";
         let ast = runmat_parser::parse(source).expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -6442,13 +6572,10 @@ mod tests {
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
         assert!(
-            bytecode
-                .instructions
-                .iter()
-                .any(|instr| matches!(
-                    instr,
-                    Instr::CreateSemanticFutureExpandMultiOutput(FunctionId(_), _, 1)
-                )),
+            bytecode.instructions.iter().any(|instr| matches!(
+                instr,
+                Instr::CreateSemanticFutureExpandMultiOutput(FunctionId(_), _, 1)
+            )),
             "expected async expansion call lowering to create a semantic future expansion descriptor"
         );
         let layout = bytecode.layout.as_ref().expect("layout");

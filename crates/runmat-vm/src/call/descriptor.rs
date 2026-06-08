@@ -72,8 +72,8 @@ pub(crate) struct CallableDescriptor {
 }
 
 impl CallableDescriptor {
-    fn parse_at_handle_name(text: &str) -> Option<String> {
-        let handle = text.trim().strip_prefix('@')?.trim();
+    fn parse_handle_name(text: &str) -> Option<String> {
+        let handle = text.trim().strip_prefix('@').unwrap_or(text.trim()).trim();
         if handle.is_empty() {
             None
         } else {
@@ -240,7 +240,7 @@ impl CallableDescriptor {
     ) -> Self {
         match func_val {
             Value::String(text) => {
-                if let Some(name) = Self::parse_at_handle_name(&text) {
+                if let Some(name) = Self::parse_handle_name(&text) {
                     let (identity, fallback_policy) =
                         Self::resolve_named_target(&name, function_registry);
                     return Self::feval_resolved_name(
@@ -255,7 +255,7 @@ impl CallableDescriptor {
             }
             Value::CharArray(ca) if ca.rows == 1 => {
                 let text: String = ca.data.iter().collect();
-                if let Some(name) = Self::parse_at_handle_name(&text) {
+                if let Some(name) = Self::parse_handle_name(&text) {
                     let (identity, fallback_policy) =
                         Self::resolve_named_target(&name, function_registry);
                     return Self::feval_resolved_name(
@@ -269,7 +269,7 @@ impl CallableDescriptor {
                 Self::feval_forward(Value::CharArray(ca), args, requested_outputs)
             }
             Value::StringArray(sa) if sa.data.len() == 1 => {
-                if let Some(name) = Self::parse_at_handle_name(&sa.data[0]) {
+                if let Some(name) = Self::parse_handle_name(&sa.data[0]) {
                     let (identity, fallback_policy) =
                         Self::resolve_named_target(&name, function_registry);
                     return Self::feval_resolved_name(
@@ -415,7 +415,13 @@ async fn forward_named_fallback(
     args: Vec<Value>,
     requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
-    forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
+    match runmat_runtime::call_builtin_async_with_outputs(&name, &args, requested_outputs).await {
+        Ok(value) => Ok(value),
+        Err(err) if err.identifier() == Some("RunMat:UndefinedFunction") => {
+            forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
+        }
+        Err(err) => Err(err),
+    }
 }
 
 async fn execute_resolved_callable(

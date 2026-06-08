@@ -229,6 +229,13 @@ const SETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS: BuiltinErrorDescriptor = BuiltinEr
     message: "setfield: private property access denied",
 };
 
+const SETFIELD_ERROR_PROPERTY_STATIC_ACCESS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.PROPERTY_STATIC_ACCESS",
+    identifier: Some("RunMat:PropertyStaticAccess"),
+    when: "Property exists but is static and cannot be assigned through an instance.",
+    message: "setfield: static property access denied",
+};
+
 const SETFIELD_ERROR_OBJECT_PROPERTY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SETFIELD.OBJECT_PROPERTY",
     identifier: Some("RunMat:setfield:ObjectProperty"),
@@ -250,7 +257,7 @@ const SETFIELD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "setfield: internal error",
 };
 
-const SETFIELD_ERRORS: [BuiltinErrorDescriptor; 13] = [
+const SETFIELD_ERRORS: [BuiltinErrorDescriptor; 14] = [
     SETFIELD_ERROR_NOT_ENOUGH_INPUTS,
     SETFIELD_ERROR_FIELD_EXPECTED,
     SETFIELD_ERROR_INDEX_SELECTOR_TYPE,
@@ -261,6 +268,7 @@ const SETFIELD_ERRORS: [BuiltinErrorDescriptor; 13] = [
     SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
     SETFIELD_ERROR_MISSING_FIELD,
     SETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS,
+    SETFIELD_ERROR_PROPERTY_STATIC_ACCESS,
     SETFIELD_ERROR_OBJECT_PROPERTY,
     SETFIELD_ERROR_INVALID_HANDLE,
     SETFIELD_ERROR_INTERNAL,
@@ -295,6 +303,10 @@ fn setfield_private_access(message: impl Into<String>) -> RuntimeError {
     setfield_error_with_message(message, &SETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS)
 }
 
+fn setfield_static_access(message: impl Into<String>) -> RuntimeError {
+    setfield_error_with_message(message, &SETFIELD_ERROR_PROPERTY_STATIC_ACCESS)
+}
+
 fn remap_setfield_flow(err: RuntimeError, prefix: Option<&str>) -> RuntimeError {
     let mut message = err.message().to_string();
     if let Some(prefix) = prefix {
@@ -316,7 +328,7 @@ fn is_undefined_function(err: &RuntimeError) -> bool {
 #[runtime_builtin(
     name = "setfield",
     category = "structs/core",
-    summary = "Assign into struct fields, struct arrays, or MATLAB-style object properties.",
+    summary = "Assign values into struct fields, nested fields, or struct-array elements.",
     keywords = "setfield,struct,assignment,object property",
     type_resolver(setfield_type),
     descriptor(crate::builtins::structs::core::setfield::SETFIELD_DESCRIPTOR),
@@ -979,7 +991,7 @@ async fn write_object_property(
 ) -> BuiltinResult<()> {
     if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
         if prop.is_static {
-            return Err(setfield_flow(format!(
+            return Err(setfield_static_access(format!(
                 "Property '{}' is static; use classref('{}').{}",
                 name, obj.class_name, name
             )));
@@ -1027,7 +1039,7 @@ async fn assign_into_handle(
             "setfield: expected at least one field name when assigning into a handle",
         ));
     }
-    if !handle.valid {
+    if !runmat_builtins::is_handle_valid(&handle) {
         return Err(setfield_flow(format!(
             "Invalid or deleted handle object '{}'.",
             handle.class_name
@@ -1613,6 +1625,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "x".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -1672,6 +1685,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "version".to_string(),
                 is_static: true,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -1711,6 +1725,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "version".to_string(),
                 is_static: true,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -1759,7 +1774,7 @@ pub(crate) mod tests {
         .expect("setfield handle update");
 
         match updated {
-            Value::HandleObject(h) => assert!(h.valid),
+            Value::HandleObject(h) => assert!(runmat_builtins::is_handle_valid(&h)),
             other => panic!("expected handle, got {other:?}"),
         }
 

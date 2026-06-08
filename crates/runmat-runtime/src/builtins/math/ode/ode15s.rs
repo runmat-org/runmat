@@ -210,7 +210,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "ode15s",
     category = "math/ode",
-    summary = "Solve stiff ODE systems with an adaptive implicit host-side integrator.",
+    summary = "Solve stiff ODE systems with adaptive implicit integration.",
     keywords = "ode15s,ode,stiff,implicit,adaptive step",
     accel = "sink",
     type_resolver(ode_solution_type),

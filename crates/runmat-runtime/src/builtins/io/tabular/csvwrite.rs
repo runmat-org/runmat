@@ -220,7 +220,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "csvwrite",
     category = "io/tabular",
-    summary = "Write numeric matrices to comma-separated text files using MATLAB-compatible offsets.",
+    summary = "Write numeric matrices to CSV files.",
     keywords = "csvwrite,csv,write,row offset,column offset",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),

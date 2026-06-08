@@ -1,3 +1,7 @@
+use crate::hir::{
+    FunctionArgDefaultValue, FunctionArgDim, FunctionArgSizeSpec, FunctionArgValidator,
+    FunctionArgumentValidation,
+};
 use crate::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingId, BindingName, BindingOwner,
     BindingResolution, BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution,
@@ -8,11 +12,12 @@ use crate::{
     HirAssembly, HirBinding, HirBlock, HirCall, HirCallableRef, HirClass, HirCommandCall,
     HirEntrypoint, HirError, HirExpr, HirExprKind, HirFunction, HirImport, HirIndex, HirModule,
     HirPlace, HirStmt as HirStmtNode, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
-    IndexResultContext, IndexingSemantics, LoweringContext, LoweringResult, ModuleId, OperatorKind,
-    PackageName, PlaceMutation, PlaceMutationKind, QualifiedName, ReferenceKind,
-    ReferenceResolution, RequestedOutputCount, SourceId, SourceUnitKind, Span, StmtId,
-    StringLiteral, SymbolName, WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME,
-    DISCARD_OUTPUT_NAME, NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
+    IndexResultContext, IndexingSemantics, LoweringContext, LoweringResult, MemberAccess,
+    MemberName, ModuleId, OperatorKind, PackageName, PlaceMutation, PlaceMutationKind,
+    QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount, SourceId,
+    SourceUnitKind, Span, StmtId, StringLiteral, SymbolName, WorkspaceExportPolicy,
+    WorkspaceVisibility, AWAIT_EXTENSION_NAME, NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME,
+    SPAWN_EXTENSION_NAME,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use std::collections::{HashMap, HashSet};
@@ -32,6 +37,15 @@ const IDENT_CLASS_MEMBER_NAME_CONFLICT: &str = "RunMat:ClassMemberNameConflict";
 const IDENT_AGGREGATE_SHAPE_MISMATCH: &str = "RunMat:AggregateShapeMismatch";
 const IDENT_IMPORT_AMBIGUOUS: &str = "RunMat:ImportAmbiguous";
 const IDENT_IMPORT_DUPLICATE: &str = "RunMat:ImportDuplicate";
+const IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN: &str = "RunMat:FunctionArgumentValidationUnknown";
+const IDENT_FUNCTION_ARGUMENT_VALIDATION_DUPLICATE: &str =
+    "RunMat:FunctionArgumentValidationDuplicate";
+const IDENT_FUNCTION_ARGUMENT_VALIDATION_UNSUPPORTED: &str =
+    "RunMat:FunctionArgumentValidationUnsupported";
+const IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR: &str =
+    "RunMat:FunctionArgumentValidationUnknownValidator";
+const IDENT_FUNCTION_ARGUMENT_DEFAULT_UNSUPPORTED: &str =
+    "RunMat:FunctionArgumentDefaultUnsupported";
 
 #[derive(Clone)]
 struct ScopeFrame {
@@ -47,14 +61,20 @@ struct LoweringCtx {
     next_expr: usize,
     next_stmt: usize,
     next_function: usize,
+    next_class: usize,
     scopes: Vec<ScopeFrame>,
     function_modifiers: Vec<FunctionModifiers>,
     top_level_await: Vec<bool>,
     runmat_extensions_enabled: bool,
     top_level_await_enabled: bool,
     function_names: HashMap<String, FunctionId>,
+    class_names: HashMap<String, ClassId>,
     external_function_names: HashMap<String, FunctionId>,
     known_project_symbols: HashSet<String>,
+    private_function_owners: HashMap<String, String>,
+    private_function_aliases: HashMap<String, HashMap<String, String>>,
+    private_alias_stack: Vec<HashMap<String, String>>,
+    private_owner_stack: Vec<String>,
     captures: HashMap<FunctionId, Vec<CapturedBinding>>,
 }
 
@@ -63,6 +83,8 @@ struct LowerFunctionSpec<'a> {
     name: &'a str,
     params: &'a [String],
     outputs: &'a [String],
+    argument_validations: &'a [runmat_parser::FunctionArgValidationDecl],
+    argument_block_kinds: &'a [runmat_parser::FunctionArgumentsBlockKind],
     body: &'a [AstStmt],
     span: Span,
     kind: FunctionKind,
@@ -81,6 +103,51 @@ pub fn lower(prog: &AstProgram, context: &LoweringContext<'_>) -> Result<Lowerin
 }
 
 impl LoweringCtx {
+    fn class_for_id(&self, id: ClassId) -> Option<&HirClass> {
+        self.assembly.classes.iter().find(|class| class.id == id)
+    }
+
+    fn class_has_public_static_property(&self, class_name: &str, property_name: &str) -> bool {
+        if let Some(class_id) = self.class_id_for_name(class_name) {
+            if let Some(class_def) = self.class_for_id(class_id) {
+                if class_def.properties.iter().any(|property| {
+                    property.name.0 == property_name
+                        && property.attributes.is_static
+                        && matches!(property.attributes.get_access, MemberAccess::Public)
+                        && matches!(property.attributes.access, MemberAccess::Public)
+                }) {
+                    return true;
+                }
+            }
+        }
+        if let Some((property, _owner)) =
+            runmat_builtins::lookup_property(class_name, property_name)
+        {
+            return property.is_static
+                && property.get_access == runmat_builtins::Access::Public
+                && property.set_access == runmat_builtins::Access::Public;
+        }
+        false
+    }
+
+    fn class_id_for_name(&self, name: &str) -> Option<ClassId> {
+        if let Some(id) = self.class_names.get(name) {
+            return Some(*id);
+        }
+        self.class_id_for_unqualified_name(name)
+    }
+
+    fn class_id_for_unqualified_name(&self, name: &str) -> Option<ClassId> {
+        if let Some(id) = self.class_names.get(name) {
+            return Some(*id);
+        }
+        self.assembly
+            .classes
+            .iter()
+            .find(|class| class.name.0.len() == 1 && class.name.0[0].0 == name)
+            .map(|class| class.id)
+    }
+
     fn qualified_name_string(name: &QualifiedName) -> String {
         name.0
             .iter()
@@ -94,6 +161,28 @@ impl LoweringCtx {
             || self
                 .known_project_symbols
                 .contains(&Self::qualified_name_string(qualified))
+            || self.source_class_static_method_exists(qualified)
+    }
+
+    fn source_class_static_method_exists(&self, qualified: &QualifiedName) -> bool {
+        if qualified.0.len() < 2 {
+            return false;
+        }
+        let method_name = qualified.0[qualified.0.len() - 1].0.as_str();
+        let class_segments = &qualified.0[..qualified.0.len() - 1];
+        self.assembly.classes.iter().any(|class| {
+            class.name.0.len() == class_segments.len()
+                && class
+                    .name
+                    .0
+                    .iter()
+                    .zip(class_segments.iter())
+                    .all(|(a, b)| a.0 == b.0)
+                && class
+                    .methods
+                    .iter()
+                    .any(|method| method.is_static && method.name.0 == method_name)
+        })
     }
 
     fn wildcard_import_candidate(import_path: &QualifiedName, name: &str) -> QualifiedName {
@@ -136,14 +225,20 @@ impl LoweringCtx {
             next_expr: 0,
             next_stmt: 0,
             next_function: 0,
+            next_class: 0,
             scopes: Vec::new(),
             function_modifiers: Vec::new(),
             top_level_await: Vec::new(),
             runmat_extensions_enabled: context.runmat_extensions_enabled,
             top_level_await_enabled: context.top_level_await_enabled,
             function_names: HashMap::new(),
+            class_names: HashMap::new(),
             external_function_names: context.bound_functions.clone(),
             known_project_symbols: context.known_project_symbols.clone(),
+            private_function_owners: context.private_function_owners.clone(),
+            private_function_aliases: context.private_function_aliases.clone(),
+            private_alias_stack: Vec::new(),
+            private_owner_stack: Vec::new(),
             captures: HashMap::new(),
         };
 
@@ -165,6 +260,9 @@ impl LoweringCtx {
                     .top_level_functions
                     .push(id);
             }
+            if let AstStmt::ClassDef { name, .. } = stmt {
+                let _ = ctx.reserve_class_name(name);
+            }
         }
 
         for stmt in &prog.body {
@@ -181,6 +279,54 @@ impl LoweringCtx {
             }
         }
         validate_semantic_imports(&ctx.assembly.modules[ctx.module.0].imports)?;
+
+        for stmt in &prog.body {
+            match stmt {
+                AstStmt::Function {
+                    name,
+                    params,
+                    outputs,
+                    argument_validations,
+                    argument_block_kinds,
+                    body,
+                    isolated,
+                    is_async,
+                    span,
+                } => {
+                    let id = ctx.function_names[name];
+                    let function = ctx.lower_function(LowerFunctionSpec {
+                        id,
+                        name,
+                        params,
+                        outputs,
+                        argument_validations,
+                        argument_block_kinds,
+                        body,
+                        span: *span,
+                        kind: FunctionKind::Named,
+                        modifiers: FunctionModifiers {
+                            isolated: *isolated,
+                            is_async: *is_async,
+                        },
+                        parent: None,
+                        enclosing_class: None,
+                    })?;
+                    ctx.assembly.functions.push(function);
+                }
+                AstStmt::ClassDef {
+                    attributes,
+                    name,
+                    super_class,
+                    members,
+                    span,
+                } => {
+                    let class =
+                        ctx.lower_class(attributes, name, super_class.as_deref(), members, *span)?;
+                    ctx.assembly.classes.push(class);
+                }
+                _ => {}
+            }
+        }
 
         let executable: Vec<_> = prog
             .body
@@ -200,16 +346,18 @@ impl LoweringCtx {
                     top_level_await: context.top_level_await_enabled,
                 },
             });
-            let body = ctx.with_scope(
-                entry_function,
-                WorkspaceVisibility::TopLevel,
-                FunctionModifiers::default(),
-                ctx.top_level_await_enabled,
-                |ctx| {
-                    ctx.seed_existing_workspace_bindings(context.variables, entry_function);
-                    ctx.lower_stmt_refs(&executable)
-                },
-            )?;
+            let body = ctx.with_private_alias_scope_for_function("main", |ctx| {
+                ctx.with_scope(
+                    entry_function,
+                    WorkspaceVisibility::TopLevel,
+                    FunctionModifiers::default(),
+                    ctx.top_level_await_enabled,
+                    |ctx| {
+                        ctx.seed_existing_workspace_bindings(context.variables, entry_function);
+                        ctx.lower_stmt_refs(&executable)
+                    },
+                )
+            })?;
             let locals = ctx.binding_ids_for_owner(entry_function);
             ctx.assembly.functions.push(HirFunction {
                 id: entry_function,
@@ -221,6 +369,7 @@ impl LoweringCtx {
                 params: vec![],
                 outputs: vec![],
                 abi: FunctionAbi::empty(),
+                argument_validations: vec![],
                 locals,
                 captures: vec![],
                 modifiers: FunctionModifiers::default(),
@@ -231,48 +380,6 @@ impl LoweringCtx {
                     .map(AstStmt::span)
                     .unwrap_or(Span { start: 0, end: 0 }),
             });
-        }
-
-        for stmt in &prog.body {
-            match stmt {
-                AstStmt::Function {
-                    name,
-                    params,
-                    outputs,
-                    body,
-                    isolated,
-                    is_async,
-                    span,
-                } => {
-                    let id = ctx.function_names[name];
-                    let function = ctx.lower_function(LowerFunctionSpec {
-                        id,
-                        name,
-                        params,
-                        outputs,
-                        body,
-                        span: *span,
-                        kind: FunctionKind::Named,
-                        modifiers: FunctionModifiers {
-                            isolated: *isolated,
-                            is_async: *is_async,
-                        },
-                        parent: None,
-                        enclosing_class: None,
-                    })?;
-                    ctx.assembly.functions.push(function);
-                }
-                AstStmt::ClassDef {
-                    name,
-                    super_class,
-                    members,
-                    span,
-                } => {
-                    let class = ctx.lower_class(name, super_class.as_deref(), members, *span)?;
-                    ctx.assembly.classes.push(class);
-                }
-                _ => {}
-            }
         }
 
         Ok((ctx.assembly, ctx.hir_index))
@@ -287,9 +394,75 @@ impl LoweringCtx {
         id
     }
 
+    fn private_owner_scope_for_function_name(name: &str) -> String {
+        if let Some((owner, _)) = name.split_once(".__private__.") {
+            return owner.to_string();
+        }
+        name.rsplit_once('.')
+            .map(|(owner, _)| owner.to_string())
+            .unwrap_or_default()
+    }
+
+    fn with_private_alias_scope_for_function<T>(
+        &mut self,
+        function_name: &str,
+        f: impl FnOnce(&mut Self) -> Result<T, HirError>,
+    ) -> Result<T, HirError> {
+        let owner_scope = Self::private_owner_scope_for_function_name(function_name);
+        let mut aliases = self.private_alias_stack.last().cloned().unwrap_or_default();
+        if let Some(scoped_aliases) = self.private_function_aliases.get(&owner_scope) {
+            aliases.extend(scoped_aliases.clone());
+        }
+        self.private_alias_stack.push(aliases);
+        self.private_owner_stack.push(owner_scope);
+        let result = f(self);
+        self.private_owner_stack.pop();
+        self.private_alias_stack.pop();
+        result
+    }
+
+    fn current_private_owner_scope(&self) -> &str {
+        self.private_owner_stack
+            .last()
+            .map(String::as_str)
+            .unwrap_or("")
+    }
+
+    fn private_function_is_visible_in_current_scope(&self, display_name: &str) -> bool {
+        match self.private_function_owners.get(display_name) {
+            Some(owner) => owner == self.current_private_owner_scope(),
+            None => true,
+        }
+    }
+
+    fn resolve_scoped_function_name(&self, name: &str) -> Option<FunctionId> {
+        if let Some(target_name) = self
+            .private_alias_stack
+            .last()
+            .and_then(|aliases| aliases.get(name))
+        {
+            if let Some(function) = self.function_names.get(target_name) {
+                return Some(*function);
+            }
+        }
+        let function = self.function_names.get(name).copied()?;
+        self.private_function_is_visible_in_current_scope(name)
+            .then_some(function)
+    }
+
     fn take_function_id(&mut self) -> FunctionId {
         let id = FunctionId(self.next_function);
         self.next_function += 1;
+        id
+    }
+
+    fn reserve_class_name(&mut self, name: &str) -> ClassId {
+        if let Some(id) = self.class_names.get(name) {
+            return *id;
+        }
+        let id = ClassId(self.next_class);
+        self.next_class += 1;
+        self.class_names.insert(name.to_string(), id);
         id
     }
 
@@ -507,6 +680,8 @@ impl LoweringCtx {
             name,
             params,
             outputs,
+            argument_validations,
+            argument_block_kinds,
             body,
             span,
             kind,
@@ -514,130 +689,225 @@ impl LoweringCtx {
             parent,
             enclosing_class,
         } = spec;
-        self.with_scope(
-            id,
-            WorkspaceVisibility::Hidden,
-            modifiers.clone(),
-            false,
-            |ctx| {
-                for stmt in body {
-                    if let AstStmt::Function { name, .. } = stmt {
-                        ctx.reserve_function_name(name);
+        self.with_private_alias_scope_for_function(name, |ctx| {
+            ctx.with_scope(
+                id,
+                WorkspaceVisibility::Hidden,
+                modifiers.clone(),
+                false,
+                |ctx| {
+                    for stmt in body {
+                        if let AstStmt::Function { name, .. } = stmt {
+                            ctx.reserve_function_name(name);
+                        }
                     }
-                }
-                let mut param_ids = Vec::new();
-                for param in params {
-                    param_ids.push(ctx.define_binding(
-                        param,
-                        BindingRole::Parameter,
+                    let mut param_ids = Vec::new();
+                    for param in params {
+                        param_ids.push(ctx.define_binding(
+                            param,
+                            BindingRole::Parameter,
+                            BindingStorage::Lexical,
+                            span,
+                        ));
+                    }
+                    let mut output_ids = Vec::new();
+                    for output in outputs {
+                        output_ids.push(ctx.lookup_binding(output).unwrap_or_else(|| {
+                            ctx.define_binding(
+                                output,
+                                BindingRole::Output,
+                                BindingStorage::Lexical,
+                                span,
+                            )
+                        }));
+                    }
+                    let implicit_nargin = Some(ctx.define_binding(
+                        "nargin",
+                        BindingRole::Local,
                         BindingStorage::Lexical,
                         span,
                     ));
-                }
-                let mut output_ids = Vec::new();
-                for output in outputs {
-                    output_ids.push(ctx.lookup_binding(output).unwrap_or_else(|| {
-                        ctx.define_binding(
-                            output,
-                            BindingRole::Output,
-                            BindingStorage::Lexical,
-                            span,
-                        )
-                    }));
-                }
-                let implicit_nargin = Some(ctx.define_binding(
-                    "nargin",
-                    BindingRole::Local,
-                    BindingStorage::Lexical,
-                    span,
-                ));
-                let implicit_nargout = Some(ctx.define_binding(
-                    "nargout",
-                    BindingRole::Local,
-                    BindingStorage::Lexical,
-                    span,
-                ));
-                let hir_body = ctx.lower_stmts_semantic(body)?;
-                for stmt in body {
-                    if let AstStmt::Function {
-                        name,
-                        params,
-                        outputs,
-                        body,
-                        isolated,
-                        is_async,
+                    let implicit_nargout = Some(ctx.define_binding(
+                        "nargout",
+                        BindingRole::Local,
+                        BindingStorage::Lexical,
                         span,
-                    } = stmt
-                    {
-                        let nested_id = ctx.function_names[name];
-                        let nested = ctx.lower_function(LowerFunctionSpec {
-                            id: nested_id,
+                    ));
+                    let mut argument_validations_hir =
+                        Vec::with_capacity(argument_validations.len());
+                    for block_kind in argument_block_kinds {
+                        if !matches!(block_kind, runmat_parser::FunctionArgumentsBlockKind::Input) {
+                            return Err(HirError::new("unsupported function arguments-block kind")
+                                .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNSUPPORTED)
+                                .with_span(span));
+                        }
+                    }
+                    let mut seen_argument_validation_bindings = HashSet::new();
+                    for decl in argument_validations {
+                        if decl.has_unsupported_trailing {
+                            return Err(HirError::new(
+                                "unsupported arguments-block validator syntax",
+                            )
+                            .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNSUPPORTED)
+                            .with_span(span));
+                        }
+                        let Some(binding) = ctx.lookup_binding(&decl.name) else {
+                            return Err(HirError::new(format!(
+                                "arguments block declaration '{}' does not match a function input",
+                                decl.name
+                            ))
+                            .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN)
+                            .with_span(span));
+                        };
+                        if !param_ids.contains(&binding) {
+                            return Err(HirError::new(format!(
+                            "arguments block declaration '{}' must reference an input parameter",
+                            decl.name
+                        ))
+                            .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN)
+                            .with_span(span));
+                        }
+                        if !seen_argument_validation_bindings.insert(binding) {
+                            return Err(HirError::new(format!(
+                                "arguments block declaration '{}' appears more than once",
+                                decl.name
+                            ))
+                            .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_DUPLICATE)
+                            .with_span(span));
+                        }
+                        let default_value = match &decl.default_value {
+                            None => None,
+                            Some(expr) => Some(Self::lower_function_argument_default(expr, span)?),
+                        };
+                        let mut parser_validators = decl.validators.clone();
+                        let mut class_name = decl.class_name.clone();
+                        if parser_validators.is_empty() {
+                            if let Some(name) = decl.class_name.as_deref() {
+                                if Self::is_builtin_function_argument_validator(name) {
+                                    class_name = None;
+                                    parser_validators.push(
+                                        runmat_parser::FunctionArgValidatorDecl {
+                                            name: name.to_string(),
+                                            args: Vec::new(),
+                                        },
+                                    );
+                                }
+                            }
+                        }
+                        let mut validators = Vec::with_capacity(parser_validators.len());
+                        for validator in &parser_validators {
+                            validators
+                                .push(Self::lower_function_argument_validator(validator, span)?);
+                        }
+                        argument_validations_hir.push(FunctionArgumentValidation {
+                            binding,
+                            size: decl.size.as_ref().map(|size| FunctionArgSizeSpec {
+                                rows: match size.rows {
+                                    runmat_parser::FunctionArgDim::Any => FunctionArgDim::Any,
+                                    runmat_parser::FunctionArgDim::Exact(value) => {
+                                        FunctionArgDim::Exact(value)
+                                    }
+                                },
+                                cols: match size.cols {
+                                    runmat_parser::FunctionArgDim::Any => FunctionArgDim::Any,
+                                    runmat_parser::FunctionArgDim::Exact(value) => {
+                                        FunctionArgDim::Exact(value)
+                                    }
+                                },
+                            }),
+                            class_name,
+                            validators,
+                            default_value,
+                        });
+                    }
+                    let hir_body = ctx.lower_stmts_semantic(body)?;
+                    for stmt in body {
+                        if let AstStmt::Function {
                             name,
                             params,
                             outputs,
+                            argument_validations,
+                            argument_block_kinds,
                             body,
-                            span: *span,
-                            kind: FunctionKind::Named,
-                            modifiers: FunctionModifiers {
-                                isolated: *isolated,
-                                is_async: *is_async,
-                            },
-                            parent: Some(id),
-                            enclosing_class,
-                        })?;
-                        ctx.assembly.functions.push(nested);
+                            isolated,
+                            is_async,
+                            span,
+                        } = stmt
+                        {
+                            let nested_id = ctx.function_names[name];
+                            let nested = ctx.lower_function(LowerFunctionSpec {
+                                id: nested_id,
+                                name,
+                                params,
+                                outputs,
+                                argument_validations,
+                                argument_block_kinds,
+                                body,
+                                span: *span,
+                                kind: FunctionKind::Named,
+                                modifiers: FunctionModifiers {
+                                    isolated: *isolated,
+                                    is_async: *is_async,
+                                },
+                                parent: Some(id),
+                                enclosing_class,
+                            })?;
+                            ctx.assembly.functions.push(nested);
+                        }
                     }
-                }
-                let locals = ctx.binding_ids_for_owner(id);
-                let captures = ctx.captures.remove(&id).unwrap_or_default();
-                if modifiers.isolated && !captures.is_empty() {
-                    return Err(HirError::new(
-                        "isolated functions cannot capture outer lexical bindings",
-                    )
-                    .with_identifier(IDENT_ISOLATED_LEXICAL_CAPTURE_UNSUPPORTED)
-                    .with_span(span));
-                }
-                ctx.hir_index.functions.push(FunctionResolution {
-                    name: FunctionName(name.to_string()),
-                    function: id,
-                    parent,
-                    span,
-                });
-                Ok(HirFunction {
-                    id,
-                    module: ctx.module,
-                    parent,
-                    enclosing_class,
-                    name: FunctionName(name.to_string()),
-                    kind,
-                    params: param_ids.clone(),
-                    outputs: output_ids.clone(),
-                    abi: FunctionAbi {
-                        fixed_inputs: param_ids,
-                        varargin: params
-                            .last()
-                            .filter(|p| p.as_str() == "varargin")
-                            .and_then(|p| ctx.lookup_binding(p)),
-                        fixed_outputs: output_ids,
-                        varargout: outputs
-                            .last()
-                            .filter(|p| p.as_str() == "varargout")
-                            .and_then(|p| ctx.lookup_binding(p)),
-                        implicit_nargin,
-                        implicit_nargout,
-                    },
-                    locals,
-                    captures,
-                    modifiers,
-                    body: hir_body,
-                    span,
-                })
-            },
-        )
+                    let locals = ctx.binding_ids_for_owner(id);
+                    let captures = ctx.captures.remove(&id).unwrap_or_default();
+                    if modifiers.isolated && !captures.is_empty() {
+                        return Err(HirError::new(
+                            "isolated functions cannot capture outer lexical bindings",
+                        )
+                        .with_identifier(IDENT_ISOLATED_LEXICAL_CAPTURE_UNSUPPORTED)
+                        .with_span(span));
+                    }
+                    ctx.hir_index.functions.push(FunctionResolution {
+                        name: FunctionName(name.to_string()),
+                        function: id,
+                        parent,
+                        span,
+                    });
+                    Ok(HirFunction {
+                        id,
+                        module: ctx.module,
+                        parent,
+                        enclosing_class,
+                        name: FunctionName(name.to_string()),
+                        kind,
+                        params: param_ids.clone(),
+                        outputs: output_ids.clone(),
+                        abi: FunctionAbi {
+                            fixed_inputs: param_ids,
+                            varargin: params
+                                .last()
+                                .filter(|p| p.as_str() == "varargin")
+                                .and_then(|p| ctx.lookup_binding(p)),
+                            fixed_outputs: output_ids,
+                            varargout: outputs
+                                .last()
+                                .filter(|p| p.as_str() == "varargout")
+                                .and_then(|p| ctx.lookup_binding(p)),
+                            implicit_nargin,
+                            implicit_nargout,
+                        },
+                        argument_validations: argument_validations_hir,
+                        locals,
+                        captures,
+                        modifiers,
+                        body: hir_body,
+                        span,
+                    })
+                },
+            )
+        })
     }
 
     fn lower_class(
         &mut self,
+        class_attributes: &[runmat_parser::Attr],
         name: &str,
         super_class: Option<&str>,
         members: &[runmat_parser::ClassMember],
@@ -649,7 +919,7 @@ impl LoweringCtx {
                     .with_identifier(IDENT_CLASS_SELF_INHERITANCE_INVALID),
             );
         }
-        let class_id = ClassId(self.assembly.classes.len());
+        let class_id = self.reserve_class_name(name);
         self.assembly.modules[self.module.0].classes.push(class_id);
         let mut properties = Vec::new();
         let mut methods = Vec::new();
@@ -658,12 +928,19 @@ impl LoweringCtx {
         let mut arguments = Vec::new();
         let mut property_names = HashSet::new();
         let mut method_names = HashSet::new();
+        let is_sealed = class_attributes
+            .iter()
+            .any(|attr| attr.name.eq_ignore_ascii_case("Sealed"));
+        let is_abstract = class_attributes
+            .iter()
+            .any(|attr| attr.name.eq_ignore_ascii_case("Abstract"));
 
         for member in members {
             match member {
                 runmat_parser::ClassMember::Properties { attributes, names } => {
                     let attributes = property_attributes(name, attributes)?;
-                    for prop_name in names {
+                    for property_decl in names {
+                        let prop_name = &property_decl.name;
                         if !property_names.insert(prop_name.clone()) {
                             return Err(HirError::new(format!(
                                 "Duplicate property '{prop_name}' in class {name}"
@@ -676,10 +953,15 @@ impl LoweringCtx {
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                         }
+                        let default = property_decl
+                            .default
+                            .as_ref()
+                            .map(|expr| self.lower_expr_semantic(expr))
+                            .transpose()?;
                         properties.push(ClassProperty {
                             name: crate::MemberName(prop_name.clone()),
                             attributes: attributes.clone(),
-                            default: None,
+                            default,
                             span,
                         });
                     }
@@ -689,11 +971,48 @@ impl LoweringCtx {
                         .iter()
                         .any(|attr| attr.name.eq_ignore_ascii_case("Static"));
                     let method_attributes = method_attributes(name, attributes)?;
+                    let parse_abstract_signature =
+                        |stmt: &AstStmt| -> Option<(String, Vec<String>, Vec<String>, Span)> {
+                            match stmt {
+                                AstStmt::Assign(
+                                    output,
+                                    AstExpr::FuncCall(method_name, args, _),
+                                    _,
+                                    span,
+                                ) => {
+                                    let params = args
+                                        .iter()
+                                        .map(|arg| match arg {
+                                            AstExpr::Ident(param, _) => Some(param.clone()),
+                                            _ => None,
+                                        })
+                                        .collect::<Option<Vec<_>>>()?;
+                                    Some((method_name.clone(), params, vec![output.clone()], *span))
+                                }
+                                AstStmt::ExprStmt(
+                                    AstExpr::FuncCall(method_name, args, _),
+                                    _,
+                                    span,
+                                ) => {
+                                    let params = args
+                                        .iter()
+                                        .map(|arg| match arg {
+                                            AstExpr::Ident(param, _) => Some(param.clone()),
+                                            _ => None,
+                                        })
+                                        .collect::<Option<Vec<_>>>()?;
+                                    Some((method_name.clone(), params, Vec::new(), *span))
+                                }
+                                _ => None,
+                            }
+                        };
                     for stmt in body {
                         if let AstStmt::Function {
                             name: method_name,
                             params,
                             outputs,
+                            argument_validations,
+                            argument_block_kinds,
                             body,
                             isolated,
                             is_async,
@@ -701,11 +1020,14 @@ impl LoweringCtx {
                         } = stmt
                         {
                             let function_id = self.take_function_id();
+                            let qualified_method_name = format!("{name}.{method_name}");
                             let function = self.lower_function(LowerFunctionSpec {
                                 id: function_id,
-                                name: method_name,
+                                name: &qualified_method_name,
                                 params,
                                 outputs,
+                                argument_validations,
+                                argument_block_kinds,
                                 body,
                                 span: *span,
                                 kind: FunctionKind::ClassMethod { is_static },
@@ -735,6 +1057,50 @@ impl LoweringCtx {
                                 is_static,
                                 attributes: method_attributes.clone(),
                                 span: *span,
+                            });
+                        } else if method_attributes.is_abstract {
+                            let Some((method_name, params, outputs, method_span)) =
+                                parse_abstract_signature(stmt)
+                            else {
+                                return Err(HirError::new(format!(
+                                    "Invalid abstract method declaration in class {name}"
+                                )));
+                            };
+                            let function_id = self.take_function_id();
+                            let qualified_method_name = format!("{name}.{method_name}");
+                            let function = self.lower_function(LowerFunctionSpec {
+                                id: function_id,
+                                name: &qualified_method_name,
+                                params: &params,
+                                outputs: &outputs,
+                                argument_validations: &[],
+                                argument_block_kinds: &[],
+                                body: &[],
+                                span: method_span,
+                                kind: FunctionKind::ClassMethod { is_static },
+                                modifiers: FunctionModifiers::default(),
+                                parent: None,
+                                enclosing_class: Some(class_id),
+                            })?;
+                            self.assembly.functions.push(function);
+                            if !method_names.insert(method_name.clone()) {
+                                return Err(HirError::new(format!(
+                                    "Duplicate method '{method_name}' in class {name}",
+                                ))
+                                .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
+                            }
+                            if property_names.contains(&method_name) {
+                                return Err(HirError::new(format!(
+                                    "Name '{method_name}' used for both property and method in class {name}",
+                                ))
+                                .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
+                            }
+                            methods.push(ClassMethod {
+                                function: function_id,
+                                name: crate::MethodName(method_name),
+                                is_static,
+                                attributes: method_attributes.clone(),
+                                span: method_span,
                             });
                         }
                     }
@@ -795,19 +1161,42 @@ impl LoweringCtx {
             span,
         });
 
+        let resolved_super = super_class.and_then(|super_name| {
+            if super_name.eq_ignore_ascii_case("handle") {
+                None
+            } else {
+                self.class_names.get(super_name).copied().or_else(|| {
+                    self.assembly
+                        .classes
+                        .iter()
+                        .find(|candidate| {
+                            candidate.name.0.len() == 1 && candidate.name.0[0].0 == super_name
+                        })
+                        .map(|candidate| candidate.id)
+                })
+            }
+        });
+
+        let kind = if super_class
+            .map(|name| name.eq_ignore_ascii_case("handle"))
+            .unwrap_or(false)
+            || resolved_super
+                .and_then(|id| self.assembly.classes.iter().find(|class| class.id == id))
+                .is_some_and(|class| matches!(class.kind, ClassKind::Handle))
+        {
+            ClassKind::Handle
+        } else {
+            ClassKind::Value
+        };
+
         Ok(HirClass {
             id: class_id,
             module: self.module,
             name: qualified,
-            super_class: None,
-            kind: if super_class
-                .map(|name| name.eq_ignore_ascii_case("handle"))
-                .unwrap_or(false)
-            {
-                ClassKind::Handle
-            } else {
-                ClassKind::Value
-            },
+            super_class: resolved_super,
+            kind,
+            is_sealed,
+            is_abstract,
             properties,
             methods,
             events,
@@ -815,6 +1204,141 @@ impl LoweringCtx {
             arguments,
             span,
         })
+    }
+
+    fn lower_function_argument_default(
+        expr: &AstExpr,
+        span: Span,
+    ) -> Result<FunctionArgDefaultValue, HirError> {
+        match expr {
+            AstExpr::Number(_, _) | AstExpr::Unary(UnOp::Plus, _, _) | AstExpr::Unary(UnOp::Minus, _, _) => {
+                let parsed = Self::lower_validator_numeric_literal_expr(expr).ok_or_else(|| {
+                    HirError::new("arguments default value must be a numeric literal")
+                        .with_identifier(IDENT_FUNCTION_ARGUMENT_DEFAULT_UNSUPPORTED)
+                        .with_span(span)
+                })?;
+                Ok(FunctionArgDefaultValue::Number(parsed))
+            }
+            AstExpr::String(value, _) => {
+                let unquoted = value
+                    .strip_prefix('"')
+                    .and_then(|rest| rest.strip_suffix('"'))
+                    .or_else(|| value.strip_prefix('\'').and_then(|rest| rest.strip_suffix('\'')))
+                    .unwrap_or(value)
+                    .to_string();
+                Ok(FunctionArgDefaultValue::String(unquoted))
+            }
+            AstExpr::Ident(name, _) if name.eq_ignore_ascii_case("true") => {
+                Ok(FunctionArgDefaultValue::Bool(true))
+            }
+            AstExpr::Ident(name, _) if name.eq_ignore_ascii_case("false") => {
+                Ok(FunctionArgDefaultValue::Bool(false))
+            }
+            AstExpr::Tensor(rows, _) if rows.is_empty() || rows.iter().all(Vec::is_empty) => {
+                Ok(FunctionArgDefaultValue::EmptyArray)
+            }
+            _ => Err(HirError::new(
+                "unsupported arguments default value; expected literal number, string, true, false, or []",
+            )
+            .with_identifier(IDENT_FUNCTION_ARGUMENT_DEFAULT_UNSUPPORTED)
+            .with_span(span)),
+        }
+    }
+
+    fn lower_function_argument_validator(
+        validator: &runmat_parser::FunctionArgValidatorDecl,
+        span: Span,
+    ) -> Result<FunctionArgValidator, HirError> {
+        match validator.name.as_str() {
+            "mustBeFinite" => Ok(FunctionArgValidator::Finite),
+            "mustBeNumericOrLogical" => Ok(FunctionArgValidator::NumericOrLogical),
+            "mustBeText" => Ok(FunctionArgValidator::Text),
+            "mustBeNonempty" => Ok(FunctionArgValidator::Nonempty),
+            "mustBeScalarOrEmpty" => Ok(FunctionArgValidator::ScalarOrEmpty),
+            "mustBeReal" => Ok(FunctionArgValidator::Real),
+            "mustBeInteger" => Ok(FunctionArgValidator::Integer),
+            "mustBePositive" => Ok(FunctionArgValidator::Positive),
+            "mustBeNegative" => Ok(FunctionArgValidator::Negative),
+            "mustBeNonnegative" => Ok(FunctionArgValidator::Nonnegative),
+            "mustBeNonzero" => Ok(FunctionArgValidator::Nonzero),
+            "mustBeNonpositive" => Ok(FunctionArgValidator::Nonpositive),
+            "mustBeGreaterThanOrEqual" => {
+                let threshold = Self::lower_validator_numeric_threshold(&validator.args, span)?;
+                Ok(FunctionArgValidator::GreaterThanOrEqual(threshold))
+            }
+            "mustBeLessThanOrEqual" => {
+                let threshold = Self::lower_validator_numeric_threshold(&validator.args, span)?;
+                Ok(FunctionArgValidator::LessThanOrEqual(threshold))
+            }
+            "mustBeGreaterThan" => {
+                let threshold = Self::lower_validator_numeric_threshold(&validator.args, span)?;
+                Ok(FunctionArgValidator::GreaterThan(threshold))
+            }
+            "mustBeLessThan" => {
+                let threshold = Self::lower_validator_numeric_threshold(&validator.args, span)?;
+                Ok(FunctionArgValidator::LessThan(threshold))
+            }
+            _ => Err(HirError::new(format!(
+                "unsupported arguments validator '{}'",
+                validator.name
+            ))
+            .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+            .with_span(span)),
+        }
+    }
+
+    fn lower_validator_numeric_threshold(args: &[AstExpr], span: Span) -> Result<f64, HirError> {
+        let threshold_expr = match args {
+            [value] => value,
+            [_, value] => value,
+            _ => {
+                return Err(
+                    HirError::new("validator requires one numeric threshold argument")
+                        .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+                        .with_span(span),
+                );
+            }
+        };
+        Self::lower_validator_numeric_literal_expr(threshold_expr).ok_or_else(|| {
+            HirError::new("validator threshold must be a numeric literal")
+                .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+                .with_span(span)
+        })
+    }
+
+    fn lower_validator_numeric_literal_expr(expr: &AstExpr) -> Option<f64> {
+        match expr {
+            AstExpr::Number(value, _) => value.parse::<f64>().ok(),
+            AstExpr::Unary(UnOp::Plus, inner, _) => {
+                Self::lower_validator_numeric_literal_expr(inner)
+            }
+            AstExpr::Unary(UnOp::Minus, inner, _) => {
+                Self::lower_validator_numeric_literal_expr(inner).map(|value| -value)
+            }
+            _ => None,
+        }
+    }
+
+    fn is_builtin_function_argument_validator(name: &str) -> bool {
+        matches!(
+            name,
+            "mustBeFinite"
+                | "mustBeNumericOrLogical"
+                | "mustBeText"
+                | "mustBeNonempty"
+                | "mustBeScalarOrEmpty"
+                | "mustBeReal"
+                | "mustBeInteger"
+                | "mustBePositive"
+                | "mustBeNegative"
+                | "mustBeNonnegative"
+                | "mustBeNonzero"
+                | "mustBeNonpositive"
+                | "mustBeGreaterThanOrEqual"
+                | "mustBeLessThanOrEqual"
+                | "mustBeGreaterThan"
+                | "mustBeLessThan"
+        )
     }
 
     fn lower_stmt_refs(&mut self, stmts: &[&AstStmt]) -> Result<HirBlock, HirError> {
@@ -862,26 +1386,59 @@ impl LoweringCtx {
                     *suppressed,
                 )
             }
-            AstStmt::MultiAssign(names, expr, suppressed, _) => {
-                let targets = names
+            AstStmt::MultiAssign(targets, expr, suppressed, _) => {
+                if let [runmat_parser::MultiAssignTarget::LValue(lvalue)] = targets.as_slice() {
+                    let deletion = lvalue_supports_deletion(lvalue) && is_empty_array_expr(expr);
+                    let place = self.lower_lvalue_semantic(lvalue, span, deletion)?;
+                    let kind = mutation_kind_for_place(&place, deletion);
+                    let creation_policy = creation_policy_for_place(&place, deletion);
+                    self.record_mutation(
+                        place.clone(),
+                        kind,
+                        creation_policy,
+                        AssignmentShapePolicy::MatlabCompatible,
+                    );
+                    let requested = requested_outputs_for_lvalue_assignment(lvalue, expr);
+                    return Ok(Some(HirStmtNode {
+                        id: self.alloc_stmt_id(),
+                        kind: HirStmtKind::Assign(
+                            place,
+                            self.lower_expr_semantic_requested(expr, requested)?,
+                            *suppressed,
+                        ),
+                        span,
+                    }));
+                }
+                let lowered_targets = targets
                     .iter()
-                    .map(|name| {
-                        if name == DISCARD_OUTPUT_NAME {
-                            crate::OutputTarget::Discard
-                        } else {
-                            let binding = self.binding_for_write(name, span);
-                            crate::OutputTarget::Place(HirPlace::Binding(binding))
+                    .map(|target| -> Result<crate::OutputTarget, HirError> {
+                        match target {
+                            runmat_parser::MultiAssignTarget::Discard => {
+                                Ok(crate::OutputTarget::Discard)
+                            }
+                            runmat_parser::MultiAssignTarget::LValue(lvalue) => {
+                                let place = self.lower_lvalue_semantic(lvalue, span, false)?;
+                                let kind = mutation_kind_for_place(&place, false);
+                                let creation_policy = creation_policy_for_place(&place, false);
+                                self.record_mutation(
+                                    place.clone(),
+                                    kind,
+                                    creation_policy,
+                                    AssignmentShapePolicy::MatlabCompatible,
+                                );
+                                Ok(crate::OutputTarget::Place(place))
+                            }
                         }
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>, HirError>>()?;
                 HirStmtKind::MultiAssign(
                     crate::OutputTargetList {
-                        requested_outputs: RequestedOutputCount::Exactly(names.len()),
-                        targets,
+                        requested_outputs: RequestedOutputCount::Exactly(lowered_targets.len()),
+                        targets: lowered_targets,
                     },
                     self.lower_expr_semantic_requested(
                         expr,
-                        RequestedOutputCount::Exactly(names.len()),
+                        RequestedOutputCount::Exactly(targets.len()),
                     )?,
                     *suppressed,
                 )
@@ -1029,14 +1586,26 @@ impl LoweringCtx {
         use runmat_parser::LValue;
         Ok(match lvalue {
             LValue::Var(name) => HirPlace::Binding(self.binding_for_write(name, span)),
-            LValue::Member(base, name) => HirPlace::Member(
-                Box::new(self.lower_assignment_base_expr(
-                    base,
-                    span,
-                    assignment_index_context(deletion),
-                )?),
-                crate::MemberName(name.clone()),
-            ),
+            LValue::Member(base, name) => {
+                let lowered_base = if let AstExpr::Ident(class_name, _) = &**base {
+                    if self.lookup_binding(class_name).is_none()
+                        && self.class_id_for_unqualified_name(class_name).is_some()
+                    {
+                        self.classref_expr(class_name, base.span())?
+                    } else {
+                        self.lower_assignment_base_expr(
+                            base,
+                            span,
+                            assignment_index_context(deletion),
+                        )?
+                    }
+                } else if let AstExpr::MetaClass(class_name, _) = &**base {
+                    self.classref_expr(class_name, base.span())?
+                } else {
+                    self.lower_assignment_base_expr(base, span, assignment_index_context(deletion))?
+                };
+                HirPlace::Member(Box::new(lowered_base), crate::MemberName(name.clone()))
+            }
             LValue::MemberDynamic(base, name) => HirPlace::MemberDynamic(
                 Box::new(self.lower_assignment_base_expr(
                     base,
@@ -1159,6 +1728,11 @@ impl LoweringCtx {
                     .any(|c| c.name == name.as_str())
                 {
                     HirExprKind::Constant(SymbolName(name.clone()))
+                } else if let Some(class_name) =
+                    self.resolve_imported_static_property_target(name, span)?
+                {
+                    let class_ref = self.classref_expr(&class_name, span)?;
+                    HirExprKind::Member(Box::new(class_ref), MemberName(name.clone()))
                 } else {
                     return Err(HirError::new(format!("undefined variable '{name}'"))
                         .with_span(span)
@@ -1253,6 +1827,58 @@ impl LoweringCtx {
                     )?)
                 }
             }
+            AstExpr::SuperConstructorCall {
+                current_class,
+                super_class,
+                args,
+                ..
+            } => {
+                let lowered_args = args
+                    .iter()
+                    .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
+                    .collect::<Result<Vec<_>, _>>()?;
+                HirExprKind::Call(HirCall {
+                    callee: HirCallableRef::SuperConstructor {
+                        current_class: SymbolName(current_class.clone()),
+                        super_class: qualified_name(
+                            &super_class
+                                .split('.')
+                                .map(|segment| segment.to_string())
+                                .collect::<Vec<_>>(),
+                        ),
+                    },
+                    args: lowered_args,
+                    syntax: CallSyntax::Plain,
+                    requested_outputs,
+                })
+            }
+            AstExpr::SuperMethodCall {
+                current_class,
+                super_class,
+                method,
+                args,
+                ..
+            } => {
+                let lowered_args = args
+                    .iter()
+                    .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
+                    .collect::<Result<Vec<_>, _>>()?;
+                HirExprKind::Call(HirCall {
+                    callee: HirCallableRef::SuperMethod {
+                        current_class: SymbolName(current_class.clone()),
+                        super_class: qualified_name(
+                            &super_class
+                                .split('.')
+                                .map(|segment| segment.to_string())
+                                .collect::<Vec<_>>(),
+                        ),
+                        method: SymbolName(method.clone()),
+                    },
+                    args: lowered_args,
+                    syntax: CallSyntax::Method,
+                    requested_outputs,
+                })
+            }
             AstExpr::CommandCall(name, args, _) => HirExprKind::CommandCall(HirCommandCall {
                 command: self
                     .call_for_name(
@@ -1321,6 +1947,7 @@ impl LoweringCtx {
                                 implicit_nargin: None,
                                 implicit_nargout: None,
                             },
+                            argument_validations: vec![],
                             locals,
                             captures: ctx.captures.remove(&function_id).unwrap_or_default(),
                             modifiers: FunctionModifiers::default(),
@@ -1416,7 +2043,27 @@ impl LoweringCtx {
             AstExpr::Colon(_) => HirExprKind::Colon,
             AstExpr::EndKeyword(_) => HirExprKind::End,
             AstExpr::Member(base, name, _) => {
-                let lowered_base = if let AstExpr::MetaClass(class_name, _) = &**base {
+                let lowered_base = if let AstExpr::Ident(class_name, _) = &**base {
+                    if self.lookup_binding(class_name).is_none() {
+                        if let Some(qualified) =
+                            self.resolve_imported_class_name_target(class_name, base.span())?
+                        {
+                            self.classref_expr(&qualified, base.span())?
+                        } else if self.class_id_for_unqualified_name(class_name).is_some() {
+                            self.classref_expr(class_name, base.span())?
+                        } else {
+                            self.lower_expr_semantic(base)?
+                        }
+                    } else {
+                        self.lower_expr_semantic(base)?
+                    }
+                } else if let Some(qualified_base) = self.unbound_qualified_member_base(base) {
+                    if self.class_id_for_name(&qualified_base).is_some() {
+                        self.classref_expr(&qualified_base, base.span())?
+                    } else {
+                        self.lower_expr_semantic(base)?
+                    }
+                } else if let AstExpr::MetaClass(class_name, _) = &**base {
                     self.classref_expr(class_name, base.span())?
                 } else {
                     self.lower_expr_semantic(base)?
@@ -1474,6 +2121,37 @@ impl LoweringCtx {
                                 &function_name,
                                 call_args,
                                 CallSyntax::Plain,
+                                requested_outputs,
+                                span,
+                            )?),
+                            span,
+                        });
+                    }
+                    if self.lookup_binding(class_name).is_none()
+                        && (self.class_id_for_unqualified_name(class_name).is_some()
+                            || self
+                                .resolve_imported_class_name_target(class_name, base.span())?
+                                .is_some())
+                    {
+                        let classref = if let Some(qualified) =
+                            self.resolve_imported_class_name_target(class_name, base.span())?
+                        {
+                            self.classref_expr(&qualified, base.span())?
+                        } else {
+                            self.classref_expr(class_name, base.span())?
+                        };
+                        let mut call_args = vec![classref];
+                        call_args.extend(
+                            args.iter()
+                                .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
+                                .collect::<Result<Vec<_>, _>>()?,
+                        );
+                        return Ok(HirExpr {
+                            id: self.alloc_expr_id(),
+                            kind: HirExprKind::Call(self.call_for_name(
+                                name,
+                                call_args,
+                                CallSyntax::Method,
                                 requested_outputs,
                                 span,
                             )?),
@@ -1649,10 +2327,38 @@ impl LoweringCtx {
         let qualified_call_name =
             qualified_name(&name.split('.').map(ToString::to_string).collect::<Vec<_>>());
         let method_like_syntax = matches!(syntax, CallSyntax::Method | CallSyntax::DottedInvoke);
-        let (callee, kind) = if let Some(function) = self.function_names.get(name) {
+        let imported_constructor = if !method_like_syntax {
+            self.resolve_imported_constructor_target(name, span)?
+        } else {
+            None
+        };
+        let constructor_class = if !method_like_syntax {
+            imported_constructor
+                .as_ref()
+                .map(|(_, class_id)| *class_id)
+                .or_else(|| self.class_id_for_name(name))
+        } else {
+            None
+        };
+        let constructor_name_override = imported_constructor
+            .as_ref()
+            .map(|(qualified, _)| qualified.as_str());
+        let (callee, kind) = if let Some(class) = constructor_class {
+            let constructor_name = constructor_name_override.unwrap_or(name);
+            let constructor_qualified_name = qualified_name(
+                &constructor_name
+                    .split('.')
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+            );
             (
-                HirCallableRef::Function(*function),
-                CallKind::DirectFunction(*function),
+                HirCallableRef::Unresolved(constructor_qualified_name),
+                CallKind::Constructor(class),
+            )
+        } else if let Some(function) = self.resolve_scoped_function_name(name) {
+            (
+                HirCallableRef::Function(function),
+                CallKind::DirectFunction(function),
             )
         } else if let Some(function) = self.external_function_names.get(name) {
             (
@@ -1696,6 +2402,125 @@ impl LoweringCtx {
         })
     }
 
+    fn resolve_imported_constructor_target(
+        &self,
+        name: &str,
+        span: Span,
+    ) -> Result<Option<(String, ClassId)>, HirError> {
+        let imports = &self.assembly.modules[self.module.0].imports;
+        let specific_candidates: Vec<String> = imports
+            .iter()
+            .filter(|import| {
+                !import.wildcard && import.path.0.last().map(|part| part.0.as_str()) == Some(name)
+            })
+            .map(|import| Self::qualified_name_string(&import.path))
+            .collect();
+        let specific_matches: Vec<(String, ClassId)> = specific_candidates
+            .iter()
+            .filter_map(|qualified| {
+                self.class_id_for_name(qualified)
+                    .map(|class_id| (qualified.clone(), class_id))
+            })
+            .collect();
+        if specific_matches.len() == 1 {
+            return Ok(specific_matches.first().cloned());
+        }
+        if specific_candidates.len() > 1 || specific_matches.len() > 1 {
+            return Err(
+                HirError::new(format!("ambiguous call target '{name}' via imports"))
+                    .with_span(span)
+                    .with_identifier(IDENT_IMPORT_AMBIGUOUS),
+            );
+        }
+        let wildcard_candidates: Vec<String> = imports
+            .iter()
+            .filter(|import| import.wildcard)
+            .map(|import| Self::wildcard_import_candidate(&import.path, name))
+            .map(|qualified| Self::qualified_name_string(&qualified))
+            .collect();
+        let wildcard_matches: Vec<(String, ClassId)> = wildcard_candidates
+            .iter()
+            .filter_map(|qualified| {
+                self.class_id_for_name(qualified)
+                    .map(|class_id| (qualified.clone(), class_id))
+            })
+            .collect();
+        if wildcard_matches.len() == 1 {
+            return Ok(wildcard_matches.first().cloned());
+        }
+        let resolvable_wildcard_candidates = wildcard_candidates
+            .iter()
+            .filter(|candidate| self.known_project_symbols.contains(*candidate))
+            .count();
+        if wildcard_matches.len() > 1 || resolvable_wildcard_candidates > 1 {
+            return Err(HirError::new(format!(
+                "ambiguous call target '{name}' via wildcard imports"
+            ))
+            .with_span(span)
+            .with_identifier(IDENT_IMPORT_AMBIGUOUS));
+        }
+        Ok(None)
+    }
+
+    fn resolve_imported_class_name_target(
+        &self,
+        name: &str,
+        span: Span,
+    ) -> Result<Option<String>, HirError> {
+        let imports = &self.assembly.modules[self.module.0].imports;
+        let specific_candidates: Vec<String> = imports
+            .iter()
+            .filter(|import| {
+                !import.wildcard && import.path.0.last().map(|part| part.0.as_str()) == Some(name)
+            })
+            .map(|import| Self::qualified_name_string(&import.path))
+            .collect();
+        let specific_resolvable: Vec<String> = specific_candidates
+            .iter()
+            .filter(|qualified| {
+                self.class_id_for_name(qualified).is_some()
+                    || self.known_project_symbols.contains(*qualified)
+            })
+            .cloned()
+            .collect();
+        if specific_resolvable.len() == 1 {
+            return Ok(specific_resolvable.first().cloned());
+        }
+        if specific_resolvable.len() > 1 {
+            return Err(
+                HirError::new(format!("ambiguous call target '{name}' via imports"))
+                    .with_span(span)
+                    .with_identifier(IDENT_IMPORT_AMBIGUOUS),
+            );
+        }
+
+        let wildcard_candidates: Vec<String> = imports
+            .iter()
+            .filter(|import| import.wildcard)
+            .map(|import| Self::wildcard_import_candidate(&import.path, name))
+            .map(|qualified| Self::qualified_name_string(&qualified))
+            .collect();
+        let wildcard_resolvable: Vec<String> = wildcard_candidates
+            .iter()
+            .filter(|qualified| {
+                self.class_id_for_name(qualified).is_some()
+                    || self.known_project_symbols.contains(*qualified)
+            })
+            .cloned()
+            .collect();
+        if wildcard_resolvable.len() == 1 {
+            return Ok(wildcard_resolvable.first().cloned());
+        }
+        if wildcard_resolvable.len() > 1 {
+            return Err(HirError::new(format!(
+                "ambiguous call target '{name}' via wildcard imports"
+            ))
+            .with_span(span)
+            .with_identifier(IDENT_IMPORT_AMBIGUOUS));
+        }
+        Ok(None)
+    }
+
     fn resolve_imported_call_target(
         &self,
         name: &str,
@@ -1737,13 +2562,38 @@ impl LoweringCtx {
         Ok(None)
     }
 
+    fn resolve_imported_static_property_target(
+        &self,
+        name: &str,
+        span: Span,
+    ) -> Result<Option<String>, HirError> {
+        let imports = &self.assembly.modules[self.module.0].imports;
+        let specific_candidates: Vec<String> = imports
+            .iter()
+            .filter(|import| import.wildcard)
+            .map(|import| Self::qualified_name_string(&import.path))
+            .filter(|qualified_class| self.class_has_public_static_property(qualified_class, name))
+            .collect();
+        if specific_candidates.len() == 1 {
+            return Ok(specific_candidates.first().cloned());
+        }
+        if specific_candidates.len() > 1 {
+            return Err(HirError::new(format!(
+                "ambiguous static property target '{name}' via wildcard imports"
+            ))
+            .with_span(span)
+            .with_identifier(IDENT_IMPORT_AMBIGUOUS));
+        }
+        Ok(None)
+    }
+
     fn resolve_function_handle_target(
         &self,
         name: &str,
         span: Span,
     ) -> Result<crate::FunctionHandleTarget, HirError> {
-        if let Some(function) = self.function_names.get(name) {
-            return Ok(crate::FunctionHandleTarget::Function(*function));
+        if let Some(function) = self.resolve_scoped_function_name(name) {
+            return Ok(crate::FunctionHandleTarget::Function(function));
         }
         if let Some(function) = self.external_function_names.get(name) {
             return Ok(crate::FunctionHandleTarget::Function(*function));
@@ -1753,7 +2603,39 @@ impl LoweringCtx {
                 name.to_string(),
             )));
         }
+        if let Some((qualified_constructor, _)) =
+            self.resolve_imported_constructor_target(name, span)?
+        {
+            return Ok(crate::FunctionHandleTarget::DefPath(
+                def_path_for_import_path(&qualified_name(
+                    &qualified_constructor
+                        .split('.')
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                )),
+            ));
+        }
         if name.contains('.') {
+            let mut parts = name.split('.');
+            if let Some(first) = parts.next() {
+                let suffix = parts.collect::<Vec<_>>();
+                if !suffix.is_empty() {
+                    if let Some(qualified_class) =
+                        self.resolve_imported_class_name_target(first, span)?
+                    {
+                        let resolved_qualified_name =
+                            format!("{qualified_class}.{}", suffix.join("."));
+                        return Ok(crate::FunctionHandleTarget::DefPath(
+                            def_path_for_import_path(&qualified_name(
+                                &resolved_qualified_name
+                                    .split('.')
+                                    .map(ToString::to_string)
+                                    .collect::<Vec<_>>(),
+                            )),
+                        ));
+                    }
+                }
+            }
             if Self::is_well_formed_qualified_name(name) {
                 return Ok(crate::FunctionHandleTarget::DefPath(
                     def_path_for_import_path(&qualified_name(
@@ -1941,18 +2823,63 @@ fn requested_outputs_for_lvalue_assignment(
     if !matches!(expr, AstExpr::FuncCall(_, _, _) | AstExpr::Ident(_, _)) {
         return RequestedOutputCount::One;
     }
+    if lvalue_requires_current_nargout(lvalue) {
+        return RequestedOutputCount::CurrentFunctionNargout;
+    }
     static_lvalue_assignment_count(lvalue)
         .filter(|count| *count > 1)
         .map(RequestedOutputCount::Exactly)
         .unwrap_or(RequestedOutputCount::One)
 }
 
+fn lvalue_requires_current_nargout(lvalue: &runmat_parser::LValue) -> bool {
+    use runmat_parser::LValue;
+    let indices = match lvalue {
+        LValue::IndexCell(_, indices) => indices,
+        _ => return false,
+    };
+    indices.iter().any(expr_references_nargout)
+}
+
+fn expr_references_nargout(expr: &AstExpr) -> bool {
+    match expr {
+        AstExpr::Ident(name, _) => name == NARGOUT_BUILTIN_NAME,
+        AstExpr::Range(start, step, end, _) => {
+            expr_references_nargout(start)
+                || step.as_deref().is_some_and(expr_references_nargout)
+                || expr_references_nargout(end)
+        }
+        AstExpr::Binary(left, _, right, _) => {
+            expr_references_nargout(left) || expr_references_nargout(right)
+        }
+        AstExpr::Unary(_, inner, _) => expr_references_nargout(inner),
+        AstExpr::Tensor(rows, _) | AstExpr::Cell(rows, _) => rows
+            .iter()
+            .flat_map(|row| row.iter())
+            .any(expr_references_nargout),
+        AstExpr::Index(base, indices, _) | AstExpr::IndexCell(base, indices, _) => {
+            expr_references_nargout(base) || indices.iter().any(expr_references_nargout)
+        }
+        AstExpr::FuncCall(_, args, _)
+        | AstExpr::MethodCall(_, _, args, _)
+        | AstExpr::DottedInvoke(_, _, args, _) => args.iter().any(expr_references_nargout),
+        AstExpr::Member(base, _, _) => expr_references_nargout(base),
+        AstExpr::MemberDynamic(base, name, _) => {
+            expr_references_nargout(base) || expr_references_nargout(name)
+        }
+        AstExpr::AnonFunc { body, .. } => expr_references_nargout(body),
+        _ => false,
+    }
+}
+
 fn static_lvalue_assignment_count(lvalue: &runmat_parser::LValue) -> Option<usize> {
     use runmat_parser::LValue;
     match lvalue {
-        LValue::Index(_, indices) => indices.iter().try_fold(1usize, |acc, index| {
-            static_index_component_count(index).map(|count| acc.saturating_mul(count))
-        }),
+        LValue::Index(_, indices) | LValue::IndexCell(_, indices) => {
+            indices.iter().try_fold(1usize, |acc, index| {
+                static_index_component_count(index).map(|count| acc.saturating_mul(count))
+            })
+        }
         _ => None,
     }
 }
@@ -2073,8 +3000,9 @@ fn parse_member_access_value(
     match normalized.as_str() {
         "public" => Ok(crate::MemberAccess::Public),
         "private" => Ok(crate::MemberAccess::Private),
+        "protected" => Ok(crate::MemberAccess::Protected),
         other => Err(HirError::new(format!(
-            "invalid access value '{other}' in class '{class_name}' {section} (allowed: public, private)"
+            "invalid access value '{other}' in class '{class_name}' {section} (allowed: public, private, protected)"
         ))
         .with_identifier(IDENT_CLASS_ACCESS_VALUE_INVALID)),
     }
@@ -2141,6 +3069,9 @@ fn property_attributes(
             "class '{class_name}' properties: attributes 'Constant' and 'Dependent' cannot be combined"
         ))
         .with_identifier(IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT));
+    }
+    if has_constant {
+        result.is_static = true;
     }
     Ok(result)
 }

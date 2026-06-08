@@ -439,7 +439,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "stem",
     category = "plotting",
-    summary = "Render MATLAB-compatible stem plots.",
+    summary = "Create stem plots for discrete sequences and sampled data.",
     keywords = "stem,plotting,discrete",
     sink = true,
     suppress_auto_output = true,

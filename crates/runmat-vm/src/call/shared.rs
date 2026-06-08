@@ -172,12 +172,14 @@ impl ObjectIndexKind {
     }
 }
 
+#[derive(Clone)]
 pub(crate) enum ObjectIndexSelector {
     ScalarIndices { indices: Vec<usize> },
     IndexValues { values: Vec<Value> },
     Member(String),
 }
 
+#[derive(Clone)]
 pub(crate) struct ObjectIndexDescriptor {
     base: Value,
     op: ObjectIndexOp,
@@ -339,6 +341,43 @@ fn build_protocol_index_cell(values: Vec<Value>) -> Result<Value, RuntimeError> 
     Ok(Value::Cell(cell))
 }
 
+fn matlab_index_type(kind: ObjectIndexKind) -> &'static str {
+    match kind {
+        ObjectIndexKind::Paren => "()",
+        ObjectIndexKind::Brace => "{}",
+        ObjectIndexKind::Member => ".",
+    }
+}
+
+fn class_name_from_base(base: &Value) -> Option<&str> {
+    match base {
+        Value::Object(obj) => Some(obj.class_name.as_str()),
+        Value::HandleObject(handle) => Some(handle.class_name.as_str()),
+        _ => None,
+    }
+}
+
+fn build_matlab_substruct_arg(descriptor: &ObjectIndexDescriptor) -> Result<Value, RuntimeError> {
+    let subs_value = match &descriptor.selector {
+        ObjectIndexSelector::ScalarIndices { indices } => {
+            let values = indices
+                .iter()
+                .map(|index| Value::Num(*index as f64))
+                .collect();
+            build_protocol_index_cell(values)?
+        }
+        ObjectIndexSelector::IndexValues { values } => build_protocol_index_cell(values.clone())?,
+        ObjectIndexSelector::Member(field) => Value::String(field.clone()),
+    };
+    let mut value = runmat_builtins::StructValue::new();
+    value.fields.insert(
+        "type".to_string(),
+        Value::String(matlab_index_type(descriptor.kind).to_string()),
+    );
+    value.fields.insert("subs".to_string(), subs_value);
+    Ok(Value::Struct(value))
+}
+
 pub(crate) async fn call_getfield_with_indices(
     base: Value,
     field: String,
@@ -367,6 +406,7 @@ pub(crate) async fn call_object_operator_method(
         CallableIdentity::Method(MethodId(method.to_string())),
         vec![arg],
         1,
+        None,
         CallableFallbackPolicy::ObjectDispatch,
     )
     .await
@@ -383,6 +423,7 @@ pub(crate) async fn call_object_named_method_with_outputs(
         CallableIdentity::Method(MethodId(method.clone())),
         args,
         requested_outputs,
+        None,
         CallableFallbackPolicy::ObjectDispatch,
     )
     .await
@@ -459,12 +500,49 @@ pub(crate) async fn call_object_index_descriptor_method_with_outputs(
     descriptor: ObjectIndexDescriptor,
     requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
+    if let Some(class_name) = class_name_from_base(&descriptor.base) {
+        if let Some((method, owner)) =
+            runmat_builtins::lookup_method(class_name, descriptor.op.protocol_name())
+        {
+            let mut semantic_args = vec![
+                descriptor.base.clone(),
+                build_matlab_substruct_arg(&descriptor)?,
+            ];
+            if let Some(rhs) = descriptor.rhs.clone() {
+                semantic_args.push(rhs);
+            }
+            if let Some(result) =
+                runmat_runtime::user_functions::try_call_semantic_function_by_name(
+                    &method.function_name,
+                    &semantic_args,
+                    requested_outputs,
+                )
+                .await
+            {
+                return result;
+            }
+            let owner_qualified = format!("{}.{}", owner, descriptor.op.protocol_name());
+            if owner_qualified != method.function_name {
+                if let Some(result) =
+                    runmat_runtime::user_functions::try_call_semantic_function_by_name(
+                        &owner_qualified,
+                        &semantic_args,
+                        requested_outputs,
+                    )
+                    .await
+                {
+                    return result;
+                }
+            }
+        }
+    }
     let (base, method, args) = descriptor.into_method_invocation()?;
     crate::call::closures::call_method_or_member_index_with_outputs(
         base,
         CallableIdentity::Method(MethodId(method.clone())),
         args,
         requested_outputs,
+        None,
         CallableFallbackPolicy::ObjectDispatch,
     )
     .await
@@ -1055,6 +1133,8 @@ mod tests {
             MethodDef {
                 name: OBJECT_PROTOCOL_SUBSREF.to_string(),
                 is_static: false,
+                is_abstract: false,
+                is_sealed: false,
                 access: Access::Public,
                 function_name: "subsref_impl".to_string(),
                 implicit_class_argument: None,
@@ -1092,6 +1172,8 @@ mod tests {
             MethodDef {
                 name: OBJECT_PROTOCOL_SUBSASGN.to_string(),
                 is_static: false,
+                is_abstract: false,
+                is_sealed: false,
                 access: Access::Public,
                 function_name: "subsasgn_impl".to_string(),
                 implicit_class_argument: None,

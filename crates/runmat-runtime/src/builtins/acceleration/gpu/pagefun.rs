@@ -229,7 +229,7 @@ fn pagefun_internal_error(message: impl Into<String>) -> RuntimeError {
 #[runtime_builtin(
     name = "pagefun",
     category = "acceleration/gpu",
-    summary = "Apply MATLAB operators page-by-page across higher-dimensional arrays.",
+    summary = "Apply matrix operators page-by-page across higher-dimensional arrays.",
     keywords = "pagefun,gpuArray,mtimes,pages,batch",
     accel = "custom",
     type_resolver(pagefun_type),

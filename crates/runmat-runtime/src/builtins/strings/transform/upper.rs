@@ -124,7 +124,7 @@ fn upper_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 #[runtime_builtin(
     name = "upper",
     category = "strings/transform",
-    summary = "Convert strings, character arrays, and cell arrays of character vectors to uppercase.",
+    summary = "Convert text inputs to uppercase character forms.",
     keywords = "upper,uppercase,strings,character array,text",
     accel = "sink",
     type_resolver(text_preserve_type),

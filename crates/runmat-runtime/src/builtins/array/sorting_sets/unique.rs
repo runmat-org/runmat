@@ -265,7 +265,7 @@ fn unique_internal_error(message: impl Into<String>) -> crate::RuntimeError {
 #[runtime_builtin(
     name = "unique",
     category = "array/sorting_sets",
-    summary = "Return the unique elements or rows of arrays with optional index outputs.",
+    summary = "Return unique elements or rows with optional index mappings.",
     keywords = "unique,set,distinct,stable,rows,indices,gpu",
     accel = "array_construct",
     sink = true,

@@ -129,7 +129,7 @@ fn symrcm_error_with_detail(
 #[runtime_builtin(
     name = "symrcm",
     category = "math/linalg/structure",
-    summary = "Compute the symmetric reverse Cuthill-McKee permutation that reduces matrix bandwidth.",
+    summary = "Compute symmetric reverse Cuthill-McKee permutations to reduce matrix bandwidth.",
     keywords = "symrcm,reverse cuthill-mckee,bandwidth reduction,gpu",
     accel = "graph",
     type_resolver(symrcm_type),

@@ -200,7 +200,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "nnz",
     category = "math/reduction",
-    summary = "Count the number of nonzero elements in an array with MATLAB-compatible semantics.",
+    summary = "Count nonzero elements in arrays.",
     keywords = "nnz,nonzero,count,sparsity,gpu",
     accel = "reduction",
     type_resolver(nnz_type),

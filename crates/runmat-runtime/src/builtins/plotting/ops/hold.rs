@@ -61,7 +61,7 @@ pub const HOLD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "hold",
     category = "plotting",
-    summary = "Toggle whether plots replace or append to the current axes.",
+    summary = "Control plot replacement versus appending.",
     keywords = "hold,plotting",
     suppress_auto_output = true,
     type_resolver(bool_type),

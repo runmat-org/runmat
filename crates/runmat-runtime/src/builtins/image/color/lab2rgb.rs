@@ -131,7 +131,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "lab2rgb",
     category = "image/color",
-    summary = "Convert CIE L*a*b* values to sRGB using D65 white.",
+    summary = "Convert CIE L*a*b* values to sRGB (D65 white point).",
     keywords = "lab2rgb,lab,cielab,rgb,color,image,colormap",
     accel = "sink",
     type_resolver(same_shape_type),

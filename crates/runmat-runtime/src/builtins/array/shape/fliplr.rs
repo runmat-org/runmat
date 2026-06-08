@@ -162,7 +162,7 @@ fn remap_fliplr_error(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "fliplr",
     category = "array/shape",
-    summary = "Flip an array left-to-right along the second dimension.",
+    summary = "Flip arrays left-to-right.",
     keywords = "fliplr,flip,horizontal,matrix,gpu",
     accel = "custom",
     type_resolver(preserve_matrix_type),

@@ -217,7 +217,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "dot",
     category = "math/linalg/ops",
-    summary = "Dot product (inner product) of matching tensors along a specified dimension.",
+    summary = "Compute dot products.",
     keywords = "dot,inner product,gpu,linear algebra",
     accel = "reduction",
     type_resolver(dot_type),

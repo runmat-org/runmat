@@ -345,7 +345,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "sum",
     category = "math/reduction",
-    summary = "Sum elements of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Sum array elements along dimensions with MATLAB-compatible options.",
     keywords = "sum,reduction,gpu,omitnan,all,like",
     accel = "reduction",
     type_resolver(sum_type),

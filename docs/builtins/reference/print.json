@@ -1,0 +1,102 @@
+{
+  "title": "print",
+  "category": "plotting",
+  "keywords": [
+    "print",
+    "figure export",
+    "png",
+    "plotting",
+    "save figure"
+  ],
+  "summary": "Export figures to files in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`print` is a figure export sink. It gathers filename and option arguments when needed, then serializes the figure through the plotting renderer. Existing GPU-backed plot geometry can still use the shared WGPU plotting path during export."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": "plot-core",
+  "tested": {
+    "unit": "builtins::plotting::print::tests",
+    "integration": "direct headless Chrome WASM verification of print.json examples"
+  },
+  "description": "`print` exports the active or specified figure to files. Device tokens, resolution options, and argument forms follow MATLAB-style `print` semantics in RunMat.",
+  "behaviors": [
+    "`print(filename, '-dpng')` writes PNG bytes to `filename`. If the name has no `.png` extension, RunMat appends one.",
+    "`print(filename, '-dpng', '-rN')` scales the export dimensions from the default 800 by 600 canvas using `N` DPI relative to RunMat's 150 DPI default.",
+    "`print(fig, filename, '-dpng')` exports the specified figure handle instead of the active figure.",
+    "Command-style argument order is accepted when RunMat parses command calls into string arguments, such as `print -dpng plot.png`.",
+    "PDF, EPS, and SVG device tokens are recognized but return a clear unsupported-device error until those exporters are implemented."
+  ],
+  "examples": [
+    {
+      "description": "Export the active figure to a PNG file",
+      "input": "x = 0:0.1:2*pi;\nplot(x, sin(x));\nprint(\"sine_plot\", \"-dpng\");"
+    },
+    {
+      "description": "Export at a higher resolution",
+      "input": "x = 0:0.1:1;\nplot(x, x.^2, \"LineWidth\", 2);\nprint(\"quadratic_plot\", \"-dpng\", \"-r300\");"
+    },
+    {
+      "description": "Export a specific figure handle",
+      "input": "fig = figure();\nplot(1:5, [1 4 2 5 3]);\nprint(fig, \"explicit_handle_plot.png\", \"-dpng\");"
+    },
+    {
+      "description": "Command-style device order",
+      "input": "plot(1:4, [1 3 2 4]);\nprint -dpng command_style_plot.png"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which formats does `print` support?",
+      "answer": "PNG is supported today with `-dpng`. RunMat recognizes PDF, EPS, and SVG device tokens, but they return an unsupported-device error until those exporters are available in the rendering stack."
+    },
+    {
+      "question": "Where does the file go in the browser?",
+      "answer": "The PNG is written through RunMat's filesystem provider. In the sandbox this is usually the in-memory or IndexedDB-backed virtual filesystem, and the host can expose the file as a download artifact."
+    },
+    {
+      "question": "Does `-r300` change the figure data?",
+      "answer": "No. It only changes the pixel dimensions used for export. The plot data and graphics handles remain unchanged."
+    }
+  ],
+  "links": [
+    {
+      "label": "figure",
+      "url": "./figure"
+    },
+    {
+      "label": "gcf",
+      "url": "./gcf"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/print.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/print.rs"
+  },
+  "gpu_residency": "`print` is an I/O sink and returns a host logical status. Filename and option arguments are gathered before parsing. GPU-resident plot data already captured in figure state may still be consumed by the plotting renderer without forcing user-visible gathers when the shared WGPU export path is available.",
+  "gpu_behavior": [
+    "No numeric GPU kernels are launched for `print` itself.",
+    "The PNG exporter first attempts the interactive GPU render path and falls back to CPU rasterization when headless GPU initialization is unavailable.",
+    "The builtin writes PNG bytes through RunMat's filesystem layer, so output storage is host or virtual-filesystem backed."
+  ]
+}

@@ -19,6 +19,19 @@ pub enum Expr {
     Range(Box<Expr>, Option<Box<Expr>>, Box<Expr>, Span),
     Colon(Span),
     FuncCall(String, Vec<Expr>, Span),
+    SuperConstructorCall {
+        current_class: String,
+        super_class: String,
+        args: Vec<Expr>,
+        span: Span,
+    },
+    SuperMethodCall {
+        current_class: String,
+        super_class: String,
+        method: String,
+        args: Vec<Expr>,
+        span: Span,
+    },
     CommandCall(String, Vec<Expr>, Span),
     Member(Box<Expr>, String, Span),
     // Dynamic field: s.(expr)
@@ -52,6 +65,8 @@ impl Expr {
             | Expr::Range(_, _, _, span)
             | Expr::Colon(span)
             | Expr::FuncCall(_, _, span)
+            | Expr::SuperConstructorCall { span, .. }
+            | Expr::SuperMethodCall { span, .. }
             | Expr::CommandCall(_, _, span)
             | Expr::Member(_, _, span)
             | Expr::MemberDynamic(_, _, span)
@@ -82,6 +97,30 @@ impl Expr {
             Expr::Range(start, step, end, _) => Expr::Range(start, step, end, span),
             Expr::Colon(_) => Expr::Colon(span),
             Expr::FuncCall(name, args, _) => Expr::FuncCall(name, args, span),
+            Expr::SuperConstructorCall {
+                current_class,
+                super_class,
+                args,
+                ..
+            } => Expr::SuperConstructorCall {
+                current_class,
+                super_class,
+                args,
+                span,
+            },
+            Expr::SuperMethodCall {
+                current_class,
+                super_class,
+                method,
+                args,
+                ..
+            } => Expr::SuperMethodCall {
+                current_class,
+                super_class,
+                method,
+                args,
+                span,
+            },
             Expr::CommandCall(name, args, _) => Expr::CommandCall(name, args, span),
             Expr::Member(base, name, _) => Expr::Member(base, name, span),
             Expr::MemberDynamic(base, name, _) => Expr::MemberDynamic(base, name, span),
@@ -135,7 +174,7 @@ pub enum UnOp {
 pub enum Stmt {
     ExprStmt(Expr, bool, Span), // Expression and whether it's semicolon-terminated (suppressed)
     Assign(String, Expr, bool, Span), // Variable, Expression, and whether it's semicolon-terminated (suppressed)
-    MultiAssign(Vec<String>, Expr, bool, Span),
+    MultiAssign(Vec<MultiAssignTarget>, Expr, bool, Span),
     AssignLValue(LValue, Expr, bool, Span),
     If {
         cond: Expr,
@@ -176,6 +215,8 @@ pub enum Stmt {
         name: String,
         params: Vec<String>,
         outputs: Vec<String>,
+        argument_validations: Vec<FunctionArgValidationDecl>,
+        argument_block_kinds: Vec<FunctionArgumentsBlockKind>,
         body: Vec<Stmt>,
         isolated: bool,
         is_async: bool,
@@ -187,11 +228,18 @@ pub enum Stmt {
         span: Span,
     },
     ClassDef {
+        attributes: Vec<Attr>,
         name: String,
         super_class: Option<String>,
         members: Vec<ClassMember>,
         span: Span,
     },
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum MultiAssignTarget {
+    Discard,
+    LValue(LValue),
 }
 
 impl Stmt {
@@ -233,11 +281,53 @@ pub struct Attr {
     pub value: Option<String>,
 }
 
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct ClassPropertyDecl {
+    pub name: String,
+    pub default: Option<Expr>,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum FunctionArgDim {
+    Any,
+    Exact(usize),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct FunctionArgSizeSpec {
+    pub rows: FunctionArgDim,
+    pub cols: FunctionArgDim,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct FunctionArgValidationDecl {
+    pub name: String,
+    pub size: Option<FunctionArgSizeSpec>,
+    pub class_name: Option<String>,
+    pub validators: Vec<FunctionArgValidatorDecl>,
+    pub default_value: Option<Expr>,
+    pub has_unsupported_trailing: bool,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum FunctionArgumentsBlockKind {
+    Input,
+    Repeating,
+    Output,
+    Unsupported(Vec<Attr>),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct FunctionArgValidatorDecl {
+    pub name: String,
+    pub args: Vec<Expr>,
+}
+
 #[derive(Debug, PartialEq)]
 pub enum ClassMember {
     Properties {
         attributes: Vec<Attr>,
-        names: Vec<String>,
+        names: Vec<ClassPropertyDecl>,
     },
     Methods {
         attributes: Vec<Attr>,

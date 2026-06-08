@@ -264,7 +264,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "ones",
     category = "array/creation",
-    summary = "Create arrays filled with ones.",
+    summary = "Create arrays of ones.",
     keywords = "ones,array,logical,gpu,like",
     accel = "array_construct",
     type_resolver(ones_type),

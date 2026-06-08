@@ -231,7 +231,7 @@ fn cell_error_with_message(
 #[runtime_builtin(
     name = "cell",
     category = "cells/core",
-    summary = "Create empty MATLAB cell arrays.",
+    summary = "Create empty cell arrays.",
     keywords = "cell,cell array,container,empty",
     accel = "array_construct",
     sink = true,

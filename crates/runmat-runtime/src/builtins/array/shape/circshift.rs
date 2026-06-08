@@ -227,7 +227,7 @@ fn circshift_internal(message: impl Into<String>) -> RuntimeError {
 #[runtime_builtin(
     name = "circshift",
     category = "array/shape",
-    summary = "Rotate arrays circularly along one or more dimensions.",
+    summary = "Rotate array elements circularly along one or more dimensions.",
     keywords = "circshift,circular shift,rotate array,gpu,cyclic shift",
     accel = "custom",
     type_resolver(preserve_array_type),

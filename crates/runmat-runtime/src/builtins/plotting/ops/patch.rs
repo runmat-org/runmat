@@ -316,7 +316,7 @@ impl Default for PatchOptions {
 #[runtime_builtin(
     name = "patch",
     category = "plotting",
-    summary = "Create MATLAB-compatible colored polygon patches.",
+    summary = "Create filled polygon patch graphics from coordinate or faces/vertices data.",
     keywords = "patch,plotting,polygon,faces,vertices",
     sink = true,
     suppress_auto_output = true,

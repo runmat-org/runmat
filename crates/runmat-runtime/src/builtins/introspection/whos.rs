@@ -198,7 +198,7 @@ pub const WHOS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "whos",
     category = "introspection",
-    summary = "List variables in the workspace or MAT-files with MATLAB-compatible metadata.",
+    summary = "List workspace or MAT-file variables with metadata.",
     keywords = "whos,workspace variables,memory usage,struct array",
     accel = "cpu",
     type_resolver(whos_type),

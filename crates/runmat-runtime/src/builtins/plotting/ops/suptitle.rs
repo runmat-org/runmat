@@ -130,7 +130,7 @@ pub const SUPTITLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "suptitle",
     category = "plotting",
-    summary = "Set a title centered above the entire figure.",
+    summary = "Set a centered figure-level title (legacy alias of `sgtitle`).",
     keywords = "suptitle,sgtitle,subplot,title,plotting",
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),

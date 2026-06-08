@@ -300,7 +300,7 @@ fn map_string_result<T>(
 #[runtime_builtin(
     name = "fwrite",
     category = "io/filetext",
-    summary = "Write binary data to a file identifier.",
+    summary = "Write binary data to file identifiers.",
     keywords = "fwrite,file,io,binary,precision",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fwrite_type),

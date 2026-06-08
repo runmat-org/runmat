@@ -185,7 +185,7 @@ fn imfilter_map_error(
 #[runtime_builtin(
     name = "imfilter",
     category = "image/filters",
-    summary = "Apply linear filters with MATLAB-compatible padding semantics.",
+    summary = "Apply linear image filters.",
     keywords = "imfilter,image,filter,convolution,correlation,padding",
     accel = "custom-imfilter",
     type_resolver(imfilter_type),

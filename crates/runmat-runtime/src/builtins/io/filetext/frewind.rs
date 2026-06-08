@@ -161,7 +161,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "frewind",
     category = "io/filetext",
-    summary = "Rewind the file position indicator to the beginning of the file.",
+    summary = "Rewind file position indicators.",
     keywords = "frewind,file,rewind,seek,io,file identifier",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::frewind_type),

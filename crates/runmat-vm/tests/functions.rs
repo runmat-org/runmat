@@ -11,6 +11,26 @@ fn execute_source(source: &str) -> Vec<runmat_builtins::Value> {
     interpret(&bytecode).expect("execute bytecode")
 }
 
+fn execute_source_with_catalog(source: &str, name: &str) -> Vec<runmat_builtins::Value> {
+    let bytecode = compile_source(source).expect("compile source");
+    let source_id = bytecode.source_id.unwrap_or(runmat_hir::SourceId(0));
+    let source_text = source.to_string();
+    let source_name = name.to_string();
+    thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            let _catalog_guard = runmat_runtime::source_context::replace_source_catalog(vec![(
+                source_id,
+                source_name,
+                source_text,
+            )]);
+            futures::executor::block_on(runmat_vm::interpret(&bytecode)).expect("execute bytecode")
+        })
+        .expect("spawn catalog test thread")
+        .join()
+        .expect("catalog test thread failed")
+}
+
 fn execute_source_result(
     source: &str,
 ) -> Result<Vec<runmat_builtins::Value>, Box<runmat_runtime::RuntimeError>> {
@@ -79,6 +99,130 @@ fn unresolved_external_function_handle_zero_output_feval_fails_without_legacy_fa
         Some("RunMat:UndefinedFunction"),
         "unexpected error: {}",
         err.message()
+    );
+}
+
+#[test]
+fn nested_varargout_forwarding_with_nargout_slice_assignment() {
+    let source = r#"
+        [a,b] = outer(5);
+        function varargout = outer(x)
+            [varargout{1:nargout}] = inner(x);
+            function varargout = inner(v)
+                varargout{1} = v + 1;
+                varargout{2} = v + 2;
+            end
+        end
+    "#;
+    let bytecode = compile_source(source).expect("compile source");
+    let entry = bytecode
+        .function_registry
+        .functions
+        .values()
+        .find(|f| f.display_name == "outer")
+        .expect("outer bytecode present");
+    assert!(
+        entry.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { .. }
+                | runmat_vm::Instr::CallSemanticFunctionMultiUsingOutputSlot(_, _, _)
+                | runmat_vm::Instr::CallFunctionMultiUsingOutputSlot { .. }
+        )),
+        "outer should lower nested forwarding call with dynamic output-slot arity; instructions={:?}",
+        entry.instructions
+    );
+    let vars = interpret(&bytecode).expect("execute bytecode");
+    assert!(
+        has_num(&vars, 6.0),
+        "expected first forwarded output; vars={vars:?}"
+    );
+    assert!(
+        has_num(&vars, 7.0),
+        "expected second forwarded output; vars={vars:?}"
+    );
+}
+
+#[test]
+fn nested_varargout_forwarding_with_nargout_slice_assignment_via_feval() {
+    let source = r#"
+        [a,b] = outer(5);
+        function varargout = outer(x)
+            [varargout{1:nargout}] = feval('pair', x);
+        end
+        function varargout = pair(v)
+            varargout{1} = v + 10;
+            varargout{2} = v + 20;
+        end
+    "#;
+    let bytecode = compile_source(source).expect("compile source");
+    let entry = bytecode
+        .function_registry
+        .functions
+        .values()
+        .find(|f| f.display_name == "outer")
+        .expect("outer bytecode present");
+    assert!(
+        entry.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CallFevalMultiUsingOutputSlot(_, _)
+        )),
+        "outer should lower feval forwarding call with dynamic output-slot arity; instructions={:?}",
+        entry.instructions
+    );
+    let vars = interpret(&bytecode).expect("execute bytecode");
+    assert!(
+        has_num(&vars, 15.0),
+        "expected first forwarded output; vars={vars:?}"
+    );
+    assert!(
+        has_num(&vars, 25.0),
+        "expected second forwarded output; vars={vars:?}"
+    );
+}
+
+#[test]
+fn nested_varargout_forwarding_with_nargout_slice_assignment_via_nested_feval() {
+    let source = r#"
+        [a,b] = outer(5);
+        function varargout = outer(x)
+            [varargout{1:nargout}] = feval('inner', x);
+            function varargout = inner(v)
+                varargout{1} = v + 10;
+                varargout{2} = v + 20;
+            end
+        end
+    "#;
+    let bytecode = compile_source(source).expect("compile source");
+    let entry = bytecode
+        .function_registry
+        .functions
+        .values()
+        .find(|f| f.display_name == "outer")
+        .expect("outer bytecode present");
+    assert!(
+        entry.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateSemanticClosure(_, name, 1) if name == "inner"
+        )),
+        "outer should lower string feval target to a captured semantic closure; instructions={:?}",
+        entry.instructions
+    );
+    assert!(
+        entry
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalMultiUsingOutputSlot(_, _))),
+        "outer should retain dynamic output-slot feval; instructions={:?}",
+        entry.instructions
+    );
+    let vars = interpret(&bytecode).expect("execute bytecode");
+    assert!(
+        has_num(&vars, 15.0),
+        "expected first forwarded output; vars={vars:?}"
+    );
+    assert!(
+        has_num(&vars, 25.0),
+        "expected second forwarded output; vars={vars:?}"
     );
 }
 
@@ -1218,6 +1362,402 @@ fn nargin_nargout_in_user_functions() {
 }
 
 #[test]
+fn narginchk_nargoutchk_validate_function_arity() {
+    let program = r#"
+        r = guarded(1, 2, 3);
+        function y = guarded(a, b, varargin)
+            narginchk(2, Inf);
+            nargoutchk(1, 1);
+            y = a + b + length(varargin);
+        end
+    "#;
+    let vars = execute_source(program);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-4.0).abs()<1e-9)));
+}
+
+#[test]
+fn dynamic_workspace_eval_mutates_and_reads_current_vm_workspace() {
+    let vars = execute_source(
+        r#"
+        eval('dyn_x = 41;');
+        dyn_y = eval('dyn_x + 1');
+    "#,
+    );
+    assert!(has_num(&vars, 41.0));
+    assert!(has_num(&vars, 42.0));
+}
+
+#[test]
+fn dynamic_workspace_evalin_caller_from_function_targets_vm_script_workspace() {
+    let vars = execute_source(
+        r#"
+        outer_x = 5;
+        y = helper();
+
+        function out = helper()
+            out = evalin('caller', 'outer_x + 2');
+            assignin('caller', 'caller_z', 11);
+        end
+    "#,
+    );
+    assert!(has_num(&vars, 7.0));
+    assert!(has_num(&vars, 11.0));
+}
+
+#[test]
+fn dynamic_workspace_invalid_selector_errors_are_catchable() {
+    let vars = execute_source(
+        r#"
+        try
+            evalin('workspace', '1');
+            err = "BAD";
+        catch e
+            err = e.identifier;
+        end
+    "#,
+    );
+    assert!(vars.iter().any(
+        |v| matches!(v, runmat_builtins::Value::String(s) if s == "RunMat:DynamicWorkspaceSelector")
+    ));
+}
+
+#[test]
+fn narginchk_reports_too_few_inputs() {
+    let err = execute_source_result(
+        r#"
+        r = guarded(1);
+        function y = guarded(a, b)
+            narginchk(2, 2);
+            y = a + b;
+        end
+    "#,
+    )
+    .expect_err("narginchk should reject too few inputs");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:NotEnoughInputs"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn narginchk_reports_too_many_inputs() {
+    let err = execute_source_result(
+        r#"
+        r = guarded(1, 2);
+        function y = guarded(a, varargin)
+            narginchk(1, 1);
+            y = a;
+        end
+    "#,
+    )
+    .expect_err("narginchk should reject too many inputs");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:TooManyInputs"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn nargoutchk_reports_too_few_outputs() {
+    let err = execute_source_result(
+        r#"
+        r = guarded();
+        function [a, b] = guarded()
+            nargoutchk(2, 2);
+            a = 1;
+            b = 2;
+        end
+    "#,
+    )
+    .expect_err("nargoutchk should reject too few requested outputs");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:NotEnoughOutputs"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn nargoutchk_reports_too_many_outputs() {
+    let err = execute_source_result(
+        r#"
+        [a, b] = guarded();
+        function varargout = guarded()
+            nargoutchk(0, 1);
+            varargout{1} = 1;
+        end
+    "#,
+    )
+    .expect_err("nargoutchk should reject too many requested outputs");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:TooManyOutputs"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn arity_check_helpers_report_invalid_bounds() {
+    let err = execute_source_result(
+        r#"
+        r = guarded(1);
+        function y = guarded(a)
+            narginchk(2, 1);
+            y = a;
+        end
+    "#,
+    )
+    .expect_err("narginchk should reject invalid bounds");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:NarginchkBoundsInvalid"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn arity_check_helper_errors_are_catchable() {
+    let program = r#"
+        try
+            guarded(1, 2);
+            eid = "BAD";
+        catch e
+            eid = e.identifier;
+        end
+        function y = guarded(a, varargin)
+            narginchk(1, 1);
+            y = a;
+        end
+    "#;
+    let vars = execute_source(program);
+    assert!(vars.iter().any(|v| {
+        matches!(v, runmat_builtins::Value::String(s) if s == "RunMat:TooManyInputs")
+    }));
+}
+
+#[test]
+fn dynamic_narginchk_function_handle_uses_current_function_arity() {
+    let program = r#"
+        ok = guarded(1, 2);
+        function y = guarded(a, varargin)
+            checker = @narginchk;
+            feval(checker, 1, 2);
+            y = a;
+        end
+    "#;
+    let vars = execute_source(program);
+    assert!(has_num(&vars, 1.0));
+}
+
+#[test]
+fn dynamic_narginchk_errors_are_catchable() {
+    let program = r#"
+        try
+            guarded(1, 2, 3);
+            eid = "BAD";
+        catch e
+            eid = e.identifier;
+        end
+        function y = guarded(a, varargin)
+            checker = @narginchk;
+            feval(checker, 1, 2);
+            y = a;
+        end
+    "#;
+    let vars = execute_source(program);
+    assert!(vars.iter().any(|v| {
+        matches!(v, runmat_builtins::Value::String(s) if s == "RunMat:TooManyInputs")
+    }));
+}
+
+#[test]
+fn dynamic_nargoutchk_function_handle_uses_current_function_arity() {
+    let program = r#"
+        y = guarded(1);
+        function y = guarded(a)
+            checker = @nargoutchk;
+            feval(checker, 1, 1);
+            y = a;
+        end
+    "#;
+    let vars = execute_source(program);
+    assert!(has_num(&vars, 1.0));
+}
+
+#[test]
+fn dynamic_nargoutchk_errors_are_catchable() {
+    let program = r#"
+        try
+            [a, b] = guarded(1);
+            eid = "BAD";
+        catch e
+            eid = e.identifier;
+        end
+        function [a, b] = guarded(x)
+            checker = @nargoutchk;
+            feval(checker, 1, 1);
+            a = x;
+            b = x;
+        end
+    "#;
+    let vars = execute_source(program);
+    assert!(vars.iter().any(|v| {
+        matches!(v, runmat_builtins::Value::String(s) if s == "RunMat:TooManyOutputs")
+    }));
+}
+
+#[test]
+fn inputname_reports_direct_caller_argument_names() {
+    let source = r#"
+        alpha = 10;
+        beta = 20;
+        [n1, n2, n3, n4] = probe(alpha, alpha + 1, 7, beta);
+        function [a, b, c, d] = probe(x, y, z, w)
+            a = inputname(1);
+            b = inputname(2);
+            c = inputname(3);
+            d = inputname(4);
+        end
+    "#;
+    let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_inputname_probe.m");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "alpha")));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "beta")));
+    let empty_strings = vars
+        .iter()
+        .filter(|v| matches!(v, runmat_builtins::Value::String(s) if s.is_empty()))
+        .count();
+    assert!(
+        empty_strings >= 2,
+        "expression and literal arguments should return empty input names; vars={vars:?}"
+    );
+}
+
+#[test]
+fn inputname_reports_feval_caller_argument_names() {
+    let source = r#"
+        beta = 20;
+        [n1, n2] = feval(@probe, beta, beta + 1);
+        function [a, b] = probe(x, y)
+            a = inputname(1);
+            b = inputname(2);
+        end
+    "#;
+    let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_inputname_feval_probe.m");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "beta")));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s.is_empty())));
+}
+
+#[test]
+fn mfilename_reads_current_source_context() {
+    let source = r#"
+        name = mfilename();
+        full = mfilename("fullpath");
+        fallback = mfilename("not-a-mode");
+    "#;
+    let bytecode = compile_source(source).expect("compile source");
+    let source_text = source.to_string();
+    let vars = thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            let _catalog_guard = runmat_runtime::source_context::replace_source_catalog(vec![(
+                runmat_hir::SourceId(0),
+                "/tmp/runmat_vm_mfilename_probe.m".to_string(),
+                source_text,
+            )]);
+            futures::executor::block_on(runmat_vm::interpret(&bytecode)).expect("execute bytecode")
+        })
+        .expect("spawn mfilename test thread")
+        .join()
+        .expect("mfilename test thread failed");
+    assert!(vars.iter().any(|v| {
+        matches!(v, runmat_builtins::Value::String(s) if s == "runmat_vm_mfilename_probe")
+    }));
+    assert!(vars.iter().any(|v| {
+        matches!(v, runmat_builtins::Value::String(s) if s == "/tmp/runmat_vm_mfilename_probe")
+    }));
+}
+
+#[test]
+fn functions_builtin_reports_function_handle_metadata() {
+    let source = r#"
+        builtin = functions(@sin);
+        builtin_name = getfield(builtin, "function");
+        builtin_type = builtin.type;
+        local_handle = @local_id;
+        local_info = functions(local_handle);
+        local_name = getfield(local_info, "function");
+        anon_info = functions(@(x) x + 1);
+        anon_type = anon_info.type;
+        function y = local_id(x)
+            y = x;
+        end
+    "#;
+    let vars = execute_source(source);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "sin")));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "simple")));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "local_id")));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "anonymous")));
+}
+
+#[test]
+fn localfunctions_returns_callable_local_function_handles() {
+    let source = r#"
+        handles = localfunctions();
+        h1 = handles{1};
+        h2 = handles{2};
+        info1 = functions(h1);
+        info2 = functions(h2);
+        name1 = getfield(info1, "function");
+        name2 = getfield(info2, "function");
+        total = feval(h1, 5) + feval(h2, 5);
+
+        function y = helper_one(x)
+            y = x + 1;
+        end
+
+        function y = helper_two(x)
+            y = x + 2;
+        end
+    "#;
+    let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_localfunctions_probe.m");
+    assert!(
+        has_num(&vars, 13.0),
+        "local function handles should be callable; vars={vars:?}"
+    );
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "helper_one")));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "helper_two")));
+}
+
+#[test]
 fn missing_fixed_input_can_be_guarded_with_nargin() {
     let program = r#"
         r = f(1, 2);
@@ -1384,6 +1924,138 @@ fn nested_function_calls() {
         })
         .expect("spawn nested_function_calls thread");
     handle.join().expect("nested_function_calls thread failed");
+}
+
+#[test]
+fn nested_function_shared_lexical_scope_read_and_write() {
+    let program = r#"
+        function r = outer(a)
+            total = 100;
+            function y = add(x)
+                total = total + x;
+                y = total;
+            end
+            r1 = add(a);
+            r2 = add(1);
+            r = r1 + r2;
+        end
+        result = outer(5);
+    "#;
+    let vars = execute_source(program);
+    // total evolves: 100 -> 105 -> 106, so r = 105 + 106 = 211.
+    assert!(has_num(&vars, 211.0), "unexpected vars: {vars:?}");
+}
+
+#[test]
+fn direct_recursive_function_executes() {
+    let program = r#"
+        result = fact(5);
+        function y = fact(n)
+            if n <= 1
+                y = 1;
+            else
+                y = n * fact(n - 1);
+            end
+        end
+    "#;
+    let vars = execute_source(program);
+    assert!(has_num(&vars, 120.0), "unexpected vars: {vars:?}");
+}
+
+#[test]
+fn mutual_recursive_functions_execute() {
+    let program = r#"
+        a = is_even(6);
+        b = is_odd(5);
+        result = a * 10 + b;
+        function y = is_even(n)
+            if n <= 0
+                y = 1;
+            else
+                y = is_odd(n - 1);
+            end
+        end
+        function y = is_odd(n)
+            if n <= 0
+                y = 0;
+            else
+                y = is_even(n - 1);
+            end
+        end
+    "#;
+    let vars = execute_source(program);
+    assert!(has_num(&vars, 11.0), "unexpected vars: {vars:?}");
+}
+
+#[test]
+fn recursive_function_handle_call_executes() {
+    let program = r#"
+        h = @fact;
+        result = h(5);
+        function y = fact(n)
+            if n <= 1
+                y = 1;
+            else
+                y = n * fact(n - 1);
+            end
+        end
+    "#;
+    let bytecode = compile_source(program).expect("compile recursive handle call");
+    assert!(
+        bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "fact"
+        )),
+        "recursive handle should carry semantic function identity"
+    );
+
+    let vars = interpret(&bytecode).expect("execute recursive handle call");
+    assert!(has_num(&vars, 120.0), "unexpected vars: {vars:?}");
+}
+
+#[test]
+fn recursive_feval_string_call_executes() {
+    let program = r#"
+        result = feval('fact', 5);
+        function y = fact(n)
+            if n <= 1
+                y = 1;
+            else
+                y = n * feval('fact', n - 1);
+            end
+        end
+    "#;
+    let bytecode = compile_source(program).expect("compile recursive feval call");
+    assert!(
+        bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "fact"
+        )),
+        "recursive feval string callee should carry semantic function identity"
+    );
+
+    let vars = interpret(&bytecode).expect("execute recursive feval call");
+    assert!(has_num(&vars, 120.0), "unexpected vars: {vars:?}");
+}
+
+#[test]
+fn nested_recursive_function_with_capture_executes() {
+    let program = r#"
+        result = outer(4);
+        function r = outer(n)
+            scale = 2;
+            function y = inner(k)
+                if k <= 1
+                    y = scale;
+                else
+                    y = scale + inner(k - 1);
+                end
+            end
+            r = inner(n);
+        end
+    "#;
+    let vars = execute_source(program);
+    assert!(has_num(&vars, 8.0), "unexpected vars: {vars:?}");
 }
 
 #[test]

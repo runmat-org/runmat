@@ -248,7 +248,7 @@ enum BoundariesMode {
 #[runtime_builtin(
     name = "eraseBetween",
     category = "strings/transform",
-    summary = "Delete text between boundary markers with MATLAB-compatible semantics.",
+    summary = "Delete text between boundary markers.",
     keywords = "eraseBetween,delete,boundaries,strings",
     accel = "sink",
     type_resolver(text_preserve_type),

@@ -364,7 +364,7 @@ async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
 #[runtime_builtin(
     name = "filter",
     category = "math/signal",
-    summary = "Apply an IIR/FIR digital filter to scalars, vectors, or tensors.",
+    summary = "Apply IIR/FIR digital filters.",
     keywords = "filter,IIR,FIR,difference equation,initial conditions,gpu",
     accel = "custom",
     type_resolver(filter_type),

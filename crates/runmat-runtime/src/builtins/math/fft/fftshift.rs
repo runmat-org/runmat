@@ -192,7 +192,7 @@ fn compute_fftshift_dims(shape: &[usize], dims_arg: Option<&Value>) -> BuiltinRe
 #[runtime_builtin(
     name = "fftshift",
     category = "math/fft",
-    summary = "Shift zero-frequency components to the center of a spectrum.",
+    summary = "Shift zero-frequency components to spectrum centers.",
     keywords = "fftshift,fourier transform,frequency centering,spectrum,gpu",
     accel = "custom",
     type_resolver(fftshift_type),

@@ -187,7 +187,7 @@ fn triu_error_with_message(
 #[runtime_builtin(
     name = "triu",
     category = "array/shape",
-    summary = "Upper triangular portion of a matrix or paged tensor.",
+    summary = "Extract upper-triangular portions of matrices or paged tensors.",
     keywords = "triu,upper triangular,matrix,diagonal,gpu",
     accel = "custom",
     type_resolver(preserve_matrix_type),

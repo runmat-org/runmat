@@ -94,12 +94,16 @@ pub(crate) mod pie;
 pub(crate) mod plot;
 #[path = "ops/plot3.rs"]
 pub(crate) mod plot3;
+#[path = "ops/print.rs"]
+pub(crate) mod print;
 #[path = "ops/quiver.rs"]
 pub(crate) mod quiver;
 #[path = "ops/scatter.rs"]
 pub(crate) mod scatter;
 #[path = "ops/scatter3.rs"]
 pub(crate) mod scatter3;
+#[path = "ops/scatterplot.rs"]
+pub(crate) mod scatterplot;
 #[path = "ops/semilogx.rs"]
 pub(crate) mod semilogx;
 #[path = "ops/semilogy.rs"]

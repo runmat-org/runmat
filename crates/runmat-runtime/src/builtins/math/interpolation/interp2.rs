@@ -423,7 +423,7 @@ fn interp2_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 #[runtime_builtin(
     name = "interp2",
     category = "math/interpolation",
-    summary = "Two-dimensional interpolation on gridded data.",
+    summary = "Interpolate two-dimensional gridded data.",
     keywords = "interp2,interpolation,bilinear,nearest,grid,meshgrid",
     accel = "sink",
     sink = true,

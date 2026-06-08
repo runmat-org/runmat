@@ -194,7 +194,7 @@ fn compute_ifftshift_dims(shape: &[usize], dims_arg: Option<&Value>) -> BuiltinR
 #[runtime_builtin(
     name = "ifftshift",
     category = "math/fft",
-    summary = "Undo fftshift by moving the zero-frequency component back to the origin.",
+    summary = "Shift centered spectra back to origin ordering.",
     keywords = "ifftshift,inverse fft shift,frequency alignment,gpu",
     accel = "custom",
     type_resolver(ifftshift_type),

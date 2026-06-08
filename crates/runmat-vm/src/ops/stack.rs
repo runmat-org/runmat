@@ -130,18 +130,21 @@ where
     Ok(())
 }
 
-pub fn store_local<BeforeLocalOverwrite, BeforeVarOverwrite, AfterFallbackStore>(
+#[allow(clippy::too_many_arguments)]
+pub fn store_local<BeforeLocalOverwrite, BeforeVarOverwrite, AfterLocalStore, AfterFallbackStore>(
     stack: &mut Vec<Value>,
     context: &mut ExecutionContext,
     vars: &mut Vec<Value>,
     offset: usize,
     mut before_local_overwrite: BeforeLocalOverwrite,
     mut before_var_overwrite: BeforeVarOverwrite,
+    mut after_local_store: AfterLocalStore,
     mut after_fallback_store: AfterFallbackStore,
 ) -> Result<(), RuntimeError>
 where
     BeforeLocalOverwrite: FnMut(&Value, &Value),
     BeforeVarOverwrite: FnMut(&Value, &Value),
+    AfterLocalStore: FnMut(usize, &Value),
     AfterFallbackStore: FnMut(&str, usize, &Value),
 {
     let value = pop_value(stack)?;
@@ -152,6 +155,7 @@ where
         }
         before_local_overwrite(&context.locals[local_index], &value);
         context.locals[local_index] = value;
+        after_local_store(local_index, &context.locals[local_index]);
     } else {
         if offset >= vars.len() {
             vars.resize(offset + 1, Value::Num(0.0));

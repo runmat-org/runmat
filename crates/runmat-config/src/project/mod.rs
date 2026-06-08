@@ -130,13 +130,13 @@ pub enum ProjectManifestLoadError {
     ParseToml {
         path: PathBuf,
         #[source]
-        source: toml::de::Error,
+        source: Box<toml::de::Error>,
     },
     #[error("failed to parse JSON project manifest {path}: {source}")]
     ParseJson {
         path: PathBuf,
         #[source]
-        source: serde_json::Error,
+        source: Box<serde_json::Error>,
     },
     #[error("invalid project manifest {path}: {source}")]
     Validation {
@@ -303,7 +303,7 @@ pub enum DiscoverProjectEntrypointError {
         manifest_path: PathBuf,
         entrypoint: String,
         #[source]
-        source: ProjectEntrypointResolveError,
+        source: Box<ProjectEntrypointResolveError>,
     },
 }
 
@@ -530,14 +530,14 @@ pub fn load_project_manifest(path: &Path) -> Result<ProjectManifest, ProjectMani
         parse_project_manifest_json(&content).map_err(|source| {
             ProjectManifestLoadError::ParseJson {
                 path: path.to_path_buf(),
-                source,
+                source: Box::new(source),
             }
         })?
     } else {
         parse_project_manifest_toml(&content).map_err(|source| {
             ProjectManifestLoadError::ParseToml {
                 path: path.to_path_buf(),
-                source,
+                source: Box::new(source),
             }
         })?
     };
@@ -568,14 +568,14 @@ pub async fn load_project_manifest_async(
         parse_project_manifest_json(&content).map_err(|source| {
             ProjectManifestLoadError::ParseJson {
                 path: path.to_path_buf(),
-                source,
+                source: Box::new(source),
             }
         })?
     } else {
         parse_project_manifest_toml(&content).map_err(|source| {
             ProjectManifestLoadError::ParseToml {
                 path: path.to_path_buf(),
-                source,
+                source: Box::new(source),
             }
         })?
     };
@@ -791,7 +791,7 @@ pub fn resolve_named_entrypoint_from(
             |source| DiscoverProjectEntrypointError::Resolve {
                 manifest_path: manifest_path.clone(),
                 entrypoint: entrypoint_name.to_string(),
-                source,
+                source: Box::new(source),
             },
         )?
     else {

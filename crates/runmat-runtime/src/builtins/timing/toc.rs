@@ -123,7 +123,7 @@ fn toc_error_with_message(
 #[runtime_builtin(
     name = "toc",
     category = "timing",
-    summary = "Read the elapsed time since the most recent tic or an explicit handle.",
+    summary = "Return elapsed time since the latest tic or a specific tic handle.",
     keywords = "toc,timing,profiling,benchmark",
     type_resolver(toc_type),
     descriptor(crate::builtins::timing::toc::TOC_DESCRIPTOR),

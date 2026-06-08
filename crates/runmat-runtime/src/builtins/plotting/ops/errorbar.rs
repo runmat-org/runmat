@@ -291,7 +291,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "errorbar",
     category = "plotting",
-    summary = "Render MATLAB-compatible error bars.",
+    summary = "Create plots with symmetric or asymmetric error bars.",
     keywords = "errorbar,plotting,uncertainty",
     sink = true,
     suppress_auto_output = true,

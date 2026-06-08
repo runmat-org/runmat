@@ -32,6 +32,10 @@ pub fn workspace_global_names() -> Vec<String> {
     names
 }
 
+pub fn get_global_value(name: &str) -> Option<Value> {
+    GLOBALS.with(|globals| globals.borrow().get(name).cloned())
+}
+
 pub fn collect_thread_roots() -> Vec<Value> {
     let mut thread_roots = Vec::new();
     GLOBALS.with(|g| {

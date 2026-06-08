@@ -90,7 +90,9 @@ impl RunMatSession {
 
         #[cfg(not(feature = "jit"))]
         if enable_jit {
-            info!("JIT support was requested but the 'jit' feature is disabled; running interpreter-only.");
+            info!(
+                "JIT support was requested but the 'jit' feature is disabled; running interpreter-only."
+            );
         }
 
         let session = Self {
@@ -122,7 +124,9 @@ impl RunMatSession {
             emit_fusion_plan: false,
             compat_mode: CompatMode::Matlab,
             top_level_await_enabled: true,
+            dynamic_eval_enabled: true,
             format_mode: runmat_builtins::FormatMode::default(),
+            pending_companion_source_discovery: None,
         };
 
         runmat_vm::set_call_stack_limit(session.callstack_limit);

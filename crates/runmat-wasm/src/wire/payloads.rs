@@ -8,8 +8,8 @@ use crate::wire::value::{value_to_json, MAX_DATA_PREVIEW};
 use runmat_builtins::Value;
 use runmat_core::{
     abi::{
-        DiagnosticSeverity, DisplayEvent, DisplayLabel, ExecutionOutcome, RuntimeDiagnostic,
-        RuntimeFlow, WorkspaceBindingKey,
+        DiagnosticSeverity, DisplayEvent, DisplayLabel, ExecutionOutcome, ExecutionSourceContext,
+        RuntimeDiagnostic, RuntimeFlow, WorkspaceBindingKey,
     },
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
     value_shape, ExecutionProfiling, ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision,
@@ -69,7 +69,10 @@ pub(crate) struct MemoryUsagePayload {
 }
 
 impl ExecutionPayload {
-    pub(crate) fn from_outcome(outcome: ExecutionOutcome, source: &str) -> Self {
+    pub(crate) fn from_outcome(
+        outcome: ExecutionOutcome,
+        source_context: &ExecutionSourceContext,
+    ) -> Self {
         let workspace = WorkspacePayload::from_outcome(&outcome);
         let flow = runtime_flow_to_json(&outcome.flow);
         let value = outcome.flow.durable_workspace_value().cloned();
@@ -77,7 +80,7 @@ impl ExecutionPayload {
             .diagnostics
             .iter()
             .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
-            .map(|diagnostic| error_payload_from_diagnostic(diagnostic, source));
+            .map(|diagnostic| error_payload_from_diagnostic(diagnostic, source_context));
         Self {
             flow,
             display_events: outcome
@@ -368,25 +371,39 @@ fn workspace_entry_from_value(name: String, value: &Value) -> WorkspaceEntryPayl
 
 fn error_payload_from_diagnostic(
     diagnostic: &RuntimeDiagnostic,
-    source: &str,
+    source_context: &ExecutionSourceContext,
 ) -> RunMatErrorPayload {
-    let span = diagnostic.span.map(|span| {
-        let (line, column) = line_col_from_source(source, span.start);
-        RunMatErrorSpanPayload {
-            start: span.start,
-            end: span.end,
-            line,
-            column,
-        }
+    let span = source_context.source_text().and_then(|source| {
+        diagnostic.span.map(|span| {
+            let (line, column) = line_col_from_source(source, span.start);
+            RunMatErrorSpanPayload {
+                start: span.start,
+                end: span.end,
+                line,
+                column,
+            }
+        })
     });
+    let diagnostic_text = match (source_context.source_text(), diagnostic.span) {
+        (Some(source), Some(span)) => {
+            runmat_runtime::build_runtime_error(diagnostic.message.clone())
+                .with_identifier(diagnostic.code.clone())
+                .with_span((span.start, span.end.saturating_sub(span.start).max(1)).into())
+                .with_call_stack(diagnostic.callstack.clone())
+                .with_call_frames_elided(diagnostic.callstack_elided)
+                .build()
+                .format_diagnostic_with_source(Some(source_context.source_name()), Some(source))
+        }
+        _ => diagnostic.message.clone(),
+    };
     RunMatErrorPayload {
         kind: RunMatErrorKind::Runtime,
         message: diagnostic.message.clone(),
         identifier: Some(diagnostic.code.clone()),
-        diagnostic: diagnostic.message.clone(),
+        diagnostic: diagnostic_text,
         span,
-        callstack: Vec::new(),
-        callstack_elided: 0,
+        callstack: diagnostic.callstack.clone(),
+        callstack_elided: diagnostic.callstack_elided,
     }
 }
 
@@ -808,8 +825,16 @@ pub(crate) fn parse_materialize_options(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_core::abi::{WorkspaceBindingValue, WorkspaceDelta};
+    use runmat_core::abi::{ExecutionSourceContext, WorkspaceBindingValue, WorkspaceDelta};
     use runmat_hir::BindingName;
+
+    fn test_source_context() -> ExecutionSourceContext {
+        ExecutionSourceContext {
+            name: "<test>".to_string(),
+            text: Some(String::new()),
+            identity: None,
+        }
+    }
 
     #[test]
     fn execution_payload_serializes_runtime_flow_kind() {
@@ -818,7 +843,7 @@ mod tests {
             ..ExecutionOutcome::default()
         };
 
-        let payload = ExecutionPayload::from_outcome(outcome, "");
+        let payload = ExecutionPayload::from_outcome(outcome, &test_source_context());
         assert_eq!(payload.flow["kind"], "output-list");
         assert_eq!(
             payload.flow["values"],
@@ -849,10 +874,36 @@ mod tests {
             ..ExecutionOutcome::default()
         };
 
-        let payload = ExecutionPayload::from_outcome(outcome, "");
+        let payload = ExecutionPayload::from_outcome(outcome, &test_source_context());
         assert_eq!(payload.workspace.version, 42);
         assert_eq!(payload.workspace.removals, vec!["x".to_string()]);
         assert_eq!(payload.workspace.values.len(), 1);
         assert_eq!(payload.workspace.values[0].name, "x");
+    }
+
+    #[test]
+    fn execution_payload_formats_runtime_diagnostic_with_source_context() {
+        let outcome = ExecutionOutcome {
+            diagnostics: vec![RuntimeDiagnostic {
+                code: "RunMat:IndexOutOfBounds".to_string(),
+                severity: DiagnosticSeverity::Error,
+                message: "Index out of bounds".to_string(),
+                span: Some(runmat_hir::Span { start: 7, end: 11 }),
+                callstack: vec!["<main> @ path-source.m:2:5".to_string()],
+                callstack_elided: 0,
+            }],
+            ..ExecutionOutcome::default()
+        };
+        let source_context = ExecutionSourceContext {
+            name: "path-source.m".to_string(),
+            text: Some("x = 1;\ny = x(2);\n".to_string()),
+            identity: None,
+        };
+
+        let payload = ExecutionPayload::from_outcome(outcome, &source_context);
+        let error = payload.error.expect("error payload");
+        assert!(error.diagnostic.contains("--> path-source.m:2:1"));
+        assert_eq!(error.span.expect("span").line, 2);
+        assert_eq!(error.callstack, vec!["<main> @ path-source.m:2:5"]);
     }
 }

@@ -23,6 +23,7 @@ pub use bytecode::{
 pub use bytecode::{
     FusionCandidateGroup, FusionInstructionKind, FusionInstructionWindow, FusionMetadata,
 };
+pub use call::builtins::set_dynamic_eval_options;
 pub use compiler::CompileError;
 pub use interpreter::api::{
     set_call_stack_limit, set_error_namespace, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
@@ -52,6 +53,7 @@ pub async fn call_method_or_member_index_named_with_outputs(
         name,
         args,
         requested_outputs,
+        None,
     )
     .await
 }

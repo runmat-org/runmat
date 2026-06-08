@@ -296,7 +296,7 @@ fn conv2_error_with_source(
 #[runtime_builtin(
     name = "conv2",
     category = "math/signal",
-    summary = "Two-dimensional convolution with MATLAB-compatible padding modes.",
+    summary = "Compute two-dimensional convolution.",
     keywords = "conv2,2d convolution,image filtering,gpu",
     accel = "custom",
     type_resolver(conv2_type),

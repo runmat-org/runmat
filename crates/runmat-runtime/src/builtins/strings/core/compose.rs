@@ -156,7 +156,7 @@ fn remap_compose_flow(mut err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "compose",
     category = "strings/core",
-    summary = "Format values into MATLAB string arrays using printf-style placeholders.",
+    summary = "Format values into string arrays using printf-style placeholders.",
     keywords = "compose,format,string array,gpu",
     accel = "sink",
     type_resolver(string_array_type),

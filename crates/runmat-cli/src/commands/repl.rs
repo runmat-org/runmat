@@ -390,7 +390,8 @@ async fn process_repl_line(
         HostExecutionPolicy::default(),
         engine.workspace_handle(),
     );
-    match engine.execute_request(request).await {
+    let response = engine.execute_request(request).await;
+    match response.result {
         Ok(outcome) => {
             emit_execution_streams(&outcome.streams);
             for diagnostic in &outcome.diagnostics {
@@ -409,7 +410,9 @@ async fn process_repl_line(
             }
         }
         Err(e) => {
-            if let Some(diag) = format_frontend_error(&e, "<repl>", line) {
+            if let Some(diag) = response.source_context.source_text().and_then(|source| {
+                format_frontend_error(&e, response.source_context.source_name(), source)
+            }) {
                 eprintln!("{diag}");
             } else {
                 eprintln!("Execution error: {e}");

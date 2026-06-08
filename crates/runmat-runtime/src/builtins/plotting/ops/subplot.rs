@@ -115,7 +115,7 @@ fn map_subplot_figure_error(err: FigureError) -> RuntimeError {
 #[runtime_builtin(
     name = "subplot",
     category = "plotting",
-    summary = "Select a subplot grid location.",
+    summary = "Select or create an axes at a subplot grid location.",
     keywords = "subplot,axes,plotting",
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),

@@ -29,6 +29,34 @@ fn tf_constructs_object_through_vm_dispatch() {
 }
 
 #[test]
+fn ss_constructs_object_through_vm_dispatch() {
+    let program = r#"
+        G = ss([0 1; -2 -3], [0; 1], [1 0], 0, 0.1);
+        c = class(G);
+        a = G.A;
+        b = G.B;
+        ts = G.Ts;
+    "#;
+    let vars = execute_source(program).unwrap();
+
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Object(object) if object.class_name == "ss")));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::String(class_name) if class_name == "ss")));
+    assert!(vars.iter().any(|value| {
+        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.data == vec![0.0, -2.0, 1.0, -3.0])
+    }));
+    assert!(vars.iter().any(|value| {
+        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.data == vec![0.0, 1.0])
+    }));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 0.1).abs() < 1.0e-12)));
+}
+
+#[test]
 fn step_returns_siso_response_through_vm_dispatch() {
     let program = r#"
         H = tf(1, [1 1]);

@@ -166,7 +166,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "ind2rgb",
     category = "image/color",
-    summary = "Convert an indexed image and colormap to an RGB truecolor image.",
+    summary = "Convert indexed images and colormaps to RGB.",
     keywords = "ind2rgb,indexed image,colormap,rgb,image",
     accel = "sink",
     type_resolver(ind2rgb_type),

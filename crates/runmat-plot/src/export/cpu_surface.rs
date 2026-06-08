@@ -1285,6 +1285,7 @@ pub async fn render_figure_rgba_bytes(
         Some((width, height)),
         Some(&axes_sizes),
         None,
+        None,
     );
 
     let mut axes_views = Vec::with_capacity(axes_count);

@@ -93,6 +93,21 @@ fn parse_cell_index_value_for_len(value: &Value, len: usize) -> Result<usize, Ru
     parse_cell_index_value(value)
 }
 
+fn parse_cell_index_values_for_assignment(value: &Value) -> Result<Vec<usize>, RuntimeError> {
+    match value {
+        Value::Tensor(t) if t.data.len() > 1 => t
+            .data
+            .iter()
+            .map(|&raw| {
+                let idx = exact_index_from_f64(raw)
+                    .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?;
+                parse_positive_cell_index(idx)
+            })
+            .collect(),
+        _ => Ok(vec![parse_cell_index_value(value)?]),
+    }
+}
+
 fn decode_cell_end_plus(value: f64) -> Option<usize> {
     if !value.is_nan() {
         return None;
@@ -452,6 +467,72 @@ where
             "Unsupported number of cell indices",
         )),
     }
+}
+
+pub fn assign_cell_value_multi<OnWrite>(
+    mut ca: CellArray,
+    positions: &[usize],
+    rhs_values: &[Value],
+    mut on_write: OnWrite,
+) -> Result<Value, RuntimeError>
+where
+    OnWrite: FnMut(&Value, &Value),
+{
+    if positions.is_empty() {
+        return Ok(Value::Cell(ca));
+    }
+    if positions.len() != rhs_values.len() {
+        return Err(mex(
+            "CellAssignmentArityMismatch",
+            "Cell brace assignment target count does not match source value count",
+        ));
+    }
+    let old_len = ca.data.len();
+    if let Some(max_pos) = positions.iter().copied().max() {
+        if max_pos > old_len {
+            if !(ca.data.is_empty() || ca.rows <= 1 || ca.cols <= 1) {
+                return Err(mex(
+                    "UnsupportedCellGrowth",
+                    "Cell growth via linear brace assignment is only supported for vectors",
+                ));
+            }
+            while ca.data.len() < max_pos {
+                ca.data.push(allocate_empty_cell_handle()?);
+            }
+            let len = ca.data.len();
+            if old_len == 0 || ca.rows <= 1 {
+                ca.rows = 1;
+                ca.cols = len;
+                ca.shape = vec![1, len];
+            } else {
+                ca.rows = len;
+                ca.cols = 1;
+                ca.shape = vec![len, 1];
+            }
+        }
+    }
+    for (position, rhs) in positions.iter().zip(rhs_values.iter()) {
+        if *position == 0 || *position > ca.data.len() {
+            return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+        }
+        let pos = row_major_pos_from_linear(&ca, *position)?;
+        if let Some(oldv) = ca.data.get(pos) {
+            on_write(oldv, rhs);
+        }
+        ca.data[pos] = allocate_cell_handle(rhs.clone())?;
+    }
+    Ok(Value::Cell(ca))
+}
+
+pub fn resolve_cell_assignment_positions(
+    ca: &CellArray,
+    indices: &[Value],
+) -> Result<Vec<usize>, RuntimeError> {
+    if indices.len() != 1 {
+        return Err(mex("CellIndexType", "Unsupported cell index type"));
+    }
+    let _ = ca;
+    parse_cell_index_values_for_assignment(&indices[0])
 }
 
 pub fn delete_cell_linear(mut ca: CellArray, idx: usize) -> Result<Value, RuntimeError> {

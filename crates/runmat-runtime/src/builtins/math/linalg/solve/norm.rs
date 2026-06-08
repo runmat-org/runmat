@@ -176,7 +176,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "norm",
     category = "math/linalg/solve",
-    summary = "Vector and matrix norms with MATLAB semantics.",
+    summary = "Compute vector and matrix norms.",
     keywords = "norm,vector norm,matrix norm,frobenius,nuclear,gpu",
     accel = "reduction",
     type_resolver(numeric_scalar_type),

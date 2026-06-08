@@ -429,7 +429,7 @@ impl MaxEvaluation {
 #[runtime_builtin(
     name = "max",
     category = "math/reduction",
-    summary = "Return the maximum elements of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Return maximum elements along dimensions or pairwise comparisons.",
     keywords = "max,maximum,reduction,gpu,comparisonmethod,omitnan",
     accel = "reduction",
     type_resolver(max_type),

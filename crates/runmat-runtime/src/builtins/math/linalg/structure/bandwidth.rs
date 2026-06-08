@@ -167,7 +167,7 @@ enum BandSelector {
 #[runtime_builtin(
     name = "bandwidth",
     category = "math/linalg/structure",
-    summary = "Compute the lower and upper bandwidth of a matrix.",
+    summary = "Compute matrix lower and upper bandwidth.",
     keywords = "bandwidth,lower bandwidth,upper bandwidth,structure,gpu",
     accel = "structure",
     type_resolver(bandwidth_type),

@@ -168,7 +168,7 @@ fn pow2_error_with_detail(
 #[runtime_builtin(
     name = "pow2",
     category = "math/elementwise",
-    summary = "Compute 2.^X or scale mantissas by binary exponents.",
+    summary = "Compute powers of two or scale mantissas by exponents.",
     keywords = "pow2,ldexp,binary scaling,gpu",
     accel = "unary",
     type_resolver(numeric_binary_type),

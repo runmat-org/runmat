@@ -160,7 +160,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "transpose",
     category = "math/linalg/ops",
-    summary = "Swap the first two dimensions of arrays without conjugating complex values.",
+    summary = "Transpose arrays by swapping the first two dimensions without conjugation.",
     keywords = "transpose,swap rows and columns,non-conjugate",
     accel = "transpose",
     type_resolver(transpose_type),

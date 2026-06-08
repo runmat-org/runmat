@@ -3,6 +3,7 @@ use runmat_gc_api::GcPtr;
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
@@ -2081,6 +2082,40 @@ pub struct HandleRef {
     pub valid: bool,
 }
 
+const HANDLE_VALID_FLAG_PROPERTY: &str = "__runmat_handle_valid__";
+
+pub fn is_handle_valid(handle: &HandleRef) -> bool {
+    if !handle.valid {
+        return false;
+    }
+    let raw = unsafe { handle.target.as_raw() };
+    if raw.is_null() {
+        return false;
+    }
+    match unsafe { &*raw } {
+        Value::Object(obj) => !matches!(
+            obj.properties.get(HANDLE_VALID_FLAG_PROPERTY),
+            Some(Value::Bool(false))
+        ),
+        _ => true,
+    }
+}
+
+pub fn set_handle_valid(handle: &HandleRef, valid: bool) -> bool {
+    let raw = unsafe { handle.target.as_raw_mut() };
+    if raw.is_null() {
+        return false;
+    }
+    match unsafe { &mut *raw } {
+        Value::Object(obj) => {
+            obj.properties
+                .insert(HANDLE_VALID_FLAG_PROPERTY.to_string(), Value::Bool(valid));
+            true
+        }
+        _ => false,
+    }
+}
+
 impl PartialEq for HandleRef {
     fn eq(&self, other: &Self) -> bool {
         let a = unsafe { self.target.as_raw() } as usize;
@@ -2474,12 +2509,14 @@ impl ObjectInstance {
 pub enum Access {
     Public,
     Private,
+    Protected,
 }
 
 #[derive(Debug, Clone)]
 pub struct PropertyDef {
     pub name: String,
     pub is_static: bool,
+    pub is_constant: bool,
     pub is_dependent: bool,
     pub get_access: Access,
     pub set_access: Access,
@@ -2490,6 +2527,8 @@ pub struct PropertyDef {
 pub struct MethodDef {
     pub name: String,
     pub is_static: bool,
+    pub is_abstract: bool,
+    pub is_sealed: bool,
     pub access: Access,
     pub function_name: String, // bound runtime builtin/user func name
     pub implicit_class_argument: Option<String>,
@@ -2506,10 +2545,25 @@ pub struct ClassDef {
 use std::sync::Mutex;
 
 static CLASS_REGISTRY: OnceLock<Mutex<HashMap<String, ClassDef>>> = OnceLock::new();
+static SEALED_CLASS_REGISTRY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static ABSTRACT_CLASS_REGISTRY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static STATIC_VALUES: OnceLock<Mutex<HashMap<(String, String), Value>>> = OnceLock::new();
+static ENUMERATION_REGISTRY: OnceLock<Mutex<HashMap<String, HashSet<String>>>> = OnceLock::new();
 
 fn registry() -> &'static Mutex<HashMap<String, ClassDef>> {
     CLASS_REGISTRY.get_or_init(|| Mutex::new(primitive_class_registry()))
+}
+
+fn sealed_registry() -> &'static Mutex<HashSet<String>> {
+    SEALED_CLASS_REGISTRY.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn abstract_registry() -> &'static Mutex<HashSet<String>> {
+    ABSTRACT_CLASS_REGISTRY.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn enumeration_registry() -> &'static Mutex<HashMap<String, HashSet<String>>> {
+    ENUMERATION_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn primitive_class_registry() -> HashMap<String, ClassDef> {
@@ -2522,6 +2576,8 @@ fn primitive_class_registry() -> HashMap<String, ClassDef> {
                 MethodDef {
                     name: "zeros".to_string(),
                     is_static: true,
+                    is_abstract: false,
+                    is_sealed: false,
                     access: Access::Public,
                     function_name: "zeros".to_string(),
                     implicit_class_argument: Some(class_name.to_string()),
@@ -2541,12 +2597,86 @@ fn primitive_class_registry() -> HashMap<String, ClassDef> {
 }
 
 pub fn register_class(def: ClassDef) {
+    register_class_with_modifiers(def, false, false);
+}
+
+pub fn register_class_with_sealed(def: ClassDef, is_sealed: bool) {
+    register_class_with_modifiers(def, is_sealed, false);
+}
+
+pub fn register_class_with_modifiers(def: ClassDef, is_sealed: bool, is_abstract: bool) {
     let mut m = registry().lock().unwrap();
-    m.insert(def.name.clone(), def);
+    let class_name = def.name.clone();
+    m.insert(class_name.clone(), def);
+    let mut sealed = sealed_registry().lock().unwrap();
+    if is_sealed {
+        sealed.insert(class_name.clone());
+    } else {
+        sealed.remove(&class_name);
+    }
+    let mut abstract_classes = abstract_registry().lock().unwrap();
+    if is_abstract {
+        abstract_classes.insert(class_name.clone());
+    } else {
+        abstract_classes.remove(&class_name);
+    }
+    enumeration_registry()
+        .lock()
+        .unwrap()
+        .entry(class_name)
+        .or_default();
+}
+
+pub fn register_class_enumerations(class_name: &str, members: impl IntoIterator<Item = String>) {
+    let mut registry = enumeration_registry().lock().unwrap();
+    let entry = registry.entry(class_name.to_string()).or_default();
+    entry.clear();
+    entry.extend(members);
+}
+
+pub fn class_has_enumeration_member(class_name: &str, member: &str) -> bool {
+    enumeration_registry()
+        .lock()
+        .unwrap()
+        .get(class_name)
+        .is_some_and(|members| members.contains(member))
 }
 
 pub fn get_class(name: &str) -> Option<ClassDef> {
     registry().lock().unwrap().get(name).cloned()
+}
+
+pub fn class_names() -> Vec<String> {
+    registry().lock().unwrap().keys().cloned().collect()
+}
+
+pub fn is_class_sealed(name: &str) -> bool {
+    sealed_registry().lock().unwrap().contains(name)
+}
+
+pub fn is_class_abstract(name: &str) -> bool {
+    abstract_registry().lock().unwrap().contains(name)
+}
+
+pub fn is_class_or_subclass(class_name: &str, ancestor_name: &str) -> bool {
+    if class_name == ancestor_name {
+        return true;
+    }
+    let reg = registry().lock().unwrap();
+    let mut current = Some(class_name.to_string());
+    let mut visited = std::collections::HashSet::new();
+    while let Some(name) = current {
+        if !visited.insert(name.clone()) {
+            break;
+        }
+        if name == ancestor_name {
+            return true;
+        }
+        current = reg
+            .get(&name)
+            .and_then(|class_def| class_def.parent.clone());
+    }
+    false
 }
 
 /// Resolve a property through the inheritance chain, returning the property definition and
@@ -2676,6 +2806,8 @@ mod class_registry_tests {
             MethodDef {
                 name: "parentOnly".to_string(),
                 is_static: false,
+                is_abstract: false,
+                is_sealed: false,
                 access: Access::Public,
                 function_name: "parentOnly_impl".to_string(),
                 implicit_class_argument: None,
@@ -2735,6 +2867,7 @@ mod class_registry_tests {
             PropertyDef {
                 name: "parentFlag".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,

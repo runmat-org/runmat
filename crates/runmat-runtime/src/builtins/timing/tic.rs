@@ -114,7 +114,7 @@ fn stopwatch_error_with_message(
 #[runtime_builtin(
     name = "tic",
     category = "timing",
-    summary = "Start a stopwatch timer and optionally return a handle for toc.",
+    summary = "Start a high-resolution stopwatch and optionally return a toc handle.",
     keywords = "tic,timing,profiling,benchmark",
     sink = true,
     type_resolver(tic_type),

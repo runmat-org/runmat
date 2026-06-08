@@ -214,7 +214,7 @@ fn conv_error_with_source(
 #[runtime_builtin(
     name = "conv",
     category = "math/signal",
-    summary = "One-dimensional linear convolution with MATLAB-compatible padding.",
+    summary = "Compute one-dimensional linear convolution.",
     keywords = "conv,convolution,signal processing,gpu",
     accel = "custom",
     type_resolver(conv_type),

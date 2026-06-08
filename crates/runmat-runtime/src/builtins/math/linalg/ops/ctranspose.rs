@@ -163,7 +163,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "ctranspose",
     category = "math/linalg/ops",
-    summary = "Swap the first two dimensions of arrays and conjugate complex values.",
+    summary = "Conjugate-transpose arrays.",
     keywords = "ctranspose,conjugate transpose,hermitian,gpu",
     accel = "transpose",
     type_resolver(transpose_type),

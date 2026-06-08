@@ -141,7 +141,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "trace",
     category = "math/linalg/ops",
-    summary = "Sum the diagonal elements of matrices and matrix-like tensors.",
+    summary = "Sum main-diagonal elements of matrix and matrix-like inputs.",
     keywords = "trace,matrix trace,diagonal sum,gpu",
     accel = "reduction",
     type_resolver(numeric_scalar_type),

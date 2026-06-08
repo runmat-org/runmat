@@ -33,7 +33,7 @@ fn lower_expr_place(
     expr: &HirExpr,
     temps: &mut Vec<MirStmt>,
 ) -> Result<MirPlace, HirError> {
-    Ok(match &expr.kind {
+    let lowered = match &expr.kind {
         HirExprKind::Binding(binding) => MirPlace::Local(ctx.local_for_binding(*binding)?),
         HirExprKind::Member(base, member) => MirPlace::Member(
             Box::new(lower_expr_place(ctx, base, temps)?),
@@ -47,6 +47,13 @@ fn lower_expr_place(
             Box::new(lower_expr_place(ctx, base, temps)?),
             lower_indexing(ctx, indexing, temps)?,
         ),
-        _ => return Err(HirError::new("expression is not a simple MIR place")),
-    })
+        _ => {
+            let operand = lower_operand(ctx, expr, temps)?;
+            match operand {
+                crate::MirOperand::Local(local) => MirPlace::Local(local),
+                _ => return Err(HirError::new("expression is not a simple MIR place")),
+            }
+        }
+    };
+    Ok(lowered)
 }

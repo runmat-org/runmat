@@ -122,7 +122,7 @@ fn complex_error_with_detail(
 #[runtime_builtin(
     name = "complex",
     category = "math/elementwise",
-    summary = "Construct complex values from real and imaginary parts, or lift a real value into complex storage.",
+    summary = "Construct complex values from real and imaginary parts.",
     keywords = "complex,construct,imaginary,real,elementwise",
     type_resolver(complex_type),
     descriptor(crate::builtins::math::elementwise::complex::COMPLEX_DESCRIPTOR),

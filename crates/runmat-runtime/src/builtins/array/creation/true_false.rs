@@ -244,7 +244,7 @@ pub const FALSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "true",
     category = "array/creation",
-    summary = "Create logical arrays filled with true values.",
+    summary = "Create logical arrays filled with `true` values.",
     keywords = "true,logical,array",
     accel = "array_construct",
     descriptor(crate::builtins::array::creation::true_false::TRUE_DESCRIPTOR),

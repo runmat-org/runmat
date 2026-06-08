@@ -46,7 +46,7 @@ import { fileURLToPath } from "url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = findRepoRoot(scriptDir);
-const builtinsDir = join(repoRoot, "crates", "runmat-runtime", "src", "builtins", "builtins-json");
+const builtinsDir = join(repoRoot, "docs", "builtins", "reference");
 const outputDir = join(repoRoot, "scripts", "example-output-reports");
 const imageOutputDir = join(outputDir, "plot-example-images");
 const reportPath = join(outputDir, "example-output-report.html");

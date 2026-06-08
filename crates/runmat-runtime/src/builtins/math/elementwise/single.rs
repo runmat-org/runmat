@@ -187,7 +187,7 @@ fn conversion_error(type_name: &str) -> RuntimeError {
 #[runtime_builtin(
     name = "single",
     category = "math/elementwise",
-    summary = "Convert scalars, arrays, and gpuArray values to single precision.",
+    summary = "Convert values to single-precision (`float32`) representation.",
     keywords = "single,float32,cast,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

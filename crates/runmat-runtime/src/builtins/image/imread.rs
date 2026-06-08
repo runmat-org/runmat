@@ -323,7 +323,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "imread",
     category = "image/io",
-    summary = "Read an image from a file path or HTTP(S) URL into a MATLAB-compatible array.",
+    summary = "Read image files into arrays.",
     keywords = "imread,image,read,file,jpeg,jpg,png,bmp,gif,tiff,webp,url",
     accel = "sink",
     type_resolver(imread_type),

@@ -6,6 +6,7 @@
 pub mod arg_tokens;
 pub mod broadcast;
 pub mod concatenation;
+pub mod deal;
 pub mod elementwise;
 pub mod env;
 pub mod format;

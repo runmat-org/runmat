@@ -210,7 +210,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "ode45",
     category = "math/ode",
-    summary = "Solve nonstiff ODE systems with an adaptive Dormand-Prince 5(4) method.",
+    summary = "Solve nonstiff ODE systems using adaptive Dormand-Prince 5(4) integration.",
     keywords = "ode45,ode,nonstiff,dormand-prince,adaptive step",
     accel = "sink",
     type_resolver(ode_solution_type),

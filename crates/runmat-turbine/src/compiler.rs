@@ -1025,8 +1025,20 @@ impl BytecodeCompiler {
                     | Instr::DeclareGlobal(_)
                     | Instr::DeclarePersistent(_)
                     | Instr::CallFevalMulti(_, _)
+                    | Instr::CallFevalMultiUsingOutputSlot(_, _)
+                    | Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _)
                     | Instr::CreateSemanticFuture(_, _, _)
                     | Instr::CreateSemanticFutureExpandMultiOutput(_, _, _)
+                    | Instr::CallSuperConstructorMulti { .. }
+                    | Instr::CallSuperMethodMulti { .. }
+                    | Instr::CallSuperConstructorExpandMultiOutput { .. }
+                    | Instr::CallSuperMethodExpandMultiOutput { .. }
+                    | Instr::CallSemanticNestedFunctionMulti { .. }
+                    | Instr::CallBuiltinMultiUsingOutputSlot(_, _, _)
+                    | Instr::CallFunctionMultiUsingOutputSlot { .. }
+                    | Instr::CallSemanticFunctionMultiUsingOutputSlot(_, _, _)
+                    | Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { .. }
+                    | Instr::CallSemanticNestedFunctionExpandMultiOutput { .. }
                     | Instr::Spawn
                     | Instr::Await => {
                         return Err(execution_error(

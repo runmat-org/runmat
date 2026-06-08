@@ -129,7 +129,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "fullfile",
     category = "io/repl_fs",
-    summary = "Build a platform-correct file path from multiple path segments.",
+    summary = "Build platform-correct file paths from path segments.",
     keywords = "fullfile,join paths,filesystem,filesep,path assembly",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fullfile_type),

@@ -250,7 +250,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "histcounts",
     category = "stats/hist",
-    summary = "Count observations in numeric arrays using configurable histogram bins.",
+    summary = "Count observations in histogram bins.",
     keywords = "histcounts,histogram,binning,normalization,probability,cdf,gpu",
     accel = "reduction",
     sink = true,

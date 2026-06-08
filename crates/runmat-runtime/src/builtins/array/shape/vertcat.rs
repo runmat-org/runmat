@@ -252,7 +252,7 @@ pub const VERTCAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "vertcat",
     category = "array/shape",
-    summary = "Concatenate inputs vertically (dimension 1) just like MATLAB semicolons.",
+    summary = "Concatenate inputs vertically along the first dimension.",
     keywords = "vertcat,vertical concatenation,array,gpu",
     accel = "array_construct",
     type_resolver(vertcat_type),

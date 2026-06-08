@@ -72,7 +72,7 @@ fn format_error_with(
 #[runtime_builtin(
     name = "format",
     category = "io",
-    summary = "Set the numeric display format for console output (format short, format long, etc.).",
+    summary = "Set numeric display format for console output.",
     keywords = "format,display,precision,numeric,short,long,scientific",
     sink = true,
     suppress_auto_output = true,

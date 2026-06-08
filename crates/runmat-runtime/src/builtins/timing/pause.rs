@@ -188,7 +188,7 @@ enum PauseWait {
 #[runtime_builtin(
     name = "pause",
     category = "timing",
-    summary = "Suspend execution until a key press or specified duration.",
+    summary = "Pause execution until keypress or specified duration elapses.",
     keywords = "pause,sleep,wait,delay",
     accel = "metadata",
     sink = true,

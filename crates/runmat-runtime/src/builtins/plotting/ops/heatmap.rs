@@ -194,7 +194,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "heatmap",
     category = "plotting",
-    summary = "Create a MATLAB-compatible heatmap chart.",
+    summary = "Create heatmap charts.",
     keywords = "heatmap,plotting,chart,colormap,matrix visualization",
     sink = true,
     suppress_auto_output = true,

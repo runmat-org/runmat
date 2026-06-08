@@ -3,13 +3,17 @@ use crate::bytecode::program::Bytecode;
 use crate::interpreter::timing::InterpreterTiming;
 use crate::runtime::gc::InterpretContext;
 use crate::runtime::workspace::{
-    refresh_workspace_state, set_workspace_state, take_pending_workspace_state, WorkspaceStateGuard,
+    refresh_workspace_state, set_transient_workspace_state, set_workspace_state,
+    take_pending_workspace_state, WorkspaceStateGuard,
 };
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-pub fn prepare_workspace_guard(vars: &mut Vec<Value>) -> Option<WorkspaceStateGuard> {
+pub fn prepare_workspace_guard(
+    var_names: &HashMap<usize, String>,
+    vars: &mut Vec<Value>,
+) -> Option<WorkspaceStateGuard> {
     let pending_state = take_pending_workspace_state();
     let guard = pending_state.map(|(names, assigned)| {
         let filtered_assigned: HashSet<String> = assigned
@@ -18,8 +22,24 @@ pub fn prepare_workspace_guard(vars: &mut Vec<Value>) -> Option<WorkspaceStateGu
             .collect();
         set_workspace_state(names, filtered_assigned, vars)
     });
+    if guard.is_some() {
+        refresh_workspace_state(vars);
+        return guard;
+    }
+    if var_names.is_empty() {
+        return None;
+    }
+    let mut names = HashMap::new();
+    let mut assigned = HashSet::new();
+    for (slot, name) in var_names {
+        names.insert(name.clone(), *slot);
+        if *slot < vars.len() {
+            assigned.insert(name.clone());
+        }
+    }
+    let guard = set_transient_workspace_state(names, assigned, vars);
     refresh_workspace_state(vars);
-    guard
+    Some(guard)
 }
 
 pub fn create_gc_context(

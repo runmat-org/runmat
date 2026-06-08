@@ -138,7 +138,7 @@ fn hypot_error_with_detail(
 #[runtime_builtin(
     name = "hypot",
     category = "math/elementwise",
-    summary = "Element-wise Euclidean norm sqrt(x.^2 + y.^2) with MATLAB-compatible broadcasting.",
+    summary = "Compute element-wise Euclidean norms with hypot.",
     keywords = "hypot,euclidean norm,distance,gpu",
     accel = "binary",
     type_resolver(numeric_binary_type),

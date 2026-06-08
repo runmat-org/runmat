@@ -276,7 +276,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "copyfile",
     category = "io/repl_fs",
-    summary = "Copy files or folders with MATLAB-compatible status, diagnostic message, and message ID outputs.",
+    summary = "Copy files or folders.",
     keywords = "copyfile,copy file,copy folder,filesystem,status,message,messageid,force,overwrite",
     accel = "cpu",
     suppress_auto_output = true,

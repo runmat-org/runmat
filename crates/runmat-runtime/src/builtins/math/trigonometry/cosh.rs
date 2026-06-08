@@ -121,7 +121,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "cosh",
     category = "math/trigonometry",
-    summary = "Hyperbolic cosine of scalars, vectors, matrices, or N-D tensors (element-wise).",
+    summary = "Compute hyperbolic cosine element-wise.",
     keywords = "cosh,hyperbolic cosine,trigonometry,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

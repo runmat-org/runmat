@@ -229,7 +229,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "surf",
     category = "plotting",
-    summary = "Render a MATLAB-compatible surface plot.",
+    summary = "Create 3-D surface plots from grid or mesh data.",
     keywords = "surf,plotting,3d,surface",
     sink = true,
     suppress_auto_output = true,

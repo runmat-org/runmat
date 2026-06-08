@@ -325,7 +325,7 @@ enum CumprodNanMode {
 #[runtime_builtin(
     name = "cumprod",
     category = "math/reduction",
-    summary = "Cumulative product of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute cumulative products.",
     keywords = "cumprod,cumulative product,running product,reverse,omitnan,gpu",
     accel = "reduction",
     type_resolver(cumprod_type),

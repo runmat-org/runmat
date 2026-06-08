@@ -170,7 +170,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "pinv",
     category = "math/linalg/solve",
-    summary = "Compute the Moore–Penrose pseudoinverse of a matrix using SVD.",
+    summary = "Compute Moore-Penrose pseudoinverses using SVD-based tolerance rules.",
     keywords = "pinv,pseudoinverse,svd,least squares,gpu",
     accel = "pinv",
     type_resolver(pinv_type),

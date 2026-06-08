@@ -118,14 +118,14 @@ impl RunMatWasm {
     pub async fn execute_request_js(&self, request_value: JsValue) -> Result<JsValue, JsValue> {
         let request_payload: ExecuteRequestPayload = serde_wasm_bindgen::from_value(request_value)
             .map_err(|err| js_error(&format!("executeRequest payload parse failed: {err}")))?;
-        let source = match &request_payload.source {
+        let source_for_telemetry = match &request_payload.source {
             ExecuteRequestSourcePayload::Text { text, .. } => text.clone(),
             ExecuteRequestSourcePayload::Path { path } => path.clone(),
         };
         init_logging_once();
         let exec_span = info_span!(
             "runmat.execute",
-            source_len = source.len() as u64,
+            source_len = source_for_telemetry.len() as u64,
             disposed = self.disposed.get()
         );
         let _enter = exec_span.enter();
@@ -208,9 +208,9 @@ impl RunMatWasm {
                 count => runmat_hir::RequestedOutputCount::Exactly(count as usize),
             };
         }
-        let exec_result = session.execute_request(request).await;
+        let exec_response = session.execute_request(request).await;
         *self.session.borrow_mut() = session;
-        let payload = match exec_result {
+        let payload = match exec_response.result {
             Ok(outcome) => {
                 if !outcome.diagnostics.iter().any(|diagnostic| {
                     diagnostic.severity == runmat_core::abi::DiagnosticSeverity::Error
@@ -223,7 +223,7 @@ impl RunMatWasm {
                         }
                     }
                 }
-                ExecutionPayload::from_outcome(outcome, &source)
+                ExecutionPayload::from_outcome(outcome, &exec_response.source_context)
             }
             Err(err) => ExecutionPayload {
                 flow: serde_json::json!({ "kind": "no-value" }),
@@ -232,7 +232,11 @@ impl RunMatWasm {
                 type_info: None,
                 execution_time_ms: 0,
                 used_jit: false,
-                error: Some(run_error_payload(&err, &source)),
+                error: Some(run_error_payload(
+                    &err,
+                    Some(exec_response.source_context.source_name()),
+                    exec_response.source_context.source_text(),
+                )),
                 stdout: Vec::new(),
                 display_events: Vec::new(),
                 workspace: WorkspacePayload {
@@ -414,7 +418,7 @@ impl RunMatWasm {
         let mut session = self.session.borrow_mut();
         let snapshot = session
             .compile_fusion_plan(&source)
-            .map_err(|err| run_error_to_js(&err, &source))?;
+            .map_err(|err| run_error_to_js(&err, Some("<fusion_plan>"), Some(&source)))?;
         match snapshot {
             Some(plan) => serde_wasm_bindgen::to_value(&FusionPlanPayload::from(plan))
                 .map_err(|err| js_error(&format!("Failed to serialize fusion plan: {err}"))),

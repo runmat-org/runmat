@@ -182,7 +182,7 @@ fn filter2_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescripto
 #[runtime_builtin(
     name = "filter2",
     category = "image/filters",
-    summary = "Apply a 2-D correlation or convolution with MATLAB-compatible sizing.",
+    summary = "Apply 2-D correlation/convolution filters.",
     keywords = "filter2,correlation,convolution,image filtering,gpu",
     accel = "custom-imfilter",
     type_resolver(filter2_type),

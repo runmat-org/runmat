@@ -177,7 +177,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "dir",
     category = "io/repl_fs",
-    summary = "Return file and folder information in a MATLAB-compatible struct array.",
+    summary = "Return file and folder metadata.",
     keywords = "dir,list files,folder contents,metadata,wildcard,struct array",
     accel = "cpu",
     suppress_auto_output = true,

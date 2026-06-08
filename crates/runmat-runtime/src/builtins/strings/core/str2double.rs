@@ -125,7 +125,7 @@ fn remap_str2double_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "str2double",
     category = "strings/core",
-    summary = "Convert strings, character arrays, or cell arrays of text into doubles.",
+    summary = "Convert text representations of numbers into double-precision values.",
     keywords = "str2double,string to double,text conversion,gpu",
     accel = "sink",
     type_resolver(numeric_text_scalar_or_tensor_type),

@@ -370,7 +370,7 @@ pub fn spec_from_request(filter: &FspecialFilter) -> BuiltinResult<FspecialFilte
 #[runtime_builtin(
     name = "fspecial",
     category = "image/filters",
-    summary = "Generate classical 2-D correlation kernels used in MATLAB image processing workflows.",
+    summary = "Generate standard 2-D filter kernels.",
     keywords = "fspecial,filter,gaussian,sobel,motion,laplacian,disk",
     accel = "array_construct",
     type_resolver(fspecial_type),

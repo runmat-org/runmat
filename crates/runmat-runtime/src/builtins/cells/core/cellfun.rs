@@ -288,7 +288,7 @@ fn cellfun_error_with_message(
 #[runtime_builtin(
     name = "cellfun",
     category = "cells/core",
-    summary = "Apply a function to the contents of each cell array element.",
+    summary = "Apply a function to each cell element.",
     keywords = "cellfun,cell,array,functional",
     accel = "host",
     type_resolver(cellfun_type),

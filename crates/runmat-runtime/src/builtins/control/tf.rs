@@ -222,6 +222,7 @@ fn ensure_tf_class_registered() {
                 PropertyDef {
                     name: name.to_string(),
                     is_static: false,
+                    is_constant: false,
                     is_dependent: false,
                     get_access: Access::Public,
                     set_access: Access::Public,
@@ -243,7 +244,7 @@ fn ensure_tf_class_registered() {
 #[runtime_builtin(
     name = "tf",
     category = "control",
-    summary = "Create a SISO transfer-function object from numerator and denominator coefficient vectors.",
+    summary = "Create SISO transfer-function objects from numerator and denominator coefficients.",
     keywords = "tf,transfer function,control system,filter,polynomial",
     type_resolver(tf_type),
     descriptor(crate::builtins::control::tf::TF_DESCRIPTOR),
