@@ -1378,6 +1378,52 @@ fn narginchk_nargoutchk_validate_function_arity() {
 }
 
 #[test]
+fn dynamic_workspace_eval_mutates_and_reads_current_vm_workspace() {
+    let vars = execute_source(
+        r#"
+        eval('dyn_x = 41;');
+        dyn_y = eval('dyn_x + 1');
+    "#,
+    );
+    assert!(has_num(&vars, 41.0));
+    assert!(has_num(&vars, 42.0));
+}
+
+#[test]
+fn dynamic_workspace_evalin_caller_from_function_targets_vm_script_workspace() {
+    let vars = execute_source(
+        r#"
+        outer_x = 5;
+        y = helper();
+
+        function out = helper()
+            out = evalin('caller', 'outer_x + 2');
+            assignin('caller', 'caller_z', 11);
+        end
+    "#,
+    );
+    assert!(has_num(&vars, 7.0));
+    assert!(has_num(&vars, 11.0));
+}
+
+#[test]
+fn dynamic_workspace_invalid_selector_errors_are_catchable() {
+    let vars = execute_source(
+        r#"
+        try
+            evalin('workspace', '1');
+            err = "BAD";
+        catch e
+            err = e.identifier;
+        end
+    "#,
+    );
+    assert!(vars.iter().any(
+        |v| matches!(v, runmat_builtins::Value::String(s) if s == "RunMat:DynamicWorkspaceSelector")
+    ));
+}
+
+#[test]
 fn narginchk_reports_too_few_inputs() {
     let err = execute_source_result(
         r#"

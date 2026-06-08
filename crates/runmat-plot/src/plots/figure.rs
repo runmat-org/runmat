@@ -14,9 +14,8 @@ use glam::Vec4;
 use log::trace;
 use std::collections::HashMap;
 
-pub type AxisViewBounds = (f64, f64, f64, f64);
-pub type AxesViewBounds = Vec<Option<AxisViewBounds>>;
-pub type AxesViewBoundsSlice<'a> = &'a [Option<AxisViewBounds>];
+type ViewBounds2D = (f64, f64, f64, f64);
+type PerAxesViewBoundsRef<'a> = &'a [Option<ViewBounds2D>];
 
 /// A figure that can contain multiple overlaid plots
 #[derive(Debug, Clone)]
@@ -1143,7 +1142,7 @@ impl Figure {
         &mut self,
         viewport_px: Option<(u32, u32)>,
         axes_viewports_px: Option<&[(u32, u32)]>,
-        axes_view_bounds: Option<AxesViewBoundsSlice<'_>>,
+        axes_view_bounds: Option<PerAxesViewBoundsRef<'_>>,
         gpu: Option<&GpuPackContext<'_>>,
     ) -> Vec<(usize, RenderData)> {
         fn push_with_optional_markers(

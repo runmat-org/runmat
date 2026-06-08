@@ -1,7 +1,8 @@
 use runmat_lexer::Token;
 
 use crate::ast::{
-    FunctionArgDim, FunctionArgSizeSpec, FunctionArgValidationDecl, FunctionArgValidatorDecl,
+    Attr, FunctionArgDim, FunctionArgSizeSpec, FunctionArgValidationDecl, FunctionArgValidatorDecl,
+    FunctionArgumentsBlockKind,
 };
 use crate::{Expr, Stmt, SyntaxError};
 
@@ -384,8 +385,11 @@ impl Parser {
             || self.consume(&Token::Newline)
         {}
         let mut argument_validations = Vec::new();
-        if self.peek_token() == Some(&Token::Arguments) {
+        let mut argument_block_kinds = Vec::new();
+        while self.peek_token() == Some(&Token::Arguments) {
             self.pos += 1;
+            let attrs = self.parse_optional_attr_list();
+            argument_block_kinds.push(Self::function_arguments_block_kind(&attrs));
             // Parse simple MATLAB function arguments-block declarations.
             while let Some(token) = self.peek_token() {
                 if matches!(token, Token::End) {
@@ -416,11 +420,28 @@ impl Parser {
             params,
             outputs,
             argument_validations,
+            argument_block_kinds,
             body,
             isolated,
             is_async,
             span: self.span_from(start, end),
         })
+    }
+
+    fn function_arguments_block_kind(attrs: &[Attr]) -> FunctionArgumentsBlockKind {
+        match attrs {
+            [] => FunctionArgumentsBlockKind::Input,
+            [attr] if attr.value.is_none() && attr.name.eq_ignore_ascii_case("Input") => {
+                FunctionArgumentsBlockKind::Input
+            }
+            [attr] if attr.value.is_none() && attr.name.eq_ignore_ascii_case("Repeating") => {
+                FunctionArgumentsBlockKind::Repeating
+            }
+            [attr] if attr.value.is_none() && attr.name.eq_ignore_ascii_case("Output") => {
+                FunctionArgumentsBlockKind::Output
+            }
+            _ => FunctionArgumentsBlockKind::Unsupported(attrs.to_vec()),
+        }
     }
 
     fn parse_function_argument_validation_decl(
@@ -480,14 +501,29 @@ impl Parser {
 
         // Record unsupported trailing tokens on the same logical line.
         let mut has_unsupported_trailing = false;
+        let mut paren_depth = 0usize;
+        let mut brace_depth = 0usize;
+        let mut bracket_depth = 0usize;
         while let Some(token) = self.peek_token() {
-            if matches!(
-                token,
-                Token::Semicolon | Token::Comma | Token::Newline | Token::End
-            ) {
+            let at_top_level = paren_depth == 0 && brace_depth == 0 && bracket_depth == 0;
+            if at_top_level
+                && matches!(
+                    token,
+                    Token::Semicolon | Token::Comma | Token::Newline | Token::End
+                )
+            {
                 break;
             }
             has_unsupported_trailing = true;
+            match token {
+                Token::LParen => paren_depth += 1,
+                Token::RParen => paren_depth = paren_depth.saturating_sub(1),
+                Token::LBrace => brace_depth += 1,
+                Token::RBrace => brace_depth = brace_depth.saturating_sub(1),
+                Token::LBracket => bracket_depth += 1,
+                Token::RBracket => bracket_depth = bracket_depth.saturating_sub(1),
+                _ => {}
+            }
             self.pos += 1;
         }
 

@@ -33,8 +33,8 @@ fn assert_error_prefix(namespace: &str, code: &str) {
         session.workspace_handle(),
     );
 
-    let (identifier, message) = match futures::executor::block_on(session.execute_request(request))
-    {
+    let response = futures::executor::block_on(session.execute_request(request));
+    let (identifier, message) = match response.result {
         Ok(outcome) => {
             let diag = outcome
                 .diagnostics

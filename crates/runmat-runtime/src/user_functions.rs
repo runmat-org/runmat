@@ -58,6 +58,8 @@ runmat_thread_local! {
         const { RefCell::new(None) };
     static SOURCE_FUNCTION_CATALOG: RefCell<Option<Arc<Vec<SourceFunctionInfo>>>> =
         const { RefCell::new(None) };
+    static ACTIVE_SEMANTIC_FUNCTION_STACK: RefCell<Vec<usize>> =
+        const { RefCell::new(Vec::new()) };
 }
 
 pub struct FunctionInvokerGuard {
@@ -71,6 +73,8 @@ pub struct FunctionResolverGuard {
 pub struct SourceFunctionCatalogGuard {
     previous: Option<Arc<Vec<SourceFunctionInfo>>>,
 }
+
+pub struct ActiveSemanticFunctionGuard;
 
 impl Drop for FunctionInvokerGuard {
     fn drop(&mut self) {
@@ -99,6 +103,14 @@ impl Drop for SourceFunctionCatalogGuard {
     }
 }
 
+impl Drop for ActiveSemanticFunctionGuard {
+    fn drop(&mut self) {
+        ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| {
+            slot.borrow_mut().pop();
+        });
+    }
+}
+
 pub fn install_semantic_function_invoker(
     invoker: Option<Arc<FunctionInvoker>>,
 ) -> FunctionInvokerGuard {
@@ -123,12 +135,23 @@ pub fn install_source_function_catalog(
     SourceFunctionCatalogGuard { previous }
 }
 
+pub fn push_active_semantic_function(function: usize) -> ActiveSemanticFunctionGuard {
+    ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| {
+        slot.borrow_mut().push(function);
+    });
+    ActiveSemanticFunctionGuard
+}
+
 pub fn current_semantic_function_invoker() -> Option<Arc<FunctionInvoker>> {
     SEMANTIC_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
 }
 
 pub fn current_semantic_function_resolver() -> Option<Arc<FunctionResolver>> {
     SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone())
+}
+
+pub fn current_active_semantic_function() -> Option<usize> {
+    ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| slot.borrow().last().copied())
 }
 
 pub fn source_functions_for(source_id: SourceId) -> Vec<SourceFunctionInfo> {

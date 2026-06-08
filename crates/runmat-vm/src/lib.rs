@@ -23,6 +23,7 @@ pub use bytecode::{
 pub use bytecode::{
     FusionCandidateGroup, FusionInstructionKind, FusionInstructionWindow, FusionMetadata,
 };
+pub use call::builtins::set_dynamic_eval_options;
 pub use compiler::CompileError;
 pub use interpreter::api::{
     set_call_stack_limit, set_error_namespace, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,

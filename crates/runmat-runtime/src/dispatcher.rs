@@ -694,38 +694,57 @@ mod tests {
 
     #[test]
     fn constructor_fallback_defaults_when_constructor_is_private_or_unavailable() {
-        for (prefix, is_static, access) in [
-            ("runtime_ctor_private", true, Access::Private),
-            ("runtime_ctor_public_no_semantic", true, Access::Public),
-        ] {
-            let class_name = unique_class_name(prefix);
-            let mut methods = HashMap::new();
-            methods.insert(
-                class_name.clone(),
-                MethodDef {
-                    name: class_name.clone(),
-                    is_static,
-                    is_abstract: false,
-                    is_sealed: false,
-                    access: access.clone(),
-                    function_name: "Point.origin".to_string(),
-                    implicit_class_argument: None,
-                },
-            );
-            register_class(ClassDef {
-                name: class_name.clone(),
-                parent: None,
-                properties: HashMap::new(),
-                methods,
-            });
+        let private_class_name = unique_class_name("runtime_ctor_private");
+        let mut private_methods = HashMap::new();
+        private_methods.insert(
+            private_class_name.clone(),
+            MethodDef {
+                name: private_class_name.clone(),
+                is_static: true,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Private,
+                function_name: "Point.origin".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: private_class_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: private_methods,
+        });
+        let err = call_builtin(&private_class_name, &[])
+            .expect_err("private constructor should enforce access before default fallback");
+        assert_eq!(err.identifier(), Some("RunMat:MethodPrivate"));
 
-            let out = call_builtin(&class_name, &[])
-                .expect("fallback should default-construct when ctor metadata is not invokable");
-            let Value::Object(obj) = out else {
-                panic!("expected object result");
-            };
-            assert_eq!(obj.class_name, class_name);
-        }
+        let public_class_name = unique_class_name("runtime_ctor_public_no_semantic");
+        let mut public_methods = HashMap::new();
+        public_methods.insert(
+            public_class_name.clone(),
+            MethodDef {
+                name: public_class_name.clone(),
+                is_static: true,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: "Point.origin".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: public_class_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: public_methods,
+        });
+
+        let out = call_builtin(&public_class_name, &[])
+            .expect("public ctor metadata without semantic body should default-construct");
+        let Value::Object(obj) = out else {
+            panic!("expected object result");
+        };
+        assert_eq!(obj.class_name, public_class_name);
     }
 
     #[test]

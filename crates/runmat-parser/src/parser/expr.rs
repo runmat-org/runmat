@@ -278,11 +278,11 @@ impl Parser {
                             position: token.position,
                             found_token: Some(token.lexeme),
                             expected: Some("identifier".to_string()),
-                        })
+                        });
                     }
                     _ => {
                         return Err(self
-                            .error_with_expected("expected member name after '.'", "identifier"))
+                            .error_with_expected("expected member name after '.'", "identifier"));
                     }
                 };
                 if self.consume(&Token::LParen) {

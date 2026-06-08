@@ -47,7 +47,8 @@ pub fn execute_text_request_for_testing(
         abi::HostExecutionPolicy::default(),
         session.workspace_handle(),
     );
-    let outcome = futures::executor::block_on(session.execute_request(request))?;
+    let response = futures::executor::block_on(session.execute_request(request));
+    let outcome = response.result?;
     let workspace = session.workspace_snapshot();
     let warnings = outcome
         .diagnostics

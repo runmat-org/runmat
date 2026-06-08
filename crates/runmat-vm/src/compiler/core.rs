@@ -1354,7 +1354,7 @@ impl Compiler {
             _ => {
                 return Err(self
                     .compile_error("MIR multi-assign call output count does not match targets")
-                    .with_identifier(IDENT_MIR_MULTI_ASSIGN_OUTPUT_COUNT_MISMATCH))
+                    .with_identifier(IDENT_MIR_MULTI_ASSIGN_OUTPUT_COUNT_MISMATCH));
             }
         }
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
@@ -2091,7 +2091,7 @@ impl Compiler {
                     _ => {
                         return Err(self
                             .compile_error(format!("operator {op:?} is not a MIR unary operator"))
-                            .with_identifier(IDENT_MIR_OPERATOR_UNSUPPORTED))
+                            .with_identifier(IDENT_MIR_OPERATOR_UNSUPPORTED));
                     }
                 };
                 Ok(())
@@ -2132,7 +2132,7 @@ impl Compiler {
                             .compile_error(format!(
                                 "operator {op:?} is not supported in primary MIR lowering yet"
                             ))
-                            .with_identifier(IDENT_MIR_OPERATOR_UNSUPPORTED))
+                            .with_identifier(IDENT_MIR_OPERATOR_UNSUPPORTED));
                     }
                 };
                 Ok(())
@@ -3544,7 +3544,7 @@ impl Compiler {
                     _ => {
                         return Err(self.compile_error(format!(
                             "constant {name} is not supported in primary MIR lowering yet"
-                        )))
+                        )));
                     }
                 };
                 Ok(())
@@ -3692,6 +3692,27 @@ impl Compiler {
     ) -> Option<(FunctionId, Vec<crate::layout::VmCaptureSlot>, String)> {
         let layout = self.layout.as_ref()?;
         let current_function = self.function;
+        if let Some(current) = current_function {
+            let owner_scope = layout
+                .functions
+                .get(&current)
+                .map(|function| function.private_owner_scope.as_str())
+                .unwrap_or_default();
+            if !owner_scope.is_empty() && !name.contains('.') {
+                let scoped_name = format!("{owner_scope}.__private__.{name}");
+                if let Some((function, function_layout)) = layout
+                    .functions
+                    .iter()
+                    .find(|(_, function_layout)| function_layout.display_name == scoped_name)
+                {
+                    return Some((
+                        *function,
+                        function_layout.captures.clone(),
+                        function_layout.display_name.clone(),
+                    ));
+                }
+            }
+        }
         let mut ids: Vec<_> = layout.functions.keys().copied().collect();
         ids.sort_by_key(|id| id.0);
         ids.into_iter().find_map(|function| {

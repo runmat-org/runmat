@@ -232,7 +232,7 @@ const SETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS: BuiltinErrorDescriptor = BuiltinEr
 const SETFIELD_ERROR_PROPERTY_STATIC_ACCESS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SETFIELD.PROPERTY_STATIC_ACCESS",
     identifier: Some("RunMat:PropertyStaticAccess"),
-    when: "Property exists but is static and cannot be assigned through an object instance.",
+    when: "Property exists but is static and cannot be assigned through an instance.",
     message: "setfield: static property access denied",
 };
 

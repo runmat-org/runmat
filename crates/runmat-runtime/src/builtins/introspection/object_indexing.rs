@@ -42,20 +42,22 @@ const SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDes
     outputs: &SUBSREF_OUTPUT,
 }];
 
-const SUBSREF_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    BuiltinErrorDescriptor {
-        code: "RM.SUBSREF.RECEIVER_INVALID",
-        identifier: Some("RunMat:InvalidObjectDispatch"),
-        when: "Receiver is not an object or handle object.",
-        message: "subsref: requires object receiver",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.SUBSREF.METHOD_MISSING",
-        identifier: Some("RunMat:MissingSubsref"),
-        when: "Target class does not implement subsref.",
-        message: "subsref: class does not define subsref for indexing operation",
-    },
-];
+const SUBSREF_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUBSREF.RECEIVER_INVALID",
+    identifier: Some("RunMat:InvalidObjectDispatch"),
+    when: "Receiver is not an object or handle object.",
+    message: "subsref: requires object receiver",
+};
+
+const SUBSREF_ERROR_METHOD_MISSING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUBSREF.METHOD_MISSING",
+    identifier: Some("RunMat:MissingSubsref"),
+    when: "Target class does not implement subsref.",
+    message: "subsref: class does not define subsref for indexing operation",
+};
+
+const SUBSREF_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [SUBSREF_ERROR_RECEIVER_INVALID, SUBSREF_ERROR_METHOD_MISSING];
 
 pub const SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SUBSREF_SIGNATURES,
@@ -109,19 +111,23 @@ const SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDe
     outputs: &SUBSASGN_OUTPUT,
 }];
 
+const SUBSASGN_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUBSASGN.RECEIVER_INVALID",
+    identifier: Some("RunMat:InvalidObjectDispatch"),
+    when: "Receiver is not an object or handle object.",
+    message: "subsasgn: requires object receiver",
+};
+
+const SUBSASGN_ERROR_METHOD_MISSING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUBSASGN.METHOD_MISSING",
+    identifier: Some("RunMat:MissingSubsasgn"),
+    when: "Target class does not implement subsasgn.",
+    message: "subsasgn: class does not define subsasgn for indexed assignment",
+};
+
 const SUBSASGN_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    BuiltinErrorDescriptor {
-        code: "RM.SUBSASGN.RECEIVER_INVALID",
-        identifier: Some("RunMat:InvalidObjectDispatch"),
-        when: "Receiver is not an object or handle object.",
-        message: "subsasgn: requires object receiver",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.SUBSASGN.METHOD_MISSING",
-        identifier: Some("RunMat:MissingSubsasgn"),
-        when: "Target class does not implement subsasgn.",
-        message: "subsasgn: class does not define subsasgn for indexed assignment",
-    },
+    SUBSASGN_ERROR_RECEIVER_INVALID,
+    SUBSASGN_ERROR_METHOD_MISSING,
 ];
 
 pub const SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -138,8 +144,9 @@ pub(crate) async fn dispatch_subsref(
 ) -> crate::BuiltinResult<Value> {
     match obj {
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
-            let class_name = crate::object_receiver_class_name(&receiver)
-                .ok_or_else(|| crate::runtime_descriptor_error("subsref", &SUBSREF_ERRORS[0]))?;
+            let class_name = crate::object_receiver_class_name(&receiver).ok_or_else(|| {
+                crate::runtime_descriptor_error("subsref", &SUBSREF_ERROR_RECEIVER_INVALID)
+            })?;
             let dispatch_receiver = receiver.clone();
             let dispatch_kind = kind.clone();
             let dispatch_payload = payload.clone();
@@ -174,7 +181,7 @@ pub(crate) async fn dispatch_subsref(
                     }
                     Err(crate::runtime_descriptor_error(
                         "subsref",
-                        &SUBSREF_ERRORS[1],
+                        &SUBSREF_ERROR_METHOD_MISSING,
                     ))
                 }
                 Err(err) => Err(err),
@@ -182,7 +189,7 @@ pub(crate) async fn dispatch_subsref(
         }
         other => Err(crate::runtime_descriptor_error_with_detail(
             "subsref",
-            &SUBSREF_ERRORS[0],
+            &SUBSREF_ERROR_RECEIVER_INVALID,
             format!("receiver must be object, got {other:?}"),
         )),
     }
@@ -196,8 +203,9 @@ pub(crate) async fn dispatch_subsasgn(
 ) -> crate::BuiltinResult<Value> {
     match obj {
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
-            let class_name = crate::object_receiver_class_name(&receiver)
-                .ok_or_else(|| crate::runtime_descriptor_error("subsasgn", &SUBSASGN_ERRORS[0]))?;
+            let class_name = crate::object_receiver_class_name(&receiver).ok_or_else(|| {
+                crate::runtime_descriptor_error("subsasgn", &SUBSASGN_ERROR_RECEIVER_INVALID)
+            })?;
             let dispatch_receiver = receiver.clone();
             let dispatch_kind = kind.clone();
             let dispatch_payload = payload.clone();
@@ -234,7 +242,7 @@ pub(crate) async fn dispatch_subsasgn(
                     }
                     Err(crate::runtime_descriptor_error(
                         "subsasgn",
-                        &SUBSASGN_ERRORS[1],
+                        &SUBSASGN_ERROR_METHOD_MISSING,
                     ))
                 }
                 Err(err) => Err(err),
@@ -242,7 +250,7 @@ pub(crate) async fn dispatch_subsasgn(
         }
         other => Err(crate::runtime_descriptor_error_with_detail(
             "subsasgn",
-            &SUBSASGN_ERRORS[0],
+            &SUBSASGN_ERROR_RECEIVER_INVALID,
             format!("receiver must be object, got {other:?}"),
         )),
     }

@@ -44,12 +44,9 @@ runmat_thread_local::runmat_thread_local! {
     static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
 }
 
-fn sync_initial_vars(initial: &mut [Value], vars: &[Value]) {
-    for (i, var) in vars.iter().enumerate() {
-        if i < initial.len() {
-            initial[i] = var.clone();
-        }
-    }
+fn sync_initial_vars(initial: &mut Vec<Value>, vars: &[Value]) {
+    initial.clear();
+    initial.extend_from_slice(vars);
 }
 
 fn ensure_workspace_resolver_registered() {
@@ -220,10 +217,13 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
         }
     }
 
+    let _active_semantic_function_guard =
+        user_functions::push_active_semantic_function(function_id.0);
     let mut bytecode = Bytecode::with_instructions(func.instructions.clone(), func.var_count);
     bytecode.instr_spans = func.instr_spans.clone();
     bytecode.call_arg_spans = func.call_arg_spans.clone();
     bytecode.source_id = func.source_id;
+    bytecode.var_names = func.var_names.clone();
     bytecode.bound_functions = function_registry.functions.clone();
     bytecode.function_registry = function_registry.clone();
     let result_vars = interpret_function_with_counts(
@@ -820,7 +820,7 @@ fn clear_semantic_function_temp_residency(result_vars: &[Value], output_values: 
 
 pub async fn interpret_with_vars(
     bytecode: &Bytecode,
-    initial_vars: &mut [Value],
+    initial_vars: &mut Vec<Value>,
     current_function_name: Option<&str>,
 ) -> VmResult<InterpreterOutcome> {
     let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
@@ -842,7 +842,7 @@ pub async fn interpret_with_vars(
 
 async fn run_interpreter(
     state: Box<InterpreterState>,
-    initial_vars: &mut [Value],
+    initial_vars: &mut Vec<Value>,
 ) -> VmResult<InterpreterOutcome> {
     let state = *state;
     Box::pin(run_interpreter_inner(state, initial_vars)).await
@@ -850,7 +850,7 @@ async fn run_interpreter(
 
 async fn run_interpreter_inner(
     state: InterpreterState,
-    initial_vars: &mut [Value],
+    initial_vars: &mut Vec<Value>,
 ) -> VmResult<InterpreterOutcome> {
     let run_span = info_span!(
         "interpreter.run",
@@ -920,6 +920,17 @@ async fn run_interpreter_inner(
     let registry_for_function_resolver = Arc::clone(&function_registry);
     let _semantic_resolver_guard =
         user_functions::install_semantic_function_resolver(Some(Arc::new(move |name: &str| {
+            if let Some(active_function) = user_functions::current_active_semantic_function() {
+                if let Some(function) =
+                    registry_for_function_resolver.get(runmat_hir::FunctionId(active_function))
+                {
+                    if let Some(scoped_function) = registry_for_function_resolver
+                        .resolve_name_in_private_scope(&function.private_owner_scope, name)
+                    {
+                        return Some(scoped_function.0);
+                    }
+                }
+            }
             if let Some(function) = registry_for_function_resolver.resolve_name(name) {
                 return Some(function.0);
             }
@@ -946,7 +957,7 @@ async fn run_interpreter_inner(
     CALL_COUNTS.with(|cc| {
         *cc.borrow_mut() = call_counts.clone();
     });
-    let _workspace_guard = interp_engine::prepare_workspace_guard(&mut vars);
+    let _workspace_guard = interp_engine::prepare_workspace_guard(&bytecode.var_names, &mut vars);
     let thread_roots: Vec<Value> = runtime_globals::collect_thread_roots();
     let mut _gc_context = interp_engine::create_gc_context(&stack, &vars, thread_roots)?;
     let debug_stack = interp_engine::debug_stack_enabled();
@@ -1118,7 +1129,7 @@ async fn run_interpreter_inner(
         if let Some(decision) = dispatch_result {
             match decision {
                 interp_dispatch::DispatchHandled::Generic(DispatchDecision::ContinueLoop) => {
-                    continue
+                    continue;
                 }
                 interp_dispatch::DispatchHandled::Generic(DispatchDecision::FallThrough) => {
                     pc += 1;
@@ -1130,7 +1141,7 @@ async fn run_interpreter_inner(
                 }
                 interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::ContinueLoop)
                 | interp_dispatch::DispatchHandled::Return(DispatchDecision::ContinueLoop) => {
-                    continue
+                    continue;
                 }
                 interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::Return) => {
                     interpreter_timing.flush_host_span("return_value", None);
@@ -1369,6 +1380,7 @@ mod tests {
         CellArray, Closure, HandleRef, ObjectInstance, StructValue, Tensor, Value,
     };
     use runmat_hir::FunctionId;
+    use std::collections::HashMap;
     use std::sync::{atomic::AtomicBool, Arc};
     #[cfg(feature = "native-accel")]
     use {
@@ -1397,6 +1409,7 @@ mod tests {
         FunctionBytecode {
             function: FunctionId(0),
             display_name: "f".into(),
+            private_owner_scope: String::new(),
             source_id: None,
             instructions: vec![Instr::Return],
             instr_spans: Vec::new(),
@@ -1409,6 +1422,7 @@ mod tests {
             varargout_slot,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            var_names: HashMap::new(),
             argument_validations: Vec::new(),
         }
     }
@@ -2311,8 +2325,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn store_local_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_other_local(
-    ) {
+    fn store_local_overwrite_preserves_nested_handle_object_provider_alias() {
         use runmat_accelerate::fusion_residency;
 
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
@@ -2840,8 +2853,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn spawn_await_completion_preserves_nested_handle_object_target_handle_when_alias_live_in_locals(
-    ) {
+    fn spawn_await_preserves_nested_handle_object_target_alias() {
         use runmat_accelerate::fusion_residency;
 
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));

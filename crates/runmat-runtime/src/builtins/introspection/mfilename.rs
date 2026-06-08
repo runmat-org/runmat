@@ -88,7 +88,30 @@ fn path_without_extension(name: &str) -> String {
     }
     let mut path = Path::new(name).to_path_buf();
     path.set_extension("");
-    path.to_string_lossy().to_string()
+    path_to_display_string(&path)
+}
+
+fn path_to_display_string(path: &Path) -> String {
+    let text = path.to_string_lossy().to_string();
+    #[cfg(windows)]
+    {
+        strip_windows_verbatim_prefix(&text)
+    }
+    #[cfg(not(windows))]
+    {
+        text
+    }
+}
+
+#[cfg(windows)]
+fn strip_windows_verbatim_prefix(path: &str) -> String {
+    if let Some(stripped) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{stripped}")
+    } else if let Some(stripped) = path.strip_prefix(r"\\?\") {
+        stripped.to_string()
+    } else {
+        path.to_string()
+    }
 }
 
 fn file_stem_without_extension(name: &str) -> String {

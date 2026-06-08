@@ -244,11 +244,17 @@ fn test_script_execution_with_run_command() {
 
 #[test]
 fn test_nonexistent_script() {
-    let output = run_runmat(&["run", "/nonexistent/script.m"]);
+    let temp_dir = TempDir::new().unwrap();
+    let script_path = temp_dir.path().join("nonexistent.m");
+
+    let output = run_runmat(&["run", script_path.to_str().unwrap()]);
     assert!(!output.status.success());
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Failed to read") || stderr.contains("No such file"));
+    assert!(
+        stderr.contains("RunMat:SourceReadFailed") || stderr.contains("failed to read source path"),
+        "stderr did not include a source read failure:\n{stderr}"
+    );
 }
 
 #[test]

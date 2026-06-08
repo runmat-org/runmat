@@ -101,6 +101,7 @@ pub struct RunMatSession {
     emit_fusion_plan: bool,
     compat_mode: CompatMode,
     top_level_await_enabled: bool,
+    dynamic_eval_enabled: bool,
     /// Persisted numeric display format for this session (survives across executions).
     format_mode: runmat_builtins::FormatMode,
     /// Preloaded companion statements discovered asynchronously by the request path.

@@ -6,7 +6,7 @@
 
 use crate::core::renderer::Vertex;
 use crate::core::{BoundingBox, Camera, ClipPolicy, DepthMode, Scene, WgpuRenderer};
-use crate::plots::figure::{AxesViewBounds, AxisViewBounds, LegendEntry, TextStyle};
+use crate::plots::figure::{LegendEntry, TextStyle};
 use crate::plots::surface::ColorMap;
 use crate::plots::Figure;
 use glam::{Mat4, Vec3, Vec4};
@@ -14,6 +14,9 @@ use runmat_time::Instant;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+type ViewBounds2D = (f64, f64, f64, f64);
+type PerAxesViewBounds = Vec<Option<ViewBounds2D>>;
 
 #[derive(Clone, Debug)]
 struct CachedSceneBuffers {
@@ -94,7 +97,7 @@ pub struct PlotRenderer {
     /// Last per-axes plot viewport sizes used to build viewport-dependent geometry.
     last_axes_plot_sizes_px: Option<Vec<(u32, u32)>>,
     /// Last per-axes orthographic view bounds used for viewport-dependent 2D stroke geometry.
-    last_axes_view_bounds: Option<AxesViewBounds>,
+    last_axes_view_bounds: Option<PerAxesViewBounds>,
     /// Last figure view contract used to decide whether script-owned axes state changed.
     last_axes_view_contract: Option<AxesViewContract>,
 
@@ -388,6 +391,22 @@ impl PlotRenderer {
         }
     }
 
+    pub fn set_axes_camera_interaction_flags(&mut self, flags: &[bool]) {
+        self.axes_2d_camera_user_controlled
+            .resize(self.axes_cameras.len(), false);
+        let mut any_user_controlled = false;
+        for idx in 0..self.axes_cameras.len() {
+            let controlled = flags.get(idx).copied().unwrap_or(false);
+            if let Some(flag) = self.axes_2d_camera_user_controlled.get_mut(idx) {
+                *flag = controlled;
+            }
+            any_user_controlled |= controlled;
+        }
+        if any_user_controlled {
+            self.note_camera_interaction();
+        }
+    }
+
     fn clear_axes_camera_interaction(&mut self, axes_index: usize) {
         if let Some(flag) = self.axes_2d_camera_user_controlled.get_mut(axes_index) {
             *flag = false;
@@ -597,7 +616,7 @@ impl PlotRenderer {
         self.needs_update = true;
     }
 
-    fn axes_view_bounds_for_count(&self, axes_count: usize) -> AxesViewBounds {
+    fn axes_view_bounds_for_count(&self, axes_count: usize) -> PerAxesViewBounds {
         (0..axes_count)
             .map(|idx| self.view_bounds_for_axes(idx))
             .collect()
@@ -752,7 +771,7 @@ impl PlotRenderer {
         }
     }
 
-    fn display_bounds_for_axes(&self, axes_index: usize) -> Option<AxisViewBounds> {
+    fn display_bounds_for_axes(&self, axes_index: usize) -> Option<(f64, f64, f64, f64)> {
         let base = self.axes_bounds(axes_index)?;
         let mut x_min = base.min.x as f64;
         let mut x_max = base.max.x as f64;
@@ -1014,7 +1033,7 @@ impl PlotRenderer {
                 .unwrap_or_else(|| self.axes_cameras[idx].target)
             })
             .collect();
-        let display_bounds: Vec<Option<(f64, f64, f64, f64)>> = (0..self.axes_cameras.len())
+        let display_bounds: PerAxesViewBounds = (0..self.axes_cameras.len())
             .map(|idx| self.display_bounds_for_axes(idx))
             .collect();
         for (idx, c) in self.axes_cameras.iter_mut().enumerate() {

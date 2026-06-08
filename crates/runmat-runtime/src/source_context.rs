@@ -88,6 +88,18 @@ pub fn replace_source_catalog(entries: Vec<(SourceId, String, String)>) -> Sourc
     SourceCatalogGuard { prev }
 }
 
+pub fn source_catalog_entries() -> Vec<(SourceId, String, String)> {
+    SOURCE_CATALOG.with(|catalog| {
+        catalog
+            .borrow()
+            .iter()
+            .map(|(source_id, source)| {
+                (*source_id, source.name.to_string(), source.text.to_string())
+            })
+            .collect()
+    })
+}
+
 pub fn current_source() -> Option<Arc<str>> {
     CURRENT_SOURCE.with(|slot| {
         slot.borrow()

@@ -613,11 +613,21 @@ mod tests {
 
     fn unique_temp_path(stem: &str) -> PathBuf {
         let mut path = std::env::temp_dir();
+        let thread = std::thread::current();
+        let thread_name = thread.name().unwrap_or("thread");
+        let safe_thread_name: String = thread_name
+            .chars()
+            .map(|ch| match ch {
+                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+                ch if ch.is_control() => '_',
+                ch => ch,
+            })
+            .collect();
         path.push(format!(
             "runmat_print_test_{}_{}_{}",
             stem,
             std::process::id(),
-            std::thread::current().name().unwrap_or("thread")
+            safe_thread_name
         ));
         path
     }

@@ -788,6 +788,7 @@ fn compile_semantic_functions(
             FunctionBytecode {
                 function: function.id,
                 display_name: function_layout.display_name.clone(),
+                private_owner_scope: function_layout.private_owner_scope.clone(),
                 source_id,
                 instructions: compiler.instructions,
                 instr_spans: compiler.instr_spans,
@@ -819,6 +820,7 @@ fn compile_semantic_functions(
                     .iter()
                     .map(|capture| capture.slot.0)
                     .collect(),
+                var_names: function_layout_var_names(hir, function_layout)?,
                 argument_validations: function
                     .argument_validations
                     .iter()
@@ -926,6 +928,20 @@ fn compile_semantic_functions(
         );
     }
     Ok(functions)
+}
+
+fn function_layout_var_names(
+    hir: &HirAssembly,
+    function_layout: &crate::layout::VmFunctionLayout,
+) -> Result<HashMap<usize, String>, CompileError> {
+    let mut names = HashMap::new();
+    for (binding, slot) in &function_layout.binding_slots {
+        let hir_binding = hir.bindings.get(binding.0).ok_or_else(|| {
+            CompileError::new(format!("missing HIR binding for VM slot {:?}", binding))
+        })?;
+        names.insert(slot.0, hir_binding.name.0.clone());
+    }
+    Ok(names)
 }
 
 #[cfg(test)]
@@ -1382,10 +1398,7 @@ mod tests {
             "non-entrypoint helper MIR bodies should not drive entrypoint fusion signal metadata"
         );
         assert_eq!(
-            bytecode
-                .fusion_metadata
-                .mir_fusion_candidate_group_count,
-            0,
+            bytecode.fusion_metadata.mir_fusion_candidate_group_count, 0,
             "non-entrypoint helper MIR bodies should not drive entrypoint fusion candidate metadata"
         );
         assert!(
@@ -1507,7 +1520,11 @@ mod tests {
         ];
 
         assert!(
-            !super::fusion_group_within_semantic_candidate_spans(&group, &instr_spans, &split_candidates),
+            !super::fusion_group_within_semantic_candidate_spans(
+                &group,
+                &instr_spans,
+                &split_candidates
+            ),
             "expected rejection when bytecode group coverage requires unioning multiple semantic candidate spans"
         );
     }
@@ -2573,8 +2590,7 @@ mod tests {
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
 
         assert_eq!(
-            bytecode.async_metadata.mir_spawn_site_count,
-            0,
+            bytecode.async_metadata.mir_spawn_site_count, 0,
             "spawn sites in non-entrypoint helper bodies should not be attributed to the entrypoint bytecode artifact"
         );
         assert!(
@@ -2637,8 +2653,7 @@ mod tests {
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
 
         assert_eq!(
-            bytecode.async_metadata.mir_await_site_count,
-            0,
+            bytecode.async_metadata.mir_await_site_count, 0,
             "await sites in non-entrypoint helper bodies should not be attributed to the entrypoint bytecode artifact"
         );
         assert!(
@@ -6549,8 +6564,7 @@ mod tests {
 
     #[test]
     fn compile_lowers_async_expansion_call_to_future_expand_instruction() {
-        let source =
-            "async function y = inc(x); y = x + 1; end; args = {2}; t = inc(args{:}); z = await(t);";
+        let source = "async function y = inc(x); y = x + 1; end; args = {2}; t = inc(args{:}); z = await(t);";
         let ast = runmat_parser::parse(source).expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -6558,13 +6572,10 @@ mod tests {
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
         assert!(
-            bytecode
-                .instructions
-                .iter()
-                .any(|instr| matches!(
-                    instr,
-                    Instr::CreateSemanticFutureExpandMultiOutput(FunctionId(_), _, 1)
-                )),
+            bytecode.instructions.iter().any(|instr| matches!(
+                instr,
+                Instr::CreateSemanticFutureExpandMultiOutput(FunctionId(_), _, 1)
+            )),
             "expected async expansion call lowering to create a semantic future expansion descriptor"
         );
         let layout = bytecode.layout.as_ref().expect("layout");

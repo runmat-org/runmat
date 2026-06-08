@@ -1,7 +1,8 @@
 //! Image export (PNG and raw RGBA).
 //!
 //! This module renders with the native GPU surface path first and falls back to
-//! a CPU raster path only when headless GPU initialization is unavailable.
+//! a CPU raster path when headless GPU initialization is unavailable or the
+//! platform graphics stack panics during setup.
 
 use crate::core::Camera;
 use crate::plots::Figure;

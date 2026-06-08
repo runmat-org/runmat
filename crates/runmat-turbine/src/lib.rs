@@ -663,7 +663,7 @@ impl TurbineEngine {
     pub fn execute_or_compile(
         &mut self,
         bytecode: &Bytecode,
-        vars: &mut [Value],
+        vars: &mut Vec<Value>,
     ) -> Result<(i32, bool)> {
         let hash = self.calculate_bytecode_hash(bytecode);
         let _span = info_span!(
@@ -676,7 +676,11 @@ impl TurbineEngine {
 
         // If function is compiled, execute it with function definitions
         if self.cache.contains(hash) {
-            match self.execute_compiled_with_function_products(hash, vars, &function_registry) {
+            match self.execute_compiled_with_function_products(
+                hash,
+                vars.as_mut_slice(),
+                &function_registry,
+            ) {
                 Ok(result) => return Ok((result, true)),
                 Err(err) => {
                     warn!(
@@ -693,7 +697,7 @@ impl TurbineEngine {
                     info!("Bytecode compiled successfully, executing JIT version");
                     match self.execute_compiled_with_function_products(
                         hash,
-                        vars,
+                        vars.as_mut_slice(),
                         &function_registry,
                     ) {
                         Ok(result) => return Ok((result, true)),
@@ -1982,7 +1986,7 @@ mod tests {
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
-            argument_validations: Vec::new(),
+            ..FunctionBytecode::default()
         }
     }
 

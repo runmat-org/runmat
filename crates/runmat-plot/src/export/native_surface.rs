@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{any::Any, panic, sync::Arc};
 
 use crate::core::{Camera, PlotRenderConfig, PlotRenderer, RenderResult};
 use crate::gpu::util::map_read_async;
@@ -16,6 +16,7 @@ use egui_wgpu::ScreenDescriptor;
 
 pub const HEADLESS_GPU_ADAPTER_UNAVAILABLE: &str = "Failed to find suitable GPU adapter";
 pub const HEADLESS_GPU_DEVICE_CREATION_FAILED_PREFIX: &str = "Failed to create device:";
+pub const HEADLESS_GPU_CONTEXT_PANICKED_PREFIX: &str = "Headless GPU context creation panicked:";
 
 /// Renderer adapter for external/native surface targets owned by a host runtime.
 pub struct NativeSurfaceRenderContext {
@@ -128,7 +129,18 @@ impl NativeSurfaceRenderContext {
         camera: Option<&Camera>,
         axes_cameras: Option<&[Camera]>,
     ) -> Result<RenderResult, String> {
-        self.prepare_scene(figure, camera, axes_cameras);
+        self.render_to_view_with_camera_state(figure, view, camera, axes_cameras, None)
+    }
+
+    pub fn render_to_view_with_camera_state(
+        &mut self,
+        figure: &Figure,
+        view: &wgpu::TextureView,
+        camera: Option<&Camera>,
+        axes_cameras: Option<&[Camera]>,
+        axes_camera_user_controlled: Option<&[bool]>,
+    ) -> Result<RenderResult, String> {
+        self.prepare_scene(figure, camera, axes_cameras, axes_camera_user_controlled);
 
         let mut encoder = self.renderer.wgpu_renderer.device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
@@ -153,6 +165,17 @@ impl NativeSurfaceRenderContext {
         camera: Option<&Camera>,
         axes_cameras: Option<&[Camera]>,
     ) -> Result<Vec<u8>, String> {
+        self.render_to_rgba_with_camera_state(figure, camera, axes_cameras, None)
+            .await
+    }
+
+    pub async fn render_to_rgba_with_camera_state(
+        &mut self,
+        figure: &Figure,
+        camera: Option<&Camera>,
+        axes_cameras: Option<&[Camera]>,
+        axes_camera_user_controlled: Option<&[bool]>,
+    ) -> Result<Vec<u8>, String> {
         log::debug!(
             "runmat-plot: native_surface.render_to_rgba.start width={} height={} axes={} overrides={}",
             self.config.width.max(1),
@@ -160,7 +183,7 @@ impl NativeSurfaceRenderContext {
             figure.axes_metadata.len(),
             axes_cameras.map(|items| items.len()).unwrap_or(0)
         );
-        self.prepare_scene(figure, camera, axes_cameras);
+        self.prepare_scene(figure, camera, axes_cameras, axes_camera_user_controlled);
 
         let width = self.config.width.max(1);
         let height = self.config.height.max(1);
@@ -262,6 +285,7 @@ impl NativeSurfaceRenderContext {
         figure: &Figure,
         camera: Option<&Camera>,
         axes_cameras: Option<&[Camera]>,
+        axes_camera_user_controlled: Option<&[bool]>,
     ) {
         // Keep runtime config aligned with figure metadata, but treat the default figure
         // white background as "unspecified" and prefer active theme background for app parity.
@@ -285,6 +309,9 @@ impl NativeSurfaceRenderContext {
                     *target = override_camera.clone();
                 }
             }
+        }
+        if let Some(flags) = axes_camera_user_controlled {
+            self.renderer.set_axes_camera_interaction_flags(flags);
         }
     }
 
@@ -315,19 +342,28 @@ impl NativeSurfaceRenderContext {
             let mut plot_area_points: Option<egui::Rect> = None;
             let scene_stats = self.renderer.scene.statistics();
             let _ = self.renderer.calculate_data_bounds();
-            overlay
-                .egui_ctx
-                .set_pixels_per_point(self.pixels_per_point.max(0.5));
             let ppp = self.pixels_per_point.max(0.5);
+            let screen_rect = egui::Rect::from_min_size(
+                egui::Pos2::new(0.0, 0.0),
+                egui::Vec2::new(
+                    (self.config.width.max(1) as f32) / ppp,
+                    (self.config.height.max(1) as f32) / ppp,
+                ),
+            );
             let full_output = overlay.egui_ctx.run(
                 egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::new(0.0, 0.0),
-                        egui::Vec2::new(
-                            (self.config.width.max(1) as f32) / ppp,
-                            (self.config.height.max(1) as f32) / ppp,
-                        ),
-                    )),
+                    screen_rect: Some(screen_rect),
+                    viewports: std::iter::once((
+                        egui::ViewportId::ROOT,
+                        egui::ViewportInfo {
+                            native_pixels_per_point: Some(ppp),
+                            inner_rect: Some(screen_rect),
+                            outer_rect: Some(screen_rect),
+                            focused: Some(true),
+                            ..Default::default()
+                        },
+                    ))
+                    .collect(),
                     ..Default::default()
                 },
                 |ctx| {
@@ -704,7 +740,13 @@ async fn create_headless_context(
         height
     );
 
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+    let instance = panic::catch_unwind(|| wgpu::Instance::new(wgpu::InstanceDescriptor::default()))
+        .map_err(|payload| {
+            format!(
+                "{HEADLESS_GPU_CONTEXT_PANICKED_PREFIX} {}",
+                panic_payload_to_string(payload)
+            )
+        })?;
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -731,6 +773,17 @@ async fn create_headless_context(
 pub fn is_headless_gpu_unavailable_error(err: &str) -> bool {
     err.contains(HEADLESS_GPU_ADAPTER_UNAVAILABLE)
         || err.contains(HEADLESS_GPU_DEVICE_CREATION_FAILED_PREFIX)
+        || err.contains(HEADLESS_GPU_CONTEXT_PANICKED_PREFIX)
+}
+
+fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic payload".to_string()
+    }
 }
 
 pub async fn render_figure_rgba_bytes_interactive_with_camera(
@@ -969,4 +1022,16 @@ pub async fn render_figure_png_bytes_interactive_with_axes_cameras_and_theme_and
         rgba.len()
     );
     encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn headless_gpu_panic_errors_are_fallback_eligible() {
+        assert!(is_headless_gpu_unavailable_error(
+            "Headless GPU context creation panicked: called `Option::unwrap()` on a `None` value"
+        ));
+    }
 }

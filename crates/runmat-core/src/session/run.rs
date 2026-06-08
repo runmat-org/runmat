@@ -88,32 +88,52 @@ impl RunMatSession {
     pub async fn execute_request(
         &mut self,
         request: crate::abi::ExecutionRequest,
-    ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+    ) -> crate::abi::ExecutionResponse {
         let requested_outputs = request.requested_outputs.clone();
         let source_input = request.source.clone();
-        let (source_name, source_text) = source_input_text(request.source).await?;
+        let (source_name, source_text) = match source_input_text(request.source).await {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                return crate::abi::ExecutionResponse {
+                    source_context: unresolved_source_context(&source_input),
+                    result: Err(err),
+                };
+            }
+        };
+        let source_identity = resolve_source_identity(&source_input, &source_text);
         let previous_compat = self.compat_mode;
         let previous_top_level_await_enabled = self.top_level_await_enabled;
+        let previous_dynamic_eval_enabled = self.dynamic_eval_enabled;
         let previous_source_name = self.active_source_name.clone();
         let previous_workspace_handle = self.abi_workspace_handle;
         let previous_source_identity = self.active_source_identity.clone();
 
         self.compat_mode = request.compatibility;
         self.top_level_await_enabled = request.host_policy.top_level_await;
-        self.active_source_name = source_name;
+        self.dynamic_eval_enabled = request.host_policy.dynamic_eval;
+        self.active_source_name = source_name.clone();
         self.abi_workspace_handle = request.workspace;
-        self.active_source_identity = resolve_source_identity(&source_input, &source_text);
+        self.active_source_identity = source_identity.clone();
 
         let result = self.run(&source_text).await;
 
         self.compat_mode = previous_compat;
         self.top_level_await_enabled = previous_top_level_await_enabled;
+        self.dynamic_eval_enabled = previous_dynamic_eval_enabled;
         self.active_source_name = previous_source_name;
         self.abi_workspace_handle = previous_workspace_handle;
         self.active_source_identity = previous_source_identity;
         self.pending_companion_source_discovery = None;
 
-        result.map(|outcome| apply_requested_output_policy(outcome, &requested_outputs))
+        crate::abi::ExecutionResponse {
+            source_context: crate::abi::ExecutionSourceContext {
+                name: source_name,
+                text: Some(source_text),
+                identity: source_identity,
+            },
+            result: result
+                .map(|outcome| apply_requested_output_policy(outcome, &requested_outputs)),
+        }
     }
 
     async fn execute_internal(
@@ -130,6 +150,12 @@ impl RunMatSession {
         })?;
         runmat_vm::set_call_stack_limit(self.callstack_limit);
         runmat_vm::set_error_namespace(&self.error_namespace);
+        runmat_vm::set_dynamic_eval_options(
+            self.compat_mode,
+            self.compat_mode.allows_runmat_extensions(),
+            self.top_level_await_enabled,
+            self.dynamic_eval_enabled,
+        );
         runmat_hir::set_error_namespace(&self.error_namespace);
         let exec_span = info_span!(
             "runtime.execute",
@@ -570,7 +596,9 @@ impl RunMatSession {
                                         } else {
                                             suppressed_value = Some(assignment_value);
                                             if self.verbose {
-                                                debug!("JIT assignment suppressed due to semicolon, captured for type info");
+                                                debug!(
+                                                    "JIT assignment suppressed due to semicolon, captured for type info"
+                                                );
                                             }
                                         }
                                     }
@@ -668,7 +696,9 @@ impl RunMatSession {
                                     } else {
                                         suppressed_value = Some(assignment_value);
                                         if self.verbose {
-                                            debug!("Interpreter assignment suppressed due to semicolon, captured for type info");
+                                            debug!(
+                                                "Interpreter assignment suppressed due to semicolon, captured for type info"
+                                            );
                                         }
                                     }
                                 }
@@ -698,12 +728,16 @@ impl RunMatSession {
                                 ans_update = Some((temp_var_id, expression_value.clone()));
                                 result_value = Some(expression_value);
                                 if self.verbose {
-                                    debug!("Expression result from temp var {temp_var_id}: {result_value:?}");
+                                    debug!(
+                                        "Expression result from temp var {temp_var_id}: {result_value:?}"
+                                    );
                                 }
                             } else {
                                 suppressed_value = Some(expression_value);
                                 if self.verbose {
-                                    debug!("Expression suppressed, captured for type info from temp var {temp_var_id}: {suppressed_value:?}");
+                                    debug!(
+                                        "Expression suppressed, captured for type info from temp var {temp_var_id}: {suppressed_value:?}"
+                                    );
                                 }
                             }
                         }
@@ -1018,7 +1052,18 @@ impl RunMatSession {
                     .to_string(),
                 severity: crate::abi::DiagnosticSeverity::Error,
                 message: error.message().to_string(),
-                span: None,
+                span: runtime_error_span(error),
+                callstack: if !error.context.call_stack.is_empty() {
+                    error.context.call_stack.clone()
+                } else {
+                    error
+                        .context
+                        .call_frames
+                        .iter()
+                        .map(|frame| frame.function.clone())
+                        .collect()
+                },
+                callstack_elided: error.context.call_frames_elided,
             });
         }
         diagnostics.extend(
@@ -1029,6 +1074,8 @@ impl RunMatSession {
                     severity: crate::abi::DiagnosticSeverity::Warning,
                     message: warning.message.clone(),
                     span: None,
+                    callstack: Vec::new(),
+                    callstack_elided: 0,
                 }),
         );
 
@@ -1205,6 +1252,33 @@ fn source_text_hash(source_text: &str) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     source_text.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+fn unresolved_source_context(
+    source: &crate::abi::SourceInput,
+) -> crate::abi::ExecutionSourceContext {
+    let name = match source {
+        crate::abi::SourceInput::Path(path) => path.clone(),
+        crate::abi::SourceInput::Text { name, .. } => name.clone(),
+    };
+    crate::abi::ExecutionSourceContext {
+        name,
+        text: match source {
+            crate::abi::SourceInput::Text { text, .. } => Some(text.clone()),
+            crate::abi::SourceInput::Path(_) => None,
+        },
+        identity: None,
+    }
+}
+
+fn runtime_error_span(error: &runmat_runtime::RuntimeError) -> Option<runmat_hir::Span> {
+    error.span.as_ref().map(|span| {
+        let start = span.offset();
+        runmat_hir::Span {
+            start,
+            end: start + span.len().max(1),
+        }
+    })
 }
 
 fn compile_eval_hook_bytecode(

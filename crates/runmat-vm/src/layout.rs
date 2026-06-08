@@ -20,6 +20,7 @@ pub struct VmAssemblyLayout {
 pub struct VmFunctionLayout {
     pub function: FunctionId,
     pub display_name: String,
+    pub private_owner_scope: String,
     pub frame_abi: VmFrameAbi,
     pub binding_slots: HashMap<BindingId, VmSlotId>,
     pub mir_local_slots: HashMap<MirLocalId, VmSlotId>,
@@ -203,12 +204,49 @@ fn derive_function_layout(
     Ok(VmFunctionLayout {
         function: function.id,
         display_name: function.name.0.clone(),
+        private_owner_scope: private_owner_scope_for_function(hir, function),
         frame_abi,
         binding_slots,
         mir_local_slots,
         captures,
         local_count: next_slot,
     })
+}
+
+fn private_owner_scope_from_name(name: &str) -> Option<String> {
+    if let Some((owner, _)) = name.split_once(".__private__.") {
+        return Some(owner.to_string());
+    }
+    name.rsplit_once('.').map(|(owner, _)| owner.to_string())
+}
+
+fn private_owner_scope_for_function(
+    hir: &HirAssembly,
+    function: &runmat_hir::HirFunction,
+) -> String {
+    if let Some(owner) =
+        private_owner_scope_from_name(&function.name.0).filter(|owner| !owner.is_empty())
+    {
+        return owner;
+    }
+
+    let mut parent = function.parent;
+    while let Some(parent_id) = parent {
+        let Some(parent_function) = hir
+            .functions
+            .iter()
+            .find(|candidate| candidate.id == parent_id)
+        else {
+            break;
+        };
+        if let Some(owner) =
+            private_owner_scope_from_name(&parent_function.name.0).filter(|owner| !owner.is_empty())
+        {
+            return owner;
+        }
+        parent = parent_function.parent;
+    }
+    String::new()
 }
 
 fn allocate_frame_abi(

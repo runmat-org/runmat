@@ -58,7 +58,8 @@ pub async fn execute_benchmark(
             HostExecutionPolicy::default(),
             engine.workspace_handle(),
         );
-        match engine.execute_request(request).await {
+        let response = engine.execute_request(request).await;
+        match response.result {
             Ok(outcome) if outcome_error_code(&outcome).is_none() => {}
             Ok(outcome) => {
                 let error =
@@ -100,9 +101,9 @@ pub async fn execute_benchmark(
                         provider: capture_provider_snapshot(),
                     });
                 }
-                if let Some(diag) =
-                    format_frontend_error(&err, file.to_string_lossy().as_ref(), &content)
-                {
+                if let Some(diag) = response.source_context.source_text().and_then(|source| {
+                    format_frontend_error(&err, response.source_context.source_name(), source)
+                }) {
                     eprintln!("{diag}");
                 } else {
                     eprintln!("Benchmark error: {err}");
@@ -123,7 +124,8 @@ pub async fn execute_benchmark(
             HostExecutionPolicy::default(),
             engine.workspace_handle(),
         );
-        let outcome = match engine.execute_request(request).await {
+        let response = engine.execute_request(request).await;
+        let outcome = match response.result {
             Ok(outcome) => outcome,
             Err(err) => {
                 let failure = err.telemetry_failure_info();
@@ -144,9 +146,9 @@ pub async fn execute_benchmark(
                         provider: capture_provider_snapshot(),
                     });
                 }
-                if let Some(diag) =
-                    format_frontend_error(&err, file.to_string_lossy().as_ref(), &content)
-                {
+                if let Some(diag) = response.source_context.source_text().and_then(|source| {
+                    format_frontend_error(&err, response.source_context.source_name(), source)
+                }) {
                     eprintln!("{diag}");
                 } else {
                     eprintln!("Benchmark error: {err}");
