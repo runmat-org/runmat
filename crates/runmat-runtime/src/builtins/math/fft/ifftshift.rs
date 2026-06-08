@@ -12,7 +12,11 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::fft::type_resolvers::ifftshift_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::ifftshift")]
@@ -45,44 +49,185 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "ifftshift";
 
-fn ifftshift_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
+const IFFTSHIFT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Shifted array with the same size and type family as X.",
+}];
+
+const IFFTSHIFT_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric, complex, logical, or gpuArray input.",
+}];
+
+const IFFTSHIFT_INPUTS_DIMS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric, complex, logical, or gpuArray input.",
+    },
+    BuiltinParamDescriptor {
+        name: "DIM",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector (scalar, numeric vector, or logical mask vector).",
+    },
+];
+
+const IFFTSHIFT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = ifftshift(X)",
+        inputs: &IFFTSHIFT_INPUTS_CORE,
+        outputs: &IFFTSHIFT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = ifftshift(X, DIM)",
+        inputs: &IFFTSHIFT_INPUTS_DIMS,
+        outputs: &IFFTSHIFT_OUTPUT,
+    },
+];
+
+const IFFTSHIFT_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFTSHIFT.ARG_COUNT",
+    identifier: Some("RunMat:ifftshift:ArgCount"),
+    when: "More than two input arguments are supplied.",
+    message: "ifftshift: invalid argument count",
+};
+
+const IFFTSHIFT_ERROR_INVALID_DIMS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFTSHIFT.INVALID_DIMS",
+    identifier: Some("RunMat:ifftshift:InvalidDimensions"),
+    when: "DIM argument is malformed or out of range.",
+    message: "ifftshift: invalid dimension argument",
+};
+
+const IFFTSHIFT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFTSHIFT.INVALID_INPUT",
+    identifier: Some("RunMat:ifftshift:InvalidInput"),
+    when: "X is not a supported numeric/logical input type.",
+    message: "ifftshift: expected numeric or logical input",
+};
+
+const IFFTSHIFT_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFTSHIFT.UNSUPPORTED_INPUT",
+    identifier: Some("RunMat:ifftshift:UnsupportedInput"),
+    when: "X is an unsupported object/cell/function/meta runtime type.",
+    message: "ifftshift: unsupported input type",
+};
+
+const IFFTSHIFT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFTSHIFT.INTERNAL",
+    identifier: Some("RunMat:ifftshift:Internal"),
+    when: "Shifting, tensor reconstruction, or GPU transfer operations fail.",
+    message: "ifftshift: internal error",
+};
+
+const IFFTSHIFT_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    IFFTSHIFT_ERROR_ARG_COUNT,
+    IFFTSHIFT_ERROR_INVALID_DIMS,
+    IFFTSHIFT_ERROR_INVALID_INPUT,
+    IFFTSHIFT_ERROR_UNSUPPORTED_INPUT,
+    IFFTSHIFT_ERROR_INTERNAL,
+];
+
+pub const IFFTSHIFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &IFFTSHIFT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &IFFTSHIFT_ERRORS,
+};
+
+fn ifftshift_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    ifftshift_error_with_message(error.message, error)
+}
+
+fn ifftshift_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    ifftshift_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn ifftshift_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
         .with_builtin(BUILTIN_NAME)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn ifftshift_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn compute_ifftshift_dims(shape: &[usize], dims_arg: Option<&Value>) -> BuiltinResult<Vec<usize>> {
+    compute_shift_dims(shape, dims_arg, BUILTIN_NAME).map_err(|source| {
+        ifftshift_error_with_source(
+            &IFFTSHIFT_ERROR_INVALID_DIMS,
+            "dimension parsing failed",
+            source,
+        )
+    })
 }
 
 #[runtime_builtin(
     name = "ifftshift",
     category = "math/fft",
-    summary = "Undo fftshift by moving the zero-frequency component back to the origin.",
+    summary = "Shift centered spectra back to origin ordering.",
     keywords = "ifftshift,inverse fft shift,frequency alignment,gpu",
     accel = "custom",
     type_resolver(ifftshift_type),
+    descriptor(crate::builtins::math::fft::ifftshift::IFFTSHIFT_DESCRIPTOR),
     builtin_path = "crate::builtins::math::fft::ifftshift"
 )]
 async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(ifftshift_error("ifftshift: too many input arguments"));
+        return Err(ifftshift_error(&IFFTSHIFT_ERROR_ARG_COUNT));
     }
     let dims_arg = rest.first();
 
     match value {
         Value::Tensor(tensor) => {
-            let dims = compute_shift_dims(&tensor.shape, dims_arg, BUILTIN_NAME)?;
+            let dims = compute_ifftshift_dims(&tensor.shape, dims_arg)?;
             Ok(ifftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::ComplexTensor(ct) => {
-            let dims = compute_shift_dims(&ct.shape, dims_arg, BUILTIN_NAME)?;
+            let dims = compute_ifftshift_dims(&ct.shape, dims_arg)?;
             Ok(ifftshift_complex_tensor(ct, &dims).map(Value::ComplexTensor)?)
         }
         Value::LogicalArray(array) => {
-            let dims = compute_shift_dims(&array.shape, dims_arg, BUILTIN_NAME)?;
+            let dims = compute_ifftshift_dims(&array.shape, dims_arg)?;
             Ok(ifftshift_logical(array, &dims).map(Value::LogicalArray)?)
         }
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| ifftshift_error(format!("ifftshift: {e}")))?;
-            let dims = compute_shift_dims(&tensor.shape, dims_arg, BUILTIN_NAME)?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|source| {
+                ifftshift_error_with_detail(
+                    &IFFTSHIFT_ERROR_INTERNAL,
+                    format!("complex tensor construction failed: {source}"),
+                )
+            })?;
+            let dims = compute_ifftshift_dims(&tensor.shape, dims_arg)?;
             Ok(ifftshift_complex_tensor(tensor, &dims).map(|result| {
                 if result.data.len() == 1 {
                     let (r, i) = result.data[0];
@@ -93,27 +238,34 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
             })?)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-            let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-                .map_err(|e| ifftshift_error(e))?;
-            let dims = compute_shift_dims(&tensor.shape, dims_arg, BUILTIN_NAME)?;
+            let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value).map_err(|detail| {
+                ifftshift_error_with_detail(
+                    &IFFTSHIFT_ERROR_INVALID_INPUT,
+                    format!("scalar/tensor conversion failed: {detail}"),
+                )
+            })?;
+            let dims = compute_ifftshift_dims(&tensor.shape, dims_arg)?;
             Ok(ifftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => {
-            let dims = compute_shift_dims(&handle.shape, dims_arg, BUILTIN_NAME)?;
+            let dims = compute_ifftshift_dims(&handle.shape, dims_arg)?;
             Ok(ifftshift_gpu(handle, &dims).await?)
         }
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => Err(
-            ifftshift_error("ifftshift: expected numeric or logical input"),
-        ),
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
+            Err(ifftshift_error(&IFFTSHIFT_ERROR_INVALID_INPUT))
+        }
         Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(ifftshift_error("ifftshift: unsupported input type")),
+        | Value::OutputList(_) => Err(ifftshift_error(&IFFTSHIFT_ERROR_UNSUPPORTED_INPUT)),
     }
 }
 
@@ -121,32 +273,60 @@ fn ifftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
     let Tensor { data, shape, .. } = tensor;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
     if data.is_empty() || plan.is_noop() {
-        return Tensor::new(data, shape).map_err(|e| ifftshift_error(format!("ifftshift: {e}")));
+        return Tensor::new(data, shape).map_err(|source| {
+            ifftshift_error_with_detail(
+                &IFFTSHIFT_ERROR_INTERNAL,
+                format!("tensor reconstruction failed: {source}"),
+            )
+        });
     }
     let rotated = apply_shift(BUILTIN_NAME, &data, &plan.ext_shape, &plan.positive)?;
-    Tensor::new(rotated, shape).map_err(|e| ifftshift_error(format!("ifftshift: {e}")))
+    Tensor::new(rotated, shape).map_err(|source| {
+        ifftshift_error_with_detail(
+            &IFFTSHIFT_ERROR_INTERNAL,
+            format!("tensor reconstruction failed: {source}"),
+        )
+    })
 }
 
 fn ifftshift_complex_tensor(tensor: ComplexTensor, dims: &[usize]) -> BuiltinResult<ComplexTensor> {
     let ComplexTensor { data, shape, .. } = tensor;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
     if data.is_empty() || plan.is_noop() {
-        return ComplexTensor::new(data, shape)
-            .map_err(|e| ifftshift_error(format!("ifftshift: {e}")));
+        return ComplexTensor::new(data, shape).map_err(|source| {
+            ifftshift_error_with_detail(
+                &IFFTSHIFT_ERROR_INTERNAL,
+                format!("complex tensor reconstruction failed: {source}"),
+            )
+        });
     }
     let rotated = apply_shift(BUILTIN_NAME, &data, &plan.ext_shape, &plan.positive)?;
-    ComplexTensor::new(rotated, shape).map_err(|e| ifftshift_error(format!("ifftshift: {e}")))
+    ComplexTensor::new(rotated, shape).map_err(|source| {
+        ifftshift_error_with_detail(
+            &IFFTSHIFT_ERROR_INTERNAL,
+            format!("complex tensor reconstruction failed: {source}"),
+        )
+    })
 }
 
 fn ifftshift_logical(array: LogicalArray, dims: &[usize]) -> BuiltinResult<LogicalArray> {
     let LogicalArray { data, shape } = array;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
     if data.is_empty() || plan.is_noop() {
-        return LogicalArray::new(data, shape)
-            .map_err(|e| ifftshift_error(format!("ifftshift: {e}")));
+        return LogicalArray::new(data, shape).map_err(|source| {
+            ifftshift_error_with_detail(
+                &IFFTSHIFT_ERROR_INTERNAL,
+                format!("logical array reconstruction failed: {source}"),
+            )
+        });
     }
     let rotated = apply_shift(BUILTIN_NAME, &data, &plan.ext_shape, &plan.positive)?;
-    LogicalArray::new(rotated, shape).map_err(|e| ifftshift_error(format!("ifftshift: {e}")))
+    LogicalArray::new(rotated, shape).map_err(|source| {
+        ifftshift_error_with_detail(
+            &IFFTSHIFT_ERROR_INTERNAL,
+            format!("logical array reconstruction failed: {source}"),
+        )
+    })
 }
 
 async fn ifftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value> {
@@ -182,7 +362,11 @@ async fn ifftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult
 }
 
 async fn ifftshift_gpu_fallback(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value> {
-    let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+    let host_tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|source| {
+            ifftshift_error_with_source(&IFFTSHIFT_ERROR_INTERNAL, "gpu gather failed", source)
+        })?;
     let shifted = ifftshift_tensor(host_tensor, dims)?;
     if let Some(provider) = runmat_accelerate_api::provider() {
         let view = HostTensorView {
@@ -192,7 +376,12 @@ async fn ifftshift_gpu_fallback(handle: GpuTensorHandle, dims: &[usize]) -> Buil
         return provider
             .upload(&view)
             .map(Value::GpuTensor)
-            .map_err(|e| ifftshift_error(format!("ifftshift: {e}")));
+            .map_err(|source| {
+                ifftshift_error_with_detail(
+                    &IFFTSHIFT_ERROR_INTERNAL,
+                    format!("gpu upload failed: {source}"),
+                )
+            });
     }
     Ok(tensor::tensor_into_value(shifted))
 }
@@ -203,10 +392,17 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{
+        builtin_function_by_name, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor,
+        Type,
+    };
 
     fn error_message(error: crate::RuntimeError) -> String {
         error.message().to_string()
+    }
+
+    fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
+        error.identifier()
     }
 
     #[test]
@@ -223,6 +419,19 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(2), Some(5)])
             }
         );
+    }
+
+    #[test]
+    fn ifftshift_descriptor_signatures_and_errors() {
+        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("ifftshift builtin");
+        let descriptor = builtin.descriptor.expect("ifftshift descriptor");
+        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
+        assert!(labels.contains(&"Y = ifftshift(X)"));
+        assert!(labels.contains(&"Y = ifftshift(X, DIM)"));
+        assert!(descriptor
+            .errors
+            .iter()
+            .any(|err| err.code == "RM.IFFTSHIFT.INVALID_DIMS"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -333,13 +542,15 @@ pub(crate) mod tests {
     #[test]
     fn ifftshift_dimension_zero_error() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = error_message(
-            ifftshift_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))])
-                .unwrap_err(),
+        let err = ifftshift_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))])
+            .unwrap_err();
+        assert_eq!(
+            error_identifier(&err),
+            IFFTSHIFT_ERROR_INVALID_DIMS.identifier
         );
         assert!(
-            err.contains("dimension indices must be >= 1"),
-            "unexpected error: {err}"
+            error_message(err).contains(IFFTSHIFT_ERROR_INVALID_DIMS.message),
+            "unexpected error"
         );
     }
 
@@ -362,12 +573,15 @@ pub(crate) mod tests {
     #[test]
     fn ifftshift_rejects_non_numeric_dimension_argument() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = error_message(
-            ifftshift_builtin(Value::Tensor(tensor), vec![Value::from("invalid")]).unwrap_err(),
+        let err =
+            ifftshift_builtin(Value::Tensor(tensor), vec![Value::from("invalid")]).unwrap_err();
+        assert_eq!(
+            error_identifier(&err),
+            IFFTSHIFT_ERROR_INVALID_DIMS.identifier
         );
         assert!(
-            err.contains("dimension indices must be numeric"),
-            "unexpected error: {err}"
+            error_message(err).contains(IFFTSHIFT_ERROR_INVALID_DIMS.message),
+            "unexpected error"
         );
     }
 

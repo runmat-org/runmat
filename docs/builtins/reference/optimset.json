@@ -1,0 +1,62 @@
+{
+  "title": "optimset",
+  "category": "math/optim",
+  "keywords": [
+    "optimset",
+    "options",
+    "TolX",
+    "TolFun",
+    "MaxIter",
+    "Display"
+  ],
+  "summary": "Create or update optimization options structures with MATLAB-compatible name/value handling.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Options are host metadata."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::optim::optimset::tests"
+  },
+  "description": "`optimset` builds option structs for optimization routines and supports MATLAB-compatible create-from-scratch and copy-and-override workflows with recognized option names.",
+  "behaviors": [
+    "Option names are case-insensitive for the builtins that consume them.",
+    "`TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, and `Display` are canonicalized when constructed with `optimset`.",
+    "Unknown option names are preserved so future solvers can read them."
+  ],
+  "examples": [
+    {
+      "description": "Create options for fminbnd",
+      "input": "opts = optimset('TolX', 1e-10, 'Display', 'off');\nx = fminbnd(@cos, 0, pi, opts)",
+      "output": "x =\n    3.1416"
+    }
+  ],
+  "links": [
+    {
+      "label": "fminbnd",
+      "url": "./fminbnd"
+    },
+    {
+      "label": "fzero",
+      "url": "./fzero"
+    },
+    {
+      "label": "fsolve",
+      "url": "./fsolve"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/optim/optimset.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/optimset.rs"
+  }
+}

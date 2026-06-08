@@ -1,9 +1,45 @@
 //! MATLAB-compatible `drawnow` builtin.
 
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::bool_type;
 use crate::BuiltinResult;
+
+const DRAWNOW_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "ok",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when pending graphics updates were flushed (or no-op completed).",
+}];
+
+const DRAWNOW_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+
+const DRAWNOW_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "ok = drawnow()",
+    inputs: &DRAWNOW_INPUTS_NONE,
+    outputs: &DRAWNOW_OUTPUT_STATUS,
+}];
+
+const DRAWNOW_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DRAWNOW.INTERNAL",
+    identifier: Some("RunMat:drawnow:Internal"),
+    when: "Rendering flush fails in the active plotting backend.",
+    message: "drawnow: internal operation failed",
+};
+
+const DRAWNOW_ERRORS: [BuiltinErrorDescriptor; 1] = [DRAWNOW_ERROR_INTERNAL];
+
+pub const DRAWNOW_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DRAWNOW_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DRAWNOW_ERRORS,
+};
 
 /// Flush pending figure updates to any bound plot surfaces.
 ///
@@ -16,10 +52,11 @@ use crate::BuiltinResult;
     keywords = "drawnow,graphics,flush,plot",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(bool_type),
+    descriptor(crate::builtins::plotting::drawnow::DRAWNOW_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::drawnow"
 )]
-pub async fn drawnow_builtin() -> BuiltinResult<String> {
+pub async fn drawnow_builtin() -> BuiltinResult<bool> {
     #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
     {
         use crate::builtins::plotting;
@@ -29,11 +66,29 @@ pub async fn drawnow_builtin() -> BuiltinResult<String> {
                 .with_builtin("drawnow")
                 .build()
         })?;
-        return Ok("drawnow: presented".to_string());
+        Ok(true)
     }
 
     #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
     {
-        Ok("drawnow: ok".to_string())
+        Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+
+    #[test]
+    fn drawnow_descriptor_signature_present() {
+        assert_eq!(DRAWNOW_DESCRIPTOR.signatures.len(), 1);
+        assert_eq!(DRAWNOW_DESCRIPTOR.signatures[0].label, "ok = drawnow()");
+    }
+
+    #[test]
+    fn drawnow_returns_true() {
+        let result = block_on(drawnow_builtin()).unwrap();
+        assert!(result);
     }
 }

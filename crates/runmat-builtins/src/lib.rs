@@ -1,6 +1,9 @@
 pub use inventory;
 use runmat_gc_api::GcPtr;
+use runmat_thread_local::runmat_thread_local;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
@@ -94,6 +97,15 @@ pub enum Value {
     OutputList(Vec<Value>),
     // Function handle pointing to a named function (builtin or user)
     FunctionHandle(String),
+    // Function handle whose resolution must stay at the external boundary.
+    ExternalFunctionHandle(String),
+    // Function handle preserving typed method identity.
+    MethodFunctionHandle(String),
+    // Function handle with compiler/session semantic identity.
+    BoundFunctionHandle {
+        name: String,
+        function: usize,
+    },
     Closure(Closure),
     ClassRef(String),
     MException(MException),
@@ -187,6 +199,28 @@ impl Default for StructValue {
 pub enum NumericDType {
     F64,
     F32,
+    U8,
+    U16,
+}
+
+impl NumericDType {
+    pub fn class_name(self) -> &'static str {
+        match self {
+            NumericDType::F64 => "double",
+            NumericDType::F32 => "single",
+            NumericDType::U8 => "uint8",
+            NumericDType::U16 => "uint16",
+        }
+    }
+
+    pub fn byte_size(self) -> usize {
+        match self {
+            NumericDType::F64 => 8,
+            NumericDType::F32 => 4,
+            NumericDType::U8 => 1,
+            NumericDType::U16 => 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -598,7 +632,7 @@ impl fmt::Display for Tensor {
                     if i > 0 {
                         write!(f, " ")?;
                     }
-                    write!(f, "{}", format_number_short_g(*v))?;
+                    write!(f, "{}", format_number(*v))?;
                 }
                 write!(f, "]")
             }
@@ -614,7 +648,7 @@ impl fmt::Display for Tensor {
                             write!(f, "  ")?;
                         }
                         let v = self.data[r + c * rows];
-                        write!(f, "{}", format_number_short_g(v))?;
+                        write!(f, "{}", format_number(v))?;
                     }
                 }
                 Ok(())
@@ -622,7 +656,7 @@ impl fmt::Display for Tensor {
             _ => {
                 if should_expand_nd_display(&self.shape) {
                     write_nd_pages(f, &self.shape, |f, idx| {
-                        write!(f, "{}", format_number_short_g(self.data[idx]))
+                        write!(f, "{}", format_number(self.data[idx]))
                     })
                 } else {
                     write!(f, "Tensor(shape={:?})", self.shape)
@@ -953,27 +987,6 @@ pub enum Type {
     },
     /// Multiple return values captured as a list (internal destructuring helper)
     OutputList(Vec<Type>),
-    /// Dataset handle with optional compile-time schema information
-    DataDataset {
-        arrays: Option<std::collections::BTreeMap<String, DataArrayTypeInfo>>,
-    },
-    /// Data array handle with optional dtype/shape metadata
-    DataArray {
-        dtype: Option<String>,
-        shape: Option<Vec<Option<usize>>>,
-        chunk_shape: Option<Vec<Option<usize>>>,
-        codec: Option<String>,
-    },
-    /// Data transaction handle
-    DataTransaction,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
-pub struct DataArrayTypeInfo {
-    pub dtype: Option<String>,
-    pub shape: Option<Vec<Option<usize>>>,
-    pub chunk_shape: Option<Vec<Option<usize>>>,
-    pub codec: Option<String>,
 }
 
 impl Type {
@@ -1024,9 +1037,6 @@ impl Type {
             (Type::Int, Type::Num) | (Type::Num, Type::Int) => true, // Number compatibility
             (Type::Tensor { .. }, Type::Tensor { .. }) => true, // Tensor compatibility regardless of dims for now
             (Type::OutputList(a), Type::OutputList(b)) => a.len() == b.len(),
-            (Type::DataDataset { .. }, Type::DataDataset { .. }) => true,
-            (Type::DataArray { .. }, Type::DataArray { .. }) => true,
-            (Type::DataTransaction, Type::DataTransaction) => true,
             (a, b) => a == b,
         }
     }
@@ -1117,44 +1127,6 @@ impl Type {
                     Type::OutputList(vec![Type::Unknown; a.len().max(b.len())])
                 }
             }
-            (Type::DataDataset { arrays: a }, Type::DataDataset { arrays: b }) => {
-                let merged = match (a, b) {
-                    (None, None) => None,
-                    (Some(sa), None) | (None, Some(sa)) => Some(sa.clone()),
-                    (Some(sa), Some(sb)) => {
-                        let mut out = sa.clone();
-                        for (name, right) in sb {
-                            out.entry(name.clone())
-                                .and_modify(|left| {
-                                    *left = unify_array_type_info(left, right);
-                                })
-                                .or_insert_with(|| right.clone());
-                        }
-                        Some(out)
-                    }
-                };
-                Type::DataDataset { arrays: merged }
-            }
-            (
-                Type::DataArray {
-                    dtype: ad,
-                    shape: ashp,
-                    chunk_shape: ach,
-                    codec: ac,
-                },
-                Type::DataArray {
-                    dtype: bd,
-                    shape: bshp,
-                    chunk_shape: bch,
-                    codec: bc,
-                },
-            ) => Type::DataArray {
-                dtype: ad.clone().or_else(|| bd.clone()),
-                shape: unify_optional_dims(ashp, bshp),
-                chunk_shape: unify_optional_dims(ach, bch),
-                codec: ac.clone().or_else(|| bc.clone()),
-            },
-            (Type::DataTransaction, Type::DataTransaction) => Type::DataTransaction,
             (a, b) if a == b => a.clone(),
             _ => Type::Union(vec![self.clone(), other.clone()]),
         }
@@ -1200,7 +1172,10 @@ impl Type {
             Value::HandleObject(_) => Type::Unknown,
             Value::Listener(_) => Type::Unknown,
             Value::Struct(_) => Type::Struct { known_fields: None },
-            Value::FunctionHandle(_) => Type::Function {
+            Value::FunctionHandle(_)
+            | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
+            | Value::BoundFunctionHandle { .. } => Type::Function {
                 params: vec![Type::Unknown],
                 returns: Box::new(Type::Unknown),
             },
@@ -1224,36 +1199,10 @@ impl Type {
     }
 }
 
-fn unify_optional_dims(
-    lhs: &Option<Vec<Option<usize>>>,
-    rhs: &Option<Vec<Option<usize>>>,
-) -> Option<Vec<Option<usize>>> {
-    match (lhs, rhs) {
-        (None, None) => None,
-        (Some(a), None) | (None, Some(a)) => Some(a.clone()),
-        (Some(a), Some(b)) if a == b => Some(a.clone()),
-        (Some(a), Some(b)) if a.len() == b.len() => Some(
-            a.iter()
-                .zip(b.iter())
-                .map(|(x, y)| if x == y { *x } else { None })
-                .collect(),
-        ),
-        (Some(_), Some(_)) => None,
-    }
-}
-
-fn unify_array_type_info(lhs: &DataArrayTypeInfo, rhs: &DataArrayTypeInfo) -> DataArrayTypeInfo {
-    DataArrayTypeInfo {
-        dtype: lhs.dtype.clone().or_else(|| rhs.dtype.clone()),
-        shape: unify_optional_dims(&lhs.shape, &rhs.shape),
-        chunk_shape: unify_optional_dims(&lhs.chunk_shape, &rhs.chunk_shape),
-        codec: lhs.codec.clone().or_else(|| rhs.codec.clone()),
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Closure {
     pub function_name: String,
+    pub bound_function: Option<usize>,
     pub captures: Vec<Value>,
 }
 
@@ -1437,16 +1386,84 @@ pub type TypeResolverWithContext = fn(args: &[Type], ctx: &ResolveContext) -> Ty
 
 #[derive(Clone, Copy, Debug)]
 pub enum TypeResolverKind {
-    Legacy(TypeResolver),
+    Simple(TypeResolver),
     WithContext(TypeResolverWithContext),
 }
 
 pub fn type_resolver_kind(resolver: TypeResolver) -> TypeResolverKind {
-    TypeResolverKind::Legacy(resolver)
+    TypeResolverKind::Simple(resolver)
 }
 
 pub fn type_resolver_kind_ctx(resolver: TypeResolverWithContext) -> TypeResolverKind {
     TypeResolverKind::WithContext(resolver)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinOutputMode {
+    Fixed,
+    ByRequestedOutputCount,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinCompletionPolicy {
+    Public,
+    MethodOnly,
+    HiddenInternal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinParamArity {
+    Required,
+    Optional,
+    Variadic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinParamType {
+    Any,
+    NumericScalar,
+    IntegerScalar,
+    StringScalar,
+    NumericArray,
+    LogicalArray,
+    SizeArg,
+    LikePrototype,
+    AxesHandle,
+    StyleSpec,
+    PropertyName,
+    PropertyValue,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinParamDescriptor {
+    pub name: &'static str,
+    pub ty: BuiltinParamType,
+    pub arity: BuiltinParamArity,
+    pub default: Option<&'static str>,
+    pub description: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinSignatureDescriptor {
+    pub label: &'static str,
+    pub inputs: &'static [BuiltinParamDescriptor],
+    pub outputs: &'static [BuiltinParamDescriptor],
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinErrorDescriptor {
+    pub code: &'static str,
+    pub identifier: Option<&'static str>,
+    pub when: &'static str,
+    pub message: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinDescriptor {
+    pub signatures: &'static [BuiltinSignatureDescriptor],
+    pub output_mode: BuiltinOutputMode,
+    pub completion_policy: BuiltinCompletionPolicy,
+    pub errors: &'static [BuiltinErrorDescriptor],
 }
 
 /// Simple builtin function definition using the unified type system
@@ -1464,6 +1481,7 @@ pub struct BuiltinFunction {
     pub accel_tags: &'static [AccelTag],
     pub is_sink: bool,
     pub suppress_auto_output: bool,
+    pub descriptor: Option<&'static BuiltinDescriptor>,
 }
 
 impl BuiltinFunction {
@@ -1495,7 +1513,21 @@ impl BuiltinFunction {
             accel_tags,
             is_sink,
             suppress_auto_output,
+            descriptor: None,
         }
+    }
+
+    pub fn with_descriptor(mut self, descriptor: &'static BuiltinDescriptor) -> Self {
+        self.descriptor = Some(descriptor);
+        self
+    }
+
+    pub fn with_descriptor_option(
+        mut self,
+        descriptor: Option<&'static BuiltinDescriptor>,
+    ) -> Self {
+        self.descriptor = descriptor;
+        self
     }
 
     pub fn infer_return_type(&self, args: &[Type]) -> Type {
@@ -1505,11 +1537,15 @@ impl BuiltinFunction {
     pub fn infer_return_type_with_context(&self, args: &[Type], ctx: &ResolveContext) -> Type {
         if let Some(resolver) = self.type_resolver {
             return match resolver {
-                TypeResolverKind::Legacy(resolver) => resolver(args),
+                TypeResolverKind::Simple(resolver) => resolver(args),
                 TypeResolverKind::WithContext(resolver) => resolver(args, ctx),
             };
         }
         self.return_type.clone()
+    }
+
+    pub fn semantics(&self) -> BuiltinSemantics {
+        semantics::builtin_semantics_for(self)
     }
 }
 
@@ -1520,7 +1556,14 @@ pub struct Constant {
     pub value: Value,
 }
 
+pub mod semantics;
 pub mod shape_rules;
+
+pub use semantics::{
+    builtin_semantics_for, builtin_semantics_for_name, BuiltinAsyncBehavior, BuiltinCompatibility,
+    BuiltinEffects, BuiltinEnvironmentEffect, BuiltinPurity, BuiltinSemanticKind, BuiltinSemantics,
+    BuiltinWorkspaceEffect, ConcatKind, ShapeTransformKind,
+};
 
 impl std::fmt::Debug for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1625,7 +1668,42 @@ pub fn builtin_docs() -> Vec<&'static BuiltinDoc> {
 // Display implementations
 // ----------------------
 
-fn format_number_short_g(value: f64) -> String {
+/// Controls how numeric values are displayed in the console, mirroring MATLAB's `format` command.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum FormatMode {
+    /// 4 decimal places, fixed or scientific (MATLAB default).
+    #[default]
+    Short,
+    /// 15 decimal places, fixed or scientific.
+    Long,
+    /// Always scientific notation, 4 decimal places.
+    ShortE,
+    /// Always scientific notation, 14 decimal places.
+    LongE,
+    /// Compact: shorter of fixed/scientific, 5 significant digits.
+    ShortG,
+    /// Compact: shorter of fixed/scientific, 15 significant digits.
+    LongG,
+    /// Rational approximation (p/q).
+    Rational,
+    /// IEEE 754 hexadecimal representation.
+    Hex,
+}
+
+runmat_thread_local! {
+    static DISPLAY_FORMAT: RefCell<FormatMode> = const { RefCell::new(FormatMode::Short) };
+}
+
+pub fn set_display_format(mode: FormatMode) {
+    DISPLAY_FORMAT.with(|c| *c.borrow_mut() = mode);
+}
+
+pub fn get_display_format() -> FormatMode {
+    DISPLAY_FORMAT.with(|c| *c.borrow())
+}
+
+/// Format a number using the current thread-local display format.
+pub fn format_number(value: f64) -> String {
     if value.is_nan() {
         return "NaN".to_string();
     }
@@ -1637,59 +1715,111 @@ fn format_number_short_g(value: f64) -> String {
         }
         .to_string();
     }
-    // Normalize -0.0 to 0
-    let mut v = value;
-    if v == 0.0 {
-        v = 0.0;
+    let mode = get_display_format();
+    if mode == FormatMode::Hex {
+        return fmt_hex(value);
     }
+    let v = if value == 0.0 { 0.0 } else { value };
+    match mode {
+        FormatMode::Short => fmt_short(v),
+        FormatMode::Long => fmt_long(v),
+        FormatMode::ShortE => fmt_sci(v, 4),
+        FormatMode::LongE => fmt_sci(v, 14),
+        FormatMode::ShortG => fmt_compact(v, 5),
+        FormatMode::LongG => fmt_compact(v, 15),
+        FormatMode::Rational => fmt_rational(v),
+        FormatMode::Hex => unreachable!("hex mode handled before zero normalization"),
+    }
+}
 
+/// Reformat Rust's `e`-notation exponent into MATLAB style (`e+02`, `e-03`).
+fn matlab_exp(s: &str) -> String {
+    if let Some(e_pos) = s.find('e') {
+        let mantissa = &s[..e_pos];
+        let exp: i32 = s[e_pos + 1..].parse().unwrap_or(0);
+        let sign = if exp >= 0 { '+' } else { '-' };
+        format!("{mantissa}e{sign}{:02}", exp.unsigned_abs())
+    } else {
+        s.to_string()
+    }
+}
+
+fn fmt_sci(v: f64, dec: usize) -> String {
+    if v == 0.0 {
+        return format!("0.{:0>dec$}e+00", 0, dec = dec);
+    }
+    let s = format!("{v:.dec$e}");
+    matlab_exp(&s)
+}
+
+fn fmt_short(v: f64) -> String {
     let abs = v.abs();
     if abs == 0.0 {
         return "0".to_string();
     }
-
-    // Decide between fixed and scientific notation roughly like short g
-    let use_scientific = !(1e-4..1e6).contains(&abs);
-
-    if use_scientific {
-        // 5 significant digits in scientific notation for short g style
-        let s = format!("{v:.4e}");
-        // Trim trailing zeros in fraction part
-        if let Some(idx) = s.find('e') {
-            let (mut mantissa, exp) = s.split_at(idx);
-            // mantissa like "-1.23450"
-            if let Some(dot_idx) = mantissa.find('.') {
-                // Trim trailing zeros
-                let mut end = mantissa.len();
-                while end > dot_idx + 1 && mantissa.as_bytes()[end - 1] == b'0' {
-                    end -= 1;
-                }
-                if end > 0 && mantissa.as_bytes()[end - 1] == b'.' {
-                    end -= 1;
-                }
-                mantissa = &mantissa[..end];
-            }
-            return format!("{mantissa}{exp}");
-        }
-        return s;
+    if v.fract() == 0.0 && abs < 1e15 {
+        return format!("{}", v as i64);
     }
+    if (0.001..10000.0).contains(&abs) {
+        format!("{:.4}", v)
+    } else {
+        fmt_sci(v, 4)
+    }
+}
 
-    // Fixed notation with up to 12 significant digits, trim trailing zeros
-    // Compute number of decimals to retain to reach ~12 significant digits
-    let exp10 = abs.log10().floor() as i32; // position of most significant digit
-    let sig_digits: i32 = 12;
-    let decimals = (sig_digits - 1 - exp10).clamp(0, 12) as usize;
-    // Round to that many decimals
+fn fmt_long(v: f64) -> String {
+    let abs = v.abs();
+    if abs == 0.0 {
+        return "0".to_string();
+    }
+    if v.fract() == 0.0 && abs < 1e15 {
+        return format!("{}", v as i64);
+    }
+    if (0.001..10000.0).contains(&abs) {
+        format!("{:.15}", v)
+    } else {
+        fmt_sci(v, 14)
+    }
+}
+
+fn fmt_compact(v: f64, sig_digits: usize) -> String {
+    let abs = v.abs();
+    if abs == 0.0 {
+        return "0".to_string();
+    }
+    let use_scientific = !(1e-4..1e6).contains(&abs);
+    if use_scientific {
+        let dec = sig_digits - 1;
+        let s = format!("{v:.dec$e}");
+        // trim trailing zeros in mantissa then reformat exponent
+        if let Some(e_pos) = s.find('e') {
+            let exp_part = &s[e_pos..];
+            let mut mantissa = s[..e_pos].to_string();
+            if let Some(dot) = mantissa.find('.') {
+                let mut end = mantissa.len();
+                while end > dot + 1 && mantissa.as_bytes()[end - 1] == b'0' {
+                    end -= 1;
+                }
+                if mantissa.as_bytes()[end - 1] == b'.' {
+                    end -= 1;
+                }
+                mantissa.truncate(end);
+            }
+            return matlab_exp(&format!("{mantissa}{exp_part}"));
+        }
+        return matlab_exp(&s);
+    }
+    let exp10 = abs.log10().floor() as i32;
+    let decimals = ((sig_digits as i32 - 1 - exp10).max(0)) as usize;
     let pow = 10f64.powi(decimals as i32);
     let rounded = (v * pow).round() / pow;
     let mut s = format!("{rounded:.decimals$}");
     if let Some(dot) = s.find('.') {
-        // Trim trailing zeros
         let mut end = s.len();
         while end > dot + 1 && s.as_bytes()[end - 1] == b'0' {
             end -= 1;
         }
-        if end > 0 && s.as_bytes()[end - 1] == b'.' {
+        if s.as_bytes()[end - 1] == b'.' {
             end -= 1;
         }
         s.truncate(end);
@@ -1698,6 +1828,64 @@ fn format_number_short_g(value: f64) -> String {
         s = "0".to_string();
     }
     s
+}
+
+fn fmt_rational(v: f64) -> String {
+    if v == 0.0 {
+        return "0".to_string();
+    }
+    let negative = v < 0.0;
+    let abs = v.abs();
+    if v.fract() == 0.0 && abs < 1e15 {
+        return format!("{}", v as i64);
+    }
+    // Continued fraction convergents; stop at the first one within MATLAB's
+    // 5e-7 relative tolerance (matches `format rational` behaviour for pi → 355/113).
+    let tol = 5e-7 * abs;
+    let max_d = 1_000_000i64;
+    let mut n0: i64 = 1;
+    let mut n1: i64 = abs.floor() as i64;
+    let mut d0: i64 = 0;
+    let mut d1: i64 = 1;
+    let mut a = abs;
+    let mut best_n = n1;
+    let mut best_d = d1;
+    for _ in 0..50 {
+        if (abs - best_n as f64 / best_d as f64).abs() <= tol {
+            break;
+        }
+        let f = a.fract();
+        if f < 1e-10 {
+            break;
+        }
+        a = 1.0 / f;
+        let q = a.floor() as i64;
+        let Some(n2) = q.checked_mul(n1).and_then(|v| v.checked_add(n0)) else {
+            break;
+        };
+        let Some(d2) = q.checked_mul(d1).and_then(|v| v.checked_add(d0)) else {
+            break;
+        };
+        if d2 > max_d {
+            break;
+        }
+        best_n = n2;
+        best_d = d2;
+        n0 = n1;
+        n1 = n2;
+        d0 = d1;
+        d1 = d2;
+    }
+    let sign = if negative { "-" } else { "" };
+    if best_d == 1 {
+        format!("{sign}{best_n}")
+    } else {
+        format!("{sign}{best_n}/{best_d}")
+    }
+}
+
+fn fmt_hex(v: f64) -> String {
+    format!("{:016x}", v.to_bits())
 }
 
 // -------- Exception type --------
@@ -1724,6 +1912,40 @@ pub struct HandleRef {
     pub class_name: String,
     pub target: GcPtr<Value>,
     pub valid: bool,
+}
+
+const HANDLE_VALID_FLAG_PROPERTY: &str = "__runmat_handle_valid__";
+
+pub fn is_handle_valid(handle: &HandleRef) -> bool {
+    if !handle.valid {
+        return false;
+    }
+    let raw = unsafe { handle.target.as_raw() };
+    if raw.is_null() {
+        return false;
+    }
+    match unsafe { &*raw } {
+        Value::Object(obj) => !matches!(
+            obj.properties.get(HANDLE_VALID_FLAG_PROPERTY),
+            Some(Value::Bool(false))
+        ),
+        _ => true,
+    }
+}
+
+pub fn set_handle_valid(handle: &HandleRef, valid: bool) -> bool {
+    let raw = unsafe { handle.target.as_raw_mut() };
+    if raw.is_null() {
+        return false;
+    }
+    match unsafe { &mut *raw } {
+        Value::Object(obj) => {
+            obj.properties
+                .insert(HANDLE_VALID_FLAG_PROPERTY.to_string(), Value::Bool(valid));
+            true
+        }
+        _ => false,
+    }
 }
 
 impl PartialEq for HandleRef {
@@ -1759,26 +1981,16 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Int(i) => write!(f, "{}", i.to_i64()),
-            Value::Num(n) => write!(f, "{}", format_number_short_g(*n)),
+            Value::Num(n) => write!(f, "{}", format_number(*n)),
             Value::Complex(re, im) => {
                 if *im == 0.0 {
-                    write!(f, "{}", format_number_short_g(*re))
+                    write!(f, "{}", format_number(*re))
                 } else if *re == 0.0 {
-                    write!(f, "{}i", format_number_short_g(*im))
+                    write!(f, "{}i", format_number(*im))
                 } else if *im < 0.0 {
-                    write!(
-                        f,
-                        "{}-{}i",
-                        format_number_short_g(*re),
-                        format_number_short_g(im.abs())
-                    )
+                    write!(f, "{}-{}i", format_number(*re), format_number(im.abs()))
                 } else {
-                    write!(
-                        f,
-                        "{}+{}i",
-                        format_number_short_g(*re),
-                        format_number_short_g(*im)
-                    )
+                    write!(f, "{}+{}i", format_number(*re), format_number(*im))
                 }
             }
             Value::Bool(b) => write!(f, "{}", if *b { 1 } else { 0 }),
@@ -1837,7 +2049,12 @@ impl fmt::Display for Value {
                 }
                 write!(f, "]")
             }
-            Value::FunctionHandle(name) => write!(f, "@{name}"),
+            Value::FunctionHandle(name)
+            | Value::ExternalFunctionHandle(name)
+            | Value::MethodFunctionHandle(name) => {
+                write!(f, "@{name}")
+            }
+            Value::BoundFunctionHandle { name, .. } => write!(f, "@{name}"),
             Value::Closure(c) => write!(
                 f,
                 "<closure {} captures={}>",
@@ -1903,7 +2120,28 @@ impl fmt::Display for ComplexTensor {
 
 #[cfg(test)]
 mod display_tests {
-    use super::{ComplexTensor, LogicalArray, Tensor};
+    use super::{
+        fmt_rational, format_number, set_display_format, ComplexTensor, FormatMode, LogicalArray,
+        Tensor,
+    };
+
+    #[test]
+    fn fmt_rational_large_value_with_tiny_fract_does_not_overflow() {
+        // abs ~1e15 with a small fractional part: q*n1 would overflow i64 without
+        // checked arithmetic.
+        let result = std::panic::catch_unwind(|| fmt_rational(1_000_000_000_000_000.000_1));
+        assert!(
+            result.is_ok(),
+            "fmt_rational panicked on large value with tiny fract"
+        );
+
+        // Negative counterpart.
+        let result = std::panic::catch_unwind(|| fmt_rational(-1_000_000_000_000_000.000_1));
+        assert!(
+            result.is_ok(),
+            "fmt_rational panicked on negative large value with tiny fract"
+        );
+    }
 
     #[test]
     fn tensor_nd_display_uses_page_headers() {
@@ -1946,6 +2184,14 @@ mod display_tests {
         let rendered = complex.to_string();
         assert!(rendered.contains("(:, :, 1) ="));
         assert!(rendered.contains("(:, :, 2) ="));
+    }
+
+    #[test]
+    fn format_hex_preserves_negative_zero_sign_bit() {
+        set_display_format(FormatMode::Hex);
+        assert_eq!(format_number(-0.0), "8000000000000000");
+        assert_eq!(format_number(0.0), "0000000000000000");
+        set_display_format(FormatMode::Short);
     }
 }
 
@@ -2007,7 +2253,7 @@ impl CellArray {
                 expected
             ));
         }
-        // Note: data will be allocated into GC handles by callers (runtime/ignition) to avoid builtins↔gc cycles
+        // Note: data will be allocated into GC handles by callers (runtime/vm) to avoid builtins↔gc cycles
         let handles: Vec<GcPtr<Value>> = data
             .into_iter()
             .map(|v| unsafe { GcPtr::from_raw(Box::into_raw(Box::new(v))) })
@@ -2083,6 +2329,10 @@ impl ObjectInstance {
             properties: HashMap::new(),
         }
     }
+
+    pub fn is_class(&self, name: &str) -> bool {
+        self.class_name == name
+    }
 }
 
 // -------- Class registry (scaffolding) --------
@@ -2090,12 +2340,14 @@ impl ObjectInstance {
 pub enum Access {
     Public,
     Private,
+    Protected,
 }
 
 #[derive(Debug, Clone)]
 pub struct PropertyDef {
     pub name: String,
     pub is_static: bool,
+    pub is_constant: bool,
     pub is_dependent: bool,
     pub get_access: Access,
     pub set_access: Access,
@@ -2106,8 +2358,11 @@ pub struct PropertyDef {
 pub struct MethodDef {
     pub name: String,
     pub is_static: bool,
+    pub is_abstract: bool,
+    pub is_sealed: bool,
     pub access: Access,
     pub function_name: String, // bound runtime builtin/user func name
+    pub implicit_class_argument: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -2121,19 +2376,138 @@ pub struct ClassDef {
 use std::sync::Mutex;
 
 static CLASS_REGISTRY: OnceLock<Mutex<HashMap<String, ClassDef>>> = OnceLock::new();
+static SEALED_CLASS_REGISTRY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static ABSTRACT_CLASS_REGISTRY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static STATIC_VALUES: OnceLock<Mutex<HashMap<(String, String), Value>>> = OnceLock::new();
+static ENUMERATION_REGISTRY: OnceLock<Mutex<HashMap<String, HashSet<String>>>> = OnceLock::new();
 
 fn registry() -> &'static Mutex<HashMap<String, ClassDef>> {
-    CLASS_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+    CLASS_REGISTRY.get_or_init(|| Mutex::new(primitive_class_registry()))
+}
+
+fn sealed_registry() -> &'static Mutex<HashSet<String>> {
+    SEALED_CLASS_REGISTRY.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn abstract_registry() -> &'static Mutex<HashSet<String>> {
+    ABSTRACT_CLASS_REGISTRY.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn enumeration_registry() -> &'static Mutex<HashMap<String, HashSet<String>>> {
+    ENUMERATION_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn primitive_class_registry() -> HashMap<String, ClassDef> {
+    ["double", "single", "logical"]
+        .into_iter()
+        .map(|class_name| {
+            let mut methods = HashMap::new();
+            methods.insert(
+                "zeros".to_string(),
+                MethodDef {
+                    name: "zeros".to_string(),
+                    is_static: true,
+                    is_abstract: false,
+                    is_sealed: false,
+                    access: Access::Public,
+                    function_name: "zeros".to_string(),
+                    implicit_class_argument: Some(class_name.to_string()),
+                },
+            );
+            (
+                class_name.to_string(),
+                ClassDef {
+                    name: class_name.to_string(),
+                    parent: None,
+                    properties: HashMap::new(),
+                    methods,
+                },
+            )
+        })
+        .collect()
 }
 
 pub fn register_class(def: ClassDef) {
+    register_class_with_modifiers(def, false, false);
+}
+
+pub fn register_class_with_sealed(def: ClassDef, is_sealed: bool) {
+    register_class_with_modifiers(def, is_sealed, false);
+}
+
+pub fn register_class_with_modifiers(def: ClassDef, is_sealed: bool, is_abstract: bool) {
     let mut m = registry().lock().unwrap();
-    m.insert(def.name.clone(), def);
+    let class_name = def.name.clone();
+    m.insert(class_name.clone(), def);
+    let mut sealed = sealed_registry().lock().unwrap();
+    if is_sealed {
+        sealed.insert(class_name.clone());
+    } else {
+        sealed.remove(&class_name);
+    }
+    let mut abstract_classes = abstract_registry().lock().unwrap();
+    if is_abstract {
+        abstract_classes.insert(class_name.clone());
+    } else {
+        abstract_classes.remove(&class_name);
+    }
+    enumeration_registry()
+        .lock()
+        .unwrap()
+        .entry(class_name)
+        .or_default();
+}
+
+pub fn register_class_enumerations(class_name: &str, members: impl IntoIterator<Item = String>) {
+    let mut registry = enumeration_registry().lock().unwrap();
+    let entry = registry.entry(class_name.to_string()).or_default();
+    entry.clear();
+    entry.extend(members);
+}
+
+pub fn class_has_enumeration_member(class_name: &str, member: &str) -> bool {
+    enumeration_registry()
+        .lock()
+        .unwrap()
+        .get(class_name)
+        .is_some_and(|members| members.contains(member))
 }
 
 pub fn get_class(name: &str) -> Option<ClassDef> {
     registry().lock().unwrap().get(name).cloned()
+}
+
+pub fn class_names() -> Vec<String> {
+    registry().lock().unwrap().keys().cloned().collect()
+}
+
+pub fn is_class_sealed(name: &str) -> bool {
+    sealed_registry().lock().unwrap().contains(name)
+}
+
+pub fn is_class_abstract(name: &str) -> bool {
+    abstract_registry().lock().unwrap().contains(name)
+}
+
+pub fn is_class_or_subclass(class_name: &str, ancestor_name: &str) -> bool {
+    if class_name == ancestor_name {
+        return true;
+    }
+    let reg = registry().lock().unwrap();
+    let mut current = Some(class_name.to_string());
+    let mut visited = std::collections::HashSet::new();
+    while let Some(name) = current {
+        if !visited.insert(name.clone()) {
+            break;
+        }
+        if name == ancestor_name {
+            return true;
+        }
+        current = reg
+            .get(&name)
+            .and_then(|class_def| class_def.parent.clone());
+    }
+    false
 }
 
 /// Resolve a property through the inheritance chain, returning the property definition and
@@ -2141,10 +2515,11 @@ pub fn get_class(name: &str) -> Option<ClassDef> {
 pub fn lookup_property(class_name: &str, prop: &str) -> Option<(PropertyDef, String)> {
     let reg = registry().lock().unwrap();
     let mut current = Some(class_name.to_string());
-    let guard: Option<std::sync::MutexGuard<'_, std::collections::HashMap<String, ClassDef>>> =
-        None;
-    drop(guard);
+    let mut visited = std::collections::HashSet::new();
     while let Some(name) = current {
+        if !visited.insert(name.clone()) {
+            break;
+        }
         if let Some(cls) = reg.get(&name) {
             if let Some(p) = cls.properties.get(prop) {
                 return Some((p.clone(), name));
@@ -2162,7 +2537,11 @@ pub fn lookup_property(class_name: &str, prop: &str) -> Option<(PropertyDef, Str
 pub fn lookup_method(class_name: &str, method: &str) -> Option<(MethodDef, String)> {
     let reg = registry().lock().unwrap();
     let mut current = Some(class_name.to_string());
+    let mut visited = std::collections::HashSet::new();
     while let Some(name) = current {
+        if !visited.insert(name.clone()) {
+            break;
+        }
         if let Some(cls) = reg.get(&name) {
             if let Some(m) = cls.methods.get(method) {
                 return Some((m.clone(), name));
@@ -2205,5 +2584,168 @@ pub fn set_static_property_value_in_owner(
         Ok(())
     } else {
         Err(format!("Unknown static property '{class_name}.{prop}'"))
+    }
+}
+
+#[cfg(test)]
+mod class_registry_tests {
+    use super::{
+        get_class, lookup_method, lookup_property, register_class, Access, ClassDef, MethodDef,
+        PropertyDef,
+    };
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_class_name(prefix: &str) -> String {
+        let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", prefix, id)
+    }
+
+    #[test]
+    fn primitive_classes_expose_static_zeros_method_metadata() {
+        for class_name in ["double", "single", "logical"] {
+            let class_def = get_class(class_name).expect("primitive class should be registered");
+            let method = class_def
+                .methods
+                .get("zeros")
+                .expect("primitive class should expose zeros static method");
+            assert!(method.is_static, "zeros should be static on {class_name}");
+            assert_eq!(method.function_name, "zeros");
+            assert_eq!(method.implicit_class_argument.as_deref(), Some(class_name));
+
+            let (resolved, owner) =
+                lookup_method(class_name, "zeros").expect("lookup should find primitive zeros");
+            assert_eq!(owner, class_name);
+            assert_eq!(resolved.function_name, "zeros");
+            assert_eq!(
+                resolved.implicit_class_argument.as_deref(),
+                Some(class_name)
+            );
+        }
+    }
+
+    #[test]
+    fn method_lookup_uses_parent_class_metadata_chain() {
+        let parent_name = unique_class_name("plan6_parent");
+        let child_name = unique_class_name("plan6_child");
+
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            "parentOnly".to_string(),
+            MethodDef {
+                name: "parentOnly".to_string(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: "parentOnly_impl".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let (method, owner) = lookup_method(&child_name, "parentOnly")
+            .expect("child lookup should resolve inherited method through parent metadata");
+        assert_eq!(owner, parent_name);
+        assert_eq!(method.function_name, "parentOnly_impl");
+    }
+
+    #[test]
+    fn method_lookup_handles_parent_cycle() {
+        let class_a = unique_class_name("plan6_cycle_method_a");
+        let class_b = unique_class_name("plan6_cycle_method_b");
+
+        register_class(ClassDef {
+            name: class_a.clone(),
+            parent: Some(class_b.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: class_b.clone(),
+            parent: Some(class_a.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        assert!(
+            lookup_method(&class_a, "missing").is_none(),
+            "cyclic parent metadata should terminate missing method lookup"
+        );
+    }
+
+    #[test]
+    fn property_lookup_uses_parent_class_metadata_chain() {
+        let parent_name = unique_class_name("plan6_property_parent");
+        let child_name = unique_class_name("plan6_property_child");
+
+        let mut parent_properties = HashMap::new();
+        parent_properties.insert(
+            "parentFlag".to_string(),
+            PropertyDef {
+                name: "parentFlag".to_string(),
+                is_static: false,
+                is_constant: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: parent_properties,
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let (property, owner) = lookup_property(&child_name, "parentFlag")
+            .expect("child property lookup should resolve inherited property through parent");
+        assert_eq!(owner, parent_name);
+        assert_eq!(property.name, "parentFlag");
+        assert!(!property.is_static);
+    }
+
+    #[test]
+    fn property_lookup_handles_parent_cycle() {
+        let class_a = unique_class_name("plan6_cycle_property_a");
+        let class_b = unique_class_name("plan6_cycle_property_b");
+
+        register_class(ClassDef {
+            name: class_a.clone(),
+            parent: Some(class_b.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: class_b.clone(),
+            parent: Some(class_a.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        assert!(
+            lookup_property(&class_a, "missing").is_none(),
+            "cyclic parent metadata should terminate missing property lookup"
+        );
     }
 }

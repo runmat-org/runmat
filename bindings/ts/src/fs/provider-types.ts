@@ -13,18 +13,21 @@ export interface RunMatFilesystemDirEntry {
   fileType?: RunMatFsFileType;
 }
 
+export type RunMatMaybePromise<T> = T | Promise<T>;
+
 export interface RunMatFilesystemProvider {
-  readFile(path: string): Uint8Array | ArrayBuffer;
-  writeFile(path: string, data: Uint8Array | ArrayBuffer | ArrayBufferView): void;
-  removeFile(path: string): void;
-  metadata(path: string): RunMatFilesystemMetadata;
-  symlinkMetadata?(path: string): RunMatFilesystemMetadata;
-  readDir(path: string): RunMatFilesystemDirEntry[];
-  canonicalize?(path: string): string;
-  createDir?(path: string): void;
-  createDirAll?(path: string): void;
-  removeDir?(path: string): void;
-  removeDirAll?(path: string): void;
-  rename?(from: string, to: string): void;
-  setReadonly?(path: string, readonly: boolean): void;
+  readFile(path: string): RunMatMaybePromise<Uint8Array | ArrayBuffer>;
+  readMany?(paths: string[]): RunMatMaybePromise<Array<Uint8Array | ArrayBuffer | null>>;
+  writeFile(path: string, data: Uint8Array | ArrayBuffer | ArrayBufferView): RunMatMaybePromise<void>;
+  removeFile(path: string): RunMatMaybePromise<void>;
+  metadata(path: string): RunMatMaybePromise<RunMatFilesystemMetadata>;
+  symlinkMetadata?(path: string): RunMatMaybePromise<RunMatFilesystemMetadata>;
+  readDir(path: string): RunMatMaybePromise<RunMatFilesystemDirEntry[]>;
+  canonicalize?(path: string): RunMatMaybePromise<string>;
+  createDir?(path: string): RunMatMaybePromise<void>;
+  createDirAll?(path: string): RunMatMaybePromise<void>;
+  removeDir?(path: string): RunMatMaybePromise<void>;
+  removeDirAll?(path: string): RunMatMaybePromise<void>;
+  rename?(from: string, to: string): RunMatMaybePromise<void>;
+  setReadonly?(path: string, readonly: boolean): RunMatMaybePromise<void>;
 }

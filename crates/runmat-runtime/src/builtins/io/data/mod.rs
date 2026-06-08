@@ -4,7 +4,11 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use runmat_builtins::{ObjectInstance, StructValue, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ObjectInstance, StructValue, Tensor, Value,
+};
 use runmat_filesystem::data_contract::{DataChunkDescriptor, DataChunkUploadRequest};
 use runmat_macros::runtime_builtin;
 
@@ -15,10 +19,10 @@ use crate::builtins::common::spec::{
 use crate::data::{
     array_object, data_error, dataset_object, dataset_root, ensure_manifest_sequence,
     get_object_prop, manifest_path, manifest_version_token, now_rfc3339, parse_schema,
-    parse_string, read_array_payload, read_manifest, remove_tx, sha256_hex, start_tx,
-    transaction_object, with_tx, with_tx_mut, write_array_payload, write_manifest, DataArrayMeta,
-    DataArrayPayload, DataChunkIndex, DataChunkIndexEntry, DataManifest, PendingCreateArray,
-    PendingFill, PendingResize, PendingWrite, TxnStatus,
+    parse_string, read_array_payload_async, read_manifest_async, remove_tx, sha256_hex, start_tx,
+    transaction_object, with_tx, with_tx_mut, write_array_payload_async, write_manifest_async,
+    DataArrayMeta, DataArrayPayload, DataChunkIndex, DataChunkIndexEntry, DataManifest,
+    PendingCreateArray, PendingFill, PendingResize, PendingWrite, TxnStatus,
 };
 use crate::{make_cell, BuiltinResult};
 
@@ -49,6 +53,959 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Data builtins are side-effecting and not fusible.",
 };
 
+const DATA_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.INVALID_ARGUMENT",
+    identifier: Some("RunMat:data:InvalidArgument"),
+    when: "Arguments, receiver object, or option grammar are invalid for the requested data API.",
+    message: "data: invalid argument",
+};
+
+const DATA_ERROR_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.NOT_FOUND",
+    identifier: Some("RunMat:data:NotFound"),
+    when: "Referenced dataset/array/transaction object is missing or cannot be resolved.",
+    message: "data: requested object not found",
+};
+
+const DATA_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.INTERNAL",
+    identifier: Some("RunMat:data:Internal"),
+    when: "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
+    message: "data: internal operation failed",
+};
+
+const DATA_DESCRIPTOR_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    DATA_ERROR_INVALID_ARGUMENT,
+    DATA_ERROR_NOT_FOUND,
+    DATA_ERROR_INTERNAL,
+];
+
+const OUT_DATASET: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "ds",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Dataset handle object.",
+}];
+
+const OUT_ARRAY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "arr",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "DataArray handle object.",
+}];
+
+const OUT_TX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tx",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "DataTransaction handle object.",
+}];
+
+const OUT_BOOL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "ok",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical success/result flag.",
+}];
+
+const OUT_STRING: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "s",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "String scalar result.",
+}];
+
+const OUT_STRUCT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Struct result.",
+}];
+
+const OUT_CELL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Cell-array result.",
+}];
+
+const OUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Value result.",
+}];
+
+const OUT_TENSOR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric tensor result.",
+}];
+
+const IN_PATH_SCHEMA_REST: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "path",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dataset path (.data).",
+    },
+    BuiltinParamDescriptor {
+        name: "schema",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dataset schema struct.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_PATH_REST: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "path",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dataset path (.data).",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_FROM_TO_REST: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "fromPath",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Source dataset path.",
+    },
+    BuiltinParamDescriptor {
+        name: "toPath",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Destination dataset path.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_PATH_FORMAT_TARGET_REST: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "path",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dataset path (.data).",
+    },
+    BuiltinParamDescriptor {
+        name: "format",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Format token (currently 'data').",
+    },
+    BuiltinParamDescriptor {
+        name: "targetPath",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target dataset path.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_PREFIX_REST: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "prefix",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Filesystem prefix to scan for datasets.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "obj",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Receiver object.",
+}];
+
+const IN_BASE_NAME: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Name key/array identifier.",
+    },
+];
+
+const IN_BASE_KEY_DEFAULT: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "key",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Attribute key.",
+    },
+    BuiltinParamDescriptor {
+        name: "defaultValue",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("0"),
+        description: "Fallback value when key is absent.",
+    },
+];
+
+const IN_BASE_KEY_VALUE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "key",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Attribute key.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Attribute value.",
+    },
+];
+
+const IN_BASE_ATTRS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "attrs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Struct of attribute updates.",
+    },
+];
+
+const IN_BASE_LABEL_REST: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "label",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Snapshot label.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_BASE_REST: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_BASE_SLICE_OPTIONAL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataArray receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "sliceSpec",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional slice specification.",
+    },
+];
+
+const IN_BASE_VALUES: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataArray receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "values",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Full-array values payload.",
+    },
+];
+
+const IN_BASE_SLICE_VALUES: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataArray receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "sliceSpec",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Slice specification.",
+    },
+    BuiltinParamDescriptor {
+        name: "values",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Slice values payload.",
+    },
+];
+
+const IN_BASE_NEW_SHAPE_REST: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataArray receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "newShape",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "New array shape.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_BASE_VALUE_REST: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataArray receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Fill value.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_TX_WRITE: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "tx",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataTransaction receiver.",
+    },
+    BuiltinParamDescriptor {
+        name: "arrayName",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target array name.",
+    },
+    BuiltinParamDescriptor {
+        name: "sliceSpec",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Slice specification.",
+    },
+    BuiltinParamDescriptor {
+        name: "values",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Values payload.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_TX_ARRAY_SHAPE_REST: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "tx",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataTransaction receiver.",
+    },
+    BuiltinParamDescriptor {
+        name: "arrayName",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target array name.",
+    },
+    BuiltinParamDescriptor {
+        name: "newShape",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "New shape vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_TX_ARRAY_VALUE_SLICE_OPT: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "tx",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataTransaction receiver.",
+    },
+    BuiltinParamDescriptor {
+        name: "arrayName",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target array name.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Fill value.",
+    },
+    BuiltinParamDescriptor {
+        name: "sliceSpec",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional slice specification.",
+    },
+];
+
+const IN_TX_ARRAY_NAME: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "tx",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataTransaction receiver.",
+    },
+    BuiltinParamDescriptor {
+        name: "arrayName",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target array name.",
+    },
+];
+
+const IN_TX_ARRAY_META: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "tx",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataTransaction receiver.",
+    },
+    BuiltinParamDescriptor {
+        name: "arrayName",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "New array name.",
+    },
+    BuiltinParamDescriptor {
+        name: "meta",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Array metadata struct.",
+    },
+];
+
+const IN_TX_COMMIT_REST: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "tx",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataTransaction receiver.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Commit options (e.g. if_manifest).",
+    },
+];
+
+macro_rules! one_sig_descriptor {
+    ($desc:ident, $sigs:ident, $label:expr, $inputs:expr, $outputs:expr) => {
+        const $sigs: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+            label: $label,
+            inputs: $inputs,
+            outputs: $outputs,
+        }];
+        pub const $desc: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &$sigs,
+            output_mode: BuiltinOutputMode::Fixed,
+            completion_policy: BuiltinCompletionPolicy::Public,
+            errors: &DATA_DESCRIPTOR_ERRORS,
+        };
+    };
+}
+
+one_sig_descriptor!(
+    DATA_CREATE_DESCRIPTOR,
+    DATA_CREATE_SIGS,
+    "ds = data.create(path, schema, Name, Value, ...)",
+    &IN_PATH_SCHEMA_REST,
+    &OUT_DATASET
+);
+one_sig_descriptor!(
+    DATA_OPEN_DESCRIPTOR,
+    DATA_OPEN_SIGS,
+    "ds = data.open(path, Name, Value, ...)",
+    &IN_PATH_REST,
+    &OUT_DATASET
+);
+one_sig_descriptor!(
+    DATA_EXISTS_DESCRIPTOR,
+    DATA_EXISTS_SIGS,
+    "tf = data.exists(path)",
+    &IN_PATH_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATA_DELETE_DESCRIPTOR,
+    DATA_DELETE_SIGS,
+    "tf = data.delete(path, Name, Value, ...)",
+    &IN_PATH_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATA_COPY_DESCRIPTOR,
+    DATA_COPY_SIGS,
+    "tf = data.copy(fromPath, toPath, Name, Value, ...)",
+    &IN_FROM_TO_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATA_MOVE_DESCRIPTOR,
+    DATA_MOVE_SIGS,
+    "tf = data.move(fromPath, toPath, Name, Value, ...)",
+    &IN_FROM_TO_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATA_IMPORT_DESCRIPTOR,
+    DATA_IMPORT_SIGS,
+    "ds = data.import(path, format, sourcePath, Name, Value, ...)",
+    &IN_PATH_FORMAT_TARGET_REST,
+    &OUT_DATASET
+);
+one_sig_descriptor!(
+    DATA_EXPORT_DESCRIPTOR,
+    DATA_EXPORT_SIGS,
+    "tf = data.export(path, format, targetPath, Name, Value, ...)",
+    &IN_PATH_FORMAT_TARGET_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATA_LIST_DESCRIPTOR,
+    DATA_LIST_SIGS,
+    "C = data.list(prefix, Name, Value, ...)",
+    &IN_PREFIX_REST,
+    &OUT_CELL
+);
+one_sig_descriptor!(
+    DATA_INSPECT_DESCRIPTOR,
+    DATA_INSPECT_SIGS,
+    "S = data.inspect(path)",
+    &IN_PATH_REST,
+    &OUT_STRUCT
+);
+
+one_sig_descriptor!(
+    DATASET_PATH_DESCRIPTOR,
+    DATASET_PATH_SIGS,
+    "path = Dataset.path(ds)",
+    &IN_BASE,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATASET_ID_DESCRIPTOR,
+    DATASET_ID_SIGS,
+    "id = Dataset.id(ds)",
+    &IN_BASE,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATASET_VERSION_DESCRIPTOR,
+    DATASET_VERSION_SIGS,
+    "version = Dataset.version(ds)",
+    &IN_BASE,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATASET_ARRAYS_DESCRIPTOR,
+    DATASET_ARRAYS_SIGS,
+    "C = Dataset.arrays(ds)",
+    &IN_BASE,
+    &OUT_CELL
+);
+one_sig_descriptor!(
+    DATASET_HAS_ARRAY_DESCRIPTOR,
+    DATASET_HAS_ARRAY_SIGS,
+    "tf = Dataset.has_array(ds, name)",
+    &IN_BASE_NAME,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATASET_ARRAY_DESCRIPTOR,
+    DATASET_ARRAY_SIGS,
+    "arr = Dataset.array(ds, name)",
+    &IN_BASE_NAME,
+    &OUT_ARRAY
+);
+one_sig_descriptor!(
+    DATASET_ATTRS_DESCRIPTOR,
+    DATASET_ATTRS_SIGS,
+    "S = Dataset.attrs(ds)",
+    &IN_BASE,
+    &OUT_STRUCT
+);
+one_sig_descriptor!(
+    DATASET_GET_ATTR_DESCRIPTOR,
+    DATASET_GET_ATTR_SIGS,
+    "value = Dataset.get_attr(ds, key, defaultValue)",
+    &IN_BASE_KEY_DEFAULT,
+    &OUT_VALUE
+);
+one_sig_descriptor!(
+    DATASET_SET_ATTR_DESCRIPTOR,
+    DATASET_SET_ATTR_SIGS,
+    "tf = Dataset.set_attr(ds, key, value)",
+    &IN_BASE_KEY_VALUE,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATASET_SET_ATTRS_DESCRIPTOR,
+    DATASET_SET_ATTRS_SIGS,
+    "tf = Dataset.set_attrs(ds, attrs)",
+    &IN_BASE_ATTRS,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATASET_BEGIN_DESCRIPTOR,
+    DATASET_BEGIN_SIGS,
+    "tx = Dataset.begin(ds, Name, Value, ...)",
+    &IN_BASE_REST,
+    &OUT_TX
+);
+one_sig_descriptor!(
+    DATASET_SNAPSHOT_DESCRIPTOR,
+    DATASET_SNAPSHOT_SIGS,
+    "snapshotPath = Dataset.snapshot(ds, label, Name, Value, ...)",
+    &IN_BASE_LABEL_REST,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATASET_REFRESH_DESCRIPTOR,
+    DATASET_REFRESH_SIGS,
+    "ds = Dataset.refresh(ds)",
+    &IN_BASE,
+    &OUT_DATASET
+);
+
+one_sig_descriptor!(
+    DATAARRAY_NAME_DESCRIPTOR,
+    DATAARRAY_NAME_SIGS,
+    "name = DataArray.name(arr)",
+    &IN_BASE,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATAARRAY_DTYPE_DESCRIPTOR,
+    DATAARRAY_DTYPE_SIGS,
+    "dtype = DataArray.dtype(arr)",
+    &IN_BASE,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATAARRAY_SHAPE_DESCRIPTOR,
+    DATAARRAY_SHAPE_SIGS,
+    "shape = DataArray.shape(arr)",
+    &IN_BASE,
+    &OUT_TENSOR
+);
+one_sig_descriptor!(
+    DATAARRAY_RANK_DESCRIPTOR,
+    DATAARRAY_RANK_SIGS,
+    "rank = DataArray.rank(arr)",
+    &IN_BASE,
+    &OUT_VALUE
+);
+one_sig_descriptor!(
+    DATAARRAY_CHUNK_SHAPE_DESCRIPTOR,
+    DATAARRAY_CHUNK_SHAPE_SIGS,
+    "chunkShape = DataArray.chunk_shape(arr)",
+    &IN_BASE,
+    &OUT_TENSOR
+);
+one_sig_descriptor!(
+    DATAARRAY_CODEC_DESCRIPTOR,
+    DATAARRAY_CODEC_SIGS,
+    "codec = DataArray.codec(arr)",
+    &IN_BASE,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATAARRAY_READ_DESCRIPTOR,
+    DATAARRAY_READ_SIGS,
+    "X = DataArray.read(arr, sliceSpec)",
+    &IN_BASE_SLICE_OPTIONAL,
+    &OUT_TENSOR
+);
+const DATAARRAY_WRITE_SIGS: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "tf = DataArray.write(arr, values)",
+        inputs: &IN_BASE_VALUES,
+        outputs: &OUT_BOOL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = DataArray.write(arr, sliceSpec, values)",
+        inputs: &IN_BASE_SLICE_VALUES,
+        outputs: &OUT_BOOL,
+    },
+];
+pub const DATAARRAY_WRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DATAARRAY_WRITE_SIGS,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DATA_DESCRIPTOR_ERRORS,
+};
+one_sig_descriptor!(
+    DATAARRAY_RESIZE_DESCRIPTOR,
+    DATAARRAY_RESIZE_SIGS,
+    "tf = DataArray.resize(arr, newShape, Name, Value, ...)",
+    &IN_BASE_NEW_SHAPE_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATAARRAY_FILL_DESCRIPTOR,
+    DATAARRAY_FILL_SIGS,
+    "tf = DataArray.fill(arr, value, Name, Value, ...)",
+    &IN_BASE_VALUE_REST,
+    &OUT_BOOL
+);
+
+one_sig_descriptor!(
+    DATATX_ID_DESCRIPTOR,
+    DATATX_ID_SIGS,
+    "id = DataTransaction.id(tx)",
+    &IN_BASE,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATATX_WRITE_DESCRIPTOR,
+    DATATX_WRITE_SIGS_1,
+    "tf = DataTransaction.write(tx, arrayName, sliceSpec, values, Name, Value, ...)",
+    &IN_TX_WRITE,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_SET_ATTR_DESCRIPTOR,
+    DATATX_SET_ATTR_SIGS,
+    "tf = DataTransaction.set_attr(tx, key, value)",
+    &IN_BASE_KEY_VALUE,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_SET_ATTRS_DESCRIPTOR,
+    DATATX_SET_ATTRS_SIGS,
+    "tf = DataTransaction.set_attrs(tx, attrs)",
+    &IN_BASE_ATTRS,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_RESIZE_DESCRIPTOR,
+    DATATX_RESIZE_SIGS,
+    "tf = DataTransaction.resize(tx, arrayName, newShape, Name, Value, ...)",
+    &IN_TX_ARRAY_SHAPE_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_FILL_DESCRIPTOR,
+    DATATX_FILL_SIGS,
+    "tf = DataTransaction.fill(tx, arrayName, value, sliceSpec)",
+    &IN_TX_ARRAY_VALUE_SLICE_OPT,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_DELETE_ARRAY_DESCRIPTOR,
+    DATATX_DELETE_ARRAY_SIGS,
+    "tf = DataTransaction.delete_array(tx, arrayName)",
+    &IN_TX_ARRAY_NAME,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_CREATE_ARRAY_DESCRIPTOR,
+    DATATX_CREATE_ARRAY_SIGS,
+    "tf = DataTransaction.create_array(tx, arrayName, meta)",
+    &IN_TX_ARRAY_META,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_COMMIT_DESCRIPTOR,
+    DATATX_COMMIT_SIGS,
+    "tf = DataTransaction.commit(tx, Name, Value, ...)",
+    &IN_TX_COMMIT_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    COMMIT_ALIAS_DESCRIPTOR,
+    COMMIT_ALIAS_SIGS,
+    "tf = commit(tx, Name, Value, ...)",
+    &IN_TX_COMMIT_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_ABORT_DESCRIPTOR,
+    DATATX_ABORT_SIGS,
+    "tf = DataTransaction.abort(tx)",
+    &IN_BASE,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_STATUS_DESCRIPTOR,
+    DATATX_STATUS_SIGS,
+    "status = DataTransaction.status(tx)",
+    &IN_BASE,
+    &OUT_STRING
+);
+
 #[runtime_builtin(
     name = "data.create",
     category = "io/data",
@@ -56,6 +1013,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "data,dataset,create,persistence",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
+    descriptor(crate::builtins::io::data::DATA_CREATE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_create_builtin(
@@ -76,7 +1034,7 @@ async fn data_create_builtin(
             values: vec![0.0; total],
         };
         let (payload_path, chunk_index_path) =
-            write_array_payload(&root, &name, &payload, &meta.chunk_shape)?;
+            write_array_payload_async(&root, &name, &payload, &meta.chunk_shape).await?;
         meta.data_path = make_rel_data_path(&root, &payload_path)?;
         meta.chunk_index_path = Some(make_rel_data_path(&root, &chunk_index_path)?);
         arrays.insert(name, meta);
@@ -93,7 +1051,7 @@ async fn data_create_builtin(
         attrs: BTreeMap::new(),
         txn_sequence: 0,
     };
-    write_manifest(&root, &manifest)?;
+    write_manifest_async(&root, &manifest).await?;
     Ok(dataset_object(&path, &manifest))
 }
 
@@ -103,14 +1061,15 @@ async fn data_create_builtin(
     summary = "Open a dataset handle from a .data path.",
     keywords = "data,dataset,open,persistence",
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
+    descriptor(crate::builtins::io::data::DATA_OPEN_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_open_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.open path")?;
     let root = dataset_root(&path);
-    let manifest = read_manifest(&root)?;
+    let manifest = read_manifest_async(&root).await?;
     let mut ds = dataset_object(&path, &manifest);
-    hydrate_dataset_descriptor(&path, &mut ds);
+    hydrate_dataset_descriptor_async(&path, &mut ds).await;
     Ok(ds)
 }
 
@@ -120,12 +1079,15 @@ async fn data_open_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Valu
     summary = "Check if dataset exists.",
     keywords = "data,dataset,exists",
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATA_EXISTS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_exists_builtin(path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.exists path")?;
     let root = dataset_root(&path);
-    let exists = runmat_filesystem::metadata(manifest_path(&root)).is_ok();
+    let exists = runmat_filesystem::metadata_async(manifest_path(&root))
+        .await
+        .is_ok();
     Ok(Value::Bool(exists))
 }
 
@@ -136,17 +1098,20 @@ async fn data_exists_builtin(path: Value) -> BuiltinResult<Value> {
     keywords = "data,dataset,delete",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATA_DELETE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_delete_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.delete path")?;
     let root = dataset_root(&path);
-    runmat_filesystem::remove_dir_all(&root).map_err(|err| {
-        data_error(format!(
-            "data.delete: failed to remove '{}': {err}",
-            root.display()
-        ))
-    })?;
+    runmat_filesystem::remove_dir_all_async(&root)
+        .await
+        .map_err(|err| {
+            data_error(format!(
+                "data.delete: failed to remove '{}': {err}",
+                root.display()
+            ))
+        })?;
     Ok(Value::Bool(true))
 }
 
@@ -157,6 +1122,7 @@ async fn data_delete_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Va
     keywords = "data,dataset,copy",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATA_COPY_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_copy_builtin(
@@ -166,7 +1132,7 @@ async fn data_copy_builtin(
 ) -> BuiltinResult<Value> {
     let from = parse_string(&from_path, "data.copy fromPath")?;
     let to = parse_string(&to_path, "data.copy toPath")?;
-    copy_dir_recursive(&dataset_root(&from), &dataset_root(&to))?;
+    copy_dir_recursive(&dataset_root(&from), &dataset_root(&to)).await?;
     Ok(Value::Bool(true))
 }
 
@@ -177,6 +1143,7 @@ async fn data_copy_builtin(
     keywords = "data,dataset,move",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATA_MOVE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_move_builtin(
@@ -186,11 +1153,13 @@ async fn data_move_builtin(
 ) -> BuiltinResult<Value> {
     let from = parse_string(&from_path, "data.move fromPath")?;
     let to = parse_string(&to_path, "data.move toPath")?;
-    runmat_filesystem::rename(dataset_root(&from), dataset_root(&to)).map_err(|err| {
-        data_error(format!(
-            "data.move: failed to move dataset '{from}' -> '{to}': {err}"
-        ))
-    })?;
+    runmat_filesystem::rename_async(dataset_root(&from), dataset_root(&to))
+        .await
+        .map_err(|err| {
+            data_error(format!(
+                "data.move: failed to move dataset '{from}' -> '{to}': {err}"
+            ))
+        })?;
     Ok(Value::Bool(true))
 }
 
@@ -201,6 +1170,7 @@ async fn data_move_builtin(
     keywords = "data,dataset,import",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
+    descriptor(crate::builtins::io::data::DATA_IMPORT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_import_builtin(
@@ -217,8 +1187,8 @@ async fn data_import_builtin(
         ));
     }
     let source_path = parse_string(&source_path, "data.import sourcePath")?;
-    copy_dir_recursive(&dataset_root(&source_path), &dataset_root(&path))?;
-    let manifest = read_manifest(&dataset_root(&path))?;
+    copy_dir_recursive(&dataset_root(&source_path), &dataset_root(&path)).await?;
+    let manifest = read_manifest_async(&dataset_root(&path)).await?;
     Ok(dataset_object(&path, &manifest))
 }
 
@@ -229,6 +1199,7 @@ async fn data_import_builtin(
     keywords = "data,dataset,export",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATA_EXPORT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_export_builtin(
@@ -245,7 +1216,7 @@ async fn data_export_builtin(
         ));
     }
     let target_path = parse_string(&target_path, "data.export targetPath")?;
-    copy_dir_recursive(&dataset_root(&path), &dataset_root(&target_path))?;
+    copy_dir_recursive(&dataset_root(&path), &dataset_root(&target_path)).await?;
     Ok(Value::Bool(true))
 }
 
@@ -255,17 +1226,20 @@ async fn data_export_builtin(
     summary = "List dataset paths under a prefix.",
     keywords = "data,dataset,list",
     type_resolver(crate::builtins::io::type_resolvers::data_cell_string_type),
+    descriptor(crate::builtins::io::data::DATA_LIST_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_list_builtin(path_prefix: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
     let prefix = parse_string(&path_prefix, "data.list prefix")?;
     let root = PathBuf::from(prefix);
-    let entries = runmat_filesystem::read_dir(&root).map_err(|err| {
-        data_error(format!(
-            "data.list: failed to read '{}': {err}",
-            root.display()
-        ))
-    })?;
+    let entries = runmat_filesystem::read_dir_async(&root)
+        .await
+        .map_err(|err| {
+            data_error(format!(
+                "data.list: failed to read '{}': {err}",
+                root.display()
+            ))
+        })?;
     let mut values = Vec::new();
     for entry in entries {
         if !entry.is_dir() {
@@ -275,7 +1249,10 @@ async fn data_list_builtin(path_prefix: Value, _rest: Vec<Value>) -> BuiltinResu
         if candidate.extension().and_then(|s| s.to_str()) != Some("data") {
             continue;
         }
-        if runmat_filesystem::metadata(candidate.join("manifest.json")).is_ok() {
+        if runmat_filesystem::metadata_async(candidate.join("manifest.json"))
+            .await
+            .is_ok()
+        {
             values.push(Value::String(candidate.to_string_lossy().to_string()));
         }
     }
@@ -289,12 +1266,13 @@ async fn data_list_builtin(path_prefix: Value, _rest: Vec<Value>) -> BuiltinResu
     summary = "Inspect dataset metadata and schema fields.",
     keywords = "data,dataset,inspect,schema",
     type_resolver(crate::builtins::io::type_resolvers::data_struct_type),
+    descriptor(crate::builtins::io::data::DATA_INSPECT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_inspect_builtin(path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.inspect path")?;
     let root = dataset_root(&path);
-    let manifest = read_manifest(&root)?;
+    let manifest = read_manifest_async(&root).await?;
     let mut out = StructValue::new();
     out.fields.insert("path".to_string(), Value::String(path));
     out.fields
@@ -314,6 +1292,7 @@ async fn data_inspect_builtin(path: Value) -> BuiltinResult<Value> {
     summary = "Return dataset path.",
     keywords = "dataset,path",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATASET_PATH_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_path_builtin(base: Value) -> BuiltinResult<Value> {
@@ -325,6 +1304,7 @@ async fn dataset_path_builtin(base: Value) -> BuiltinResult<Value> {
     name = "Dataset.id",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATASET_ID_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_id_builtin(base: Value) -> BuiltinResult<Value> {
@@ -336,6 +1316,7 @@ async fn dataset_id_builtin(base: Value) -> BuiltinResult<Value> {
     name = "Dataset.version",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATASET_VERSION_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_version_builtin(base: Value) -> BuiltinResult<Value> {
@@ -347,11 +1328,12 @@ async fn dataset_version_builtin(base: Value) -> BuiltinResult<Value> {
     name = "Dataset.arrays",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_cell_string_type),
+    descriptor(crate::builtins::io::data::DATASET_ARRAYS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_arrays_builtin(base: Value) -> BuiltinResult<Value> {
     let path = dataset_path_from_object(&base, "Dataset.arrays")?;
-    let manifest = read_manifest(&dataset_root(&path))?;
+    let manifest = read_manifest_async(&dataset_root(&path)).await?;
     let values: Vec<Value> = manifest
         .arrays
         .keys()
@@ -364,12 +1346,13 @@ async fn dataset_arrays_builtin(base: Value) -> BuiltinResult<Value> {
     name = "Dataset.has_array",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATASET_HAS_ARRAY_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_has_array_builtin(base: Value, name: Value) -> BuiltinResult<Value> {
     let path = dataset_path_from_object(&base, "Dataset.has_array")?;
     let name = parse_string(&name, "Dataset.has_array name")?;
-    let manifest = read_manifest(&dataset_root(&path))?;
+    let manifest = read_manifest_async(&dataset_root(&path)).await?;
     Ok(Value::Bool(manifest.arrays.contains_key(&name)))
 }
 
@@ -377,12 +1360,13 @@ async fn dataset_has_array_builtin(base: Value, name: Value) -> BuiltinResult<Va
     name = "Dataset.array",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_array_type),
+    descriptor(crate::builtins::io::data::DATASET_ARRAY_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_array_builtin(base: Value, name: Value) -> BuiltinResult<Value> {
     let path = dataset_path_from_object(&base, "Dataset.array")?;
     let name = parse_string(&name, "Dataset.array name")?;
-    let manifest = read_manifest(&dataset_root(&path))?;
+    let manifest = read_manifest_async(&dataset_root(&path)).await?;
     if !manifest.arrays.contains_key(&name) {
         return Err(data_error(format!(
             "Dataset.array: array '{name}' not found"
@@ -395,11 +1379,12 @@ async fn dataset_array_builtin(base: Value, name: Value) -> BuiltinResult<Value>
     name = "Dataset.attrs",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_struct_type),
+    descriptor(crate::builtins::io::data::DATASET_ATTRS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_attrs_builtin(base: Value) -> BuiltinResult<Value> {
     let path = dataset_path_from_object(&base, "Dataset.attrs")?;
-    let manifest = read_manifest(&dataset_root(&path))?;
+    let manifest = read_manifest_async(&dataset_root(&path)).await?;
     Ok(attrs_to_struct(&manifest.attrs))
 }
 
@@ -407,6 +1392,7 @@ async fn dataset_attrs_builtin(base: Value) -> BuiltinResult<Value> {
     name = "Dataset.get_attr",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_unknown_type),
+    descriptor(crate::builtins::io::data::DATASET_GET_ATTR_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_get_attr_builtin(
@@ -416,7 +1402,7 @@ async fn dataset_get_attr_builtin(
 ) -> BuiltinResult<Value> {
     let path = dataset_path_from_object(&base, "Dataset.get_attr")?;
     let key = parse_string(&key, "Dataset.get_attr key")?;
-    let manifest = read_manifest(&dataset_root(&path))?;
+    let manifest = read_manifest_async(&dataset_root(&path)).await?;
     if let Some(value) = manifest.attrs.get(&key) {
         return Ok(json_to_value(value));
     }
@@ -428,17 +1414,18 @@ async fn dataset_get_attr_builtin(
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATASET_SET_ATTR_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_set_attr_builtin(base: Value, key: Value, value: Value) -> BuiltinResult<Value> {
     let path = dataset_path_from_object(&base, "Dataset.set_attr")?;
     let key = parse_string(&key, "Dataset.set_attr key")?;
     let root = dataset_root(&path);
-    let mut manifest = read_manifest(&root)?;
+    let mut manifest = read_manifest_async(&root).await?;
     manifest.attrs.insert(key, value_to_json(&value));
     manifest.updated_at = now_rfc3339();
     manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
-    write_manifest(&root, &manifest)?;
+    write_manifest_async(&root, &manifest).await?;
     Ok(Value::Bool(true))
 }
 
@@ -447,6 +1434,7 @@ async fn dataset_set_attr_builtin(base: Value, key: Value, value: Value) -> Buil
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATASET_SET_ATTRS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<Value> {
@@ -455,13 +1443,13 @@ async fn dataset_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<V
         return Err(data_error("Dataset.set_attrs: attrs must be a struct"));
     };
     let root = dataset_root(&path);
-    let mut manifest = read_manifest(&root)?;
+    let mut manifest = read_manifest_async(&root).await?;
     for (k, v) in incoming.fields {
         manifest.attrs.insert(k, value_to_json(&v));
     }
     manifest.updated_at = now_rfc3339();
     manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
-    write_manifest(&root, &manifest)?;
+    write_manifest_async(&root, &manifest).await?;
     Ok(Value::Bool(true))
 }
 
@@ -469,11 +1457,12 @@ async fn dataset_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<V
     name = "Dataset.begin",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_tx_type),
+    descriptor(crate::builtins::io::data::DATASET_BEGIN_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_begin_builtin(base: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
     let path = dataset_path_from_object(&base, "Dataset.begin")?;
-    let manifest = read_manifest(&dataset_root(&path))?;
+    let manifest = read_manifest_async(&dataset_root(&path)).await?;
     let tx_id = start_tx(path.clone(), manifest.txn_sequence);
     tracing::info!(
         target: "runmat.data",
@@ -489,6 +1478,7 @@ async fn dataset_begin_builtin(base: Value, _rest: Vec<Value>) -> BuiltinResult<
     name = "Dataset.snapshot",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATASET_SNAPSHOT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_snapshot_builtin(
@@ -500,14 +1490,16 @@ async fn dataset_snapshot_builtin(
     let label = parse_string(&label, "Dataset.snapshot label")?;
     let root = dataset_root(&path);
     let snapshots = root.join(".snapshots");
-    runmat_filesystem::create_dir_all(&snapshots).map_err(|err| {
-        data_error(format!(
-            "Dataset.snapshot: failed to create snapshots dir: {err}"
-        ))
-    })?;
+    runmat_filesystem::create_dir_all_async(&snapshots)
+        .await
+        .map_err(|err| {
+            data_error(format!(
+                "Dataset.snapshot: failed to create snapshots dir: {err}"
+            ))
+        })?;
     let src = manifest_path(&root);
     let dst = snapshots.join(format!("{}.manifest.json", sanitize_label(&label)));
-    copy_file(&src, &dst)?;
+    copy_file(&src, &dst).await?;
     Ok(Value::String(dst.to_string_lossy().to_string()))
 }
 
@@ -515,13 +1507,14 @@ async fn dataset_snapshot_builtin(
     name = "Dataset.refresh",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
+    descriptor(crate::builtins::io::data::DATASET_REFRESH_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_refresh_builtin(base: Value) -> BuiltinResult<Value> {
     let path = dataset_path_from_object(&base, "Dataset.refresh")?;
-    let manifest = read_manifest(&dataset_root(&path))?;
+    let manifest = read_manifest_async(&dataset_root(&path)).await?;
     let mut ds = dataset_object(&path, &manifest);
-    hydrate_dataset_descriptor(&path, &mut ds);
+    hydrate_dataset_descriptor_async(&path, &mut ds).await;
     Ok(ds)
 }
 
@@ -529,6 +1522,7 @@ async fn dataset_refresh_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataArray.name",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_NAME_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_name_builtin(base: Value) -> BuiltinResult<Value> {
@@ -540,11 +1534,12 @@ async fn data_array_name_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataArray.dtype",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_DTYPE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_dtype_builtin(base: Value) -> BuiltinResult<Value> {
     let (path, name) = array_identity(&base, "DataArray.dtype")?;
-    let manifest = read_manifest(&dataset_root(&path))?;
+    let manifest = read_manifest_async(&dataset_root(&path)).await?;
     let meta = manifest
         .arrays
         .get(&name)
@@ -556,11 +1551,12 @@ async fn data_array_dtype_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataArray.shape",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_shape_tensor_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_SHAPE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_shape_builtin(base: Value) -> BuiltinResult<Value> {
     let (path, name) = array_identity(&base, "DataArray.shape")?;
-    let manifest = read_manifest(&dataset_root(&path))?;
+    let manifest = read_manifest_async(&dataset_root(&path)).await?;
     let meta = manifest
         .arrays
         .get(&name)
@@ -575,11 +1571,12 @@ async fn data_array_shape_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataArray.rank",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_int_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_RANK_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_rank_builtin(base: Value) -> BuiltinResult<Value> {
     let (path, name) = array_identity(&base, "DataArray.rank")?;
-    let manifest = read_manifest(&dataset_root(&path))?;
+    let manifest = read_manifest_async(&dataset_root(&path)).await?;
     let meta = manifest
         .arrays
         .get(&name)
@@ -591,11 +1588,12 @@ async fn data_array_rank_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataArray.chunk_shape",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_shape_tensor_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_CHUNK_SHAPE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_chunk_shape_builtin(base: Value) -> BuiltinResult<Value> {
     let (path, name) = array_identity(&base, "DataArray.chunk_shape")?;
-    let manifest = read_manifest(&dataset_root(&path))?;
+    let manifest = read_manifest_async(&dataset_root(&path)).await?;
     let meta = manifest
         .arrays
         .get(&name)
@@ -614,11 +1612,12 @@ async fn data_array_chunk_shape_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataArray.codec",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_CODEC_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_codec_builtin(base: Value) -> BuiltinResult<Value> {
     let (path, name) = array_identity(&base, "DataArray.codec")?;
-    let manifest = read_manifest(&dataset_root(&path))?;
+    let manifest = read_manifest_async(&dataset_root(&path)).await?;
     let meta = manifest
         .arrays
         .get(&name)
@@ -630,17 +1629,18 @@ async fn data_array_codec_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataArray.read",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_tensor_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_READ_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_read_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let (path, name) = array_identity(&base, "DataArray.read")?;
     let root = dataset_root(&path);
-    let manifest = read_manifest(&root)?;
+    let manifest = read_manifest_async(&root).await?;
     let meta = manifest
         .arrays
         .get(&name)
         .ok_or_else(|| data_error(format!("DataArray.read: array '{name}' not found")))?;
-    let payload = read_array_payload(&root, meta)?;
+    let payload = read_array_payload_async(&root, meta).await?;
     let sliced = if let Some(slice_spec) = rest.first() {
         read_slice_payload(&payload, slice_spec)?
     } else {
@@ -656,6 +1656,7 @@ async fn data_array_read_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_WRITE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_write_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -669,7 +1670,7 @@ async fn data_array_write_builtin(base: Value, rest: Vec<Value>) -> BuiltinResul
             ))
         }
     };
-    write_array_full(&path, &name, slice_spec, value)?;
+    write_array_full_async(&path, &name, slice_spec, value).await?;
     Ok(Value::Bool(true))
 }
 
@@ -678,6 +1679,7 @@ async fn data_array_write_builtin(base: Value, rest: Vec<Value>) -> BuiltinResul
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_RESIZE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_resize_builtin(
@@ -688,7 +1690,7 @@ async fn data_array_resize_builtin(
     let (path, name) = array_identity(&base, "DataArray.resize")?;
     let shape = parse_shape_from_value(&new_shape)?;
     let root = dataset_root(&path);
-    let mut manifest = read_manifest(&root)?;
+    let mut manifest = read_manifest_async(&root).await?;
     let meta = manifest
         .arrays
         .get_mut(&name)
@@ -700,12 +1702,12 @@ async fn data_array_resize_builtin(
         values: vec![0.0; shape.iter().copied().product()],
     };
     let (payload_path, chunk_index_path) =
-        write_array_payload(&root, &name, &payload, &meta.chunk_shape)?;
+        write_array_payload_async(&root, &name, &payload, &meta.chunk_shape).await?;
     meta.data_path = make_rel_data_path(&root, &payload_path)?;
     meta.chunk_index_path = Some(make_rel_data_path(&root, &chunk_index_path)?);
     manifest.updated_at = now_rfc3339();
     manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
-    write_manifest(&root, &manifest)?;
+    write_manifest_async(&root, &manifest).await?;
     Ok(Value::Bool(true))
 }
 
@@ -714,6 +1716,7 @@ async fn data_array_resize_builtin(
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_FILL_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_fill_builtin(
@@ -723,7 +1726,7 @@ async fn data_array_fill_builtin(
 ) -> BuiltinResult<Value> {
     let (path, name) = array_identity(&base, "DataArray.fill")?;
     let root = dataset_root(&path);
-    let mut manifest = read_manifest(&root)?;
+    let mut manifest = read_manifest_async(&root).await?;
     let meta = manifest
         .arrays
         .get_mut(&name)
@@ -735,12 +1738,12 @@ async fn data_array_fill_builtin(
         values: vec![scalar; meta.shape.iter().copied().product()],
     };
     let (payload_path, chunk_index_path) =
-        write_array_payload(&root, &name, &payload, &meta.chunk_shape)?;
+        write_array_payload_async(&root, &name, &payload, &meta.chunk_shape).await?;
     meta.data_path = make_rel_data_path(&root, &payload_path)?;
     meta.chunk_index_path = Some(make_rel_data_path(&root, &chunk_index_path)?);
     manifest.updated_at = now_rfc3339();
     manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
-    write_manifest(&root, &manifest)?;
+    write_manifest_async(&root, &manifest).await?;
     Ok(Value::Bool(true))
 }
 
@@ -748,6 +1751,7 @@ async fn data_array_fill_builtin(
     name = "DataTransaction.id",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATATX_ID_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_id_builtin(base: Value) -> BuiltinResult<Value> {
@@ -760,6 +1764,7 @@ async fn data_tx_id_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_WRITE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_write_builtin(
@@ -790,6 +1795,7 @@ async fn data_tx_write_builtin(
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_SET_ATTR_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_set_attr_builtin(base: Value, key: Value, value: Value) -> BuiltinResult<Value> {
@@ -812,6 +1818,7 @@ async fn data_tx_set_attr_builtin(base: Value, key: Value, value: Value) -> Buil
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_SET_ATTRS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<Value> {
@@ -840,6 +1847,7 @@ async fn data_tx_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<V
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_RESIZE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_resize_builtin(
@@ -871,6 +1879,7 @@ async fn data_tx_resize_builtin(
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_FILL_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_fill_builtin(
@@ -901,6 +1910,7 @@ async fn data_tx_fill_builtin(
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_DELETE_ARRAY_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_delete_array_builtin(base: Value, array_name: Value) -> BuiltinResult<Value> {
@@ -923,6 +1933,7 @@ async fn data_tx_delete_array_builtin(base: Value, array_name: Value) -> Builtin
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_CREATE_ARRAY_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_create_array_builtin(
@@ -953,6 +1964,7 @@ async fn data_tx_create_array_builtin(
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_COMMIT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -984,7 +1996,7 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
     let attr_updates = attrs.len();
 
     let root = dataset_root(&dataset_path);
-    let mut manifest = read_manifest(&root)?;
+    let mut manifest = read_manifest_async(&root).await?;
     ensure_manifest_sequence(base_sequence, &manifest)?;
     if let Some(Value::Struct(options)) = rest.first() {
         if let Some(expected) = options.fields.get("if_manifest") {
@@ -1005,10 +2017,10 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
         }
     }
     for create in create_arrays {
-        create_array_in_manifest(&root, &mut manifest, &create.array, create.meta)?;
+        create_array_in_manifest(&root, &mut manifest, &create.array, create.meta).await?;
     }
     for resize in resizes {
-        resize_array_in_manifest(&root, &mut manifest, &resize.array, resize.shape)?;
+        resize_array_in_manifest(&root, &mut manifest, &resize.array, resize.shape).await?;
     }
     for fill in fills {
         fill_array_in_manifest(
@@ -1017,26 +2029,28 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
             &fill.array,
             fill.slice_spec.as_ref(),
             &fill.value,
-        )?;
+        )
+        .await?;
     }
     for write in writes {
-        apply_write_to_manifest(
+        apply_write_to_manifest_async(
             &root,
             &mut manifest,
             &write.array,
             write.slice_spec.as_ref(),
             &write.value,
-        )?;
+        )
+        .await?;
     }
     for array_name in delete_arrays {
-        delete_array_in_manifest(&root, &mut manifest, &array_name)?;
+        delete_array_in_manifest_async(&root, &mut manifest, &array_name).await?;
     }
     for (k, v) in attrs {
         manifest.attrs.insert(k, value_to_json(&v));
     }
     manifest.updated_at = now_rfc3339();
     manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
-    write_manifest(&root, &manifest)?;
+    write_manifest_async(&root, &manifest).await?;
     with_tx_mut(&tx_id, |tx| {
         tx.status = TxnStatus::Committed;
         Ok(())
@@ -1059,10 +2073,33 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
 }
 
 #[runtime_builtin(
+    name = "commit",
+    category = "io/data",
+    sink = true,
+    type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::COMMIT_ALIAS_DESCRIPTOR),
+    builtin_path = "crate::builtins::io::data"
+)]
+async fn data_tx_commit_alias_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    match &base {
+        Value::Object(obj) if obj.class_name == "DataTransaction" => {
+            data_tx_commit_builtin(base, rest).await
+        }
+        Value::HandleObject(handle) if handle.class_name == "DataTransaction" => {
+            data_tx_commit_builtin(base, rest).await
+        }
+        _ => Err(data_error(
+            "commit: receiver must be a DataTransaction (use tx = ds.begin())",
+        )),
+    }
+}
+
+#[runtime_builtin(
     name = "DataTransaction.abort",
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_ABORT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_abort_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1084,6 +2121,7 @@ async fn data_tx_abort_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataTransaction.status",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATATX_STATUS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_status_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1122,12 +2160,12 @@ fn as_object<'a>(value: &'a Value, context: &str) -> BuiltinResult<&'a ObjectIns
     }
 }
 
-fn hydrate_dataset_descriptor(path: &str, dataset: &mut Value) {
+async fn hydrate_dataset_descriptor_async(path: &str, dataset: &mut Value) {
     let request = runmat_filesystem::data_contract::DataManifestRequest {
         path: path.to_string(),
         version: None,
     };
-    let descriptor = match runmat_filesystem::data_manifest_descriptor(&request) {
+    let descriptor = match runmat_filesystem::data_manifest_descriptor_async(&request).await {
         Ok(descriptor) => descriptor,
         Err(_) => return,
     };
@@ -1162,8 +2200,9 @@ fn sanitize_label(label: &str) -> String {
         .collect()
 }
 
-fn copy_file(src: &PathBuf, dst: &PathBuf) -> BuiltinResult<()> {
-    let mut in_file = runmat_filesystem::File::open(src)
+async fn copy_file(src: &PathBuf, dst: &PathBuf) -> BuiltinResult<()> {
+    let bytes = runmat_filesystem::read_async(src)
+        .await
         .map_err(|err| data_error(format!("failed to open '{}': {err}", src.display())))?;
     let parent = dst.parent().ok_or_else(|| {
         data_error(format!(
@@ -1171,17 +2210,18 @@ fn copy_file(src: &PathBuf, dst: &PathBuf) -> BuiltinResult<()> {
             dst.display()
         ))
     })?;
-    runmat_filesystem::create_dir_all(parent)
+    runmat_filesystem::create_dir_all_async(parent)
+        .await
         .map_err(|err| data_error(format!("failed to create '{}': {err}", parent.display())))?;
-    let mut out_file = runmat_filesystem::File::create(dst)
-        .map_err(|err| data_error(format!("failed to create '{}': {err}", dst.display())))?;
-    std::io::copy(&mut in_file, &mut out_file).map_err(|err| {
-        data_error(format!(
-            "failed to copy '{}' -> '{}': {err}",
-            src.display(),
-            dst.display()
-        ))
-    })?;
+    runmat_filesystem::write_async(dst, &bytes)
+        .await
+        .map_err(|err| {
+            data_error(format!(
+                "failed to copy '{}' -> '{}': {err}",
+                src.display(),
+                dst.display()
+            ))
+        })?;
     Ok(())
 }
 
@@ -1195,7 +2235,7 @@ fn make_rel_data_path(
     Ok(rel.to_string_lossy().to_string())
 }
 
-fn create_array_in_manifest(
+async fn create_array_in_manifest(
     root: &std::path::Path,
     manifest: &mut DataManifest,
     array_name: &str,
@@ -1212,14 +2252,14 @@ fn create_array_in_manifest(
         values: vec![0.0; meta.shape.iter().copied().product()],
     };
     let (payload_path, chunk_index_path) =
-        write_array_payload(root, array_name, &payload, &meta.chunk_shape)?;
+        write_array_payload_async(root, array_name, &payload, &meta.chunk_shape).await?;
     meta.data_path = make_rel_data_path(root, &payload_path)?;
     meta.chunk_index_path = Some(make_rel_data_path(root, &chunk_index_path)?);
     manifest.arrays.insert(array_name.to_string(), meta);
     Ok(())
 }
 
-fn resize_array_in_manifest(
+async fn resize_array_in_manifest(
     root: &std::path::Path,
     manifest: &mut DataManifest,
     array_name: &str,
@@ -1236,13 +2276,13 @@ fn resize_array_in_manifest(
         values: vec![0.0; shape.iter().copied().product()],
     };
     let (payload_path, chunk_index_path) =
-        write_array_payload(root, array_name, &payload, &meta.chunk_shape)?;
+        write_array_payload_async(root, array_name, &payload, &meta.chunk_shape).await?;
     meta.data_path = make_rel_data_path(root, &payload_path)?;
     meta.chunk_index_path = Some(make_rel_data_path(root, &chunk_index_path)?);
     Ok(())
 }
 
-fn fill_array_in_manifest(
+async fn fill_array_in_manifest(
     root: &std::path::Path,
     manifest: &mut DataManifest,
     array_name: &str,
@@ -1255,7 +2295,7 @@ fn fill_array_in_manifest(
         .cloned()
         .ok_or_else(|| data_error(format!("array '{array_name}' not found")))?;
     let scalar = scalar_to_f64(value)?;
-    let payload = read_array_payload(root, &meta)?;
+    let payload = read_array_payload_async(root, &meta).await?;
     let next_payload = if let Some(slice_spec) = slice_spec {
         let ranges = parse_slice_spec(slice_spec, &payload.shape)?;
         let target_shape: Vec<usize> = ranges
@@ -1278,7 +2318,7 @@ fn fill_array_in_manifest(
         }
     };
     let (payload_path, chunk_index_path) =
-        write_array_payload(root, array_name, &next_payload, &meta.chunk_shape)?;
+        write_array_payload_async(root, array_name, &next_payload, &meta.chunk_shape).await?;
     if let Some(updated) = manifest.arrays.get_mut(array_name) {
         updated.shape = next_payload.shape.clone();
         updated.data_path = make_rel_data_path(root, &payload_path)?;
@@ -1287,7 +2327,7 @@ fn fill_array_in_manifest(
     Ok(())
 }
 
-fn delete_array_in_manifest(
+async fn delete_array_in_manifest_async(
     root: &std::path::Path,
     manifest: &mut DataManifest,
     array_name: &str,
@@ -1299,13 +2339,15 @@ fn delete_array_in_manifest(
         )));
     }
     let array_dir = root.join("arrays").join(array_name);
-    if runmat_filesystem::metadata(&array_dir).is_ok() {
-        runmat_filesystem::remove_dir_all(&array_dir).map_err(|err| {
-            data_error(format!(
-                "DataTransaction.delete_array: failed to remove '{}': {err}",
-                array_dir.display()
-            ))
-        })?;
+    if runmat_filesystem::metadata_async(&array_dir).await.is_ok() {
+        runmat_filesystem::remove_dir_all_async(&array_dir)
+            .await
+            .map_err(|err| {
+                data_error(format!(
+                    "DataTransaction.delete_array: failed to remove '{}': {err}",
+                    array_dir.display()
+                ))
+            })?;
     }
     Ok(())
 }
@@ -1368,8 +2410,10 @@ fn default_chunk_shape(shape: &[usize]) -> Vec<usize> {
     out
 }
 
-fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> BuiltinResult<()> {
-    let metadata = runmat_filesystem::metadata(src)
+#[async_recursion::async_recursion(?Send)]
+async fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> BuiltinResult<()> {
+    let metadata = runmat_filesystem::metadata_async(src)
+        .await
         .map_err(|err| data_error(format!("failed to stat '{}': {err}", src.display())))?;
     if !metadata.is_dir() {
         return Err(data_error(format!(
@@ -1377,18 +2421,20 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> BuiltinResult<()> {
             src.display()
         )));
     }
-    runmat_filesystem::create_dir_all(dst)
+    runmat_filesystem::create_dir_all_async(dst)
+        .await
         .map_err(|err| data_error(format!("failed to create '{}': {err}", dst.display())))?;
-    for entry in runmat_filesystem::read_dir(src)
+    for entry in runmat_filesystem::read_dir_async(src)
+        .await
         .map_err(|err| data_error(format!("failed to read '{}': {err}", src.display())))?
     {
         let entry_src = entry.path().to_path_buf();
         let entry_dst = dst.join(entry.file_name());
         if entry.is_dir() {
-            copy_dir_recursive(&entry_src, &entry_dst)?;
+            copy_dir_recursive(&entry_src, &entry_dst).await?;
             continue;
         }
-        copy_file(&entry_src, &entry_dst)?;
+        copy_file(&entry_src, &entry_dst).await?;
     }
     Ok(())
 }
@@ -1434,21 +2480,21 @@ fn scalar_to_f64(value: &Value) -> BuiltinResult<f64> {
     }
 }
 
-fn write_array_full(
+async fn write_array_full_async(
     dataset_path: &str,
     array_name: &str,
     slice_spec: Option<&Value>,
     value: &Value,
 ) -> BuiltinResult<()> {
     let root = dataset_root(dataset_path);
-    let mut manifest = read_manifest(&root)?;
-    apply_write_to_manifest(&root, &mut manifest, array_name, slice_spec, value)?;
+    let mut manifest = read_manifest_async(&root).await?;
+    apply_write_to_manifest_async(&root, &mut manifest, array_name, slice_spec, value).await?;
     manifest.updated_at = now_rfc3339();
     manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
-    write_manifest(&root, &manifest)
+    write_manifest_async(&root, &manifest).await
 }
 
-fn apply_write_to_manifest(
+async fn apply_write_to_manifest_async(
     root: &std::path::Path,
     manifest: &mut DataManifest,
     array_name: &str,
@@ -1462,12 +2508,14 @@ fn apply_write_to_manifest(
         .ok_or_else(|| data_error(format!("array '{array_name}' not found")))?;
 
     if let Some(slice_spec) = slice_spec {
-        if apply_slice_write_chunked(root, manifest, array_name, &meta, slice_spec, value)? {
+        if apply_slice_write_chunked_async(root, manifest, array_name, &meta, slice_spec, value)
+            .await?
+        {
             return Ok(());
         }
     }
 
-    let payload = read_array_payload(root, &meta)?;
+    let payload = read_array_payload_async(root, &meta).await?;
     let mut next_payload = payload.clone();
     if let Some(slice_spec) = slice_spec {
         next_payload = write_slice_payload(&payload, slice_spec, value)?;
@@ -1478,7 +2526,7 @@ fn apply_write_to_manifest(
     }
 
     let (payload_path, chunk_index_path) =
-        write_array_payload(root, array_name, &next_payload, &meta.chunk_shape)?;
+        write_array_payload_async(root, array_name, &next_payload, &meta.chunk_shape).await?;
     if let Some(updated) = manifest.arrays.get_mut(array_name) {
         updated.shape = next_payload.shape.clone();
         updated.data_path = make_rel_data_path(root, &payload_path)?;
@@ -1487,7 +2535,7 @@ fn apply_write_to_manifest(
     Ok(())
 }
 
-fn apply_slice_write_chunked(
+async fn apply_slice_write_chunked_async(
     root: &std::path::Path,
     manifest: &mut DataManifest,
     array_name: &str,
@@ -1499,7 +2547,10 @@ fn apply_slice_write_chunked(
         return Ok(false);
     };
     let index_path = root.join(index_rel_path);
-    if runmat_filesystem::metadata(&index_path).is_err() {
+    if runmat_filesystem::metadata_async(&index_path)
+        .await
+        .is_err()
+    {
         return Ok(false);
     }
     let ranges = parse_slice_spec(slice_spec, &meta.shape)?;
@@ -1515,12 +2566,14 @@ fn apply_slice_write_chunked(
         )));
     }
 
-    let index_bytes = runmat_filesystem::read(&index_path).map_err(|err| {
-        data_error(format!(
-            "failed to read chunk index '{}': {err}",
-            index_path.display()
-        ))
-    })?;
+    let index_bytes = runmat_filesystem::read_async(&index_path)
+        .await
+        .map_err(|err| {
+            data_error(format!(
+                "failed to read chunk index '{}': {err}",
+                index_path.display()
+            ))
+        })?;
     let mut chunk_index: DataChunkIndex = serde_json::from_slice(&index_bytes).map_err(|err| {
         data_error(format!(
             "failed to parse chunk index '{}': {err}",
@@ -1552,7 +2605,8 @@ fn apply_slice_write_chunked(
             &chunk_extent,
             &pos_by_key,
             &chunk_index,
-        )?;
+        )
+        .await?;
 
         let mut local = vec![0usize; intersection.len()];
         let intersection_shape: Vec<usize> = intersection
@@ -1585,12 +2639,14 @@ fn apply_slice_write_chunked(
         let chunk_bytes = serde_json::to_vec(&chunk_payload)
             .map_err(|err| data_error(format!("failed to encode chunk payload: {err}")))?;
         let chunk_path = root.join(&entry.data_path);
-        runmat_filesystem::write(&chunk_path, &chunk_bytes).map_err(|err| {
-            data_error(format!(
-                "failed to write chunk payload '{}': {err}",
-                chunk_path.display()
-            ))
-        })?;
+        runmat_filesystem::write_async(&chunk_path, &chunk_bytes)
+            .await
+            .map_err(|err| {
+                data_error(format!(
+                    "failed to write chunk payload '{}': {err}",
+                    chunk_path.display()
+                ))
+            })?;
 
         entry.coords = coords.clone();
         entry.shape = chunk_extent.clone();
@@ -1615,7 +2671,7 @@ fn apply_slice_write_chunked(
         ));
     }
 
-    maybe_upload_chunk_batch(root, array_name, upload_batch)?;
+    maybe_upload_chunk_batch_async(root, array_name, upload_batch).await?;
     tracing::info!(
         target: "runmat.data",
         dataset = %root.display(),
@@ -1625,12 +2681,14 @@ fn apply_slice_write_chunked(
     );
     let index_write = serde_json::to_vec(&chunk_index)
         .map_err(|err| data_error(format!("failed to encode chunk index json: {err}")))?;
-    runmat_filesystem::write(&index_path, &index_write).map_err(|err| {
-        data_error(format!(
-            "failed to write chunk index '{}': {err}",
-            index_path.display()
-        ))
-    })?;
+    runmat_filesystem::write_async(&index_path, &index_write)
+        .await
+        .map_err(|err| {
+            data_error(format!(
+                "failed to write chunk index '{}': {err}",
+                index_path.display()
+            ))
+        })?;
 
     if let Some(updated) = manifest.arrays.get_mut(array_name) {
         updated.shape = meta.shape.clone();
@@ -1919,7 +2977,7 @@ fn touched_chunk_coords(
     out
 }
 
-fn maybe_upload_chunk_batch(
+async fn maybe_upload_chunk_batch_async(
     root: &std::path::Path,
     array_name: &str,
     batch: Vec<(DataChunkDescriptor, Vec<u8>)>,
@@ -1932,7 +2990,7 @@ fn maybe_upload_chunk_batch(
         array: array_name.to_string(),
         chunks: batch.iter().map(|(d, _)| d.clone()).collect(),
     };
-    let targets = match runmat_filesystem::data_chunk_upload_targets(&request) {
+    let targets = match runmat_filesystem::data_chunk_upload_targets_async(&request).await {
         Ok(targets) => targets,
         Err(err) if err.kind() == std::io::ErrorKind::Unsupported => return Ok(()),
         Err(err) => {
@@ -1951,12 +3009,14 @@ fn maybe_upload_chunk_batch(
                     descriptor.key
                 ))
             })?;
-        runmat_filesystem::data_upload_chunk(target, &bytes).map_err(|err| {
-            data_error(format!(
-                "failed to upload chunk '{}': {err}",
-                descriptor.key
-            ))
-        })?;
+        runmat_filesystem::data_upload_chunk_async(target, &bytes)
+            .await
+            .map_err(|err| {
+                data_error(format!(
+                    "failed to upload chunk '{}': {err}",
+                    descriptor.key
+                ))
+            })?;
         tracing::info!(
             target: "runmat.data",
             dataset = %root.display(),
@@ -1973,7 +3033,7 @@ fn chunk_rel_path(array_name: &str, object_id: &str) -> String {
     format!("arrays/{array_name}/chunks/{object_id}.json")
 }
 
-fn load_or_init_chunk(
+async fn load_or_init_chunk(
     root: &std::path::Path,
     array_name: &str,
     key: &str,
@@ -1988,12 +3048,14 @@ fn load_or_init_chunk(
             .get(index)
             .cloned()
             .ok_or_else(|| data_error(format!("chunk index missing key '{key}'")))?;
-        let bytes = runmat_filesystem::read(root.join(&entry.data_path)).map_err(|err| {
-            data_error(format!(
-                "failed to read chunk payload '{}': {err}",
-                entry.data_path
-            ))
-        })?;
+        let bytes = runmat_filesystem::read_async(root.join(&entry.data_path))
+            .await
+            .map_err(|err| {
+                data_error(format!(
+                    "failed to read chunk payload '{}': {err}",
+                    entry.data_path
+                ))
+            })?;
         let payload: DataArrayPayload = serde_json::from_slice(&bytes).map_err(|err| {
             data_error(format!(
                 "failed to parse chunk payload '{}': {err}",
@@ -2066,6 +3128,7 @@ fn json_to_value(value: &serde_json::Value) -> Value {
 mod tests {
     use super::*;
     use crate::dispatcher::call_builtin;
+    use async_trait::async_trait;
     use axum::extract::{Query, State};
     use axum::http::{HeaderMap, StatusCode};
     use axum::routing::{post, put};
@@ -2090,6 +3153,38 @@ mod tests {
             .expect("data test serial lock poisoned")
     }
 
+    #[test]
+    fn io_data_descriptors_cover_constructor_and_transaction_surface() {
+        let data_labels: Vec<&str> = DATA_CREATE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(data_labels.contains(&"ds = data.create(path, schema, Name, Value, ...)"));
+
+        let read_labels: Vec<&str> = DATAARRAY_READ_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(read_labels.contains(&"X = DataArray.read(arr, sliceSpec)"));
+
+        let write_labels: Vec<&str> = DATAARRAY_WRITE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(write_labels.contains(&"tf = DataArray.write(arr, values)"));
+        assert!(write_labels.contains(&"tf = DataArray.write(arr, sliceSpec, values)"));
+
+        let tx_labels: Vec<&str> = DATATX_COMMIT_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(tx_labels.contains(&"tf = DataTransaction.commit(tx, Name, Value, ...)"));
+    }
+
     #[derive(Default)]
     struct CountingDataUploadProvider {
         inner: NativeFsProvider,
@@ -2112,71 +3207,72 @@ mod tests {
         }
     }
 
+    #[async_trait(?Send)]
     impl FsProvider for HttpDataUploadProvider {
         fn open(&self, path: &Path, flags: &OpenFlags) -> std::io::Result<Box<dyn FileHandle>> {
             self.inner.open(path, flags)
         }
 
-        fn read(&self, path: &Path) -> std::io::Result<Vec<u8>> {
-            self.inner.read(path)
+        async fn read(&self, path: &Path) -> std::io::Result<Vec<u8>> {
+            self.inner.read(path).await
         }
 
-        fn write(&self, path: &Path, data: &[u8]) -> std::io::Result<()> {
-            self.inner.write(path, data)
+        async fn write(&self, path: &Path, data: &[u8]) -> std::io::Result<()> {
+            self.inner.write(path, data).await
         }
 
-        fn remove_file(&self, path: &Path) -> std::io::Result<()> {
-            self.inner.remove_file(path)
+        async fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+            self.inner.remove_file(path).await
         }
 
-        fn metadata(&self, path: &Path) -> std::io::Result<FsMetadata> {
-            self.inner.metadata(path)
+        async fn metadata(&self, path: &Path) -> std::io::Result<FsMetadata> {
+            self.inner.metadata(path).await
         }
 
-        fn symlink_metadata(&self, path: &Path) -> std::io::Result<FsMetadata> {
-            self.inner.symlink_metadata(path)
+        async fn symlink_metadata(&self, path: &Path) -> std::io::Result<FsMetadata> {
+            self.inner.symlink_metadata(path).await
         }
 
-        fn read_dir(&self, path: &Path) -> std::io::Result<Vec<DirEntry>> {
-            self.inner.read_dir(path)
+        async fn read_dir(&self, path: &Path) -> std::io::Result<Vec<DirEntry>> {
+            self.inner.read_dir(path).await
         }
 
-        fn canonicalize(&self, path: &Path) -> std::io::Result<std::path::PathBuf> {
-            self.inner.canonicalize(path)
+        async fn canonicalize(&self, path: &Path) -> std::io::Result<std::path::PathBuf> {
+            self.inner.canonicalize(path).await
         }
 
-        fn create_dir(&self, path: &Path) -> std::io::Result<()> {
-            self.inner.create_dir(path)
+        async fn create_dir(&self, path: &Path) -> std::io::Result<()> {
+            self.inner.create_dir(path).await
         }
 
-        fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
-            self.inner.create_dir_all(path)
+        async fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+            self.inner.create_dir_all(path).await
         }
 
-        fn remove_dir(&self, path: &Path) -> std::io::Result<()> {
-            self.inner.remove_dir(path)
+        async fn remove_dir(&self, path: &Path) -> std::io::Result<()> {
+            self.inner.remove_dir(path).await
         }
 
-        fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
-            self.inner.remove_dir_all(path)
+        async fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
+            self.inner.remove_dir_all(path).await
         }
 
-        fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
-            self.inner.rename(from, to)
+        async fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            self.inner.rename(from, to).await
         }
 
-        fn set_readonly(&self, path: &Path, readonly: bool) -> std::io::Result<()> {
-            self.inner.set_readonly(path, readonly)
+        async fn set_readonly(&self, path: &Path, readonly: bool) -> std::io::Result<()> {
+            self.inner.set_readonly(path, readonly).await
         }
 
-        fn data_manifest_descriptor(
+        async fn data_manifest_descriptor(
             &self,
             request: &DataManifestRequest,
         ) -> std::io::Result<DataManifestDescriptor> {
-            self.inner.data_manifest_descriptor(request)
+            self.inner.data_manifest_descriptor(request).await
         }
 
-        fn data_chunk_upload_targets(
+        async fn data_chunk_upload_targets(
             &self,
             request: &DataChunkUploadRequest,
         ) -> std::io::Result<Vec<DataChunkUploadTarget>> {
@@ -2203,7 +3299,7 @@ mod tests {
             Ok(parsed.targets)
         }
 
-        fn data_upload_chunk(
+        async fn data_upload_chunk(
             &self,
             target: &DataChunkUploadTarget,
             data: &[u8],
@@ -2316,71 +3412,72 @@ mod tests {
         }
     }
 
+    #[async_trait(?Send)]
     impl FsProvider for CountingDataUploadProvider {
         fn open(&self, path: &Path, flags: &OpenFlags) -> std::io::Result<Box<dyn FileHandle>> {
             self.inner.open(path, flags)
         }
 
-        fn read(&self, path: &Path) -> std::io::Result<Vec<u8>> {
-            self.inner.read(path)
+        async fn read(&self, path: &Path) -> std::io::Result<Vec<u8>> {
+            self.inner.read(path).await
         }
 
-        fn write(&self, path: &Path, data: &[u8]) -> std::io::Result<()> {
-            self.inner.write(path, data)
+        async fn write(&self, path: &Path, data: &[u8]) -> std::io::Result<()> {
+            self.inner.write(path, data).await
         }
 
-        fn remove_file(&self, path: &Path) -> std::io::Result<()> {
-            self.inner.remove_file(path)
+        async fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+            self.inner.remove_file(path).await
         }
 
-        fn metadata(&self, path: &Path) -> std::io::Result<FsMetadata> {
-            self.inner.metadata(path)
+        async fn metadata(&self, path: &Path) -> std::io::Result<FsMetadata> {
+            self.inner.metadata(path).await
         }
 
-        fn symlink_metadata(&self, path: &Path) -> std::io::Result<FsMetadata> {
-            self.inner.symlink_metadata(path)
+        async fn symlink_metadata(&self, path: &Path) -> std::io::Result<FsMetadata> {
+            self.inner.symlink_metadata(path).await
         }
 
-        fn read_dir(&self, path: &Path) -> std::io::Result<Vec<DirEntry>> {
-            self.inner.read_dir(path)
+        async fn read_dir(&self, path: &Path) -> std::io::Result<Vec<DirEntry>> {
+            self.inner.read_dir(path).await
         }
 
-        fn canonicalize(&self, path: &Path) -> std::io::Result<std::path::PathBuf> {
-            self.inner.canonicalize(path)
+        async fn canonicalize(&self, path: &Path) -> std::io::Result<std::path::PathBuf> {
+            self.inner.canonicalize(path).await
         }
 
-        fn create_dir(&self, path: &Path) -> std::io::Result<()> {
-            self.inner.create_dir(path)
+        async fn create_dir(&self, path: &Path) -> std::io::Result<()> {
+            self.inner.create_dir(path).await
         }
 
-        fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
-            self.inner.create_dir_all(path)
+        async fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+            self.inner.create_dir_all(path).await
         }
 
-        fn remove_dir(&self, path: &Path) -> std::io::Result<()> {
-            self.inner.remove_dir(path)
+        async fn remove_dir(&self, path: &Path) -> std::io::Result<()> {
+            self.inner.remove_dir(path).await
         }
 
-        fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
-            self.inner.remove_dir_all(path)
+        async fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
+            self.inner.remove_dir_all(path).await
         }
 
-        fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
-            self.inner.rename(from, to)
+        async fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            self.inner.rename(from, to).await
         }
 
-        fn set_readonly(&self, path: &Path, readonly: bool) -> std::io::Result<()> {
-            self.inner.set_readonly(path, readonly)
+        async fn set_readonly(&self, path: &Path, readonly: bool) -> std::io::Result<()> {
+            self.inner.set_readonly(path, readonly).await
         }
 
-        fn data_manifest_descriptor(
+        async fn data_manifest_descriptor(
             &self,
             request: &DataManifestRequest,
         ) -> std::io::Result<DataManifestDescriptor> {
-            self.inner.data_manifest_descriptor(request)
+            self.inner.data_manifest_descriptor(request).await
         }
 
-        fn data_chunk_upload_targets(
+        async fn data_chunk_upload_targets(
             &self,
             request: &DataChunkUploadRequest,
         ) -> std::io::Result<Vec<DataChunkUploadTarget>> {
@@ -2396,7 +3493,7 @@ mod tests {
                 .collect())
         }
 
-        fn data_upload_chunk(
+        async fn data_upload_chunk(
             &self,
             target: &DataChunkUploadTarget,
             _data: &[u8],
@@ -2580,8 +3677,11 @@ mod tests {
         let untouched_path = root.join("arrays/temperature/chunks/obj_1_1.json");
         let touched_path = root.join("arrays/temperature/chunks/obj_0_0.json");
         let untouched_before =
-            runmat_filesystem::read(&untouched_path).expect("read untouched before");
-        let touched_before = runmat_filesystem::read(&touched_path).expect("read touched before");
+            futures::executor::block_on(runmat_filesystem::read_async(&untouched_path))
+                .expect("read untouched before");
+        let touched_before =
+            futures::executor::block_on(runmat_filesystem::read_async(&touched_path))
+                .expect("read touched before");
 
         let slice = Value::Cell(
             CellArray::new(
@@ -2599,8 +3699,11 @@ mod tests {
         call_builtin("DataArray.write", &[arr.clone(), slice, rhs]).expect("slice write");
 
         let untouched_after =
-            runmat_filesystem::read(&untouched_path).expect("read untouched after");
-        let touched_after = runmat_filesystem::read(&touched_path).expect("read touched after");
+            futures::executor::block_on(runmat_filesystem::read_async(&untouched_path))
+                .expect("read untouched after");
+        let touched_after =
+            futures::executor::block_on(runmat_filesystem::read_async(&touched_path))
+                .expect("read touched after");
         assert_eq!(untouched_before, untouched_after);
         assert_ne!(touched_before, touched_after);
     }
@@ -2667,14 +3770,19 @@ mod tests {
         )
         .expect("initial write");
 
-        let manifest = read_manifest(&dataset_root(&path)).expect("manifest after initial write");
+        let manifest =
+            futures::executor::block_on(crate::data::read_manifest_async(&dataset_root(&path)))
+                .expect("manifest after initial write");
         let meta = manifest
             .arrays
             .get("temperature")
             .expect("temperature meta");
         let chunk_index_path =
             dataset_root(&path).join(meta.chunk_index_path.clone().expect("chunk index path"));
-        assert!(runmat_filesystem::metadata(&chunk_index_path).is_ok());
+        assert!(
+            futures::executor::block_on(runmat_filesystem::metadata_async(&chunk_index_path))
+                .is_ok()
+        );
 
         {
             let mut keys = uploaded.lock().expect("uploaded keys lock");

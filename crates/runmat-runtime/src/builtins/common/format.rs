@@ -8,6 +8,8 @@ use runmat_builtins::{IntValue, LogicalArray, StringArray, Value};
 
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
+const FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER: &str = "RunMat:format:UnsupportedSpecifier";
+
 /// Stateful cursor over formatting arguments.
 #[derive(Debug)]
 pub struct ArgCursor<'a> {
@@ -44,6 +46,15 @@ fn format_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).build()
 }
 
+fn format_error_with_identifier(
+    message: impl Into<String>,
+    identifier: &'static str,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(identifier)
+        .build()
+}
+
 fn map_control_flow_with_context(err: RuntimeError, context: &str) -> RuntimeError {
     crate::builtins::common::map_control_flow_with_builtin(err, context)
 }
@@ -62,6 +73,7 @@ struct FormatFlags {
     left_align: bool,
     sign_plus: bool,
     sign_space: bool,
+    grouping: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -150,6 +162,15 @@ fn parse_format_spec(chars: &mut Peekable<Chars<'_>>) -> BuiltinResult<FormatSpe
             }
             Some('+') => {
                 flags.sign_plus = true;
+                chars.next();
+            }
+            Some('\'') => {
+                flags.grouping = true;
+                chars.next();
+            }
+            Some('I') => {
+                // Locale-specific alternative digits are not implemented yet.
+                // Consume the flag to keep format parsing compatible.
                 chars.next();
             }
             _ => break,
@@ -360,9 +381,10 @@ fn apply_format_spec(
             format_char(value, flags, width)
         }
         other => {
-            return Err(format_error(format!(
-                "sprintf: unsupported format %{other}"
-            )));
+            return Err(format_error_with_identifier(
+                format!("sprintf: unsupported format %{other}"),
+                FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER,
+            ));
         }
     }?;
 
@@ -428,6 +450,10 @@ fn format_integer(
         }
     }
 
+    if flags.grouping && base == 10 {
+        digits = group_decimal_digits(&digits);
+    }
+
     apply_width(sign, prefix, digits, flags, width, flags.zero_pad)
 }
 
@@ -471,6 +497,10 @@ fn format_unsigned(
             2 => prefix.push_str("0b"),
             _ => {}
         }
+    }
+
+    if flags.grouping && base == 10 {
+        digits = group_decimal_digits(&digits);
     }
 
     apply_width(String::new(), prefix, digits, flags, width, flags.zero_pad)
@@ -535,6 +565,10 @@ fn format_float(
 
     if alternate && !body.contains('.') && matches!(conversion, 'f' | 'F' | 'g' | 'G') {
         body.push('.');
+    }
+
+    if flags.grouping && matches!(conversion, 'f' | 'F' | 'g' | 'G') {
+        body = group_float_mantissa(&body);
     }
 
     let zero_pad_allowed = flags.zero_pad && !flags.left_align;
@@ -773,6 +807,35 @@ fn value_to_f64(value: &Value) -> BuiltinResult<f64> {
     }
 }
 
+pub(crate) fn number_to_string(value: f64) -> String {
+    if value.is_nan() {
+        return "NaN".to_string();
+    }
+    if value.is_infinite() {
+        return if value.is_sign_negative() {
+            "-Inf".to_string()
+        } else {
+            "Inf".to_string()
+        };
+    }
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    value.to_string()
+}
+
+pub(crate) fn complex_to_string(re: f64, im: f64) -> String {
+    if im == 0.0 {
+        number_to_string(re)
+    } else if re == 0.0 {
+        format!("{}i", number_to_string(im))
+    } else if im < 0.0 {
+        format!("{}-{}i", number_to_string(re), number_to_string(im.abs()))
+    } else {
+        format!("{}+{}i", number_to_string(re), number_to_string(im))
+    }
+}
+
 fn value_to_string(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
@@ -784,10 +847,10 @@ fn value_to_string(value: &Value) -> BuiltinResult<String> {
             Ok(s)
         }
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        Value::Num(n) => Ok(Value::Num(*n).to_string()),
+        Value::Num(n) => Ok(number_to_string(*n)),
         Value::Int(i) => Ok(i.to_i64().to_string()),
         Value::Bool(b) => Ok(if *b { "true" } else { "false" }.to_string()),
-        Value::Complex(re, im) => Ok(Value::Complex(*re, *im).to_string()),
+        Value::Complex(re, im) => Ok(complex_to_string(*re, *im)),
         other => Err(format_error(format!(
             "sprintf: expected text or scalar value for %s conversion, got {other:?}"
         ))),
@@ -849,6 +912,41 @@ fn to_base_string(mut value: u128, base: u32, uppercase: bool) -> String {
         value /= base as u128;
     }
     buf.iter().rev().collect()
+}
+
+fn group_decimal_digits(digits: &str) -> String {
+    if digits.len() <= 3 {
+        return digits.to_string();
+    }
+    let chars: Vec<char> = digits.chars().collect();
+    let mut out = String::with_capacity(digits.len() + (digits.len() - 1) / 3);
+    for (idx, ch) in chars.iter().enumerate() {
+        if idx > 0 && (chars.len() - idx).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(*ch);
+    }
+    out
+}
+
+fn group_float_mantissa(text: &str) -> String {
+    let (mantissa, exponent) = match text.find(['e', 'E']) {
+        Some(idx) => (&text[..idx], &text[idx..]),
+        None => (text, ""),
+    };
+
+    let mut parts = mantissa.splitn(2, '.');
+    let int_part = parts.next().unwrap_or_default();
+    let frac_part = parts.next();
+    let grouped_int = group_decimal_digits(int_part);
+
+    let mut out = grouped_int;
+    if let Some(frac) = frac_part {
+        out.push('.');
+        out.push_str(frac);
+    }
+    out.push_str(exponent);
+    out
 }
 
 /// Extract a printf-style format string from a MATLAB value, validating that it
@@ -1036,6 +1134,9 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         | Value::Object(_)
         | Value::Struct(_)
         | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_) => {
             return Err(format_error(format!(
@@ -1044,4 +1145,38 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{get_display_format, set_display_format, FormatMode};
+
+    #[test]
+    fn format_variadic_supports_thousands_grouping_flag() {
+        let out = format_variadic("%'d %'.2f", &[Value::Num(1234567.0), Value::Num(12345.5)])
+            .expect("grouped formatting should succeed");
+        assert_eq!(out, "1,234,567 12,345.50");
+    }
+
+    #[test]
+    fn format_variadic_consumes_i_flag_without_error() {
+        let out = format_variadic("%Id", &[Value::Int(IntValue::I32(42))])
+            .expect("I flag should be accepted as compatibility no-op");
+        assert_eq!(out, "42");
+    }
+
+    #[test]
+    fn percent_s_numeric_and_complex_ignore_display_format() {
+        let previous = get_display_format();
+        set_display_format(FormatMode::Hex);
+        let result = format_variadic(
+            "%s %s",
+            &[Value::Num(std::f64::consts::PI), Value::Complex(1.5, -2.0)],
+        );
+        set_display_format(previous);
+
+        let out = result.expect("%s formatting should succeed");
+        assert_eq!(out, "3.141592653589793 1.5-2i");
+    }
 }

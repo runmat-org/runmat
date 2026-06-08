@@ -12,12 +12,6 @@ register_constant!(
 );
 
 register_constant!(
-    "e",
-    Value::Num(std::f64::consts::E),
-    "crate::builtins::constants"
-);
-
-register_constant!(
     "eps",
     Value::Num(f64::EPSILON),
     "crate::builtins::constants"

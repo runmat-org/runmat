@@ -2,7 +2,11 @@
 
 use std::convert::TryFrom;
 
-use runmat_builtins::{StructValue, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    StructValue, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::format::format_variadic;
@@ -13,7 +17,188 @@ use crate::builtins::common::spec::{
 use crate::builtins::diagnostics::type_resolvers::error_type;
 use crate::{build_runtime_error, RuntimeError};
 
-const DEFAULT_IDENTIFIER: &str = "MATLAB:error";
+const BUILTIN_NAME: &str = "error";
+
+const ERROR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Never returned because error always throws.",
+}];
+
+const ERROR_INPUTS_MESSAGE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "message",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Error message text.",
+}];
+
+const ERROR_INPUTS_MESSAGE_VARIADIC: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "message",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Error message template text.",
+    },
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Formatting values for the message template.",
+    },
+];
+
+const ERROR_INPUTS_IDENTIFIER_MESSAGE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "message_id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"RunMat:error\""),
+        description: "Message identifier.",
+    },
+    BuiltinParamDescriptor {
+        name: "message",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Error message text.",
+    },
+];
+
+const ERROR_INPUTS_IDENTIFIER_MESSAGE_VARIADIC: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "message_id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"RunMat:error\""),
+        description: "Message identifier.",
+    },
+    BuiltinParamDescriptor {
+        name: "message",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Error message template text.",
+    },
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Formatting values for the message template.",
+    },
+];
+
+const ERROR_INPUTS_MEXCEPTION: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "mex",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "MException value to rethrow.",
+}];
+
+const ERROR_INPUTS_STRUCT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "msg_struct",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Struct containing identifier/message fields.",
+}];
+
+const ERROR_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "out = error(message)",
+        inputs: &ERROR_INPUTS_MESSAGE,
+        outputs: &ERROR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = error(message, A...)",
+        inputs: &ERROR_INPUTS_MESSAGE_VARIADIC,
+        outputs: &ERROR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = error(message_id, message)",
+        inputs: &ERROR_INPUTS_IDENTIFIER_MESSAGE,
+        outputs: &ERROR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = error(message_id, message, A...)",
+        inputs: &ERROR_INPUTS_IDENTIFIER_MESSAGE_VARIADIC,
+        outputs: &ERROR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = error(mex)",
+        inputs: &ERROR_INPUTS_MEXCEPTION,
+        outputs: &ERROR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = error(msg_struct)",
+        inputs: &ERROR_INPUTS_STRUCT,
+        outputs: &ERROR_OUTPUT,
+    },
+];
+
+const ERROR_ERROR_MISSING_MESSAGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERROR.MISSING_MESSAGE",
+    identifier: Some("RunMat:error"),
+    when: "No arguments are supplied.",
+    message: "error: missing message argument",
+};
+
+const ERROR_ERROR_EXTRA_ARGS_MEXCEPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERROR.MEXCEPTION_EXTRA_ARGS",
+    identifier: Some("RunMat:error"),
+    when: "Additional arguments are supplied after an MException input.",
+    message: "error: additional arguments are not allowed when passing an MException",
+};
+
+const ERROR_ERROR_EXTRA_ARGS_STRUCT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERROR.STRUCT_EXTRA_ARGS",
+    identifier: Some("RunMat:error"),
+    when: "Additional arguments are supplied after a message-struct input.",
+    message: "error: additional arguments are not allowed when passing a message struct",
+};
+
+const ERROR_ERROR_STRUCT_MISSING_IDENTIFIER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERROR.STRUCT_MISSING_IDENTIFIER",
+    identifier: Some("RunMat:error"),
+    when: "Message struct does not contain an identifier field.",
+    message: "error: message struct must contain an 'identifier' field",
+};
+
+const ERROR_ERROR_STRUCT_MISSING_MESSAGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERROR.STRUCT_MISSING_MESSAGE",
+    identifier: Some("RunMat:error"),
+    when: "Message struct does not contain a message field.",
+    message: "error: message struct must contain a 'message' field",
+};
+
+const ERROR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERROR.INVALID_INPUT",
+    identifier: Some("RunMat:error"),
+    when: "Identifier/message inputs or format arguments are not string-compatible.",
+    message: "error: invalid input argument",
+};
+
+const ERROR_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    ERROR_ERROR_MISSING_MESSAGE,
+    ERROR_ERROR_EXTRA_ARGS_MEXCEPTION,
+    ERROR_ERROR_EXTRA_ARGS_STRUCT,
+    ERROR_ERROR_STRUCT_MISSING_IDENTIFIER,
+    ERROR_ERROR_STRUCT_MISSING_MESSAGE,
+    ERROR_ERROR_INVALID_INPUT,
+];
+
+pub const ERROR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ERROR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERROR_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::error")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -44,34 +229,55 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 fn error_flow(identifier: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
-        .with_builtin("error")
+        .with_builtin(BUILTIN_NAME)
         .with_identifier(normalize_identifier(identifier))
         .build()
 }
 
-fn remap_error_flow(err: RuntimeError, identifier: &str) -> RuntimeError {
-    build_runtime_error(err.message().to_string())
-        .with_builtin("error")
-        .with_identifier(normalize_identifier(identifier))
-        .with_source(err)
-        .build()
+fn error_default_identifier() -> &'static str {
+    ERROR_ERROR_MISSING_MESSAGE
+        .identifier
+        .expect("error default identifier must be defined")
+}
+
+fn error_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    error_error_with_message(error.message, error)
+}
+
+fn error_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(normalize_identifier(identifier));
+    }
+    builder.build()
+}
+
+fn remap_error_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(err.message().to_string())
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(normalize_identifier(identifier));
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "error",
     category = "diagnostics",
-    summary = "Throw an exception with an identifier and a formatted diagnostic message.",
+    summary = "Throw exceptions with identifiers and formatted messages.",
     keywords = "error,exception,diagnostics,throw",
     accel = "metadata",
     type_resolver(error_type),
+    descriptor(crate::builtins::diagnostics::error::ERROR_DESCRIPTOR),
     builtin_path = "crate::builtins::diagnostics::error"
 )]
 fn error_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(error_flow(
-            DEFAULT_IDENTIFIER,
-            "error: missing message argument",
-        ));
+        return Err(error_error(&ERROR_ERROR_MISSING_MESSAGE));
     }
 
     let mut iter = args.into_iter();
@@ -81,19 +287,13 @@ fn error_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     match first {
         Value::MException(mex) => {
             if !rest.is_empty() {
-                return Err(error_flow(
-                    DEFAULT_IDENTIFIER,
-                    "error: additional arguments are not allowed when passing an MException",
-                ));
+                return Err(error_error(&ERROR_ERROR_EXTRA_ARGS_MEXCEPTION));
             }
             Err(error_flow(&mex.identifier, &mex.message))
         }
         Value::Struct(ref st) => {
             if !rest.is_empty() {
-                return Err(error_flow(
-                    DEFAULT_IDENTIFIER,
-                    "error: additional arguments are not allowed when passing a message struct",
-                ));
+                return Err(error_error(&ERROR_ERROR_EXTRA_ARGS_STRUCT));
             }
             let (identifier, message) = extract_struct_error_fields(st)?;
             Err(error_flow(&identifier, &message))
@@ -106,10 +306,10 @@ fn handle_message_arguments(first: Value, rest: Vec<Value>) -> crate::BuiltinRes
     let first_string = value_to_string("error", &first)?;
 
     if rest.is_empty() {
-        return Err(error_flow(DEFAULT_IDENTIFIER, first_string));
+        return Err(error_flow(error_default_identifier(), first_string));
     }
 
-    let mut identifier = DEFAULT_IDENTIFIER.to_string();
+    let mut identifier = error_default_identifier().to_string();
     let mut format_string = first_string;
     let mut format_args: &[Value] = &rest;
 
@@ -127,7 +327,7 @@ fn handle_message_arguments(first: Value, rest: Vec<Value>) -> crate::BuiltinRes
         format_string
     } else {
         format_variadic(&format_string, format_args)
-            .map_err(|flow| remap_error_flow(flow, DEFAULT_IDENTIFIER))?
+            .map_err(|flow| remap_error_flow(flow, &ERROR_ERROR_INVALID_INPUT))?
     };
 
     Err(error_flow(&identifier, message))
@@ -140,22 +340,12 @@ fn extract_struct_error_fields(
         .fields
         .get("identifier")
         .or_else(|| struct_value.fields.get("messageid"))
-        .ok_or_else(|| {
-            error_flow(
-                DEFAULT_IDENTIFIER,
-                "error: message struct must contain an 'identifier' field",
-            )
-        })?;
+        .ok_or_else(|| error_error(&ERROR_ERROR_STRUCT_MISSING_IDENTIFIER))?;
     let message_value = struct_value
         .fields
         .get("message")
         .or_else(|| struct_value.fields.get("msg"))
-        .ok_or_else(|| {
-            error_flow(
-                DEFAULT_IDENTIFIER,
-                "error: message struct must contain a 'message' field",
-            )
-        })?;
+        .ok_or_else(|| error_error(&ERROR_ERROR_STRUCT_MISSING_MESSAGE))?;
 
     let identifier = value_to_string("error", identifier_value)?;
     let message = value_to_string("error", message_value)?;
@@ -163,17 +353,19 @@ fn extract_struct_error_fields(
 }
 
 fn value_to_string(context: &str, value: &Value) -> crate::BuiltinResult<String> {
-    String::try_from(value).map_err(|e| error_flow(DEFAULT_IDENTIFIER, format!("{context}: {e}")))
+    String::try_from(value).map_err(|e| {
+        error_error_with_message(format!("{context}: {e}"), &ERROR_ERROR_INVALID_INPUT)
+    })
 }
 
 fn normalize_identifier(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        DEFAULT_IDENTIFIER.to_string()
+        error_default_identifier().to_string()
     } else if trimmed.contains(':') {
         trimmed.to_string()
     } else {
-        format!("MATLAB:{trimmed}")
+        format!("RunMat:{trimmed}")
     }
 }
 
@@ -210,7 +402,7 @@ pub(crate) mod tests {
     #[test]
     fn error_requires_message() {
         let err = unwrap_error(error_builtin(Vec::new()).expect_err("should error"));
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(error_default_identifier()));
         assert!(err.message().contains("missing message"));
     }
 
@@ -219,7 +411,7 @@ pub(crate) mod tests {
     fn default_identifier_is_applied() {
         let err =
             unwrap_error(error_builtin(vec![Value::from("Failure!")]).expect_err("should error"));
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(error_default_identifier()));
         assert_eq!(err.message(), "Failure!");
     }
 
@@ -248,7 +440,7 @@ pub(crate) mod tests {
             ])
             .expect_err("should error"),
         );
-        assert_eq!(err.identifier(), Some("MATLAB:missingNamespace"));
+        assert_eq!(err.identifier(), Some("RunMat:missingNamespace"));
         assert_eq!(err.message(), "Message");
     }
 
@@ -262,29 +454,29 @@ pub(crate) mod tests {
             ])
             .expect_err("should error"),
         );
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(error_default_identifier()));
         assert_eq!(err.message(), "Value: 7.");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_accepts_mexception() {
-        let mex = MException::new("MATLAB:demo:test".to_string(), "broken".to_string());
+        let mex = MException::new("RunMat:demo:test".to_string(), "broken".to_string());
         let err =
             unwrap_error(error_builtin(vec![Value::MException(mex)]).expect_err("should error"));
-        assert_eq!(err.identifier(), Some("MATLAB:demo:test"));
+        assert_eq!(err.identifier(), Some("RunMat:demo:test"));
         assert_eq!(err.message(), "broken");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_rejects_extra_args_after_mexception() {
-        let mex = MException::new("MATLAB:demo:test".to_string(), "broken".to_string());
+        let mex = MException::new("RunMat:demo:test".to_string(), "broken".to_string());
         let err = unwrap_error(
             error_builtin(vec![Value::MException(mex), Value::from(1.0)])
                 .expect_err("should error"),
         );
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(error_default_identifier()));
         assert!(err.message().contains("additional arguments"));
     }
 
@@ -308,7 +500,7 @@ pub(crate) mod tests {
         st.fields
             .insert("identifier".to_string(), Value::from("pkg:demo:oops"));
         let err = unwrap_error(error_builtin(vec![Value::Struct(st)]).expect_err("should error"));
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(error_default_identifier()));
         assert!(err
             .message()
             .contains("message struct must contain a 'message' field"));

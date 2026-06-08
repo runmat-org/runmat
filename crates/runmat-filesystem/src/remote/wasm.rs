@@ -2,7 +2,9 @@ use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
 use crate::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use async_trait::async_trait;
 use js_sys::{ArrayBuffer, Uint8Array};
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -107,7 +109,7 @@ impl RemoteFsProvider {
         let xhr = self.prepare_xhr(method, &url, XmlHttpRequestResponseType::Text)?;
         self.apply_headers(&xhr, content_type)?;
         self.dispatch(&xhr, body)?;
-        self.read_text(&xhr)
+        self.read_text(&xhr, method, &url)
     }
 
     fn send_bytes(
@@ -122,10 +124,14 @@ impl RemoteFsProvider {
         let xhr = self.prepare_xhr(method, &url, XmlHttpRequestResponseType::Arraybuffer)?;
         self.apply_headers(&xhr, content_type)?;
         self.dispatch(&xhr, body)?;
-        self.read_bytes(&xhr)
+        self.read_bytes(&xhr, method, &url)
     }
 
     fn fetch_download_url(&self, path: &str) -> io::Result<DownloadUrlResponse> {
+        info!(
+            "remote.fs.download_url.request path={} direct_read_threshold_bytes={}",
+            path, self.direct_read_threshold_bytes
+        );
         let text = self.send_text(
             "GET",
             "/fs/download-url",
@@ -133,21 +139,55 @@ impl RemoteFsProvider {
             None,
             None,
         )?;
-        serde_json::from_str(&text).map_err(map_serde_err)
+        let response: DownloadUrlResponse = serde_json::from_str(&text).map_err(map_serde_err)?;
+        info!(
+            "remote.fs.download_url.ok path={} signed_url={}",
+            path,
+            sanitize_url_for_log(&response.download_url)
+        );
+        Ok(response)
     }
 
-    fn read_range_from_url(&self, url: &str, offset: u64, length: u64) -> io::Result<Vec<u8>> {
+    fn read_range_from_url(
+        &self,
+        source_path: &str,
+        url: &str,
+        offset: u64,
+        length: u64,
+    ) -> io::Result<Vec<u8>> {
         if length == 0 {
             return Ok(Vec::new());
         }
         let end = offset + length - 1;
+        info!(
+            "remote.fs.signed_url.read_range_start path={} url={} offset={} length={}",
+            source_path,
+            sanitize_url_for_log(url),
+            offset,
+            length
+        );
         let xhr = self.prepare_xhr("GET", url, XmlHttpRequestResponseType::Arraybuffer)?;
         let range = format!("bytes={offset}-{end}");
         xhr.set_request_header("Range", &range)
             .map_err(|err| map_js_error("set_request_header", err))?;
         self.apply_headers(&xhr, None)?;
         self.dispatch(&xhr, None)?;
-        self.read_bytes(&xhr)
+        let bytes = self.read_bytes(&xhr, "GET", url);
+        match &bytes {
+            Ok(payload) => info!(
+                "remote.fs.signed_url.read_range_ok path={} url={} bytes={}",
+                source_path,
+                sanitize_url_for_log(url),
+                payload.len()
+            ),
+            Err(error) => warn!(
+                "remote.fs.signed_url.read_range_failed path={} url={} error={}",
+                source_path,
+                sanitize_url_for_log(url),
+                error
+            ),
+        }
+        bytes
     }
 
     fn send_empty(&self, method: &str, route: &str, query: &[(&str, String)]) -> io::Result<()> {
@@ -202,12 +242,12 @@ impl RemoteFsProvider {
         Ok(())
     }
 
-    fn read_text(&self, xhr: &XmlHttpRequest) -> io::Result<String> {
+    fn read_text(&self, xhr: &XmlHttpRequest, method: &str, url: &str) -> io::Result<String> {
         let status = xhr
             .status()
             .map_err(|err| map_js_error("XmlHttpRequest::status", err))?;
         if status < 200 || status >= 300 {
-            return Err(self.status_error(xhr, status));
+            return Err(self.status_error(xhr, status, method, url));
         }
         xhr.response_text()
             .map_err(|err| map_js_error("XmlHttpRequest::response_text", err))?
@@ -219,12 +259,18 @@ impl RemoteFsProvider {
             })
     }
 
-    fn read_bytes(&self, xhr: &XmlHttpRequest) -> io::Result<Vec<u8>> {
+    fn read_bytes(&self, xhr: &XmlHttpRequest, method: &str, url: &str) -> io::Result<Vec<u8>> {
         let status = xhr
             .status()
             .map_err(|err| map_js_error("XmlHttpRequest::status", err))?;
         if status < 200 || status >= 300 {
-            return Err(self.status_error(xhr, status));
+            warn!(
+                "remote.fs.http_non_success status={} method={} url={}",
+                status,
+                method,
+                sanitize_url_for_log(url)
+            );
+            return Err(self.status_error(xhr, status, method, url));
         }
         let value = xhr
             .response()
@@ -241,7 +287,13 @@ impl RemoteFsProvider {
         Ok(out)
     }
 
-    fn status_error(&self, xhr: &XmlHttpRequest, status: u16) -> io::Error {
+    fn status_error(
+        &self,
+        xhr: &XmlHttpRequest,
+        status: u16,
+        method: &str,
+        url: &str,
+    ) -> io::Error {
         let message = xhr
             .response_text()
             .ok()
@@ -255,10 +307,14 @@ impl RemoteFsProvider {
             400 => ErrorKind::InvalidInput,
             _ => ErrorKind::Other,
         };
-        io::Error::new(kind, format!("remote fs http error ({status}): {message}"))
+        io::Error::new(
+            kind,
+            format!("remote fs http error ({status}) method={method} url={url}: {message}"),
+        )
     }
 
     fn fetch_metadata(&self, path: &str) -> io::Result<MetadataResponse> {
+        info!("remote.fs.metadata.request path={}", path);
         let text = self.send_text(
             "GET",
             "/fs/metadata",
@@ -266,7 +322,12 @@ impl RemoteFsProvider {
             None,
             None,
         )?;
-        serde_json::from_str(&text).map_err(map_serde_err)
+        let metadata: MetadataResponse = serde_json::from_str(&text).map_err(map_serde_err)?;
+        info!(
+            "remote.fs.metadata.ok path={} len={} file_type={}",
+            path, metadata.len, metadata.file_type
+        );
+        Ok(metadata)
     }
 
     fn fetch_dir(&self, path: &str) -> io::Result<Vec<DirEntryResponse>> {
@@ -287,7 +348,7 @@ impl RemoteFsProvider {
     }
 
     fn download_chunk(&self, path: &str, offset: u64, length: usize) -> io::Result<Vec<u8>> {
-        self.send_bytes(
+        let response = self.send_bytes(
             "GET",
             "/fs/read",
             &[
@@ -297,7 +358,21 @@ impl RemoteFsProvider {
             ],
             None,
             None,
-        )
+        );
+        match &response {
+            Ok(bytes) => info!(
+                "remote.fs.read_chunk.ok path={} offset={} length={} received={}",
+                path,
+                offset,
+                length,
+                bytes.len()
+            ),
+            Err(error) => warn!(
+                "remote.fs.read_chunk.failed path={} offset={} length={} error={}",
+                path, offset, length, error
+            ),
+        }
+        response
     }
 
     fn upload_chunk(
@@ -419,7 +494,7 @@ impl RemoteFsProvider {
             .status()
             .map_err(|err| map_js_error("XmlHttpRequest::status", err))?;
         if status < 200 || status >= 300 {
-            return Err(self.status_error(&xhr, status));
+            return Err(self.status_error(&xhr, status, "PUT", &url));
         }
         Ok(())
     }
@@ -433,7 +508,14 @@ impl RemoteFsProvider {
 
     fn ensure_parent_exists(&self, path: &Path) -> io::Result<()> {
         if let Some(parent) = path.parent() {
-            self.create_dir_all(parent)?;
+            self.send_json(
+                "POST",
+                "/fs/mkdir",
+                &CreateDirRequest {
+                    path: self.normalize(parent),
+                    recursive: true,
+                },
+            )?;
         }
         Ok(())
     }
@@ -443,9 +525,17 @@ impl RemoteFsProvider {
             return Ok(Vec::new());
         }
         if should_use_direct_read(len, self.direct_read_threshold_bytes) {
+            info!(
+                "remote.fs.read_strategy path={} strategy=signed-url len={}",
+                path, len
+            );
             let url = self.fetch_download_url(path)?.download_url;
-            return self.read_range_from_url(&url, 0, len);
+            return self.read_range_from_url(path, &url, 0, len);
         }
+        info!(
+            "remote.fs.read_strategy path={} strategy=fs-read len={} chunk_bytes={}",
+            path, len, self.chunk_bytes
+        );
         let mut buffer = Vec::with_capacity(len as usize);
         let mut offset = 0;
         while offset < len {
@@ -605,10 +695,23 @@ impl RemoteFsProvider {
     }
 }
 
+fn sanitize_url_for_log(url: &str) -> String {
+    match Url::parse(url) {
+        Ok(parsed) => {
+            let mut sanitized = parsed;
+            sanitized.set_query(None);
+            sanitized.set_fragment(None);
+            sanitized.to_string()
+        }
+        Err(_) => "<invalid-url>".to_string(),
+    }
+}
+
 fn should_use_direct_read(length: u64, threshold: u64) -> bool {
     length >= threshold
 }
 
+#[async_trait(?Send)]
 impl FsProvider for RemoteFsProvider {
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let mut data = Vec::new();
@@ -669,40 +772,62 @@ impl FsProvider for RemoteFsProvider {
         Ok(Box::new(handle))
     }
 
-    fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+    async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         let normalized = self.normalize(path);
-        let meta = self.fetch_metadata(&normalized)?;
+        let meta = match self.fetch_metadata(&normalized) {
+            Ok(meta) => meta,
+            Err(error) => {
+                warn!(
+                    "remote.fs.read.failed path={} stage=metadata kind={:?} error={}",
+                    normalized,
+                    error.kind(),
+                    error
+                );
+                return Err(error);
+            }
+        };
         if meta.file_type != "file" {
             return Err(io::Error::new(
                 ErrorKind::Other,
                 "remote path is not a file",
             ));
         }
-        self.download_raw_file(&normalized, meta.len)
+        match self.download_raw_file(&normalized, meta.len) {
+            Ok(bytes) => Ok(bytes),
+            Err(error) => {
+                warn!(
+                    "remote.fs.read.failed path={} stage=download kind={:?} error={}",
+                    normalized,
+                    error.kind(),
+                    error
+                );
+                Err(error)
+            }
+        }
     }
 
-    fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+    async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
         let normalized = self.normalize(path);
         self.ensure_parent_exists(path)?;
         self.upload_entire_file(&normalized, data)
     }
 
-    fn remove_file(&self, path: &Path) -> io::Result<()> {
+    async fn remove_file(&self, path: &Path) -> io::Result<()> {
         let normalized = self.normalize(path);
         self.send_empty("DELETE", "/fs/file", &[("path", normalized)])
     }
 
-    fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+    async fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
         let normalized = self.normalize(path);
         let resp = self.fetch_metadata(&normalized)?;
         Ok(resp.into())
     }
 
-    fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
-        self.metadata(path)
+    async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+        self.metadata(path).await
     }
 
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+    async fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
         let normalized = self.normalize(path);
         let resp = self.fetch_dir(&normalized)?;
         Ok(resp
@@ -715,13 +840,13 @@ impl FsProvider for RemoteFsProvider {
             .collect())
     }
 
-    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+    async fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
         let normalized = self.normalize(path);
         let canonical = self.fetch_canonical_path(&normalized)?;
         Ok(PathBuf::from(canonical))
     }
 
-    fn create_dir(&self, path: &Path) -> io::Result<()> {
+    async fn create_dir(&self, path: &Path) -> io::Result<()> {
         self.send_json(
             "POST",
             "/fs/mkdir",
@@ -732,7 +857,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+    async fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         self.send_json(
             "POST",
             "/fs/mkdir",
@@ -743,7 +868,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn remove_dir(&self, path: &Path) -> io::Result<()> {
+    async fn remove_dir(&self, path: &Path) -> io::Result<()> {
         self.send_empty(
             "DELETE",
             "/fs/dir",
@@ -754,7 +879,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+    async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
         self.send_empty(
             "DELETE",
             "/fs/dir",
@@ -762,7 +887,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+    async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         self.send_json(
             "POST",
             "/fs/rename",
@@ -773,7 +898,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
+    async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
         self.send_json(
             "POST",
             "/fs/set-readonly",
@@ -784,7 +909,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn data_manifest_descriptor(
+    async fn data_manifest_descriptor(
         &self,
         request: &DataManifestRequest,
     ) -> io::Result<DataManifestDescriptor> {
@@ -796,7 +921,7 @@ impl FsProvider for RemoteFsProvider {
         serde_json::from_str(&text).map_err(map_serde_err)
     }
 
-    fn data_chunk_upload_targets(
+    async fn data_chunk_upload_targets(
         &self,
         request: &DataChunkUploadRequest,
     ) -> io::Result<Vec<DataChunkUploadTarget>> {
@@ -818,7 +943,11 @@ impl FsProvider for RemoteFsProvider {
         Ok(response.targets)
     }
 
-    fn data_upload_chunk(&self, target: &DataChunkUploadTarget, data: &[u8]) -> io::Result<()> {
+    async fn data_upload_chunk(
+        &self,
+        target: &DataChunkUploadTarget,
+        data: &[u8],
+    ) -> io::Result<()> {
         self.upload_chunk_target(&target.method, &target.upload_url, &target.headers, data)
     }
 }
@@ -933,6 +1062,9 @@ impl Seek for RemoteFileHandle {
         Ok(self.cursor as u64)
     }
 }
+
+#[async_trait(?Send)]
+impl FileHandle for RemoteFileHandle {}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

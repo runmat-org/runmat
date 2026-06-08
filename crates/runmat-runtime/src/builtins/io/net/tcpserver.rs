@@ -1,7 +1,11 @@
 //! MATLAB-compatible `tcpserver` builtin for RunMat.
 
 use once_cell::sync::OnceCell;
-use runmat_builtins::{IntValue, StructValue, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, StructValue, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -15,11 +19,110 @@ use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex};
 
-const MESSAGE_ID_INVALID_ADDRESS: &str = "MATLAB:tcpserver:InvalidAddress";
-const MESSAGE_ID_INVALID_PORT: &str = "MATLAB:tcpserver:InvalidPort";
-const MESSAGE_ID_INVALID_NAME_VALUE: &str = "MATLAB:tcpserver:InvalidNameValue";
-const MESSAGE_ID_BIND_FAILED: &str = "MATLAB:tcpserver:BindFailed";
-const MESSAGE_ID_INTERNAL: &str = "MATLAB:tcpserver:InternalError";
+const BUILTIN_NAME: &str = "tcpserver";
+
+const TCPSERVER_OUTPUT_SERVER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "server",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "tcpserver handle struct for accept/close operations.",
+}];
+const TCPSERVER_INPUTS_ADDRESS_PORT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "address",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Bind address or hostname.",
+    },
+    BuiltinParamDescriptor {
+        name: "port",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Listening TCP port (0..65535).",
+    },
+];
+const TCPSERVER_INPUTS_ADDRESS_PORT_NAME_VALUE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "address",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Bind address or hostname.",
+    },
+    BuiltinParamDescriptor {
+        name: "port",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Listening TCP port (0..65535).",
+    },
+    BuiltinParamDescriptor {
+        name: "name_value_pairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/Value options such as Timeout, UserData, Name, and ByteOrder.",
+    },
+];
+const TCPSERVER_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "server = tcpserver(address, port)",
+        inputs: &TCPSERVER_INPUTS_ADDRESS_PORT,
+        outputs: &TCPSERVER_OUTPUT_SERVER,
+    },
+    BuiltinSignatureDescriptor {
+        label: "server = tcpserver(address, port, Name, Value, ...)",
+        inputs: &TCPSERVER_INPUTS_ADDRESS_PORT_NAME_VALUE,
+        outputs: &TCPSERVER_OUTPUT_SERVER,
+    },
+];
+
+const TCPSERVER_ERROR_INVALID_ADDRESS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TCPSERVER.INVALID_ADDRESS",
+    identifier: Some("RunMat:tcpserver:InvalidAddress"),
+    when: "Address argument is not a valid string scalar.",
+    message: "tcpserver: invalid address argument",
+};
+const TCPSERVER_ERROR_INVALID_PORT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TCPSERVER.INVALID_PORT",
+    identifier: Some("RunMat:tcpserver:InvalidPort"),
+    when: "Port argument is non-scalar, non-integer, non-finite, or out of range.",
+    message: "tcpserver: invalid port argument",
+};
+const TCPSERVER_ERROR_INVALID_NAME_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TCPSERVER.INVALID_NAME_VALUE",
+    identifier: Some("RunMat:tcpserver:InvalidNameValue"),
+    when: "Name/Value arguments are malformed, unsupported, or have invalid values.",
+    message: "tcpserver: invalid name-value arguments",
+};
+const TCPSERVER_ERROR_BIND_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TCPSERVER.BIND_FAILED",
+    identifier: Some("RunMat:tcpserver:BindFailed"),
+    when: "Socket bind operation fails.",
+    message: "tcpserver: unable to bind listener",
+};
+const TCPSERVER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TCPSERVER.INTERNAL",
+    identifier: Some("RunMat:tcpserver:InternalError"),
+    when: "Internal listener metadata retrieval fails.",
+    message: "tcpserver: internal error",
+};
+const TCPSERVER_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    TCPSERVER_ERROR_INVALID_ADDRESS,
+    TCPSERVER_ERROR_INVALID_PORT,
+    TCPSERVER_ERROR_INVALID_NAME_VALUE,
+    TCPSERVER_ERROR_BIND_FAILED,
+    TCPSERVER_ERROR_INTERNAL,
+];
+pub const TCPSERVER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TCPSERVER_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TCPSERVER_ERRORS,
+};
 
 pub(crate) const DEFAULT_TIMEOUT_SECONDS: f64 = 10.0;
 pub(crate) const HANDLE_ID_FIELD: &str = "__tcpserver_id";
@@ -144,15 +247,31 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host networking only. GPU-resident scalars are gathered prior to socket binding.",
 };
 
-fn tcpserver_error(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier(message_id)
-        .with_builtin("tcpserver")
-        .build()
+fn tcpserver_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-fn tcpserver_flow(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
-    tcpserver_error(message_id, message)
+fn tcpserver_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let detail = detail.strip_prefix("tcpserver: ").unwrap_or(detail);
+    tcpserver_error_with_message(format!("{}: {}", error.message, detail), error)
+}
+
+fn tcpserver_flow(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl AsRef<str>,
+) -> RuntimeError {
+    tcpserver_error_with_detail(error, message)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::tcpserver")]
@@ -169,9 +288,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "tcpserver",
     category = "io/net",
-    summary = "Create a TCP server that listens for MATLAB-compatible client connections.",
+    summary = "Create TCP server listeners and return MATLAB-compatible server structs.",
     keywords = "tcpserver,tcp,network,server",
     type_resolver(crate::builtins::io::type_resolvers::tcpserver_type),
+    descriptor(crate::builtins::io::net::tcpserver::TCPSERVER_DESCRIPTOR),
     builtin_path = "crate::builtins::io::net::tcpserver"
 )]
 pub(crate) async fn tcpserver_builtin(
@@ -183,21 +303,21 @@ pub(crate) async fn tcpserver_builtin(
     let port = gather_if_needed_async(&port).await?;
 
     let host = string_scalar(&address, "tcpserver address")
-        .map_err(|err| tcpserver_flow(MESSAGE_ID_INVALID_ADDRESS, err.to_string()))?;
+        .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INVALID_ADDRESS, err.to_string()))?;
     let port = parse_port(&port)
-        .map_err(|err| tcpserver_flow(MESSAGE_ID_INVALID_PORT, err.to_string()))?;
+        .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INVALID_PORT, err.to_string()))?;
 
     let options = parse_name_value_pairs(rest).await?;
 
     let listener = TcpListener::bind((host.as_str(), port)).map_err(|err| {
         tcpserver_flow(
-            MESSAGE_ID_BIND_FAILED,
+            &TCPSERVER_ERROR_BIND_FAILED,
             format!("tcpserver: unable to bind {host}:{port} ({err})"),
         )
     })?;
     let local_addr = listener
         .local_addr()
-        .map_err(|err| tcpserver_flow(MESSAGE_ID_INTERNAL, format!("tcpserver: {err}")))?;
+        .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, format!("tcpserver: {err}")))?;
 
     let id = insert_server(listener, host.clone(), local_addr, &options);
     Ok(build_tcpserver_struct(id, &host, local_addr, &options))
@@ -228,7 +348,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
     }
     if !rest.len().is_multiple_of(2) {
         return Err(tcpserver_flow(
-            MESSAGE_ID_INVALID_NAME_VALUE,
+            &TCPSERVER_ERROR_INVALID_NAME_VALUE,
             "tcpserver: name-value arguments must appear in pairs",
         ));
     }
@@ -239,47 +359,55 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
         let value_raw = iter
             .next()
             .expect("even-length vector ensures paired name/value");
-        let name_value = gather_if_needed_async(&name_raw).await?;
+        let name_value = gather_if_needed_async(&name_raw)
+            .await
+            .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
 
         let name = string_scalar(&name_value, "OptionName").map_err(|err| {
             tcpserver_flow(
-                MESSAGE_ID_INVALID_NAME_VALUE,
+                &TCPSERVER_ERROR_INVALID_NAME_VALUE,
                 format!("tcpserver: invalid option name: {err}"),
             )
         })?;
         let lower = name.to_ascii_lowercase();
         match lower.as_str() {
             "timeout" => {
-                let timeout_value = gather_if_needed_async(&value_raw).await?;
+                let timeout_value = gather_if_needed_async(&value_raw)
+                    .await
+                    .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
                 options.timeout = parse_timeout(&timeout_value).map_err(|err| {
                     tcpserver_flow(
-                        MESSAGE_ID_INVALID_NAME_VALUE,
+                        &TCPSERVER_ERROR_INVALID_NAME_VALUE,
                         format!("tcpserver: invalid Timeout value: {err}"),
                     )
                 })?
             }
             "userdata" => options.user_data = value_raw,
             "name" => {
-                let name_value = gather_if_needed_async(&value_raw).await?;
+                let name_value = gather_if_needed_async(&value_raw)
+                    .await
+                    .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
                 let text = string_scalar(&name_value, "Name").map_err(|err| {
                     tcpserver_flow(
-                        MESSAGE_ID_INVALID_NAME_VALUE,
+                        &TCPSERVER_ERROR_INVALID_NAME_VALUE,
                         format!("tcpserver: invalid Name value: {err}"),
                     )
                 })?;
                 options.name = Some(text);
             }
             "byteorder" => {
-                let order_value = gather_if_needed_async(&value_raw).await?;
+                let order_value = gather_if_needed_async(&value_raw)
+                    .await
+                    .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
                 let raw_order = string_scalar(&order_value, "ByteOrder").map_err(|err| {
                     tcpserver_flow(
-                        MESSAGE_ID_INVALID_NAME_VALUE,
+                        &TCPSERVER_ERROR_INVALID_NAME_VALUE,
                         format!("tcpserver: invalid ByteOrder value: {err}"),
                     )
                 })?;
                 let canon = canonicalize_byte_order(&raw_order).ok_or_else(|| {
                     tcpserver_flow(
-                        MESSAGE_ID_INVALID_NAME_VALUE,
+                        &TCPSERVER_ERROR_INVALID_NAME_VALUE,
                         format!("tcpserver: unsupported ByteOrder '{raw_order}'"),
                     )
                 })?;
@@ -287,7 +415,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
             }
             _ => {
                 return Err(tcpserver_flow(
-                    MESSAGE_ID_INVALID_NAME_VALUE,
+                    &TCPSERVER_ERROR_INVALID_NAME_VALUE,
                     format!("tcpserver: unsupported option '{name}'"),
                 ));
             }
@@ -528,6 +656,18 @@ pub(crate) mod tests {
         futures::executor::block_on(tcpserver_builtin(address, port, rest))
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tcpserver_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = TCPSERVER_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"server = tcpserver(address, port)"));
+        assert!(labels.contains(&"server = tcpserver(address, port, Name, Value, ...)"));
+    }
+
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {
         crate::builtins::io::net::accept::test_guard()
     }
@@ -633,7 +773,7 @@ pub(crate) mod tests {
             vec![Value::from("ByteOrder"), Value::from("middle-endian")],
         )
         .unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_INVALID_NAME_VALUE);
+        assert_error_identifier(err, TCPSERVER_ERROR_INVALID_NAME_VALUE.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -668,7 +808,7 @@ pub(crate) mod tests {
             Vec::new(),
         )
         .unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_INVALID_PORT);
+        assert_error_identifier(err, TCPSERVER_ERROR_INVALID_PORT.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -681,7 +821,7 @@ pub(crate) mod tests {
             vec![Value::from("Timeout")],
         )
         .unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_INVALID_NAME_VALUE);
+        assert_error_identifier(err, TCPSERVER_ERROR_INVALID_NAME_VALUE.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

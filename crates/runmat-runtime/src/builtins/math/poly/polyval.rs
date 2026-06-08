@@ -3,7 +3,11 @@
 use log::debug;
 use num_complex::Complex64;
 use runmat_accelerate_api::{HostTensorView, ProviderPolyvalMu, ProviderPolyvalOptions};
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -16,6 +20,170 @@ use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResul
 
 const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyval";
+
+const POLYVAL_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Evaluated polynomial values at x.",
+}];
+
+const POLYVAL_OUTPUT_Y_DELTA: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Evaluated polynomial values at x.",
+    },
+    BuiltinParamDescriptor {
+        name: "delta",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prediction interval values when S is supplied.",
+    },
+];
+
+const POLYVAL_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Polynomial coefficient vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Evaluation points.",
+    },
+];
+
+const POLYVAL_INPUTS_WITH_S: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Polynomial coefficient vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Evaluation points.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional polyfit statistics structure.",
+    },
+];
+
+const POLYVAL_INPUTS_WITH_S_MU: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Polynomial coefficient vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Evaluation points.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional polyfit statistics structure (or []).",
+    },
+    BuiltinParamDescriptor {
+        name: "mu",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional centering/scaling vector [mean, std].",
+    },
+];
+
+const POLYVAL_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "y = polyval(p, x)",
+        inputs: &POLYVAL_INPUTS,
+        outputs: &POLYVAL_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = polyval(p, x, S)",
+        inputs: &POLYVAL_INPUTS_WITH_S,
+        outputs: &POLYVAL_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = polyval(p, x, S, mu)",
+        inputs: &POLYVAL_INPUTS_WITH_S_MU,
+        outputs: &POLYVAL_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y, delta] = polyval(p, x)",
+        inputs: &POLYVAL_INPUTS,
+        outputs: &POLYVAL_OUTPUT_Y_DELTA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y, delta] = polyval(p, x, S)",
+        inputs: &POLYVAL_INPUTS_WITH_S,
+        outputs: &POLYVAL_OUTPUT_Y_DELTA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y, delta] = polyval(p, x, S, mu)",
+        inputs: &POLYVAL_INPUTS_WITH_S_MU,
+        outputs: &POLYVAL_OUTPUT_Y_DELTA,
+    },
+];
+
+const POLYVAL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POLYVAL.INVALID_ARGUMENT",
+    identifier: Some("RunMat:polyval:InvalidArgument"),
+    when: "Option arguments (S/mu/output arity) are malformed or unsupported.",
+    message: "polyval: invalid argument",
+};
+
+const POLYVAL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POLYVAL.INVALID_INPUT",
+    identifier: Some("RunMat:polyval:InvalidInput"),
+    when: "Polynomial coefficients or evaluation points cannot be interpreted as numeric inputs.",
+    message: "polyval: invalid input",
+};
+
+const POLYVAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POLYVAL.INTERNAL",
+    identifier: Some("RunMat:polyval:Internal"),
+    when: "Runtime fails while building output tensors, deltas, or provider fallbacks.",
+    message: "polyval: internal runtime failure",
+};
+
+const POLYVAL_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    POLYVAL_ERROR_INVALID_ARGUMENT,
+    POLYVAL_ERROR_INVALID_INPUT,
+    POLYVAL_ERROR_INTERNAL,
+];
+
+pub const POLYVAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &POLYVAL_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &POLYVAL_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyval")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -35,9 +203,22 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn polyval_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+    polyval_error_with(message, &POLYVAL_ERROR_INVALID_INPUT)
+}
+
+fn polyval_argument_error(message: impl Into<String>) -> RuntimeError {
+    polyval_error_with(message, &POLYVAL_ERROR_INVALID_ARGUMENT)
+}
+
+fn polyval_error_with(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyval")]
@@ -54,11 +235,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "polyval",
     category = "math/poly",
-    summary = "Evaluate a polynomial at given points with MATLAB-compatible options.",
+    summary = "Evaluate polynomials at specified points.",
     keywords = "polyval,polynomial,polyfit,delta,gpu",
     accel = "sink",
     sink = true,
     type_resolver(polyval_type),
+    descriptor(crate::builtins::math::poly::polyval::POLYVAL_DESCRIPTOR),
     builtin_path = "crate::builtins::math::poly::polyval"
 )]
 async fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -121,7 +303,7 @@ pub async fn evaluate(
     };
 
     if want_delta && stats.is_none() {
-        return Err(polyval_error(
+        return Err(polyval_argument_error(
             "polyval: S input (structure returned by polyfit) is required for delta output",
         ));
     }
@@ -273,7 +455,7 @@ impl PolyvalEval {
     pub fn delta(&self) -> BuiltinResult<Value> {
         self.delta
             .clone()
-            .ok_or_else(|| polyval_error("polyval: delta output not computed"))
+            .ok_or_else(|| polyval_argument_error("polyval: delta output not computed"))
     }
 
     /// Consume into the main value.
@@ -285,7 +467,7 @@ impl PolyvalEval {
     pub fn into_pair(self) -> BuiltinResult<(Value, Value)> {
         match self.delta {
             Some(delta) => Ok((self.value, delta)),
-            None => Err(polyval_error("polyval: delta output not computed")),
+            None => Err(polyval_argument_error("polyval: delta output not computed")),
         }
     }
 }
@@ -370,7 +552,7 @@ async fn parse_option_values(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
             },
             mu: Some(rest[1].clone()),
         }),
-        _ => Err(polyval_error("polyval: too many input arguments")),
+        _ => Err(polyval_argument_error("polyval: too many input arguments")),
     }
 }
 
@@ -884,6 +1066,31 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn polyval_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = POLYVAL_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"y = polyval(p, x)"));
+        assert!(labels.contains(&"y = polyval(p, x, S)"));
+        assert!(labels.contains(&"y = polyval(p, x, S, mu)"));
+        assert!(labels.contains(&"[y, delta] = polyval(p, x, S)"));
+    }
+
+    #[test]
+    fn polyval_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = POLYVAL_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.POLYVAL.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.POLYVAL.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.POLYVAL.INTERNAL"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyval_scalar() {
@@ -1023,6 +1230,21 @@ pub(crate) mod tests {
         )
         .expect_err("expected mu length error");
         assert_error_contains(err, "mu must contain at least two elements");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn polyval_rejects_excess_optional_arguments() {
+        let coeffs = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
+        let points = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+        let err = polyval_builtin(
+            Value::Tensor(coeffs),
+            Value::Tensor(points),
+            vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)],
+        )
+        .expect_err("expected too many arguments error");
+        assert_eq!(err.identifier(), POLYVAL_ERROR_INVALID_ARGUMENT.identifier);
+        assert_error_contains(err, "too many input arguments");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -1,6 +1,6 @@
 #![cfg(feature = "wgpu")]
 
-use runmat_accelerate::backend::wgpu::provider_impl::WgpuProviderOptions;
+use runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate::fusion::{
     detect_fusion_groups, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
@@ -15,7 +15,7 @@ use runmat_builtins::{Type, Value};
 use std::collections::HashMap;
 
 fn upload(
-    provider: &runmat_accelerate::backend::wgpu::provider_impl::WgpuProvider,
+    provider: &runmat_accelerate::backend::wgpu::provider::WgpuProvider,
     rows: usize,
     cols: usize,
     data: &[f64],
@@ -175,6 +175,7 @@ async fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
                 cv.insert(v_dim, Value::Num(dim_val));
                 cv
             },
+            materialized_stores: Vec::new(),
             output: Some(v_y),
             kernel: FusionKernelSpec {
                 kind: FusionKind::Reduction,

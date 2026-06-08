@@ -189,6 +189,7 @@ fn test_custom_preset() {
         memory_mapping_enabled: false,
         parallel_loading: true,
         progress_reporting: true,
+        max_optimization_level: runmat_snapshot::OptimizationLevel::MaxPerformance,
         max_cache_size: 64 * 1024 * 1024,
         cache_eviction_policy: CacheEvictionPolicy::TimeToLive(Duration::from_secs(300)),
     };

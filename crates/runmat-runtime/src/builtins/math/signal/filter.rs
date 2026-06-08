@@ -4,7 +4,11 @@ use std::cmp::max;
 use log::debug;
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderIirFilterOptions};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -46,10 +50,293 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "filter";
 
+const FILTER_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Filtered signal output.",
+}];
+
+const FILTER_OUTPUT_Y_ZF: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Filtered signal output.",
+    },
+    BuiltinParamDescriptor {
+        name: "zf",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Final filter state for warm-starting a subsequent call.",
+    },
+];
+
+const FILTER_INPUTS_CORE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "b",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numerator coefficient vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "a",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Denominator coefficient vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Signal values to filter.",
+    },
+];
+
+const FILTER_INPUTS_WITH_ZI: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "b",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numerator coefficient vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "a",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Denominator coefficient vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Signal values to filter.",
+    },
+    BuiltinParamDescriptor {
+        name: "zi",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Initial filter state (use [] for default zero state).",
+    },
+];
+
+const FILTER_INPUTS_WITH_ZI_DIM: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "b",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numerator coefficient vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "a",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Denominator coefficient vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Signal values to filter.",
+    },
+    BuiltinParamDescriptor {
+        name: "zi",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Initial filter state (use [] for default zero state).",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("first non-singleton dimension"),
+        description: "Dimension to operate along.",
+    },
+];
+
+const FILTER_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "y = filter(b, a, x)",
+        inputs: &FILTER_INPUTS_CORE,
+        outputs: &FILTER_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = filter(b, a, x, zi)",
+        inputs: &FILTER_INPUTS_WITH_ZI,
+        outputs: &FILTER_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = filter(b, a, x, zi, dim)",
+        inputs: &FILTER_INPUTS_WITH_ZI_DIM,
+        outputs: &FILTER_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y, zf] = filter(b, a, x)",
+        inputs: &FILTER_INPUTS_CORE,
+        outputs: &FILTER_OUTPUT_Y_ZF,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y, zf] = filter(b, a, x, zi)",
+        inputs: &FILTER_INPUTS_WITH_ZI,
+        outputs: &FILTER_OUTPUT_Y_ZF,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y, zf] = filter(b, a, x, zi, dim)",
+        inputs: &FILTER_INPUTS_WITH_ZI_DIM,
+        outputs: &FILTER_OUTPUT_Y_ZF,
+    },
+];
+
+const FILTER_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER.ARG_COUNT",
+    identifier: Some("RunMat:filter:ArgCount"),
+    when: "More than five input arguments are provided.",
+    message: "filter: expected between three and five input arguments",
+};
+
+const FILTER_ERROR_INVALID_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER.INVALID_DIMENSION",
+    identifier: Some("RunMat:filter:InvalidDimension"),
+    when: "dim is missing, non-numeric, non-integer, or less than one.",
+    message: "filter: dimension must be numeric and >= 1",
+};
+
+const FILTER_ERROR_EMPTY_DENOMINATOR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER.EMPTY_DENOMINATOR",
+    identifier: Some("RunMat:filter:EmptyDenominator"),
+    when: "Denominator coefficient vector is empty.",
+    message: "filter: denominator coefficients cannot be empty",
+};
+
+const FILTER_ERROR_EMPTY_NUMERATOR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER.EMPTY_NUMERATOR",
+    identifier: Some("RunMat:filter:EmptyNumerator"),
+    when: "Numerator coefficient vector is empty.",
+    message: "filter: numerator coefficients cannot be empty",
+};
+
+const FILTER_ERROR_INVALID_COEFFICIENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER.INVALID_COEFFICIENTS",
+    identifier: Some("RunMat:filter:InvalidCoefficients"),
+    when: "Coefficient inputs are non-numeric or non-vector values.",
+    message: "filter: invalid coefficient input",
+};
+
+const FILTER_ERROR_INVALID_SIGNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER.INVALID_SIGNAL",
+    identifier: Some("RunMat:filter:InvalidSignal"),
+    when: "Signal input is non-numeric/logical.",
+    message: "filter: invalid signal input",
+};
+
+const FILTER_ERROR_INVALID_INITIAL_STATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER.INVALID_INITIAL_STATE",
+    identifier: Some("RunMat:filter:InvalidInitialState"),
+    when: "Initial state input is invalid for current filter/order configuration.",
+    message: "filter: invalid initial state input",
+};
+
+const FILTER_ERROR_DENOMINATOR_A1_ZERO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER.DENOMINATOR_A1_ZERO",
+    identifier: Some("RunMat:filter:DenominatorLeadingZero"),
+    when: "The leading denominator coefficient a(1) is zero.",
+    message: "filter: denominator coefficient a(1) must be non-zero",
+};
+
+const FILTER_ERROR_GATHER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER.GATHER_FAILED",
+    identifier: Some("RunMat:filter:GatherFailed"),
+    when: "GPU values fail to gather for host normalization/fallback.",
+    message: "filter: failed to gather GPU value",
+};
+
+const FILTER_ERROR_PROVIDER_UPLOAD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER.PROVIDER_UPLOAD",
+    identifier: Some("RunMat:filter:ProviderUploadFailed"),
+    when: "Provider-side upload for coefficients or initial state fails.",
+    message: "filter: failed to upload provider input",
+};
+
+const FILTER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER.INTERNAL",
+    identifier: Some("RunMat:filter:Internal"),
+    when: "Internal tensor/state/index processing fails.",
+    message: "filter: internal error",
+};
+
+const FILTER_ERRORS: [BuiltinErrorDescriptor; 11] = [
+    FILTER_ERROR_ARG_COUNT,
+    FILTER_ERROR_INVALID_DIMENSION,
+    FILTER_ERROR_EMPTY_DENOMINATOR,
+    FILTER_ERROR_EMPTY_NUMERATOR,
+    FILTER_ERROR_INVALID_COEFFICIENTS,
+    FILTER_ERROR_INVALID_SIGNAL,
+    FILTER_ERROR_INVALID_INITIAL_STATE,
+    FILTER_ERROR_DENOMINATOR_A1_ZERO,
+    FILTER_ERROR_GATHER_FAILED,
+    FILTER_ERROR_PROVIDER_UPLOAD,
+    FILTER_ERROR_INTERNAL,
+];
+
+pub const FILTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FILTER_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FILTER_ERRORS,
+};
+
 fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
+    filter_error_with_message(message, &FILTER_ERROR_INTERNAL)
+}
+
+fn filter_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    filter_error_with_message(error.message, error)
+}
+
+fn filter_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    filter_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn filter_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
         .with_builtin(BUILTIN_NAME)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn filter_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
@@ -57,26 +344,31 @@ async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
         Value::Int(_) | Value::Num(_) => {
             tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
                 .await
-                .map_err(runtime_error_for)?
+                .map_err(|detail| {
+                    filter_error_with_detail(&FILTER_ERROR_INVALID_DIMENSION, detail)
+                })?
                 .ok_or_else(|| {
-                    runtime_error_for(format!(
-                        "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
-                    ))
+                    filter_error_with_detail(
+                        &FILTER_ERROR_INVALID_DIMENSION,
+                        format!("received {value:?}"),
+                    )
                 })
         }
-        _ => Err(runtime_error_for(format!(
-            "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
-        ))),
+        _ => Err(filter_error_with_detail(
+            &FILTER_ERROR_INVALID_DIMENSION,
+            format!("received {value:?}"),
+        )),
     }
 }
 
 #[runtime_builtin(
     name = "filter",
     category = "math/signal",
-    summary = "Apply an IIR/FIR digital filter to scalars, vectors, or tensors.",
+    summary = "Apply IIR/FIR digital filters.",
     keywords = "filter,IIR,FIR,difference equation,initial conditions,gpu",
     accel = "custom",
     type_resolver(filter_type),
+    descriptor(crate::builtins::math::signal::filter::FILTER_DESCRIPTOR),
     builtin_path = "crate::builtins::math::signal::filter"
 )]
 async fn filter_builtin(
@@ -168,14 +460,10 @@ impl FilterArgs {
         let coeffs_a = CoeffInput::from_value("filter", "denominator", a).await?;
 
         if coeffs_a.len == 0 {
-            return Err(runtime_error_for(
-                "filter: denominator coefficients cannot be empty",
-            ));
+            return Err(filter_error(&FILTER_ERROR_EMPTY_DENOMINATOR));
         }
         if coeffs_b.len == 0 {
-            return Err(runtime_error_for(
-                "filter: numerator coefficients cannot be empty",
-            ));
+            return Err(filter_error(&FILTER_ERROR_EMPTY_NUMERATOR));
         }
 
         let signal = SignalInput::from_value(x).await?;
@@ -246,22 +534,36 @@ struct CoeffInput {
 }
 
 impl CoeffInput {
+    fn empty_error(label: &str) -> &'static BuiltinErrorDescriptor {
+        if label == "denominator" {
+            &FILTER_ERROR_EMPTY_DENOMINATOR
+        } else {
+            &FILTER_ERROR_EMPTY_NUMERATOR
+        }
+    }
+
     async fn from_value(name: &str, label: &str, value: Value) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
                 let tensor = gpu_helpers::gather_tensor_async(&handle)
                     .await
-                    .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+                    .map_err(|flow| {
+                        filter_error_with_source(
+                            &FILTER_ERROR_GATHER_FAILED,
+                            "coefficient gather failed",
+                            map_control_flow_with_builtin(flow, BUILTIN_NAME),
+                        )
+                    })?;
                 Self::from_tensor(name, label, tensor)
             }
             Value::Tensor(tensor) => Self::from_tensor(name, label, tensor),
             Value::ComplexTensor(tensor) => {
                 let len = tensor.data.len();
                 if len == 0 {
-                    return Err(runtime_error_for(format!(
-                        "{}: {} coefficients cannot be empty",
-                        name, label
-                    )));
+                    return Err(filter_error_with_detail(
+                        Self::empty_error(label),
+                        format!("{name}: {label} coefficients cannot be empty"),
+                    ));
                 }
                 ensure_vector_shape(name, label, &tensor.shape)?;
                 let data = tensor
@@ -277,7 +579,10 @@ impl CoeffInput {
             }
             Value::LogicalArray(logical) => {
                 let tensor = tensor::logical_to_tensor(&logical).map_err(|e| {
-                    runtime_error_for(format!("{}: {label} coefficients: {e}", name))
+                    filter_error_with_detail(
+                        &FILTER_ERROR_INVALID_COEFFICIENTS,
+                        format!("{name}: {label} coefficients: {e}"),
+                    )
                 })?;
                 Self::from_tensor(name, label, tensor)
             }
@@ -301,10 +606,10 @@ impl CoeffInput {
                 len: 1,
                 is_complex: true,
             }),
-            other => Err(runtime_error_for(format!(
-                "{}: unsupported {} type {:?}; expected numeric or logical values",
-                name, label, other
-            ))),
+            other => Err(filter_error_with_detail(
+                &FILTER_ERROR_INVALID_COEFFICIENTS,
+                format!("{name}: received {other:?}"),
+            )),
         }
     }
 
@@ -312,10 +617,10 @@ impl CoeffInput {
         ensure_vector_shape(name, label, &tensor.shape)?;
         let len = tensor.data.len();
         if len == 0 {
-            return Err(runtime_error_for(format!(
-                "{}: {} coefficients cannot be empty",
-                name, label
-            )));
+            return Err(filter_error_with_detail(
+                Self::empty_error(label),
+                format!("{name}: {label} coefficients cannot be empty"),
+            ));
         }
         let data = tensor
             .data
@@ -343,7 +648,13 @@ impl SignalInput {
             Value::GpuTensor(handle) => {
                 let tensor = gpu_helpers::gather_tensor_async(&handle)
                     .await
-                    .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+                    .map_err(|flow| {
+                        filter_error_with_source(
+                            &FILTER_ERROR_GATHER_FAILED,
+                            "signal gather failed",
+                            map_control_flow_with_builtin(flow, BUILTIN_NAME),
+                        )
+                    })?;
                 let shape = tensor.shape.clone();
                 let data = tensor
                     .data
@@ -386,8 +697,12 @@ impl SignalInput {
                 })
             }
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical)
-                    .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
+                let tensor = tensor::logical_to_tensor(&logical).map_err(|e| {
+                    filter_error_with_detail(
+                        &FILTER_ERROR_INVALID_SIGNAL,
+                        format!("logical signal conversion failed: {e}"),
+                    )
+                })?;
                 let shape = tensor.shape.clone();
                 let data = tensor
                     .data
@@ -425,10 +740,10 @@ impl SignalInput {
                 is_complex: true,
                 gpu_handle: None,
             }),
-            other => Err(runtime_error_for(format!(
-                "filter: unsupported signal type {:?}; expected numeric or logical values",
-                other
-            ))),
+            other => Err(filter_error_with_detail(
+                &FILTER_ERROR_INVALID_SIGNAL,
+                format!("received {other:?}"),
+            )),
         }
     }
 }
@@ -465,14 +780,23 @@ impl InitialState {
                     return Ok(Self::empty(expected_shape.to_vec()))
                 }
                 Value::GpuTensor(handle) => {
-                    let tensor = gpu_helpers::gather_tensor_async(&handle)
-                        .await
-                        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+                    let tensor =
+                        gpu_helpers::gather_tensor_async(&handle)
+                            .await
+                            .map_err(|flow| {
+                                filter_error_with_source(
+                                    &FILTER_ERROR_GATHER_FAILED,
+                                    "initial-state gather failed",
+                                    map_control_flow_with_builtin(flow, BUILTIN_NAME),
+                                )
+                            })?;
                     if !tensor.data.is_empty() {
-                        return Err(runtime_error_for(format!(
-                            "{}: initial conditions must be empty when the filter order is zero",
-                            name
-                        )));
+                        return Err(filter_error_with_detail(
+                            &FILTER_ERROR_INVALID_INITIAL_STATE,
+                            format!(
+                                "{name}: initial conditions must be empty when the filter order is zero"
+                            ),
+                        ));
                     }
                     return Ok(Self {
                         provided: true,
@@ -496,8 +820,7 @@ impl InitialState {
                 }
                 other => {
                     let msg = format!(
-                        "{}: initial conditions must be empty when the filter order is zero",
-                        name
+                        "{name}: initial conditions must be empty when the filter order is zero"
                     );
                     let detail = match other {
                         Value::Tensor(t)
@@ -511,7 +834,10 @@ impl InitialState {
                         }
                         _ => format!("{msg}; received {:?}", other),
                     };
-                    return Err(runtime_error_for(detail));
+                    return Err(filter_error_with_detail(
+                        &FILTER_ERROR_INVALID_INITIAL_STATE,
+                        detail,
+                    ));
                 }
             }
         }
@@ -520,7 +846,13 @@ impl InitialState {
             Value::GpuTensor(handle) => {
                 let tensor = gpu_helpers::gather_tensor_async(&handle)
                     .await
-                    .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+                    .map_err(|flow| {
+                        filter_error_with_source(
+                            &FILTER_ERROR_GATHER_FAILED,
+                            "initial-state gather failed",
+                            map_control_flow_with_builtin(flow, BUILTIN_NAME),
+                        )
+                    })?;
                 (
                     tensor
                         .data
@@ -553,8 +885,12 @@ impl InitialState {
                 None,
             ),
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical)
-                    .map_err(|e| runtime_error_for(format!("{name}: initial conditions: {e}")))?;
+                let tensor = tensor::logical_to_tensor(&logical).map_err(|e| {
+                    filter_error_with_detail(
+                        &FILTER_ERROR_INVALID_INITIAL_STATE,
+                        format!("{name}: initial conditions: {e}"),
+                    )
+                })?;
                 (
                     tensor
                         .data
@@ -576,26 +912,32 @@ impl InitialState {
             ),
             Value::Complex(re, im) => (vec![Complex::new(re, im)], vec![1, 1], true, None),
             other => {
-                return Err(runtime_error_for(format!(
-                    "{name}: unsupported initial condition type {:?}; expected numeric values",
-                    other
-                )))
+                return Err(filter_error_with_detail(
+                    &FILTER_ERROR_INVALID_INITIAL_STATE,
+                    format!("{name}: unsupported initial condition type {other:?}"),
+                ))
             }
         };
 
         if column_major.len() != expected_states {
-            return Err(runtime_error_for(format!(
-                "{name}: initial conditions have {} elements but {} were expected",
-                column_major.len(),
-                expected_states
-            )));
+            return Err(filter_error_with_detail(
+                &FILTER_ERROR_INVALID_INITIAL_STATE,
+                format!(
+                    "{name}: initial conditions have {} elements but {} were expected",
+                    column_major.len(),
+                    expected_states
+                ),
+            ));
         }
 
         if !shapes_compatible(expected_shape, &shape) {
-            return Err(runtime_error_for(format!(
-                "{name}: initial conditions must have shape {:?}, received {:?}",
-                expected_shape, shape
-            )));
+            return Err(filter_error_with_detail(
+                &FILTER_ERROR_INVALID_INITIAL_STATE,
+                format!(
+                    "{name}: initial conditions must have shape {:?}, received {:?}",
+                    expected_shape, shape
+                ),
+            ));
         }
 
         Ok(Self {
@@ -613,8 +955,9 @@ fn parse_optional_arguments(rest: &[Value]) -> BuiltinResult<(Option<Value>, Opt
         0 => Ok((None, None)),
         1 => Ok((Some(rest[0].clone()), None)),
         2 => Ok((Some(rest[0].clone()), Some(rest[1].clone()))),
-        _ => Err(runtime_error_for(
-            "filter: expected between three and five input arguments (b, a, x [, zi [, dim]])",
+        _ => Err(filter_error_with_detail(
+            &FILTER_ERROR_ARG_COUNT,
+            "(b, a, x [, zi [, dim]])",
         )),
     }
 }
@@ -671,9 +1014,10 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         shape: &b_shape,
     };
     let b_handle = provider.upload(&view_b).map_err(|e| {
-        runtime_error_for(format!(
-            "filter: failed to upload numerator coefficients: {e}"
-        ))
+        filter_error_with_detail(
+            &FILTER_ERROR_PROVIDER_UPLOAD,
+            format!("numerator upload failed: {e}"),
+        )
     })?;
     temp_handles.push(b_handle.clone());
 
@@ -683,9 +1027,10 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         shape: &a_shape,
     };
     let a_handle = provider.upload(&view_a).map_err(|e| {
-        runtime_error_for(format!(
-            "filter: failed to upload denominator coefficients: {e}"
-        ))
+        filter_error_with_detail(
+            &FILTER_ERROR_PROVIDER_UPLOAD,
+            format!("denominator upload failed: {e}"),
+        )
     })?;
     temp_handles.push(a_handle.clone());
 
@@ -707,7 +1052,10 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         };
         let handle = provider.upload(&view).map_err(|e| {
             cleanup_temp_handles(provider, temp_handles.clone());
-            runtime_error_for(format!("filter: failed to upload initial conditions: {e}"))
+            filter_error_with_detail(
+                &FILTER_ERROR_PROVIDER_UPLOAD,
+                format!("initial-state upload failed: {e}"),
+            )
         })?;
         (Some(handle.clone()), Some(handle))
     };
@@ -771,9 +1119,7 @@ fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {
 
     let a0 = a_norm[0];
     if a0 == Complex::new(0.0, 0.0) {
-        return Err(runtime_error_for(
-            "filter: denominator coefficient a(1) must be non-zero",
-        ));
+        return Err(filter_error(&FILTER_ERROR_DENOMINATOR_A1_ZERO));
     }
 
     for coeff in &mut b_norm {
@@ -801,11 +1147,14 @@ fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {
         Vec::<Complex<f64>>::new()
     } else if args.initial.provided {
         if args.initial.column_major.len() != expected_states {
-            return Err(runtime_error_for(format!(
-                "filter: initial conditions have {} elements but {} were expected",
-                args.initial.column_major.len(),
-                expected_states
-            )));
+            return Err(filter_error_with_detail(
+                &FILTER_ERROR_INVALID_INITIAL_STATE,
+                format!(
+                    "initial conditions have {} elements but {} were expected",
+                    args.initial.column_major.len(),
+                    expected_states
+                ),
+            ));
         }
         states_from_column_major_complex(
             &args.initial.column_major,
@@ -923,10 +1272,10 @@ fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {
 fn ensure_vector_shape(name: &str, label: &str, shape: &[usize]) -> BuiltinResult<()> {
     let non_singleton = shape.iter().copied().filter(|&d| d > 1).count();
     if non_singleton > 1 {
-        Err(runtime_error_for(format!(
-            "{}: {} coefficients must be a row or column vector",
-            name, label
-        )))
+        Err(filter_error_with_detail(
+            &FILTER_ERROR_INVALID_COEFFICIENTS,
+            format!("{name}: {label} coefficients must be a row or column vector"),
+        ))
     } else {
         Ok(())
     }
@@ -1123,7 +1472,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{builtin_function_by_name, IntValue, ResolveContext, Type};
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -1155,6 +1504,23 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(3), Some(4)])
             }
         );
+    }
+
+    #[test]
+    fn filter_descriptor_signatures_and_errors() {
+        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("filter builtin");
+        let descriptor = builtin.descriptor.expect("filter descriptor");
+        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
+        assert!(labels.contains(&"y = filter(b, a, x)"));
+        assert!(labels.contains(&"y = filter(b, a, x, zi)"));
+        assert!(labels.contains(&"y = filter(b, a, x, zi, dim)"));
+        assert!(labels.contains(&"[y, zf] = filter(b, a, x)"));
+        assert!(labels.contains(&"[y, zf] = filter(b, a, x, zi)"));
+        assert!(labels.contains(&"[y, zf] = filter(b, a, x, zi, dim)"));
+        assert!(descriptor
+            .errors
+            .iter()
+            .any(|err| err.code == "RM.FILTER.ARG_COUNT"));
     }
 
     fn approx_eq_slice(lhs: &[f64], rhs: &[f64]) {

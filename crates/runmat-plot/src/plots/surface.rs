@@ -26,6 +26,9 @@ pub struct SurfacePlot {
     /// If true, render Z at 0 (flat), but color-map using Z values
     pub flatten_z: bool,
 
+    /// If true, this flattened surface should behave like a 2D image for camera/UI decisions.
+    pub image_mode: bool,
+
     /// Optional color limits override for mapping Z -> color (caxis)
     pub color_limits: Option<(f64, f64)>,
 
@@ -143,6 +146,7 @@ impl SurfacePlot {
             wireframe: false,
             alpha: 1.0,
             flatten_z: false,
+            image_mode: false,
             color_limits: None,
             color_grid: None,
             lighting_enabled: true,
@@ -181,6 +185,7 @@ impl SurfacePlot {
             wireframe: false,
             alpha: 1.0,
             flatten_z: false,
+            image_mode: false,
             color_limits: None,
             color_grid: None,
             lighting_enabled: true,
@@ -278,6 +283,13 @@ impl SurfacePlot {
     /// Render surface flat in Z while mapping colors from Z values (for imagesc/imshow)
     pub fn with_flatten_z(mut self, enabled: bool) -> Self {
         self.flatten_z = enabled;
+        self.dirty = true;
+        self.drop_gpu_if_possible();
+        self
+    }
+
+    pub fn with_image_mode(mut self, enabled: bool) -> Self {
+        self.image_mode = enabled;
         self.dirty = true;
         self.drop_gpu_if_possible();
         self
@@ -528,6 +540,35 @@ impl SurfacePlot {
         self.indices.as_ref().unwrap()
     }
 
+    fn generate_wireframe_indices(&self) -> Vec<u32> {
+        let mut indices = Vec::new();
+        if self.x_len < 2 || self.y_len < 2 {
+            return indices;
+        }
+
+        // Horizontal grid edges (along Y for each X row)
+        for i in 0..self.x_len {
+            for j in 0..(self.y_len - 1) {
+                let a = (i * self.y_len + j) as u32;
+                let b = (i * self.y_len + j + 1) as u32;
+                indices.push(a);
+                indices.push(b);
+            }
+        }
+
+        // Vertical grid edges (along X for each Y column)
+        for i in 0..(self.x_len - 1) {
+            for j in 0..self.y_len {
+                let a = (i * self.y_len + j) as u32;
+                let b = ((i + 1) * self.y_len + j) as u32;
+                indices.push(a);
+                indices.push(b);
+            }
+        }
+
+        indices
+    }
+
     /// Generate complete render data for the graphics pipeline
     pub fn render_data(&mut self) -> RenderData {
         log::debug!(
@@ -538,12 +579,17 @@ impl SurfacePlot {
         );
 
         let using_gpu = self.gpu_vertices.is_some();
+        let bounds = self.bounds();
         let vertices = if using_gpu {
             Vec::new()
         } else {
             self.generate_vertices().clone()
         };
-        let indices = self.generate_indices().clone();
+        let indices = if self.wireframe {
+            self.generate_wireframe_indices()
+        } else {
+            self.generate_indices().clone()
+        };
 
         let material = Material {
             albedo: Vec4::new(1.0, 1.0, 1.0, self.alpha),
@@ -584,7 +630,7 @@ impl SurfacePlot {
             indices: Some(indices),
 
             gpu_vertices: self.gpu_vertices.clone(),
-            bounds: None,
+            bounds: Some(bounds),
             material,
             draw_calls: vec![draw_call],
             image: None,

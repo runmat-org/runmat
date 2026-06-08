@@ -1,6 +1,6 @@
 #![cfg(feature = "wgpu")]
 
-use runmat_accelerate::backend::wgpu::provider_impl::WgpuProviderOptions;
+use runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate::fusion::{
     detect_fusion_groups, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
@@ -15,7 +15,7 @@ use runmat_builtins::{Type, Value};
 use std::collections::HashMap;
 
 fn upload(
-    provider: &runmat_accelerate::backend::wgpu::provider_impl::WgpuProvider,
+    provider: &runmat_accelerate::backend::wgpu::provider::WgpuProvider,
     rows: usize,
     cols: usize,
     data: &[f64],
@@ -151,6 +151,7 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
             cv.insert(v_all, Value::String("all".to_string()));
             cv
         },
+        materialized_stores: Vec::new(),
         output: Some(v_mse),
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,

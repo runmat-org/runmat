@@ -10,7 +10,11 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, Duration, Local, NaiveDate};
 use glob::glob;
-use runmat_builtins::{StructValue, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    StructValue, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{
@@ -20,7 +24,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::console::{record_console_output, ConsoleStream};
+use crate::console::{record_console_line, ConsoleStream};
 use crate::output_context::requested_output_count;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
@@ -53,6 +57,106 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "dir";
 
+const DIR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "listing",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Struct array with name/folder/date/bytes/isdir/datenum fields.",
+}];
+const DIR_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const DIR_INPUTS_NAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "name",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Folder, file, or wildcard path to list.",
+}];
+const DIR_INPUTS_FOLDER_PATTERN: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "folder",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Base folder to list.",
+    },
+    BuiltinParamDescriptor {
+        name: "pattern",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Name or wildcard pattern within folder.",
+    },
+];
+const DIR_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "listing = dir()",
+        inputs: &DIR_INPUTS_NONE,
+        outputs: &DIR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "listing = dir(name)",
+        inputs: &DIR_INPUTS_NAME,
+        outputs: &DIR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "listing = dir(folder, pattern)",
+        inputs: &DIR_INPUTS_FOLDER_PATTERN,
+        outputs: &DIR_OUTPUT,
+    },
+];
+const DIR_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DIR.TOO_MANY_INPUTS",
+    identifier: None,
+    when: "More than two input arguments are provided.",
+    message: "dir: too many input arguments",
+};
+const DIR_ERROR_NAME_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DIR.NAME_ARG",
+    identifier: None,
+    when: "Single name argument is not a character vector or string scalar.",
+    message: "dir: name must be a character vector or string scalar",
+};
+const DIR_ERROR_FOLDER_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DIR.FOLDER_ARG",
+    identifier: None,
+    when: "Folder argument is not a character vector or string scalar.",
+    message: "dir: folder must be a character vector or string scalar",
+};
+const DIR_ERROR_PATTERN_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DIR.PATTERN_ARG",
+    identifier: None,
+    when: "Pattern argument is not a character vector or string scalar.",
+    message: "dir: pattern must be a character vector or string scalar",
+};
+const DIR_ERROR_FOLDER_WILDCARD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DIR.FOLDER_WILDCARD",
+    identifier: None,
+    when: "Folder argument contains wildcard characters.",
+    message: "dir: folder input must not contain wildcard characters",
+};
+const DIR_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    DIR_ERROR_TOO_MANY_INPUTS,
+    DIR_ERROR_NAME_ARG,
+    DIR_ERROR_FOLDER_ARG,
+    DIR_ERROR_PATTERN_ARG,
+    DIR_ERROR_FOLDER_WILDCARD,
+];
+pub const DIR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DIR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DIR_ERRORS,
+};
+
+fn dir_error_row(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn dir_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -73,20 +177,21 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "dir",
     category = "io/repl_fs",
-    summary = "Return file and folder information in a MATLAB-compatible struct array.",
+    summary = "Return file and folder metadata.",
     keywords = "dir,list files,folder contents,metadata,wildcard,struct array",
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::dir_type),
+    descriptor(crate::builtins::io::repl_fs::dir::DIR_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::dir"
 )]
 async fn dir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(&args).await?;
     let records = match gathered.len() {
-        0 => list_current_directory()?,
-        1 => list_from_single_value(&gathered[0])?,
-        2 => list_with_folder_and_pattern(&gathered[0], &gathered[1])?,
-        _ => return Err(dir_error("dir: too many input arguments")),
+        0 => list_current_directory().await?,
+        1 => list_from_single_value(&gathered[0]).await?,
+        2 => list_with_folder_and_pattern(&gathered[0], &gathered[1]).await?,
+        _ => return Err(dir_error_row(&DIR_ERROR_TOO_MANY_INPUTS)),
     };
     if should_emit_stdout() {
         emit_dir_stdout(&records);
@@ -116,49 +221,38 @@ async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     Ok(out)
 }
 
-fn list_current_directory() -> BuiltinResult<Vec<DirRecord>> {
+async fn list_current_directory() -> BuiltinResult<Vec<DirRecord>> {
     let cwd = vfs::current_dir().map_err(|err| {
         dir_error(format!(
             "dir: unable to determine current directory ({err})"
         ))
     })?;
-    let mut records = list_directory(&cwd, true)?;
+    let mut records = list_directory(&cwd, true).await?;
     sort_records(&mut records);
     Ok(records)
 }
 
-fn list_from_single_value(value: &Value) -> BuiltinResult<Vec<DirRecord>> {
-    let text = scalar_text(
-        value,
-        "dir: name must be a character vector or string scalar",
-    )?;
-    list_from_text(&text)
+async fn list_from_single_value(value: &Value) -> BuiltinResult<Vec<DirRecord>> {
+    let text = scalar_text(value, &DIR_ERROR_NAME_ARG)?;
+    list_from_text(&text).await
 }
 
-fn list_with_folder_and_pattern(
+async fn list_with_folder_and_pattern(
     folder_value: &Value,
     pattern_value: &Value,
 ) -> BuiltinResult<Vec<DirRecord>> {
-    let folder_text = scalar_text(
-        folder_value,
-        "dir: folder must be a character vector or string scalar",
-    )?;
-    let pattern_text = scalar_text(
-        pattern_value,
-        "dir: pattern must be a character vector or string scalar",
-    )?;
+    let folder_text = scalar_text(folder_value, &DIR_ERROR_FOLDER_ARG)?;
+    let pattern_text = scalar_text(pattern_value, &DIR_ERROR_PATTERN_ARG)?;
 
     let expanded_folder = expand_user_path(folder_text.trim(), "dir").map_err(dir_error)?;
     if contains_wildcards(&expanded_folder) {
-        return Err(dir_error(
-            "dir: folder input must not contain wildcard characters",
-        ));
+        return Err(dir_error_row(&DIR_ERROR_FOLDER_WILDCARD));
     }
 
     let base_path = PathBuf::from(&expanded_folder);
     let trimmed_pattern = pattern_text.trim();
     if trimmed_pattern.is_empty() {
-        let mut records = list_directory(&base_path, true)?;
+        let mut records = list_directory(&base_path, true).await?;
         sort_records(&mut records);
         return Ok(records);
     }
@@ -167,38 +261,38 @@ fn list_with_folder_and_pattern(
         let mut pattern_path = base_path.clone();
         pattern_path.push(trimmed_pattern);
         let pattern_str = path_to_string(&pattern_path);
-        let mut records = list_glob_pattern(&pattern_str, trimmed_pattern)?;
+        let mut records = list_glob_pattern(&pattern_str, trimmed_pattern).await?;
         sort_records(&mut records);
         Ok(records)
     } else {
         let mut target_path = base_path.clone();
         target_path.push(trimmed_pattern);
-        list_path(&path_to_string(&target_path), trimmed_pattern)
+        list_path(&path_to_string(&target_path), trimmed_pattern).await
     }
 }
 
-fn list_from_text(text: &str) -> BuiltinResult<Vec<DirRecord>> {
+async fn list_from_text(text: &str) -> BuiltinResult<Vec<DirRecord>> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        return list_current_directory();
+        return list_current_directory().await;
     }
 
     let expanded = expand_user_path(trimmed, "dir").map_err(dir_error)?;
     if contains_wildcards(&expanded) {
-        let mut records = list_glob_pattern(&expanded, trimmed)?;
+        let mut records = list_glob_pattern(&expanded, trimmed).await?;
         sort_records(&mut records);
         Ok(records)
     } else {
-        list_path(&expanded, trimmed)
+        list_path(&expanded, trimmed).await
     }
 }
 
-fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
+async fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
     let path = PathBuf::from(expanded);
-    match vfs::metadata(&path) {
+    match vfs::metadata_async(&path).await {
         Ok(metadata) => {
             if metadata.is_dir() {
-                let mut records = list_directory(&path, true)?;
+                let mut records = list_directory(&path, true).await?;
                 sort_records(&mut records);
                 Ok(records)
             } else {
@@ -206,7 +300,7 @@ fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
                     .parent()
                     .map(|p| p.to_path_buf())
                     .unwrap_or_else(|| PathBuf::from("."));
-                let folder = absolute_folder_string(&folder_path)?;
+                let folder = absolute_folder_string(&folder_path).await?;
                 let name = path
                     .file_name()
                     .map(|os| os.to_string_lossy().into_owned())
@@ -230,7 +324,7 @@ fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
     }
 }
 
-fn list_glob_pattern(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
+async fn list_glob_pattern(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
     let mut records = Vec::new();
 
     let matcher = glob(expanded)
@@ -238,13 +332,13 @@ fn list_glob_pattern(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRec
     for item in matcher {
         match item {
             Ok(path) => {
-                let metadata = vfs::symlink_metadata(&path).ok();
+                let metadata = vfs::symlink_metadata_async(&path).await.ok();
                 let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
                 let folder_path = path
                     .parent()
                     .map(|p| p.to_path_buf())
                     .unwrap_or_else(|| PathBuf::from("."));
-                let folder = absolute_folder_string(&folder_path)?;
+                let folder = absolute_folder_string(&folder_path).await?;
                 let name = path
                     .file_name()
                     .map(|os| os.to_string_lossy().into_owned())
@@ -276,9 +370,9 @@ fn list_glob_pattern(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRec
     Ok(records)
 }
 
-fn list_directory(dir: &Path, include_special: bool) -> BuiltinResult<Vec<DirRecord>> {
-    let folder = absolute_folder_string(dir)?;
-    let dir_metadata = vfs::metadata(dir).ok();
+async fn list_directory(dir: &Path, include_special: bool) -> BuiltinResult<Vec<DirRecord>> {
+    let folder = absolute_folder_string(dir).await?;
+    let dir_metadata = vfs::metadata_async(dir).await.ok();
     let mut records = Vec::new();
 
     if include_special {
@@ -287,7 +381,8 @@ fn list_directory(dir: &Path, include_special: bool) -> BuiltinResult<Vec<DirRec
     }
 
     let dir_display = folder.clone();
-    let read_dir = vfs::read_dir(dir)
+    let read_dir = vfs::read_dir_async(dir)
+        .await
         .map_err(|err| dir_error(format!("dir: unable to access '{dir_display}' ({err})")))?;
     for entry in read_dir {
         let name_os: &OsString = entry.file_name();
@@ -297,14 +392,15 @@ fn list_directory(dir: &Path, include_special: bool) -> BuiltinResult<Vec<DirRec
         }
 
         let path = entry.path().to_path_buf();
-        let metadata = vfs::metadata(&path)
-            .or_else(|_| vfs::symlink_metadata(&path))
-            .map_err(|err| {
+        let metadata = match vfs::metadata_async(&path).await {
+            Ok(meta) => meta,
+            Err(_) => vfs::symlink_metadata_async(&path).await.map_err(|err| {
                 dir_error(format!(
                     "dir: unable to read metadata for '{}' ({err})",
                     name
                 ))
-            })?;
+            })?,
+        };
         records.push(record_from_metadata(&folder, name, &metadata));
     }
 
@@ -353,7 +449,7 @@ fn emit_dir_stdout(records: &[DirRecord]) {
         }
         lines.push(format!("{:<20} {:>10} {}", record.date, size_field, name));
     }
-    record_console_output(ConsoleStream::Stdout, lines.join("\n"));
+    record_console_line(ConsoleStream::Stdout, lines.join("\n"));
 }
 
 fn should_emit_stdout() -> bool {
@@ -364,7 +460,7 @@ fn should_emit_stdout() -> bool {
     }
 }
 
-fn scalar_text(value: &Value, error: &str) -> BuiltinResult<String> {
+fn scalar_text(value: &Value, error: &'static BuiltinErrorDescriptor) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
@@ -375,11 +471,11 @@ fn scalar_text(value: &Value, error: &str) -> BuiltinResult<String> {
             }
             Ok(row.trim_end().to_string())
         }
-        _ => Err(dir_error(error)),
+        _ => Err(dir_error_row(error)),
     }
 }
 
-fn absolute_folder_string(path: &Path) -> BuiltinResult<String> {
+async fn absolute_folder_string(path: &Path) -> BuiltinResult<String> {
     let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -391,7 +487,7 @@ fn absolute_folder_string(path: &Path) -> BuiltinResult<String> {
             })?
             .join(path)
     };
-    let normalized = vfs::canonicalize(&joined).unwrap_or(joined);
+    let normalized = vfs::canonicalize_async(&joined).await.unwrap_or(joined);
     Ok(path_to_string(&normalized))
 }
 
@@ -460,7 +556,7 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use runmat_builtins::{CharArray, StringArray, StructValue as TestStruct};
-    use runmat_filesystem::{self as fs, File};
+    use runmat_filesystem::File;
     use tempfile::tempdir;
 
     fn dir_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -564,6 +660,19 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn dir_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = DIR_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"listing = dir()"));
+        assert!(labels.contains(&"listing = dir(name)"));
+        assert!(labels.contains(&"listing = dir(folder, pattern)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn dir_lists_current_directory() {
         let _lock = REPL_FS_TEST_LOCK
             .lock()
@@ -574,7 +683,7 @@ pub(crate) mod tests {
         env::set_current_dir(dir.path()).expect("switch temp dir");
 
         File::create("alpha.txt").expect("create file");
-        fs::create_dir("beta").expect("create dir");
+        futures::executor::block_on(vfs::create_dir_async("beta")).expect("create dir");
 
         let value = dir_builtin(Vec::new()).expect("dir");
         let entries = structs_from_value(value);
@@ -643,7 +752,8 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
         let dir = tempdir().expect("tempdir");
         File::create(dir.path().join("data.csv")).expect("create file");
-        fs::create_dir(dir.path().join("nested")).expect("create dir");
+        futures::executor::block_on(vfs::create_dir_async(dir.path().join("nested")))
+            .expect("create dir");
 
         let value = dir_builtin(vec![Value::from(dir.path().to_string_lossy().to_string())])
             .expect("dir path");
@@ -726,10 +836,7 @@ pub(crate) mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let err = dir_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
-        assert_eq!(
-            err.message(),
-            "dir: name must be a character vector or string scalar"
-        );
+        assert_eq!(err.message(), DIR_ERROR_NAME_ARG.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -741,10 +848,7 @@ pub(crate) mod tests {
         let array = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
         let err =
             dir_builtin(vec![Value::StringArray(array)]).expect_err("expected multi-string error");
-        assert_eq!(
-            err.message(),
-            "dir: name must be a character vector or string scalar"
-        );
+        assert_eq!(err.message(), DIR_ERROR_NAME_ARG.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -773,10 +877,7 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
         let err = dir_builtin(vec![Value::from("*bad"), Value::from("*.txt")])
             .expect_err("expected wildcard folder error");
-        assert_eq!(
-            err.message(),
-            "dir: folder input must not contain wildcard characters"
-        );
+        assert_eq!(err.message(), DIR_ERROR_FOLDER_WILDCARD.message);
     }
 
     #[cfg(not(windows))]

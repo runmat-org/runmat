@@ -7,7 +7,11 @@ pub(crate) mod rem;
 pub(crate) mod round;
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
@@ -74,10 +78,80 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "mod";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const MOD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "R",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise modulus result.",
+}];
+const MOD_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dividend input (numeric/logical/char/complex).",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Divisor input (numeric/logical/char/complex).",
+    },
+];
+const MOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "R = mod(A, B)",
+    inputs: &MOD_INPUTS,
+    outputs: &MOD_OUTPUT,
+}];
+const MOD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOD.INVALID_INPUT",
+    identifier: Some("RunMat:mod:InvalidInput"),
+    when: "Inputs cannot be interpreted as numeric, logical, char, or complex operands.",
+    message: "mod: invalid input",
+};
+const MOD_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOD.SIZE_MISMATCH",
+    identifier: Some("RunMat:mod:SizeMismatch"),
+    when: "Operands are not broadcast-compatible.",
+    message: "mod: array sizes are not compatible for broadcasting",
+};
+const MOD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOD.INTERNAL",
+    identifier: Some("RunMat:mod:Internal"),
+    when: "Internal tensor conversion, allocation, or provider composition failed.",
+    message: "mod: internal error",
+};
+const MOD_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    MOD_ERROR_INVALID_INPUT,
+    MOD_ERROR_SIZE_MISMATCH,
+    MOD_ERROR_INTERNAL,
+];
+pub const MOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MOD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &MOD_ERRORS,
+};
+
+fn mod_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    mod_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn mod_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -87,6 +161,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     keywords = "mod,modulus,remainder,gpu",
     accel = "binary",
     type_resolver(numeric_binary_type),
+    descriptor(crate::builtins::math::rounding::MOD_DESCRIPTOR),
     builtin_path = "crate::builtins::math::rounding"
 )]
 async fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -116,7 +191,7 @@ async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
                                     let _ = provider.free(&div);
                                     let _ = provider.free(&floored);
                                     let _ = provider.free(&mul);
-                                    return Ok(Value::GpuTensor(out));
+                                    return Ok(gpu_helpers::resident_gpu_value(out));
                                 }
                                 Err(_) => {
                                     let _ = provider.free(&mul);
@@ -146,8 +221,8 @@ fn mod_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     if let Some(result) = scalar_mod_value(&lhs, &rhs) {
         return Ok(result);
     }
-    let left = value_into_numeric_array(lhs, "mod")?;
-    let right = value_into_numeric_array(rhs, "mod")?;
+    let left = value_into_numeric_array(lhs)?;
+    let right = value_into_numeric_array(rhs)?;
     match align_numeric_arrays(left, right)? {
         NumericPair::Real(a, b) => compute_mod_real(&a, &b),
         NumericPair::Complex(a, b) => compute_mod_complex(&a, &b),
@@ -156,10 +231,10 @@ fn mod_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 
 fn compute_mod_real(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape)
-        .map_err(|err| builtin_error(format!("mod: {err}")))?;
+        .map_err(|err| mod_error_with_detail(&MOD_ERROR_SIZE_MISMATCH, err))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("mod: {e}")))?;
+            .map_err(|e| mod_error_with_detail(&MOD_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let mut result = vec![0.0f64; plan.len()];
@@ -169,16 +244,16 @@ fn compute_mod_real(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
         result[out_idx] = mod_real_scalar(aval, bval);
     }
     let tensor = Tensor::new(result, plan.output_shape().to_vec())
-        .map_err(|e| builtin_error(format!("mod: {e}")))?;
+        .map_err(|e| mod_error_with_detail(&MOD_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
 fn compute_mod_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape)
-        .map_err(|err| builtin_error(format!("mod: {err}")))?;
+        .map_err(|err| mod_error_with_detail(&MOD_ERROR_SIZE_MISMATCH, err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("mod: {e}")))?;
+            .map_err(|e| mod_error_with_detail(&MOD_ERROR_INTERNAL, e))?;
         return Ok(complex_tensor_into_value(tensor));
     }
     let mut result = vec![(0.0f64, 0.0f64); plan.len()];
@@ -188,7 +263,7 @@ fn compute_mod_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<Va
         result[out_idx] = mod_complex_scalar(ar, ai, br, bi);
     }
     let tensor = ComplexTensor::new(result, plan.output_shape().to_vec())
-        .map_err(|e| builtin_error(format!("mod: {e}")))?;
+        .map_err(|e| mod_error_with_detail(&MOD_ERROR_INTERNAL, e))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -208,7 +283,11 @@ fn mod_real_scalar(a: f64, b: f64) -> f64 {
         remainder = 0.0;
     }
     if b.is_infinite() && a.is_finite() {
-        return a;
+        // MATLAB sign-correction: mod(a, ±Inf) returns a when signs match, ±Inf otherwise.
+        if a == 0.0 {
+            return 0.0;
+        }
+        return if a.signum() == b.signum() { a } else { b };
     }
     if !remainder.is_finite() && !a.is_finite() {
         return f64::NAN;
@@ -306,29 +385,31 @@ fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
     }
 }
 
-fn value_into_numeric_array(value: Value, name: &str) -> BuiltinResult<NumericArray> {
+fn value_into_numeric_array(value: Value) -> BuiltinResult<NumericArray> {
     match value {
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| builtin_error(format!("{name}: {e}")))?;
+                .map_err(|e| mod_error_with_detail(&MOD_ERROR_INTERNAL, e))?;
             Ok(NumericArray::Complex(tensor))
         }
         Value::ComplexTensor(ct) => Ok(NumericArray::Complex(ct)),
         Value::CharArray(ca) => {
             let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
             let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-                .map_err(|e| builtin_error(format!("{name}: {e}")))?;
+                .map_err(|e| mod_error_with_detail(&MOD_ERROR_INTERNAL, e))?;
             Ok(NumericArray::Real(tensor))
         }
-        Value::String(_) | Value::StringArray(_) => Err(builtin_error(format!(
-            "{name}: expected numeric input, got string"
-        ))),
-        Value::GpuTensor(_) => Err(builtin_error(format!(
-            "{name}: internal error converting GPU tensor"
-        ))),
+        Value::String(_) | Value::StringArray(_) => Err(mod_error_with_detail(
+            &MOD_ERROR_INVALID_INPUT,
+            "expected numeric input, got string",
+        )),
+        Value::GpuTensor(_) => Err(mod_error_with_detail(
+            &MOD_ERROR_INTERNAL,
+            "internal error converting GPU tensor",
+        )),
         other => {
-            let tensor =
-                tensor::value_into_tensor_for(name, other).map_err(|err| builtin_error(err))?;
+            let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other)
+                .map_err(|err| mod_error_with_detail(&MOD_ERROR_INVALID_INPUT, err))?;
             Ok(NumericArray::Real(tensor))
         }
     }
@@ -360,7 +441,8 @@ fn into_complex(input: NumericArray) -> BuiltinResult<ComplexTensor> {
         NumericArray::Real(t) => {
             let Tensor { data, shape, .. } = t;
             let complex: Vec<(f64, f64)> = data.into_iter().map(|re| (re, 0.0)).collect();
-            ComplexTensor::new(complex, shape).map_err(|e| builtin_error(format!("mod: {e}")))
+            ComplexTensor::new(complex, shape)
+                .map_err(|e| mod_error_with_detail(&MOD_ERROR_INTERNAL, e))
         }
         NumericArray::Complex(ct) => Ok(ct),
     }
@@ -386,6 +468,16 @@ pub(crate) mod tests {
             "unexpected error: {}",
             error.message()
         );
+    }
+
+    #[test]
+    fn mod_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = MOD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"R = mod(A, B)"));
     }
 
     #[test]
@@ -533,7 +625,9 @@ pub(crate) mod tests {
     fn mod_string_input_errors() {
         let err = mod_builtin(Value::from("abc"), Value::Num(3.0))
             .expect_err("string inputs should error");
+        let identifier = err.identifier().map(str::to_string);
         assert_error_contains(err, "expected numeric input");
+        assert_eq!(identifier.as_deref(), MOD_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

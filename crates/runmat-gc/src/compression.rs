@@ -380,9 +380,18 @@ impl Default for CompressedPtrArray {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn compression_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
 
     #[test]
     fn test_compressed_ptr_null() {
+        let _guard = compression_test_guard();
         let null_ptr = CompressedPtr::null();
         assert!(null_ptr.is_null());
         assert_eq!(null_ptr.decompress(), ptr::null());
@@ -390,6 +399,7 @@ mod tests {
 
     #[test]
     fn test_compressed_ptr_basic() {
+        let _guard = compression_test_guard();
         reset_heap_base_for_test();
 
         // Create a test pointer
@@ -406,6 +416,7 @@ mod tests {
 
     #[test]
     fn test_compressed_ptr_offset() {
+        let _guard = compression_test_guard();
         reset_heap_base_for_test();
 
         let test_data = [1u8; 1000];
@@ -426,6 +437,7 @@ mod tests {
 
     #[test]
     fn test_compressed_ptr_array() {
+        let _guard = compression_test_guard();
         reset_heap_base_for_test();
 
         let mut array = CompressedPtrArray::new();
@@ -452,6 +464,7 @@ mod tests {
 
     #[test]
     fn test_compression_savings() {
+        let _guard = compression_test_guard();
         let savings = calculate_compression_savings(1000);
         if is_compression_beneficial() {
             assert_eq!(savings, 4000); // 1000 pointers * 4 bytes saved each
@@ -462,6 +475,7 @@ mod tests {
 
     #[test]
     fn test_compressed_ptr_add_offset() {
+        let _guard = compression_test_guard();
         // Represent a pointer that is base+99 (stored as 100 internally)
         let ptr = CompressedPtr { offset: 100 };
 
@@ -478,6 +492,7 @@ mod tests {
 
     #[test]
     fn test_compressed_ptr_offset_from() {
+        let _guard = compression_test_guard();
         // ptr1 actual offset = 99, ptr2 actual offset = 149
         let ptr1 = CompressedPtr { offset: 100 };
         let ptr2 = CompressedPtr { offset: 150 };
@@ -491,6 +506,7 @@ mod tests {
 
     #[test]
     fn test_compression_stats() {
+        let _guard = compression_test_guard();
         let mut stats = CompressionStats::new();
         assert_eq!(stats.pointers_compressed, 0);
         assert_eq!(stats.memory_saved_bytes, 0);

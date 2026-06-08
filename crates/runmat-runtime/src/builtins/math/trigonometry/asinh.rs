@@ -5,7 +5,11 @@
 
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -17,6 +21,51 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "asinh";
+
+const ASINH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise inverse hyperbolic sine result.",
+}];
+
+const ASINH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, array, char array, complex value, or gpuArray.",
+}];
+
+const ASINH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = asinh(X)",
+    inputs: &ASINH_INPUTS,
+    outputs: &ASINH_OUTPUT,
+}];
+
+const ASINH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ASINH.INVALID_INPUT",
+    identifier: Some("RunMat:asinh:InvalidInput"),
+    when: "Input cannot be interpreted as supported numeric/char/complex data.",
+    message: "asinh: invalid input",
+};
+
+const ASINH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ASINH.INTERNAL",
+    identifier: Some("RunMat:asinh:Internal"),
+    when: "Internal gather/conversion/allocation/provider flow failed.",
+    message: "asinh: internal error",
+};
+
+const ASINH_ERRORS: [BuiltinErrorDescriptor; 2] = [ASINH_ERROR_INVALID_INPUT, ASINH_ERROR_INTERNAL];
+
+pub const ASINH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ASINH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ASINH_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::asinh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -35,10 +84,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute asinh directly on device buffers; runtimes gather to host when unary_asinh is unavailable.",
 };
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn asinh_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn asinh_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::asinh")]
@@ -61,10 +124,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "asinh",
     category = "math/trigonometry",
-    summary = "Inverse hyperbolic sine of scalars, vectors, matrices, or N-D tensors (element-wise).",
+    summary = "Element-wise inverse hyperbolic sine.",
     keywords = "asinh,arcsinh,inverse hyperbolic sine,trigonometry,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::trigonometry::asinh::ASINH_DESCRIPTOR),
     builtin_path = "crate::builtins::math::trigonometry::asinh"
 )]
 async fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
@@ -73,9 +137,7 @@ async fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Complex(re, im) => Ok(complex_asinh_scalar(re, im)),
         Value::ComplexTensor(ct) => asinh_complex_tensor(ct),
         Value::CharArray(ca) => asinh_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(runtime_error_for("asinh: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(asinh_error(&ASINH_ERROR_INVALID_INPUT)),
         other => asinh_real(other),
     }
 }
@@ -83,7 +145,7 @@ async fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
 async fn asinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_asinh(&handle).await {
-            return Ok(Value::GpuTensor(out));
+            return Ok(gpu_helpers::resident_gpu_value(out));
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
@@ -91,13 +153,15 @@ async fn asinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 }
 
 fn asinh_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("asinh", value).map_err(runtime_error_for)?;
+    let tensor = tensor::value_into_tensor_for("asinh", value)
+        .map_err(|e| asinh_error_with_detail(&ASINH_ERROR_INVALID_INPUT, e))?;
     asinh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
 fn asinh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.asinh()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("asinh: {e}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| asinh_error_with_detail(&ASINH_ERROR_INTERNAL, e))
 }
 
 fn asinh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -110,7 +174,7 @@ fn asinh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         })
         .collect::<Vec<_>>();
     let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-        .map_err(|e| runtime_error_for(format!("asinh: {e}")))?;
+        .map_err(|e| asinh_error_with_detail(&ASINH_ERROR_INTERNAL, e))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -121,7 +185,7 @@ fn asinh_char_array(ca: CharArray) -> BuiltinResult<Value> {
         .map(|&ch| (ch as u32 as f64).asinh())
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-        .map_err(|e| runtime_error_for(format!("asinh: {e}")))?;
+        .map_err(|e| asinh_error_with_detail(&ASINH_ERROR_INTERNAL, e))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -142,8 +206,18 @@ pub(crate) mod tests {
         block_on(super::asinh_builtin(value))
     }
 
-    fn error_message(err: RuntimeError) -> String {
+    fn error_message(err: &RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn asinh_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = ASINH_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = asinh(X)"));
     }
 
     #[test]
@@ -292,11 +366,12 @@ pub(crate) mod tests {
     #[test]
     fn asinh_string_errors() {
         let err = asinh_builtin(Value::from("not numeric")).expect_err("expected error");
-        let message = error_message(err);
+        let message = error_message(&err);
         assert!(
-            message.contains("expected numeric input"),
+            message.contains("invalid input"),
             "unexpected error: {message}"
         );
+        assert_eq!(err.identifier(), ASINH_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

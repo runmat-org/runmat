@@ -1,7 +1,11 @@
 //! MATLAB-compatible `cumprod` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderNanMode, ProviderScanDirection};
-use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -11,6 +15,240 @@ const NAME: &str = "cumprod";
 fn cumprod_type(args: &[Type], ctx: &ResolveContext) -> Type {
     cumulative_numeric_type(args, ctx)
 }
+
+const CUMPROD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Cumulative product result.",
+}];
+
+const CUMPROD_PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar or array.",
+};
+
+const CUMPROD_PARAM_DIM: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "dim",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Optional,
+    default: Some("[]"),
+    description: "Dimension selector (placeholder [] keeps default dimension).",
+};
+
+const CUMPROD_PARAM_DIRECTION: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "direction",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("\"forward\""),
+    description: "Scan direction: \"forward\" or \"reverse\".",
+};
+
+const CUMPROD_PARAM_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "nanflag",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("\"includenan\""),
+    description:
+        "Missing-value mode: \"includenan\"/\"includemissing\" or \"omitnan\"/\"omitmissing\".",
+};
+
+const CUMPROD_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [CUMPROD_PARAM_A];
+
+const CUMPROD_INPUTS_DIM: [BuiltinParamDescriptor; 2] = [CUMPROD_PARAM_A, CUMPROD_PARAM_DIM];
+
+const CUMPROD_INPUTS_DIRECTION: [BuiltinParamDescriptor; 2] =
+    [CUMPROD_PARAM_A, CUMPROD_PARAM_DIRECTION];
+
+const CUMPROD_INPUTS_NANFLAG: [BuiltinParamDescriptor; 2] =
+    [CUMPROD_PARAM_A, CUMPROD_PARAM_NANFLAG];
+
+const CUMPROD_INPUTS_DIM_DIRECTION: [BuiltinParamDescriptor; 3] =
+    [CUMPROD_PARAM_A, CUMPROD_PARAM_DIM, CUMPROD_PARAM_DIRECTION];
+
+const CUMPROD_INPUTS_DIRECTION_DIM: [BuiltinParamDescriptor; 3] =
+    [CUMPROD_PARAM_A, CUMPROD_PARAM_DIRECTION, CUMPROD_PARAM_DIM];
+
+const CUMPROD_INPUTS_DIM_NANFLAG: [BuiltinParamDescriptor; 3] =
+    [CUMPROD_PARAM_A, CUMPROD_PARAM_DIM, CUMPROD_PARAM_NANFLAG];
+
+const CUMPROD_INPUTS_NANFLAG_DIM: [BuiltinParamDescriptor; 3] =
+    [CUMPROD_PARAM_A, CUMPROD_PARAM_NANFLAG, CUMPROD_PARAM_DIM];
+
+const CUMPROD_INPUTS_DIRECTION_NANFLAG: [BuiltinParamDescriptor; 3] = [
+    CUMPROD_PARAM_A,
+    CUMPROD_PARAM_DIRECTION,
+    CUMPROD_PARAM_NANFLAG,
+];
+
+const CUMPROD_INPUTS_NANFLAG_DIRECTION: [BuiltinParamDescriptor; 3] = [
+    CUMPROD_PARAM_A,
+    CUMPROD_PARAM_NANFLAG,
+    CUMPROD_PARAM_DIRECTION,
+];
+
+const CUMPROD_INPUTS_DIM_DIRECTION_NANFLAG: [BuiltinParamDescriptor; 4] = [
+    CUMPROD_PARAM_A,
+    CUMPROD_PARAM_DIM,
+    CUMPROD_PARAM_DIRECTION,
+    CUMPROD_PARAM_NANFLAG,
+];
+
+const CUMPROD_INPUTS_DIM_NANFLAG_DIRECTION: [BuiltinParamDescriptor; 4] = [
+    CUMPROD_PARAM_A,
+    CUMPROD_PARAM_DIM,
+    CUMPROD_PARAM_NANFLAG,
+    CUMPROD_PARAM_DIRECTION,
+];
+
+const CUMPROD_INPUTS_DIRECTION_DIM_NANFLAG: [BuiltinParamDescriptor; 4] = [
+    CUMPROD_PARAM_A,
+    CUMPROD_PARAM_DIRECTION,
+    CUMPROD_PARAM_DIM,
+    CUMPROD_PARAM_NANFLAG,
+];
+
+const CUMPROD_INPUTS_DIRECTION_NANFLAG_DIM: [BuiltinParamDescriptor; 4] = [
+    CUMPROD_PARAM_A,
+    CUMPROD_PARAM_DIRECTION,
+    CUMPROD_PARAM_NANFLAG,
+    CUMPROD_PARAM_DIM,
+];
+
+const CUMPROD_INPUTS_NANFLAG_DIM_DIRECTION: [BuiltinParamDescriptor; 4] = [
+    CUMPROD_PARAM_A,
+    CUMPROD_PARAM_NANFLAG,
+    CUMPROD_PARAM_DIM,
+    CUMPROD_PARAM_DIRECTION,
+];
+
+const CUMPROD_INPUTS_NANFLAG_DIRECTION_DIM: [BuiltinParamDescriptor; 4] = [
+    CUMPROD_PARAM_A,
+    CUMPROD_PARAM_NANFLAG,
+    CUMPROD_PARAM_DIRECTION,
+    CUMPROD_PARAM_DIM,
+];
+
+const CUMPROD_SIGNATURES: [BuiltinSignatureDescriptor; 16] = [
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A)",
+        inputs: &CUMPROD_INPUTS_CORE,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, dim)",
+        inputs: &CUMPROD_INPUTS_DIM,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, direction)",
+        inputs: &CUMPROD_INPUTS_DIRECTION,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, nanflag)",
+        inputs: &CUMPROD_INPUTS_NANFLAG,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, dim, direction)",
+        inputs: &CUMPROD_INPUTS_DIM_DIRECTION,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, direction, dim)",
+        inputs: &CUMPROD_INPUTS_DIRECTION_DIM,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, dim, nanflag)",
+        inputs: &CUMPROD_INPUTS_DIM_NANFLAG,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, nanflag, dim)",
+        inputs: &CUMPROD_INPUTS_NANFLAG_DIM,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, direction, nanflag)",
+        inputs: &CUMPROD_INPUTS_DIRECTION_NANFLAG,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, nanflag, direction)",
+        inputs: &CUMPROD_INPUTS_NANFLAG_DIRECTION,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, dim, direction, nanflag)",
+        inputs: &CUMPROD_INPUTS_DIM_DIRECTION_NANFLAG,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, dim, nanflag, direction)",
+        inputs: &CUMPROD_INPUTS_DIM_NANFLAG_DIRECTION,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, direction, dim, nanflag)",
+        inputs: &CUMPROD_INPUTS_DIRECTION_DIM_NANFLAG,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, direction, nanflag, dim)",
+        inputs: &CUMPROD_INPUTS_DIRECTION_NANFLAG_DIM,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, nanflag, dim, direction)",
+        inputs: &CUMPROD_INPUTS_NANFLAG_DIM_DIRECTION,
+        outputs: &CUMPROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cumprod(A, nanflag, direction, dim)",
+        inputs: &CUMPROD_INPUTS_NANFLAG_DIRECTION_DIM,
+        outputs: &CUMPROD_OUTPUT,
+    },
+];
+
+const CUMPROD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CUMPROD.INVALID_ARGUMENT",
+    identifier: Some("RunMat:cumprod:InvalidArgument"),
+    when: "Dimension, direction, or missing-value argument grammar is invalid.",
+    message: "cumprod: invalid argument",
+};
+
+const CUMPROD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CUMPROD.INVALID_INPUT",
+    identifier: Some("RunMat:cumprod:InvalidInput"),
+    when: "Input value type is unsupported for cumulative product reduction.",
+    message: "cumprod: invalid input",
+};
+
+const CUMPROD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CUMPROD.INTERNAL",
+    identifier: Some("RunMat:cumprod:Internal"),
+    when: "Reduction execution fails due to conversion, provider, or allocation operations.",
+    message: "cumprod: internal reduction failure",
+};
+
+const CUMPROD_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    CUMPROD_ERROR_INVALID_ARGUMENT,
+    CUMPROD_ERROR_INVALID_INPUT,
+    CUMPROD_ERROR_INTERNAL,
+];
+
+pub const CUMPROD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CUMPROD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CUMPROD_ERRORS,
+};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -35,8 +273,30 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may expose device prefix-product kernels; the runtime gathers to host when hooks are absent or options are unsupported.",
 };
 
-fn cumprod_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn cumprod_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    cumprod_error_with_message(error.message, error)
+}
+
+fn cumprod_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    cumprod_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn cumprod_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn cumprod_internal_error(detail: impl AsRef<str>) -> RuntimeError {
+    cumprod_error_with_detail(&CUMPROD_ERROR_INTERNAL, detail)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::cumprod")]
@@ -65,10 +325,11 @@ enum CumprodNanMode {
 #[runtime_builtin(
     name = "cumprod",
     category = "math/reduction",
-    summary = "Cumulative product of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute cumulative products.",
     keywords = "cumprod,cumulative product,running product,reverse,omitnan,gpu",
     accel = "reduction",
     type_resolver(cumprod_type),
+    descriptor(crate::builtins::math::reduction::cumprod::CUMPROD_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::cumprod"
 )]
 async fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -77,7 +338,7 @@ async fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
         Value::GpuTensor(handle) => cumprod_gpu(handle, dim, direction, nan_mode).await,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| cumprod_error(format!("cumprod: {e}")))?;
+                .map_err(|e| cumprod_internal_error(&e))?;
             let target_dim = dim.unwrap_or(1);
             let result = cumprod_complex_tensor(&tensor, target_dim, direction, nan_mode)?;
             Ok(complex_tensor_into_value(result))
@@ -95,7 +356,7 @@ fn parse_arguments(
     args: &[Value],
 ) -> BuiltinResult<(Option<usize>, CumprodDirection, CumprodNanMode)> {
     if args.len() > 3 {
-        return Err(cumprod_error("cumprod: unsupported arguments"));
+        return Err(cumprod_error(&CUMPROD_ERROR_INVALID_ARGUMENT));
     }
 
     let mut dim: Option<usize> = None;
@@ -108,11 +369,14 @@ fn parse_arguments(
         match value {
             Value::Int(_) | Value::Num(_) => {
                 if dim.is_some() {
-                    return Err(cumprod_error("cumprod: dimension specified more than once"));
+                    return Err(cumprod_error_with_detail(
+                        &CUMPROD_ERROR_INVALID_ARGUMENT,
+                        "dimension specified more than once",
+                    ));
                 }
-                dim = Some(
-                    tensor::parse_dimension(value, "cumprod").map_err(|err| cumprod_error(err))?,
-                );
+                dim = Some(tensor::parse_dimension(value, "cumprod").map_err(|err| {
+                    cumprod_error_with_detail(&CUMPROD_ERROR_INVALID_ARGUMENT, err)
+                })?);
             }
             Value::Tensor(t) if t.data.is_empty() => {
                 // MATLAB allows [] as a placeholder for the default dimension; ignore it.
@@ -126,8 +390,9 @@ fn parse_arguments(
                     match keyword.as_str() {
                         "forward" => {
                             if direction_set {
-                                return Err(cumprod_error(
-                                    "cumprod: direction specified more than once",
+                                return Err(cumprod_error_with_detail(
+                                    &CUMPROD_ERROR_INVALID_ARGUMENT,
+                                    "direction specified more than once",
                                 ));
                             }
                             direction = CumprodDirection::Forward;
@@ -135,8 +400,9 @@ fn parse_arguments(
                         }
                         "reverse" => {
                             if direction_set {
-                                return Err(cumprod_error(
-                                    "cumprod: direction specified more than once",
+                                return Err(cumprod_error_with_detail(
+                                    &CUMPROD_ERROR_INVALID_ARGUMENT,
+                                    "direction specified more than once",
                                 ));
                             }
                             direction = CumprodDirection::Reverse;
@@ -144,8 +410,9 @@ fn parse_arguments(
                         }
                         "omitnan" | "omitmissing" => {
                             if nan_set {
-                                return Err(cumprod_error(
-                                    "cumprod: missing-value handling specified more than once",
+                                return Err(cumprod_error_with_detail(
+                                    &CUMPROD_ERROR_INVALID_ARGUMENT,
+                                    "missing-value handling specified more than once",
                                 ));
                             }
                             nan_mode = CumprodNanMode::Omit;
@@ -153,28 +420,32 @@ fn parse_arguments(
                         }
                         "includenan" | "includemissing" => {
                             if nan_set {
-                                return Err(cumprod_error(
-                                    "cumprod: missing-value handling specified more than once",
+                                return Err(cumprod_error_with_detail(
+                                    &CUMPROD_ERROR_INVALID_ARGUMENT,
+                                    "missing-value handling specified more than once",
                                 ));
                             }
                             nan_mode = CumprodNanMode::Include;
                             nan_set = true;
                         }
                         "" => {
-                            return Err(cumprod_error(
-                                "cumprod: empty string option is not supported",
+                            return Err(cumprod_error_with_detail(
+                                &CUMPROD_ERROR_INVALID_ARGUMENT,
+                                "empty string option is not supported",
                             ));
                         }
                         other => {
-                            return Err(cumprod_error(format!(
-                                "cumprod: unrecognised option '{other}'"
-                            )));
+                            return Err(cumprod_error_with_detail(
+                                &CUMPROD_ERROR_INVALID_ARGUMENT,
+                                format!("unrecognised option '{other}'"),
+                            ));
                         }
                     }
                 } else {
-                    return Err(cumprod_error(format!(
-                        "cumprod: unsupported argument type {value:?}"
-                    )));
+                    return Err(cumprod_error_with_detail(
+                        &CUMPROD_ERROR_INVALID_ARGUMENT,
+                        format!("unsupported argument type {value:?}"),
+                    ));
                 }
             }
         }
@@ -189,8 +460,8 @@ fn cumprod_host(
     direction: CumprodDirection,
     nan_mode: CumprodNanMode,
 ) -> BuiltinResult<Value> {
-    let tensor =
-        tensor::value_into_tensor_for("cumprod", value).map_err(|err| cumprod_error(err))?;
+    let tensor = tensor::value_into_tensor_for("cumprod", value)
+        .map_err(|err| cumprod_error_with_detail(&CUMPROD_ERROR_INVALID_INPUT, err))?;
     let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
     let result = cumprod_tensor(&tensor, target_dim, direction, nan_mode)?;
     Ok(tensor::tensor_into_value(result))
@@ -211,7 +482,9 @@ async fn cumprod_gpu(
         }
     }
     if matches!(direction, CumprodDirection::Reverse) && matches!(nan_mode, CumprodNanMode::Omit) {
-        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+        let tensor = gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|err| cumprod_internal_error(err.message()))?;
         let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&tensor.shape));
         let result = cumprod_tensor(&tensor, fallback_dim, direction, nan_mode)?;
         return Ok(tensor::tensor_into_value(result));
@@ -219,7 +492,10 @@ async fn cumprod_gpu(
 
     if let Some(target) = dim {
         if target == 0 {
-            return Err(cumprod_error("cumprod: dimension must be >= 1"));
+            return Err(cumprod_error_with_detail(
+                &CUMPROD_ERROR_INVALID_ARGUMENT,
+                "dimension must be >= 1",
+            ));
         }
         if target > handle.shape.len() {
             return Ok(Value::GpuTensor(handle));
@@ -228,7 +504,10 @@ async fn cumprod_gpu(
 
     let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
     if fallback_dim == 0 {
-        return Err(cumprod_error("cumprod: dimension must be >= 1"));
+        return Err(cumprod_error_with_detail(
+            &CUMPROD_ERROR_INVALID_ARGUMENT,
+            "dimension must be >= 1",
+        ));
     }
 
     if let Some(provider) = runmat_accelerate_api::provider() {
@@ -253,7 +532,9 @@ async fn cumprod_gpu(
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|err| cumprod_internal_error(err.message()))?;
     let result = cumprod_tensor(&tensor, fallback_dim, direction, nan_mode)?;
     Ok(tensor::tensor_into_value(result))
 }
@@ -265,7 +546,10 @@ fn cumprod_tensor(
     nan_mode: CumprodNanMode,
 ) -> BuiltinResult<Tensor> {
     if dim == 0 {
-        return Err(cumprod_error("cumprod: dimension must be >= 1"));
+        return Err(cumprod_error_with_detail(
+            &CUMPROD_ERROR_INVALID_ARGUMENT,
+            "dimension must be >= 1",
+        ));
     }
     if tensor.data.is_empty() || dim > tensor.shape.len() {
         return Ok(tensor.clone());
@@ -348,7 +632,7 @@ fn cumprod_tensor(
         }
     }
 
-    Tensor::new(output, tensor.shape.clone()).map_err(|e| cumprod_error(format!("cumprod: {e}")))
+    Tensor::new(output, tensor.shape.clone()).map_err(|e| cumprod_internal_error(&e))
 }
 
 fn cumprod_complex_tensor(
@@ -358,7 +642,10 @@ fn cumprod_complex_tensor(
     nan_mode: CumprodNanMode,
 ) -> BuiltinResult<ComplexTensor> {
     if dim == 0 {
-        return Err(cumprod_error("cumprod: dimension must be >= 1"));
+        return Err(cumprod_error_with_detail(
+            &CUMPROD_ERROR_INVALID_ARGUMENT,
+            "dimension must be >= 1",
+        ));
     }
     if tensor.data.is_empty() || dim > tensor.shape.len() {
         return Ok(tensor.clone());
@@ -443,8 +730,7 @@ fn cumprod_complex_tensor(
         }
     }
 
-    ComplexTensor::new(output, tensor.shape.clone())
-        .map_err(|e| cumprod_error(format!("cumprod: {e}")))
+    ComplexTensor::new(output, tensor.shape.clone()).map_err(|e| cumprod_internal_error(&e))
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
@@ -511,6 +797,43 @@ pub(crate) mod tests {
 
     fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::cumprod_builtin(value, rest))
+    }
+
+    fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
+        error.identifier()
+    }
+
+    #[test]
+    fn cumprod_descriptor_signatures_and_errors() {
+        let labels: Vec<&str> = CUMPROD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"B = cumprod(A)"));
+        assert!(labels.contains(&"B = cumprod(A, dim)"));
+        assert!(labels.contains(&"B = cumprod(A, direction)"));
+        assert!(labels.contains(&"B = cumprod(A, nanflag)"));
+        assert!(labels.contains(&"B = cumprod(A, dim, direction)"));
+        assert!(labels.contains(&"B = cumprod(A, direction, dim)"));
+        assert!(labels.contains(&"B = cumprod(A, dim, nanflag)"));
+        assert!(labels.contains(&"B = cumprod(A, nanflag, dim)"));
+        assert!(labels.contains(&"B = cumprod(A, direction, nanflag)"));
+        assert!(labels.contains(&"B = cumprod(A, nanflag, direction)"));
+        assert!(labels.contains(&"B = cumprod(A, dim, direction, nanflag)"));
+        assert!(labels.contains(&"B = cumprod(A, nanflag, direction, dim)"));
+        assert!(CUMPROD_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|err| err.code == CUMPROD_ERROR_INVALID_ARGUMENT.code));
+        assert!(CUMPROD_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|err| err.code == CUMPROD_ERROR_INVALID_INPUT.code));
+        assert!(CUMPROD_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|err| err.code == CUMPROD_ERROR_INTERNAL.code));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -712,8 +1035,13 @@ pub(crate) mod tests {
         let result = cumprod_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))]);
         match result {
             Err(err) => {
+                assert_eq!(
+                    error_identifier(&err),
+                    CUMPROD_ERROR_INVALID_ARGUMENT.identifier
+                );
                 assert!(
-                    err.message().contains("dimension must be >= 1"),
+                    err.message()
+                        .contains(CUMPROD_ERROR_INVALID_ARGUMENT.message),
                     "unexpected result: {err}"
                 );
             }

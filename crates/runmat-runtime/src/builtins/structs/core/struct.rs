@@ -5,7 +5,11 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::structs::type_resolvers::struct_type;
-use runmat_builtins::{CellArray, CharArray, StructValue, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StructValue, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -47,16 +51,211 @@ enum FieldValue {
     Cell(CellArray),
 }
 
-fn struct_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("struct").build()
+const BUILTIN_NAME: &str = "struct";
+
+const STRUCT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Scalar struct or struct array.",
+}];
+
+const STRUCT_INPUTS_EMPTY: [BuiltinParamDescriptor; 0] = [];
+const STRUCT_INPUTS_TEMPLATE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "template",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Existing struct/struct-array template or empty array for struct([]).",
+}];
+const STRUCT_INPUTS_PAIRS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "field",
+        ty: BuiltinParamType::PropertyName,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Field name.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Field value or cell array of field values.",
+    },
+    BuiltinParamDescriptor {
+        name: "name_value_pairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional field/value pairs.",
+    },
+];
+
+const STRUCT_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "S = struct()",
+        inputs: &STRUCT_INPUTS_EMPTY,
+        outputs: &STRUCT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = struct(template)",
+        inputs: &STRUCT_INPUTS_TEMPLATE,
+        outputs: &STRUCT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = struct(field, value, ...)",
+        inputs: &STRUCT_INPUTS_PAIRS,
+        outputs: &STRUCT_OUTPUT,
+    },
+];
+
+const STRUCT_ERROR_INVALID_SINGLE_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.INVALID_SINGLE_INPUT",
+    identifier: Some("RunMat:struct:InvalidSingleInput"),
+    when: "Single input is neither struct, struct-array cell, nor empty numeric/logical array.",
+    message:
+        "struct: expected name/value pairs, an existing struct or struct array, or [] to create an empty struct array",
+};
+
+const STRUCT_ERROR_NAME_VALUE_PAIRS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.NAME_VALUE_PAIRS",
+    identifier: Some("RunMat:struct:NameValuePairs"),
+    when: "Name/value arguments are not supplied in complete pairs.",
+    message: "struct: expected name/value pairs",
+};
+
+const STRUCT_ERROR_CELL_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.CELL_SIZE_MISMATCH",
+    identifier: Some("RunMat:struct:CellSizeMismatch"),
+    when: "Cell value inputs for struct-array construction do not share the same shape.",
+    message: "struct: cell inputs must have matching sizes",
+};
+
+const STRUCT_ERROR_SIZE_OVERFLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.SIZE_OVERFLOW",
+    identifier: Some("RunMat:struct:SizeOverflow"),
+    when: "Requested struct-array size exceeds platform limits.",
+    message: "struct: struct array size exceeds platform limits",
+};
+
+const STRUCT_ERROR_ASSEMBLE_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.ASSEMBLE_FAILED",
+    identifier: Some("RunMat:struct:AssembleFailed"),
+    when: "Internal struct-array assembly failed.",
+    message: "struct: failed to assemble struct array",
+};
+
+const STRUCT_ERROR_EMPTY_ARRAY_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.EMPTY_ARRAY_FAILED",
+    identifier: Some("RunMat:struct:EmptyArrayFailed"),
+    when: "Internal empty struct-array creation failed.",
+    message: "struct: failed to create empty struct array",
+};
+
+const STRUCT_ERROR_STRUCT_ARRAY_CONTENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.STRUCT_ARRAY_CONTENTS",
+    identifier: Some("RunMat:struct:StructArrayContents"),
+    when: "Single-argument struct-array cell input contains non-struct values.",
+    message: "struct: single argument cell input must contain structs",
+};
+
+const STRUCT_ERROR_STRUCT_ARRAY_COPY_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.STRUCT_ARRAY_COPY_FAILED",
+    identifier: Some("RunMat:struct:StructArrayCopyFailed"),
+    when: "Copying a single-argument struct-array cell input failed.",
+    message: "struct: failed to copy struct array",
+};
+
+const STRUCT_ERROR_FIELD_NAME_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.FIELD_NAME_TYPE",
+    identifier: Some("RunMat:struct:FieldNameType"),
+    when: "Field name is not a string scalar or 1xN character vector.",
+    message: "struct: field names must be strings or character vectors",
+};
+
+const STRUCT_ERROR_FIELD_NAME_SCALAR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.FIELD_NAME_SCALAR",
+    identifier: Some("RunMat:struct:FieldNameScalar"),
+    when: "Field name char/string-array input is not scalar.",
+    message: "struct: field names must be scalar string arrays or character vectors",
+};
+
+const STRUCT_ERROR_FIELD_NAME_CHAR_VECTOR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.FIELD_NAME_CHAR_VECTOR",
+    identifier: Some("RunMat:struct:FieldNameCharVector"),
+    when: "Character-array field name input is not a 1-by-N character vector.",
+    message: "struct: field names must be 1-by-N character vectors",
+};
+
+const STRUCT_ERROR_FIELD_NAME_EMPTY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.FIELD_NAME_EMPTY",
+    identifier: Some("RunMat:struct:FieldNameEmpty"),
+    when: "Field name is empty.",
+    message: "struct: field names must be nonempty",
+};
+
+const STRUCT_ERROR_FIELD_NAME_START_CHAR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.FIELD_NAME_START_CHAR",
+    identifier: Some("RunMat:struct:FieldNameStartChar"),
+    when: "Field name does not start with a letter or underscore.",
+    message: "struct: field names must begin with a letter or underscore",
+};
+
+const STRUCT_ERROR_FIELD_NAME_INVALID_CHAR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.FIELD_NAME_INVALID_CHAR",
+    identifier: Some("RunMat:struct:FieldNameInvalidChar"),
+    when: "Field name includes unsupported characters.",
+    message: "struct: invalid character in field name",
+};
+
+const STRUCT_ERRORS: [BuiltinErrorDescriptor; 14] = [
+    STRUCT_ERROR_INVALID_SINGLE_INPUT,
+    STRUCT_ERROR_NAME_VALUE_PAIRS,
+    STRUCT_ERROR_CELL_SIZE_MISMATCH,
+    STRUCT_ERROR_SIZE_OVERFLOW,
+    STRUCT_ERROR_ASSEMBLE_FAILED,
+    STRUCT_ERROR_EMPTY_ARRAY_FAILED,
+    STRUCT_ERROR_STRUCT_ARRAY_CONTENTS,
+    STRUCT_ERROR_STRUCT_ARRAY_COPY_FAILED,
+    STRUCT_ERROR_FIELD_NAME_TYPE,
+    STRUCT_ERROR_FIELD_NAME_SCALAR,
+    STRUCT_ERROR_FIELD_NAME_CHAR_VECTOR,
+    STRUCT_ERROR_FIELD_NAME_EMPTY,
+    STRUCT_ERROR_FIELD_NAME_START_CHAR,
+    STRUCT_ERROR_FIELD_NAME_INVALID_CHAR,
+];
+
+pub const STRUCT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STRUCT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STRUCT_ERRORS,
+};
+
+fn struct_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    struct_error_with_message(error.message, error)
+}
+
+fn struct_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "struct",
     category = "structs/core",
-    summary = "Create scalar structs or struct arrays from name/value pairs.",
+    summary = "Create scalar structs or struct arrays from field/value inputs.",
     keywords = "struct,structure,name-value,record",
     type_resolver(struct_type),
+    descriptor(crate::builtins::structs::core::r#struct::STRUCT_DESCRIPTOR),
     builtin_path = "crate::builtins::structs::core::r#struct"
 )]
 async fn struct_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -67,12 +266,16 @@ async fn struct_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
             Value::Cell(cell) => clone_struct_array(&cell),
             Value::Tensor(tensor) if tensor.data.is_empty() => empty_struct_array(),
             Value::LogicalArray(logical) if logical.data.is_empty() => empty_struct_array(),
-            other => Err(struct_flow(format!(
-                "struct: expected name/value pairs, an existing struct or struct array, or [] to create an empty struct array (got {other:?})"
-            ))),
+            other => Err(struct_error_with_message(
+                format!(
+                    "{} (got {other:?})",
+                    STRUCT_ERROR_INVALID_SINGLE_INPUT.message
+                ),
+                &STRUCT_ERROR_INVALID_SINGLE_INPUT,
+            )),
         },
         len if len % 2 == 0 => build_from_pairs(rest),
-        _ => Err(struct_flow("struct: expected name/value pairs")),
+        _ => Err(struct_error(&STRUCT_ERROR_NAME_VALUE_PAIRS)),
     }
 }
 
@@ -88,7 +291,7 @@ fn build_from_pairs(args: Vec<Value>) -> BuiltinResult<Value> {
                 let shape = cell.shape.clone();
                 if let Some(existing) = &target_shape {
                     if *existing != shape {
-                        return Err(struct_flow("struct: cell inputs must have matching sizes"));
+                        return Err(struct_error(&STRUCT_ERROR_CELL_SIZE_MISMATCH));
                     }
                 } else {
                     target_shape = Some(shape);
@@ -138,12 +341,12 @@ fn build_struct_array(entries: Vec<FieldEntry>, shape: Vec<usize>) -> BuiltinRes
     let total_len = shape
         .iter()
         .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
-        .ok_or_else(|| struct_flow("struct: struct array size exceeds platform limits"))?;
+        .ok_or_else(|| struct_error(&STRUCT_ERROR_SIZE_OVERFLOW))?;
 
     for entry in &entries {
         if let FieldValue::Cell(cell) = &entry.value {
             if cell.data.len() != total_len {
-                return Err(struct_flow("struct: cell inputs must have matching sizes"));
+                return Err(struct_error(&STRUCT_ERROR_CELL_SIZE_MISMATCH));
             }
         }
     }
@@ -163,20 +366,30 @@ fn build_struct_array(entries: Vec<FieldEntry>, shape: Vec<usize>) -> BuiltinRes
 
     CellArray::new_with_shape(structs, shape)
         .map(Value::Cell)
-        .map_err(|e| struct_flow(format!("struct: failed to assemble struct array: {e}")))
+        .map_err(|e| {
+            struct_error_with_message(
+                format!("{}: {e}", STRUCT_ERROR_ASSEMBLE_FAILED.message),
+                &STRUCT_ERROR_ASSEMBLE_FAILED,
+            )
+        })
 }
 
 fn clone_cell_element(cell: &CellArray, index: usize) -> BuiltinResult<Value> {
     cell.data
         .get(index)
         .map(|ptr| unsafe { &*ptr.as_raw() }.clone())
-        .ok_or_else(|| struct_flow("struct: cell inputs must have matching sizes"))
+        .ok_or_else(|| struct_error(&STRUCT_ERROR_CELL_SIZE_MISMATCH))
 }
 
 fn empty_struct_array() -> BuiltinResult<Value> {
     CellArray::new(Vec::new(), 0, 0)
         .map(Value::Cell)
-        .map_err(|e| struct_flow(format!("struct: failed to create empty struct array: {e}")))
+        .map_err(|e| {
+            struct_error_with_message(
+                format!("{}: {e}", STRUCT_ERROR_EMPTY_ARRAY_FAILED.message),
+                &STRUCT_ERROR_EMPTY_ARRAY_FAILED,
+            )
+        })
 }
 
 fn clone_struct_array(array: &CellArray) -> BuiltinResult<Value> {
@@ -184,16 +397,25 @@ fn clone_struct_array(array: &CellArray) -> BuiltinResult<Value> {
     for (index, handle) in array.data.iter().enumerate() {
         let value = unsafe { &*handle.as_raw() }.clone();
         if !matches!(value, Value::Struct(_)) {
-            return Err(struct_flow(format!(
-                "struct: single argument cell input must contain structs (element {} is not a struct)",
-                index + 1
-            )));
+            return Err(struct_error_with_message(
+                format!(
+                    "{} (element {} is not a struct)",
+                    STRUCT_ERROR_STRUCT_ARRAY_CONTENTS.message,
+                    index + 1
+                ),
+                &STRUCT_ERROR_STRUCT_ARRAY_CONTENTS,
+            ));
         }
         values.push(value);
     }
     CellArray::new_with_shape(values, array.shape.clone())
         .map(Value::Cell)
-        .map_err(|e| struct_flow(format!("struct: failed to copy struct array: {e}")))
+        .map_err(|e| {
+            struct_error_with_message(
+                format!("{}: {e}", STRUCT_ERROR_STRUCT_ARRAY_COPY_FAILED.message),
+                &STRUCT_ERROR_STRUCT_ARRAY_COPY_FAILED,
+            )
+        })
 }
 
 fn parse_field_name(value: &Value) -> BuiltinResult<String> {
@@ -203,17 +425,11 @@ fn parse_field_name(value: &Value) -> BuiltinResult<String> {
             if sa.data.len() == 1 {
                 sa.data[0].clone()
             } else {
-                return Err(struct_flow(
-                    "struct: field names must be scalar string arrays or character vectors",
-                ));
+                return Err(struct_error(&STRUCT_ERROR_FIELD_NAME_SCALAR));
             }
         }
         Value::CharArray(ca) => char_array_to_string(ca)?,
-        _ => {
-            return Err(struct_flow(
-                "struct: field names must be strings or character vectors",
-            ))
-        }
+        _ => return Err(struct_error(&STRUCT_ERROR_FIELD_NAME_TYPE)),
     };
 
     validate_field_name(&text)?;
@@ -222,9 +438,7 @@ fn parse_field_name(value: &Value) -> BuiltinResult<String> {
 
 fn char_array_to_string(ca: &CharArray) -> BuiltinResult<String> {
     if ca.rows > 1 {
-        return Err(struct_flow(
-            "struct: field names must be 1-by-N character vectors",
-        ));
+        return Err(struct_error(&STRUCT_ERROR_FIELD_NAME_CHAR_VECTOR));
     }
     let mut out = String::with_capacity(ca.data.len());
     for ch in &ca.data {
@@ -235,21 +449,29 @@ fn char_array_to_string(ca: &CharArray) -> BuiltinResult<String> {
 
 fn validate_field_name(name: &str) -> BuiltinResult<()> {
     if name.is_empty() {
-        return Err(struct_flow("struct: field names must be nonempty"));
+        return Err(struct_error(&STRUCT_ERROR_FIELD_NAME_EMPTY));
     }
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
-        return Err(struct_flow("struct: field names must be nonempty"));
+        return Err(struct_error(&STRUCT_ERROR_FIELD_NAME_EMPTY));
     };
     if !is_first_char_valid(first) {
-        return Err(struct_flow(format!(
-            "struct: field names must begin with a letter or underscore (got '{name}')"
-        )));
+        return Err(struct_error_with_message(
+            format!(
+                "{} (got '{name}')",
+                STRUCT_ERROR_FIELD_NAME_START_CHAR.message
+            ),
+            &STRUCT_ERROR_FIELD_NAME_START_CHAR,
+        ));
     }
     if let Some(bad) = chars.find(|c| !is_subsequent_char_valid(*c)) {
-        return Err(struct_flow(format!(
-            "struct: invalid character '{bad}' in field name '{name}'"
-        )));
+        return Err(struct_error_with_message(
+            format!(
+                "{} ('{bad}' in '{name}')",
+                STRUCT_ERROR_FIELD_NAME_INVALID_CHAR.message
+            ),
+            &STRUCT_ERROR_FIELD_NAME_INVALID_CHAR,
+        ));
     }
     Ok(())
 }

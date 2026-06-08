@@ -3,6 +3,10 @@
 use std::sync::Arc;
 
 use regex::{Captures, Regex, RegexBuilder};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_builtins::{CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
@@ -43,6 +47,116 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "regexprep";
 
+const REGEXPREP_OUTPUT_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Text with replacements applied (preserves scalar/array shape semantics).",
+}];
+
+const REGEXPREP_INPUTS_CORE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "subject",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (char/string/string-array/cellstr).",
+    },
+    BuiltinParamDescriptor {
+        name: "pattern",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (scalar, sequence, or elementwise list).",
+    },
+    BuiltinParamDescriptor {
+        name: "replacement",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Replacement text (scalar, sequence, or elementwise list).",
+    },
+];
+
+const REGEXPREP_INPUTS_OPTIONS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "subject",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (char/string/string-array/cellstr).",
+    },
+    BuiltinParamDescriptor {
+        name: "pattern",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (scalar, sequence, or elementwise list).",
+    },
+    BuiltinParamDescriptor {
+        name: "replacement",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Replacement text (scalar, sequence, or elementwise list).",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Regex replacement options (case/lineanchors/dotall/once/emptymatch/...).",
+    },
+];
+
+const REGEXPREP_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "out = regexprep(subject, pattern, replacement)",
+        inputs: &REGEXPREP_INPUTS_CORE,
+        outputs: &REGEXPREP_OUTPUT_TEXT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = regexprep(subject, pattern, replacement, options...)",
+        inputs: &REGEXPREP_INPUTS_OPTIONS,
+        outputs: &REGEXPREP_OUTPUT_TEXT,
+    },
+];
+
+const REGEXPREP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REGEXPREP.INVALID_ARGUMENT",
+    identifier: Some("RunMat:regexprep:InvalidArgument"),
+    when: "Input/options are malformed, unsupported, or shape-incompatible.",
+    message: "regexprep: invalid argument",
+};
+
+const REGEXPREP_ERROR_PATTERN_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REGEXPREP.PATTERN_INVALID",
+    identifier: Some("RunMat:regexprep:PatternInvalid"),
+    when: "Pattern cannot be compiled as a regular expression.",
+    message: "regexprep: invalid regular expression pattern",
+};
+
+const REGEXPREP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REGEXPREP.INTERNAL",
+    identifier: Some("RunMat:regexprep:Internal"),
+    when: "Internal regex replacement or output reconstruction fails.",
+    message: "regexprep: internal operation failed",
+};
+
+const REGEXPREP_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    REGEXPREP_ERROR_INVALID_ARGUMENT,
+    REGEXPREP_ERROR_PATTERN_INVALID,
+    REGEXPREP_ERROR_INTERNAL,
+];
+
+pub const REGEXPREP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &REGEXPREP_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &REGEXPREP_ERRORS,
+};
+
 fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -63,6 +177,7 @@ fn with_builtin_context(mut err: RuntimeError) -> RuntimeError {
     keywords = "regexprep,regex,replace,substitute",
     accel = "sink",
     type_resolver(text_preserve_type),
+    descriptor(crate::builtins::strings::regex::regexprep::REGEXPREP_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::regex::regexprep"
 )]
 async fn regexprep_builtin(
@@ -934,6 +1049,17 @@ fn parse_toggle(value: Option<&Value>) -> Option<bool> {
 pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{ResolveContext, Type};
+
+    #[test]
+    fn regexprep_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = REGEXPREP_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"out = regexprep(subject, pattern, replacement)"));
+        assert!(labels.contains(&"out = regexprep(subject, pattern, replacement, options...)"));
+    }
 
     fn run_regexprep(
         subject: Value,

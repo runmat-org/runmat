@@ -1,6 +1,6 @@
 #![cfg(feature = "wgpu")]
 
-use runmat_accelerate::backend::wgpu::provider_impl::WgpuProviderOptions;
+use runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate::fusion::{
     FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
@@ -104,6 +104,7 @@ fn fused_single_pass_sum_mul_no_alias() {
         shape: ShapeInfo::Tensor(vec![Some(cols)]),
         span: InstrSpan { start: 0, end: 1 },
         pattern: None,
+        stack_layout: None,
     };
 
     let plan = FusionGroupPlan {
@@ -133,6 +134,7 @@ fn fused_single_pass_sum_mul_no_alias() {
             cv.insert(v_dim, Value::Num(1.0));
             cv
         },
+        materialized_stores: Vec::new(),
         output: Some(v_sum),
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,

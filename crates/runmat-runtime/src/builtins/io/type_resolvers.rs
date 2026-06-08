@@ -41,6 +41,11 @@ pub fn feof_type(args: &[Type], ctx: &ResolveContext) -> Type {
     bool_type(args, ctx)
 }
 
+pub fn fgetl_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Union(vec![Type::String, Type::Num])
+}
+
 pub fn fgets_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::String, Type::Num])
@@ -262,20 +267,15 @@ pub fn readmatrix_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 }
 
 pub fn data_dataset_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::DataDataset { arrays: None }
+    Type::Struct { known_fields: None }
 }
 
 pub fn data_array_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::DataArray {
-        dtype: None,
-        shape: None,
-        chunk_shape: None,
-        codec: None,
-    }
+    Type::Struct { known_fields: None }
 }
 
 pub fn data_tx_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::DataTransaction
+    Type::Struct { known_fields: None }
 }
 
 pub fn data_cell_string_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
@@ -337,6 +337,12 @@ mod tests {
 
     assert_resolver!(fclose_type_resolver, fclose_type, &[], Type::Num);
     assert_resolver!(feof_type_resolver, feof_type, &[], Type::Bool);
+    assert_resolver!(
+        fgetl_type_resolver,
+        fgetl_type,
+        &[],
+        Type::Union(vec![Type::String, Type::Num])
+    );
     assert_resolver!(
         fgets_type_resolver,
         fgets_type,
@@ -494,24 +500,19 @@ mod tests {
         data_dataset_type_resolver,
         data_dataset_type,
         &[],
-        Type::DataDataset { arrays: None }
+        Type::Struct { known_fields: None }
     );
     assert_resolver!(
         data_array_type_resolver,
         data_array_type,
         &[],
-        Type::DataArray {
-            dtype: None,
-            shape: None,
-            chunk_shape: None,
-            codec: None,
-        }
+        Type::Struct { known_fields: None }
     );
     assert_resolver!(
         data_tx_type_resolver,
         data_tx_type,
         &[],
-        Type::DataTransaction
+        Type::Struct { known_fields: None }
     );
     assert_resolver!(data_int_type_resolver, data_int_type, &[], Type::Int);
     assert_resolver!(

@@ -1,5 +1,9 @@
 //! MATLAB-compatible `join` builtin with GPU-aware semantics for RunMat.
 
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
 
@@ -40,31 +44,221 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "join";
-const INPUT_TYPE_ERROR: &str =
-    "join: input must be a string array, string scalar, character array, or cell array of character vectors";
-const DELIMITER_TYPE_ERROR: &str =
-    "join: delimiter must be a string, character vector, string array, or cell array of character vectors";
-const DELIMITER_SIZE_ERROR: &str =
-    "join: size of delimiter array must match the size of str, with the join dimension reduced by one";
-const DIMENSION_TYPE_ERROR: &str = "join: dimension must be a positive integer scalar";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
+const JOIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Joined text preserving join output container semantics.",
+}];
+
+const JOIN_INPUTS_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "str",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input text (string/char/cell).",
+}];
+
+const JOIN_INPUTS_DELIMITER: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "delimiter",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: Some("\" \""),
+        description: "Delimiter scalar or delimiter array matching join shape constraints.",
+    },
+];
+
+const JOIN_INPUTS_DIM: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive dimension index to join along.",
+    },
+];
+
+const JOIN_INPUTS_DELIMITER_DIM: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "delimiter",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Delimiter scalar or delimiter array matching join shape constraints.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive dimension index to join along.",
+    },
+];
+
+const JOIN_INPUTS_DIM_DELIMITER: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive dimension index to join along.",
+    },
+    BuiltinParamDescriptor {
+        name: "delimiter",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Delimiter scalar or delimiter array matching join shape constraints.",
+    },
+];
+
+const JOIN_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "out = join(str)",
+        inputs: &JOIN_INPUTS_BASE,
+        outputs: &JOIN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = join(str, delimiter)",
+        inputs: &JOIN_INPUTS_DELIMITER,
+        outputs: &JOIN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = join(str, dim)",
+        inputs: &JOIN_INPUTS_DIM,
+        outputs: &JOIN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = join(str, delimiter, dim)",
+        inputs: &JOIN_INPUTS_DELIMITER_DIM,
+        outputs: &JOIN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = join(str, dim, delimiter)",
+        inputs: &JOIN_INPUTS_DIM_DELIMITER,
+        outputs: &JOIN_OUTPUT,
+    },
+];
+
+const JOIN_ERROR_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JOIN.INPUT_TYPE",
+    identifier: Some("RunMat:join:InputType"),
+    when: "Input text is not a string array/scalar, char array, or cell array of text scalars.",
+    message:
+        "join: input must be a string array, string scalar, character array, or cell array of character vectors",
+};
+
+const JOIN_ERROR_DELIMITER_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JOIN.DELIMITER_TYPE",
+    identifier: Some("RunMat:join:DelimiterType"),
+    when: "Delimiter is not a supported text scalar/array/cell value.",
+    message:
+        "join: delimiter must be a string, character vector, string array, or cell array of character vectors",
+};
+
+const JOIN_ERROR_DELIMITER_SIZE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JOIN.DELIMITER_SIZE",
+    identifier: Some("RunMat:join:DelimiterSize"),
+    when: "Delimiter array shape does not match join shape constraints.",
+    message:
+        "join: size of delimiter array must match the size of str, with the join dimension reduced by one",
+};
+
+const JOIN_ERROR_DIMENSION_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JOIN.DIMENSION_TYPE",
+    identifier: Some("RunMat:join:DimensionType"),
+    when: "Dimension argument is not a positive integer scalar.",
+    message: "join: dimension must be a positive integer scalar",
+};
+
+const JOIN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JOIN.ARG_COUNT",
+    identifier: Some("RunMat:join:ArgCount"),
+    when: "More than three total arguments are supplied.",
+    message: "join: too many input arguments",
+};
+
+const JOIN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JOIN.INTERNAL",
+    identifier: Some("RunMat:join:InternalError"),
+    when: "Internal output container construction failed.",
+    message: "join: internal error",
+};
+
+const JOIN_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    JOIN_ERROR_INPUT_TYPE,
+    JOIN_ERROR_DELIMITER_TYPE,
+    JOIN_ERROR_DELIMITER_SIZE,
+    JOIN_ERROR_DIMENSION_TYPE,
+    JOIN_ERROR_ARG_COUNT,
+    JOIN_ERROR_INTERNAL,
+];
+
+pub const JOIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &JOIN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &JOIN_ERRORS,
+};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
 
+fn join_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn join_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    join_error_with_message(error.message, error)
+}
+
 #[runtime_builtin(
     name = "join",
     category = "strings/transform",
-    summary = "Combine text across a specified dimension inserting delimiters between elements.",
+    summary = "Join text elements with delimiters along a dimension.",
     keywords = "join,string join,concatenate strings,delimiters,cell array join",
     accel = "none",
     type_resolver(text_concat_type),
+    descriptor(crate::builtins::strings::transform::join::JOIN_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::join"
 )]
 async fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -89,7 +283,7 @@ async fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     };
 
     if dimension == 0 {
-        return Err(runtime_error_for(DIMENSION_TYPE_ERROR));
+        return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
     }
 
     let ndims = input.ndims();
@@ -124,10 +318,10 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<Value>, Option<usize
             } else if let Some(dim) = value_to_dimension(&args[0])? {
                 Ok((Some(args[1].clone()), Some(dim)))
             } else {
-                Err(runtime_error_for(DIMENSION_TYPE_ERROR))
+                Err(join_error(&JOIN_ERROR_DIMENSION_TYPE))
             }
         }
-        _ => Err(runtime_error_for("join: too many input arguments")),
+        _ => Err(join_error(&JOIN_ERROR_ARG_COUNT)),
     }
 }
 
@@ -145,28 +339,28 @@ fn value_to_dimension(value: &Value) -> BuiltinResult<Option<usize>> {
         Value::Int(i) => {
             let v = i.to_i64();
             if v <= 0 {
-                return Err(runtime_error_for(DIMENSION_TYPE_ERROR));
+                return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
             }
             Ok(Some(v as usize))
         }
         Value::Num(n) => {
             if !n.is_finite() || *n <= 0.0 {
-                return Err(runtime_error_for(DIMENSION_TYPE_ERROR));
+                return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err(runtime_error_for(DIMENSION_TYPE_ERROR));
+                return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
             }
             Ok(Some(rounded as usize))
         }
         Value::Tensor(t) if t.data.len() == 1 => {
             let val = t.data[0];
             if !val.is_finite() || val <= 0.0 {
-                return Err(runtime_error_for(DIMENSION_TYPE_ERROR));
+                return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
             }
             let rounded = val.round();
             if (rounded - val).abs() > f64::EPSILON {
-                return Err(runtime_error_for(DIMENSION_TYPE_ERROR));
+                return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
             }
             Ok(Some(rounded as usize))
         }
@@ -216,7 +410,7 @@ impl JoinInput {
                     kind: OutputKind::CellArray,
                 })
             }
-            _ => Err(runtime_error_for(INPUT_TYPE_ERROR)),
+            _ => Err(join_error(&JOIN_ERROR_INPUT_TYPE)),
         }
     }
 
@@ -247,16 +441,18 @@ fn build_value(kind: OutputKind, data: Vec<String>, shape: Vec<usize>) -> Builti
     match kind {
         OutputKind::StringScalar => Ok(Value::String(data.into_iter().next().unwrap_or_default())),
         OutputKind::StringArray => {
-            let array = StringArray::new(data, shape)
-                .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+            let array = StringArray::new(data, shape).map_err(|e| {
+                join_error_with_message(format!("{BUILTIN_NAME}: {e}"), &JOIN_ERROR_INTERNAL)
+            })?;
             Ok(Value::StringArray(array))
         }
         OutputKind::CellArray => {
             let rows = shape.first().copied().unwrap_or(0);
             let cols = shape.get(1).copied().unwrap_or(1);
             if rows == 0 || cols == 0 || data.is_empty() {
-                return make_cell(Vec::new(), rows, cols)
-                    .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")));
+                return make_cell(Vec::new(), rows, cols).map_err(|e| {
+                    join_error_with_message(format!("{BUILTIN_NAME}: {e}"), &JOIN_ERROR_INTERNAL)
+                });
             }
             let mut values = Vec::with_capacity(rows * cols);
             for row in 0..rows {
@@ -265,13 +461,18 @@ fn build_value(kind: OutputKind, data: Vec<String>, shape: Vec<usize>) -> Builti
                     let text = data[idx].clone();
                     let chars: Vec<char> = text.chars().collect();
                     let cols_count = chars.len();
-                    let char_array = CharArray::new(chars, 1, cols_count)
-                        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+                    let char_array = CharArray::new(chars, 1, cols_count).map_err(|e| {
+                        join_error_with_message(
+                            format!("{BUILTIN_NAME}: {e}"),
+                            &JOIN_ERROR_INTERNAL,
+                        )
+                    })?;
                     values.push(Value::CharArray(char_array));
                 }
             }
-            make_cell(values, rows, cols)
-                .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+            make_cell(values, rows, cols).map_err(|e| {
+                join_error_with_message(format!("{BUILTIN_NAME}: {e}"), &JOIN_ERROR_INTERNAL)
+            })
         }
     }
 }
@@ -294,7 +495,7 @@ fn cell_array_to_strings(cell: CellArray) -> BuiltinResult<(Vec<String>, Vec<usi
             let idx = row * cols + col;
             strings.push(
                 cell_element_to_string(&data[idx])
-                    .ok_or_else(|| runtime_error_for(INPUT_TYPE_ERROR))?,
+                    .ok_or_else(|| join_error(&JOIN_ERROR_INPUT_TYPE))?,
             );
         }
     }
@@ -407,7 +608,7 @@ fn value_to_string_array(value: Value) -> BuiltinResult<(Vec<String>, Vec<usize>
             let strings = char_array_rows_to_strings(&array);
             Ok((strings, vec![rows, 1]))
         }
-        _ => Err(runtime_error_for(DELIMITER_TYPE_ERROR)),
+        _ => Err(join_error(&JOIN_ERROR_DELIMITER_TYPE)),
     }
 }
 
@@ -417,7 +618,7 @@ fn normalize_delimiter_shape(
     axis_idx: usize,
 ) -> BuiltinResult<Vec<usize>> {
     if shape.len() > full_shape.len() {
-        return Err(runtime_error_for(DELIMITER_SIZE_ERROR));
+        return Err(join_error(&JOIN_ERROR_DELIMITER_SIZE));
     }
     if shape.len() < full_shape.len() {
         shape.resize(full_shape.len(), 1);
@@ -427,7 +628,7 @@ fn normalize_delimiter_shape(
     if axis_len == 0 {
         shape[axis_idx] = 1;
     } else if shape[axis_idx] != axis_len {
-        return Err(runtime_error_for(DELIMITER_SIZE_ERROR));
+        return Err(join_error(&JOIN_ERROR_DELIMITER_SIZE));
     }
 
     for (dim, size) in shape.iter().enumerate() {
@@ -436,7 +637,7 @@ fn normalize_delimiter_shape(
         }
         let reference = full_shape[dim];
         if *size != reference && *size != 1 {
-            return Err(runtime_error_for(DELIMITER_SIZE_ERROR));
+            return Err(join_error(&JOIN_ERROR_DELIMITER_SIZE));
         }
     }
 
@@ -697,12 +898,12 @@ pub(crate) mod tests {
     fn join_cell_array_of_char_vectors() {
         let gpu = CharArray::new_row("GPU");
         let accel = CharArray::new_row("Accelerate");
-        let ignition = CharArray::new_row("Ignition");
+        let vm_label = CharArray::new_row("VM");
         let interpreter = CharArray::new_row("Interpreter");
         let values = vec![
             Value::CharArray(gpu),
             Value::CharArray(accel),
-            Value::CharArray(ignition),
+            Value::CharArray(vm_label),
             Value::CharArray(interpreter),
         ];
         let cell = make_cell(values, 2, 2).expect("cell");
@@ -721,7 +922,7 @@ pub(crate) mod tests {
                         );
                         assert_eq!(
                             char_row_to_string_slice(&b.data, b.cols, 0),
-                            "Ignition, Interpreter"
+                            "VM, Interpreter"
                         );
                     }
                     other => panic!("expected char arrays, got {other:?}"),

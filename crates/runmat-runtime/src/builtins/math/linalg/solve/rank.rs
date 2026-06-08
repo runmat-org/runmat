@@ -3,7 +3,11 @@
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::linalg::{
@@ -18,6 +22,86 @@ use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rank";
+
+const RANK_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "k",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Estimated matrix rank.",
+}];
+
+const RANK_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix.",
+}];
+
+const RANK_INPUTS_TOL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "tol",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Singular-value threshold.",
+    },
+];
+
+const RANK_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "k = rank(A)",
+        inputs: &RANK_INPUTS,
+        outputs: &RANK_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "k = rank(A, tol)",
+        inputs: &RANK_INPUTS_TOL,
+        outputs: &RANK_OUTPUT,
+    },
+];
+
+const RANK_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RANK.INVALID_ARGUMENT",
+    identifier: Some("RunMat:rank:InvalidArgument"),
+    when: "Optional tolerance argument is malformed or outside accepted bounds.",
+    message: "rank: invalid argument",
+};
+
+const RANK_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RANK.INVALID_INPUT",
+    identifier: Some("RunMat:rank:InvalidInput"),
+    when: "Input shape/type cannot be processed for rank evaluation.",
+    message: "rank: invalid input",
+};
+
+const RANK_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RANK.INTERNAL",
+    identifier: Some("RunMat:rank:Internal"),
+    when: "Runtime fails while computing rank or executing fallback/upload paths.",
+    message: "rank: internal runtime failure",
+};
+
+const RANK_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    RANK_ERROR_INVALID_ARGUMENT,
+    RANK_ERROR_INVALID_INPUT,
+    RANK_ERROR_INTERNAL,
+];
+
+pub const RANK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &RANK_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &RANK_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::rank")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -36,8 +120,23 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may keep the computation on-device via the `rank` hook; the reference backend gathers to the host and re-uploads a scalar.",
 };
 
+fn rank_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+    rank_error_with_message(message, &RANK_ERROR_INVALID_INPUT)
+}
+
+fn argument_error(message: impl Into<String>) -> RuntimeError {
+    rank_error_with_message(message, &RANK_ERROR_INVALID_ARGUMENT)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -76,14 +175,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "rank",
     category = "math/linalg/solve",
-    summary = "Compute the numerical rank of a matrix using SVD with MATLAB-compatible tolerance handling.",
+    summary = "Compute a matrix's numerical rank using SVD-based tolerance rules.",
     keywords = "rank,svd,tolerance,matrix,gpu",
     accel = "rank",
     type_resolver(numeric_scalar_type),
+    descriptor(crate::builtins::math::linalg::solve::rank::RANK_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::solve::rank"
 )]
 async fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let tol = parse_tolerance_arg(NAME, &rest).map_err(builtin_error)?;
+    let tol = parse_tolerance_arg(NAME, &rest).map_err(argument_error)?;
     match value {
         Value::GpuTensor(handle) => rank_gpu(handle, tol).await,
         Value::ComplexTensor(tensor) => rank_complex_tensor_value(tensor, tol),
@@ -253,6 +353,25 @@ pub(crate) mod tests {
         assert_eq!(out, Type::Num);
     }
 
+    #[test]
+    fn rank_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = RANK_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"k = rank(A)"));
+        assert!(labels.contains(&"k = rank(A, tol)"));
+    }
+
+    #[test]
+    fn rank_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = RANK_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.RANK.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.RANK.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.RANK.INTERNAL"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rank_singular_matrix() {
@@ -318,6 +437,7 @@ pub(crate) mod tests {
             err.message().contains("2-D matrices or vectors"),
             "unexpected error message: {err}"
         );
+        assert_eq!(err.identifier(), RANK_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -330,6 +450,7 @@ pub(crate) mod tests {
             err.message().contains("tolerance must be >= 0"),
             "unexpected error message: {err}"
         );
+        assert_eq!(err.identifier(), RANK_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -344,6 +465,7 @@ pub(crate) mod tests {
             err.message().contains("tolerance must be a real scalar"),
             "unexpected error message: {err}"
         );
+        assert_eq!(err.identifier(), RANK_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

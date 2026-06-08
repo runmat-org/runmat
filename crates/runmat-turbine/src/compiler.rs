@@ -8,22 +8,64 @@ use cranelift::prelude::*;
 use cranelift_codegen::ir::ValueDef;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
-use runmat_ignition::Instr;
+use runmat_vm::ArgSpec;
+use runmat_vm::{FunctionRegistry, Instr};
 use std::collections::{BTreeSet, HashMap};
 
 /// Context for compilation containing related parameters
 struct CompileContext<'a> {
     vars_ptr: Value,
-    function_definitions: &'a HashMap<String, runmat_ignition::UserFunction>,
+    function_registry: &'a FunctionRegistry,
     module: &'a mut JITModule,
-    runmat_call_user_function_id: FuncId,
+    runmat_call_semantic_function_id: FuncId,
+    runmat_call_semantic_function_outputs_id: FuncId,
+    runmat_call_semantic_function_values_id: FuncId,
+    runmat_call_semantic_function_expanded_values_id: FuncId,
+    runmat_call_feval_expanded_values_id: FuncId,
+    runmat_call_builtin_expanded_values_id: FuncId,
+    runmat_call_method_member_expanded_values_id: FuncId,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct RuntimeCallIds {
+    pub runmat_call_semantic_function_id: FuncId,
+    pub runmat_call_semantic_function_outputs_id: FuncId,
+    pub runmat_call_semantic_function_values_id: FuncId,
+    pub runmat_call_semantic_function_expanded_values_id: FuncId,
+    pub runmat_call_feval_expanded_values_id: FuncId,
+    pub runmat_call_builtin_expanded_values_id: FuncId,
+    pub runmat_call_method_member_expanded_values_id: FuncId,
+}
+
+pub(crate) struct CompileInstructionParams<'a> {
+    pub instructions: &'a [Instr],
+    pub func: &'a mut codegen::ir::Function,
+    pub var_count: usize,
+    pub function_registry: &'a FunctionRegistry,
+    pub module: &'a mut JITModule,
+    pub runtime_call_ids: RuntimeCallIds,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StackEntry {
+    num: Value,
+    value_ptr: Option<Value>,
+}
+
+struct MethodMemberExpandedCall<'a> {
+    identity: &'a runmat_hir::CallableIdentity,
+    fallback_policy: runmat_hir::CallableFallbackPolicy,
+    args: &'a [StackEntry],
+    specs: &'a [ArgSpec],
+    out_count: usize,
 }
 
 /// Stack simulation for tracking values during compilation  
-/// Values are represented as f64 values
+/// Numeric values stay as f64 fast-path lanes; value_ptr preserves full TurbineValue slots
+/// where the JIT needs to hand cells/objects/strings back to host callbacks.
 #[derive(Debug, Clone)]
 struct StackSimulator {
-    values: Vec<Value>,
+    values: Vec<StackEntry>,
 }
 
 impl StackSimulator {
@@ -32,10 +74,24 @@ impl StackSimulator {
     }
 
     fn push(&mut self, value: Value) {
-        self.values.push(value);
+        self.values.push(StackEntry {
+            num: value,
+            value_ptr: None,
+        });
+    }
+
+    fn push_var(&mut self, num: Value, value_ptr: Value) {
+        self.values.push(StackEntry {
+            num,
+            value_ptr: Some(value_ptr),
+        });
     }
 
     fn pop(&mut self) -> Result<Value> {
+        Ok(self.pop_entry()?.num)
+    }
+
+    fn pop_entry(&mut self) -> Result<StackEntry> {
         self.values.pop().ok_or_else(|| {
             TurbineError::ModuleError("Stack underflow during compilation".to_string())
         })
@@ -191,24 +247,27 @@ impl ControlFlowGraph {
 }
 
 /// Compiles bytecode instructions to Cranelift IR
-pub struct BytecodeCompiler;
+pub(crate) struct BytecodeCompiler;
 
 impl BytecodeCompiler {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 
     /// Compile a sequence of bytecode instructions to Cranelift IR
     /// Function signature: fn(*mut Value, usize) -> i32
-    pub fn compile_instructions(
+    pub(crate) fn compile_instructions(
         &mut self,
-        instructions: &[Instr],
-        func: &mut codegen::ir::Function,
-        _var_count: usize,
-        function_definitions: &std::collections::HashMap<String, runmat_ignition::UserFunction>,
-        module: &mut JITModule,
-        runmat_call_user_function_id: FuncId,
+        params: CompileInstructionParams<'_>,
     ) -> Result<()> {
+        let CompileInstructionParams {
+            instructions,
+            func,
+            var_count: _var_count,
+            function_registry,
+            module,
+            runtime_call_ids,
+        } = params;
         let mut builder_context = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_context);
 
@@ -217,7 +276,7 @@ impl BytecodeCompiler {
         builder.switch_to_block(entry_block);
 
         // Function parameters
-        let vars_ptr = builder.block_params(entry_block)[0]; // *mut f64 (not Value!)
+        let vars_ptr = builder.block_params(entry_block)[0]; // *mut TurbineValue
         let _vars_len = builder.block_params(entry_block)[1]; // usize
 
         // Initialize stack (no need for Cranelift variables since we use direct memory access)
@@ -238,9 +297,21 @@ impl BytecodeCompiler {
         // Compile with control flow graph
         let mut ctx = CompileContext {
             vars_ptr,
-            function_definitions,
+            function_registry,
             module,
-            runmat_call_user_function_id,
+            runmat_call_semantic_function_id: runtime_call_ids.runmat_call_semantic_function_id,
+            runmat_call_semantic_function_outputs_id: runtime_call_ids
+                .runmat_call_semantic_function_outputs_id,
+            runmat_call_semantic_function_values_id: runtime_call_ids
+                .runmat_call_semantic_function_values_id,
+            runmat_call_semantic_function_expanded_values_id: runtime_call_ids
+                .runmat_call_semantic_function_expanded_values_id,
+            runmat_call_feval_expanded_values_id: runtime_call_ids
+                .runmat_call_feval_expanded_values_id,
+            runmat_call_builtin_expanded_values_id: runtime_call_ids
+                .runmat_call_builtin_expanded_values_id,
+            runmat_call_method_member_expanded_values_id: runtime_call_ids
+                .runmat_call_method_member_expanded_values_id,
         };
 
         Self::compile_with_cfg(&mut builder, &mut stack, instructions, &cfg, &mut ctx)?;
@@ -313,21 +384,29 @@ impl BytecodeCompiler {
                             "Non-numeric literal not supported in JIT mode".to_string(),
                         ));
                     }
-                    Instr::LoadVar(idx) => {
+                    Instr::LoadVar(idx) | Instr::LoadVarForIndexAssignment(idx) => {
                         let idx_val = builder.ins().iconst(types::I64, *idx as i64);
-                        let element_size = builder.ins().iconst(types::I64, 8);
+                        let element_size = builder.ins().iconst(types::I64, 16);
                         let offset = builder.ins().imul(idx_val, element_size);
                         let var_addr = builder.ins().iadd(ctx.vars_ptr, offset);
-                        let val = builder.ins().load(types::F64, MemFlags::new(), var_addr, 0);
-                        local_stack.push(val);
+                        let payload_offset = builder.ins().iconst(types::I64, 8);
+                        let payload_addr = builder.ins().iadd(var_addr, payload_offset);
+                        let val = builder
+                            .ins()
+                            .load(types::F64, MemFlags::new(), payload_addr, 0);
+                        local_stack.push_var(val, var_addr);
                     }
                     Instr::StoreVar(idx) => {
                         let val = local_stack.pop()?;
                         let idx_val = builder.ins().iconst(types::I64, *idx as i64);
-                        let element_size = builder.ins().iconst(types::I64, 8);
+                        let element_size = builder.ins().iconst(types::I64, 16);
                         let offset = builder.ins().imul(idx_val, element_size);
                         let var_addr = builder.ins().iadd(ctx.vars_ptr, offset);
-                        builder.ins().store(MemFlags::new(), val, var_addr, 0);
+                        let payload_offset = builder.ins().iconst(types::I64, 8);
+                        let payload_addr = builder.ins().iadd(var_addr, payload_offset);
+                        let num_tag = builder.ins().iconst(types::I32, 1);
+                        builder.ins().store(MemFlags::new(), num_tag, var_addr, 0);
+                        builder.ins().store(MemFlags::new(), val, payload_addr, 0);
                     }
                     Instr::Add => {
                         let (a, b) = local_stack.pop_two()?;
@@ -344,10 +423,10 @@ impl BytecodeCompiler {
                         let result = Self::call_runtime_mul_static(builder, a, b);
                         local_stack.push(result);
                     }
-                    Instr::Div => {
-                        let (a, b) = local_stack.pop_two()?;
-                        let result = Self::call_runtime_div_static(builder, a, b);
-                        local_stack.push(result);
+                    Instr::RightDiv | Instr::LeftDiv => {
+                        return Err(execution_error(
+                            "Matrix division not supported in JIT mode".to_string(),
+                        ));
                     }
                     Instr::Pow => {
                         let (a, b) = local_stack.pop_two()?;
@@ -421,7 +500,28 @@ impl BytecodeCompiler {
                         let result = Self::call_runtime_ne_static(builder, a, b);
                         local_stack.push(result);
                     }
-                    Instr::CallBuiltin(name, arg_count) => {
+                    Instr::LogicalNot => {
+                        let value = local_stack.pop()?;
+                        let result = Self::call_runtime_builtin_static(builder, "not", &[value]);
+                        local_stack.push(result);
+                    }
+                    Instr::LogicalAnd => {
+                        let (lhs, rhs) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_builtin_static(builder, "and", &[lhs, rhs]);
+                        local_stack.push(result);
+                    }
+                    Instr::LogicalOr => {
+                        let (lhs, rhs) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_builtin_static(builder, "or", &[lhs, rhs]);
+                        local_stack.push(result);
+                    }
+                    Instr::CallBuiltinMulti(name, arg_count, out_count) => {
+                        if *out_count != 1 {
+                            return Err(execution_error(
+                                "CallBuiltinMulti with out_count > 1 is not supported in JIT; use interpreter"
+                                    .to_string(),
+                            ));
+                        }
                         if matches!(name.as_str(), "max" | "min") {
                             return Err(execution_error(format!(
                                 "Builtin '{name}' is not yet supported in Turbine JIT; falling back to interpreter"
@@ -557,41 +657,139 @@ impl BytecodeCompiler {
                             .brif(is_false, false_block, &[], true_block, &[]);
                         block_terminated = true;
                     }
-                    Instr::CallFunction(func_name, arg_count) => {
-                        // Compile user-defined function call to native code
-                        let mut args = Vec::new();
-                        for _ in 0..*arg_count {
-                            args.push(local_stack.pop()?);
+                    Instr::CallSemanticFunctionMulti(function, arg_count, out_count) => {
+                        if *out_count > 1 {
+                            match instructions.get(pc + 1) {
+                                Some(Instr::Unpack(count)) if count == out_count => {}
+                                _ => return Err(execution_error(
+                                    "Semantic multi-output JIT calls require a following Unpack",
+                                )),
+                            }
                         }
-                        args.reverse();
 
-                        let result = Self::call_user_function_jit(
+                        let args = Self::pop_call_args(&mut local_stack, *arg_count)?;
+
+                        if *out_count == 1 {
+                            let result = Self::call_semantic_function_jit(
+                                builder,
+                                ctx.module,
+                                ctx.runmat_call_semantic_function_id,
+                                function.0,
+                                &args,
+                            )?;
+                            local_stack.push(result);
+                        } else {
+                            let results = Self::call_semantic_function_multi_jit(
+                                builder,
+                                ctx.module,
+                                ctx.runmat_call_semantic_function_outputs_id,
+                                function.0,
+                                &args,
+                                *out_count,
+                            )?;
+                            for result in results {
+                                local_stack.push(result);
+                            }
+                            pc += 1;
+                        }
+                    }
+                    Instr::CallFunctionMulti {
+                        identity,
+                        fallback_policy,
+                        arg_count,
+                        out_count,
+                    } => {
+                        if *out_count > 1 {
+                            match instructions.get(pc + 1) {
+                                Some(Instr::Unpack(count)) if count == out_count => {}
+                                _ => return Err(execution_error(
+                                    "Semantic named multi-output JIT calls require a following Unpack",
+                                )),
+                            }
+                        }
+
+                        let args = Self::pop_call_args(&mut local_stack, *arg_count)?;
+                        let results = Self::compile_named_function_multi_call_jit(
                             builder,
-                            ctx.module,
-                            ctx.runmat_call_user_function_id,
-                            func_name,
+                            ctx,
+                            identity,
+                            *fallback_policy,
                             &args,
-                            ctx.function_definitions,
+                            *out_count,
                         )?;
-                        local_stack.push(result);
+                        for result in results {
+                            local_stack.push(result);
+                        }
+                        if *out_count > 1 {
+                            pc += 1;
+                        }
+                    }
+                    Instr::CallSemanticFunctionExpandMultiOutput(function, specs, out_count) => {
+                        if *out_count > 1 {
+                            match instructions.get(pc + 1) {
+                                Some(Instr::Unpack(count)) if count == out_count => {}
+                                _ => {
+                                    return Err(execution_error(
+                                        "Semantic expanded multi-output JIT calls require a following Unpack",
+                                    ))
+                                }
+                            }
+                        }
+                        let results = if specs.iter().any(|spec| spec.is_expand) {
+                            let args =
+                                Self::pop_expanded_call_arg_entries(&mut local_stack, specs)?;
+                            Self::call_semantic_function_expanded_values_jit(
+                                builder,
+                                ctx.module,
+                                ctx.runmat_call_semantic_function_expanded_values_id,
+                                function.0,
+                                &args,
+                                specs,
+                                *out_count,
+                            )?
+                        } else {
+                            let args = Self::pop_non_expanding_call_args(&mut local_stack, specs)?;
+                            Self::call_semantic_function_values_jit(
+                                builder,
+                                ctx.module,
+                                ctx.runmat_call_semantic_function_values_id,
+                                function.0,
+                                &args,
+                                *out_count,
+                            )?
+                        };
+                        for result in results {
+                            local_stack.push(result);
+                        }
+                        if *out_count > 1 {
+                            pc += 1;
+                        }
                     }
                     Instr::LoadLocal(offset) => {
                         // Load from local variable slot
                         let offset_val = builder.ins().iconst(types::I64, *offset as i64);
-                        let element_size = builder.ins().iconst(types::I64, 8);
+                        let element_size = builder.ins().iconst(types::I64, 16);
                         let local_offset = builder.ins().imul(offset_val, element_size);
                         let var_addr = builder.ins().iadd(ctx.vars_ptr, local_offset);
-                        let val = builder.ins().load(types::F64, MemFlags::new(), var_addr, 0);
-                        local_stack.push(val);
+                        let payload_offset = builder.ins().iconst(types::I64, 8);
+                        let payload_addr = builder.ins().iadd(var_addr, payload_offset);
+                        let val = builder
+                            .ins()
+                            .load(types::F64, MemFlags::new(), payload_addr, 0);
+                        local_stack.push_var(val, var_addr);
                     }
                     Instr::StoreLocal(offset) => {
                         // Store to local variable slot
                         let val = local_stack.pop()?;
                         let offset_val = builder.ins().iconst(types::I64, *offset as i64);
-                        let element_size = builder.ins().iconst(types::I64, 8);
+                        let element_size = builder.ins().iconst(types::I64, 16);
                         let local_offset = builder.ins().imul(offset_val, element_size);
                         let var_addr = builder.ins().iadd(ctx.vars_ptr, local_offset);
-                        builder.ins().store(MemFlags::new(), val, var_addr, 0);
+                        let payload_offset = builder.ins().iconst(types::I64, 8);
+                        let payload_addr = builder.ins().iadd(var_addr, payload_offset);
+                        let num_tag = builder.ins().iconst(types::I32, 1);
+                        builder.ins().store(MemFlags::new(), num_tag, var_addr, 0);
+                        builder.ins().store(MemFlags::new(), val, payload_addr, 0);
                     }
                     Instr::EnterScope(_count) => {
                         // Function scope entry - local variables managed through LoadLocal/StoreLocal
@@ -606,47 +804,243 @@ impl BytecodeCompiler {
                         builder.ins().return_(&[zero]);
                         block_terminated = true;
                     }
+                    Instr::CallFevalExpandMultiOutput(specs, out_count) => {
+                        if *out_count > 1 {
+                            match instructions.get(pc + 1) {
+                                Some(Instr::Unpack(count)) if count == out_count => {}
+                                _ => {
+                                    return Err(execution_error(
+                                        "Expanded feval multi-output JIT calls require a following Unpack",
+                                    ))
+                                }
+                            }
+                        }
+                        let mut call_entries =
+                            Self::pop_expanded_call_arg_entries(&mut local_stack, specs)?;
+                        let func = local_stack.pop_entry()?;
+                        call_entries.insert(0, func);
+                        let results = Self::call_feval_expanded_values_jit(
+                            builder,
+                            ctx.module,
+                            ctx.runmat_call_feval_expanded_values_id,
+                            &call_entries,
+                            specs,
+                            *out_count,
+                        )?;
+                        for result in results {
+                            local_stack.push(result);
+                        }
+                        if *out_count > 1 {
+                            pc += 1;
+                        }
+                    }
+                    Instr::CallFunctionExpandMultiOutput {
+                        identity,
+                        fallback_policy,
+                        specs,
+                        out_count,
+                    } => {
+                        if *out_count > 1 {
+                            match instructions.get(pc + 1) {
+                                Some(Instr::Unpack(count)) if count == out_count => {}
+                                _ => {
+                                    return Err(execution_error(
+                                        "Named expanded multi-output JIT calls require a following Unpack",
+                                    ))
+                                }
+                            }
+                        }
+
+                        let results = if specs.iter().any(|spec| spec.is_expand) {
+                            let args =
+                                Self::pop_expanded_call_arg_entries(&mut local_stack, specs)?;
+                            Self::compile_named_function_expand_multi_call_jit(
+                                builder,
+                                ctx,
+                                identity,
+                                *fallback_policy,
+                                &args,
+                                specs,
+                                *out_count,
+                            )?
+                        } else {
+                            let args = Self::pop_non_expanding_call_args(&mut local_stack, specs)?;
+                            Self::compile_named_function_multi_call_jit(
+                                builder,
+                                ctx,
+                                identity,
+                                *fallback_policy,
+                                &args,
+                                *out_count,
+                            )?
+                        };
+                        for result in results {
+                            local_stack.push(result);
+                        }
+                        if *out_count > 1 {
+                            pc += 1;
+                        }
+                    }
+                    Instr::CallBuiltinExpandMultiOutput(name, specs, out_count) => {
+                        if *out_count > 1 {
+                            match instructions.get(pc + 1) {
+                                Some(Instr::Unpack(count)) if count == out_count => {}
+                                _ => {
+                                    return Err(execution_error(
+                                        "Builtin expanded multi-output JIT calls require a following Unpack",
+                                    ))
+                                }
+                            }
+                        }
+                        let args = Self::pop_expanded_call_arg_entries(&mut local_stack, specs)?;
+                        let results = Self::call_builtin_expanded_values_jit(
+                            builder,
+                            ctx.module,
+                            ctx.runmat_call_builtin_expanded_values_id,
+                            name,
+                            &args,
+                            specs,
+                            *out_count,
+                        )?;
+                        for result in results {
+                            local_stack.push(result);
+                        }
+                        if *out_count > 1 {
+                            pc += 1;
+                        }
+                    }
+                    Instr::CallMethodOrMemberIndexExpandMultiOutput {
+                        identity,
+                        fallback_policy,
+                        specs,
+                        out_count,
+                    } => {
+                        if *out_count > 1 {
+                            match instructions.get(pc + 1) {
+                                Some(Instr::Unpack(count)) if count == out_count => {}
+                                _ => {
+                                    return Err(execution_error(
+                                        "Method/member expanded multi-output JIT calls require a following Unpack",
+                                    ))
+                                }
+                            }
+                        }
+
+                        let has_expansion = specs.iter().any(|spec| spec.is_expand);
+                        let results = if Self::resolve_named_multi_call_target(
+                            identity,
+                            *fallback_policy,
+                            ctx.function_registry,
+                        )
+                        .is_some()
+                        {
+                            if has_expansion {
+                                let args =
+                                    Self::pop_expanded_call_arg_entries(&mut local_stack, specs)?;
+                                Self::compile_named_function_expand_multi_call_jit(
+                                    builder,
+                                    ctx,
+                                    identity,
+                                    *fallback_policy,
+                                    &args,
+                                    specs,
+                                    *out_count,
+                                )?
+                            } else {
+                                let args =
+                                    Self::pop_non_expanding_call_args(&mut local_stack, specs)?;
+                                Self::compile_named_function_multi_call_jit(
+                                    builder,
+                                    ctx,
+                                    identity,
+                                    *fallback_policy,
+                                    &args,
+                                    *out_count,
+                                )?
+                            }
+                        } else {
+                            let args =
+                                Self::pop_expanded_call_arg_entries(&mut local_stack, specs)?;
+                            Self::call_method_member_expanded_values_jit(
+                                builder,
+                                ctx,
+                                MethodMemberExpandedCall {
+                                    identity,
+                                    fallback_policy: *fallback_policy,
+                                    args: &args,
+                                    specs,
+                                    out_count: *out_count,
+                                },
+                            )?
+                        };
+                        for result in results {
+                            local_stack.push(result);
+                        }
+                        if *out_count > 1 {
+                            pc += 1;
+                        }
+                    }
                     // Not yet supported in JIT; require interpreter
                     Instr::IndexSlice(_, _, _, _)
                     | Instr::CreateCell2D(_, _)
-                    | Instr::IndexCell(_)
+                    | Instr::CreateStructLiteral(_)
+                    | Instr::CreateObjectLiteral { .. }
+                    | Instr::IndexCell { .. }
                     | Instr::LoadStaticProperty(_, _)
-                    | Instr::CallStaticMethod(_, _, _)
                     | Instr::EnterTry(_, _)
                     | Instr::PopTry
                     | Instr::UPlus
                     | Instr::AndAnd(_)
                     | Instr::OrOr(_)
-                    | Instr::IndexSliceEx(_, _, _, _, _)
-                    | Instr::IndexRangeEnd { .. }
-                    | Instr::Index1DRangeEnd { .. }
-                    | Instr::StoreRangeEnd { .. }
+                    | Instr::IndexSliceExpr { .. }
+                    | Instr::StoreSliceExpr { .. }
+                    | Instr::StoreSliceExprDelete { .. }
                     | Instr::StoreSlice(_, _, _, _)
-                    | Instr::StoreSliceEx(_, _, _, _, _)
-                    | Instr::StoreSlice1DRangeEnd { .. }
+                    | Instr::StoreSliceDelete(_, _, _, _)
                     | Instr::LoadMember(_)
+                    | Instr::LoadMemberOrInit(_)
                     | Instr::LoadMemberDynamic
+                    | Instr::LoadMemberDynamicOrInit
                     | Instr::StoreMember(_)
+                    | Instr::StoreMemberOrInit(_)
                     | Instr::StoreMemberDynamic
+                    | Instr::StoreMemberDynamicOrInit
+                    | Instr::CreateFunctionHandle(_)
+                    | Instr::CreateExternalFunctionHandle(_)
+                    | Instr::CreateMethodFunctionHandle(_)
+                    | Instr::CreateBoundFunctionHandle(_, _)
                     | Instr::CreateClosure(_, _)
-                    | Instr::CallMethod(_, _)
-                    | Instr::IndexCellExpand(_, _)
+                    | Instr::CreateSemanticClosure(_, _, _)
+                    | Instr::CallMethodOrMemberIndexMulti { .. }
+                    | Instr::IndexCellExpand { .. }
+                    | Instr::IndexCellList { .. }
                     | Instr::StoreIndex(_)
-                    | Instr::StoreIndexCell(_)
+                    | Instr::StoreIndexCell { .. }
+                    | Instr::StoreIndexDelete(_)
+                    | Instr::StoreIndexCellDelete { .. }
                     | Instr::LoadMethod(_)
                     | Instr::RegisterClass { .. }
-                    | Instr::CallBuiltinExpandLast(_, _, _)
-                    | Instr::CallBuiltinExpandAt(_, _, _, _)
-                    | Instr::CallBuiltinExpandMulti(_, _)
-                    | Instr::CallFunctionExpandMulti(_, _)
-                    | Instr::CallFunctionMulti(_, _, _)
-                    | Instr::CallFunctionExpandAt(_, _, _, _)
                     | Instr::Swap
                     | Instr::RegisterImport { .. }
                     | Instr::DeclareGlobal(_)
                     | Instr::DeclarePersistent(_)
-                    | Instr::CallFeval(_)
-                    | Instr::CallFevalExpandMulti(_) => {
+                    | Instr::CallFevalMulti(_, _)
+                    | Instr::CallFevalMultiUsingOutputSlot(_, _)
+                    | Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _)
+                    | Instr::CreateSemanticFuture(_, _, _)
+                    | Instr::CreateSemanticFutureExpandMultiOutput(_, _, _)
+                    | Instr::CallSuperConstructorMulti { .. }
+                    | Instr::CallSuperMethodMulti { .. }
+                    | Instr::CallSuperConstructorExpandMultiOutput { .. }
+                    | Instr::CallSuperMethodExpandMultiOutput { .. }
+                    | Instr::CallSemanticNestedFunctionMulti { .. }
+                    | Instr::CallBuiltinMultiUsingOutputSlot(_, _, _)
+                    | Instr::CallFunctionMultiUsingOutputSlot { .. }
+                    | Instr::CallSemanticFunctionMultiUsingOutputSlot(_, _, _)
+                    | Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { .. }
+                    | Instr::CallSemanticNestedFunctionExpandMultiOutput { .. }
+                    | Instr::Spawn
+                    | Instr::Await => {
                         return Err(execution_error(
                             "Unsupported instruction in JIT; use interpreter".to_string(),
                         ));
@@ -692,45 +1086,135 @@ impl BytecodeCompiler {
         builder.ins().fadd(a, b)
     }
 
-    /// Compile user-defined function call to native machine code
-    /// Uses recursive compilation: each function is compiled separately and called
-    fn call_user_function_jit(
+    fn unsupported_expanded_call_jit<T>() -> Result<T> {
+        Err(execution_error(
+            "Expanded calls require Turbine non-scalar/cell/comma-list ABI; use interpreter",
+        ))
+    }
+
+    fn pop_call_args(stack: &mut StackSimulator, arg_count: usize) -> Result<Vec<Value>> {
+        let mut args = Vec::with_capacity(arg_count);
+        for _ in 0..arg_count {
+            args.push(stack.pop()?);
+        }
+        args.reverse();
+        Ok(args)
+    }
+
+    fn pop_non_expanding_call_args(
+        stack: &mut StackSimulator,
+        specs: &[ArgSpec],
+    ) -> Result<Vec<Value>> {
+        if specs.iter().any(|spec| spec.is_expand) {
+            return Self::unsupported_expanded_call_jit();
+        }
+        Self::pop_call_args(stack, specs.len())
+    }
+
+    fn pop_expanded_call_arg_entries(
+        stack: &mut StackSimulator,
+        specs: &[ArgSpec],
+    ) -> Result<Vec<StackEntry>> {
+        let mut entries = Vec::new();
+        for spec in specs.iter().rev() {
+            if spec.is_expand {
+                let mut indices = Vec::with_capacity(spec.num_indices);
+                for _ in 0..spec.num_indices {
+                    indices.push(stack.pop_entry()?);
+                }
+                indices.reverse();
+                let base = stack.pop_entry()?;
+                entries.extend(indices.into_iter().rev());
+                entries.push(base);
+            } else {
+                entries.push(stack.pop_entry()?);
+            }
+        }
+        entries.reverse();
+        Ok(entries)
+    }
+
+    fn compile_named_function_multi_call_jit(
+        builder: &mut FunctionBuilder,
+        ctx: &mut CompileContext<'_>,
+        identity: &runmat_hir::CallableIdentity,
+        fallback_policy: runmat_hir::CallableFallbackPolicy,
+        args: &[Value],
+        out_count: usize,
+    ) -> Result<Vec<Value>> {
+        let Some(function) =
+            Self::resolve_named_multi_call_target(identity, fallback_policy, ctx.function_registry)
+        else {
+            return Err(execution_error(
+                "Named multi-output function calls without semantic identities are not supported in JIT; use interpreter",
+            ));
+        };
+
+        Self::call_semantic_function_multi_jit(
+            builder,
+            ctx.module,
+            ctx.runmat_call_semantic_function_outputs_id,
+            function.0,
+            args,
+            out_count,
+        )
+    }
+
+    fn compile_named_function_expand_multi_call_jit(
+        builder: &mut FunctionBuilder,
+        ctx: &mut CompileContext<'_>,
+        identity: &runmat_hir::CallableIdentity,
+        fallback_policy: runmat_hir::CallableFallbackPolicy,
+        args: &[StackEntry],
+        specs: &[ArgSpec],
+        out_count: usize,
+    ) -> Result<Vec<Value>> {
+        let Some(function) =
+            Self::resolve_named_multi_call_target(identity, fallback_policy, ctx.function_registry)
+        else {
+            return Err(execution_error(
+                "Named expanded multi-output function calls without semantic identities are not supported in JIT; use interpreter",
+            ));
+        };
+
+        Self::call_semantic_function_expanded_values_jit(
+            builder,
+            ctx.module,
+            ctx.runmat_call_semantic_function_expanded_values_id,
+            function.0,
+            args,
+            specs,
+            out_count,
+        )
+    }
+
+    fn resolve_named_multi_call_target(
+        identity: &runmat_hir::CallableIdentity,
+        fallback_policy: runmat_hir::CallableFallbackPolicy,
+        function_registry: &runmat_vm::FunctionRegistry,
+    ) -> Option<runmat_hir::FunctionId> {
+        if let runmat_hir::CallableIdentity::BoundFunction(function) = identity {
+            return Some(*function);
+        }
+        let name = fallback_policy.resolution_name_for(identity)?;
+        function_registry.resolve_name(&name)
+    }
+
+    fn call_semantic_function_jit(
         builder: &mut FunctionBuilder,
         module: &mut JITModule,
-        runmat_call_user_function_id: FuncId,
-        func_name: &str,
+        runmat_call_semantic_function_id: FuncId,
+        function_id: usize,
         args: &[Value],
-        function_definitions: &std::collections::HashMap<String, runmat_ignition::UserFunction>,
     ) -> Result<Value> {
-        // Look up the function definition
-        let function_def = function_definitions
-            .get(func_name)
-            .ok_or_else(|| execution_error(format!("Unknown function: {func_name}")))?;
-
-        // Validate argument count
-        if args.len() != function_def.params.len() {
-            return Err(execution_error(format!(
-                "Function {} expects {} arguments, got {}",
-                func_name,
-                function_def.params.len(),
-                args.len()
-            )));
-        }
-
-        // For JIT compilation of user-defined functions, we need to call a runtime function
-        // that can handle the recursive compilation and execution of the specific function.
-        // This provides proper isolation and allows for nested function calls.
-
-        // Prepare arguments array
         let args_slot = if !args.is_empty() {
             let slot = builder.create_sized_stack_slot(StackSlotData::new(
                 StackSlotKind::ExplicitSlot,
                 (args.len() * 8) as u32,
-                8, // alignment for f64
+                8,
             ));
             let args_ptr = builder.ins().stack_addr(types::I64, slot, 0);
 
-            // Store arguments
             for (i, &arg) in args.iter().enumerate() {
                 let offset = builder.ins().iconst(types::I64, (i * 8) as i64);
                 let arg_addr = builder.ins().iadd(args_ptr, offset);
@@ -742,62 +1226,34 @@ impl BytecodeCompiler {
             None
         };
 
-        // Prepare function name as C string
-        let func_name_bytes = func_name.as_bytes();
-        let name_slot = builder.create_sized_stack_slot(StackSlotData::new(
-            StackSlotKind::ExplicitSlot,
-            (func_name_bytes.len() + 1) as u32, // +1 for null terminator
-            1,
-        ));
-        let name_ptr = builder.ins().stack_addr(types::I64, name_slot, 0);
-
-        // Store function name with null terminator
-        for (i, &byte) in func_name_bytes.iter().enumerate() {
-            let offset = builder.ins().iconst(types::I64, i as i64);
-            let byte_addr = builder.ins().iadd(name_ptr, offset);
-            let byte_val = builder.ins().iconst(types::I8, byte as i64);
-            builder.ins().store(MemFlags::new(), byte_val, byte_addr, 0);
-        }
-        // Null terminator
-        let null_offset = builder
-            .ins()
-            .iconst(types::I64, func_name_bytes.len() as i64);
-        let null_addr = builder.ins().iadd(name_ptr, null_offset);
-        let null_val = builder.ins().iconst(types::I8, 0);
-        builder.ins().store(MemFlags::new(), null_val, null_addr, 0);
-
-        // Use the expert's pattern: declare_func_in_func to get a valid FuncRef
-        let runtime_fn = module.declare_func_in_func(runmat_call_user_function_id, builder.func);
-
-        // Allocate space for the result (f64)
+        let runtime_fn =
+            module.declare_func_in_func(runmat_call_semantic_function_id, builder.func);
         let result_slot =
             builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
         let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
+        let function_id = builder.ins().iconst(types::I64, function_id as i64);
 
         let call_args = if let Some((args_ptr, _)) = args_slot {
             vec![
-                name_ptr,
+                function_id,
                 args_ptr,
-                builder.ins().iconst(types::I32, args.len() as i64), // i32 for arg_count
+                builder.ins().iconst(types::I32, args.len() as i64),
                 result_ptr,
             ]
         } else {
             vec![
-                name_ptr,
-                builder.ins().iconst(types::I64, 0), // null args ptr
-                builder.ins().iconst(types::I32, 0), // args count (i32)
+                function_id,
+                builder.ins().iconst(types::I64, 0),
+                builder.ins().iconst(types::I32, 0),
                 result_ptr,
             ]
         };
 
         let call = builder.ins().call(runtime_fn, &call_args);
-        let status = builder.inst_results(call)[0]; // i32 status code
-
-        // Check status for error handling - if non-zero, we have an error
+        let status = builder.inst_results(call)[0];
         let zero = builder.ins().iconst(types::I32, 0);
         let is_error = builder.ins().icmp(IntCC::NotEqual, status, zero);
 
-        // Create blocks for error and success paths
         let error_block = builder.create_block();
         let success_block = builder.create_block();
         let after_block = builder.create_block();
@@ -806,29 +1262,552 @@ impl BytecodeCompiler {
             .ins()
             .brif(is_error, error_block, &[], success_block, &[]);
 
-        // Error block: return 0.0 to indicate error (keeps variable unchanged)
         builder.switch_to_block(error_block);
-        let error_result = builder.ins().f64const(0.0);
-        builder.ins().jump(after_block, &[error_result]);
+        builder.ins().return_(&[status]);
 
-        // Success block: load the actual result
         builder.switch_to_block(success_block);
         let success_result = builder
             .ins()
             .load(types::F64, MemFlags::new(), result_ptr, 0);
         builder.ins().jump(after_block, &[success_result]);
 
-        // After block: get the final result
         builder.switch_to_block(after_block);
         builder.append_block_param(after_block, types::F64);
         let result = builder.block_params(after_block)[0];
 
-        // Seal all blocks
         builder.seal_block(error_block);
         builder.seal_block(success_block);
         builder.seal_block(after_block);
 
         Ok(result)
+    }
+
+    fn call_semantic_function_multi_jit(
+        builder: &mut FunctionBuilder,
+        module: &mut JITModule,
+        runmat_call_semantic_function_outputs_id: FuncId,
+        function_id: usize,
+        args: &[Value],
+        out_count: usize,
+    ) -> Result<Vec<Value>> {
+        let args_slot = if !args.is_empty() {
+            let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                (args.len() * 8) as u32,
+                8,
+            ));
+            let args_ptr = builder.ins().stack_addr(types::I64, slot, 0);
+
+            for (i, &arg) in args.iter().enumerate() {
+                let offset = builder.ins().iconst(types::I64, (i * 8) as i64);
+                let arg_addr = builder.ins().iadd(args_ptr, offset);
+                builder.ins().store(MemFlags::new(), arg, arg_addr, 0);
+            }
+
+            Some((args_ptr, slot))
+        } else {
+            None
+        };
+
+        let runtime_fn =
+            module.declare_func_in_func(runmat_call_semantic_function_outputs_id, builder.func);
+        let result_slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (out_count.max(1) * 8) as u32,
+            8,
+        ));
+        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
+        let function_id = builder.ins().iconst(types::I64, function_id as i64);
+
+        let call_args = if let Some((args_ptr, _)) = args_slot {
+            vec![
+                function_id,
+                args_ptr,
+                builder.ins().iconst(types::I32, args.len() as i64),
+                builder.ins().iconst(types::I32, out_count as i64),
+                result_ptr,
+            ]
+        } else {
+            vec![
+                function_id,
+                builder.ins().iconst(types::I64, 0),
+                builder.ins().iconst(types::I32, 0),
+                builder.ins().iconst(types::I32, out_count as i64),
+                result_ptr,
+            ]
+        };
+
+        let call = builder.ins().call(runtime_fn, &call_args);
+        let status = builder.inst_results(call)[0];
+        let zero = builder.ins().iconst(types::I32, 0);
+        let is_error = builder.ins().icmp(IntCC::NotEqual, status, zero);
+
+        let error_block = builder.create_block();
+        let success_block = builder.create_block();
+        let after_block = builder.create_block();
+        let result_types = vec![types::F64; out_count];
+
+        builder
+            .ins()
+            .brif(is_error, error_block, &[], success_block, &[]);
+
+        builder.switch_to_block(error_block);
+        builder.ins().return_(&[status]);
+
+        builder.switch_to_block(success_block);
+        let mut success_results = Vec::with_capacity(out_count);
+        for i in 0..out_count {
+            let offset = builder.ins().iconst(types::I64, (i * 8) as i64);
+            let value_ptr = builder.ins().iadd(result_ptr, offset);
+            success_results.push(
+                builder
+                    .ins()
+                    .load(types::F64, MemFlags::new(), value_ptr, 0),
+            );
+        }
+        builder.ins().jump(after_block, &success_results);
+
+        builder.switch_to_block(after_block);
+        for ty in result_types {
+            builder.append_block_param(after_block, ty);
+        }
+        let results = builder.block_params(after_block).to_vec();
+
+        builder.seal_block(error_block);
+        builder.seal_block(success_block);
+        builder.seal_block(after_block);
+
+        Ok(results)
+    }
+
+    fn store_turbine_value_num_args(
+        builder: &mut FunctionBuilder,
+        args: &[Value],
+    ) -> Option<Value> {
+        if args.is_empty() {
+            return None;
+        }
+        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (args.len() * 16) as u32,
+            8,
+        ));
+        let args_ptr = builder.ins().stack_addr(types::I64, slot, 0);
+        for (i, &arg) in args.iter().enumerate() {
+            let base_offset = (i * 16) as i64;
+            let tag_offset = builder.ins().iconst(types::I64, base_offset);
+            let tag_addr = builder.ins().iadd(args_ptr, tag_offset);
+            let payload_offset = builder.ins().iconst(types::I64, base_offset + 8);
+            let payload_addr = builder.ins().iadd(args_ptr, payload_offset);
+            let num_tag = builder.ins().iconst(types::I32, 1);
+            builder.ins().store(MemFlags::new(), num_tag, tag_addr, 0);
+            builder.ins().store(MemFlags::new(), arg, payload_addr, 0);
+        }
+        Some(args_ptr)
+    }
+
+    fn store_turbine_value_arg_entries(
+        builder: &mut FunctionBuilder,
+        args: &[StackEntry],
+    ) -> Option<Value> {
+        if args.is_empty() {
+            return None;
+        }
+        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (args.len() * 16) as u32,
+            8,
+        ));
+        let args_ptr = builder.ins().stack_addr(types::I64, slot, 0);
+        for (i, arg) in args.iter().enumerate() {
+            let base_offset = (i * 16) as i64;
+            let dest_offset = builder.ins().iconst(types::I64, base_offset);
+            let dest_addr = builder.ins().iadd(args_ptr, dest_offset);
+            let dest_payload_offset = builder.ins().iconst(types::I64, base_offset + 8);
+            let dest_payload_addr = builder.ins().iadd(args_ptr, dest_payload_offset);
+
+            if let Some(src_addr) = arg.value_ptr {
+                let tag_and_reserved = builder.ins().load(types::I64, MemFlags::new(), src_addr, 0);
+                let src_payload_offset = builder.ins().iconst(types::I64, 8);
+                let src_payload_addr = builder.ins().iadd(src_addr, src_payload_offset);
+                let payload = builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), src_payload_addr, 0);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), tag_and_reserved, dest_addr, 0);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), payload, dest_payload_addr, 0);
+            } else {
+                let num_tag = builder.ins().iconst(types::I32, 1);
+                builder.ins().store(MemFlags::new(), num_tag, dest_addr, 0);
+                builder
+                    .ins()
+                    .store(MemFlags::new(), arg.num, dest_payload_addr, 0);
+            }
+        }
+        Some(args_ptr)
+    }
+
+    fn store_turbine_arg_specs(builder: &mut FunctionBuilder, specs: &[ArgSpec]) -> Option<Value> {
+        if specs.is_empty() {
+            return None;
+        }
+        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (specs.len() * 16) as u32,
+            4,
+        ));
+        let specs_ptr = builder.ins().stack_addr(types::I64, slot, 0);
+        for (i, spec) in specs.iter().enumerate() {
+            let base = (i * 16) as i64;
+            for (field_offset, value) in [
+                (0, i64::from(spec.is_expand)),
+                (4, spec.num_indices as i64),
+                (8, i64::from(spec.expand_all)),
+                (12, 0),
+            ] {
+                let offset = builder.ins().iconst(types::I64, base + field_offset);
+                let addr = builder.ins().iadd(specs_ptr, offset);
+                let value = builder.ins().iconst(types::I32, value);
+                builder.ins().store(MemFlags::new(), value, addr, 0);
+            }
+        }
+        Some(specs_ptr)
+    }
+
+    fn call_semantic_function_values_jit(
+        builder: &mut FunctionBuilder,
+        module: &mut JITModule,
+        runmat_call_semantic_function_values_id: FuncId,
+        function_id: usize,
+        args: &[Value],
+        out_count: usize,
+    ) -> Result<Vec<Value>> {
+        let args_ptr = Self::store_turbine_value_num_args(builder, args)
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let runtime_fn =
+            module.declare_func_in_func(runmat_call_semantic_function_values_id, builder.func);
+        let result_slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (out_count.max(1) * 16) as u32,
+            8,
+        ));
+        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
+        let function_id = builder.ins().iconst(types::I64, function_id as i64);
+        let arg_count = builder.ins().iconst(types::I32, args.len() as i64);
+        let out_count_value = builder.ins().iconst(types::I32, out_count as i64);
+        let call = builder.ins().call(
+            runtime_fn,
+            &[
+                function_id,
+                args_ptr,
+                arg_count,
+                out_count_value,
+                result_ptr,
+            ],
+        );
+        let status = builder.inst_results(call)[0];
+        let zero = builder.ins().iconst(types::I32, 0);
+        let is_error = builder.ins().icmp(IntCC::NotEqual, status, zero);
+        let error_block = builder.create_block();
+        let success_block = builder.create_block();
+        let after_block = builder.create_block();
+        builder
+            .ins()
+            .brif(is_error, error_block, &[], success_block, &[]);
+        builder.switch_to_block(error_block);
+        let error_results: Vec<_> = (0..out_count)
+            .map(|_| builder.ins().f64const(0.0))
+            .collect();
+        builder.ins().jump(after_block, &error_results);
+        builder.switch_to_block(success_block);
+        let mut success_results = Vec::with_capacity(out_count);
+        for i in 0..out_count {
+            let payload_offset = (i * 16 + 8) as i64;
+            let payload_offset = builder.ins().iconst(types::I64, payload_offset);
+            let payload_ptr = builder.ins().iadd(result_ptr, payload_offset);
+            success_results.push(
+                builder
+                    .ins()
+                    .load(types::F64, MemFlags::new(), payload_ptr, 0),
+            );
+        }
+        builder.ins().jump(after_block, &success_results);
+        builder.switch_to_block(after_block);
+        for _ in 0..out_count {
+            builder.append_block_param(after_block, types::F64);
+        }
+        let results = builder.block_params(after_block).to_vec();
+        builder.seal_block(error_block);
+        builder.seal_block(success_block);
+        builder.seal_block(after_block);
+        Ok(results)
+    }
+
+    fn call_semantic_function_expanded_values_jit(
+        builder: &mut FunctionBuilder,
+        module: &mut JITModule,
+        runmat_call_semantic_function_expanded_values_id: FuncId,
+        function_id: usize,
+        args: &[StackEntry],
+        specs: &[ArgSpec],
+        out_count: usize,
+    ) -> Result<Vec<Value>> {
+        let args_ptr = Self::store_turbine_value_arg_entries(builder, args)
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let specs_ptr = Self::store_turbine_arg_specs(builder, specs)
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let runtime_fn = module.declare_func_in_func(
+            runmat_call_semantic_function_expanded_values_id,
+            builder.func,
+        );
+        let result_slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (out_count.max(1) * 16) as u32,
+            8,
+        ));
+        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
+        let function_id = builder.ins().iconst(types::I64, function_id as i64);
+        let arg_count = builder.ins().iconst(types::I32, args.len() as i64);
+        let spec_count = builder.ins().iconst(types::I32, specs.len() as i64);
+        let out_count_value = builder.ins().iconst(types::I32, out_count as i64);
+        let call = builder.ins().call(
+            runtime_fn,
+            &[
+                function_id,
+                args_ptr,
+                arg_count,
+                specs_ptr,
+                spec_count,
+                out_count_value,
+                result_ptr,
+            ],
+        );
+        let status = builder.inst_results(call)[0];
+        Self::load_turbine_value_payloads_or_zero(builder, status, result_ptr, out_count)
+    }
+
+    fn call_feval_expanded_values_jit(
+        builder: &mut FunctionBuilder,
+        module: &mut JITModule,
+        runmat_call_feval_expanded_values_id: FuncId,
+        args: &[StackEntry],
+        specs: &[ArgSpec],
+        out_count: usize,
+    ) -> Result<Vec<Value>> {
+        let args_ptr = Self::store_turbine_value_arg_entries(builder, args)
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let specs_ptr = Self::store_turbine_arg_specs(builder, specs)
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let runtime_fn =
+            module.declare_func_in_func(runmat_call_feval_expanded_values_id, builder.func);
+        let result_slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (out_count.max(1) * 16) as u32,
+            8,
+        ));
+        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
+        let arg_count = builder.ins().iconst(types::I32, args.len() as i64);
+        let spec_count = builder.ins().iconst(types::I32, specs.len() as i64);
+        let out_count_value = builder.ins().iconst(types::I32, out_count as i64);
+        let call = builder.ins().call(
+            runtime_fn,
+            &[
+                args_ptr,
+                arg_count,
+                specs_ptr,
+                spec_count,
+                out_count_value,
+                result_ptr,
+            ],
+        );
+        let status = builder.inst_results(call)[0];
+        Self::load_turbine_value_payloads_or_zero(builder, status, result_ptr, out_count)
+    }
+
+    fn store_utf8_bytes(builder: &mut FunctionBuilder, bytes: &[u8]) -> Option<Value> {
+        if bytes.is_empty() {
+            return None;
+        }
+        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            bytes.len() as u32,
+            1,
+        ));
+        let base_ptr = builder.ins().stack_addr(types::I64, slot, 0);
+        for (i, byte) in bytes.iter().enumerate() {
+            let offset = builder.ins().iconst(types::I64, i as i64);
+            let addr = builder.ins().iadd(base_ptr, offset);
+            let value = builder.ins().iconst(types::I8, *byte as i64);
+            builder.ins().store(MemFlags::new(), value, addr, 0);
+        }
+        Some(base_ptr)
+    }
+
+    fn call_builtin_expanded_values_jit(
+        builder: &mut FunctionBuilder,
+        module: &mut JITModule,
+        runmat_call_builtin_expanded_values_id: FuncId,
+        name: &str,
+        args: &[StackEntry],
+        specs: &[ArgSpec],
+        out_count: usize,
+    ) -> Result<Vec<Value>> {
+        let name_ptr = Self::store_utf8_bytes(builder, name.as_bytes())
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let name_len = builder.ins().iconst(types::I32, name.len() as i64);
+        let args_ptr = Self::store_turbine_value_arg_entries(builder, args)
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let specs_ptr = Self::store_turbine_arg_specs(builder, specs)
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let runtime_fn =
+            module.declare_func_in_func(runmat_call_builtin_expanded_values_id, builder.func);
+        let result_slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (out_count.max(1) * 16) as u32,
+            8,
+        ));
+        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
+        let arg_count = builder.ins().iconst(types::I32, args.len() as i64);
+        let spec_count = builder.ins().iconst(types::I32, specs.len() as i64);
+        let out_count_value = builder.ins().iconst(types::I32, out_count as i64);
+        let call = builder.ins().call(
+            runtime_fn,
+            &[
+                name_ptr,
+                name_len,
+                args_ptr,
+                arg_count,
+                specs_ptr,
+                spec_count,
+                out_count_value,
+                result_ptr,
+            ],
+        );
+        let status = builder.inst_results(call)[0];
+        Self::load_turbine_value_payloads_or_zero(builder, status, result_ptr, out_count)
+    }
+
+    fn method_member_identity_name(identity: &runmat_hir::CallableIdentity) -> Option<&str> {
+        match identity {
+            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name))
+            | runmat_hir::CallableIdentity::Method(runmat_hir::MethodId(name))
+                if !name.is_empty() =>
+            {
+                Some(name.as_str())
+            }
+            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
+                if segments.len() == 1 && !segments[0].0.is_empty() =>
+            {
+                Some(segments[0].0.as_str())
+            }
+            _ => None,
+        }
+    }
+
+    fn encode_callable_fallback_policy(policy: runmat_hir::CallableFallbackPolicy) -> i32 {
+        match policy {
+            runmat_hir::CallableFallbackPolicy::None => 0,
+            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution => 1,
+            runmat_hir::CallableFallbackPolicy::ObjectDispatch => 2,
+            runmat_hir::CallableFallbackPolicy::ExternalBoundary => 3,
+        }
+    }
+
+    fn call_method_member_expanded_values_jit(
+        builder: &mut FunctionBuilder,
+        ctx: &mut CompileContext<'_>,
+        call_spec: MethodMemberExpandedCall<'_>,
+    ) -> Result<Vec<Value>> {
+        let name = Self::method_member_identity_name(call_spec.identity).ok_or_else(|| {
+            execution_error("method/member expanded call missing callable name for JIT bridge")
+        })?;
+        let name_ptr = Self::store_utf8_bytes(builder, name.as_bytes())
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let name_len = builder.ins().iconst(types::I32, name.len() as i64);
+        let fallback_value = builder.ins().iconst(
+            types::I32,
+            Self::encode_callable_fallback_policy(call_spec.fallback_policy) as i64,
+        );
+        let args_ptr = Self::store_turbine_value_arg_entries(builder, call_spec.args)
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let specs_ptr = Self::store_turbine_arg_specs(builder, call_spec.specs)
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let runtime_fn = ctx.module.declare_func_in_func(
+            ctx.runmat_call_method_member_expanded_values_id,
+            builder.func,
+        );
+        let result_slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (call_spec.out_count.max(1) * 16) as u32,
+            8,
+        ));
+        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
+        let arg_count = builder
+            .ins()
+            .iconst(types::I32, call_spec.args.len() as i64);
+        let spec_count = builder
+            .ins()
+            .iconst(types::I32, call_spec.specs.len() as i64);
+        let out_count_value = builder.ins().iconst(types::I32, call_spec.out_count as i64);
+        let call_inst = builder.ins().call(
+            runtime_fn,
+            &[
+                name_ptr,
+                name_len,
+                fallback_value,
+                args_ptr,
+                arg_count,
+                specs_ptr,
+                spec_count,
+                out_count_value,
+                result_ptr,
+            ],
+        );
+        let status = builder.inst_results(call_inst)[0];
+        Self::load_turbine_value_payloads_or_zero(builder, status, result_ptr, call_spec.out_count)
+    }
+
+    fn load_turbine_value_payloads_or_zero(
+        builder: &mut FunctionBuilder,
+        status: Value,
+        result_ptr: Value,
+        out_count: usize,
+    ) -> Result<Vec<Value>> {
+        let zero = builder.ins().iconst(types::I32, 0);
+        let is_error = builder.ins().icmp(IntCC::NotEqual, status, zero);
+        let error_block = builder.create_block();
+        let success_block = builder.create_block();
+        let after_block = builder.create_block();
+        builder
+            .ins()
+            .brif(is_error, error_block, &[], success_block, &[]);
+        builder.switch_to_block(error_block);
+        builder.ins().return_(&[status]);
+        builder.switch_to_block(success_block);
+        let mut success_results = Vec::with_capacity(out_count);
+        for i in 0..out_count {
+            let payload_offset = (i * 16 + 8) as i64;
+            let payload_offset = builder.ins().iconst(types::I64, payload_offset);
+            let payload_ptr = builder.ins().iadd(result_ptr, payload_offset);
+            success_results.push(
+                builder
+                    .ins()
+                    .load(types::F64, MemFlags::new(), payload_ptr, 0),
+            );
+        }
+        builder.ins().jump(after_block, &success_results);
+        builder.switch_to_block(after_block);
+        for _ in 0..out_count {
+            builder.append_block_param(after_block, types::F64);
+        }
+        let results = builder.block_params(after_block).to_vec();
+        builder.seal_block(error_block);
+        builder.seal_block(success_block);
+        builder.seal_block(after_block);
+        Ok(results)
     }
 
     fn call_runtime_sub_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
@@ -837,10 +1816,6 @@ impl BytecodeCompiler {
 
     fn call_runtime_mul_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
         builder.ins().fmul(a, b)
-    }
-
-    fn call_runtime_div_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
-        builder.ins().fdiv(a, b)
     }
 
     fn call_runtime_pow_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
@@ -1626,6 +2601,69 @@ impl BytecodeCompiler {
 impl Default for BytecodeCompiler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn named_user_call_lowering_stays_centralized() {
+        let source = include_str!("compiler.rs");
+
+        assert_eq!(
+            source
+                .matches(&["Instr::", "CallFunctionMulti {",].concat())
+                .count(),
+            1
+        );
+        assert_eq!(
+            source
+                .matches(&["Self::", "compile_named_function_multi_call_jit("].concat())
+                .count(),
+            3
+        );
+        assert_eq!(
+            source
+                .matches(&["Self::", "compile_named_function_expand_multi_call_jit("].concat())
+                .count(),
+            2
+        );
+        assert_eq!(
+            source
+                .matches(&["Self::", "call_user_function_jit("].concat())
+                .count(),
+            0,
+            "legacy host callback should not be reachable after typed named-call lowering"
+        );
+    }
+
+    #[test]
+    fn expanded_call_abi_blocker_stays_explicit() {
+        let source = include_str!("compiler.rs");
+
+        assert_eq!(
+            source
+                .matches(&["return Self::", "unsupported_expanded_call_jit();"].concat())
+                .count(),
+            1
+        );
+        assert_eq!(
+            source
+                .matches(
+                    &[
+                        "Expanded calls require Turbine ",
+                        "non-scalar/cell/comma-list ABI",
+                    ]
+                    .concat(),
+                )
+                .count(),
+            1
+        );
+        assert!(
+            source.contains("Instr::CallFevalExpandMultiOutput(specs, out_count) => {")
+                && source.contains("let results = Self::call_feval_expanded_values_jit("),
+            "feval expanded calls should use the typed host bridge, not the generic expanded-call blocker",
+        );
     }
 }
 

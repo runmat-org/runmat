@@ -1,6 +1,6 @@
 #![cfg(feature = "wgpu")]
 
-use runmat_accelerate::backend::wgpu::provider_impl::WgpuProviderOptions;
+use runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate::fusion::{
     FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
@@ -15,7 +15,7 @@ static TEST_MUTEX: once_cell::sync::Lazy<tokio::sync::Mutex<()>> =
     once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(()));
 
 fn upload(
-    provider: &runmat_accelerate::backend::wgpu::provider_impl::WgpuProvider,
+    provider: &runmat_accelerate::backend::wgpu::provider::WgpuProvider,
     rows: usize,
     cols: usize,
     data: &[f64],
@@ -57,6 +57,7 @@ async fn fused_sum_square_dim0_matches_manual() {
         shape: ShapeInfo::Tensor(vec![Some(cols)]),
         span: InstrSpan { start: 0, end: 0 },
         pattern: None,
+        stack_layout: None,
     };
 
     let operations = vec![FusionOp::Primitive {
@@ -76,6 +77,7 @@ async fn fused_sum_square_dim0_matches_manual() {
         stack_pattern: vec![],
         constants,
         const_values: HashMap::new(),
+        materialized_stores: Vec::new(),
         output: None,
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,

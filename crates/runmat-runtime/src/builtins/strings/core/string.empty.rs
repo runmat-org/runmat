@@ -1,6 +1,10 @@
 //! MATLAB-compatible `string.empty` builtin for RunMat.
 
-use runmat_builtins::{StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -14,8 +18,149 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const LABEL: &str = "string.empty";
 
-fn string_empty_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(LABEL).build()
+const STRING_EMPTY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Empty string array with at least one zero dimension.",
+}];
+
+const STRING_EMPTY_INPUT_SZ: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "sz",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Size vector or scalar.",
+}];
+
+const STRING_EMPTY_INPUT_DIMS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "m",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First dimension.",
+    },
+    BuiltinParamDescriptor {
+        name: "n...",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional dimensions.",
+    },
+];
+
+const STRING_EMPTY_INPUT_LIKE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "dims...",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional explicit dimensions.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Literal option keyword \"like\".",
+    },
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype supplying trailing dimensions.",
+    },
+];
+
+const STRING_EMPTY_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "S = string.empty()",
+        inputs: &[],
+        outputs: &STRING_EMPTY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = string.empty(sz)",
+        inputs: &STRING_EMPTY_INPUT_SZ,
+        outputs: &STRING_EMPTY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = string.empty(m, n...)",
+        inputs: &STRING_EMPTY_INPUT_DIMS,
+        outputs: &STRING_EMPTY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = string.empty(___, \"like\", p)",
+        inputs: &STRING_EMPTY_INPUT_LIKE,
+        outputs: &STRING_EMPTY_OUTPUT,
+    },
+];
+
+const STRING_EMPTY_ERROR_INVALID_SIZE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRING_EMPTY.INVALID_SIZE",
+    identifier: Some("RunMat:string.empty:InvalidSize"),
+    when: "Size inputs are not valid numeric dimensions or vectors.",
+    message: "string.empty: size inputs must be numeric scalars or size vectors",
+};
+
+const STRING_EMPTY_ERROR_LIKE_MISSING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRING_EMPTY.LIKE_MISSING_PROTOTYPE",
+    identifier: Some("RunMat:string.empty:LikeMissingPrototype"),
+    when: "\"like\" keyword is present without a prototype.",
+    message: "string.empty: expected prototype after 'like'",
+};
+
+const STRING_EMPTY_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRING_EMPTY.LIKE_DUPLICATE",
+    identifier: Some("RunMat:string.empty:LikeDuplicate"),
+    when: "Multiple \"like\" specifications are supplied.",
+    message: "string.empty: multiple 'like' prototypes are not supported",
+};
+
+const STRING_EMPTY_ERROR_NOT_EMPTY_SHAPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRING_EMPTY.NONEMPTY_SHAPE",
+    identifier: Some("RunMat:string.empty:NonEmptyShape"),
+    when: "Parsed dimensions do not produce an empty array shape.",
+    message: "string.empty: at least one dimension must be zero",
+};
+
+const STRING_EMPTY_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRING_EMPTY.INTERNAL",
+    identifier: Some("RunMat:string.empty:InternalError"),
+    when: "Internal empty string-array construction failed.",
+    message: "string.empty: internal error",
+};
+
+const STRING_EMPTY_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    STRING_EMPTY_ERROR_INVALID_SIZE,
+    STRING_EMPTY_ERROR_LIKE_MISSING,
+    STRING_EMPTY_ERROR_LIKE_DUPLICATE,
+    STRING_EMPTY_ERROR_NOT_EMPTY_SHAPE,
+    STRING_EMPTY_ERROR_INTERNAL,
+];
+
+pub const STRING_EMPTY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STRING_EMPTY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &STRING_EMPTY_ERRORS,
+};
+
+fn string_empty_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    string_empty_error_with_message(error.message, error)
+}
+
+fn string_empty_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(LABEL);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn remap_string_empty_flow(err: RuntimeError) -> RuntimeError {
@@ -54,10 +199,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "string.empty",
     category = "strings/core",
-    summary = "Construct an empty string array with MATLAB-compatible dimensions.",
+    summary = "Construct empty string arrays with MATLAB-compatible dimension semantics.",
     keywords = "string.empty,empty,string array,preallocate",
     accel = "none",
     type_resolver(string_array_type),
+    descriptor(crate::builtins::strings::core::string_empty::STRING_EMPTY_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::core::string_empty"
 )]
 async fn string_empty_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -65,8 +211,8 @@ async fn string_empty_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let total: usize = shape.iter().product();
     debug_assert_eq!(total, 0, "string.empty must produce an empty array");
     let data = Vec::<String>::new();
-    let array =
-        StringArray::new(data, shape).map_err(|e| string_empty_flow(format!("{LABEL}: {e}")))?;
+    let array = StringArray::new(data, shape)
+        .map_err(|_| string_empty_error(&STRING_EMPTY_ERROR_INTERNAL))?;
     Ok(Value::StringArray(array))
 }
 
@@ -87,14 +233,10 @@ async fn parse_shape(args: &[Value]) -> BuiltinResult<Vec<usize>> {
         if let Some(keyword) = keyword_of(&arg_host) {
             if keyword.as_str() == "like" {
                 if like_shape.is_some() {
-                    return Err(string_empty_flow(format!(
-                        "{LABEL}: multiple 'like' prototypes are not supported"
-                    )));
+                    return Err(string_empty_error(&STRING_EMPTY_ERROR_LIKE_DUPLICATE));
                 }
                 let Some(proto_raw) = args.get(idx + 1) else {
-                    return Err(string_empty_flow(format!(
-                        "{LABEL}: expected prototype after 'like'"
-                    )));
+                    return Err(string_empty_error(&STRING_EMPTY_ERROR_LIKE_MISSING));
                 };
                 let proto = gather_if_needed_async(proto_raw)
                     .await
@@ -107,10 +249,9 @@ async fn parse_shape(args: &[Value]) -> BuiltinResult<Vec<usize>> {
             // be validated under numeric size parsing below.
         }
 
-        if let Some(parsed) = extract_dims(&arg_host, LABEL)
-            .await
-            .map_err(string_empty_flow)?
-        {
+        if let Some(parsed) = extract_dims(&arg_host, LABEL).await.map_err(|message| {
+            string_empty_error_with_message(message, &STRING_EMPTY_ERROR_INVALID_SIZE)
+        })? {
             if explicit_dims.is_empty() {
                 explicit_dims = parsed;
             } else {
@@ -120,9 +261,7 @@ async fn parse_shape(args: &[Value]) -> BuiltinResult<Vec<usize>> {
             continue;
         }
 
-        return Err(string_empty_flow(format!(
-            "{LABEL}: size inputs must be numeric scalars or size vectors"
-        )));
+        return Err(string_empty_error(&STRING_EMPTY_ERROR_INVALID_SIZE));
     }
 
     let shape = if !explicit_dims.is_empty() {
@@ -164,9 +303,7 @@ fn shape_from_like(proto: &[usize]) -> Vec<usize> {
 
 fn ensure_empty_shape(shape: &[usize]) -> BuiltinResult<()> {
     if shape.iter().product::<usize>() != 0 {
-        return Err(string_empty_flow(format!(
-            "{LABEL}: at least one dimension must be zero to construct an empty string array"
-        )));
+        return Err(string_empty_error(&STRING_EMPTY_ERROR_NOT_EMPTY_SHAPE));
     }
     Ok(())
 }

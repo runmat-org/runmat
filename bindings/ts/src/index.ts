@@ -36,14 +36,6 @@ export type {
   FusionPlanAdapter,
   FusionPlanAdapterOptions
 } from "./fusion-plan.js";
-export {
-  hydrateFigureSceneDataRefs,
-} from "./replay/scene-resolver.js";
-export type {
-  SceneHydrationDiagnostics,
-  SceneHydrationOptions,
-} from "./replay/scene-resolver.js";
-
 export type LanguageCompatMode = "matlab" | "strict";
 type RunMatPresetLogLevel = "trace" | "debug" | "info" | "warn" | "error";
 export type RunMatLogLevel = RunMatPresetLogLevel | (string & Record<never, never>);
@@ -103,6 +95,7 @@ export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
 export interface FigureEvent {
   handle: number;
   kind: FigureEventKind;
+  fingerprint?: string;
   figure?: FigureSnapshot;
 }
 
@@ -110,6 +103,15 @@ export interface FigureSnapshot {
   layout: FigureLayout;
   metadata: FigureMetadata;
   plots: FigurePlotDescriptor[];
+}
+
+export interface FigureTextStyle {
+  colorRgba?: [number, number, number, number];
+  fontSize?: number;
+  fontWeight?: string;
+  fontAngle?: string;
+  interpreter?: string;
+  visible: boolean;
 }
 
 export interface FigureLayout {
@@ -120,6 +122,8 @@ export interface FigureLayout {
 
 export interface FigureMetadata {
   title?: string;
+  sgTitle?: string;
+  sgTitleStyle?: FigureTextStyle;
   xLabel?: string;
   yLabel?: string;
   gridEnabled: boolean;
@@ -148,6 +152,7 @@ export interface FigurePlotDescriptor {
 
 export type FigurePlotKind =
   | "line"
+  | "line3"
   | "scatter"
   | "bar"
   | "error_bar"
@@ -156,7 +161,6 @@ export type FigurePlotKind =
   | "area"
   | "quiver"
   | "pie"
-  | "image"
   | "surface"
   | "scatter3"
   | "contour"
@@ -210,7 +214,7 @@ export type PlotSurfaceEvent =
       metaKey?: boolean;
     };
 
-export type StdoutStreamKind = "stdout" | "stderr";
+export type StdoutStreamKind = "stdout" | "stderr" | "clear";
 
 export interface StdoutEntry {
   stream: StdoutStreamKind;
@@ -291,6 +295,39 @@ export interface FigureImageOptions {
   handle?: number;
   width?: number;
   height?: number;
+  cameraState?: FigureImageCameraState;
+  textmark?: string;
+}
+
+export type FigureImageCameraProjectionState =
+  | {
+      kind: "perspective";
+      fov: number;
+      near: number;
+      far: number;
+    }
+  | {
+      kind: "orthographic";
+      left: number;
+      right: number;
+      bottom: number;
+      top: number;
+      near: number;
+      far: number;
+    };
+
+export interface FigureImageAxesCameraState {
+  position: [number, number, number];
+  target: [number, number, number];
+  up: [number, number, number];
+  zoom: number;
+  aspectRatio: number;
+  projection: FigureImageCameraProjectionState;
+}
+
+export interface FigureImageCameraState {
+  activeAxes: number;
+  axes: FigureImageAxesCameraState[];
 }
 
 export interface FigureBindingError extends Error {
@@ -315,7 +352,38 @@ export interface StdinEventLog {
   error?: string;
 }
 
+export type RuntimeFlow =
+  | { kind: "no-value" }
+  | { kind: "single"; value: unknown }
+  | { kind: "output-list"; values: unknown[] }
+  | { kind: "comma-list"; values: unknown[] }
+  | { kind: "dynamic-list"; id: string };
+
+export interface ExecuteRequestTextSource {
+  kind: "text";
+  name: string;
+  text: string;
+}
+
+export interface ExecuteRequestPathSource {
+  kind: "path";
+  path: string;
+}
+
+export type ExecuteRequestSource = ExecuteRequestTextSource | ExecuteRequestPathSource;
+
+export interface ExecuteRequest {
+  source: ExecuteRequestSource;
+  compatibility?: LanguageCompatMode;
+  hostPolicy?: {
+    topLevelAwait?: boolean;
+  };
+  requestedOutputs?: number;
+}
+
 export interface ExecuteResult {
+  flow: RuntimeFlow;
+  displayEvents: DisplayEvent[];
   valueText?: string;
   valueJson?: unknown;
   typeInfo?: string;
@@ -329,6 +397,16 @@ export interface ExecuteResult {
   stdinEvents: StdinEventLog[];
   profiling?: ProfilingSummary;
   fusionPlan?: FusionPlanSnapshot;
+}
+
+export interface DisplayEvent {
+  label: string;
+  valueText: string;
+  valueJson: unknown;
+  span: {
+    start: number;
+    end: number;
+  };
 }
 
 export type RunMatErrorKind = "syntax" | "semantic" | "compile" | "runtime";
@@ -376,6 +454,7 @@ export interface WorkspaceSnapshot {
   full: boolean;
   version: number;
   values: WorkspaceEntry[];
+  removals?: string[];
 }
 
 export interface WorkspaceEntry {
@@ -497,14 +576,22 @@ export interface MemoryUsage {
 }
 
 export interface RunMatSessionHandle {
-  execute(source: string): Promise<ExecuteResult>;
+  executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): Promise<void>;
   stats(): Promise<SessionStats>;
   clearWorkspace(): void;
   exportWorkspaceState(options?: { includeVariables?: "off" | "auto" | "force" }): Promise<Uint8Array | null>;
   importWorkspaceState(state: Uint8Array): Promise<boolean>;
+  workspaceSnapshot(): Promise<WorkspaceSnapshot>;
+  inspectDataFile(path: string): Promise<WorkspaceEntry[]>;
+  materializeDataFileVariable(
+    path: string,
+    selector: WorkspaceMaterializeSelector,
+    options?: MaterializeVariableOptions
+  ): Promise<MaterializedVariable>;
   exportFigureScene?(handle: number): Promise<Uint8Array | null>;
   importFigureScene?(scene: Uint8Array): Promise<number | null>;
+  importFigureSceneFromPath?(path: string): Promise<number | null>;
   currentFigureHandle?(): Promise<number>;
   dispose(): void;
   telemetryConsent(): boolean;
@@ -512,7 +599,6 @@ export interface RunMatSessionHandle {
   telemetryClientId(): string | undefined;
   gpuStatus(): GpuStatus;
   cancelExecution(): void;
-  cancelPendingRequests(): void;
   setInputHandler(handler: InputHandler | null): Promise<void>;
   materializeVariable(
     selector: WorkspaceMaterializeSelector,
@@ -521,6 +607,7 @@ export interface RunMatSessionHandle {
   setFusionPlanEnabled(enabled: boolean): void;
   setLanguageCompat(mode: LanguageCompatMode): void;
   fusionPlanForSource?(source: string): Promise<FusionPlanSnapshot | null>;
+  setFsProvider?(provider: RunMatFilesystemProvider): Promise<void>;
 }
 
 interface NativeInitOptions {
@@ -544,17 +631,26 @@ interface NativeInitOptions {
   callstackLimit?: number;
   errorNamespace?: string;
   languageCompat?: LanguageCompatMode;
+  fsProvider?: RunMatFilesystemProvider;
 }
 
 interface RunMatNativeSession {
-  execute(source: string): Promise<ExecuteResult>;
+  executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): void;
   stats(): SessionStats;
   clearWorkspace(): void;
   exportWorkspaceState?: (includeVariables?: string) => Promise<Uint8Array | null>;
   importWorkspaceState?: (state: Uint8Array) => boolean;
+  workspaceSnapshot?: () => WorkspaceSnapshot;
+  inspectDataFile?: (path: string) => WorkspaceEntry[] | Promise<WorkspaceEntry[]>;
+  materializeDataFileVariable?: (
+    path: string,
+    array: string,
+    options?: MaterializeVariableOptionsWire
+  ) => MaterializedVariable | Promise<MaterializedVariable>;
   exportFigureScene?: (handle: number) => Uint8Array | null;
-  importFigureScene?: (scene: Uint8Array) => number | null;
+  importFigureScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
+  importFigureSceneFromPath?: (path: string) => number | null | Promise<number | null>;
   currentFigureHandle?: () => number;
   dispose?: () => void;
   telemetryConsent(): boolean;
@@ -562,7 +658,6 @@ interface RunMatNativeSession {
   telemetryClientId?: () => string | undefined;
   gpuStatus(): GpuStatus;
   cancelExecution?: () => void;
-  cancelPendingRequests?: () => void;
   setInputHandler?: (handler: InputHandler | null) => void;
   materializeVariable?: (
     selector: WorkspaceMaterializeSelectorWire,
@@ -571,6 +666,7 @@ interface RunMatNativeSession {
   setFusionPlanEnabled?: (enabled: boolean) => void;
   setLanguageCompat?: (mode: LanguageCompatMode) => void;
   fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
+  setFsProvider?: (provider: RunMatFilesystemProvider) => void;
 }
 
 type WorkspaceMaterializeSelectorWire =
@@ -624,18 +720,14 @@ export interface PlotSurfaceCameraState {
 interface RunMatNativeModule {
   default: (module?: WasmInitInput | Promise<WasmInitInput>) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
-  registerFsProvider?: (provider: RunMatFilesystemProvider) => void;
-  // Legacy plot canvas bindings (handle-based).
-  registerPlotCanvas?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<void>;
-  deregisterPlotCanvas?: () => void;
-  registerFigureCanvas?: (handle: number, canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<void>;
-  deregisterFigureCanvas?: (handle: number) => void;
   plotRendererReady?: () => boolean;
   renderCurrentFigureScene?: (handle: number) => void;
   exportFigureScene?: (handle: number) => Uint8Array | null;
-  importFigureScene?: (scene: Uint8Array) => number | null;
+  importFigureScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
+  importFigureSceneFromPath?: (path: string) => number | null | Promise<number | null>;
   exportWorkspaceState?: (includeVariables?: string) => Promise<Uint8Array | null>;
   importWorkspaceState?: (state: Uint8Array) => boolean;
+  workspaceSnapshot?: () => WorkspaceSnapshot;
   createPlotSurface?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<number>;
   destroyPlotSurface?: (surfaceId: number) => void;
   resizePlotSurface?: (
@@ -660,9 +752,23 @@ interface RunMatNativeModule {
   setHoldMode?: (mode: HoldMode) => boolean;
   configureSubplot?: (rows: number, cols: number, index: number) => void;
   clearFigure?: (handle: number | null) => number;
+  resetPlotState?: () => void;
   closeFigure?: (handle: number | null) => number;
   currentAxesInfo?: () => AxesInfo;
   renderFigureImage?: (handle: number | null, width: number, height: number) => Promise<Uint8Array>;
+  renderFigureImageWithTextmark?: (
+    handle: number | null,
+    width: number,
+    height: number,
+    textmark?: string
+  ) => Promise<Uint8Array>;
+  renderFigureImageWithCameraState?: (
+    handle: number | null,
+    width: number,
+    height: number,
+    cameraState: FigureImageCameraState,
+    textmark?: string
+  ) => Promise<Uint8Array>;
   subscribeStdout?: (listener: (entry: StdoutEntry) => void) => number;
   unsubscribeStdout?: (id: number) => void;
   subscribeRuntimeLog?: (listener: (entry: RuntimeLogEntry) => void) => number;
@@ -703,18 +809,8 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
   const native = await loadNativeModule(options.wasmModule);
   const snapshotResolution = await resolveSnapshotSource(options.snapshot);
   const fsProvider = await resolveFsProvider(options.fsProvider);
-  if (fsProvider) {
-    if (typeof native.registerFsProvider !== "function") {
-      throw new Error("The loaded runmat-wasm module does not support filesystem providers yet.");
-    }
-    native.registerFsProvider(fsProvider);
-  }
   if (options.plotCanvas) {
-    if (typeof native.registerPlotCanvas === "function") {
-      // Legacy binding: register the default plot canvas before initializing the session.
-      await native.registerPlotCanvas(options.plotCanvas);
-    } else if (typeof native.createPlotSurface === "function") {
-      // New binding: create a surface for the provided canvas. The caller is responsible for binding/presenting.
+    if (typeof native.createPlotSurface === "function") {
       await native.createPlotSurface(options.plotCanvas);
     } else {
       const err = new Error(
@@ -763,7 +859,8 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     emitFusionPlan: options.emitFusionPlan ?? false,
     callstackLimit: options.callstackLimit,
     errorNamespace: options.errorNamespace,
-    languageCompat: options.language?.compat
+    languageCompat: options.language?.compat,
+    fsProvider
   });
   return new WebRunMatSession(session);
 }
@@ -774,22 +871,6 @@ export async function plotRendererReady(): Promise<boolean> {
     return false;
   }
   return native.plotRendererReady();
-}
-
-export async function deregisterPlotCanvas(): Promise<void> {
-  const native = await loadNativeModule();
-  if (typeof native.deregisterPlotCanvas !== "function") {
-    throw new Error("The loaded runmat-wasm module does not expose deregisterPlotCanvas.");
-  }
-  native.deregisterPlotCanvas();
-}
-
-export async function deregisterFigureCanvas(handle: number): Promise<void> {
-  const native = await loadNativeModule();
-  if (typeof native.deregisterFigureCanvas !== "function") {
-    throw new Error("The loaded runmat-wasm module does not expose deregisterFigureCanvas.");
-  }
-  native.deregisterFigureCanvas(handle);
 }
 
 export async function createPlotSurface(canvas: HTMLCanvasElement | OffscreenCanvas): Promise<number> {
@@ -991,6 +1072,16 @@ export async function clearFigure(handle?: number): Promise<number> {
   }
 }
 
+export async function resetPlotState(): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "resetPlotState");
+  try {
+    native.resetPlotState();
+  } catch (error) {
+    throw coerceFigureError(error);
+  }
+}
+
 export async function closeFigure(handle?: number): Promise<number> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "closeFigure");
@@ -1013,8 +1104,28 @@ export async function renderFigureImage(options: FigureImageOptions = {}): Promi
   const handle = typeof options.handle === "number" ? options.handle : null;
   const width = options.width ?? 0;
   const height = options.height ?? 0;
+  const hasTextmark = typeof options.textmark === "string";
+  const textmark = hasTextmark ? options.textmark : undefined;
   try {
-    const bytes = await native.renderFigureImage(handle, width, height);
+    let bytes: Uint8Array | ArrayLike<number> | null | undefined;
+    if (options.cameraState) {
+        if (typeof native.renderFigureImageWithCameraState !== "function") {
+          throw new Error(
+            "The loaded runmat-wasm module does not support renderFigureImageWithCameraState yet."
+          );
+        }
+        bytes = await native.renderFigureImageWithCameraState(
+          handle,
+          width,
+          height,
+          options.cameraState,
+          textmark
+        );
+    } else if (hasTextmark && typeof native.renderFigureImageWithTextmark === "function") {
+      bytes = await native.renderFigureImageWithTextmark(handle, width, height, textmark);
+    } else {
+      bytes = await native.renderFigureImage(handle, width, height);
+    }
     if (bytes instanceof Uint8Array) {
       return bytes;
     }
@@ -1046,10 +1157,23 @@ export async function importFigureScene(scene: Uint8Array): Promise<number | nul
     return null;
   }
   try {
-    const handle = native.importFigureScene(scene);
+    const handle = await native.importFigureScene(scene);
     return typeof handle === "number" ? handle : null;
-  } catch {
+  } catch (error) {
+    throw coerceFigureError(error);
+  }
+}
+
+export async function importFigureSceneFromPath(path: string): Promise<number | null> {
+  const native = await loadNativeModule();
+  if (typeof native.importFigureSceneFromPath !== "function") {
     return null;
+  }
+  try {
+    const handle = await native.importFigureSceneFromPath(path);
+    return typeof handle === "number" ? handle : null;
+  } catch (error) {
+    throw coerceFigureError(error);
   }
 }
 
@@ -1088,10 +1212,10 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
   }
 
-  async execute(source: string): Promise<ExecuteResult> {
+  async executeRequest(request: ExecuteRequest): Promise<ExecuteResult> {
     this.ensureActive();
     try {
-      return await this.native.execute(source);
+      return await this.native.executeRequest(request);
     } catch (error) {
       throw coerceRunMatError(error);
     }
@@ -1134,6 +1258,44 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
   }
 
+  async workspaceSnapshot(): Promise<WorkspaceSnapshot> {
+    this.ensureActive();
+    requireNativeFunction(this.native, "workspaceSnapshot");
+    return this.native.workspaceSnapshot();
+  }
+
+  async inspectDataFile(path: string): Promise<WorkspaceEntry[]> {
+    this.ensureActive();
+    if (typeof this.native.inspectDataFile !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose inspectDataFile yet.");
+    }
+    const entries = await this.native.inspectDataFile(path);
+    return Array.isArray(entries) ? entries : [];
+  }
+
+  async materializeDataFileVariable(
+    path: string,
+    selector: WorkspaceMaterializeSelector,
+    options?: MaterializeVariableOptions
+  ): Promise<MaterializedVariable> {
+    this.ensureActive();
+    if (typeof this.native.materializeDataFileVariable !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose materializeDataFileVariable yet.");
+    }
+    const normalized = normalizeMaterializeSelector(selector);
+    const arrayName =
+      typeof normalized === "string" ? normalized : normalized.name ?? normalized.previewToken;
+    if (!arrayName) {
+      throw new Error("materializeDataFileVariable selector requires name");
+    }
+    const wireOptions = normalizeMaterializeOptions(options);
+    return this.native.materializeDataFileVariable(
+      path,
+      arrayName,
+      wireOptions as MaterializeVariableOptionsWire | undefined
+    );
+  }
+
   async exportFigureScene(handle: number): Promise<Uint8Array | null> {
     this.ensureActive();
     if (typeof this.native.exportFigureScene !== "function") {
@@ -1152,10 +1314,23 @@ class WebRunMatSession implements RunMatSessionHandle {
       return null;
     }
     try {
-      const handle = this.native.importFigureScene(scene);
+      const handle = await this.native.importFigureScene(scene);
       return typeof handle === "number" ? handle : null;
-    } catch {
+    } catch (error) {
+      throw coerceFigureError(error);
+    }
+  }
+
+  async importFigureSceneFromPath(path: string): Promise<number | null> {
+    this.ensureActive();
+    if (typeof this.native.importFigureSceneFromPath !== "function") {
       return null;
+    }
+    try {
+      const handle = await this.native.importFigureSceneFromPath(path);
+      return typeof handle === "number" ? handle : null;
+    } catch (error) {
+      throw coerceFigureError(error);
     }
   }
 
@@ -1210,15 +1385,6 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
   }
 
-  cancelPendingRequests(): void {
-    if (this.disposed) {
-      return;
-    }
-    if (typeof this.native.cancelPendingRequests === "function") {
-      this.native.cancelPendingRequests();
-    }
-  }
-
   async setInputHandler(handler: InputHandler | null): Promise<void> {
     this.ensureActive();
     if (typeof this.native.setInputHandler !== "function") {
@@ -1263,6 +1429,14 @@ class WebRunMatSession implements RunMatSessionHandle {
     } catch (error) {
       throw coerceRunMatError(error);
     }
+  }
+
+  async setFsProvider(provider: RunMatFilesystemProvider): Promise<void> {
+    this.ensureActive();
+    if (typeof this.native.setFsProvider !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose setFsProvider yet.");
+    }
+    this.native.setFsProvider(provider);
   }
 }
 
@@ -1641,5 +1815,5 @@ export const __internals = {
 };
 
 function isNativeSession(value: unknown): value is RunMatNativeSession {
-  return Boolean(value && typeof (value as RunMatNativeSession).execute === "function");
+  return Boolean(value && typeof (value as RunMatNativeSession).executeRequest === "function");
 }

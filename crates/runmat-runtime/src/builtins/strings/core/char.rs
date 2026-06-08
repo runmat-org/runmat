@@ -1,6 +1,10 @@
 //! MATLAB-compatible `char` builtin with GPU-aware conversion semantics for RunMat.
 
-use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, LogicalArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -39,27 +43,129 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Character materialisation runs outside of fusion; results always live on the host.",
 };
 
+const BUILTIN_NAME: &str = "char";
+
+const CHAR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Character array result.",
+}];
+
+const CHAR_INPUT_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to convert into character data.",
+}];
+
+const CHAR_INPUT_VARIADIC: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X...",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Multiple inputs converted row-wise and padded.",
+}];
+
+const CHAR_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "C = char()",
+        inputs: &[],
+        outputs: &CHAR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = char(X)",
+        inputs: &CHAR_INPUT_SINGLE,
+        outputs: &CHAR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = char(X...)",
+        inputs: &CHAR_INPUT_VARIADIC,
+        outputs: &CHAR_OUTPUT,
+    },
+];
+
+const CHAR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CHAR.INVALID_INPUT",
+    identifier: Some("RunMat:char:InvalidInput"),
+    when: "Input type cannot be converted to character data.",
+    message: "char: invalid input",
+};
+
+const CHAR_ERROR_INVALID_CODEPOINT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CHAR.INVALID_CODEPOINT",
+    identifier: Some("RunMat:char:InvalidCodePoint"),
+    when: "Numeric input is not a finite integer Unicode code point.",
+    message: "char: numeric inputs must be finite Unicode code points",
+};
+
+const CHAR_ERROR_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CHAR.INVALID_DIMENSION",
+    identifier: Some("RunMat:char:InvalidDimension"),
+    when: "Array inputs are not 2-D (or trailing singleton dimensions).",
+    message: "char: inputs must be 2-D",
+};
+
+const CHAR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CHAR.INTERNAL",
+    identifier: Some("RunMat:char:InternalError"),
+    when: "Internal character array construction failed.",
+    message: "char: internal error",
+};
+
+const CHAR_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    CHAR_ERROR_INVALID_INPUT,
+    CHAR_ERROR_INVALID_CODEPOINT,
+    CHAR_ERROR_DIMENSION,
+    CHAR_ERROR_INTERNAL,
+];
+
+pub const CHAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CHAR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CHAR_ERRORS,
+};
+
+fn char_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    char_error_with_message(error.message, error)
+}
+
+fn char_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn char_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("char").build()
+    char_error_with_message(message, &CHAR_ERROR_INTERNAL)
 }
 
 fn remap_char_flow(err: RuntimeError) -> RuntimeError {
-    map_control_flow_with_builtin(err, "char")
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
 
 #[runtime_builtin(
     name = "char",
     category = "strings/core",
-    summary = "Convert numeric codes, strings, and cell contents into a character array.",
+    summary = "Convert numeric codes and text values into character arrays.",
     keywords = "char,character,string,gpu",
     accel = "conversion",
     type_resolver(string_array_type),
+    descriptor(crate::builtins::strings::core::char::CHAR_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::core::char"
 )]
 async fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         let empty =
-            CharArray::new(Vec::new(), 0, 0).map_err(|e| char_flow(format!("char: {e}")))?;
+            CharArray::new(Vec::new(), 0, 0).map_err(|_| char_error(&CHAR_ERROR_INTERNAL))?;
         return Ok(Value::CharArray(empty));
     }
 
@@ -81,7 +187,7 @@ async fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     if rows.is_empty() {
         let empty =
-            CharArray::new(Vec::new(), 0, 0).map_err(|e| char_flow(format!("char: {e}")))?;
+            CharArray::new(Vec::new(), 0, 0).map_err(|_| char_error(&CHAR_ERROR_INTERNAL))?;
         return Ok(Value::CharArray(empty));
     }
 
@@ -97,11 +203,21 @@ async fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 
     let array =
-        CharArray::new(data, total_rows, cols).map_err(|e| char_flow(format!("char: {e}")))?;
+        CharArray::new(data, total_rows, cols).map_err(|_| char_error(&CHAR_ERROR_INTERNAL))?;
     Ok(Value::CharArray(array))
 }
 
 fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
+    if let Some(array) = crate::builtins::datetime::datetime_char_array(value)
+        .map_err(|err| char_flow(err.message().to_string()))?
+    {
+        return Ok(char_array_rows(&array));
+    }
+    if let Some(array) = crate::builtins::duration::duration_char_array(value)
+        .map_err(|err| char_flow(err.message().to_string()))?
+    {
+        return Ok(char_array_rows(&array));
+    }
     match value {
         Value::CharArray(ca) => Ok(char_array_rows(ca)),
         Value::String(s) => Ok(vec![s.chars().collect()]),
@@ -118,22 +234,26 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
         Value::Tensor(t) => tensor_rows(t),
         Value::LogicalArray(la) => logical_rows(la),
         Value::Cell(ca) => cell_rows(ca),
-        Value::GpuTensor(_) => Err(char_flow("char: expected host data after gather")),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(char_flow("char: complex inputs are not supported"))
-        }
+        Value::GpuTensor(_) => Err(char_error(&CHAR_ERROR_INVALID_INPUT)),
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(char_error_with_message(
+            "char: complex inputs are not supported",
+            &CHAR_ERROR_INVALID_INPUT,
+        )),
         Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(char_flow(format!(
-            "char: unsupported input type {:?}",
-            value
-        ))),
+        | Value::OutputList(_) => Err(char_error_with_message(
+            format!("char: unsupported input type {:?}", value),
+            &CHAR_ERROR_INVALID_INPUT,
+        )),
     }
 }
 
@@ -222,8 +342,9 @@ fn cell_rows(ca: &CellArray) -> BuiltinResult<Vec<Vec<char>>> {
             0 => rows.push(Vec::new()),
             1 => rows.push(converted.remove(0)),
             _ => {
-                return Err(char_flow(
+                return Err(char_error_with_message(
                     "char: cell elements must be character vectors or string scalars",
+                    &CHAR_ERROR_INVALID_INPUT,
                 ))
             }
         }
@@ -233,27 +354,37 @@ fn cell_rows(ca: &CellArray) -> BuiltinResult<Vec<Vec<char>>> {
 
 fn number_to_char(value: f64) -> BuiltinResult<char> {
     if !value.is_finite() {
-        return Err(char_flow("char: numeric inputs must be finite"));
+        return Err(char_error_with_message(
+            "char: numeric inputs must be finite",
+            &CHAR_ERROR_INVALID_CODEPOINT,
+        ));
     }
     let rounded = value.round();
     if (value - rounded).abs() > 1e-9 {
-        return Err(char_flow(format!(
-            "char: numeric inputs must be integers in the Unicode range (got {value})"
-        )));
+        return Err(char_error_with_message(
+            format!("char: numeric inputs must be integers in the Unicode range (got {value})"),
+            &CHAR_ERROR_INVALID_CODEPOINT,
+        ));
     }
     if rounded < 0.0 {
-        return Err(char_flow(format!(
-            "char: negative code points are invalid (got {rounded})"
-        )));
+        return Err(char_error_with_message(
+            format!("char: negative code points are invalid (got {rounded})"),
+            &CHAR_ERROR_INVALID_CODEPOINT,
+        ));
     }
     if rounded > 0x10FFFF as f64 {
-        return Err(char_flow(format!(
-            "char: code point {} exceeds Unicode range",
-            rounded as u64
-        )));
+        return Err(char_error_with_message(
+            format!("char: code point {} exceeds Unicode range", rounded as u64),
+            &CHAR_ERROR_INVALID_CODEPOINT,
+        ));
     }
     let code = rounded as u32;
-    char::from_u32(code).ok_or_else(|| char_flow(format!("char: invalid code point {code}")))
+    char::from_u32(code).ok_or_else(|| {
+        char_error_with_message(
+            format!("char: invalid code point {code}"),
+            &CHAR_ERROR_INVALID_CODEPOINT,
+        )
+    })
 }
 
 fn ensure_two_dimensional(shape: &[usize], context: &str) -> BuiltinResult<()> {
@@ -263,7 +394,10 @@ fn ensure_two_dimensional(shape: &[usize], context: &str) -> BuiltinResult<()> {
     if shape.iter().skip(2).all(|&d| d == 1) {
         return Ok(());
     }
-    Err(char_flow(format!("{context}: inputs must be 2-D")))
+    Err(char_error_with_message(
+        format!("{context}: inputs must be 2-D"),
+        &CHAR_ERROR_DIMENSION,
+    ))
 }
 
 fn infer_rows_cols(shape: &[usize], len: usize) -> (usize, usize) {

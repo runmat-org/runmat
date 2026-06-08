@@ -3,7 +3,11 @@
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::linalg::{matrix_dimensions_for, singular_value_rcond};
@@ -16,6 +20,51 @@ use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rcond";
+
+const RCOND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "c",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Reciprocal condition number estimate.",
+}];
+
+const RCOND_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input square matrix.",
+}];
+
+const RCOND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "c = rcond(A)",
+    inputs: &RCOND_INPUTS,
+    outputs: &RCOND_OUTPUT,
+}];
+
+const RCOND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RCOND.INVALID_INPUT",
+    identifier: Some("RunMat:rcond:InvalidInput"),
+    when: "Input shape/type is unsupported for reciprocal condition estimation.",
+    message: "rcond: invalid input",
+};
+
+const RCOND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RCOND.INTERNAL",
+    identifier: Some("RunMat:rcond:Internal"),
+    when: "Runtime fails while computing rcond or executing fallback/upload paths.",
+    message: "rcond: internal runtime failure",
+};
+
+const RCOND_ERRORS: [BuiltinErrorDescriptor; 2] = [RCOND_ERROR_INVALID_INPUT, RCOND_ERROR_INTERNAL];
+
+pub const RCOND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &RCOND_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &RCOND_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::rcond")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -33,8 +82,19 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may reuse dense solver factorizations to expose rcond; current backends gather to the host and re-upload a scalar value when possible.",
 };
 
+fn rcond_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+    rcond_error_with_message(message, &RCOND_ERROR_INVALID_INPUT)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -77,6 +137,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "rcond,condition number,reciprocal,gpu",
     accel = "rcond",
     type_resolver(numeric_scalar_type),
+    descriptor(crate::builtins::math::linalg::solve::rcond::RCOND_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::solve::rcond"
 )]
 async fn rcond_builtin(value: Value) -> BuiltinResult<Value> {
@@ -202,6 +263,7 @@ async fn rcond_gpu_via_linsolve(
     };
 
     let options = runmat_accelerate_api::ProviderLinsolveOptions {
+        need_rcond: true,
         rcond: None,
         ..Default::default()
     };
@@ -355,6 +417,23 @@ pub(crate) mod tests {
         assert_eq!(out, Type::Num);
     }
 
+    #[test]
+    fn rcond_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = RCOND_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"c = rcond(A)"));
+    }
+
+    #[test]
+    fn rcond_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = RCOND_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.RCOND.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.RCOND.INTERNAL"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rcond_zero_is_zero() {
@@ -409,6 +488,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
         let err = unwrap_error(rcond_builtin(Value::Tensor(tensor)).unwrap_err());
         assert_eq!(err.message(), "rcond: input must be a square matrix.");
+        assert_eq!(err.identifier(), RCOND_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

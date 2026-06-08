@@ -5,11 +5,16 @@
 
 pub mod arg_tokens;
 pub mod broadcast;
+pub mod concatenation;
+pub mod deal;
+pub mod elementwise;
 pub mod env;
 pub mod format;
 pub mod fs;
 pub mod gpu_helpers;
+pub mod indexing;
 pub mod linalg;
+pub mod matrix;
 pub mod path_search;
 pub mod path_state;
 pub mod random;
@@ -28,6 +33,19 @@ pub(crate) fn map_control_flow_with_builtin(
 ) -> crate::RuntimeError {
     if err.context.builtin.is_none() {
         err.context = err.context.with_builtin(builtin);
+    }
+    if err.identifier.is_none() {
+        let segment = builtin
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        err.identifier = Some(format!("RunMat:{segment}:Error"));
     }
     err
 }

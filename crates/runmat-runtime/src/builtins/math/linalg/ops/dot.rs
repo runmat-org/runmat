@@ -6,7 +6,11 @@
 //! downstream consumers can remain device-resident.
 
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -19,6 +23,102 @@ use crate::builtins::math::linalg::type_resolvers::dot_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DOT_NAME: &str = "dot";
+
+const DOT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Dot product result.",
+}];
+
+const DOT_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right operand.",
+    },
+];
+
+const DOT_INPUTS_DIM: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Reduction dimension.",
+    },
+];
+
+const DOT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = dot(A, B)",
+        inputs: &DOT_INPUTS,
+        outputs: &DOT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = dot(A, B, dim)",
+        inputs: &DOT_INPUTS_DIM,
+        outputs: &DOT_OUTPUT,
+    },
+];
+
+const DOT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DOT.INVALID_ARGUMENT",
+    identifier: Some("RunMat:dot:InvalidArgument"),
+    when: "Argument count or dimension argument is invalid.",
+    message: "dot: invalid argument",
+};
+
+const DOT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DOT.INVALID_INPUT",
+    identifier: Some("RunMat:dot:InvalidInput"),
+    when: "Inputs are unsupported or incompatible.",
+    message: "dot: A and B must be the same size.",
+};
+
+const DOT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DOT.INTERNAL",
+    identifier: Some("RunMat:dot:Internal"),
+    when: "Runtime cannot materialize dot outputs.",
+    message: "dot: internal runtime failure",
+};
+
+const DOT_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    DOT_ERROR_INVALID_ARGUMENT,
+    DOT_ERROR_INVALID_INPUT,
+    DOT_ERROR_INTERNAL,
+];
+
+pub const DOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DOT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DOT_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::dot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -36,20 +136,48 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Dispatches to a provider-side dot implementation when available; otherwise gathers operands and re-uploads real outputs.",
 };
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(DOT_NAME).build()
+fn dot_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    dot_error_with_message(error.message, error)
 }
 
-async fn parse_dimension_arg(value: &Value) -> Result<usize, String> {
+fn dot_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(DOT_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn dot_invalid_argument(message: impl Into<String>) -> RuntimeError {
+    dot_error_with_message(message, &DOT_ERROR_INVALID_ARGUMENT)
+}
+
+fn dot_invalid_input(message: impl Into<String>) -> RuntimeError {
+    dot_error_with_message(message, &DOT_ERROR_INVALID_INPUT)
+}
+
+fn dot_internal_error(message: impl Into<String>) -> RuntimeError {
+    dot_error_with_message(message, &DOT_ERROR_INTERNAL)
+}
+
+async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(_) | Value::Num(_) => tensor::dimension_from_value_async(value, DOT_NAME, false)
-            .await
-            .and_then(|dim| {
-                dim.ok_or_else(|| format!("{DOT_NAME}: dimension must be numeric, got {value:?}"))
-            }),
-        _ => Err(format!(
+        Value::Int(_) | Value::Num(_) => {
+            let dim = tensor::dimension_from_value_async(value, DOT_NAME, false)
+                .await
+                .map_err(dot_invalid_argument)?;
+            dim.ok_or_else(|| {
+                dot_invalid_argument(format!(
+                    "{DOT_NAME}: dimension must be numeric, got {value:?}"
+                ))
+            })
+        }
+        _ => Err(dot_invalid_argument(format!(
             "{DOT_NAME}: dimension must be numeric, got {value:?}"
-        )),
+        ))),
     }
 }
 
@@ -89,18 +217,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "dot",
     category = "math/linalg/ops",
-    summary = "Dot product (inner product) of matching tensors along a specified dimension.",
+    summary = "Compute dot products.",
     keywords = "dot,inner product,gpu,linear algebra",
     accel = "reduction",
     type_resolver(dot_type),
+    descriptor(crate::builtins::math::linalg::ops::dot::DOT_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::ops::dot"
 )]
 async fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(builtin_error("dot: too many input arguments"));
+        return Err(dot_invalid_argument("dot: too many input arguments"));
     }
     let dim = match rest.first() {
-        Some(value) => Some(parse_dimension_arg(value).await.map_err(builtin_error)?),
+        Some(value) => Some(parse_dimension_arg(value).await?),
         None => None,
     };
 
@@ -134,9 +263,9 @@ async fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<
         complex_tensor_into_value(result)
     } else {
         let lhs_tensor =
-            tensor::value_into_tensor_for(DOT_NAME, lhs_host).map_err(builtin_error)?;
+            tensor::value_into_tensor_for(DOT_NAME, lhs_host).map_err(dot_invalid_input)?;
         let rhs_tensor =
-            tensor::value_into_tensor_for(DOT_NAME, rhs_host).map_err(builtin_error)?;
+            tensor::value_into_tensor_for(DOT_NAME, rhs_host).map_err(dot_invalid_input)?;
         let result = dot_real_tensor(&lhs_tensor, &rhs_tensor, dim)?;
         tensor::tensor_into_value(result)
     };
@@ -156,28 +285,28 @@ fn value_into_complex_tensor(value: Value) -> BuiltinResult<ComplexTensor> {
     match value {
         Value::ComplexTensor(t) => Ok(t),
         Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
-            .map_err(|e| builtin_error(format!("{DOT_NAME}: {e}"))),
+            .map_err(|e| dot_invalid_input(format!("{DOT_NAME}: {e}"))),
         Value::Tensor(t) => real_tensor_to_complex(&t),
         Value::Num(n) => {
             let tensor = Tensor::new(vec![n], vec![1, 1])
-                .map_err(|e| builtin_error(format!("{DOT_NAME}: {e}")))?;
+                .map_err(|e| dot_invalid_input(format!("{DOT_NAME}: {e}")))?;
             real_tensor_to_complex(&tensor)
         }
         Value::Int(i) => {
             let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1])
-                .map_err(|e| builtin_error(format!("{DOT_NAME}: {e}")))?;
+                .map_err(|e| dot_invalid_input(format!("{DOT_NAME}: {e}")))?;
             real_tensor_to_complex(&tensor)
         }
         Value::Bool(b) => {
             let tensor = Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|e| builtin_error(format!("{DOT_NAME}: {e}")))?;
+                .map_err(|e| dot_invalid_input(format!("{DOT_NAME}: {e}")))?;
             real_tensor_to_complex(&tensor)
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(e))?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(dot_invalid_input)?;
             real_tensor_to_complex(&tensor)
         }
-        other => Err(builtin_error(format!(
+        other => Err(dot_invalid_input(format!(
             "{DOT_NAME}: unsupported input type {:?}; expected numeric or logical values",
             other
         ))),
@@ -190,7 +319,7 @@ fn real_tensor_to_complex(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
     for &value in &tensor.data {
         data.push((value, 0.0));
     }
-    ComplexTensor::new(data, shape).map_err(|e| builtin_error(format!("{DOT_NAME}: {e}")))
+    ComplexTensor::new(data, shape).map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))
 }
 
 fn dot_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResult<Tensor> {
@@ -224,7 +353,7 @@ fn dot_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResult<
 
     let mut out_shape = shape.clone();
     out_shape[dim_index] = 1;
-    Tensor::new(output, out_shape).map_err(|e| builtin_error(format!("{DOT_NAME}: {e}")))
+    Tensor::new(output, out_shape).map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))
 }
 
 fn dot_complex_tensor(
@@ -267,7 +396,8 @@ fn dot_complex_tensor(
 
     let mut out_shape = shape.clone();
     out_shape[dim_index] = 1;
-    ComplexTensor::new(output, out_shape).map_err(|e| builtin_error(format!("{DOT_NAME}: {e}")))
+    ComplexTensor::new(output, out_shape)
+        .map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))
 }
 
 pub fn dot_host_real_for_provider(
@@ -292,7 +422,7 @@ fn elementwise_real_product(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
         data.push(x * y);
     }
     let shape = canonical_shape_tensor(a);
-    Tensor::new(data, shape).map_err(|e| builtin_error(format!("{DOT_NAME}: {e}")))
+    Tensor::new(data, shape).map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))
 }
 
 fn elementwise_complex_product(
@@ -306,33 +436,25 @@ fn elementwise_complex_product(
         data.push((real, imag));
     }
     let shape = canonical_shape_complex(a);
-    ComplexTensor::new(data, shape).map_err(|e| builtin_error(format!("{DOT_NAME}: {e}")))
+    ComplexTensor::new(data, shape).map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))
 }
 
 fn ensure_same_size(a: &Tensor, b: &Tensor) -> BuiltinResult<()> {
     if a.data.len() != b.data.len() {
-        return Err(builtin_error(format!(
-            "{DOT_NAME}: A and B must be the same size."
-        )));
+        return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
     }
     if canonical_shape_tensor(a) != canonical_shape_tensor(b) {
-        return Err(builtin_error(format!(
-            "{DOT_NAME}: A and B must be the same size."
-        )));
+        return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
     }
     Ok(())
 }
 
 fn ensure_same_size_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<()> {
     if a.data.len() != b.data.len() {
-        return Err(builtin_error(format!(
-            "{DOT_NAME}: A and B must be the same size."
-        )));
+        return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
     }
     if canonical_shape_complex(a) != canonical_shape_complex(b) {
-        return Err(builtin_error(format!(
-            "{DOT_NAME}: A and B must be the same size."
-        )));
+        return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
     }
     Ok(())
 }
@@ -385,11 +507,11 @@ fn promote_result_to_gpu(value: Value) -> BuiltinResult<Value> {
         }
         Value::Num(n) => {
             let tensor = Tensor::new(vec![n], vec![1, 1])
-                .map_err(|e| builtin_error(format!("{DOT_NAME}: {e}")))?;
+                .map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))?;
             promote_result_to_gpu(Value::Tensor(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(|e| builtin_error(e))?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(dot_internal_error)?;
             promote_result_to_gpu(Value::Tensor(tensor))
         }
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
@@ -460,6 +582,25 @@ pub(crate) mod tests {
             &ctx,
         );
         assert_eq!(out, Type::Num);
+    }
+
+    #[test]
+    fn dot_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = DOT_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"C = dot(A, B)"));
+        assert!(labels.contains(&"C = dot(A, B, dim)"));
+    }
+
+    #[test]
+    fn dot_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = DOT_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.DOT.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.DOT.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.DOT.INTERNAL"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -608,6 +749,7 @@ pub(crate) mod tests {
         let err = unwrap_error(
             dot_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect_err("dot"),
         );
+        assert_eq!(err.identifier(), DOT_ERROR_INVALID_INPUT.identifier);
         assert!(err.message().contains("A and B must be the same size"));
     }
 
@@ -624,6 +766,7 @@ pub(crate) mod tests {
             )
             .expect_err("expected dimension error"),
         );
+        assert_eq!(err.identifier(), DOT_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("dimension must be >= 1"));
     }
 
@@ -640,6 +783,7 @@ pub(crate) mod tests {
             )
             .expect_err("expected integer dimension error"),
         );
+        assert_eq!(err.identifier(), DOT_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("dimension must be an integer"));
     }
 

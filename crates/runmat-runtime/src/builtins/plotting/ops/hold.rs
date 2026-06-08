@@ -1,69 +1,104 @@
 //! MATLAB-compatible `hold` builtin.
 
 use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_macros::runtime_builtin;
 
-use super::plotting_error;
+use super::op_common::cmd_parsing::parse_hold_mode;
 use super::state::{set_hold, HoldMode};
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::bool_type;
 
-use crate::BuiltinResult;
+const HOLD_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "enabled",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when hold is enabled after command execution.",
+}];
 
-fn parse_mode(value: &Value) -> BuiltinResult<HoldMode> {
-    match value {
-        Value::CharArray(chars) => {
-            let text: String = chars.data.iter().collect();
-            parse_mode_str(text.trim())
-        }
-        Value::String(s) => parse_mode_str(s.trim()),
-        Value::Num(v) => Ok(if *v == 0.0 {
-            HoldMode::Off
-        } else {
-            HoldMode::On
-        }),
-        Value::Bool(b) => Ok(if *b { HoldMode::On } else { HoldMode::Off }),
-        Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
-                return Err(plotting_error("hold", "hold: logical scalar expected"));
-            }
-            Ok(if tensor.data[0] == 0.0 {
-                HoldMode::Off
-            } else {
-                HoldMode::On
-            })
-        }
-        _ => Err(plotting_error("hold", "hold: unsupported argument type")),
-    }
-}
+const HOLD_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
 
-fn parse_mode_str(text: &str) -> BuiltinResult<HoldMode> {
-    match text.to_ascii_lowercase().as_str() {
-        "on" | "all" => Ok(HoldMode::On),
-        "off" => Ok(HoldMode::Off),
-        "" => Ok(HoldMode::Toggle),
-        _ => Err(plotting_error("hold", "hold: expected 'on' or 'off'")),
-    }
-}
+const HOLD_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "mode",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Optional,
+    default: Some("\"toggle\""),
+    description: "Hold mode ('on'|'off'|'all') or numeric/logical scalar.",
+}];
+
+const HOLD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "enabled = hold()",
+        inputs: &HOLD_INPUTS_NONE,
+        outputs: &HOLD_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "enabled = hold(mode)",
+        inputs: &HOLD_INPUTS_MODE,
+        outputs: &HOLD_OUTPUT_STATUS,
+    },
+];
+
+const HOLD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HOLD.INVALID_ARGUMENT",
+    identifier: Some("RunMat:hold:InvalidArgument"),
+    when: "Hold mode argument is unsupported.",
+    message: "hold: invalid argument",
+};
+
+const HOLD_ERRORS: [BuiltinErrorDescriptor; 1] = [HOLD_ERROR_INVALID_ARGUMENT];
+
+pub const HOLD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &HOLD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &HOLD_ERRORS,
+};
 
 #[runtime_builtin(
     name = "hold",
     category = "plotting",
-    summary = "Toggle whether plots replace or append to the current axes.",
+    summary = "Control plot replacement versus appending.",
     keywords = "hold,plotting",
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(bool_type),
+    descriptor(crate::builtins::plotting::hold::HOLD_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::hold"
 )]
-pub fn hold_builtin(rest: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn hold_builtin(rest: Vec<Value>) -> crate::BuiltinResult<bool> {
     let mode = if rest.is_empty() {
         HoldMode::Toggle
     } else {
-        parse_mode(&rest[0])?
+        parse_hold_mode(&rest[0])?
     };
     let enabled = set_hold(mode);
-    Ok(if enabled {
-        "hold is on".to_string()
-    } else {
-        "hold is off".to_string()
-    })
+    Ok(enabled)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hold_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = HOLD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"enabled = hold()"));
+        assert!(labels.contains(&"enabled = hold(mode)"));
+    }
+
+    #[test]
+    fn hold_toggle_and_explicit_modes_work() {
+        let _ = hold_builtin(Vec::new()).unwrap();
+        let on = hold_builtin(vec![Value::String("on".into())]).unwrap();
+        assert!(on);
+        let off = hold_builtin(vec![Value::String("off".into())]).unwrap();
+        assert!(!off);
+    }
 }

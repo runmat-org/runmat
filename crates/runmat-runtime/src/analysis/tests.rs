@@ -1561,6 +1561,7 @@ fn gpu_run_with_provider_emits_device_refs() {
                 Ok(HostTensorOwned {
                     data: vec![0.0; h.shape.iter().product()],
                     shape: h.shape.clone(),
+                    storage: runmat_accelerate_api::handle_storage(h),
                 })
             })
         }
@@ -2710,6 +2711,7 @@ fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
                 Ok(HostTensorOwned {
                     data: vec![0.0; h.shape.iter().product()],
                     shape: h.shape.clone(),
+                    storage: runmat_accelerate_api::handle_storage(h),
                 })
             })
         }
@@ -2771,6 +2773,7 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
                 Ok(HostTensorOwned {
                     data: vec![0.0; h.shape.iter().product()],
                     shape: h.shape.clone(),
+                    storage: runmat_accelerate_api::handle_storage(h),
                 })
             })
         }

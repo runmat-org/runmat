@@ -1,7 +1,11 @@
 //! MATLAB-compatible `rem` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
@@ -68,10 +72,80 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "rem";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const REM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "R",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise remainder result.",
+}];
+const REM_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dividend input (numeric/logical/char/complex).",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Divisor input (numeric/logical/char/complex).",
+    },
+];
+const REM_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "R = rem(A, B)",
+    inputs: &REM_INPUTS,
+    outputs: &REM_OUTPUT,
+}];
+const REM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REM.INVALID_INPUT",
+    identifier: Some("RunMat:rem:InvalidInput"),
+    when: "Inputs cannot be interpreted as numeric, logical, char, or complex operands.",
+    message: "rem: invalid input",
+};
+const REM_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REM.SIZE_MISMATCH",
+    identifier: Some("RunMat:rem:SizeMismatch"),
+    when: "Operands are not broadcast-compatible.",
+    message: "rem: array sizes are not compatible for broadcasting",
+};
+const REM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REM.INTERNAL",
+    identifier: Some("RunMat:rem:Internal"),
+    when: "Internal tensor conversion, allocation, or provider composition failed.",
+    message: "rem: internal error",
+};
+const REM_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    REM_ERROR_INVALID_INPUT,
+    REM_ERROR_SIZE_MISMATCH,
+    REM_ERROR_INTERNAL,
+];
+pub const REM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &REM_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &REM_ERRORS,
+};
+
+fn rem_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    rem_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn rem_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -81,6 +155,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     keywords = "rem,remainder,truncate,gpu",
     accel = "binary",
     type_resolver(numeric_binary_type),
+    descriptor(crate::builtins::math::rounding::rem::REM_DESCRIPTOR),
     builtin_path = "crate::builtins::math::rounding::rem"
 )]
 async fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -110,7 +185,7 @@ async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
                                     let _ = provider.free(&div);
                                     let _ = provider.free(&fixed);
                                     let _ = provider.free(&mul);
-                                    return Ok(Value::GpuTensor(out));
+                                    return Ok(gpu_helpers::resident_gpu_value(out));
                                 }
                                 Err(_) => {
                                     let _ = provider.free(&mul);
@@ -140,8 +215,8 @@ fn rem_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     if let Some(result) = scalar_rem_value(&lhs, &rhs) {
         return Ok(result);
     }
-    let left = value_into_numeric_array(lhs, "rem")?;
-    let right = value_into_numeric_array(rhs, "rem")?;
+    let left = value_into_numeric_array(lhs)?;
+    let right = value_into_numeric_array(rhs)?;
     match align_numeric_arrays(left, right)? {
         NumericPair::Real(a, b) => compute_rem_real(&a, &b),
         NumericPair::Complex(a, b) => compute_rem_complex(&a, &b),
@@ -150,10 +225,10 @@ fn rem_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 
 fn compute_rem_real(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape)
-        .map_err(|err| builtin_error(format!("rem: {err}")))?;
+        .map_err(|err| rem_error_with_detail(&REM_ERROR_SIZE_MISMATCH, err))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("rem: {e}")))?;
+            .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let mut result = vec![0.0f64; plan.len()];
@@ -161,16 +236,16 @@ fn compute_rem_real(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
         result[out_idx] = rem_real_scalar(a.data[idx_a], b.data[idx_b]);
     }
     let tensor = Tensor::new(result, plan.output_shape().to_vec())
-        .map_err(|e| builtin_error(format!("rem: {e}")))?;
+        .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
 fn compute_rem_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape)
-        .map_err(|err| builtin_error(format!("rem: {err}")))?;
+        .map_err(|err| rem_error_with_detail(&REM_ERROR_SIZE_MISMATCH, err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("rem: {e}")))?;
+            .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))?;
         return Ok(complex_tensor_into_value(tensor));
     }
     let mut result = vec![(0.0f64, 0.0f64); plan.len()];
@@ -180,7 +255,7 @@ fn compute_rem_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<Va
         result[out_idx] = rem_complex_scalar(ar, ai, br, bi);
     }
     let tensor = ComplexTensor::new(result, plan.output_shape().to_vec())
-        .map_err(|e| builtin_error(format!("rem: {e}")))?;
+        .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -288,29 +363,31 @@ fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
     }
 }
 
-fn value_into_numeric_array(value: Value, name: &str) -> BuiltinResult<NumericArray> {
+fn value_into_numeric_array(value: Value) -> BuiltinResult<NumericArray> {
     match value {
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| builtin_error(format!("{name}: {e}")))?;
+                .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))?;
             Ok(NumericArray::Complex(tensor))
         }
         Value::ComplexTensor(ct) => Ok(NumericArray::Complex(ct)),
         Value::CharArray(ca) => {
             let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
             let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-                .map_err(|e| builtin_error(format!("{name}: {e}")))?;
+                .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))?;
             Ok(NumericArray::Real(tensor))
         }
-        Value::String(_) | Value::StringArray(_) => Err(builtin_error(format!(
-            "{name}: expected numeric input, got string"
-        ))),
-        Value::GpuTensor(_) => Err(builtin_error(format!(
-            "{name}: internal error converting GPU tensor"
-        ))),
+        Value::String(_) | Value::StringArray(_) => Err(rem_error_with_detail(
+            &REM_ERROR_INVALID_INPUT,
+            "expected numeric input, got string",
+        )),
+        Value::GpuTensor(_) => Err(rem_error_with_detail(
+            &REM_ERROR_INTERNAL,
+            "internal error converting GPU tensor",
+        )),
         other => {
-            let tensor =
-                tensor::value_into_tensor_for(name, other).map_err(|err| builtin_error(err))?;
+            let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other)
+                .map_err(|err| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, err))?;
             Ok(NumericArray::Real(tensor))
         }
     }
@@ -330,19 +407,20 @@ fn align_numeric_arrays(lhs: NumericArray, rhs: NumericArray) -> BuiltinResult<N
     match (lhs, rhs) {
         (NumericArray::Real(a), NumericArray::Real(b)) => Ok(NumericPair::Real(a, b)),
         (left, right) => {
-            let lc = into_complex("rem", left)?;
-            let rc = into_complex("rem", right)?;
+            let lc = into_complex(left)?;
+            let rc = into_complex(right)?;
             Ok(NumericPair::Complex(lc, rc))
         }
     }
 }
 
-fn into_complex(name: &str, input: NumericArray) -> BuiltinResult<ComplexTensor> {
+fn into_complex(input: NumericArray) -> BuiltinResult<ComplexTensor> {
     match input {
         NumericArray::Real(t) => {
             let Tensor { data, shape, .. } = t;
             let complex: Vec<(f64, f64)> = data.into_iter().map(|re| (re, 0.0)).collect();
-            ComplexTensor::new(complex, shape).map_err(|e| builtin_error(format!("{name}: {e}")))
+            ComplexTensor::new(complex, shape)
+                .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))
         }
         NumericArray::Complex(ct) => Ok(ct),
     }
@@ -368,6 +446,16 @@ pub(crate) mod tests {
             "unexpected error: {}",
             error.message()
         );
+    }
+
+    #[test]
+    fn rem_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = REM_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"R = rem(A, B)"));
     }
 
     #[test]
@@ -602,7 +690,9 @@ pub(crate) mod tests {
     fn rem_string_input_errors() {
         let err = rem_builtin(Value::from("abc"), Value::Num(3.0))
             .expect_err("string inputs should error");
+        let identifier = err.identifier().map(str::to_string);
         assert_error_contains(err, "expected numeric input");
+        assert_eq!(identifier.as_deref(), REM_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -1,11 +1,10 @@
-use runmat_builtins::{LogicalArray, NumericDType, Value};
+use runmat_builtins::{LogicalArray, Value};
 
 /// MATLAB-style class name for a runtime value.
 pub fn matlab_class_name(value: &Value) -> String {
     match value {
-        Value::Num(_) | Value::Tensor(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => {
-            "double".to_string()
-        }
+        Value::Num(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => "double".to_string(),
+        Value::Tensor(tensor) => tensor.dtype.class_name().to_string(),
         Value::Int(iv) => iv.class_name().to_string(),
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
         Value::String(_) | Value::StringArray(_) => "string".to_string(),
@@ -13,7 +12,11 @@ pub fn matlab_class_name(value: &Value) -> String {
         Value::Cell(_) => "cell".to_string(),
         Value::Struct(_) => "struct".to_string(),
         Value::GpuTensor(_) => "gpuArray".to_string(),
-        Value::FunctionHandle(_) | Value::Closure(_) => "function_handle".to_string(),
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
+        | Value::Closure(_) => "function_handle".to_string(),
         Value::HandleObject(handle) => {
             if handle.class_name.is_empty() {
                 "handle".to_string()
@@ -43,6 +46,11 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::ComplexTensor(t) => Some(t.shape.clone()),
         Value::Cell(ca) => Some(ca.shape.clone()),
         Value::GpuTensor(handle) => Some(handle.shape.clone()),
+        Value::Object(obj) if obj.is_class("datetime") => match obj.properties.get("__serial") {
+            Some(Value::Tensor(tensor)) => Some(tensor.shape.clone()),
+            Some(Value::Num(_)) => Some(vec![1, 1]),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -51,10 +59,7 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
 pub fn numeric_dtype_label(value: &Value) -> Option<&'static str> {
     match value {
         Value::Num(_) | Value::Complex(_, _) => Some("double"),
-        Value::Tensor(t) => Some(match t.dtype {
-            NumericDType::F32 => "single",
-            NumericDType::F64 => "double",
-        }),
+        Value::Tensor(t) => Some(t.dtype.class_name()),
         Value::LogicalArray(_) => Some("logical"),
         Value::Int(iv) => Some(iv.class_name()),
         _ => None,
@@ -93,6 +98,9 @@ pub fn preview_numeric_values(value: &Value, limit: usize) -> Option<(Vec<f64>, 
         | Value::Listener(_)
         | Value::OutputList(_)
         | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
@@ -115,4 +123,36 @@ fn preview_logical_slice(arr: &LogicalArray, limit: usize) -> (Vec<f64>, bool) {
         preview.push(if *value == 0 { 0.0 } else { 1.0 });
     }
     (preview, truncated)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{NumericDType, ObjectInstance, Tensor};
+
+    #[test]
+    fn approximate_size_bytes_uses_f64_width_for_integer_dtypes() {
+        // Tensor.data is always Vec<f64> (8 bytes/element) regardless of dtype.
+        let u8_tensor = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![3, 1], NumericDType::U8)
+            .expect("tensor");
+        let u16_tensor = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![3, 1], NumericDType::U16)
+            .expect("tensor");
+        let f32_tensor = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![3, 1], NumericDType::F32)
+            .expect("tensor");
+
+        assert_eq!(approximate_size_bytes(&Value::Tensor(u8_tensor)), Some(24));
+        assert_eq!(approximate_size_bytes(&Value::Tensor(u16_tensor)), Some(24));
+        assert_eq!(approximate_size_bytes(&Value::Tensor(f32_tensor)), Some(24));
+    }
+
+    #[test]
+    fn datetime_object_shape_comes_from_internal_serial_tensor() {
+        let mut object = ObjectInstance::new("datetime".to_string());
+        object.properties.insert(
+            "__serial".to_string(),
+            Value::Tensor(Tensor::new(vec![739351.0, 739352.0], vec![2, 1]).expect("tensor")),
+        );
+
+        assert_eq!(value_shape(&Value::Object(object)), Some(vec![2, 1]));
+    }
 }

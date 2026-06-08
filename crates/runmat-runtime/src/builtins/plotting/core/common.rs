@@ -52,6 +52,22 @@ pub fn numeric_triplet(
     Ok((x_vec, y_vec, z_vec))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_pair_accepts_matching_numel_vectors_with_different_shapes() {
+        let row = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap();
+        let column = Tensor::new(vec![10.0, 20.0, 30.0, 40.0], vec![4, 1]).unwrap();
+
+        let (x, y) = numeric_pair(row, column, "plot").expect("matching numel vectors");
+
+        assert_eq!(x, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(y, vec![10.0, 20.0, 30.0, 40.0]);
+    }
+}
+
 pub fn value_as_f64(value: &Value) -> Option<f64> {
     match value {
         Value::Num(v) => Some(*v),
@@ -177,6 +193,34 @@ pub fn tensor_to_surface_grid(
     for (row, row_vec) in grid.iter_mut().enumerate() {
         for (col, cell) in row_vec.iter_mut().enumerate().take(y_len) {
             let idx = col * x_len + row; // column-major layout
+            *cell = z.data[idx];
+        }
+    }
+    Ok(grid)
+}
+
+/// Convert a MATLAB surface matrix Z (rows x cols) into the plot grid layout expected by
+/// `SurfacePlot::new(x_axis, y_axis, z_grid)` where x indexes columns and y indexes rows.
+pub fn tensor_to_surface_grid_matlab_xy(
+    z: Tensor,
+    rows: usize,
+    cols: usize,
+    context: &'static str,
+) -> BuiltinResult<Vec<Vec<f64>>> {
+    let expected_len = rows
+        .checked_mul(cols)
+        .ok_or_else(|| plotting_error(context, format!("{context}: grid dimensions overflowed")))?;
+    if z.rows != rows || z.cols != cols || z.data.len() != expected_len {
+        return Err(plotting_error(
+            context,
+            format!("{context}: Z must have shape {rows}x{cols} to match X({cols}) and Y({rows})"),
+        ));
+    }
+
+    let mut grid = vec![vec![0.0; rows]; cols];
+    for (x_col, x_col_values) in grid.iter_mut().enumerate() {
+        for (y_row, cell) in x_col_values.iter_mut().enumerate() {
+            let idx = y_row + rows * x_col;
             *cell = z.data[idx];
         }
     }

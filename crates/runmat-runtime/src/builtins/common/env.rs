@@ -31,10 +31,10 @@ pub fn var(key: &str) -> io::Result<String> {
         if let Some(value) = guard.get(key) {
             return Ok(value.clone());
         }
-        return Err(io::Error::new(
+        Err(io::Error::new(
             io::ErrorKind::NotFound,
             format!("Environment variable not found: {key}"),
-        ));
+        ))
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -46,7 +46,7 @@ pub fn vars() -> Vec<(String, String)> {
     #[cfg(target_arch = "wasm32")]
     {
         let guard = env_lock().read().expect("env lock poisoned");
-        return guard.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        guard.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     }
     #[cfg(not(target_arch = "wasm32"))]
     {

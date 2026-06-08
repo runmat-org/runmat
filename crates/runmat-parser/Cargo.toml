@@ -1,6 +1,6 @@
 [package]
 name = "runmat-parser"
-version = "0.2.8"
+version = "0.5.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
@@ -10,7 +10,6 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 runmat-lexer = { workspace = true }
-logos = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]

@@ -1,7 +1,11 @@
 //! MATLAB-compatible `angle` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -9,7 +13,7 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -56,19 +60,65 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "angle";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const ANGLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "theta",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Phase angle in radians.",
+}];
+const ANGLE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric, logical, char, or complex input.",
+}];
+const ANGLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "theta = angle(X)",
+    inputs: &ANGLE_INPUTS,
+    outputs: &ANGLE_OUTPUT,
+}];
+const ANGLE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ANGLE.INVALID_INPUT",
+    identifier: Some("RunMat:angle:InvalidInput"),
+    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
+    message: "angle: invalid input",
+};
+const ANGLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ANGLE.INTERNAL",
+    identifier: Some("RunMat:angle:Internal"),
+    when: "Internal tensor conversion/allocation/provider interaction failed.",
+    message: "angle: internal error",
+};
+const ANGLE_ERRORS: [BuiltinErrorDescriptor; 2] = [ANGLE_ERROR_INVALID_INPUT, ANGLE_ERROR_INTERNAL];
+pub const ANGLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ANGLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ANGLE_ERRORS,
+};
+
+fn builtin_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "angle",
     category = "math/elementwise",
-    summary = "Phase angle of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Phase angle (argument) of real and complex values.",
     keywords = "angle,phase,argument,complex,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::elementwise::angle::ANGLE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::angle"
 )]
 async fn angle_builtin(value: Value) -> BuiltinResult<Value> {
@@ -77,9 +127,10 @@ async fn angle_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Complex(re, im) => Ok(Value::Num(angle_scalar(re, im))),
         Value::ComplexTensor(ct) => angle_complex_tensor(ct),
         Value::CharArray(ca) => angle_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("angle: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(builtin_error_with_detail(
+            &ANGLE_ERROR_INVALID_INPUT,
+            "expected numeric input",
+        )),
         other => angle_real(other),
     }
 }
@@ -92,20 +143,20 @@ async fn angle_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        .map_err(|err| builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, err.to_string()))?;
     Ok(tensor::tensor_into_value(angle_tensor(tensor)?))
 }
 
 fn angle_real(value: Value) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for("angle", value)
-        .map_err(|e| builtin_error(format!("angle: {e}")))?;
+        .map_err(|e| builtin_error_with_detail(&ANGLE_ERROR_INVALID_INPUT, e))?;
     Ok(tensor::tensor_into_value(angle_tensor(tensor)?))
 }
 
 fn angle_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let Tensor { data, shape, .. } = tensor;
     let mapped: Vec<f64> = data.into_iter().map(|re| angle_scalar(re, 0.0)).collect();
-    Tensor::new(mapped, shape).map_err(|e| builtin_error(format!("angle: {e}")))
+    Tensor::new(mapped, shape).map_err(|e| builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, e))
 }
 
 fn angle_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -114,7 +165,8 @@ fn angle_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         .into_iter()
         .map(|(re, im)| angle_scalar(re, im))
         .collect();
-    let tensor = Tensor::new(mapped, shape).map_err(|e| builtin_error(format!("angle: {e}")))?;
+    let tensor = Tensor::new(mapped, shape)
+        .map_err(|e| builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -124,8 +176,8 @@ fn angle_char_array(ca: CharArray) -> BuiltinResult<Value> {
         .into_iter()
         .map(|ch| angle_scalar(ch as u32 as f64, 0.0))
         .collect();
-    let tensor =
-        Tensor::new(mapped, vec![rows, cols]).map_err(|e| builtin_error(format!("angle: {e}")))?;
+    let tensor = Tensor::new(mapped, vec![rows, cols])
+        .map_err(|e| builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -144,6 +196,16 @@ pub(crate) mod tests {
 
     fn angle_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::angle_builtin(value))
+    }
+
+    #[test]
+    fn angle_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = ANGLE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"theta = angle(X)"));
     }
 
     #[test]
@@ -305,7 +367,9 @@ pub(crate) mod tests {
     #[test]
     fn angle_rejects_strings() {
         let err = angle_builtin(Value::from("hello")).unwrap_err();
-        assert!(err.message().contains("angle: expected numeric input"));
+        let identifier = err.identifier().map(str::to_string);
+        assert!(err.message().contains("expected numeric input"));
+        assert_eq!(identifier.as_deref(), ANGLE_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -313,7 +377,9 @@ pub(crate) mod tests {
     fn angle_rejects_string_arrays() {
         let array = StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2]).unwrap();
         let err = angle_builtin(Value::StringArray(array)).unwrap_err();
-        assert!(err.message().contains("angle: expected numeric input"));
+        let identifier = err.identifier().map(str::to_string);
+        assert!(err.message().contains("expected numeric input"));
+        assert_eq!(identifier.as_deref(), ANGLE_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

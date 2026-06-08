@@ -1,14 +1,8 @@
 use runmat_accelerate::fusion::{detect_fusion_groups, FusionKind, FusionPlan};
 use runmat_accelerate::graph::{AccelGraph, AccelNodeLabel, PrimitiveOp, ValueOrigin};
-use runmat_hir::{HirProgram, LoweringContext, SemanticError};
-use runmat_ignition::compile;
+use runmat_hir::LoweringContext;
 use runmat_parser::parse;
-use std::collections::HashMap;
 use std::sync::Once;
-
-fn lower(ast: &runmat_parser::Program) -> Result<HirProgram, SemanticError> {
-    runmat_hir::lower(ast, &LoweringContext::empty()).map(|result| result.hir)
-}
 
 fn init_logger() {
     static INIT: Once = Once::new();
@@ -19,8 +13,10 @@ fn init_logger() {
 fn compile_graph(source: &str) -> AccelGraph {
     let trimmed = source.trim_start_matches(|c: char| c.is_whitespace());
     let ast = parse(trimmed).expect("parse");
-    let hir = lower(&ast).expect("lower");
-    let bytecode = compile(&hir, &HashMap::new()).expect("compile");
+    let hir = runmat_hir::lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+    let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).expect("lower MIR");
+    let entrypoint = hir.assembly.entrypoints[0].id;
+    let bytecode = runmat_vm::compile(&hir.assembly, &mir, entrypoint).expect("compile semantic");
     bytecode.accel_graph.clone().expect("bytecode accel graph")
 }
 
@@ -56,7 +52,7 @@ fn stats_centered_gram_pattern() {
     assert!(count_primitives(&graph, PrimitiveOp::Sub) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Transpose) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Mul) >= 1);
-    assert!(count_primitives(&graph, PrimitiveOp::Div) >= 1);
+    assert!(count_primitives(&graph, PrimitiveOp::ElemDiv) >= 1);
     assert!(has_builtin(&graph, "diag"));
 }
 
@@ -168,7 +164,7 @@ fn monte_carlo_factor_risk_pattern() {
     assert!(count_primitives(&graph, PrimitiveOp::Sub) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Transpose) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Mul) >= 2);
-    assert!(count_primitives(&graph, PrimitiveOp::Div) >= 1);
+    assert!(count_primitives(&graph, PrimitiveOp::ElemDiv) >= 1);
     assert!(has_builtin(&graph, "diag"));
 }
 

@@ -1,0 +1,909 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use uuid::Uuid;
+use wasm_bindgen::prelude::JsValue;
+
+use crate::wire::errors::{js_error, RunMatErrorKind, RunMatErrorPayload, RunMatErrorSpanPayload};
+use crate::wire::value::{value_to_json, MAX_DATA_PREVIEW};
+use runmat_builtins::Value;
+use runmat_core::{
+    abi::{
+        DiagnosticSeverity, DisplayEvent, DisplayLabel, ExecutionOutcome, ExecutionSourceContext,
+        RuntimeDiagnostic, RuntimeFlow, WorkspaceBindingKey,
+    },
+    approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
+    value_shape, ExecutionProfiling, ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision,
+    FusionPlanEdge, FusionPlanNode, FusionPlanShader, FusionPlanSnapshot, MaterializedVariable,
+    StdinEvent, StdinEventKind, WorkspaceEntry, WorkspaceMaterializeOptions,
+    WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceResidency, WorkspaceSliceOptions,
+    WorkspaceSnapshot,
+};
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MaterializeSelectorPayload {
+    name: Option<String>,
+    #[serde(alias = "previewToken")]
+    token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MaterializeOptionsPayload {
+    limit: Option<usize>,
+    slice: Option<MaterializeSlicePayload>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MaterializeSlicePayload {
+    start: Vec<usize>,
+    shape: Vec<usize>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExecutionPayload {
+    pub(crate) flow: JsonValue,
+    pub(crate) display_events: Vec<DisplayEventPayload>,
+    pub(crate) value_text: Option<String>,
+    pub(crate) value_json: Option<JsonValue>,
+    pub(crate) type_info: Option<String>,
+    pub(crate) execution_time_ms: u64,
+    pub(crate) used_jit: bool,
+    pub(crate) error: Option<RunMatErrorPayload>,
+    pub(crate) stdout: Vec<ConsoleStreamPayload>,
+    pub(crate) workspace: WorkspacePayload,
+    pub(crate) figures_touched: Vec<u32>,
+    pub(crate) warnings: Vec<WarningPayload>,
+    pub(crate) stdin_events: Vec<StdinEventPayload>,
+    pub(crate) profiling: Option<ProfilingPayload>,
+    pub(crate) fusion_plan: Option<FusionPlanPayload>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MemoryUsagePayload {
+    pub(crate) bytes: u64,
+    pub(crate) pages: u32,
+}
+
+impl ExecutionPayload {
+    pub(crate) fn from_outcome(
+        outcome: ExecutionOutcome,
+        source_context: &ExecutionSourceContext,
+    ) -> Self {
+        let workspace = WorkspacePayload::from_outcome(&outcome);
+        let flow = runtime_flow_to_json(&outcome.flow);
+        let value = outcome.flow.durable_workspace_value().cloned();
+        let error = outcome
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+            .map(|diagnostic| error_payload_from_diagnostic(diagnostic, source_context));
+        Self {
+            flow,
+            display_events: outcome
+                .display_events
+                .into_iter()
+                .map(DisplayEventPayload::from)
+                .collect(),
+            value_text: value.as_ref().map(|value| value.to_string()),
+            value_json: value.as_ref().map(|value| value_to_json(value, 0)),
+            type_info: outcome.type_info,
+            execution_time_ms: outcome.execution_time_ms,
+            used_jit: outcome.used_jit,
+            error,
+            stdout: outcome
+                .streams
+                .into_iter()
+                .map(ConsoleStreamPayload::from)
+                .collect(),
+            workspace,
+            figures_touched: outcome.figures_touched,
+            warnings: outcome
+                .diagnostics
+                .into_iter()
+                .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Warning)
+                .map(WarningPayload::from_diagnostic)
+                .collect(),
+            stdin_events: outcome
+                .stdin_events
+                .into_iter()
+                .map(StdinEventPayload::from)
+                .collect(),
+            profiling: outcome.profiling.map(ProfilingPayload::from),
+            fusion_plan: outcome.fusion_plan.map(FusionPlanPayload::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DisplayEventPayload {
+    pub(crate) label: String,
+    pub(crate) value_text: String,
+    pub(crate) value_json: JsonValue,
+    pub(crate) span: DisplaySpanPayload,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DisplaySpanPayload {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+}
+
+impl From<DisplayEvent> for DisplayEventPayload {
+    fn from(event: DisplayEvent) -> Self {
+        Self {
+            label: match event.label {
+                DisplayLabel::Binding(name) => name.0,
+                DisplayLabel::Literal(label) => label,
+                DisplayLabel::Anonymous => "ans".to_string(),
+            },
+            value_text: event.value.to_string(),
+            value_json: value_to_json(&event.value, 0),
+            span: DisplaySpanPayload {
+                start: event.span.start,
+                end: event.span.end,
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConsoleStreamPayload {
+    pub(crate) stream: &'static str,
+    pub(crate) text: String,
+    pub(crate) timestamp_ms: u64,
+}
+
+impl From<ExecutionStreamEntry> for ConsoleStreamPayload {
+    fn from(entry: ExecutionStreamEntry) -> Self {
+        let stream = match entry.stream {
+            ExecutionStreamKind::Stdout => "stdout",
+            ExecutionStreamKind::Stderr => "stderr",
+            ExecutionStreamKind::ClearScreen => "clear",
+        };
+        Self {
+            stream,
+            text: entry.text,
+            timestamp_ms: entry.timestamp_ms,
+        }
+    }
+}
+
+impl ConsoleStreamPayload {
+    pub(crate) fn from_console_entry(entry: &runmat_runtime::console::ConsoleEntry) -> Self {
+        let stream = match entry.stream {
+            runmat_runtime::console::ConsoleStream::Stdout => "stdout",
+            runmat_runtime::console::ConsoleStream::Stderr => "stderr",
+            runmat_runtime::console::ConsoleStream::ClearScreen => "clear",
+        };
+        Self {
+            stream,
+            text: entry.text.clone(),
+            timestamp_ms: entry.timestamp_ms,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WarningPayload {
+    pub(crate) identifier: String,
+    pub(crate) message: String,
+}
+
+impl WarningPayload {
+    fn from_diagnostic(diagnostic: RuntimeDiagnostic) -> Self {
+        Self {
+            identifier: diagnostic.code,
+            message: diagnostic.message,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StdinEventPayload {
+    pub(crate) prompt: String,
+    pub(crate) kind: &'static str,
+    pub(crate) echo: bool,
+    pub(crate) value: Option<String>,
+    pub(crate) error: Option<String>,
+}
+
+impl From<StdinEvent> for StdinEventPayload {
+    fn from(event: StdinEvent) -> Self {
+        let kind = match event.kind {
+            StdinEventKind::Line => "line",
+            StdinEventKind::KeyPress => "keyPress",
+        };
+        Self {
+            prompt: event.prompt,
+            kind,
+            echo: event.echo,
+            value: event.value,
+            error: event.error,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkspacePayload {
+    pub(crate) full: bool,
+    pub(crate) version: u64,
+    pub(crate) values: Vec<WorkspaceEntryPayload>,
+    pub(crate) removals: Vec<String>,
+}
+
+impl From<WorkspaceSnapshot> for WorkspacePayload {
+    fn from(snapshot: WorkspaceSnapshot) -> Self {
+        Self {
+            full: snapshot.full,
+            version: snapshot.version,
+            values: snapshot
+                .values
+                .into_iter()
+                .map(WorkspaceEntryPayload::from)
+                .collect(),
+            removals: Vec::new(),
+        }
+    }
+}
+
+impl WorkspacePayload {
+    fn from_outcome(outcome: &ExecutionOutcome) -> Self {
+        Self {
+            full: outcome.workspace_delta.full_snapshot_required,
+            version: outcome.workspace_delta.version,
+            values: outcome
+                .workspace_delta
+                .upserts
+                .iter()
+                .filter_map(|binding| {
+                    let name = workspace_binding_name(&binding.key)?.to_string();
+                    Some(workspace_entry_from_value(name, &binding.value))
+                })
+                .collect(),
+            removals: outcome
+                .workspace_delta
+                .removals
+                .iter()
+                .filter_map(workspace_binding_name)
+                .map(ToString::to_string)
+                .collect(),
+        }
+    }
+}
+
+fn runtime_flow_to_json(flow: &RuntimeFlow) -> JsonValue {
+    match flow {
+        RuntimeFlow::NoValue => serde_json::json!({ "kind": "no-value" }),
+        RuntimeFlow::Single(value) => serde_json::json!({
+            "kind": "single",
+            "value": value_to_json(value, 0)
+        }),
+        RuntimeFlow::OutputList(values) => serde_json::json!({
+            "kind": "output-list",
+            "values": values.iter().map(|value| value_to_json(value, 0)).collect::<Vec<_>>()
+        }),
+        RuntimeFlow::CommaList(values) => serde_json::json!({
+            "kind": "comma-list",
+            "values": values.iter().map(|value| value_to_json(value, 0)).collect::<Vec<_>>()
+        }),
+        RuntimeFlow::DynamicList(handle) => serde_json::json!({
+            "kind": "dynamic-list",
+            "id": handle.0.to_string()
+        }),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkspaceEntryPayload {
+    pub(crate) name: String,
+    pub(crate) class_name: String,
+    pub(crate) dtype: Option<String>,
+    pub(crate) shape: Vec<usize>,
+    pub(crate) is_gpu: bool,
+    pub(crate) size_bytes: Option<u64>,
+    pub(crate) preview: Option<WorkspacePreviewPayload>,
+    pub(crate) residency: &'static str,
+    pub(crate) preview_token: Option<String>,
+}
+
+impl From<WorkspaceEntry> for WorkspaceEntryPayload {
+    fn from(entry: WorkspaceEntry) -> Self {
+        Self {
+            name: entry.name,
+            class_name: entry.class_name,
+            dtype: entry.dtype,
+            shape: entry.shape,
+            is_gpu: entry.is_gpu,
+            size_bytes: entry.size_bytes,
+            preview: entry.preview.map(WorkspacePreviewPayload::from),
+            residency: entry.residency.as_str(),
+            preview_token: entry.preview_token.map(|id| id.to_string()),
+        }
+    }
+}
+
+fn workspace_binding_name(key: &WorkspaceBindingKey) -> Option<&str> {
+    match key {
+        WorkspaceBindingKey::Interactive { name, .. }
+        | WorkspaceBindingKey::SourceBinding { binding: name, .. }
+        | WorkspaceBindingKey::Global { name, .. }
+        | WorkspaceBindingKey::Persistent { name, .. } => Some(name.0.as_str()),
+    }
+}
+
+fn workspace_entry_from_value(name: String, value: &Value) -> WorkspaceEntryPayload {
+    let shape = value_shape(value).unwrap_or_default();
+    let is_gpu = matches!(value, Value::GpuTensor(_));
+    let preview = if is_gpu {
+        None
+    } else {
+        preview_numeric_values(value, MAX_DATA_PREVIEW).map(|(values, truncated)| {
+            WorkspacePreviewPayload::from(WorkspacePreview { values, truncated })
+        })
+    };
+    WorkspaceEntryPayload {
+        name,
+        class_name: matlab_class_name(value),
+        dtype: numeric_dtype_label(value).map(|label| label.to_string()),
+        shape,
+        is_gpu,
+        size_bytes: approximate_size_bytes(value),
+        preview,
+        residency: if is_gpu {
+            WorkspaceResidency::Gpu.as_str()
+        } else {
+            WorkspaceResidency::Cpu.as_str()
+        },
+        preview_token: None,
+    }
+}
+
+fn error_payload_from_diagnostic(
+    diagnostic: &RuntimeDiagnostic,
+    source_context: &ExecutionSourceContext,
+) -> RunMatErrorPayload {
+    let span = source_context.source_text().and_then(|source| {
+        diagnostic.span.map(|span| {
+            let (line, column) = line_col_from_source(source, span.start);
+            RunMatErrorSpanPayload {
+                start: span.start,
+                end: span.end,
+                line,
+                column,
+            }
+        })
+    });
+    let diagnostic_text = match (source_context.source_text(), diagnostic.span) {
+        (Some(source), Some(span)) => {
+            runmat_runtime::build_runtime_error(diagnostic.message.clone())
+                .with_identifier(diagnostic.code.clone())
+                .with_span((span.start, span.end.saturating_sub(span.start).max(1)).into())
+                .with_call_stack(diagnostic.callstack.clone())
+                .with_call_frames_elided(diagnostic.callstack_elided)
+                .build()
+                .format_diagnostic_with_source(Some(source_context.source_name()), Some(source))
+        }
+        _ => diagnostic.message.clone(),
+    };
+    RunMatErrorPayload {
+        kind: RunMatErrorKind::Runtime,
+        message: diagnostic.message.clone(),
+        identifier: Some(diagnostic.code.clone()),
+        diagnostic: diagnostic_text,
+        span,
+        callstack: diagnostic.callstack.clone(),
+        callstack_elided: diagnostic.callstack_elided,
+    }
+}
+
+fn line_col_from_source(source: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1;
+    let mut line_start = 0;
+    for (idx, ch) in source.char_indices() {
+        if idx >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            line_start = idx + 1;
+        }
+    }
+    (line, offset.saturating_sub(line_start) + 1)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkspacePreviewPayload {
+    pub(crate) values: Vec<f64>,
+    pub(crate) truncated: bool,
+}
+
+impl From<WorkspacePreview> for WorkspacePreviewPayload {
+    fn from(preview: WorkspacePreview) -> Self {
+        Self {
+            values: preview.values,
+            truncated: preview.truncated,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DataMaterializedVariablePayload {
+    pub(crate) name: String,
+    pub(crate) class_name: String,
+    pub(crate) dtype: Option<String>,
+    pub(crate) shape: Vec<usize>,
+    pub(crate) is_gpu: bool,
+    pub(crate) residency: &'static str,
+    pub(crate) size_bytes: Option<u64>,
+    pub(crate) preview: Option<WorkspacePreviewPayload>,
+    pub(crate) value_text: String,
+    pub(crate) value_json: JsonValue,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DataMaterializeOptionsWire {
+    pub(crate) limit: Option<usize>,
+    pub(crate) slice: Option<DataSliceOptionsWire>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DataSliceOptionsWire {
+    pub(crate) start: Vec<usize>,
+    pub(crate) shape: Vec<usize>,
+}
+
+pub(crate) fn parse_data_materialize_options_wire(
+    value: JsValue,
+) -> Result<DataMaterializeOptionsWire, JsValue> {
+    if value.is_undefined() || value.is_null() {
+        return Ok(DataMaterializeOptionsWire::default());
+    }
+    serde_wasm_bindgen::from_value::<DataMaterializeOptionsWire>(value)
+        .map_err(|err| js_error(&format!("Invalid data materialize options: {err}")))
+}
+
+pub(crate) fn compute_data_preview_slice(
+    full_shape: &[usize],
+    explicit_slice: Option<&DataSliceOptionsWire>,
+    limit: usize,
+) -> (Vec<usize>, Vec<usize>) {
+    if full_shape.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+
+    if let Some(slice) = explicit_slice {
+        let mut start = Vec::with_capacity(full_shape.len());
+        let mut shape = Vec::with_capacity(full_shape.len());
+        for (axis, axis_len) in full_shape.iter().copied().enumerate() {
+            let axis_len = axis_len.max(1);
+            let axis_start = slice
+                .start
+                .get(axis)
+                .copied()
+                .unwrap_or(0)
+                .min(axis_len - 1);
+            let axis_shape = slice
+                .shape
+                .get(axis)
+                .copied()
+                .unwrap_or(axis_len)
+                .max(1)
+                .min(axis_len - axis_start);
+            start.push(axis_start);
+            shape.push(axis_shape);
+        }
+        return (start, shape);
+    }
+
+    if full_shape.len() == 1 {
+        let span = full_shape[0].max(1).min(limit.max(1));
+        return (vec![0], vec![span]);
+    }
+
+    let rows = full_shape[0].max(1);
+    let cols = full_shape[1].max(1);
+    let preview_rows = rows.min((limit as f64).sqrt().floor() as usize).max(1);
+    let preview_cols = cols.min((limit / preview_rows).max(1));
+    let mut shape = vec![preview_rows, preview_cols];
+    shape.extend(full_shape.iter().skip(2).map(|_| 1usize));
+    let start = vec![0usize; full_shape.len()];
+    (start, shape)
+}
+
+pub(crate) fn infer_dataset_class_name(rank: usize) -> &'static str {
+    match rank {
+        0 => "Scalar",
+        1 => "Vector",
+        _ => "Tensor",
+    }
+}
+
+pub(crate) fn estimate_data_array_bytes(shape: &[usize], dtype: &str) -> u64 {
+    let elements = shape
+        .iter()
+        .copied()
+        .map(|dim| dim.max(1) as u64)
+        .fold(1u64, |acc, dim| acc.saturating_mul(dim));
+    elements.saturating_mul(bytes_per_data_element(dtype) as u64)
+}
+
+fn bytes_per_data_element(dtype: &str) -> usize {
+    let normalized = dtype.to_ascii_lowercase();
+    if normalized.contains("64") {
+        8
+    } else if normalized.contains("32") {
+        4
+    } else if normalized.contains("16") {
+        2
+    } else {
+        8
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MaterializedVariablePayload {
+    pub(crate) name: String,
+    pub(crate) class_name: String,
+    pub(crate) dtype: Option<String>,
+    pub(crate) shape: Vec<usize>,
+    pub(crate) is_gpu: bool,
+    pub(crate) residency: &'static str,
+    pub(crate) size_bytes: Option<u64>,
+    pub(crate) preview: Option<WorkspacePreviewPayload>,
+    pub(crate) value_text: String,
+    pub(crate) value_json: JsonValue,
+}
+
+impl From<MaterializedVariable> for MaterializedVariablePayload {
+    fn from(value: MaterializedVariable) -> Self {
+        Self {
+            name: value.name,
+            class_name: value.class_name,
+            dtype: value.dtype,
+            shape: value.shape,
+            is_gpu: value.is_gpu,
+            residency: value.residency.as_str(),
+            size_bytes: value.size_bytes,
+            preview: value.preview.map(WorkspacePreviewPayload::from),
+            value_text: value.value.to_string(),
+            value_json: value_to_json(&value.value, 0),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProfilingPayload {
+    pub(crate) total_ms: u64,
+    pub(crate) cpu_ms: Option<u64>,
+    pub(crate) gpu_ms: Option<u64>,
+    pub(crate) kernel_count: Option<u32>,
+}
+
+impl From<ExecutionProfiling> for ProfilingPayload {
+    fn from(profiling: ExecutionProfiling) -> Self {
+        Self {
+            total_ms: profiling.total_ms,
+            cpu_ms: profiling.cpu_ms,
+            gpu_ms: profiling.gpu_ms,
+            kernel_count: profiling.kernel_count,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FusionPlanPayload {
+    pub(crate) nodes: Vec<FusionPlanNodePayload>,
+    pub(crate) edges: Vec<FusionPlanEdgePayload>,
+    pub(crate) shaders: Vec<FusionPlanShaderPayload>,
+    pub(crate) decisions: Vec<FusionPlanDecisionPayload>,
+}
+
+impl From<FusionPlanSnapshot> for FusionPlanPayload {
+    fn from(snapshot: FusionPlanSnapshot) -> Self {
+        Self {
+            nodes: snapshot
+                .nodes
+                .into_iter()
+                .map(FusionPlanNodePayload::from)
+                .collect(),
+            edges: snapshot
+                .edges
+                .into_iter()
+                .map(FusionPlanEdgePayload::from)
+                .collect(),
+            shaders: snapshot
+                .shaders
+                .into_iter()
+                .map(FusionPlanShaderPayload::from)
+                .collect(),
+            decisions: snapshot
+                .decisions
+                .into_iter()
+                .map(FusionPlanDecisionPayload::from)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FusionPlanNodePayload {
+    pub(crate) id: String,
+    pub(crate) kind: String,
+    pub(crate) label: String,
+    pub(crate) shape: Vec<usize>,
+    pub(crate) residency: Option<String>,
+}
+
+impl From<FusionPlanNode> for FusionPlanNodePayload {
+    fn from(node: FusionPlanNode) -> Self {
+        Self {
+            id: node.id,
+            kind: node.kind,
+            label: node.label,
+            shape: node.shape,
+            residency: node.residency,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FusionPlanEdgePayload {
+    pub(crate) from: String,
+    pub(crate) to: String,
+    pub(crate) reason: Option<String>,
+}
+
+impl From<FusionPlanEdge> for FusionPlanEdgePayload {
+    fn from(edge: FusionPlanEdge) -> Self {
+        Self {
+            from: edge.from,
+            to: edge.to,
+            reason: edge.reason,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FusionPlanShaderPayload {
+    pub(crate) name: String,
+    pub(crate) stage: String,
+    pub(crate) workgroup_size: Option<[u32; 3]>,
+    pub(crate) source_hash: Option<String>,
+}
+
+impl From<FusionPlanShader> for FusionPlanShaderPayload {
+    fn from(shader: FusionPlanShader) -> Self {
+        Self {
+            name: shader.name,
+            stage: shader.stage,
+            workgroup_size: shader.workgroup_size,
+            source_hash: shader.source_hash,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FusionPlanDecisionPayload {
+    pub(crate) node_id: String,
+    pub(crate) fused: bool,
+    pub(crate) reason: Option<String>,
+    pub(crate) thresholds: Option<String>,
+}
+
+impl From<FusionPlanDecision> for FusionPlanDecisionPayload {
+    fn from(decision: FusionPlanDecision) -> Self {
+        Self {
+            node_id: decision.node_id,
+            fused: decision.fused,
+            reason: decision.reason,
+            thresholds: decision.thresholds,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StatsPayload {
+    pub(crate) total_executions: usize,
+    pub(crate) jit_compiled: usize,
+    pub(crate) interpreter_fallback: usize,
+    pub(crate) total_execution_time_ms: u64,
+    pub(crate) average_execution_time_ms: f64,
+}
+
+impl From<&runmat_core::ExecutionStats> for StatsPayload {
+    fn from(stats: &runmat_core::ExecutionStats) -> Self {
+        Self {
+            total_executions: stats.total_executions,
+            jit_compiled: stats.jit_compiled,
+            interpreter_fallback: stats.interpreter_fallback,
+            total_execution_time_ms: stats.total_execution_time_ms,
+            average_execution_time_ms: stats.average_execution_time_ms,
+        }
+    }
+}
+
+pub(crate) fn parse_materialize_target(
+    value: JsValue,
+) -> Result<WorkspaceMaterializeTarget, JsValue> {
+    if value.is_undefined() || value.is_null() {
+        return Err(js_error(
+            "materializeVariable requires a selector (name or previewToken)",
+        ));
+    }
+    if let Some(token) = value.as_string() {
+        return parse_materialize_selector_str(&token);
+    }
+    let payload: MaterializeSelectorPayload = serde_wasm_bindgen::from_value(value.clone())
+        .map_err(|err| js_error(&format!("materializeVariable selector: {err}")))?;
+    if let Some(token) = payload.token {
+        return parse_materialize_token_str(&token);
+    }
+    if let Some(name) = payload.name {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(js_error(
+                "materializeVariable selector.name must not be empty",
+            ));
+        }
+        return Ok(WorkspaceMaterializeTarget::Name(trimmed.to_string()));
+    }
+    Err(js_error(
+        "materializeVariable selector must include a name or previewToken",
+    ))
+}
+
+fn parse_materialize_token_str(token: &str) -> Result<WorkspaceMaterializeTarget, JsValue> {
+    let parsed = Uuid::parse_str(token.trim())
+        .map_err(|_| js_error("materializeVariable previewToken must be a UUID string"))?;
+    Ok(WorkspaceMaterializeTarget::Token(parsed))
+}
+
+fn parse_materialize_selector_str(selector: &str) -> Result<WorkspaceMaterializeTarget, JsValue> {
+    let trimmed = selector.trim();
+    if trimmed.is_empty() {
+        return Err(js_error(
+            "materializeVariable selector string must not be empty",
+        ));
+    }
+    if let Ok(parsed) = Uuid::parse_str(trimmed) {
+        return Ok(WorkspaceMaterializeTarget::Token(parsed));
+    }
+    Ok(WorkspaceMaterializeTarget::Name(trimmed.to_string()))
+}
+
+pub(crate) fn parse_materialize_options(
+    value: JsValue,
+) -> Result<WorkspaceMaterializeOptions, JsValue> {
+    if value.is_undefined() || value.is_null() {
+        return Ok(WorkspaceMaterializeOptions::default());
+    }
+    if !value.is_object() {
+        return Err(js_error("materializeVariable options must be an object"));
+    }
+    let payload: MaterializeOptionsPayload =
+        serde_wasm_bindgen::from_value(value).map_err(|err| {
+            js_error(&format!(
+                "materializeVariable options could not be parsed: {err}"
+            ))
+        })?;
+    let mut opts = WorkspaceMaterializeOptions::default();
+    if let Some(limit) = payload.limit {
+        opts.max_elements = limit.clamp(1, MAX_DATA_PREVIEW);
+    }
+    if let Some(slice) = payload.slice {
+        opts.slice = Some(WorkspaceSliceOptions {
+            start: slice.start,
+            shape: slice.shape,
+        });
+    }
+    Ok(opts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_core::abi::{ExecutionSourceContext, WorkspaceBindingValue, WorkspaceDelta};
+    use runmat_hir::BindingName;
+
+    fn test_source_context() -> ExecutionSourceContext {
+        ExecutionSourceContext {
+            name: "<test>".to_string(),
+            text: Some(String::new()),
+            identity: None,
+        }
+    }
+
+    #[test]
+    fn execution_payload_serializes_runtime_flow_kind() {
+        let outcome = ExecutionOutcome {
+            flow: RuntimeFlow::OutputList(vec![Value::Num(1.0), Value::Num(2.0)]),
+            ..ExecutionOutcome::default()
+        };
+
+        let payload = ExecutionPayload::from_outcome(outcome, &test_source_context());
+        assert_eq!(payload.flow["kind"], "output-list");
+        assert_eq!(
+            payload.flow["values"],
+            serde_json::json!([
+                { "kind": "double", "value": 1.0, "shape": [1, 1] },
+                { "kind": "double", "value": 2.0, "shape": [1, 1] }
+            ])
+        );
+    }
+
+    #[test]
+    fn execution_payload_serializes_workspace_version_and_removals() {
+        let key = WorkspaceBindingKey::Interactive {
+            session: Uuid::nil(),
+            name: BindingName("x".to_string()),
+        };
+        let workspace_delta = WorkspaceDelta {
+            version: 42,
+            upserts: vec![WorkspaceBindingValue {
+                key: key.clone(),
+                value: Value::Num(7.0),
+            }],
+            removals: vec![key],
+            full_snapshot_required: false,
+        };
+        let outcome = ExecutionOutcome {
+            workspace_delta,
+            ..ExecutionOutcome::default()
+        };
+
+        let payload = ExecutionPayload::from_outcome(outcome, &test_source_context());
+        assert_eq!(payload.workspace.version, 42);
+        assert_eq!(payload.workspace.removals, vec!["x".to_string()]);
+        assert_eq!(payload.workspace.values.len(), 1);
+        assert_eq!(payload.workspace.values[0].name, "x");
+    }
+
+    #[test]
+    fn execution_payload_formats_runtime_diagnostic_with_source_context() {
+        let outcome = ExecutionOutcome {
+            diagnostics: vec![RuntimeDiagnostic {
+                code: "RunMat:IndexOutOfBounds".to_string(),
+                severity: DiagnosticSeverity::Error,
+                message: "Index out of bounds".to_string(),
+                span: Some(runmat_hir::Span { start: 7, end: 11 }),
+                callstack: vec!["<main> @ path-source.m:2:5".to_string()],
+                callstack_elided: 0,
+            }],
+            ..ExecutionOutcome::default()
+        };
+        let source_context = ExecutionSourceContext {
+            name: "path-source.m".to_string(),
+            text: Some("x = 1;\ny = x(2);\n".to_string()),
+            identity: None,
+        };
+
+        let payload = ExecutionPayload::from_outcome(outcome, &source_context);
+        let error = payload.error.expect("error payload");
+        assert!(error.diagnostic.contains("--> path-source.m:2:1"));
+        assert_eq!(error.span.expect("span").line, 2);
+        assert_eq!(error.callstack, vec!["<main> @ path-source.m:2:5"]);
+    }
+}

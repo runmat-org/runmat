@@ -18,10 +18,194 @@ use crate::builtins::math::linalg::type_resolvers::svd_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex64;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 const BUILTIN_NAME: &str = "svd";
+
+const SVD_OUTPUT_S: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Singular values (vector by default).",
+}];
+
+const SVD_OUTPUT_US: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "U",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left singular vectors.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Diagonal singular-value matrix or vector based on options.",
+    },
+];
+
+const SVD_OUTPUT_USV: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "U",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left singular vectors.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Diagonal singular-value matrix or vector based on options.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right singular vectors.",
+    },
+];
+
+const SVD_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix to decompose.",
+}];
+
+const SVD_INPUTS_A_OPTION: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix to decompose.",
+    },
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Option token (`0`, `econ`, `full`, `vector`, or `matrix`).",
+    },
+];
+
+const SVD_INPUTS_A_OPTION_OPTION: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix to decompose.",
+    },
+    BuiltinParamDescriptor {
+        name: "option1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First option token (`0`, `econ`, `full`, `vector`, or `matrix`).",
+    },
+    BuiltinParamDescriptor {
+        name: "option2",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second option token (`0`, `econ`, `full`, `vector`, or `matrix`).",
+    },
+];
+
+const SVD_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
+    BuiltinSignatureDescriptor {
+        label: "S = svd(A)",
+        inputs: &SVD_INPUTS_A,
+        outputs: &SVD_OUTPUT_S,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = svd(A, option)",
+        inputs: &SVD_INPUTS_A_OPTION,
+        outputs: &SVD_OUTPUT_S,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = svd(A, option1, option2)",
+        inputs: &SVD_INPUTS_A_OPTION_OPTION,
+        outputs: &SVD_OUTPUT_S,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[U, S] = svd(A)",
+        inputs: &SVD_INPUTS_A,
+        outputs: &SVD_OUTPUT_US,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[U, S] = svd(A, option)",
+        inputs: &SVD_INPUTS_A_OPTION,
+        outputs: &SVD_OUTPUT_US,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[U, S] = svd(A, option1, option2)",
+        inputs: &SVD_INPUTS_A_OPTION_OPTION,
+        outputs: &SVD_OUTPUT_US,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[U, S, V] = svd(A)",
+        inputs: &SVD_INPUTS_A,
+        outputs: &SVD_OUTPUT_USV,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[U, S, V] = svd(A, option)",
+        inputs: &SVD_INPUTS_A_OPTION,
+        outputs: &SVD_OUTPUT_USV,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[U, S, V] = svd(A, option1, option2)",
+        inputs: &SVD_INPUTS_A_OPTION_OPTION,
+        outputs: &SVD_OUTPUT_USV,
+    },
+];
+
+const SVD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SVD.INVALID_ARGUMENT",
+    identifier: Some("RunMat:svd:InvalidArgument"),
+    when: "Option arguments or requested output count are invalid.",
+    message: "svd currently supports at most three outputs",
+};
+
+const SVD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SVD.INVALID_INPUT",
+    identifier: Some("RunMat:svd:InvalidInput"),
+    when: "Input is unsupported or not a 2-D numeric/logical matrix.",
+    message: "svd: expected numeric or logical values",
+};
+
+const SVD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SVD.INTERNAL",
+    identifier: Some("RunMat:svd:Internal"),
+    when: "Runtime cannot materialize SVD outputs.",
+    message: "svd: internal runtime failure",
+};
+
+const SVD_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    SVD_ERROR_INVALID_ARGUMENT,
+    SVD_ERROR_INVALID_INPUT,
+    SVD_ERROR_INTERNAL,
+];
+
+pub const SVD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SVD_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SVD_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::svd")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -40,10 +224,31 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "GPU inputs are gathered to the host until a provider implements the reserved `svd` hook.",
 };
 
-fn svd_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn svd_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    svd_error_with_message(error.message, error)
+}
+
+fn svd_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn svd_invalid_argument(message: impl Into<String>) -> RuntimeError {
+    svd_error_with_message(message, &SVD_ERROR_INVALID_ARGUMENT)
+}
+
+fn svd_invalid_input(message: impl Into<String>) -> RuntimeError {
+    svd_error_with_message(message, &SVD_ERROR_INVALID_INPUT)
+}
+
+fn svd_internal_error(message: impl Into<String>) -> RuntimeError {
+    svd_error_with_message(message, &SVD_ERROR_INTERNAL)
 }
 
 fn with_svd_context(mut error: RuntimeError) -> RuntimeError {
@@ -72,11 +277,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "svd",
     category = "math/linalg/factor",
-    summary = "Singular value decomposition with MATLAB-compatible economy and vector options.",
+    summary = "Compute singular value decompositions with full, economy, or vector outputs.",
     keywords = "svd,singular value decomposition,economy,vector",
     accel = "sink",
     sink = true,
     type_resolver(svd_type),
+    descriptor(crate::builtins::math::linalg::factor::svd::SVD_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::factor::svd"
 )]
 async fn svd_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -94,7 +300,7 @@ async fn svd_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
         if out_count == 3 {
             return Ok(Value::OutputList(vec![eval.u(), eval.sigma(), eval.v()]));
         }
-        return Err(svd_error("svd currently supports at most three outputs"));
+        return Err(svd_error(&SVD_ERROR_INVALID_ARGUMENT));
     }
     Ok(eval.singular_values())
 }
@@ -186,7 +392,7 @@ async fn value_to_numeric_matrix(value: Value) -> BuiltinResult<NumericMatrix> {
         Value::ComplexTensor(ct) => complex_tensor_to_matrix(&ct).map(NumericMatrix::Complex),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|err| svd_error(format!("svd: {err}")))?;
+                .map_err(|err| svd_invalid_input(format!("svd: {err}")))?;
             tensor_to_matrix(&tensor).map(NumericMatrix::Real)
         }
         Value::Num(n) => Ok(NumericMatrix::Real(DMatrix::from_element(1, 1, n))),
@@ -207,7 +413,7 @@ async fn value_to_numeric_matrix(value: Value) -> BuiltinResult<NumericMatrix> {
                 .map_err(with_svd_context)?;
             tensor_to_matrix(&tensor).map(NumericMatrix::Real)
         }
-        other => Err(svd_error(format!(
+        other => Err(svd_invalid_input(format!(
             "svd: unsupported input type {other:?}; expected numeric or logical values"
         ))),
     }
@@ -215,7 +421,7 @@ async fn value_to_numeric_matrix(value: Value) -> BuiltinResult<NumericMatrix> {
 
 fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<f64>> {
     if tensor.shape.len() > 2 {
-        return Err(svd_error("svd: input must be 2-D"));
+        return Err(svd_invalid_input("svd: input must be 2-D"));
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
@@ -224,7 +430,7 @@ fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<f64>> {
 
 fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Complex64>> {
     if tensor.shape.len() > 2 {
-        return Err(svd_error("svd: input must be 2-D"));
+        return Err(svd_invalid_input("svd: input must be 2-D"));
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
@@ -238,7 +444,7 @@ fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Com
 fn parse_options(args: &[Value]) -> BuiltinResult<SvdOptions> {
     let mut opts = SvdOptions::default();
     if args.len() > 2 {
-        return Err(svd_error("svd: too many option arguments"));
+        return Err(svd_invalid_argument("svd: too many option arguments"));
     }
     for arg in args {
         match arg {
@@ -246,7 +452,7 @@ fn parse_options(args: &[Value]) -> BuiltinResult<SvdOptions> {
                 if i.to_i64() == 0 {
                     opts.econ = true;
                 } else {
-                    return Err(svd_error(
+                    return Err(svd_invalid_argument(
                         "svd: numeric option must be 0 to request economy size",
                     ));
                 }
@@ -256,7 +462,7 @@ fn parse_options(args: &[Value]) -> BuiltinResult<SvdOptions> {
                 if *n == 0.0 {
                     opts.econ = true;
                 } else {
-                    return Err(svd_error(
+                    return Err(svd_invalid_argument(
                         "svd: numeric option must be 0 to request economy size",
                     ));
                 }
@@ -275,12 +481,14 @@ fn parse_options(args: &[Value]) -> BuiltinResult<SvdOptions> {
                 "vector" => opts.sigma_format = SigmaFormat::Vector,
                 "matrix" => opts.sigma_format = SigmaFormat::Matrix,
                 other => {
-                    return Err(svd_error(format!("svd: unknown option '{other}'")));
+                    return Err(svd_invalid_argument(format!(
+                        "svd: unknown option '{other}'"
+                    )));
                 }
             }
             continue;
         }
-        return Err(svd_error(format!(
+        return Err(svd_invalid_argument(format!(
             "svd: expected option strings ('econ','vector','matrix') or the numeric value 0, got {arg:?}"
         )));
     }
@@ -322,10 +530,10 @@ fn factorize<T: nalgebra::ComplexField>(
     let svd = nalgebra::linalg::SVD::new(matrix, true, true);
     let u = svd
         .u
-        .ok_or_else(|| svd_error("svd: failed to compute left singular vectors"))?;
+        .ok_or_else(|| svd_internal_error("svd: failed to compute left singular vectors"))?;
     let v_t = svd
         .v_t
-        .ok_or_else(|| svd_error("svd: failed to compute right singular vectors"))?;
+        .ok_or_else(|| svd_internal_error("svd: failed to compute right singular vectors"))?;
     let singular_values = svd.singular_values;
     let u = u.resize(rows, singular_values.len(), T::zero());
     let v = v_t.adjoint().resize(cols, singular_values.len(), T::zero());
@@ -476,20 +684,20 @@ fn sigma_shape(m: usize, n: usize, diag_len: usize, econ: bool) -> (usize, usize
 
 fn singular_vector_value(values: &[f64]) -> BuiltinResult<Value> {
     if values.is_empty() {
-        let tensor =
-            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| svd_error(format!("svd: {e}")))?;
+        let tensor = Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|e| svd_internal_error(format!("svd: {e}")))?;
         return Ok(Value::Tensor(tensor));
     }
     let rows = values.len();
-    let tensor =
-        Tensor::new(values.to_vec(), vec![rows, 1]).map_err(|e| svd_error(format!("svd: {e}")))?;
+    let tensor = Tensor::new(values.to_vec(), vec![rows, 1])
+        .map_err(|e| svd_internal_error(format!("svd: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
 fn diag_matrix_value(values: &[f64], rows: usize, cols: usize) -> BuiltinResult<Value> {
     if rows == 0 || cols == 0 {
         let tensor = Tensor::new(Vec::new(), vec![rows, cols])
-            .map_err(|e| svd_error(format!("svd: {e}")))?;
+            .map_err(|e| svd_internal_error(format!("svd: {e}")))?;
         return Ok(Value::Tensor(tensor));
     }
     let mut data = vec![0.0; rows * cols];
@@ -497,7 +705,8 @@ fn diag_matrix_value(values: &[f64], rows: usize, cols: usize) -> BuiltinResult<
     for i in 0..diag_len.min(rows.min(cols)) {
         data[i + i * rows] = values[i];
     }
-    let tensor = Tensor::new(data, vec![rows, cols]).map_err(|e| svd_error(format!("svd: {e}")))?;
+    let tensor =
+        Tensor::new(data, vec![rows, cols]).map_err(|e| svd_internal_error(format!("svd: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -506,7 +715,7 @@ fn matrix_real_to_value(matrix: &DMatrix<f64>) -> BuiltinResult<Value> {
         matrix.as_slice().to_vec(),
         vec![matrix.nrows(), matrix.ncols()],
     )
-    .map_err(|e| svd_error(format!("svd: {e}")))?;
+    .map_err(|e| svd_internal_error(format!("svd: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -516,7 +725,7 @@ fn matrix_complex_to_value(matrix: &DMatrix<Complex64>) -> BuiltinResult<Value> 
         data.push((value.re, value.im));
     }
     let tensor = ComplexTensor::new(data, vec![matrix.nrows(), matrix.ncols()])
-        .map_err(|e| svd_error(format!("svd: {e}")))?;
+        .map_err(|e| svd_internal_error(format!("svd: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -669,6 +878,32 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(2), Some(1)])
             }
         );
+    }
+
+    #[test]
+    fn svd_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SVD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"S = svd(A)"));
+        assert!(labels.contains(&"S = svd(A, option)"));
+        assert!(labels.contains(&"S = svd(A, option1, option2)"));
+        assert!(labels.contains(&"[U, S] = svd(A)"));
+        assert!(labels.contains(&"[U, S] = svd(A, option)"));
+        assert!(labels.contains(&"[U, S] = svd(A, option1, option2)"));
+        assert!(labels.contains(&"[U, S, V] = svd(A)"));
+        assert!(labels.contains(&"[U, S, V] = svd(A, option)"));
+        assert!(labels.contains(&"[U, S, V] = svd(A, option1, option2)"));
+    }
+
+    #[test]
+    fn svd_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = SVD_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.SVD.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.SVD.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.SVD.INTERNAL"));
     }
 
     fn dmatrix_from_value(value: Value) -> DMatrix<f64> {
@@ -836,8 +1071,9 @@ pub(crate) mod tests {
     #[test]
     fn svd_invalid_option_errors() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
-        let err =
-            error_message(evaluate(Value::Tensor(matrix), &[Value::from("bogus")]).unwrap_err());
+        let err = evaluate(Value::Tensor(matrix), &[Value::from("bogus")]).unwrap_err();
+        assert_eq!(err.identifier(), SVD_ERROR_INVALID_ARGUMENT.identifier);
+        let err = error_message(err);
         assert!(err.contains("unknown option"));
     }
 
@@ -845,17 +1081,17 @@ pub(crate) mod tests {
     #[test]
     fn svd_too_many_option_arguments_errors() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
-        let err = error_message(
-            evaluate(
-                Value::Tensor(matrix),
-                &[
-                    Value::from("econ"),
-                    Value::from("vector"),
-                    Value::from("matrix"),
-                ],
-            )
-            .unwrap_err(),
-        );
+        let err = evaluate(
+            Value::Tensor(matrix),
+            &[
+                Value::from("econ"),
+                Value::from("vector"),
+                Value::from("matrix"),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), SVD_ERROR_INVALID_ARGUMENT.identifier);
+        let err = error_message(err);
         assert!(err.contains("too many option arguments"));
     }
 
@@ -863,7 +1099,9 @@ pub(crate) mod tests {
     #[test]
     fn svd_numeric_nonzero_option_errors() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
-        let err = error_message(evaluate(Value::Tensor(matrix), &[Value::Num(1.0)]).unwrap_err());
+        let err = evaluate(Value::Tensor(matrix), &[Value::Num(1.0)]).unwrap_err();
+        assert_eq!(err.identifier(), SVD_ERROR_INVALID_ARGUMENT.identifier);
+        let err = error_message(err);
         assert!(
             err.contains("numeric option must be 0"),
             "unexpected error: {err}"
@@ -891,7 +1129,9 @@ pub(crate) mod tests {
     #[test]
     fn svd_three_dimensional_input_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2, 1]).expect("tensor");
-        let err = error_message(evaluate(Value::Tensor(tensor), &[]).unwrap_err());
+        let err = evaluate(Value::Tensor(tensor), &[]).unwrap_err();
+        assert_eq!(err.identifier(), SVD_ERROR_INVALID_INPUT.identifier);
+        let err = error_message(err);
         assert!(err.contains("must be 2-D"));
     }
 

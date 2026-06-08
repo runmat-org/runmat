@@ -1,6 +1,6 @@
 #![cfg(feature = "wgpu")]
 
-use runmat_accelerate::backend::wgpu::provider_impl::WgpuProviderOptions;
+use runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate::fusion::{
     FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
@@ -12,7 +12,7 @@ use runmat_builtins::Value;
 use std::collections::HashMap;
 
 fn upload(
-    provider: &runmat_accelerate::backend::wgpu::provider_impl::WgpuProvider,
+    provider: &runmat_accelerate::backend::wgpu::provider::WgpuProvider,
     rows: usize,
     cols: usize,
     data: &[f64],
@@ -60,6 +60,7 @@ fn fused_single_pass_reduce_len_1_no_alias() {
         shape: ShapeInfo::Tensor(vec![Some(cols)]),
         span: InstrSpan { start: 0, end: 0 },
         pattern: None,
+        stack_layout: None,
     };
 
     let plan = FusionGroupPlan {
@@ -89,6 +90,7 @@ fn fused_single_pass_reduce_len_1_no_alias() {
             cv.insert(vid_dim, Value::Num(1.0));
             cv
         },
+        materialized_stores: Vec::new(),
         output: Some(vid_sum),
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,

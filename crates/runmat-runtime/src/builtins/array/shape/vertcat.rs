@@ -5,7 +5,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::vertcat")]
@@ -181,13 +185,78 @@ fn vertcat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("vertcat").build()
 }
 
+const VERTCAT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Vertically concatenated result (dimension 1).",
+}];
+
+const VERTCAT_INPUTS_EMPTY: [BuiltinParamDescriptor; 0] = [];
+
+const VERTCAT_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "An",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional input arrays.",
+    },
+];
+
+const VERTCAT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "B = vertcat()",
+        inputs: &VERTCAT_INPUTS_EMPTY,
+        outputs: &VERTCAT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = vertcat(A1, An...)",
+        inputs: &VERTCAT_INPUTS,
+        outputs: &VERTCAT_OUTPUT,
+    },
+];
+
+const VERTCAT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.VERTCAT.INVALID_INPUT",
+    identifier: Some("RunMat:vertcat:InvalidInput"),
+    when: "Inputs are malformed or incompatible for vertical concatenation.",
+    message: "vertcat: invalid input arguments",
+};
+
+const VERTCAT_ERROR_TYPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.VERTCAT.TYPE_MISMATCH",
+    identifier: Some("RunMat:vertcat:TypeMismatch"),
+    when: "Input classes cannot be concatenated together.",
+    message: "vertcat: incompatible input classes for concatenation",
+};
+
+const VERTCAT_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [VERTCAT_ERROR_INVALID_INPUT, VERTCAT_ERROR_TYPE_MISMATCH];
+
+pub const VERTCAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &VERTCAT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &VERTCAT_ERRORS,
+};
+
 #[runtime_builtin(
     name = "vertcat",
     category = "array/shape",
-    summary = "Concatenate inputs vertically (dimension 1) just like MATLAB semicolons.",
+    summary = "Concatenate inputs vertically along the first dimension.",
     keywords = "vertcat,vertical concatenation,array,gpu",
     accel = "array_construct",
     type_resolver(vertcat_type),
+    descriptor(crate::builtins::array::shape::vertcat::VERTCAT_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::vertcat"
 )]
 async fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -285,6 +354,14 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn true_empty_operand_is_neutral_for_dynamic_growth() {
+        let empty = Tensor::new(Vec::new(), vec![0, 0]).expect("empty");
+        let result = vertcat_builtin(vec![Value::Tensor(empty), Value::Num(2.0)]).expect("vertcat");
+        assert_eq!(result, Value::Num(2.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn numeric_vertical_concat() {
         let top = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let bottom = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
@@ -330,6 +407,22 @@ pub(crate) mod tests {
             Value::StringArray(arr) => {
                 assert_eq!(arr.shape, vec![2, 2]);
                 assert_eq!(arr.data, vec!["Name", "Alice", "Score", "98"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_and_char_arrays_vertical_concat() {
+        let top = StringArray::new(vec!["alpha".into()], vec![1, 1]).unwrap();
+        let bottom = CharArray::new_row("beta");
+        let result = vertcat_builtin(vec![Value::StringArray(top), Value::CharArray(bottom)])
+            .expect("vertcat mixed");
+        match result {
+            Value::StringArray(arr) => {
+                assert_eq!(arr.shape, vec![2, 1]);
+                assert_eq!(arr.data, vec!["alpha", "beta"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }

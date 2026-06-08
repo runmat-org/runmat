@@ -1,7 +1,11 @@
 //! MATLAB-compatible `ind2sub` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::common::{
@@ -56,13 +60,112 @@ fn ind2sub_type(args: &[Type], ctx: &ResolveContext) -> Type {
     }
 }
 
+const BUILTIN_NAME: &str = "ind2sub";
+
+const IND2SUB_OUTPUT_CELL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "subs",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Cell array containing one subscript output per dimension.",
+}];
+
+const IND2SUB_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "sz",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Size vector describing source array dimensions.",
+    },
+    BuiltinParamDescriptor {
+        name: "ind",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Linear indices to convert into per-dimension subscripts.",
+    },
+];
+
+const IND2SUB_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "subs = ind2sub(sz, ind)",
+    inputs: &IND2SUB_INPUTS,
+    outputs: &IND2SUB_OUTPUT_CELL,
+}];
+
+const IND2SUB_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IND2SUB.INVALID_INPUT",
+    identifier: Some("RunMat:ind2sub:InvalidInput"),
+    when: "Size vector or linear index inputs are malformed or unsupported.",
+    message: "ind2sub: invalid input arguments",
+};
+
+const IND2SUB_ERROR_INDEX_BOUNDS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IND2SUB.INDEX_BOUNDS",
+    identifier: Some("RunMat:ind2sub:IndexBounds"),
+    when: "At least one provided linear index exceeds array element bounds.",
+    message: "ind2sub: index exceeds array bounds",
+};
+
+const IND2SUB_ERROR_PROVIDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IND2SUB.PROVIDER",
+    identifier: Some("RunMat:ind2sub:ProviderError"),
+    when: "Provider-side ind2sub execution fails or returns malformed outputs.",
+    message: "ind2sub: provider execution failed",
+};
+
+const IND2SUB_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IND2SUB.INTERNAL",
+    identifier: Some("RunMat:ind2sub:InternalError"),
+    when: "Internal tensor/materialization logic fails while building outputs.",
+    message: "ind2sub: internal error",
+};
+
+const IND2SUB_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    IND2SUB_ERROR_INVALID_INPUT,
+    IND2SUB_ERROR_INDEX_BOUNDS,
+    IND2SUB_ERROR_PROVIDER,
+    IND2SUB_ERROR_INTERNAL,
+];
+
+pub const IND2SUB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &IND2SUB_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &IND2SUB_ERRORS,
+};
+
+fn ind2sub_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn ind2sub_input_error(message: impl Into<String>) -> RuntimeError {
+    ind2sub_error_with_message(message, &IND2SUB_ERROR_INVALID_INPUT)
+}
+
+fn ind2sub_internal_error(message: impl Into<String>) -> RuntimeError {
+    ind2sub_error_with_message(message, &IND2SUB_ERROR_INTERNAL)
+}
+
+fn ind2sub_provider_error(message: impl Into<String>) -> RuntimeError {
+    ind2sub_error_with_message(message, &IND2SUB_ERROR_PROVIDER)
+}
+
 #[runtime_builtin(
     name = "ind2sub",
     category = "array/indexing",
-    summary = "Convert MATLAB column-major linear indices into per-dimension subscript arrays.",
+    summary = "Convert linear indices to subscripts.",
     keywords = "ind2sub,linear index,subscripts,column major,gpu indexing",
     accel = "custom",
     type_resolver(ind2sub_type),
+    descriptor(crate::builtins::array::indexing::ind2sub::IND2SUB_DESCRIPTOR),
     builtin_path = "crate::builtins::array::indexing::ind2sub"
 )]
 async fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<Value> {
@@ -179,7 +282,7 @@ fn try_gpu_ind2sub(
         match provider.ind2sub(dims, strides, handle, total, len, &output_shape) {
             Ok(handles) => {
                 if handles.len() != dims.len() {
-                    return Err(ind2sub_error(
+                    return Err(ind2sub_provider_error(
                         "ind2sub: provider returned an unexpected number of outputs.",
                     ));
                 }
@@ -188,7 +291,7 @@ fn try_gpu_ind2sub(
                     .map(Some)
                     .map_err(|message| ind2sub_error(message))
             }
-            Err(err) => Err(ind2sub_error(err.to_string())),
+            Err(err) => Err(ind2sub_provider_error(err.to_string())),
         }
     }
 }
@@ -224,7 +327,7 @@ fn compute_subscripts(
     let mut tensors = Vec::with_capacity(dims.len());
     for data in outputs {
         let tensor = Tensor::new(data, output_shape.clone())
-            .map_err(|e| ind2sub_error(format!("ind2sub: {e}")))?;
+            .map_err(|e| ind2sub_internal_error(format!("ind2sub: {e}")))?;
         tensors.push(tensor);
     }
     Ok(tensors)
@@ -248,16 +351,19 @@ fn coerce_linear_index(value: f64, max_index: usize) -> crate::BuiltinResult<usi
     }
     let coerced = rounded as usize;
     if coerced > max_index {
-        return Err(ind2sub_error(format!(
-            "Index exceeds number of array elements. Index must not exceed {}.",
-            max_index
-        )));
+        return Err(ind2sub_error_with_message(
+            format!(
+                "Index exceeds number of array elements. Index must not exceed {}.",
+                max_index
+            ),
+            &IND2SUB_ERROR_INDEX_BOUNDS,
+        ));
     }
     Ok(coerced)
 }
 
 fn ind2sub_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("ind2sub").build()
+    ind2sub_input_error(message)
 }
 
 #[cfg(test)]
@@ -333,6 +439,30 @@ pub(crate) mod tests {
             }
             other => panic!("expected cell output, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rejects_non_integer_linear_index_identifier() {
+        let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        let err = ind2sub_builtin(Value::Tensor(dims), Value::Num(1.25))
+            .expect_err("expected non-integer index error");
+        assert_eq!(
+            err.identifier(),
+            super::IND2SUB_ERROR_INVALID_INPUT.identifier
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rejects_out_of_bounds_linear_index_identifier() {
+        let dims = Tensor::new(vec![2.0, 2.0], vec![1, 2]).unwrap();
+        let err = ind2sub_builtin(Value::Tensor(dims), Value::Num(9.0))
+            .expect_err("expected out-of-bounds index error");
+        assert_eq!(
+            err.identifier(),
+            super::IND2SUB_ERROR_INDEX_BOUNDS.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -93,13 +93,6 @@ pub async fn gather_tensor_from_gpu_async(
     Tensor::try_from(&gathered).map_err(|e| plotting_error(name, format!("{name}: {e}")))
 }
 
-pub fn gather_tensor_from_gpu(
-    handle: GpuTensorHandle,
-    name: &'static str,
-) -> BuiltinResult<Tensor> {
-    block_on(gather_tensor_from_gpu_async(handle, name))
-}
-
 /// Convert a runtime value (potentially GPU-resident) into a concrete scalar.
 pub async fn value_to_scalar_async(mut value: Value, context: &'static str) -> BuiltinResult<f64> {
     if value_contains_gpu(&value) {
@@ -144,4 +137,38 @@ pub fn gpu_xy_bounds(
     context: &'static str,
 ) -> BuiltinResult<BoundingBox> {
     block_on(gpu_xy_bounds_async(x, y, context))
+}
+
+#[cfg(feature = "plot-core")]
+pub fn gpu_errorbar_bounds(
+    x: &GpuTensorHandle,
+    y: &GpuTensorHandle,
+    y_neg: &GpuTensorHandle,
+    y_pos: &GpuTensorHandle,
+    context: &'static str,
+) -> BuiltinResult<BoundingBox> {
+    let (min_x, max_x) = axis_bounds(x, context)?;
+    let (min_y, max_y) = axis_bounds(y, context)?;
+    let (_min_neg, max_neg) = axis_bounds(y_neg, context)?;
+    let (_min_pos, max_pos) = axis_bounds(y_pos, context)?;
+    Ok(BoundingBox::new(
+        Vec3::new(min_x, min_y - max_neg, 0.0),
+        Vec3::new(max_x, max_y + max_pos, 0.0),
+    ))
+}
+
+#[cfg(feature = "plot-core")]
+pub async fn gpu_xyz_bounds_async(
+    x: &GpuTensorHandle,
+    y: &GpuTensorHandle,
+    z: &GpuTensorHandle,
+    context: &'static str,
+) -> BuiltinResult<BoundingBox> {
+    let (min_x, max_x) = axis_bounds_async(x, context).await?;
+    let (min_y, max_y) = axis_bounds_async(y, context).await?;
+    let (min_z, max_z) = axis_bounds_async(z, context).await?;
+    Ok(BoundingBox::new(
+        Vec3::new(min_x, min_y, min_z),
+        Vec3::new(max_x, max_y, max_z),
+    ))
 }

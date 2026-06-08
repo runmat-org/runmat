@@ -6,10 +6,12 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::structs::type_resolvers::fieldnames_type;
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, HandleRef, Listener, ObjectInstance, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -40,18 +42,82 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner treats fieldnames as a host inspector; it terminates any pending fusion group.",
 };
 
-fn fieldnames_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("fieldnames")
-        .build()
+const BUILTIN_NAME: &str = "fieldnames";
+
+const FIELDNAMES_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "names",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Cell array of field names.",
+}];
+
+const FIELDNAMES_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Struct, struct array, or object input.",
+}];
+
+const FIELDNAMES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "names = fieldnames(S)",
+    inputs: &FIELDNAMES_INPUTS,
+    outputs: &FIELDNAMES_OUTPUT,
+}];
+
+const FIELDNAMES_ERROR_INVALID_TARGET: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FIELDNAMES.INVALID_TARGET",
+    identifier: Some("RunMat:fieldnames:InvalidTarget"),
+    when: "Input is not a struct, struct array, or object value.",
+    message: "fieldnames: expected struct, struct array, or object",
+};
+
+const FIELDNAMES_ERROR_STRUCT_ARRAY_CONTENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FIELDNAMES.STRUCT_ARRAY_CONTENTS",
+    identifier: Some("RunMat:fieldnames:StructArrayContents"),
+    when: "Struct-array backing cell contains non-struct elements.",
+    message: "fieldnames: expected struct array contents to be structs",
+};
+
+const FIELDNAMES_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FIELDNAMES.INTERNAL",
+    identifier: Some("RunMat:fieldnames:InternalError"),
+    when: "Building the output cell array or internal metadata processing fails.",
+    message: "fieldnames: internal error",
+};
+
+const FIELDNAMES_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    FIELDNAMES_ERROR_INVALID_TARGET,
+    FIELDNAMES_ERROR_STRUCT_ARRAY_CONTENTS,
+    FIELDNAMES_ERROR_INTERNAL,
+];
+
+pub const FIELDNAMES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FIELDNAMES_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FIELDNAMES_ERRORS,
+};
+
+fn fieldnames_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "fieldnames",
     category = "structs/core",
-    summary = "List the field names of scalar structs or struct arrays.",
+    summary = "List struct or object field names.",
     keywords = "fieldnames,struct,introspection,fields",
     type_resolver(fieldnames_type),
+    descriptor(crate::builtins::structs::core::fieldnames::FIELDNAMES_DESCRIPTOR),
     builtin_path = "crate::builtins::structs::core::fieldnames"
 )]
 async fn fieldnames_builtin(value: Value) -> BuiltinResult<Value> {
@@ -62,9 +128,13 @@ async fn fieldnames_builtin(value: Value) -> BuiltinResult<Value> {
         Value::HandleObject(handle) => collect_handle_fieldnames(handle)?,
         Value::Listener(listener) => collect_listener_fieldnames(listener),
         other => {
-            return Err(fieldnames_flow(format!(
-                "fieldnames: expected struct, struct array, or object (got {other:?})"
-            )))
+            return Err(fieldnames_error_with_message(
+                format!(
+                    "{} (got {other:?})",
+                    FIELDNAMES_ERROR_INVALID_TARGET.message
+                ),
+                &FIELDNAMES_ERROR_INVALID_TARGET,
+            ))
         }
     };
 
@@ -73,7 +143,9 @@ async fn fieldnames_builtin(value: Value) -> BuiltinResult<Value> {
         .into_iter()
         .map(|name| Value::CharArray(CharArray::new_row(&name)))
         .collect();
-    crate::make_cell(cells, rows, 1).map_err(|e| fieldnames_flow(format!("fieldnames: {e}")))
+    crate::make_cell(cells, rows, 1).map_err(|e| {
+        fieldnames_error_with_message(format!("fieldnames: {e}"), &FIELDNAMES_ERROR_INTERNAL)
+    })
 }
 
 fn collect_struct_fieldnames(st: &StructValue) -> Vec<String> {
@@ -87,8 +159,9 @@ fn collect_struct_array_fieldnames(array: &CellArray) -> BuiltinResult<Vec<Strin
     for handle in array.data.iter() {
         let value = unsafe { &*handle.as_raw() };
         let Value::Struct(st) = value else {
-            return Err(fieldnames_flow(
-                "fieldnames: expected struct array contents to be structs",
+            return Err(fieldnames_error_with_message(
+                FIELDNAMES_ERROR_STRUCT_ARRAY_CONTENTS.message,
+                &FIELDNAMES_ERROR_STRUCT_ARRAY_CONTENTS,
             ));
         };
         names.extend(st.fields.keys().cloned());
@@ -105,7 +178,7 @@ fn collect_object_fieldnames(obj: &ObjectInstance) -> Vec<String> {
 fn collect_handle_fieldnames(handle: &HandleRef) -> BuiltinResult<Vec<String>> {
     let mut names = class_instance_property_names(&handle.class_name);
 
-    if handle.valid {
+    if runmat_builtins::is_handle_valid(handle) {
         let target = unsafe { &*handle.target.as_raw() };
         match target {
             Value::Struct(st) => {
@@ -145,12 +218,21 @@ fn collect_listener_fieldnames(_listener: &Listener) -> Vec<String> {
 
 fn class_instance_property_names(class_name: &str) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
-    if let Some(class_def) = runmat_builtins::get_class(class_name) {
-        for (name, prop) in &class_def.properties {
+    let mut current = Some(class_name.to_string());
+    let mut visited = HashSet::new();
+    while let Some(name) = current {
+        if !visited.insert(name.clone()) {
+            break;
+        }
+        let Some(class_def) = runmat_builtins::get_class(&name) else {
+            break;
+        };
+        for (prop_name, prop) in &class_def.properties {
             if !prop.is_static {
-                names.insert(name.clone());
+                names.insert(prop_name.clone());
             }
         }
+        current = class_def.parent.clone();
     }
     names
 }
@@ -288,6 +370,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "Value".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -299,6 +382,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "Version".to_string(),
                 is_static: true,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -320,6 +404,64 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn fieldnames_object_includes_inherited_class_properties() {
+        let parent_name = "runmat.unittest.FieldnamesParent";
+        let child_name = "runmat.unittest.FieldnamesChild";
+
+        let mut parent = ClassDef {
+            name: parent_name.to_string(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        };
+        parent.properties.insert(
+            "ParentValue".to_string(),
+            PropertyDef {
+                name: "ParentValue".to_string(),
+                is_static: false,
+                is_constant: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+        runmat_builtins::register_class(parent);
+
+        let mut child = ClassDef {
+            name: child_name.to_string(),
+            parent: Some(parent_name.to_string()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        };
+        child.properties.insert(
+            "ChildValue".to_string(),
+            PropertyDef {
+                name: "ChildValue".to_string(),
+                is_static: false,
+                is_constant: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+        runmat_builtins::register_class(child);
+
+        let obj = ObjectInstance::new(child_name.to_string());
+        let Value::Cell(cell) = run_fieldnames(Value::Object(obj)).expect("fieldnames object")
+        else {
+            panic!("expected cell array");
+        };
+        let collected = cell_strings(&cell);
+        assert_eq!(
+            collected,
+            vec!["ChildValue".to_string(), "ParentValue".to_string()]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn fieldnames_handle_object_merges_class_and_target() {
         let class_name = "runmat.unittest.FieldnamesHandle";
         let mut def = ClassDef {
@@ -333,6 +475,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "Enabled".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -362,6 +505,82 @@ pub(crate) mod tests {
         };
         let collected = cell_strings(&cell);
         assert_eq!(collected, vec!["Enabled".to_string(), "Status".to_string()]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fieldnames_handle_object_includes_inherited_class_properties() {
+        let parent_name = "runmat.unittest.FieldnamesHandleParent";
+        let child_name = "runmat.unittest.FieldnamesHandleChild";
+
+        let mut parent = ClassDef {
+            name: parent_name.to_string(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        };
+        parent.properties.insert(
+            "ParentEnabled".to_string(),
+            PropertyDef {
+                name: "ParentEnabled".to_string(),
+                is_static: false,
+                is_constant: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+        runmat_builtins::register_class(parent);
+
+        let mut child = ClassDef {
+            name: child_name.to_string(),
+            parent: Some(parent_name.to_string()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        };
+        child.properties.insert(
+            "ChildEnabled".to_string(),
+            PropertyDef {
+                name: "ChildEnabled".to_string(),
+                is_static: false,
+                is_constant: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+        runmat_builtins::register_class(child);
+
+        let mut payload = StructValue::new();
+        payload
+            .fields
+            .insert("Status".to_string(), Value::from("ready"));
+        let target = unsafe {
+            runmat_gc_api::GcPtr::from_raw(Box::into_raw(Box::new(Value::Struct(payload))))
+        };
+
+        let handle = HandleRef {
+            class_name: child_name.to_string(),
+            target,
+            valid: true,
+        };
+
+        let Value::Cell(cell) =
+            run_fieldnames(Value::HandleObject(handle)).expect("fieldnames handle")
+        else {
+            panic!("expected cell array");
+        };
+        let collected = cell_strings(&cell);
+        assert_eq!(
+            collected,
+            vec![
+                "ChildEnabled".to_string(),
+                "ParentEnabled".to_string(),
+                "Status".to_string()
+            ]
+        );
     }
 
     fn cell_strings(cell: &CellArray) -> Vec<String> {

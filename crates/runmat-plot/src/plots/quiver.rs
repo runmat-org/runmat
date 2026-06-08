@@ -1,6 +1,8 @@
 //! Quiver plot (vector field) implementation
 
-use crate::core::{BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
+use crate::core::{
+    BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
+};
 use glam::{Vec3, Vec4};
 
 #[derive(Debug, Clone)]
@@ -21,6 +23,9 @@ pub struct QuiverPlot {
     vertices: Option<Vec<Vertex>>,
     bounds: Option<BoundingBox>,
     dirty: bool,
+    gpu_vertices: Option<GpuVertexBuffer>,
+    gpu_vertex_count: Option<usize>,
+    gpu_bounds: Option<BoundingBox>,
 }
 
 impl QuiverPlot {
@@ -43,7 +48,38 @@ impl QuiverPlot {
             vertices: None,
             bounds: None,
             dirty: true,
+            gpu_vertices: None,
+            gpu_vertex_count: None,
+            gpu_bounds: None,
         })
+    }
+    pub fn from_gpu_buffer(
+        color: Vec4,
+        line_width: f32,
+        scale: f32,
+        head_size: f32,
+        buffer: GpuVertexBuffer,
+        vertex_count: usize,
+        bounds: BoundingBox,
+    ) -> Self {
+        Self {
+            x: Vec::new(),
+            y: Vec::new(),
+            u: Vec::new(),
+            v: Vec::new(),
+            color,
+            line_width,
+            scale,
+            head_size,
+            label: None,
+            visible: true,
+            vertices: None,
+            bounds: Some(bounds),
+            dirty: false,
+            gpu_vertices: Some(buffer),
+            gpu_vertex_count: Some(vertex_count),
+            gpu_bounds: Some(bounds),
+        }
     }
     pub fn with_style(mut self, color: Vec4, line_width: f32, scale: f32, head_size: f32) -> Self {
         self.color = color;
@@ -107,6 +143,9 @@ impl QuiverPlot {
     }
 
     pub fn bounds(&mut self) -> BoundingBox {
+        if let Some(bounds) = self.gpu_bounds {
+            return bounds;
+        }
         if self.dirty || self.bounds.is_none() {
             let mut min = Vec3::new(f32::INFINITY, f32::INFINITY, 0.0);
             let mut max = Vec3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, 0.0);
@@ -133,14 +172,20 @@ impl QuiverPlot {
     }
 
     pub fn render_data(&mut self) -> RenderData {
-        let vertices = self.generate_vertices().clone();
+        let using_gpu = self.gpu_vertices.is_some();
+        let bounds = self.bounds();
+        let vertices = if using_gpu {
+            Vec::new()
+        } else {
+            self.generate_vertices().clone()
+        };
         let material = Material {
             albedo: self.color,
             ..Default::default()
         };
         let draw_call = DrawCall {
             vertex_offset: 0,
-            vertex_count: vertices.len(),
+            vertex_count: self.gpu_vertex_count.unwrap_or(vertices.len()),
             index_offset: None,
             index_count: None,
             instance_count: 1,
@@ -149,8 +194,8 @@ impl QuiverPlot {
             pipeline_type: PipelineType::Lines,
             vertices,
             indices: None,
-            gpu_vertices: None,
-            bounds: None,
+            gpu_vertices: self.gpu_vertices.clone(),
+            bounds: Some(bounds),
             material,
             draw_calls: vec![draw_call],
             image: None,

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::graph::{
     AccelGraph, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, NodeId, PrimitiveOp,
-    ShapeInfo, ValueId, ValueInfo, ValueOrigin,
+    ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding,
 };
 use crate::reduction_meta::{detect_reduction_signature, ReductionAxes, ReductionBehavior};
 use runmat_accelerate_api::CovNormalization;
@@ -36,6 +36,20 @@ pub struct FusionGroup {
     pub shape: ShapeInfo,
     pub span: InstrSpan,
     pub pattern: Option<FusionPattern>,
+    #[serde(default)]
+    pub stack_layout: Option<FusionStackLayout>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FusionStackLayout {
+    pub required_stack_operands: usize,
+    pub bindings: Vec<FusionStackValueBinding>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FusionStackValueBinding {
+    pub value_id: ValueId,
+    pub stack_offset: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,7 +113,7 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
             continue;
         }
         let mut current_shape = node_output_shape(graph, node);
-        if matches!(current_shape, ShapeInfo::Unknown) {
+        if matches!(current_shape, ShapeInfo::Unknown | ShapeInfo::Scalar) {
             continue;
         }
         let mut chain: Vec<NodeId> = Vec::new();
@@ -148,6 +162,7 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
                 shape: current_shape.clone(),
                 span,
                 pattern: None,
+                stack_layout: None,
             });
             group_id += 1;
         }
@@ -172,6 +187,7 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
             shape: node_output_shape(graph, node),
             span,
             pattern: None,
+            stack_layout: None,
         });
         group_id += 1;
     }
@@ -205,14 +221,13 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
             if !next.is_elementwise() {
                 break;
             }
-            // Allow only primitive elementwise ops we can fold: add/sub/mul/div/elem variants
+            // Allow only primitive elementwise ops we can fold: add/sub/mul and elementwise divide
             let allowed = matches!(
                 next.label,
                 AccelNodeLabel::Primitive(PrimitiveOp::Add)
                     | AccelNodeLabel::Primitive(PrimitiveOp::Sub)
                     | AccelNodeLabel::Primitive(PrimitiveOp::Mul)
                     | AccelNodeLabel::Primitive(PrimitiveOp::ElemMul)
-                    | AccelNodeLabel::Primitive(PrimitiveOp::Div)
                     | AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
             );
             if !allowed {
@@ -234,6 +249,7 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
                 shape: node_output_shape(graph, node),
                 span,
                 pattern: None,
+                stack_layout: None,
             });
             group_id += 1;
         }
@@ -547,6 +563,40 @@ fn group_span(graph: &AccelGraph, nodes: &[NodeId]) -> InstrSpan {
     InstrSpan { start, end }
 }
 
+fn merge_stack_layout_with_stack_pattern(
+    existing: Option<&FusionStackLayout>,
+    inputs: &[ValueId],
+    stack_pattern: &[usize],
+) -> Option<FusionStackLayout> {
+    if existing.is_none() && stack_pattern.is_empty() {
+        return None;
+    }
+
+    let mut bindings = existing
+        .map(|layout| layout.bindings.clone())
+        .unwrap_or_default();
+    for (stack_offset, &input_idx) in stack_pattern.iter().enumerate() {
+        let &value_id = inputs.get(input_idx)?;
+        if bindings.iter().any(|binding| binding.value_id == value_id) {
+            continue;
+        }
+        bindings.push(FusionStackValueBinding {
+            value_id,
+            stack_offset,
+        });
+    }
+
+    let required_stack_operands = existing
+        .map(|layout| layout.required_stack_operands)
+        .unwrap_or(0)
+        .max(stack_pattern.len());
+
+    Some(FusionStackLayout {
+        required_stack_operands,
+        bindings,
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct FusionPlan {
     pub groups: Vec<FusionGroupPlan>,
@@ -561,6 +611,7 @@ pub struct FusionGroupPlan {
     pub stack_pattern: Vec<usize>,
     pub constants: HashMap<usize, Value>,
     pub const_values: HashMap<ValueId, Value>,
+    pub materialized_stores: Vec<FusionStoreMaterialization>,
     pub output: Option<ValueId>,
     pub kernel: FusionKernelSpec,
     // For reductions: track the ValueId of the data tensor being reduced, if identifiable
@@ -572,6 +623,12 @@ pub struct FusionGroupPlan {
     // For reductions: axis selection metadata (e.g., explicit dims vs 'all')
     pub reduction_axes: Option<ReductionAxes>,
     pub pattern: Option<FusionPattern>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FusionStoreMaterialization {
+    pub value_id: ValueId,
+    pub binding: VarBinding,
 }
 
 #[derive(Debug, Clone)]
@@ -648,9 +705,34 @@ fn fusion_debug_enabled() -> bool {
 pub fn prepare_fusion_plan(
     graph: Option<&AccelGraph>,
     groups: &[FusionGroup],
+    candidate_group_count: usize,
 ) -> Option<Arc<FusionPlan>> {
     let graph = graph?;
+    if candidate_group_count == 0 {
+        if !groups.is_empty() && fusion_debug_enabled() {
+            log::debug!(
+                "fusion plan preparation: executable bytecode fusion groups present ({}) but semantic candidate groups are absent",
+                groups.len()
+            );
+        }
+        return None;
+    }
     if groups.is_empty() {
+        if candidate_group_count > 0 && fusion_debug_enabled() {
+            log::debug!(
+                "fusion plan preparation: semantic candidate groups present ({}) but executable bytecode fusion groups are empty",
+                candidate_group_count
+            );
+        }
+        return None;
+    }
+    let groups = sanitize_runtime_groups(graph, groups);
+    if groups.is_empty() {
+        if fusion_debug_enabled() {
+            log::debug!(
+                "fusion plan preparation: semantic-gated bytecode groups could not be reconciled against runtime accel graph nodes"
+            );
+        }
         return None;
     }
     let key = graph as *const AccelGraph as usize;
@@ -662,12 +744,82 @@ pub fn prepare_fusion_plan(
         return Some(plan);
     }
 
-    let plan = FusionPlan::from_graph(graph, groups);
+    let plan = FusionPlan::from_graph(graph, &groups);
     let plan = Arc::new(plan);
     if let Ok(mut guard) = PLAN_CACHE.write() {
         guard.insert(key, Arc::downgrade(&plan));
     }
     Some(plan)
+}
+
+fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<FusionGroup> {
+    groups
+        .iter()
+        .filter_map(|group| {
+            let had_explicit_mapped_nodes = !group.nodes.is_empty();
+            let mut sanitized = group.clone();
+            sanitized.nodes.retain(|id| {
+                graph
+                    .node(*id)
+                    .map(|node| {
+                        node_matches_runtime_group_kind(graph, node, &sanitized.kind)
+                            && node_within_group_span(node, &sanitized.span)
+                    })
+                    .unwrap_or(false)
+            });
+            if sanitized.nodes.is_empty() && !had_explicit_mapped_nodes {
+                sanitized.nodes = graph
+                    .nodes
+                    .iter()
+                    .filter(|node| {
+                        node_matches_runtime_group_kind(graph, node, &sanitized.kind)
+                            && node_within_group_span(node, &sanitized.span)
+                    })
+                    .map(|node| node.id)
+                    .collect();
+            }
+            sanitized.nodes.sort_unstable_by_key(|node_id| {
+                graph
+                    .node(*node_id)
+                    .map(|node| (node.span.start, node.span.end, node.id))
+                    .unwrap_or((usize::MAX, usize::MAX, *node_id))
+            });
+            sanitized.nodes.dedup();
+            if sanitized.nodes.is_empty() {
+                None
+            } else {
+                Some(sanitized)
+            }
+        })
+        .collect()
+}
+
+fn node_matches_runtime_group_kind(
+    graph: &AccelGraph,
+    node: &AccelNode,
+    kind: &FusionKind,
+) -> bool {
+    match kind {
+        FusionKind::ElementwiseChain => {
+            node.is_elementwise()
+                || node.category == AccelOpCategory::Transpose
+                || is_elementwise_max_min(graph, node)
+        }
+        FusionKind::Reduction => node.is_reduction(),
+        FusionKind::MatmulEpilogue => {
+            node.category == AccelOpCategory::MatMul
+                || node.is_elementwise()
+                || node.category == AccelOpCategory::Transpose
+        }
+        FusionKind::CenteredGram
+        | FusionKind::ImageNormalize
+        | FusionKind::PowerStepNormalize
+        | FusionKind::ExplainedVariance => true,
+    }
+}
+
+fn node_within_group_span(node: &AccelNode, span: &InstrSpan) -> bool {
+    node.span.start >= span.start && node.span.end <= span.end
 }
 
 pub fn activate_fusion_plan(plan: Option<Arc<FusionPlan>>) {
@@ -774,7 +926,7 @@ fn log_plan_stack_pattern(stage: &str, plan: &FusionGroupPlan, graph: &AccelGrap
             pattern_meta.push(format!("#{}:input_idx={} vid=<missing>", pos, input_idx));
         }
     }
-    log::debug!(
+    log::trace!(
         "fusion plan {} {} stack_pattern={:?} meta={:?}",
         plan.index,
         stage,
@@ -851,7 +1003,7 @@ impl FusionGroupPlan {
 
                     if fusion_debug_enabled() {
                         let origin = graph.value(*input).map(|v| v.origin.clone());
-                        log::debug!(
+                        log::trace!(
                             "fusion plan #{:?} consider input vid={} origin={:?} binding={:?} newly_added={} is_variable={} stack_candidate={}",
                             index,
                             input,
@@ -878,7 +1030,7 @@ impl FusionGroupPlan {
                         if allow_stack {
                             stack_pattern.push(input_idx);
                         } else if fusion_debug_enabled() {
-                            log::debug!(
+                            log::trace!(
                                 "fusion plan {} skipping stack candidate vid={} origin_after_span",
                                 index,
                                 input
@@ -940,6 +1092,7 @@ impl FusionGroupPlan {
             stack_pattern,
             constants,
             const_values,
+            materialized_stores: Vec::new(),
             inputs,
             output,
             kernel: FusionKernelSpec::new(kind, true),
@@ -1038,7 +1191,6 @@ impl FusionGroupPlan {
                         match &node.label {
                             AccelNodeLabel::Primitive(PrimitiveOp::Mul)
                             | AccelNodeLabel::Primitive(PrimitiveOp::ElemMul)
-                            | AccelNodeLabel::Primitive(PrimitiveOp::Div)
                             | AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
                             | AccelNodeLabel::Primitive(PrimitiveOp::ElemLeftDiv)
                             | AccelNodeLabel::Primitive(PrimitiveOp::Add)
@@ -1212,7 +1364,14 @@ impl FusionGroupPlan {
         // - Reduction: require WGSL generation at plan time as well.
         // - Other kinds: executed via provider paths.
         let supported = if plan.kernel.kind.is_elementwise() {
-            plan.generate_wgsl("f32").is_some()
+            // Keep scalar ops on the VM/runtime scalar path. Fusing scalar elementwise
+            // spans can materialize scalar GPU handles that later leak into scalar-only
+            // VM coercion boundaries.
+            if scalar_shape_known_one(&plan.group.shape) {
+                false
+            } else {
+                plan.generate_wgsl("f32").is_some()
+            }
         } else if plan.kernel.kind.is_reduction() {
             plan.generate_reduction_wgsl("f32").is_some()
         } else {
@@ -1285,6 +1444,32 @@ impl FusionGroupPlan {
             plan.stack_pattern = centered_stack_idxs;
         }
 
+        if !plan.stack_pattern.is_empty() || plan.group.stack_layout.is_some() {
+            plan.group.stack_layout = merge_stack_layout_with_stack_pattern(
+                plan.group.stack_layout.as_ref(),
+                &plan.inputs,
+                &plan.stack_pattern,
+            );
+        }
+
+        if plan.group.kind.is_elementwise() {
+            let mut stores = Vec::new();
+            for op in &plan.operations {
+                let output = match op {
+                    FusionOp::Primitive { output, .. } => *output,
+                    FusionOp::Builtin { output, .. } => *output,
+                };
+                let Some(value_id) = output else {
+                    continue;
+                };
+                let Some(binding) = graph.var_binding(value_id).cloned() else {
+                    continue;
+                };
+                stores.push(FusionStoreMaterialization { value_id, binding });
+            }
+            plan.materialized_stores = stores;
+        }
+
         log_plan_stack_pattern("final", &plan, graph);
 
         // If the plan requires any unsupported operations, mark kernel as unsupported
@@ -1317,16 +1502,213 @@ impl FusionGroupPlan {
     }
 
     pub fn generate_wgsl(&self, scalar_ty: &str) -> Option<String> {
+        self.generate_wgsl_for_output(self.output?, scalar_ty)
+    }
+
+    /// Build the complete WGSL elementwise shader.
+    ///
+    /// The caller is responsible for the output-specific parts:
+    /// - `output_bindings`: one `@group(0) @binding(…) var<storage, read_write> …` line per output.
+    /// - `params_binding_idx`: the binding index for the uniform `Params` block
+    ///   (`inputs.len() + num_outputs`).
+    /// - `body`: the sequence of `let tmpN` assignment statements.
+    /// - `final_writes`: the `output….data[g] = …;` store statements.
+    fn build_wgsl_shader(
+        &self,
+        scalar_ty: &str,
+        output_bindings: &str,
+        params_binding_idx: usize,
+        body: &str,
+        final_writes: &str,
+    ) -> String {
+        let mut shader = String::new();
+
+        // ── type definitions ──────────────────────────────────────────────────
+        shader.push_str("const MAX_RANK: u32 = 128u;\n");
+        shader.push_str("struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32 };\n");
+        shader.push_str("alias PackedArray = array<PackedValue, MAX_RANK>;\n\n");
+        shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>, }};\n"));
+
+        // Broadcast-aware Params: len, offset, rank, pad, out_shape and per-input shape/stride
+        shader.push_str(
+            "struct Params {\n    len: u32,\n    offset: u32,\n    rank: u32,\n    _pad: u32,\n    out_shape: PackedArray,\n",
+        );
+        for idx in 0..self.inputs.len() {
+            shader.push_str(&format!("    in{}_shape: PackedArray,\n", idx));
+            shader.push_str(&format!("    in{}_stride: PackedArray,\n", idx));
+        }
+        shader.push_str("}\n\n");
+
+        // ── portable helper stubs ─────────────────────────────────────────────
+        // Avoid relying on backend builtins that may be missing.
+        // hypot is not a WGSL builtin; define it explicitly.
+        // Use the scaling form max*sqrt(1+(min/max)²) to avoid overflow when
+        // a² or b² exceeds the representable range.
+        // Guard against Inf inputs: Inf/Inf = NaN, so return hi early when
+        // it is already infinite (IEEE 754 requires hypot(Inf,*) = Inf).
+        if scalar_ty == "f32" {
+            shader.push_str("fn isNan(x: f32) -> bool { return x != x; }\n");
+            shader.push_str("fn isFinite(x: f32) -> bool { return (x == x) && (abs(x) < 3.4028234663852886e38); }\n");
+            shader.push_str("fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }\n");
+            shader.push_str(concat!(
+                "fn hypot(a: f32, b: f32) -> f32 {\n",
+                "    let lo = min(abs(a), abs(b));\n",
+                "    let hi = max(abs(a), abs(b));\n",
+                "    if hi == 0.0 { return 0.0; }\n",
+                "    if isInf(hi) { return hi; }\n",
+                "    let r = lo / hi;\n",
+                "    return hi * sqrt(1.0 + r * r);\n",
+                "}\n\n",
+            ));
+        } else {
+            shader.push_str("fn isNan(x: f64) -> bool { return x != x; }\n");
+            shader.push_str("fn isFinite(x: f64) -> bool { return (x == x) && (abs(x) < f64(1.7976931348623157e308)); }\n");
+            shader.push_str("fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }\n");
+            shader.push_str(concat!(
+                "fn hypot(a: f64, b: f64) -> f64 {\n",
+                "    let lo = min(abs(a), abs(b));\n",
+                "    let hi = max(abs(a), abs(b));\n",
+                "    if hi == f64(0.0) { return f64(0.0); }\n",
+                "    if isInf(hi) { return hi; }\n",
+                "    let r = lo / hi;\n",
+                "    return hi * sqrt(f64(1.0) + r * r);\n",
+                "}\n\n",
+            ));
+        }
+
+        // ── resource bindings ─────────────────────────────────────────────────
+        for (idx, _) in self.inputs.iter().enumerate() {
+            shader.push_str(&format!(
+                "@group(0) @binding({idx}) var<storage, read> input{idx}: Tensor;\n",
+            ));
+        }
+        shader.push_str(output_bindings);
+        shader.push_str(&format!(
+            "@group(0) @binding({params_binding_idx}) var<uniform> params: Params;\n\n",
+        ));
+
+        // ── compute entry point ───────────────────────────────────────────────
+        shader.push_str(
+            "@compute @workgroup_size(@WG@)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {\n",
+        );
+        shader.push_str("    let idx = gid.x;\n    if (idx >= params.len) { return; }\n");
+        shader.push_str("    let g = idx + params.offset;\n");
+
+        // Compute N-D coordinates from global index (with chunk offset)
+        shader.push_str(
+            "    var coord: array<u32, MAX_RANK>;\n    var tmp: u32 = g;\n    var d: u32 = 0u;\n    loop { if d >= params.rank { break; } let dim = params.out_shape[d].value; if dim == 0u { coord[d] = 0u; } else { coord[d] = tmp % dim; tmp = tmp / dim; } d = d + 1u; }\n",
+        );
+
+        // Compute broadcasted flat indices per input
+        for (idx, _) in self.inputs.iter().enumerate() {
+            shader.push_str(&format!(
+                "    var i{idx}: u32 = 0u; d = 0u; loop {{ if d >= params.rank {{ break; }} let sd = params.in{idx}_shape[d].value; let st = params.in{idx}_stride[d].value; let c = select(coord[d], 0u, sd == 1u); i{idx} = i{idx} + c * st; d = d + 1u; }}\n",
+            ));
+        }
+
+        shader.push_str(body);
+        shader.push_str(final_writes);
+        shader.push_str("}\n");
+        shader
+    }
+
+    /// Generate a single WGSL shader that writes all `output_ids` in one compute pass,
+    /// eliminating the O(N²) redundant dispatches that arise from calling
+    /// `generate_wgsl_for_output` N times.
+    ///
+    /// Binding layout:
+    ///   0 .. inputs.len()-1          → read-only input tensors
+    ///   inputs.len() + k             → read_write output tensor k
+    ///   inputs.len() + output_ids.len() → uniform Params
+    pub fn generate_wgsl_for_outputs(
+        &self,
+        output_ids: &[ValueId],
+        scalar_ty: &str,
+    ) -> Option<String> {
+        if output_ids.is_empty() {
+            return None;
+        }
+        if output_ids.len() == 1 {
+            return self.generate_wgsl_for_output(output_ids[0], scalar_ty);
+        }
         if !self.kernel.kind.is_elementwise() {
             return None;
         }
         if !self.kernel.supported {
             return None;
         }
-        let output_id = self.output?;
+
         let mut exprs: HashMap<ValueId, String> = HashMap::new();
         for (idx, input_id) in self.inputs.iter().enumerate() {
-            // Placeholder; will be replaced by broadcasted index variable i{idx}
+            exprs.insert(*input_id, format!("input{idx}.data[i{idx}]"));
+        }
+
+        let mut body = String::new();
+        for (node_idx, op) in self.operations.iter().enumerate() {
+            let tmp_name = format!("tmp{node_idx}");
+            match op {
+                FusionOp::Primitive { op, inputs, output } => {
+                    let expr = primitive_expr(*op, inputs, &exprs)?;
+                    body.push_str(&format!("    let {tmp_name}: {scalar_ty} = {expr};\n"));
+                    if let Some(out) = output {
+                        exprs.insert(*out, tmp_name.clone());
+                    }
+                }
+                FusionOp::Builtin {
+                    name,
+                    inputs,
+                    output,
+                } => {
+                    let expr = builtin_expr(name, inputs, &exprs, scalar_ty)?;
+                    body.push_str(&format!("    let {tmp_name}: {scalar_ty} = {expr};\n"));
+                    if let Some(out) = output {
+                        exprs.insert(*out, tmp_name.clone());
+                    }
+                }
+            }
+        }
+
+        let mut final_exprs = Vec::with_capacity(output_ids.len());
+        for output_id in output_ids {
+            final_exprs.push(exprs.get(output_id)?.clone());
+        }
+
+        let num_outputs = output_ids.len();
+        let n_inputs = self.inputs.len();
+
+        let mut output_bindings = String::new();
+        for k in 0..num_outputs {
+            output_bindings.push_str(&format!(
+                "@group(0) @binding({}) var<storage, read_write> output{k}: Tensor;\n",
+                n_inputs + k,
+            ));
+        }
+
+        let mut final_writes = String::new();
+        for (k, expr) in final_exprs.iter().enumerate() {
+            final_writes.push_str(&format!("    output{k}.data[g] = {expr};\n"));
+        }
+
+        Some(self.build_wgsl_shader(
+            scalar_ty,
+            &output_bindings,
+            n_inputs + num_outputs,
+            &body,
+            &final_writes,
+        ))
+    }
+
+    pub fn generate_wgsl_for_output(&self, output_id: ValueId, scalar_ty: &str) -> Option<String> {
+        if !self.kernel.kind.is_elementwise() {
+            return None;
+        }
+        if !self.kernel.supported {
+            return None;
+        }
+
+        let mut exprs: HashMap<ValueId, String> = HashMap::new();
+        for (idx, input_id) in self.inputs.iter().enumerate() {
+            // Placeholder; will be resolved to the broadcasted index variable i{idx}
             exprs.insert(*input_id, format!("input{idx}.data[i{idx}]"));
         }
 
@@ -1356,57 +1738,19 @@ impl FusionGroupPlan {
         }
 
         let final_expr = exprs.get(&output_id)?.clone();
+        let n_inputs = self.inputs.len();
 
-        let mut shader = String::new();
-        shader.push_str("const MAX_RANK: u32 = 128u;\n");
-        shader.push_str("struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32 };\n");
-        shader.push_str("alias PackedArray = array<PackedValue, MAX_RANK>;\n\n");
-        shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>, }};\n"));
-        // Broadcast-aware Params: len, offset, rank, pad, out_shape and per-input shape/stride
-        shader.push_str("struct Params {\n    len: u32,\n    offset: u32,\n    rank: u32,\n    _pad: u32,\n    out_shape: PackedArray,\n");
-        for idx in 0..self.inputs.len() {
-            shader.push_str(&format!("    in{}_shape: PackedArray,\n", idx));
-            shader.push_str(&format!("    in{}_stride: PackedArray,\n", idx));
-        }
-        shader.push_str("}\n\n");
-        // Provide portable stubs; avoid relying on backend builtins that may be missing
-        if scalar_ty == "f32" {
-            shader.push_str("fn isNan(x: f32) -> bool { return x != x; }\n");
-            shader.push_str("fn isFinite(x: f32) -> bool { return (x == x) && (abs(x) < 3.4028234663852886e38); }\n");
-            shader.push_str("fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }\n\n");
-        } else {
-            shader.push_str("fn isNan(x: f64) -> bool { return x != x; }\n");
-            shader.push_str("fn isFinite(x: f64) -> bool { return (x == x) && (abs(x) < f64(1.7976931348623157e308)); }\n");
-            shader.push_str("fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }\n\n");
-        }
-        for (idx, _) in self.inputs.iter().enumerate() {
-            shader.push_str(&format!(
-                "@group(0) @binding({}) var<storage, read> input{}: Tensor;\n",
-                idx, idx
-            ));
-        }
-        shader.push_str(&format!(
-            "@group(0) @binding({}) var<storage, read_write> output: Tensor;\n",
-            self.inputs.len()
-        ));
-        shader.push_str(&format!(
-            "@group(0) @binding({}) var<uniform> params: Params;\n\n",
-            self.inputs.len() + 1
-        ));
-        shader.push_str("@compute @workgroup_size(@WG@)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {\n");
-        shader.push_str("    let idx = gid.x;\n    if (idx >= params.len) { return; }\n");
-        shader.push_str("    let g = idx + params.offset;\n");
-        shader.push_str("    // Compute N-D coordinates from global index (with chunk offset)\n    var coord: array<u32, MAX_RANK>;\n    var tmp: u32 = g;\n    var d: u32 = 0u;\n    loop { if d >= params.rank { break; } let dim = params.out_shape[d].value; if dim == 0u { coord[d] = 0u; } else { coord[d] = tmp % dim; tmp = tmp / dim; } d = d + 1u; }\n");
-        // Compute broadcasted indices per input
-        for (idx, _) in self.inputs.iter().enumerate() {
-            shader.push_str(&format!(
-                "    var i{}: u32 = 0u; d = 0u; loop {{ if d >= params.rank {{ break; }} let sd = params.in{}_shape[d].value; let st = params.in{}_stride[d].value; let c = select(coord[d], 0u, sd == 1u); i{} = i{} + c * st; d = d + 1u; }}\n",
-                idx, idx, idx, idx, idx
-            ));
-        }
-        shader.push_str(&body);
-        shader.push_str(&format!("    output.data[g] = {final_expr};\n}}\n"));
-        Some(shader)
+        let output_bindings =
+            format!("@group(0) @binding({n_inputs}) var<storage, read_write> output: Tensor;\n",);
+        let final_writes = format!("    output.data[g] = {final_expr};\n");
+
+        Some(self.build_wgsl_shader(
+            scalar_ty,
+            &output_bindings,
+            n_inputs + 1,
+            &body,
+            &final_writes,
+        ))
     }
 
     pub fn generate_reduction_wgsl(&self, scalar_ty: &str) -> Option<String> {
@@ -1760,7 +2104,7 @@ fn detect_centered_gram(
             AccelNodeLabel::Primitive(op) => op,
             _ => continue,
         };
-        if div_op != PrimitiveOp::Div && div_op != PrimitiveOp::ElemDiv {
+        if div_op != PrimitiveOp::ElemDiv {
             continue;
         }
         if div_node.inputs.len() != 2 {
@@ -1953,6 +2297,7 @@ fn detect_centered_gram(
                 matrix: matrix_val_id,
                 normalization,
             }),
+            stack_layout: None,
         });
         *next_group_id += 1;
         for id in nodes {
@@ -1998,6 +2343,7 @@ fn detect_image_normalize(
             shape,
             span: span.clone(),
             pattern: Some(FusionPattern::ImageNormalize(pattern)),
+            stack_layout: None,
         });
         if fusion_debug_enabled() {
             log::debug!(
@@ -2033,7 +2379,7 @@ fn detect_power_step_normalize(
             AccelNodeLabel::Primitive(op) => op,
             _ => continue,
         };
-        if div_op != PrimitiveOp::Div && div_op != PrimitiveOp::ElemDiv {
+        if div_op != PrimitiveOp::ElemDiv {
             continue;
         }
         if div_node.inputs.len() != 2 {
@@ -2113,6 +2459,7 @@ fn detect_power_step_normalize(
                 rhs: matmul_node.inputs[1],
                 epsilon: denom_info.epsilon,
             }),
+            stack_layout: None,
         });
         *next_group_id += 1;
         for id in nodes {
@@ -2215,6 +2562,7 @@ fn detect_explained_variance(
             shape,
             span,
             pattern: Some(FusionPattern::ExplainedVariance { q: q_vid, g: g_vid }),
+            stack_layout: None,
         });
         *next_group_id += 1;
         for id in nodes {
@@ -2536,7 +2884,7 @@ fn primitive_expr(
             let (lhs, rhs) = binary(exprs)?;
             Some(format!("({lhs} * {rhs})"))
         }
-        PrimitiveOp::Div | PrimitiveOp::ElemDiv | PrimitiveOp::ElemLeftDiv => {
+        PrimitiveOp::ElemDiv | PrimitiveOp::ElemLeftDiv => {
             let (lhs, rhs) = binary(exprs)?;
             Some(format!("({lhs} / {rhs})"))
         }
@@ -2567,6 +2915,25 @@ fn builtin_expr(
         "isinf" => return builtin_unary_call("isInf", inputs, exprs),
         "isnan" => return builtin_unary_call("isNan", inputs, exprs),
         "single" | "double" | "gpuarray" => return builtin_identity(inputs, exprs),
+        "fix" => return builtin_unary_call("trunc", inputs, exprs),
+        "sign" => return builtin_unary_call("sign", inputs, exprs),
+        "mod" => {
+            let lhs = exprs.get(inputs.first()?).cloned()?;
+            let rhs = exprs.get(inputs.get(1)?).cloned()?;
+            // When rhs is infinite and lhs is finite, MATLAB sign-corrects: returns lhs when
+            // signs match, rhs (±Inf) when they differ. The general formula produces NaN here
+            // (inf * 0 = NaN), so we must short-circuit.
+            return Some(format!(
+                "select(({lhs} - {rhs} * floor({lhs} / {rhs})), select({rhs}, {lhs}, ({lhs} == 0.0 || sign({lhs}) == sign({rhs}))), (isInf({rhs}) && isFinite({lhs})))"
+            ));
+        }
+        "rem" => {
+            let lhs = exprs.get(inputs.first()?).cloned()?;
+            let rhs = exprs.get(inputs.get(1)?).cloned()?;
+            return Some(format!(
+                "select(({lhs} - {rhs} * trunc({lhs} / {rhs})), {lhs}, (isInf({rhs}) && isFinite({lhs})))"
+            ));
+        }
         "sin" => "sin",
         "cos" => "cos",
         "tan" => "tan",
@@ -2574,6 +2941,13 @@ fn builtin_expr(
         "acos" => "acos",
         "atan" => "atan",
         "atan2" => return builtin_binary("atan2", inputs, exprs),
+        "hypot" => return builtin_binary("hypot", inputs, exprs),
+        "pow2" => {
+            if inputs.len() == 1 {
+                return builtin_unary_call("exp2", inputs, exprs);
+            }
+            return None;
+        }
         "sinh" => "sinh",
         "cosh" => "cosh",
         "tanh" => "tanh",
@@ -2587,6 +2961,9 @@ fn builtin_expr(
         "ceil" => "ceil",
         "round" => "round",
         "trunc" => "trunc",
+        "asinh" => return builtin_unary_call("asinh", inputs, exprs),
+        "acosh" => return builtin_unary_call("acosh", inputs, exprs),
+        "atanh" => return builtin_unary_call("atanh", inputs, exprs),
         "max" => return builtin_binary("max", inputs, exprs),
         "min" => return builtin_binary("min", inputs, exprs),
         _ => {
@@ -2939,8 +3316,7 @@ fn analyze_image_normalize(
         img_norm_fail!("div node already assigned");
     }
     match div_node.label {
-        AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
-        | AccelNodeLabel::Primitive(PrimitiveOp::Div) => {}
+        AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv) => {}
         _ => img_norm_fail!("not div primitive"),
     }
     if div_node.inputs.len() != 2 {
@@ -3139,6 +3515,147 @@ mod tests {
     }
 
     #[test]
+    fn prepare_fusion_plan_requires_semantic_candidate_groups() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+        assert_eq!(groups.len(), 1);
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 0);
+        assert!(
+            plan.is_none(),
+            "bytecode groups alone should not produce an executable fusion plan without semantic candidate evidence"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_allows_semantic_gated_groups() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+        assert_eq!(groups.len(), 1);
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1);
+        assert!(
+            plan.is_some(),
+            "semantic candidate evidence should allow executable fusion plan preparation"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_recovers_empty_group_nodes_from_contained_runtime_span() {
+        let graph = simple_elementwise_graph();
+        let groups = vec![FusionGroup {
+            id: 0,
+            kind: FusionKind::ElementwiseChain,
+            nodes: Vec::new(),
+            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            span: InstrSpan { start: 10, end: 10 },
+            pattern: None,
+            stack_layout: None,
+        }];
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1)
+            .expect("runtime group sanitization should recover contained elementwise nodes");
+        assert_eq!(plan.groups.len(), 1);
+        assert_eq!(
+            plan.groups[0].group.nodes,
+            vec![0],
+            "runtime sanitization should recover a compatible contained node for empty group mapping"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_rejects_empty_group_nodes_when_runtime_graph_is_too_far() {
+        let graph = simple_elementwise_graph();
+        let groups = vec![FusionGroup {
+            id: 0,
+            kind: FusionKind::ElementwiseChain,
+            nodes: Vec::new(),
+            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            span: InstrSpan { start: 20, end: 20 },
+            pattern: None,
+            stack_layout: None,
+        }];
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1);
+        assert!(
+            plan.is_none(),
+            "runtime sanitization should reject empty group mapping when no compatible nearby nodes exist"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_rejects_empty_group_nodes_when_runtime_node_covers_group_span() {
+        let values = vec![
+            ValueInfo {
+                id: 0,
+                origin: ValueOrigin::Variable {
+                    kind: VarKind::Global,
+                    index: 0,
+                },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+                constant: None,
+            },
+            ValueInfo {
+                id: 1,
+                origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+                constant: None,
+            },
+        ];
+        let graph = AccelGraph {
+            nodes: vec![AccelNode {
+                id: 0,
+                label: AccelNodeLabel::Primitive(PrimitiveOp::ElemMul),
+                category: AccelOpCategory::Elementwise,
+                inputs: vec![0, 0],
+                outputs: vec![1],
+                span: InstrSpan { start: 10, end: 12 },
+                tags: vec![AccelGraphTag::Elementwise],
+            }],
+            values,
+            var_bindings: StdHashMap::new(),
+            node_bindings: StdHashMap::new(),
+        };
+        let groups = vec![FusionGroup {
+            id: 0,
+            kind: FusionKind::ElementwiseChain,
+            nodes: Vec::new(),
+            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            span: InstrSpan { start: 11, end: 11 },
+            pattern: None,
+            stack_layout: None,
+        }];
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1);
+        assert!(
+            plan.is_none(),
+            "runtime sanitization should reject covering runtime-node spans when semantic group spans are narrower"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_rejects_stale_mapped_nodes_without_runtime_remap() {
+        let graph = simple_elementwise_graph();
+        let groups = vec![FusionGroup {
+            id: 0,
+            kind: FusionKind::ElementwiseChain,
+            nodes: vec![1],
+            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            span: InstrSpan { start: 10, end: 10 },
+            pattern: None,
+            stack_layout: None,
+        }];
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1);
+        assert!(
+            plan.is_none(),
+            "runtime sanitization should reject stale mapped nodes instead of remapping from runtime graph scan"
+        );
+    }
+
+    #[test]
     fn builds_plan_and_template() {
         let graph = simple_elementwise_graph();
         let groups = detect_fusion_groups(&graph);
@@ -3243,6 +3760,37 @@ mod tests {
 
         let atan2 = super::builtin_expr("atan2", &[0, 1], &exprs, "f32");
         assert_eq!(atan2.unwrap(), "atan2(v0, v1)");
+
+        let asinh = super::builtin_expr("asinh", &[0], &exprs, "f32");
+        assert_eq!(asinh.unwrap(), "asinh(v0)");
+
+        let acosh = super::builtin_expr("acosh", &[0], &exprs, "f32");
+        assert_eq!(acosh.unwrap(), "acosh(v0)");
+
+        let atanh = super::builtin_expr("atanh", &[0], &exprs, "f32");
+        assert_eq!(atanh.unwrap(), "atanh(v0)");
+
+        let hypot = super::builtin_expr("hypot", &[0, 1], &exprs, "f32");
+        assert_eq!(hypot.unwrap(), "hypot(v0, v1)");
+
+        let sign = super::builtin_expr("sign", &[0], &exprs, "f32");
+        assert_eq!(sign.unwrap(), "sign(v0)");
+
+        let fix = super::builtin_expr("fix", &[0], &exprs, "f32");
+        assert_eq!(fix.unwrap(), "trunc(v0)");
+
+        let modulo = super::builtin_expr("mod", &[0, 1], &exprs, "f32");
+        let modulo = modulo.unwrap();
+        assert!(modulo.contains("floor"));
+        assert!(modulo.contains("isInf"));
+
+        let rem = super::builtin_expr("rem", &[0, 1], &exprs, "f32");
+        let rem = rem.unwrap();
+        assert!(rem.contains("trunc"));
+        assert!(rem.contains("isInf"));
+
+        let pow2 = super::builtin_expr("pow2", &[0], &exprs, "f32");
+        assert_eq!(pow2.unwrap(), "exp2(v0)");
 
         let single = super::builtin_expr("single", &[0], &exprs, "f32");
         assert_eq!(single.unwrap(), "v0");

@@ -1,4 +1,4 @@
-use runmat_builtins::{BuiltinDoc, BuiltinFunction};
+use runmat_builtins::{BuiltinDoc, BuiltinFunction, BuiltinParamType, BuiltinSignatureDescriptor};
 use std::fmt::Write as _;
 
 use crate::core::builtins_json;
@@ -117,8 +117,7 @@ fn render_builtin_hover_from_json(
 ) -> String {
     let mut out = String::new();
 
-    // Header (no typed signature yet): reliably show just `name(...)`.
-    let _ = writeln!(out, "```runmat\n{}(...)\n```", func.name);
+    let _ = writeln!(out, "```runmat\n{}\n```", signature_header(func));
 
     // Prefer the builtins-json "description" as the lede when it contains a call form,
     // because it typically already explains the function more concretely than summary/category/keywords.
@@ -146,10 +145,6 @@ fn render_builtin_hover_from_json(
 
         if let Some(category) = doc.category.as_deref().filter(|s| !s.trim().is_empty()) {
             let _ = writeln!(out, "**Category:** {category}\n");
-        }
-        if let Some(keywords) = doc.keywords.as_ref().filter(|k| !k.is_empty()) {
-            let joined = keywords.join(", ");
-            let _ = writeln!(out, "**Keywords:** {joined}\n");
         }
 
         if let Some(description) = description {
@@ -292,7 +287,7 @@ pub fn build_builtin_hover(func: &BuiltinFunction) -> String {
 
     // Fallback: no builtins-json entry available.
     let mut out = String::new();
-    let _ = writeln!(out, "```runmat\n{}(...)\n```", func.name);
+    let _ = writeln!(out, "```runmat\n{}\n```", signature_header(func));
 
     if !func.description.trim().is_empty() {
         let _ = writeln!(out, "**{}** — {}\n", func.name, func.description);
@@ -309,9 +304,6 @@ pub fn build_builtin_hover(func: &BuiltinFunction) -> String {
         }
         if let Some(category) = meta.category {
             let _ = writeln!(out, "**Category:** {category}");
-        }
-        if let Some(keywords) = meta.keywords {
-            let _ = writeln!(out, "**Keywords:** {keywords}");
         }
         if let Some(errors) = meta.errors {
             let _ = writeln!(out, "**Errors:** {errors}");
@@ -335,4 +327,74 @@ pub fn build_builtin_hover(func: &BuiltinFunction) -> String {
 
     let _ = writeln!(out, "Docs: {}", builtin_doc_url(func.name));
     out
+}
+
+pub fn completion_signature_label(func: &BuiltinFunction) -> Option<String> {
+    let signature = first_signature(func)?;
+    let inputs = signature
+        .inputs
+        .iter()
+        .map(format_param_for_completion)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let outputs = signature
+        .outputs
+        .iter()
+        .map(|param| param.name.to_string())
+        .collect::<Vec<_>>();
+    if outputs.is_empty() {
+        Some(format!("{}({inputs})", func.name))
+    } else if outputs.len() == 1 {
+        Some(format!("{} = {}({inputs})", outputs[0], func.name))
+    } else {
+        Some(format!(
+            "[{}] = {}({inputs})",
+            outputs.join(", "),
+            func.name
+        ))
+    }
+}
+
+pub fn signature_labels(func: &BuiltinFunction) -> Option<Vec<String>> {
+    let descriptor = func.descriptor?;
+    let labels = descriptor
+        .signatures
+        .iter()
+        .map(|sig| sig.label.to_string())
+        .collect::<Vec<_>>();
+    if labels.is_empty() {
+        None
+    } else {
+        Some(labels)
+    }
+}
+
+fn signature_header(func: &BuiltinFunction) -> String {
+    let Some(labels) = signature_labels(func) else {
+        return format!("{}(...)", func.name);
+    };
+    labels.join("\n")
+}
+
+fn first_signature(func: &BuiltinFunction) -> Option<&BuiltinSignatureDescriptor> {
+    let descriptor = func.descriptor?;
+    descriptor.signatures.first()
+}
+
+fn format_param_for_completion(param: &runmat_builtins::BuiltinParamDescriptor) -> String {
+    let ty = match param.ty {
+        BuiltinParamType::Any => "any",
+        BuiltinParamType::NumericScalar => "num",
+        BuiltinParamType::IntegerScalar => "int",
+        BuiltinParamType::StringScalar => "string",
+        BuiltinParamType::NumericArray => "numeric array",
+        BuiltinParamType::LogicalArray => "logical array",
+        BuiltinParamType::SizeArg => "size",
+        BuiltinParamType::LikePrototype => "prototype",
+        BuiltinParamType::AxesHandle => "axes",
+        BuiltinParamType::StyleSpec => "style",
+        BuiltinParamType::PropertyName => "property",
+        BuiltinParamType::PropertyValue => "value",
+    };
+    format!("{}: {}", param.name, ty)
 }

@@ -10,6 +10,8 @@ use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -50,6 +52,139 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn reshape_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("reshape").build()
 }
+
+const RESHAPE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array data with reshaped dimensions.",
+}];
+
+const RESHAPE_INPUTS_SZ: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array/value.",
+    },
+    BuiltinParamDescriptor {
+        name: "sz",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Row/column size vector. May include one auto-sized dimension ([]).",
+    },
+];
+
+const RESHAPE_INPUTS_DIMS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array/value.",
+    },
+    BuiltinParamDescriptor {
+        name: "m",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First output dimension size (or [] for auto).",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second output dimension size (or [] for auto).",
+    },
+];
+
+const RESHAPE_INPUTS_DIMS_VARIADIC: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array/value.",
+    },
+    BuiltinParamDescriptor {
+        name: "m",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First output dimension size (or [] for auto).",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second output dimension size (or [] for auto).",
+    },
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional output dimension sizes (or [] for auto).",
+    },
+];
+
+const RESHAPE_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "B = reshape(A, sz)",
+        inputs: &RESHAPE_INPUTS_SZ,
+        outputs: &RESHAPE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = reshape(A, m, n)",
+        inputs: &RESHAPE_INPUTS_DIMS,
+        outputs: &RESHAPE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = reshape(A, m, n, p...)",
+        inputs: &RESHAPE_INPUTS_DIMS_VARIADIC,
+        outputs: &RESHAPE_OUTPUT,
+    },
+];
+
+const RESHAPE_ERROR_SIZE_MISSING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RESHAPE.SIZE_MISSING",
+    identifier: Some("RunMat:reshape:SizeMissing"),
+    when: "No size vector/scalars are provided after A.",
+    message: "reshape: size information missing",
+};
+
+const RESHAPE_ERROR_INVALID_SIZE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RESHAPE.INVALID_SIZE",
+    identifier: Some("RunMat:reshape:InvalidSize"),
+    when:
+        "Size arguments are malformed, non-scalar where scalar required, or contain invalid values.",
+    message: "reshape: invalid size specification",
+};
+
+const RESHAPE_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RESHAPE.UNSUPPORTED_INPUT",
+    identifier: Some("RunMat:reshape:UnsupportedInput"),
+    when: "Input value type is unsupported for reshape.",
+    message: "reshape: unsupported input type",
+};
+
+const RESHAPE_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    RESHAPE_ERROR_SIZE_MISSING,
+    RESHAPE_ERROR_INVALID_SIZE,
+    RESHAPE_ERROR_UNSUPPORTED_INPUT,
+];
+
+pub const RESHAPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &RESHAPE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &RESHAPE_ERRORS,
+};
 
 fn reshape_rank_from_args(args: &[Type]) -> Option<usize> {
     if args.len() < 2 {
@@ -99,11 +234,12 @@ fn reshape_type(args: &[Type], ctx: &ResolveContext) -> Type {
     keywords = "reshape,resize,dimensions,gpu,auto",
     accel = "shape",
     type_resolver(reshape_type),
+    descriptor(crate::builtins::array::shape::reshape::RESHAPE_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::reshape"
 )]
 async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Err(reshape_error("reshape: size information missing"));
+        return Err(reshape_error(RESHAPE_ERROR_SIZE_MISSING.message));
     }
     let tokens = parse_size_arguments(&rest).await?;
     let numel = value_numel(&value).await?;

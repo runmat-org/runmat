@@ -1,11 +1,13 @@
 //! MATLAB-compatible `string` builtin with GPU-aware conversion semantics for RunMat.
 
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::format::format_variadic;
+use crate::builtins::common::format::{complex_to_string, format_variadic, number_to_string};
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -14,6 +16,90 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+
+const STRING_OUTPUT_S: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "String scalar/array result.",
+}];
+
+const STRING_INPUTS_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to convert to string array.",
+}];
+
+const STRING_INPUTS_VALUE_ENCODING: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input value to convert to string array.",
+    },
+    BuiltinParamDescriptor {
+        name: "encoding",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"UTF-8\""),
+        description: "Character encoding (UTF-8 aliases supported).",
+    },
+];
+
+const STRING_INPUTS_FORMAT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "formatSpec",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Format specification text/cell/string array.",
+    },
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Formatting data arguments.",
+    },
+];
+
+const STRING_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "S = string(X)",
+        inputs: &STRING_INPUTS_VALUE,
+        outputs: &STRING_OUTPUT_S,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = string(X, encoding)",
+        inputs: &STRING_INPUTS_VALUE_ENCODING,
+        outputs: &STRING_OUTPUT_S,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = string(formatSpec, A...)",
+        inputs: &STRING_INPUTS_FORMAT,
+        outputs: &STRING_OUTPUT_S,
+    },
+];
+
+const STRING_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRING.INVALID_INPUT",
+    identifier: Some("RunMat:string:InvalidInput"),
+    when: "Input conversion/formatting/encoding constraints are violated.",
+    message: "string: invalid input",
+};
+
+const STRING_ERRORS: [BuiltinErrorDescriptor; 1] = [STRING_ERROR_INVALID_INPUT];
+
+pub const STRING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STRING_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STRING_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::string")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -46,10 +132,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "string",
     category = "strings/core",
-    summary = "Convert numeric, logical, and text inputs into MATLAB string arrays.",
+    summary = "Convert numeric, logical, and text inputs into string arrays.",
     keywords = "string,convert,text,char,gpu",
     accel = "sink",
     type_resolver(string_array_type),
+    descriptor(crate::builtins::strings::core::string::STRING_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::core::string"
 )]
 async fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -211,7 +298,24 @@ struct ArgumentData {
 }
 
 fn string_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("string").build()
+    string_error_with_detail(&STRING_ERROR_INVALID_INPUT, message)
+}
+
+fn string_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl Into<String>,
+) -> RuntimeError {
+    let detail = detail.into();
+    let message = if detail.starts_with("string:") {
+        detail
+    } else {
+        format!("{}: {detail}", error.message)
+    };
+    let mut builder = build_runtime_error(message).with_builtin("string");
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn remap_string_flow(err: RuntimeError) -> RuntimeError {
@@ -441,14 +545,14 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
             shape: t.shape,
         }),
         Value::Complex(re, im) => Ok(ArgumentData {
-            values: vec![Value::String(Value::Complex(re, im).to_string())],
+            values: vec![Value::String(complex_to_string(re, im))],
             shape: vec![1, 1],
         }),
         Value::ComplexTensor(t) => Ok(ArgumentData {
             values: t
                 .data
                 .into_iter()
-                .map(|(re, im)| Value::String(Value::Complex(re, im).to_string()))
+                .map(|(re, im)| Value::String(complex_to_string(re, im)))
                 .collect(),
             shape: t.shape,
         }),
@@ -506,9 +610,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                             }
                             Value::Num(if la.data[0] != 0 { 1.0 } else { 0.0 })
                         }
-                        Value::Complex(re, im) => {
-                            Value::String(Value::Complex(re, im).to_string())
-                        }
+                        Value::Complex(re, im) => Value::String(complex_to_string(re, im)),
                         Value::ComplexTensor(t) => {
                             if t.data.len() != 1 {
                                 return Err(string_flow(
@@ -516,7 +618,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                                 ));
                             }
                             let (re, im) = t.data[0];
-                            Value::String(Value::Complex(re, im).to_string())
+                            Value::String(complex_to_string(re, im))
                         }
                         other => {
                             return Err(string_flow(format!(
@@ -544,9 +646,12 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
         | Value::Listener(_)
         | Value::Struct(_)
         | Value::OutputList(_) => Err(string_flow("string: unsupported format argument type")),
-        Value::FunctionHandle(_) | Value::Closure(_) | Value::ClassRef(_) => {
-            Err(string_flow("string: unsupported format argument type"))
-        }
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
+        | Value::Closure(_)
+        | Value::ClassRef(_) => Err(string_flow("string: unsupported format argument type")),
     }
 }
 
@@ -555,6 +660,16 @@ async fn convert_to_string_array(
     value: Value,
     encoding: StringEncoding,
 ) -> BuiltinResult<StringArray> {
+    if let Some(array) = crate::builtins::datetime::datetime_string_array(&value)
+        .map_err(|err| string_flow(err.message().to_string()))?
+    {
+        return Ok(array);
+    }
+    if let Some(array) = crate::builtins::duration::duration_string_array(&value)
+        .map_err(|err| string_flow(err.message().to_string()))?
+    {
+        return Ok(array);
+    }
     match value {
         Value::String(s) => string_scalar(s),
         Value::StringArray(sa) => Ok(sa),
@@ -563,10 +678,10 @@ async fn convert_to_string_array(
         Value::ComplexTensor(tensor) => complex_tensor_to_string_array(tensor),
         Value::LogicalArray(logical) => logical_array_to_string_array(logical),
         Value::Cell(cell) => cell_array_to_string_array(cell, encoding).await,
-        Value::Num(n) => string_scalar(Value::Num(n).to_string()),
+        Value::Num(n) => string_scalar(number_to_string(n)),
         Value::Int(i) => string_scalar(int_value_to_string(&i)),
         Value::Bool(b) => string_scalar(bool_to_string(b).to_string()),
-        Value::Complex(re, im) => string_scalar(Value::Complex(re, im).to_string()),
+        Value::Complex(re, im) => string_scalar(complex_to_string(re, im)),
         Value::GpuTensor(handle) => {
             // Defensive fallback: gather and retry.
             let gathered = gather_if_needed_async(&Value::GpuTensor(handle))
@@ -580,7 +695,7 @@ async fn convert_to_string_array(
         Value::Struct(_) => Err(string_flow(
             "string: structs are not supported for automatic conversion",
         )),
-        Value::FunctionHandle(_)
+        Value::FunctionHandle(_) | Value::ExternalFunctionHandle(_) | Value::MethodFunctionHandle(_) | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
@@ -626,7 +741,7 @@ fn char_array_to_string_array(
 fn tensor_to_string_array(tensor: Tensor) -> BuiltinResult<StringArray> {
     let mut strings = Vec::with_capacity(tensor.data.len());
     for &value in &tensor.data {
-        strings.push(Value::Num(value).to_string());
+        strings.push(number_to_string(value));
     }
     StringArray::new(strings, tensor.shape).map_err(|e| string_flow(format!("string: {e}")))
 }
@@ -634,7 +749,7 @@ fn tensor_to_string_array(tensor: Tensor) -> BuiltinResult<StringArray> {
 fn complex_tensor_to_string_array(tensor: ComplexTensor) -> BuiltinResult<StringArray> {
     let mut strings = Vec::with_capacity(tensor.data.len());
     for &(re, im) in &tensor.data {
-        strings.push(Value::Complex(re, im).to_string());
+        strings.push(complex_to_string(re, im));
     }
     StringArray::new(strings, tensor.shape).map_err(|e| string_flow(format!("string: {e}")))
 }
@@ -668,6 +783,22 @@ async fn cell_array_to_string_array(
 }
 
 fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
+    if let Some(array) = crate::builtins::datetime::datetime_string_array(value)
+        .map_err(|err| string_flow(err.message().to_string()))?
+    {
+        if array.data.len() == 1 {
+            return Ok(array.data[0].clone());
+        }
+        return Err(string_flow("string: cell datetime values must be scalar"));
+    }
+    if let Some(array) = crate::builtins::duration::duration_string_array(value)
+        .map_err(|err| string_flow(err.message().to_string()))?
+    {
+        if array.data.len() == 1 {
+            return Ok(array.data[0].clone());
+        }
+        return Err(string_flow("string: cell duration values must be scalar"));
+    }
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::StringArray(sa) => {
@@ -688,7 +819,7 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
                 ))
             }
         }
-        Value::Num(n) => Ok(Value::Num(*n).to_string()),
+        Value::Num(n) => Ok(number_to_string(*n)),
         Value::Int(i) => Ok(int_value_to_string(i)),
         Value::Bool(b) => Ok(bool_to_string(*b).to_string()),
         Value::LogicalArray(array) => {
@@ -700,16 +831,16 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
         }
         Value::Tensor(t) => {
             if t.data.len() == 1 {
-                Ok(Value::Num(t.data[0]).to_string())
+                Ok(number_to_string(t.data[0]))
             } else {
                 Err(string_flow("string: cell numeric values must be scalar"))
             }
         }
-        Value::Complex(re, im) => Ok(Value::Complex(*re, *im).to_string()),
+        Value::Complex(re, im) => Ok(complex_to_string(*re, *im)),
         Value::ComplexTensor(t) => {
             if t.data.len() == 1 {
                 let (re, im) = t.data[0];
-                Ok(Value::Complex(re, im).to_string())
+                Ok(complex_to_string(re, im))
             } else {
                 Err(string_flow("string: cell complex values must be scalar"))
             }
@@ -955,6 +1086,36 @@ pub(crate) mod tests {
             }
             other => panic!("expected string array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn string_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = STRING_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "S = string(X)",
+                "S = string(X, encoding)",
+                "S = string(formatSpec, A...)",
+            ]
+        );
+
+        let codes: Vec<&str> = STRING_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert_eq!(codes, vec!["RM.STRING.INVALID_INPUT"]);
+    }
+
+    #[test]
+    fn string_struct_input_uses_stable_identifier() {
+        let err = string_builtin(Value::Struct(StructValue::new()), Vec::new()).unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:string:InvalidInput"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

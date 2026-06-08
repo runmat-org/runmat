@@ -1,6 +1,10 @@
 //! MATLAB-compatible `sprintf` builtin that mirrors printf-style formatting semantics.
 
-use runmat_builtins::{CharArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::format::{
@@ -42,22 +46,101 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Formatting is a residency sink and is not fused; callers should treat sprintf as a CPU-only builtin.",
 };
 
-fn sprintf_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("sprintf").build()
+const BUILTIN_NAME: &str = "sprintf";
+
+const SPRINTF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "txt",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Formatted character row vector output.",
+}];
+
+const SPRINTF_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "formatSpec",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Format template text.",
+    },
+    BuiltinParamDescriptor {
+        name: "A...",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Values substituted by conversion specifiers.",
+    },
+];
+
+const SPRINTF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "txt = sprintf(formatSpec, A...)",
+    inputs: &SPRINTF_INPUTS,
+    outputs: &SPRINTF_OUTPUT,
+}];
+
+const SPRINTF_ERROR_INVALID_FORMAT_SPEC: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SPRINTF.INVALID_FORMAT_SPEC",
+    identifier: Some("RunMat:sprintf:InvalidFormatSpec"),
+    when: "formatSpec is invalid or unsupported.",
+    message: "sprintf: invalid formatSpec",
+};
+
+const SPRINTF_ERROR_ARGUMENT_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SPRINTF.ARGUMENT_MISMATCH",
+    identifier: Some("RunMat:sprintf:ArgumentMismatch"),
+    when: "Conversion specifier count does not match provided arguments.",
+    message: "sprintf: format arguments do not match conversion specifiers",
+};
+
+const SPRINTF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SPRINTF.INTERNAL",
+    identifier: Some("RunMat:sprintf:InternalError"),
+    when: "Internal char-array construction failed.",
+    message: "sprintf: internal error",
+};
+
+const SPRINTF_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    SPRINTF_ERROR_INVALID_FORMAT_SPEC,
+    SPRINTF_ERROR_ARGUMENT_MISMATCH,
+    SPRINTF_ERROR_INTERNAL,
+];
+
+pub const SPRINTF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SPRINTF_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SPRINTF_ERRORS,
+};
+
+fn sprintf_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    sprintf_error_with_message(error.message, error)
+}
+
+fn sprintf_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn remap_sprintf_flow(err: RuntimeError) -> RuntimeError {
-    map_control_flow_with_builtin(err, "sprintf")
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
 
 #[runtime_builtin(
     name = "sprintf",
     category = "strings/core",
-    summary = "Format data into a character vector using printf-style placeholders.",
+    summary = "Format data into a character vector using printf-style specifiers.",
     keywords = "sprintf,format,printf,text",
     accel = "format",
     sink = true,
     type_resolver(string_scalar_type),
+    descriptor(crate::builtins::strings::core::sprintf::SPRINTF_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::core::sprintf"
 )]
 async fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -81,8 +164,9 @@ async fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::Builtin
 
         if step.consumed == 0 {
             if cursor.remaining() > 0 {
-                return Err(sprintf_flow(
+                return Err(sprintf_error_with_message(
                     "sprintf: formatSpec contains no conversion specifiers but additional arguments were supplied",
+                    &SPRINTF_ERROR_ARGUMENT_MISMATCH,
                 ));
             }
             break;
@@ -99,7 +183,8 @@ async fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::Builtin
 fn char_row_value(text: &str) -> BuiltinResult<Value> {
     let chars: Vec<char> = text.chars().collect();
     let len = chars.len();
-    let array = CharArray::new(chars, 1, len).map_err(|e| sprintf_flow(format!("sprintf: {e}")))?;
+    let array =
+        CharArray::new(chars, 1, len).map_err(|_| sprintf_error(&SPRINTF_ERROR_INTERNAL))?;
     Ok(Value::CharArray(array))
 }
 
@@ -249,6 +334,18 @@ pub(crate) mod tests {
         assert!(
             err.contains("formatSpec must be a character row vector"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn sprintf_unsupported_specifier_reports_stable_identifier() {
+        let err = sprintf_builtin(Value::String("%q".to_string()), vec![Value::Num(1.0)])
+            .expect_err("sprintf should error");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:format:UnsupportedSpecifier"),
+            "unsupported formatter specifiers should expose a stable identifier"
         );
     }
 

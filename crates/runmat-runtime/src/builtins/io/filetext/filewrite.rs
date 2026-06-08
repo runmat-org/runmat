@@ -3,6 +3,10 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -42,29 +46,203 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "filewrite";
 
-fn filewrite_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
+const FILEWRITE_OUTPUT_COUNT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "count",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Number of bytes written.",
+}];
+const FILEWRITE_INPUTS_FILENAME_DATA: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Path to target file.",
+    },
+    BuiltinParamDescriptor {
+        name: "data",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text or uint8-compatible data to write.",
+    },
+];
+const FILEWRITE_INPUTS_FILENAME_DATA_ENCODING: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Path to target file.",
+    },
+    BuiltinParamDescriptor {
+        name: "data",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text or uint8-compatible data to write.",
+    },
+    BuiltinParamDescriptor {
+        name: "encoding",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"auto\""),
+        description: "Positional encoding label.",
+    },
+];
+const FILEWRITE_INPUTS_FILENAME_DATA_OPTIONS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Path to target file.",
+    },
+    BuiltinParamDescriptor {
+        name: "data",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text or uint8-compatible data to write.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::PropertyName,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option name: 'Encoding' or 'WriteMode'.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::PropertyValue,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option value associated with option name.",
+    },
+];
+const FILEWRITE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "count = filewrite(filename, data)",
+        inputs: &FILEWRITE_INPUTS_FILENAME_DATA,
+        outputs: &FILEWRITE_OUTPUT_COUNT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "count = filewrite(filename, data, encoding)",
+        inputs: &FILEWRITE_INPUTS_FILENAME_DATA_ENCODING,
+        outputs: &FILEWRITE_OUTPUT_COUNT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "count = filewrite(filename, data, \"Encoding\", encoding)",
+        inputs: &FILEWRITE_INPUTS_FILENAME_DATA_OPTIONS,
+        outputs: &FILEWRITE_OUTPUT_COUNT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "count = filewrite(filename, data, ..., \"WriteMode\", mode)",
+        inputs: &FILEWRITE_INPUTS_FILENAME_DATA_OPTIONS,
+        outputs: &FILEWRITE_OUTPUT_COUNT,
+    },
+];
+
+const FILEWRITE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILEWRITE.INVALID_INPUT",
+    identifier: Some("RunMat:filewrite:InvalidInput"),
+    when: "Filename/data argument constraints are violated.",
+    message: "filewrite: invalid input arguments",
+};
+const FILEWRITE_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILEWRITE.INVALID_OPTION",
+    identifier: Some("RunMat:filewrite:InvalidOption"),
+    when: "Name/value options are malformed or unsupported.",
+    message: "filewrite: invalid option configuration",
+};
+const FILEWRITE_ERROR_INVALID_DATA: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILEWRITE.INVALID_DATA",
+    identifier: Some("RunMat:filewrite:InvalidData"),
+    when: "Input data cannot be converted to writable bytes.",
+    message: "filewrite: unsupported data payload",
+};
+const FILEWRITE_ERROR_ENCODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILEWRITE.ENCODE",
+    identifier: Some("RunMat:filewrite:EncodeFailed"),
+    when: "Encoding selected output bytes/chars fails.",
+    message: "filewrite: failed to encode payload",
+};
+const FILEWRITE_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILEWRITE.IO",
+    identifier: Some("RunMat:filewrite:IoFailure"),
+    when: "Filesystem open/write/flush operation fails.",
+    message: "filewrite: file I/O failed",
+};
+const FILEWRITE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILEWRITE.INTERNAL",
+    identifier: None,
+    when: "Internal runtime control-flow or conversion fails.",
+    message: "filewrite: internal error",
+};
+const FILEWRITE_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    FILEWRITE_ERROR_INVALID_INPUT,
+    FILEWRITE_ERROR_INVALID_OPTION,
+    FILEWRITE_ERROR_INVALID_DATA,
+    FILEWRITE_ERROR_ENCODE,
+    FILEWRITE_ERROR_IO,
+    FILEWRITE_ERROR_INTERNAL,
+];
+pub const FILEWRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FILEWRITE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FILEWRITE_ERRORS,
+};
+
+fn filewrite_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    filewrite_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn filewrite_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn filewrite_error_with_source(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let identifier = err.identifier().map(str::to_string);
     let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
         .with_builtin(BUILTIN_NAME)
         .with_source(err);
-    if let Some(identifier) = identifier {
+    if let Some(identifier) = FILEWRITE_ERROR_INTERNAL.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
 }
 
 fn map_control_flow_with_context(err: RuntimeError, context: &str) -> RuntimeError {
-    let identifier = err.identifier().map(str::to_string);
     let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {context}: {}", err.message()))
         .with_builtin(BUILTIN_NAME)
         .with_source(err);
-    if let Some(identifier) = identifier {
+    if let Some(identifier) = FILEWRITE_ERROR_INTERNAL.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -128,10 +306,11 @@ impl Default for FilewriteOptions {
 #[runtime_builtin(
     name = "filewrite",
     category = "io/filetext",
-    summary = "Write text or raw bytes to a file.",
+    summary = "Write text or raw bytes to files.",
     keywords = "filewrite,io,write file,text file,append,encoding",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::filewrite_type),
+    descriptor(crate::builtins::io::filetext::filewrite::FILEWRITE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::filetext::filewrite"
 )]
 async fn filewrite_builtin(
@@ -149,7 +328,7 @@ async fn filewrite_builtin(
     let options = parse_options(&rest)?;
     let resolved = resolve_path(&path)?;
     let payload = prepare_payload(&data, options.encoding)?;
-    let written = write_bytes(&resolved, &payload, options.write_mode)?;
+    let written = write_bytes(&resolved, &payload, options.write_mode).await?;
     Ok(Value::Num(written as f64))
 }
 
@@ -191,8 +370,9 @@ fn parse_options(args: &[Value]) -> BuiltinResult<FilewriteOptions> {
     }
 
     if !(args.len() - idx).is_multiple_of(2) {
-        return Err(filewrite_error(
-            "filewrite: expected keyword/value argument pairs",
+        return Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            "expected keyword/value argument pairs",
         ));
     }
 
@@ -201,21 +381,27 @@ fn parse_options(args: &[Value]) -> BuiltinResult<FilewriteOptions> {
         let value = &args[idx + 1];
         if key.eq_ignore_ascii_case("encoding") {
             if encoding_specified {
-                return Err(filewrite_error("filewrite: duplicate 'Encoding' argument"));
+                return Err(filewrite_error_with_detail(
+                    &FILEWRITE_ERROR_INVALID_OPTION,
+                    "duplicate 'Encoding' argument",
+                ));
             }
             options.encoding = encoding_from_value(value)?;
             encoding_specified = true;
         } else if key.eq_ignore_ascii_case("writemode") {
             if write_mode_specified {
-                return Err(filewrite_error("filewrite: duplicate 'WriteMode' argument"));
+                return Err(filewrite_error_with_detail(
+                    &FILEWRITE_ERROR_INVALID_OPTION,
+                    "duplicate 'WriteMode' argument",
+                ));
             }
             options.write_mode = write_mode_from_value(value)?;
             write_mode_specified = true;
         } else {
-            return Err(filewrite_error(format!(
-                "filewrite: unrecognised option '{}'",
-                key
-            )));
+            return Err(filewrite_error_with_detail(
+                &FILEWRITE_ERROR_INVALID_OPTION,
+                format!("unrecognised option '{}'", key),
+            ));
         }
         idx += 2;
     }
@@ -232,16 +418,19 @@ fn keyword_name(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::CharArray(_) => Err(filewrite_error(
-            "filewrite: keyword names must be 1-by-N character vectors",
+        Value::CharArray(_) => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            "keyword names must be 1-by-N character vectors",
         )),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        Value::StringArray(_) => Err(filewrite_error(
-            "filewrite: keyword inputs must be scalar string arrays",
+        Value::StringArray(_) => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            "keyword inputs must be scalar string arrays",
         )),
-        other => Err(filewrite_error(format!(
-            "filewrite: expected keyword as string scalar or character vector, got {other:?}"
-        ))),
+        other => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            format!("expected keyword as string scalar or character vector, got {other:?}"),
+        )),
     }
 }
 
@@ -249,13 +438,14 @@ fn encoding_from_value(value: &Value) -> BuiltinResult<FileEncoding> {
     let label = keyword_name(value)?;
     match FileEncoding::from_label(&label) {
         Some(enc) => Ok(enc),
-        None if label.trim().is_empty() => Err(filewrite_error(
-            "filewrite: encoding name must not be empty",
+        None if label.trim().is_empty() => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            "encoding name must not be empty",
         )),
-        None => Err(filewrite_error(format!(
-            "filewrite: unsupported encoding '{}'",
-            label
-        ))),
+        None => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            format!("unsupported encoding '{}'", label),
+        )),
     }
 }
 
@@ -263,13 +453,17 @@ fn write_mode_from_value(value: &Value) -> BuiltinResult<WriteMode> {
     let label = keyword_name(value)?;
     match WriteMode::from_label(&label) {
         Some(mode) => Ok(mode),
-        None if label.trim().is_empty() => {
-            Err(filewrite_error("filewrite: write mode must not be empty"))
-        }
-        None => Err(filewrite_error(format!(
-            "filewrite: unsupported write mode '{}'; use 'overwrite' or 'append'",
-            label
-        ))),
+        None if label.trim().is_empty() => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            "write mode must not be empty",
+        )),
+        None => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_OPTION,
+            format!(
+                "unsupported write mode '{}'; use 'overwrite' or 'append'",
+                label
+            ),
+        )),
     }
 }
 
@@ -280,22 +474,28 @@ fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
             let path: String = ca.data.iter().collect();
             normalize_path(&path)
         }
-        Value::CharArray(_) => Err(filewrite_error(
-            "filewrite: filename must be a 1-by-N character vector",
+        Value::CharArray(_) => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_INPUT,
+            "filename must be a 1-by-N character vector",
         )),
         Value::StringArray(sa) if sa.data.len() == 1 => normalize_path(&sa.data[0]),
-        Value::StringArray(_) => Err(filewrite_error(
-            "filewrite: string array filename inputs must be scalar",
+        Value::StringArray(_) => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_INPUT,
+            "string array filename inputs must be scalar",
         )),
-        other => Err(filewrite_error(format!(
-            "filewrite: expected filename as string scalar or character vector, got {other:?}"
-        ))),
+        other => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_INPUT,
+            format!("expected filename as string scalar or character vector, got {other:?}"),
+        )),
     }
 }
 
 fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     if raw.is_empty() {
-        return Err(filewrite_error("filewrite: filename must not be empty"));
+        return Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_INPUT,
+            "filename must not be empty",
+        ));
     }
     Ok(Path::new(raw).to_path_buf())
 }
@@ -331,18 +531,22 @@ fn extract_payload(data: &Value) -> BuiltinResult<Payload> {
         Value::Bool(flag) => Ok(Payload::Bytes(vec![if *flag { 1 } else { 0 }])),
         Value::Tensor(t) => Ok(Payload::Bytes(tensor_to_bytes(t)?)),
         Value::LogicalArray(la) => Ok(Payload::Bytes(logical_to_bytes(la))),
-        Value::Cell(_) => Err(filewrite_error(
-            "filewrite: cell arrays are not supported inputs",
+        Value::Cell(_) => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_DATA,
+            "cell arrays are not supported inputs",
         )),
-        Value::GpuTensor(_) => Err(filewrite_error(
-            "filewrite: internal error: GPU tensor should be gathered",
+        Value::GpuTensor(_) => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INTERNAL,
+            "GPU tensor should be gathered before filewrite payload extraction",
         )),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(filewrite_error(
-            "filewrite: complex data must be converted to text before writing",
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_DATA,
+            "complex data must be converted to text before writing",
         )),
-        other => Err(filewrite_error(format!(
-            "filewrite: unsupported data type {other:?}; expected text or uint8-compatible array"
-        ))),
+        other => Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_DATA,
+            format!("unsupported data type {other:?}; expected text or uint8-compatible array"),
+        )),
     }
 }
 
@@ -382,10 +586,10 @@ fn tensor_to_bytes(tensor: &Tensor) -> BuiltinResult<Vec<u8>> {
         match float_to_byte(*value) {
             Ok(byte) => out.push(byte),
             Err(msg) => {
-                return Err(filewrite_error(format!(
-                    "filewrite: numeric element {} {msg}",
-                    idx
-                )));
+                return Err(filewrite_error_with_detail(
+                    &FILEWRITE_ERROR_INVALID_DATA,
+                    format!("numeric element {} {}", idx, msg),
+                ));
             }
         }
     }
@@ -402,21 +606,24 @@ fn logical_to_bytes(array: &LogicalArray) -> Vec<u8> {
 
 fn float_to_byte(value: f64) -> BuiltinResult<u8> {
     if !value.is_finite() {
-        return Err(filewrite_error(format!(
-            "value {value} is not finite; cannot write as raw byte"
-        )));
+        return Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_DATA,
+            format!("value {value} is not finite; cannot write as raw byte"),
+        ));
     }
     let rounded = value.round();
     if (value - rounded).abs() > 1e-9 {
-        return Err(filewrite_error(format!(
-            "value {value} is not an integer in the range 0..255"
-        )));
+        return Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_DATA,
+            format!("value {value} is not an integer in the range 0..255"),
+        ));
     }
     let int = rounded as i128;
     if !(0..=255).contains(&int) {
-        return Err(filewrite_error(format!(
-            "value {value} is not in the range 0..255"
-        )));
+        return Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_DATA,
+            format!("value {value} is not in the range 0..255"),
+        ));
     }
     Ok(int as u8)
 }
@@ -436,18 +643,20 @@ fn int_value_to_byte(value: &IntValue) -> BuiltinResult<u8> {
 
 fn signed_to_byte(value: i64) -> BuiltinResult<u8> {
     if !(0..=255).contains(&value) {
-        return Err(filewrite_error(format!(
-            "value {value} is not in the range 0..255"
-        )));
+        return Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_DATA,
+            format!("value {value} is not in the range 0..255"),
+        ));
     }
     Ok(value as u8)
 }
 
 fn unsigned_to_byte(value: u64) -> BuiltinResult<u8> {
     if value > 255 {
-        return Err(filewrite_error(format!(
-            "value {value} is not in the range 0..255"
-        )));
+        return Err(filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_DATA,
+            format!("value {value} is not in the range 0..255"),
+        ));
     }
     Ok(value as u8)
 }
@@ -466,10 +675,13 @@ fn encode_ascii_chars(chars: &[char]) -> BuiltinResult<Vec<u8>> {
     let mut out = Vec::with_capacity(chars.len());
     for &ch in chars {
         if ch as u32 > 0x7F {
-            return Err(filewrite_error(format!(
-                "filewrite: character '{}' (U+{:04X}) cannot be encoded as ASCII",
-                ch, ch as u32
-            )));
+            return Err(filewrite_error_with_detail(
+                &FILEWRITE_ERROR_ENCODE,
+                format!(
+                    "character '{}' (U+{:04X}) cannot be encoded as ASCII",
+                    ch, ch as u32
+                ),
+            ));
         }
         out.push(ch as u8);
     }
@@ -480,16 +692,19 @@ fn encode_latin_chars(chars: &[char], encoding: FileEncoding) -> BuiltinResult<V
     let mut out = Vec::with_capacity(chars.len());
     for &ch in chars {
         if ch as u32 > 0xFF {
-            return Err(filewrite_error(format!(
-                "filewrite: character '{}' (U+{:04X}) cannot be encoded as {}",
-                ch,
-                ch as u32,
-                match encoding {
-                    FileEncoding::Latin1 => "Latin-1",
-                    FileEncoding::Raw => "raw bytes",
-                    _ => unreachable!(),
-                }
-            )));
+            return Err(filewrite_error_with_detail(
+                &FILEWRITE_ERROR_ENCODE,
+                format!(
+                    "character '{}' (U+{:04X}) cannot be encoded as {}",
+                    ch,
+                    ch as u32,
+                    match encoding {
+                        FileEncoding::Latin1 => "Latin-1",
+                        FileEncoding::Raw => "raw bytes",
+                        _ => unreachable!(),
+                    }
+                ),
+            ));
         }
         out.push(ch as u8);
     }
@@ -500,16 +715,17 @@ fn encode_bytes(bytes: Vec<u8>, encoding: FileEncoding) -> BuiltinResult<Vec<u8>
     if matches!(encoding, FileEncoding::Ascii) {
         for (idx, byte) in bytes.iter().enumerate() {
             if *byte > 0x7F {
-                return Err(filewrite_error(format!(
-                    "filewrite: byte 0x{byte:02X} at index {idx} cannot be encoded as ASCII"
-                )));
+                return Err(filewrite_error_with_detail(
+                    &FILEWRITE_ERROR_ENCODE,
+                    format!("byte 0x{byte:02X} at index {idx} cannot be encoded as ASCII"),
+                ));
             }
         }
     }
     Ok(bytes)
 }
 
-fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinResult<usize> {
+async fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinResult<usize> {
     let mut options = OpenOptions::new();
     options.create(true);
     match mode {
@@ -521,37 +737,43 @@ fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinResult<us
         }
     }
 
-    let mut file = options.open(path).map_err(|err| {
-        build_runtime_error(format!(
-            "filewrite: unable to open '{}': {}",
-            path.display(),
-            err
-        ))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err)
-        .build()
+    let mut file = options.open_async(path).await.map_err(|err| {
+        filewrite_error_with_source(
+            format!(
+                "{}: unable to open '{}': {}",
+                FILEWRITE_ERROR_IO.message,
+                path.display(),
+                err
+            ),
+            &FILEWRITE_ERROR_IO,
+            err,
+        )
     })?;
 
     file.write_all(payload).map_err(|err| {
-        build_runtime_error(format!(
-            "filewrite: unable to write to '{}': {}",
-            path.display(),
-            err
-        ))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err)
-        .build()
+        filewrite_error_with_source(
+            format!(
+                "{}: unable to write to '{}': {}",
+                FILEWRITE_ERROR_IO.message,
+                path.display(),
+                err
+            ),
+            &FILEWRITE_ERROR_IO,
+            err,
+        )
     })?;
 
-    file.flush().map_err(|err| {
-        build_runtime_error(format!(
-            "filewrite: unable to flush '{}': {}",
-            path.display(),
-            err
-        ))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err)
-        .build()
+    file.flush_async().await.map_err(|err| {
+        filewrite_error_with_source(
+            format!(
+                "{}: unable to flush '{}': {}",
+                FILEWRITE_ERROR_IO.message,
+                path.display(),
+                err
+            ),
+            &FILEWRITE_ERROR_IO,
+            err,
+        )
     })?;
 
     Ok(payload.len())
@@ -560,8 +782,8 @@ fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinResult<us
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use crate::RuntimeError;
-    use runmat_filesystem as fs;
     use runmat_time::unix_timestamp_ms;
     use std::io::Read;
 
@@ -571,6 +793,20 @@ pub(crate) mod tests {
 
     fn run_filewrite(path: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(filewrite_builtin(path, data, rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn filewrite_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = FILEWRITE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"count = filewrite(filename, data)"));
+        assert!(labels.contains(&"count = filewrite(filename, data, encoding)"));
+        assert!(labels.contains(&"count = filewrite(filename, data, \"Encoding\", encoding)"));
+        assert!(labels.contains(&"count = filewrite(filename, data, ..., \"WriteMode\", mode)"));
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
@@ -598,17 +834,17 @@ pub(crate) mod tests {
             other => panic!("expected numeric byte count, got {other:?}"),
         }
 
-        let written = fs::read_to_string(&path).expect("read filewrite output");
+        let written = test_support::fs::read_to_string(&path).expect("read filewrite output");
         assert_eq!(written, contents);
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_appends_when_requested() {
         let path = unique_path("filewrite_append");
-        fs::write(&path, "first\n").expect("write baseline");
+        test_support::fs::write(&path, "first\n").expect("write baseline");
 
         run_filewrite(
             Value::from(path.to_string_lossy().to_string()),
@@ -617,10 +853,10 @@ pub(crate) mod tests {
         )
         .expect("filewrite append");
 
-        let written = fs::read_to_string(&path).expect("read appended file");
+        let written = test_support::fs::read_to_string(&path).expect("read appended file");
         assert_eq!(written, "first\nsecond\n");
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -655,13 +891,13 @@ pub(crate) mod tests {
         .expect("filewrite raw");
 
         let mut bytes = Vec::new();
-        fs::File::open(&path)
+        runmat_filesystem::File::open(&path)
             .expect("open raw file")
             .read_to_end(&mut bytes)
             .expect("read raw file");
         assert_eq!(bytes, vec![0u8, 127u8, 255u8]);
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -675,10 +911,10 @@ pub(crate) mod tests {
         )
         .expect("filewrite numeric scalar");
 
-        let bytes = fs::read(&path).expect("read numeric scalar file");
+        let bytes = test_support::fs::read(&path).expect("read numeric scalar file");
         assert_eq!(bytes, vec![65u8]);
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -692,10 +928,10 @@ pub(crate) mod tests {
         )
         .expect("filewrite bool scalar");
 
-        let bytes = fs::read(&path).expect("read bool scalar file");
+        let bytes = test_support::fs::read(&path).expect("read bool scalar file");
         assert_eq!(bytes, vec![1u8]);
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -710,10 +946,10 @@ pub(crate) mod tests {
         )
         .expect("filewrite logical array");
 
-        let bytes = fs::read(&path).expect("read logical array file");
+        let bytes = test_support::fs::read(&path).expect("read logical array file");
         assert_eq!(bytes, vec![0u8, 1u8, 1u8]);
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -785,10 +1021,10 @@ pub(crate) mod tests {
         )
         .expect("filewrite positional encoding");
 
-        let bytes = fs::read(&path).expect("read latin1 file");
+        let bytes = test_support::fs::read(&path).expect("read latin1 file");
         assert_eq!(bytes, b"Espa\xF1a");
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -803,10 +1039,10 @@ pub(crate) mod tests {
         )
         .expect("filewrite utf8 numeric");
 
-        let bytes = fs::read(&path).expect("read utf8 numeric file");
+        let bytes = test_support::fs::read(&path).expect("read utf8 numeric file");
         assert_eq!(bytes, vec![0u8, 255u8]);
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -928,10 +1164,10 @@ pub(crate) mod tests {
         )
         .expect("filewrite char path");
 
-        let written = fs::read_to_string(&path).expect("read char path file");
+        let written = test_support::fs::read_to_string(&path).expect("read char path file");
         assert_eq!(written, "hello");
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -947,9 +1183,9 @@ pub(crate) mod tests {
         )
         .expect("filewrite string array");
 
-        let written = fs::read_to_string(&path).expect("read string array file");
+        let written = test_support::fs::read_to_string(&path).expect("read string array file");
         assert_eq!(written, "a\nb\nc");
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 }

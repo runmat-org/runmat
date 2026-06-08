@@ -8,7 +8,11 @@
 
 use num_complex::Complex64;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -23,6 +27,51 @@ use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResul
 const BUILTIN_NAME: &str = "asin";
 const ZERO_EPS: f64 = 1e-12;
 const DOMAIN_TOL: f64 = 1e-12;
+
+const ASIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise inverse sine result.",
+}];
+
+const ASIN_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, array, char array, complex value, or gpuArray.",
+}];
+
+const ASIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = asin(X)",
+    inputs: &ASIN_INPUTS,
+    outputs: &ASIN_OUTPUT,
+}];
+
+const ASIN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ASIN.INVALID_INPUT",
+    identifier: Some("RunMat:asin:InvalidInput"),
+    when: "Input cannot be interpreted as supported numeric/char/complex data.",
+    message: "asin: invalid input",
+};
+
+const ASIN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ASIN.INTERNAL",
+    identifier: Some("RunMat:asin:Internal"),
+    when: "Internal gather/reduction/conversion/allocation flow failed.",
+    message: "asin: internal error",
+};
+
+const ASIN_ERRORS: [BuiltinErrorDescriptor; 2] = [ASIN_ERROR_INVALID_INPUT, ASIN_ERROR_INTERNAL];
+
+pub const ASIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ASIN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ASIN_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::asin")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -40,10 +89,16 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute asin in-place when inputs remain within [-1, 1]; the runtime gathers to host when complex promotion is required.",
 };
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn asin_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::asin")]
@@ -66,10 +121,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "asin",
     category = "math/trigonometry",
-    summary = "Element-wise inverse sine with MATLAB-compatible complex promotion.",
+    summary = "Element-wise inverse sine, with complex promotion outside [-1, 1].",
     keywords = "asin,inverse sine,arcsin,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::trigonometry::asin::ASIN_DESCRIPTOR),
     builtin_path = "crate::builtins::math::trigonometry::asin"
 )]
 async fn asin_builtin(value: Value) -> BuiltinResult<Value> {
@@ -78,9 +134,10 @@ async fn asin_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Complex(re, im) => Ok(asin_complex_value(re, im)),
         Value::ComplexTensor(ct) => asin_complex_tensor(ct),
         Value::CharArray(ca) => asin_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(runtime_error_for("asin: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(asin_error_with_detail(
+            &ASIN_ERROR_INVALID_INPUT,
+            "expected numeric input",
+        )),
         other => asin_real(other),
     }
 }
@@ -110,15 +167,17 @@ async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<bool> {
-    let min_handle = provider
-        .reduce_min(handle)
-        .await
-        .map_err(|e| runtime_error_for(format!("asin: reduce_min failed: {e}")))?;
+    let min_handle = provider.reduce_min(handle).await.map_err(|e| {
+        asin_error_with_detail(&ASIN_ERROR_INTERNAL, format!("reduce_min failed: {e}"))
+    })?;
     let max_handle = match provider.reduce_max(handle).await {
         Ok(handle) => handle,
         Err(err) => {
             let _ = provider.free(&min_handle);
-            return Err(runtime_error_for(format!("asin: reduce_max failed: {err}")));
+            return Err(asin_error_with_detail(
+                &ASIN_ERROR_INTERNAL,
+                format!("reduce_max failed: {err}"),
+            ));
         }
     };
     let min_host = match download_handle_async(provider, &min_handle).await {
@@ -126,9 +185,10 @@ async fn detect_gpu_requires_complex(
         Err(err) => {
             let _ = provider.free(&min_handle);
             let _ = provider.free(&max_handle);
-            return Err(runtime_error_for(format!(
-                "asin: reduce_min download failed: {err}"
-            )));
+            return Err(asin_error_with_detail(
+                &ASIN_ERROR_INTERNAL,
+                format!("reduce_min download failed: {err}"),
+            ));
         }
     };
     let max_host = match download_handle_async(provider, &max_handle).await {
@@ -136,15 +196,19 @@ async fn detect_gpu_requires_complex(
         Err(err) => {
             let _ = provider.free(&min_handle);
             let _ = provider.free(&max_handle);
-            return Err(runtime_error_for(format!(
-                "asin: reduce_max download failed: {err}"
-            )));
+            return Err(asin_error_with_detail(
+                &ASIN_ERROR_INTERNAL,
+                format!("reduce_max download failed: {err}"),
+            ));
         }
     };
     let _ = provider.free(&min_handle);
     let _ = provider.free(&max_handle);
     if min_host.data.iter().any(|&v| v.is_nan()) || max_host.data.iter().any(|&v| v.is_nan()) {
-        return Err(runtime_error_for("asin: reduction results contained NaN"));
+        return Err(asin_error_with_detail(
+            &ASIN_ERROR_INTERNAL,
+            "reduction results contained NaN",
+        ));
     }
     let min_val = min_host.data.iter().copied().fold(f64::INFINITY, f64::min);
     let max_val = max_host
@@ -156,7 +220,8 @@ async fn detect_gpu_requires_complex(
 }
 
 fn asin_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("asin", value).map_err(runtime_error_for)?;
+    let tensor = tensor::value_into_tensor_for("asin", value)
+        .map_err(|e| asin_error_with_detail(&ASIN_ERROR_INVALID_INPUT, e))?;
     asin_tensor_real(tensor)
 }
 
@@ -186,11 +251,11 @@ fn asin_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
             return Ok(Value::Complex(re, im));
         }
         let tensor = ComplexTensor::new(complex_data, tensor.shape.clone())
-            .map_err(|e| runtime_error_for(format!("asin: {e}")))?;
+            .map_err(|e| asin_error_with_detail(&ASIN_ERROR_INTERNAL, e))?;
         Ok(Value::ComplexTensor(tensor))
     } else {
         let tensor = Tensor::new(real_data, tensor.shape.clone())
-            .map_err(|e| runtime_error_for(format!("asin: {e}")))?;
+            .map_err(|e| asin_error_with_detail(&ASIN_ERROR_INTERNAL, e))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }
@@ -214,7 +279,7 @@ fn asin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         Ok(Value::Complex(re, im))
     } else {
         let tensor = ComplexTensor::new(data, ct.shape.clone())
-            .map_err(|e| runtime_error_for(format!("asin: {e}")))?;
+            .map_err(|e| asin_error_with_detail(&ASIN_ERROR_INTERNAL, e))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
@@ -222,12 +287,12 @@ fn asin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 fn asin_char_array(ca: CharArray) -> BuiltinResult<Value> {
     if ca.data.is_empty() {
         let tensor = Tensor::new(Vec::new(), vec![ca.rows, ca.cols])
-            .map_err(|e| runtime_error_for(format!("asin: {e}")))?;
+            .map_err(|e| asin_error_with_detail(&ASIN_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-        .map_err(|e| runtime_error_for(format!("asin: {e}")))?;
+        .map_err(|e| asin_error_with_detail(&ASIN_ERROR_INTERNAL, e))?;
     asin_tensor_real(tensor)
 }
 
@@ -252,6 +317,16 @@ pub(crate) mod tests {
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn asin_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = ASIN_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = asin(X)"));
     }
 
     #[test]
@@ -359,6 +434,7 @@ pub(crate) mod tests {
     #[test]
     fn asin_string_errors() {
         let err = asin_builtin(Value::from("hello")).expect_err("asin string should error");
+        assert_eq!(err.identifier(), ASIN_ERROR_INVALID_INPUT.identifier);
         let message = error_message(err);
         assert!(message.contains("expected numeric input"));
     }

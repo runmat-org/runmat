@@ -2,6 +2,7 @@ use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
 use crate::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value as JsonValue;
 use std::fs;
@@ -12,6 +13,7 @@ use url::Url;
 #[derive(Default)]
 pub struct NativeFsProvider;
 
+#[async_trait(?Send)]
 impl FsProvider for NativeFsProvider {
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let mut opts = fs::OpenOptions::new();
@@ -25,27 +27,27 @@ impl FsProvider for NativeFsProvider {
         Ok(Box::new(file))
     }
 
-    fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+    async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         fs::read(path)
     }
 
-    fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+    async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
         fs::write(path, data)
     }
 
-    fn remove_file(&self, path: &Path) -> io::Result<()> {
+    async fn remove_file(&self, path: &Path) -> io::Result<()> {
         fs::remove_file(path)
     }
 
-    fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+    async fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
         fs::metadata(path).map(FsMetadata::from)
     }
 
-    fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+    async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
         fs::symlink_metadata(path).map(FsMetadata::from)
     }
 
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+    async fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
         let entries = fs::read_dir(path)?;
         let mut out = Vec::new();
         for entry in entries {
@@ -64,37 +66,37 @@ impl FsProvider for NativeFsProvider {
         Ok(out)
     }
 
-    fn canonicalize(&self, path: &Path) -> io::Result<std::path::PathBuf> {
+    async fn canonicalize(&self, path: &Path) -> io::Result<std::path::PathBuf> {
         fs::canonicalize(path)
     }
 
-    fn create_dir(&self, path: &Path) -> io::Result<()> {
+    async fn create_dir(&self, path: &Path) -> io::Result<()> {
         fs::create_dir(path)
     }
 
-    fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+    async fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         fs::create_dir_all(path)
     }
 
-    fn remove_dir(&self, path: &Path) -> io::Result<()> {
+    async fn remove_dir(&self, path: &Path) -> io::Result<()> {
         fs::remove_dir(path)
     }
 
-    fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+    async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
         fs::remove_dir_all(path)
     }
 
-    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+    async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         fs::rename(from, to)
     }
 
-    fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
+    async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
         let mut perms = fs::metadata(path)?.permissions();
         perms.set_readonly(readonly);
         fs::set_permissions(path, perms)
     }
 
-    fn data_manifest_descriptor(
+    async fn data_manifest_descriptor(
         &self,
         request: &DataManifestRequest,
     ) -> io::Result<DataManifestDescriptor> {
@@ -133,7 +135,7 @@ impl FsProvider for NativeFsProvider {
         })
     }
 
-    fn data_chunk_upload_targets(
+    async fn data_chunk_upload_targets(
         &self,
         request: &DataChunkUploadRequest,
     ) -> io::Result<Vec<DataChunkUploadTarget>> {
@@ -155,7 +157,11 @@ impl FsProvider for NativeFsProvider {
             .collect()
     }
 
-    fn data_upload_chunk(&self, target: &DataChunkUploadTarget, data: &[u8]) -> io::Result<()> {
+    async fn data_upload_chunk(
+        &self,
+        target: &DataChunkUploadTarget,
+        data: &[u8],
+    ) -> io::Result<()> {
         if !target.method.eq_ignore_ascii_case("PUT") {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,

@@ -4,7 +4,11 @@
 //! component. Unlike `isfinite`/`isnan`, it returns a single logical scalar.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ResolveContext, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -42,7 +46,55 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "isreal";
-const IDENTIFIER_INTERNAL: &str = "RunMat:isreal:InternalError";
+
+const ISREAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when input uses real storage without imaginary components.",
+}];
+
+const ISREAL_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to test.",
+}];
+
+const ISREAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isreal(A)",
+    inputs: &ISREAL_INPUTS,
+    outputs: &ISREAL_OUTPUT,
+}];
+
+const ISREAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISREAL.INTERNAL",
+    identifier: Some("RunMat:isreal:InternalError"),
+    when: "Internal gather/dispatch path fails.",
+    message: "isreal: internal error",
+};
+
+const ISREAL_ERRORS: [BuiltinErrorDescriptor; 1] = [ISREAL_ERROR_INTERNAL];
+
+pub const ISREAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISREAL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISREAL_ERRORS,
+};
+
+fn isreal_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
 #[runtime_builtin(
     name = "isreal",
@@ -51,6 +103,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isreal:InternalError";
     keywords = "isreal,real,complex,gpu,logical",
     accel = "metadata",
     type_resolver(bool_scalar_type),
+    descriptor(crate::builtins::logical::tests::isreal::ISREAL_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::tests::isreal"
 )]
 async fn isreal_builtin(value: Value) -> BuiltinResult<Value> {
@@ -74,7 +127,9 @@ async fn isreal_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let gpu_value = Value::GpuTensor(handle);
     let gathered = gpu_helpers::gather_value_async(&gpu_value)
         .await
-        .map_err(|err| internal_error(format!("isreal: {err}")))?;
+        .map_err(|err| {
+            isreal_error_with_message(format!("isreal: {err}"), &ISREAL_ERROR_INTERNAL)
+        })?;
     isreal_host(gathered)
 }
 
@@ -90,10 +145,14 @@ fn isreal_host(value: Value) -> BuiltinResult<Value> {
         Value::StringArray(_) => false,
         Value::Struct(_) => false,
         Value::Cell(_) => false,
+        Value::Object(obj) if obj.is_class("duration") => true,
         Value::Object(_) => false,
         Value::HandleObject(_) => false,
         Value::Listener(_) => false,
-        Value::FunctionHandle(_) => false,
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. } => false,
         Value::Closure(_) => false,
         Value::ClassRef(_) => false,
         Value::MException(_) => false,
@@ -108,10 +167,7 @@ fn isreal_host(value: Value) -> BuiltinResult<Value> {
 }
 
 fn internal_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier(IDENTIFIER_INTERNAL)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+    isreal_error_with_message(message, &ISREAL_ERROR_INTERNAL)
 }
 
 #[cfg(test)]
@@ -195,11 +251,24 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn isreal_reports_true_for_duration_objects() {
+        let value = crate::call_builtin(
+            "duration",
+            &[Value::Num(1.0), Value::Num(30.0), Value::Num(0.0)],
+        )
+        .expect("duration");
+        let flag = run_isreal(value).expect("isreal duration");
+        assert_eq!(flag, Value::Bool(true));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn isreal_handles_function_and_handle_like_types() {
         let function_flag =
             run_isreal(Value::FunctionHandle("runmat_builtin".into())).expect("isreal fn");
         let closure_flag = run_isreal(Value::Closure(Closure {
             function_name: "anon".into(),
+            bound_function: None,
             captures: vec![Value::Num(1.0)],
         }))
         .expect("isreal closure");
@@ -221,7 +290,7 @@ pub(crate) mod tests {
         let class_ref_flag =
             run_isreal(Value::ClassRef("pkg.Class".into())).expect("isreal classref");
         let mex_flag = run_isreal(Value::MException(MException::new(
-            "MATLAB:mock".into(),
+            "RunMat:mock".into(),
             "message".into(),
         )))
         .expect("isreal mexception");

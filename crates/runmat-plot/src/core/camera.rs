@@ -288,6 +288,16 @@ impl Camera {
         self.view_proj_dirty = true;
     }
 
+    pub fn set_view_angles_deg(&mut self, azimuth_deg: f32, elevation_deg: f32) {
+        let distance = (self.position - self.target).length().max(0.1);
+        let az = azimuth_deg.to_radians();
+        let el = elevation_deg.to_radians();
+        let dir = Vec3::new(el.cos() * az.cos(), el.cos() * az.sin(), el.sin());
+        self.up = Vec3::Z;
+        self.position = self.target + dir * distance;
+        self.view_proj_dirty = true;
+    }
+
     /// Reset camera to default position
     pub fn reset(&mut self) {
         match self.projection {
@@ -873,5 +883,17 @@ mod tests {
         let camera = Camera::new_2d((10.0, 30.0, -2.0, 2.0));
         assert_eq!(camera.position, Vec3::new(20.0, 0.0, 1.0));
         assert_eq!(camera.target, Vec3::new(20.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn test_set_view_angles_preserves_distance() {
+        let mut camera = Camera::new();
+        camera.target = Vec3::new(1.0, 2.0, 3.0);
+        camera.position = camera.target + Vec3::new(2.0, 0.0, 0.0);
+        camera.set_view_angles_deg(90.0, 0.0);
+        let offset = camera.position - camera.target;
+        assert!((offset.length() - 2.0).abs() < 1e-5);
+        assert!(offset.x.abs() < 1e-4);
+        assert!((offset.y - 2.0).abs() < 1e-4);
     }
 }

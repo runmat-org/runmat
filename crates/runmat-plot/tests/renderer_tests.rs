@@ -33,65 +33,6 @@ fn skip_headless_gpu_test(test_name: &str) -> bool {
 
 #[cfg(test)]
 mod export_subplot_tests {
-    #[test]
-    fn test_svg_two_axes_line_scatter() {
-        let mut fig = runmat_plot::plots::Figure::new();
-        fig.set_subplot_grid(2, 1);
-        let x: Vec<f64> = (0..=50).map(|i| i as f64 * 0.2).collect();
-        let y: Vec<f64> = x.iter().map(|v| v.sin()).collect();
-        let i1 = fig.add_line_plot(runmat_plot::plots::LinePlot::new(x.clone(), y).unwrap());
-        let _ = fig.assign_plot_to_axes(i1, 0);
-        let y2: Vec<f64> = x.iter().map(|v| v.cos() * 0.5 + 0.5).collect();
-        let i2 = fig.add_scatter_plot(runmat_plot::plots::ScatterPlot::new(x.clone(), y2).unwrap());
-        let _ = fig.assign_plot_to_axes(i2, 1);
-        let exporter = runmat_plot::export::vector::VectorExporter::new();
-        let svg = exporter.render_to_svg(&mut fig).unwrap();
-        assert!(svg.contains("<svg"));
-        assert!(svg.len() > 500);
-    }
-
-    #[test]
-    fn test_svg_four_axes_bars_imagesc() {
-        let mut fig = runmat_plot::plots::Figure::new();
-        fig.set_subplot_grid(2, 2);
-        let y = vec![1.0, 2.0, 3.0, 2.0, 1.0];
-        let labels: Vec<String> = (1..=y.len()).map(|i| i.to_string()).collect();
-        let i0 = fig.add_bar_chart(runmat_plot::plots::BarChart::new(labels, y).unwrap());
-        let _ = fig.assign_plot_to_axes(i0, 0);
-        let rows = 5usize;
-        let cols = 5usize;
-        let mut grid = vec![vec![0.0; cols]; rows];
-        for (r, row_vec) in grid.iter_mut().enumerate() {
-            for cell in row_vec.iter_mut() {
-                *cell = (r as f64) / (rows as f64);
-            }
-        }
-        let xv: Vec<f64> = (1..=cols).map(|i| i as f64).collect();
-        let mut yv: Vec<f64> = (1..=rows).map(|i| i as f64).collect();
-        yv.reverse();
-        let img = runmat_plot::plots::ImagePlot::from_grayscale(
-            xv,
-            yv,
-            grid,
-            runmat_plot::plots::surface::ColorMap::Parula,
-            None,
-        )
-        .unwrap();
-        let i1 = fig.add_image_plot(img);
-        let _ = fig.assign_plot_to_axes(i1, 1);
-        let x2: Vec<f64> = (0..=20).map(|i| i as f64 * 0.2).collect();
-        let y2: Vec<f64> = x2.iter().map(|v| v.sin()).collect();
-        let i2 = fig.add_line_plot(runmat_plot::plots::LinePlot::new(x2, y2).unwrap());
-        let _ = fig.assign_plot_to_axes(i2, 2);
-        let xs: Vec<f64> = (0..10).map(|i| i as f64).collect();
-        let ys: Vec<f64> = xs.iter().map(|v| v.cos()).collect();
-        let i3 = fig.add_scatter_plot(runmat_plot::plots::ScatterPlot::new(xs, ys).unwrap());
-        let _ = fig.assign_plot_to_axes(i3, 3);
-        let exporter = runmat_plot::export::vector::VectorExporter::new();
-        let svg = exporter.render_to_svg(&mut fig).unwrap();
-        assert!(svg.contains("<svg"));
-        assert!(svg.len() > 500);
-    }
     #[tokio::test]
     async fn test_export_two_axes_line_scatter() {
         if super::skip_headless_gpu_test("export_subplot_tests::test_export_two_axes_line_scatter")
@@ -155,15 +96,12 @@ mod export_subplot_tests {
         let x: Vec<f64> = (1..=cols).map(|i| i as f64).collect();
         let mut yv: Vec<f64> = (1..=rows).map(|i| i as f64).collect();
         yv.reverse();
-        let img = runmat_plot::plots::ImagePlot::from_grayscale(
-            x.clone(),
-            yv.clone(),
-            grid,
-            runmat_plot::plots::surface::ColorMap::Parula,
-            None,
-        )
-        .unwrap();
-        let i1 = fig.add_image_plot(img);
+        let img = runmat_plot::plots::SurfacePlot::new(x.clone(), yv.clone(), grid)
+            .unwrap()
+            .with_colormap(runmat_plot::plots::surface::ColorMap::Parula)
+            .with_flatten_z(true)
+            .with_image_mode(true);
+        let i1 = fig.add_surface_plot(img);
         let _ = fig.assign_plot_to_axes(i1, 1);
         // Line in (1,0)
         let x2: Vec<f64> = (0..=50).map(|i| i as f64 * 0.2).collect();
@@ -186,6 +124,58 @@ mod export_subplot_tests {
         .await
         .unwrap();
         let tmp = std::env::temp_dir().join("subplot_four_axes.png");
+        exporter.export_png(&mut fig, &tmp).await.unwrap();
+        assert!(tmp.exists());
+        let meta = std::fs::metadata(&tmp).unwrap();
+        assert!(meta.len() > 1_000);
+    }
+
+    #[tokio::test]
+    async fn test_export_two_axes_line_line_margin_style() {
+        if super::skip_headless_gpu_test(
+            "export_subplot_tests::test_export_two_axes_line_line_margin_style",
+        ) {
+            return;
+        }
+
+        let mut fig = runmat_plot::plots::Figure::new();
+        fig.set_subplot_grid(1, 2);
+
+        let x_mm: Vec<f64> = (-30..=30).map(|i| i as f64).collect();
+        let y_mm: Vec<f64> = (-25..=25).map(|i| i as f64).collect();
+        let centerline: Vec<f64> = x_mm
+            .iter()
+            .map(|x| 25.0 + 18.0 * (-(x / 11.0).powi(2)).exp())
+            .collect();
+        let vertical: Vec<f64> = y_mm
+            .iter()
+            .map(|y| 25.0 + 20.0 * (-(y / 9.0).powi(2)).exp())
+            .collect();
+
+        let left = runmat_plot::plots::LinePlot::new(x_mm.clone(), centerline).unwrap();
+        let left_idx = fig.add_line_plot(left);
+        let _ = fig.assign_plot_to_axes(left_idx, 0);
+        fig.set_axes_title(0, "Centerline slice");
+        fig.set_axes_xlabel(0, "x (mm)");
+        fig.set_axes_ylabel(0, "temperature (C)");
+
+        let right = runmat_plot::plots::LinePlot::new(y_mm.clone(), vertical).unwrap();
+        let right_idx = fig.add_line_plot(right);
+        let _ = fig.assign_plot_to_axes(right_idx, 1);
+        fig.set_axes_title(1, "Vertical slice through source");
+        fig.set_axes_xlabel(1, "y (mm)");
+        fig.set_axes_ylabel(1, "temperature (C)");
+
+        let exporter = runmat_plot::export::image::ImageExporter::with_settings(
+            runmat_plot::export::image::ImageExportSettings {
+                width: 1280,
+                height: 720,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let tmp = std::env::temp_dir().join("subplot_two_axes_line_line_margin_style.png");
         exporter.export_png(&mut fig, &tmp).await.unwrap();
         assert!(tmp.exists());
         let meta = std::fs::metadata(&tmp).unwrap();
@@ -328,121 +318,6 @@ mod aesthetics_line_tests {
     }
 }
 
-#[cfg(test)]
-mod svg_aesthetics_tests {
-    use runmat_plot::export::vector::{VectorExportSettings, VectorExporter};
-    use runmat_plot::plots::line::{LineCap, LineJoin, LinePlot, LineStyle};
-
-    #[test]
-    fn test_svg_stroke_caps_joins_and_dasharray() {
-        let mut fig = runmat_plot::plots::Figure::new();
-        let x: Vec<f64> = (0..=20).map(|i| i as f64 * 0.2).collect();
-        let y1: Vec<f64> = x.iter().map(|v| (v * 0.7).sin()).collect();
-        let y2: Vec<f64> = x.iter().map(|v| (v * 0.7).cos()).collect();
-
-        let mut solid = LinePlot::new(x.clone(), y1).unwrap();
-        solid.set_line_style(LineStyle::Solid);
-        solid.set_line_width(1.0);
-        solid.set_line_join(LineJoin::Bevel);
-        solid.set_line_cap(LineCap::Square);
-        let _ = fig.add_line_plot(solid);
-
-        let mut dashed = LinePlot::new(x.clone(), y2).unwrap();
-        dashed.set_line_style(LineStyle::DashDot);
-        dashed.set_line_width(1.0);
-        dashed.set_line_join(LineJoin::Round);
-        dashed.set_line_cap(LineCap::Round);
-        let _ = fig.add_line_plot(dashed);
-
-        let exporter = VectorExporter::with_settings(VectorExportSettings {
-            width: 320.0,
-            height: 240.0,
-            ..Default::default()
-        });
-        let svg = exporter.render_to_svg(&mut fig).unwrap();
-        assert!(svg.contains("stroke-linecap=\"square\""));
-        assert!(svg.contains("stroke-linejoin=\"bevel\""));
-        assert!(
-            svg.contains("stroke-dasharray=\"6,4,1,4\"")
-                || svg.contains("stroke-dasharray=\"6,4,1,4\"")
-        );
-    }
-
-    #[test]
-    fn test_svg_dasharray_scales_with_line_width() {
-        let mut fig = runmat_plot::plots::Figure::new();
-        let x: Vec<f64> = (0..=10).map(|i| i as f64).collect();
-        let y: Vec<f64> = x.iter().map(|v| (v * 0.3).sin()).collect();
-
-        // Dashed with lw=0.5 -> 3,3 (lines pipeline)
-        let mut dashed = LinePlot::new(x.clone(), y.clone()).unwrap();
-        dashed.set_line_style(LineStyle::Dashed);
-        dashed.set_line_width(0.5);
-        let _ = fig.add_line_plot(dashed);
-
-        // Dotted with lw=0.5 -> 0.5,3
-        let mut dotted = LinePlot::new(x.clone(), y.clone()).unwrap();
-        dotted.set_line_style(LineStyle::Dotted);
-        dotted.set_line_width(0.5);
-        let _ = fig.add_line_plot(dotted);
-
-        // DashDot with lw=0.5 -> 3,2,0.5,2
-        let mut dashdot = LinePlot::new(x.clone(), y.clone()).unwrap();
-        dashdot.set_line_style(LineStyle::DashDot);
-        dashdot.set_line_width(0.5);
-        let _ = fig.add_line_plot(dashdot);
-
-        let exporter = VectorExporter::with_settings(VectorExportSettings {
-            width: 320.0,
-            height: 240.0,
-            ..Default::default()
-        });
-        let svg = exporter.render_to_svg(&mut fig).unwrap();
-
-        assert!(
-            svg.contains("stroke-dasharray=\"3,3\""),
-            "expected dashed 3,3; svg={}",
-            svg
-        );
-        assert!(
-            svg.contains("stroke-dasharray=\"0.5,3\""),
-            "expected dotted 0.5,3; svg={}",
-            svg
-        );
-        assert!(
-            svg.contains("stroke-dasharray=\"3,2,0.5,2\""),
-            "expected dashdot 3,2,0.5,2; svg={}",
-            svg
-        );
-    }
-}
-
-#[cfg(test)]
-mod svg_image_embed_tests {
-    use runmat_plot::export::vector::{VectorExportSettings, VectorExporter};
-    use runmat_plot::plots::surface::ColorMap;
-    use runmat_plot::plots::{image::ImagePlot, Figure};
-
-    #[test]
-    fn test_svg_embeds_png_data_uri_for_imagesc() {
-        // Simple 2x2 grayscale grid
-        let x: Vec<f64> = vec![0.0, 1.0];
-        let y: Vec<f64> = vec![0.0, 1.0];
-        let z: Vec<Vec<f64>> = vec![vec![0.0, 0.5], vec![0.5, 1.0]];
-        let mut fig = Figure::new();
-        let img = ImagePlot::from_grayscale(x, y, z, ColorMap::Parula, None).unwrap();
-        fig.add_image_plot(img);
-
-        let exporter = VectorExporter::with_settings(VectorExportSettings {
-            width: 160.0,
-            height: 120.0,
-            ..Default::default()
-        });
-        let svg = exporter.render_to_svg(&mut fig).unwrap();
-        assert!(svg.contains("<image "));
-        assert!(svg.contains("xlink:href=\"data:image/png;base64,"));
-    }
-}
 #[test]
 fn test_uniform_buffer_layout() {
     // Test that uniforms have the expected memory layout for GPU buffers
@@ -853,14 +728,16 @@ mod new_plots_tests {
         assert_eq!(rd.pipeline_type, runmat_plot::core::PipelineType::Triangles);
         assert!(!rd.indices.as_ref().unwrap().is_empty());
     }
+    #[test]
     fn test_errorbar_geometry_with_caps() {
         let x = vec![0.0, 1.0, 2.0];
         let y = vec![1.0, 2.0, 1.5];
         let el = vec![0.2, 0.1, 0.3];
         let eu = vec![0.3, 0.4, 0.2];
-        let mut eb = ErrorBar::new(x, y, el, eu).unwrap().with_style(
+        let mut eb = ErrorBar::new_vertical(x, y, el, eu).unwrap().with_style(
             glam::Vec4::new(0.0, 0.0, 0.0, 1.0),
             1.5,
+            LineStyle::Solid,
             0.2,
         );
         let vertices = eb.generate_vertices();
@@ -868,6 +745,31 @@ mod new_plots_tests {
         assert!(vertices.len() >= 6);
         let rd = eb.render_data();
         assert_eq!(rd.pipeline_type, runmat_plot::core::PipelineType::Lines);
+        let marker = eb.marker_render_data().expect("marker render data");
+        assert_eq!(
+            marker.pipeline_type,
+            runmat_plot::core::PipelineType::Points
+        );
+    }
+
+    #[test]
+    fn test_errorbar_both_direction_bounds() {
+        let x = vec![1.0, 2.0];
+        let y = vec![3.0, 4.0];
+        let mut eb = ErrorBar::new_both(
+            x,
+            y,
+            vec![0.1, 0.2],
+            vec![0.2, 0.3],
+            vec![0.3, 0.4],
+            vec![0.4, 0.5],
+        )
+        .unwrap();
+        let bounds = eb.bounds();
+        assert!(bounds.min.x < 1.0);
+        assert!(bounds.max.x > 2.0);
+        assert!(bounds.min.y < 3.0);
+        assert!(bounds.max.y > 4.0);
     }
 
     #[test]
@@ -888,10 +790,15 @@ mod new_plots_tests {
         let y = vec![1.0, -0.5];
         let mut sm = StemPlot::new(x, y).unwrap();
         let vertices = sm.generate_vertices();
-        // Each point: 2 vertices for stem + 4 for cross marker => 6; for 2 points => 12
-        assert_eq!(vertices.len(), 12);
+        // Each point contributes 2 stem vertices plus optional baseline line.
+        assert!(vertices.len() >= 4);
         let rd = sm.render_data();
         assert_eq!(rd.pipeline_type, runmat_plot::core::PipelineType::Lines);
+        let marker = sm.marker_render_data().expect("marker render data");
+        assert_eq!(
+            marker.pipeline_type,
+            runmat_plot::core::PipelineType::Points
+        );
     }
 
     #[test]
@@ -913,8 +820,10 @@ mod new_plots_tests {
 #[cfg(test)]
 mod image_export_tests {
     #![allow(unused_imports)]
+    use glam::Vec3;
+    use runmat_plot::core::{BoundingBox, Vertex};
     use runmat_plot::plots::surface::ColorMap;
-    use runmat_plot::plots::{image::ImagePlot, Figure};
+    use runmat_plot::plots::{ContourFillPlot, ContourPlot, Figure};
     use std::path::PathBuf;
 
     // Helper to write PNG via headless exporter
@@ -940,9 +849,13 @@ mod image_export_tests {
             vec![0.25, 0.75, 0.1],
             vec![0.9, 0.2, 0.4],
         ];
-        let img = ImagePlot::from_grayscale(x, y, z, ColorMap::Parula, None).unwrap();
+        let img = runmat_plot::plots::SurfacePlot::new(x, y, z)
+            .unwrap()
+            .with_colormap(ColorMap::Parula)
+            .with_flatten_z(true)
+            .with_image_mode(true);
         let mut fig = Figure::new();
-        fig.add_image_plot(img);
+        fig.add_surface_plot(img);
         let png_path = export_png(&mut fig, "imagesc_gray").await.unwrap();
         assert!(png_path.exists());
         let bytes = std::fs::read(&png_path).unwrap();
@@ -961,10 +874,111 @@ mod image_export_tests {
         grid[0][1] = glam::Vec4::new(0.0, 1.0, 0.0, 1.0);
         grid[1][0] = glam::Vec4::new(0.0, 0.0, 1.0, 1.0);
         grid[1][1] = glam::Vec4::new(1.0, 1.0, 1.0, 1.0);
-        let img = ImagePlot::from_color_grid(x, y, grid).unwrap();
+        let img = runmat_plot::plots::SurfacePlot::new(x, y, vec![vec![0.0, 0.0], vec![0.0, 0.0]])
+            .unwrap()
+            .with_flatten_z(true)
+            .with_image_mode(true)
+            .with_color_grid(grid);
         let mut fig = Figure::new();
-        fig.add_image_plot(img);
+        fig.add_surface_plot(img);
         let png_path = export_png(&mut fig, "imshow_rgb").await.unwrap();
+        assert!(png_path.exists());
+        let bytes = std::fs::read(&png_path).unwrap();
+        assert!(bytes.len() > 1000);
+    }
+
+    #[tokio::test]
+    async fn test_headless_contourf_export() {
+        if super::skip_headless_gpu_test("image_export_tests::test_headless_contourf_export") {
+            return;
+        }
+        let bounds = BoundingBox::new(Vec3::new(-2.0, -2.0, 0.0), Vec3::new(2.0, 2.0, 0.0));
+        let color_a = [0.1, 0.3, 0.9, 1.0];
+        let color_b = [0.9, 0.2, 0.2, 1.0];
+        let vertices = vec![
+            Vertex {
+                position: [-1.5, -1.5, 0.0],
+                color: color_a,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [0.0, -1.5, 0.0],
+                color: color_a,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [-0.75, 0.0, 0.0],
+                color: color_a,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [0.0, 0.0, 0.0],
+                color: color_b,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [1.5, 0.0, 0.0],
+                color: color_b,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [0.75, 1.5, 0.0],
+                color: color_b,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+        ];
+        let fill = ContourFillPlot::from_vertices(vertices, bounds).with_label("Filled Contours");
+        let mut fig = Figure::new();
+        fig.add_contour_fill_plot(fill);
+        let png_path = export_png(&mut fig, "contourf_basic").await.unwrap();
+        assert!(png_path.exists());
+        let bytes = std::fs::read(&png_path).unwrap();
+        assert!(bytes.len() > 1000);
+    }
+
+    #[tokio::test]
+    async fn test_headless_contour_export() {
+        if super::skip_headless_gpu_test("image_export_tests::test_headless_contour_export") {
+            return;
+        }
+        let bounds = BoundingBox::new(Vec3::new(-2.0, -2.0, 0.0), Vec3::new(2.0, 2.0, 0.0));
+        let line_color = [0.95, 0.95, 0.95, 1.0];
+        let vertices = vec![
+            Vertex {
+                position: [-1.5, -1.0, 0.0],
+                color: line_color,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [1.5, 1.0, 0.0],
+                color: line_color,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [-1.5, 1.0, 0.0],
+                color: line_color,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [1.5, -1.0, 0.0],
+                color: line_color,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+        ];
+        let contour = ContourPlot::from_vertices(vertices, 0.0, bounds).with_label("Contours");
+        let mut fig = Figure::new();
+        fig.add_contour_plot(contour);
+        let png_path = export_png(&mut fig, "contour_basic").await.unwrap();
         assert!(png_path.exists());
         let bytes = std::fs::read(&png_path).unwrap();
         assert!(bytes.len() > 1000);
@@ -1178,7 +1192,9 @@ mod export_parity_more_tests {
         let x = vec![0.0, 1.0, 2.0, 3.0];
         let y = vec![1.0, 2.0, 1.5, 2.2];
         let e = vec![0.1, 0.2, 0.15, 0.1];
-        let eb = ErrorBar::new(x, y, e.clone(), e).unwrap().with_label("Err");
+        let eb = ErrorBar::new_vertical(x, y, e.clone(), e)
+            .unwrap()
+            .with_label("Err");
         let mut fig = Figure::new().with_title("ErrorBar");
         fig.add_errorbar(eb);
         let path = export_png(&mut fig, "errorbar_basic").await.unwrap();

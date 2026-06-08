@@ -1,6 +1,6 @@
 #![cfg(feature = "wgpu")]
 
-use runmat_accelerate::backend::wgpu::provider_impl::WgpuProviderOptions;
+use runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate::fusion::{
     detect_fusion_groups, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
@@ -136,6 +136,7 @@ async fn fused_square_mean_all_matches_cpu() {
             cv.insert(v_all, Value::String("all".to_string()));
             cv
         },
+        materialized_stores: Vec::new(),
         output: Some(v_mean),
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,

@@ -10,6 +10,7 @@ use std::sync::{Arc, RwLock};
 pub enum ConsoleStream {
     Stdout,
     Stderr,
+    ClearScreen,
 }
 
 /// Single console write (line or chunk) captured during execution.
@@ -52,6 +53,20 @@ pub fn record_console_output(stream: ConsoleStream, text: impl Into<String>) {
     }
 }
 
+/// Record a control event that asks the host to clear the visible console.
+pub fn record_clear_screen() {
+    record_console_output(ConsoleStream::ClearScreen, String::new());
+}
+
+/// Record a line-oriented console entry, ensuring the stream text ends with a newline.
+pub fn record_console_line(stream: ConsoleStream, text: impl Into<String>) {
+    let mut text = text.into();
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    record_console_output(stream, text);
+}
+
 /// Clears the per-thread console buffer. Call this before execution begins so
 /// each run only returns fresh output.
 pub fn reset_thread_buffer() {
@@ -78,7 +93,21 @@ pub fn record_value_output(label: Option<&str>, value: &Value) {
     LAST_VALUE_OUTPUT.with(|last| {
         *last.borrow_mut() = Some(value.clone());
     });
-    let value_text = value.to_string();
+    let value_text = match value {
+        Value::Object(obj) if obj.is_class("datetime") => {
+            crate::builtins::datetime::datetime_display_text(value)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| value.to_string())
+        }
+        Value::Object(obj) if obj.is_class("duration") => {
+            crate::builtins::duration::duration_display_text(value)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| value.to_string())
+        }
+        _ => value.to_string(),
+    };
     let text = if let Some(name) = label {
         if is_unlabeled_nd_page_display(&value_text) {
             inject_label_into_nd_page_headers(name, &value_text)
@@ -90,7 +119,7 @@ pub fn record_value_output(label: Option<&str>, value: &Value) {
     } else {
         value_text
     };
-    record_console_output(ConsoleStream::Stdout, text);
+    record_console_line(ConsoleStream::Stdout, text);
 }
 
 pub fn take_last_value_output() -> Option<Value> {

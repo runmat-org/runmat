@@ -7,7 +7,7 @@ use parse::parse;
 fn command_form_basic() {
     let program = parse("plot 1 2 3").unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), _, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), _, _) => {
             assert_eq!(name, "plot");
             assert_eq!(args.len(), 3);
         }

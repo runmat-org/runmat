@@ -2,7 +2,11 @@
 
 use num_complex::Complex;
 use runmat_accelerate_api::{ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -43,19 +47,178 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "conv";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
+const CONV_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Convolution result.",
+}];
+
+const CONV_SIG_AB_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input vector/scalar.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second input vector/scalar.",
+    },
+];
+
+const CONV_SIG_SHAPE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input vector/scalar.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second input vector/scalar.",
+    },
+    BuiltinParamDescriptor {
+        name: "shape",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"full\""),
+        description: "Output shape: \"full\", \"same\", or \"valid\".",
+    },
+];
+
+const CONV_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = conv(A, B)",
+        inputs: &CONV_SIG_AB_INPUTS,
+        outputs: &CONV_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = conv(A, B, shape)",
+        inputs: &CONV_SIG_SHAPE_INPUTS,
+        outputs: &CONV_OUTPUT,
+    },
+];
+
+const CONV_ERROR_SHAPE_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV.SHAPE_INVALID",
+    identifier: Some("RunMat:conv:ShapeInvalid"),
+    when: "Third argument is missing or not one of full/same/valid.",
+    message: "conv: third argument must be the string 'full', 'same', or 'valid'",
+};
+
+const CONV_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV.ARG_COUNT",
+    identifier: Some("RunMat:conv:ArgCount"),
+    when: "More than three input arguments are provided.",
+    message: "conv: expected at most three input arguments",
+};
+
+const CONV_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV.INVALID_INPUT",
+    identifier: Some("RunMat:conv:InvalidInput"),
+    when: "An input value is not numeric/logical scalar/vector/tensor compatible.",
+    message: "conv: unsupported input type",
+};
+
+const CONV_ERROR_CONVERSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV.CONVERSION",
+    identifier: Some("RunMat:conv:Conversion"),
+    when: "Input conversion from logical/gpu tensor into host numeric domain fails.",
+    message: "conv: input conversion failed",
+};
+
+const CONV_ERROR_GATHER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV.GATHER_FAILED",
+    identifier: Some("RunMat:conv:GatherFailed"),
+    when: "GPU input cannot be gathered for host fallback normalization.",
+    message: "conv: failed to gather GPU input",
+};
+
+const CONV_ERROR_BUILD_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV.BUILD_OUTPUT",
+    identifier: Some("RunMat:conv:BuildOutput"),
+    when: "Output tensor allocation fails.",
+    message: "conv: failed to build tensor",
+};
+
+const CONV_ERROR_BUILD_COMPLEX_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV.BUILD_COMPLEX_OUTPUT",
+    identifier: Some("RunMat:conv:BuildComplexOutput"),
+    when: "Output complex tensor allocation fails.",
+    message: "conv: failed to build complex tensor",
+};
+
+const CONV_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    CONV_ERROR_SHAPE_INVALID,
+    CONV_ERROR_ARG_COUNT,
+    CONV_ERROR_INVALID_INPUT,
+    CONV_ERROR_CONVERSION,
+    CONV_ERROR_GATHER_FAILED,
+    CONV_ERROR_BUILD_OUTPUT,
+    CONV_ERROR_BUILD_COMPLEX_OUTPUT,
+];
+
+pub const CONV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CONV_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CONV_ERRORS,
+};
+
+fn conv_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    conv_error_with_message(error.message, error)
+}
+
+fn conv_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    conv_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn conv_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn conv_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
         .with_builtin(BUILTIN_NAME)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "conv",
     category = "math/signal",
-    summary = "One-dimensional linear convolution with MATLAB-compatible padding.",
+    summary = "Compute one-dimensional linear convolution.",
     keywords = "conv,convolution,signal processing,gpu",
     accel = "custom",
     type_resolver(conv_type),
+    descriptor(crate::builtins::math::signal::conv::CONV_DESCRIPTOR),
     builtin_path = "crate::builtins::math::signal::conv"
 )]
 async fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -118,23 +281,17 @@ fn parse_mode(args: &[Value]) -> BuiltinResult<ConvMode> {
         0 => Ok(ConvMode::Full),
         1 => {
             let Some(text) = tensor::value_to_string(&args[0]) else {
-                return Err(runtime_error_for(
-                    "conv: third argument must be the string 'full', 'same', or 'valid'",
-                ));
+                return Err(conv_error(&CONV_ERROR_SHAPE_INVALID));
             };
             let lowered = text.trim().to_ascii_lowercase();
             match lowered.as_str() {
                 "full" => Ok(ConvMode::Full),
                 "same" => Ok(ConvMode::Same),
                 "valid" => Ok(ConvMode::Valid),
-                _ => Err(runtime_error_for(
-                    "conv: third argument must be the string 'full', 'same', or 'valid'",
-                )),
+                _ => Err(conv_error(&CONV_ERROR_SHAPE_INVALID)),
             }
         }
-        _ => Err(runtime_error_for(
-            "conv: expected at most three input arguments",
-        )),
+        _ => Err(conv_error(&CONV_ERROR_ARG_COUNT)),
     }
 }
 
@@ -210,13 +367,20 @@ async fn normalize_input(value: Value) -> BuiltinResult<ConvInput> {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
-                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+                .map_err(|flow| {
+                    let message = flow.message().to_owned();
+                    conv_error_with_source(
+                        &CONV_ERROR_GATHER_FAILED,
+                        message,
+                        map_control_flow_with_builtin(flow, BUILTIN_NAME),
+                    )
+                })?;
             convert_tensor(tensor)
         }
         Value::Tensor(tensor) => convert_tensor(tensor),
         Value::ComplexTensor(tensor) => convert_complex_tensor(tensor),
         Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
-            .map_err(|err| runtime_error_for(format!("conv: {err}")))
+            .map_err(|err| conv_error_with_detail(&CONV_ERROR_CONVERSION, err))
             .and_then(convert_tensor),
         Value::Num(n) => Ok(ConvInput {
             data: vec![Complex::new(n, 0.0)],
@@ -238,10 +402,10 @@ async fn normalize_input(value: Value) -> BuiltinResult<ConvInput> {
             len: 1,
             hint: OrientationHint::Scalar,
         }),
-        other => Err(runtime_error_for(format!(
-            "conv: unsupported input type {:?}; expected numeric or logical values",
-            other
-        ))),
+        other => Err(conv_error_with_detail(
+            &CONV_ERROR_INVALID_INPUT,
+            format!("{other:?}; expected numeric or logical values"),
+        )),
     }
 }
 
@@ -374,13 +538,13 @@ fn convert_output(data: Vec<Complex<f64>>, orientation: Orientation) -> BuiltinR
     if all_real {
         let real_data: Vec<f64> = data.into_iter().map(|c| c.re).collect();
         let tensor = Tensor::new(real_data, shape)
-            .map_err(|e| runtime_error_for(format!("conv: failed to build tensor: {e}")))?;
+            .map_err(|e| conv_error_with_detail(&CONV_ERROR_BUILD_OUTPUT, &e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
 
     let complex_data: Vec<(f64, f64)> = data.into_iter().map(|c| (c.re, c.im)).collect();
     let tensor = ComplexTensor::new(complex_data, shape)
-        .map_err(|e| runtime_error_for(format!("conv: failed to build complex tensor: {e}")))?;
+        .map_err(|e| conv_error_with_detail(&CONV_ERROR_BUILD_COMPLEX_OUTPUT, &e))?;
     if tensor.data.len() == 1 {
         let (re, im) = tensor.data[0];
         if im.abs() <= EPS {
@@ -399,7 +563,9 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{
+        builtin_function_by_name, IntValue, LogicalArray, ResolveContext, Tensor, Type,
+    };
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -424,6 +590,19 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(1), Some(4)])
             }
         );
+    }
+
+    #[test]
+    fn conv_descriptor_signatures_and_errors() {
+        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("conv builtin");
+        let descriptor = builtin.descriptor.expect("conv descriptor");
+        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
+        assert!(labels.contains(&"C = conv(A, B)"));
+        assert!(labels.contains(&"C = conv(A, B, shape)"));
+        assert!(descriptor
+            .errors
+            .iter()
+            .any(|err| err.code == "RM.CONV.SHAPE_INVALID"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -27,20 +27,49 @@ fn write_script() -> (TempDir, PathBuf) {
     (dir, path)
 }
 
+fn write_config(dir: &TempDir, endpoint: &str, telemetry_enabled: bool) -> PathBuf {
+    let path = dir.path().join("runmat.toml");
+    let content = format!(
+        r#"
+[runtime]
+[runtime.telemetry]
+enabled = {telemetry_enabled}
+show_payloads = false
+http_endpoint = "{endpoint}"
+udp_endpoint = ""
+queue_size = 256
+sync_mode = true
+drain_mode = "all"
+drain_timeout_ms = 50
+require_ingestion_key = false
+
+[runtime.accelerate]
+enabled = false
+provider = "inprocess"
+allow_inprocess_fallback = true
+wgpu_power_preference = "auto"
+wgpu_force_fallback_adapter = false
+
+[runtime.accelerate.auto_offload]
+enabled = false
+calibrate = false
+log_level = "off"
+"#
+    );
+    fs::write(&path, content).unwrap();
+    path
+}
+
 #[test]
 fn telemetry_http_events_fire_for_script_execution() {
-    let (_dir, script) = write_script();
+    let (dir, script) = write_script();
     let (endpoint, rx) = start_http_probe(2);
+    let config = write_config(&dir, &endpoint, true);
 
     let output = Command::new(get_binary_path())
         .arg(script)
-        .env("RUNMAT_ACCEL_ENABLE", "0")
-        .env("RUNMAT_ACCEL_PROVIDER", "inprocess")
-        .env("RUNMAT_TELEMETRY", "1")
+        .env("RUNMAT_CONFIG", &config)
         .env("RUNMAT_TELEMETRY_KEY", "test-key")
-        .env("RUNMAT_TELEMETRY_SYNC", "1")
-        .env("RUNMAT_TELEMETRY_UDP_ENDPOINT", "off")
-        .env("RUNMAT_TELEMETRY_ENDPOINT", &endpoint)
         .output()
         .expect("runmat execution");
     assert!(
@@ -57,23 +86,21 @@ fn telemetry_http_events_fire_for_script_execution() {
         .recv_timeout(Duration::from_secs(5))
         .expect("value payload");
 
-    assert!(contains_event(&first, "runtime_started"));
-    assert!(contains_event(&second, "runtime_finished"));
+    assert!(contains_event(&first, "runtime.run.started"));
+    assert!(contains_event(&second, "runtime.run.finished"));
+    assert!(contains_uuid(&first));
+    assert!(contains_uuid(&second));
 }
 
 #[test]
 fn telemetry_respects_opt_out_env() {
-    let (_dir, script) = write_script();
+    let (dir, script) = write_script();
     let (endpoint, rx) = start_http_probe(1);
+    let config = write_config(&dir, &endpoint, false);
 
     let output = Command::new(get_binary_path())
         .arg(script)
-        .env("RUNMAT_ACCEL_ENABLE", "0")
-        .env("RUNMAT_ACCEL_PROVIDER", "inprocess")
-        .env("RUNMAT_TELEMETRY_SYNC", "1")
-        .env("RUNMAT_TELEMETRY", "0")
-        .env("RUNMAT_TELEMETRY_ENDPOINT", &endpoint)
-        .env("RUNMAT_TELEMETRY_UDP_ENDPOINT", "off")
+        .env("RUNMAT_CONFIG", &config)
         .output()
         .expect("runmat execution");
     assert!(
@@ -130,5 +157,13 @@ fn contains_event(body: &str, expected: &str) -> bool {
         .ok()
         .and_then(|value| value.get("event_label").cloned())
         .and_then(|label| label.as_str().map(|s| s == expected))
+        .unwrap_or(false)
+}
+
+fn contains_uuid(body: &str) -> bool {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|value| value.get("uuid").cloned())
+        .and_then(|value| value.as_str().map(|s| !s.trim().is_empty()))
         .unwrap_or(false)
 }

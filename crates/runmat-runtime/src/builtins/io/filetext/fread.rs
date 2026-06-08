@@ -3,7 +3,11 @@
 use std::io::{ErrorKind, Read, Seek, SeekFrom};
 
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, LogicalArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -14,9 +18,346 @@ use crate::builtins::io::filetext::{helpers::extract_scalar_string, registry};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
-const INVALID_IDENTIFIER_MESSAGE: &str =
-    "Invalid file identifier. Use fopen to generate a valid file ID.";
 const BUILTIN_NAME: &str = "fread";
+
+const FREAD_OUTPUT_DATA: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "data",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Read data as numeric tensor or character array depending on precision.",
+}];
+const FREAD_INPUTS_FID: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "fid",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "File identifier opened by fopen.",
+}];
+const FREAD_INPUTS_FID_SIZE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier opened by fopen.",
+    },
+    BuiltinParamDescriptor {
+        name: "size",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"inf\""),
+        description: "Element count or size vector ([m n]); supports \"inf\".",
+    },
+];
+const FREAD_INPUTS_FID_SIZE_PRECISION: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier opened by fopen.",
+    },
+    BuiltinParamDescriptor {
+        name: "size",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"inf\""),
+        description: "Element count or size vector ([m n]); supports \"inf\".",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Read precision label (for example \"double\", \"uint8\", \"*char\").",
+    },
+];
+const FREAD_INPUTS_FID_SIZE_PRECISION_SKIP: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier opened by fopen.",
+    },
+    BuiltinParamDescriptor {
+        name: "size",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"inf\""),
+        description: "Element count or size vector ([m n]); supports \"inf\".",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Read precision label (for example \"double\", \"uint8\", \"*char\").",
+    },
+    BuiltinParamDescriptor {
+        name: "skip",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("0"),
+        description: "Bytes skipped after each element read.",
+    },
+];
+const FREAD_INPUTS_FID_SIZE_PRECISION_SKIP_MACHINEFMT: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier opened by fopen.",
+    },
+    BuiltinParamDescriptor {
+        name: "size",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"inf\""),
+        description: "Element count or size vector ([m n]); supports \"inf\".",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Read precision label (for example \"double\", \"uint8\", \"*char\").",
+    },
+    BuiltinParamDescriptor {
+        name: "skip",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("0"),
+        description: "Bytes skipped after each element read.",
+    },
+    BuiltinParamDescriptor {
+        name: "machinefmt",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"native\""),
+        description: "Machine format label (native/little-endian/big-endian aliases).",
+    },
+];
+const FREAD_INPUTS_FID_PRECISION: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier opened by fopen.",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Read precision label when size is omitted.",
+    },
+];
+const FREAD_INPUTS_FID_PRECISION_SKIP: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier opened by fopen.",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Read precision label when size is omitted.",
+    },
+    BuiltinParamDescriptor {
+        name: "skip",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("0"),
+        description: "Bytes skipped after each element read.",
+    },
+];
+const FREAD_INPUTS_FID_PRECISION_MACHINEFMT: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier opened by fopen.",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Read precision label when size is omitted.",
+    },
+    BuiltinParamDescriptor {
+        name: "machinefmt",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"native\""),
+        description: "Machine format label (native/little-endian/big-endian aliases).",
+    },
+];
+const FREAD_INPUTS_FID_PRECISION_SKIP_MACHINEFMT: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier opened by fopen.",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Read precision label when size is omitted.",
+    },
+    BuiltinParamDescriptor {
+        name: "skip",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("0"),
+        description: "Bytes skipped after each element read.",
+    },
+    BuiltinParamDescriptor {
+        name: "machinefmt",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"native\""),
+        description: "Machine format label (native/little-endian/big-endian aliases).",
+    },
+];
+const FREAD_INPUTS_WITH_LIKE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier opened by fopen.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Positional fread arguments before the like clause.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::PropertyName,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"like\""),
+        description: "Prototype keyword; currently only 'like'.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Prototype value controlling output class/residency.",
+    },
+];
+const FREAD_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+    BuiltinSignatureDescriptor {
+        label: "data = fread(fid)",
+        inputs: &FREAD_INPUTS_FID,
+        outputs: &FREAD_OUTPUT_DATA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = fread(fid, size)",
+        inputs: &FREAD_INPUTS_FID_SIZE,
+        outputs: &FREAD_OUTPUT_DATA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = fread(fid, size, precision)",
+        inputs: &FREAD_INPUTS_FID_SIZE_PRECISION,
+        outputs: &FREAD_OUTPUT_DATA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = fread(fid, size, precision, skip)",
+        inputs: &FREAD_INPUTS_FID_SIZE_PRECISION_SKIP,
+        outputs: &FREAD_OUTPUT_DATA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = fread(fid, size, precision, skip, machinefmt)",
+        inputs: &FREAD_INPUTS_FID_SIZE_PRECISION_SKIP_MACHINEFMT,
+        outputs: &FREAD_OUTPUT_DATA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = fread(fid, precision)",
+        inputs: &FREAD_INPUTS_FID_PRECISION,
+        outputs: &FREAD_OUTPUT_DATA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = fread(fid, precision, skip)",
+        inputs: &FREAD_INPUTS_FID_PRECISION_SKIP,
+        outputs: &FREAD_OUTPUT_DATA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = fread(fid, precision, machinefmt)",
+        inputs: &FREAD_INPUTS_FID_PRECISION_MACHINEFMT,
+        outputs: &FREAD_OUTPUT_DATA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = fread(fid, precision, skip, machinefmt)",
+        inputs: &FREAD_INPUTS_FID_PRECISION_SKIP_MACHINEFMT,
+        outputs: &FREAD_OUTPUT_DATA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = fread(fid, ..., \"like\", prototype)",
+        inputs: &FREAD_INPUTS_WITH_LIKE,
+        outputs: &FREAD_OUTPUT_DATA,
+    },
+];
+
+const FREAD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FREAD.INVALID_INPUT",
+    identifier: Some("RunMat:fread:InvalidInput"),
+    when: "Identifier/argument cardinality/type constraints are violated.",
+    message: "fread: invalid input arguments",
+};
+const FREAD_ERROR_INVALID_IDENTIFIER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FREAD.INVALID_IDENTIFIER",
+    identifier: Some("RunMat:fread:InvalidIdentifier"),
+    when: "Identifier does not refer to a readable open file.",
+    message: "fread: invalid file identifier. Use fopen to generate a valid file ID.",
+};
+const FREAD_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FREAD.INVALID_OPTION",
+    identifier: Some("RunMat:fread:InvalidOption"),
+    when: "Precision, skip, machine format, or like option values are invalid.",
+    message: "fread: invalid option configuration",
+};
+const FREAD_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FREAD.IO",
+    identifier: Some("RunMat:fread:IoFailure"),
+    when: "Read/seek or data-shape materialization fails.",
+    message: "fread: file read failed",
+};
+const FREAD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FREAD.INTERNAL",
+    identifier: None,
+    when: "Internal runtime control-flow conversion failed.",
+    message: "fread: internal error",
+};
+const FREAD_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    FREAD_ERROR_INVALID_INPUT,
+    FREAD_ERROR_INVALID_IDENTIFIER,
+    FREAD_ERROR_INVALID_OPTION,
+    FREAD_ERROR_IO,
+    FREAD_ERROR_INTERNAL,
+];
+pub const FREAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FREAD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FREAD_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fread")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -35,25 +376,41 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only operation that reads from the shared file registry; GPU arguments are gathered to the CPU before I/O.",
 };
 
-fn fread_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn fread_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let detail = detail.strip_prefix("fread: ").unwrap_or(detail);
+    fread_error_with_message(format!("{}: {}", error.message, detail), error)
 }
 
-fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let identifier = err.identifier().map(str::to_string);
-    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = identifier {
+fn fread_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
 }
 
-fn map_string_result<T>(result: Result<T, String>) -> BuiltinResult<T> {
-    result.map_err(fread_error)
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = FREAD_ERROR_INTERNAL.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_string_result<T>(
+    result: Result<T, String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<T> {
+    result.map_err(|detail| fread_error_with_detail(error, detail))
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fread")]
@@ -70,10 +427,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "fread",
     category = "io/filetext",
-    summary = "Read binary data from a file identifier.",
+    summary = "Read binary data from file identifiers.",
     keywords = "fread,file,io,binary,precision",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fread_type),
+    descriptor(crate::builtins::io::filetext::fread::FREAD_DESCRIPTOR),
     builtin_path = "crate::builtins::io::filetext::fread"
 )]
 async fn fread_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -125,27 +483,36 @@ impl FreadEval {
 
 pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadEval> {
     let fid_host = gather_value(fid_value).await?;
-    let fid = map_string_result(parse_fid(&fid_host))?;
+    let fid = map_string_result(parse_fid(&fid_host), &FREAD_ERROR_INVALID_INPUT)?;
     if fid < 0 {
-        return Err(fread_error("fread: file identifier must be non-negative"));
+        return Err(fread_error_with_detail(
+            &FREAD_ERROR_INVALID_INPUT,
+            "file identifier must be non-negative",
+        ));
     }
     if fid < 3 {
-        return Err(fread_error(
-            "fread: standard input/output identifiers are not supported yet",
+        return Err(fread_error_with_detail(
+            &FREAD_ERROR_INVALID_INPUT,
+            "standard input/output identifiers are not supported yet",
         ));
     }
 
-    let info = registry::info_for(fid)
-        .ok_or_else(|| fread_error(format!("fread: {INVALID_IDENTIFIER_MESSAGE}")))?;
-    let handle = registry::take_handle(fid)
-        .ok_or_else(|| fread_error(format!("fread: {INVALID_IDENTIFIER_MESSAGE}")))?;
-    let mut file = handle
-        .lock()
-        .map_err(|_| fread_error("fread: failed to lock file handle (poisoned mutex)"))?;
+    let info = registry::info_for(fid).ok_or_else(|| {
+        fread_error_with_message(
+            FREAD_ERROR_INVALID_IDENTIFIER.message,
+            &FREAD_ERROR_INVALID_IDENTIFIER,
+        )
+    })?;
+    let handle = registry::take_handle(fid).ok_or_else(|| {
+        fread_error_with_message(
+            FREAD_ERROR_INVALID_IDENTIFIER.message,
+            &FREAD_ERROR_INVALID_IDENTIFIER,
+        )
+    })?;
 
     let arg_refs: Vec<&Value> = rest.iter().collect();
     let (size_arg, precision_arg, skip_arg, machine_arg, like_arg) =
-        classify_arguments(&arg_refs).map_err(|e| fread_error(format!("fread: {e}")))?;
+        map_string_result(classify_arguments(&arg_refs), &FREAD_ERROR_INVALID_INPUT)?;
 
     let size_host = match size_arg {
         Some(value) => Some(gather_value(value).await?),
@@ -164,22 +531,39 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
         None => None,
     };
 
-    let size_spec = map_string_result(parse_size(size_host.as_ref()))?;
-    let precision = map_string_result(parse_precision(precision_host.as_ref()))?;
-    let skip_bytes = map_string_result(parse_skip(skip_host.as_ref()))?;
-    let machine_format = map_string_result(parse_machine_format(
-        machine_host.as_ref(),
-        &info.machinefmt,
-    ))?;
+    let size_spec = map_string_result(parse_size(size_host.as_ref()), &FREAD_ERROR_INVALID_INPUT)?;
+    let precision = map_string_result(
+        parse_precision(precision_host.as_ref()),
+        &FREAD_ERROR_INVALID_OPTION,
+    )?;
+    let skip_bytes =
+        map_string_result(parse_skip(skip_host.as_ref()), &FREAD_ERROR_INVALID_OPTION)?;
+    let machine_format = map_string_result(
+        parse_machine_format(machine_host.as_ref(), &info.machinefmt),
+        &FREAD_ERROR_INVALID_OPTION,
+    )?;
 
-    let mut eval = map_string_result(read_from_handle(
-        &mut file,
-        &size_spec,
-        &precision,
-        skip_bytes,
-        machine_format,
-    ))?;
-    map_string_result(eval.apply_like(like_arg, precision))?;
+    let mut guard = handle.lock().map_err(|_| {
+        fread_error_with_detail(
+            &FREAD_ERROR_INTERNAL,
+            "failed to lock file handle (poisoned mutex)",
+        )
+    })?;
+    let file = guard.as_mut().ok_or_else(|| {
+        fread_error_with_message(
+            FREAD_ERROR_INVALID_IDENTIFIER.message,
+            &FREAD_ERROR_INVALID_IDENTIFIER,
+        )
+    })?;
+
+    let mut eval = map_string_result(
+        read_from_handle(file, &size_spec, &precision, skip_bytes, machine_format),
+        &FREAD_ERROR_IO,
+    )?;
+    map_string_result(
+        eval.apply_like(like_arg, precision),
+        &FREAD_ERROR_INVALID_OPTION,
+    )?;
     Ok(eval)
 }
 
@@ -1103,7 +1487,7 @@ pub(crate) mod tests {
     use crate::builtins::io::filetext::registry;
     use crate::builtins::io::filetext::{fclose, fopen};
     use crate::RuntimeError;
-    use runmat_filesystem::{self as fs, File};
+    use runmat_filesystem::File;
     use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
@@ -1136,6 +1520,20 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn fread_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = FREAD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"data = fread(fid)"));
+        assert!(labels.contains(&"data = fread(fid, size, precision, skip, machinefmt)"));
+        assert!(labels.contains(&"data = fread(fid, precision, machinefmt)"));
+        assert!(labels.contains(&"data = fread(fid, ..., \"like\", prototype)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn fread_reads_default_double() {
         let _guard = registry_guard();
         registry::reset_for_tests();
@@ -1162,7 +1560,7 @@ pub(crate) mod tests {
         }
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1194,7 +1592,7 @@ pub(crate) mod tests {
         }
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1227,7 +1625,7 @@ pub(crate) mod tests {
         }
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1260,7 +1658,7 @@ pub(crate) mod tests {
         }
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1298,7 +1696,7 @@ pub(crate) mod tests {
         }
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1323,7 +1721,7 @@ pub(crate) mod tests {
         assert!(err.contains("expected prototype after 'like'"));
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1353,7 +1751,7 @@ pub(crate) mod tests {
         assert!(err.contains("character prototypes require"));
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1400,7 +1798,7 @@ pub(crate) mod tests {
             run_fclose(&[Value::Num(fid as f64)]).unwrap();
         });
 
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1445,7 +1843,7 @@ pub(crate) mod tests {
         }
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1476,7 +1874,7 @@ pub(crate) mod tests {
         }
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1509,7 +1907,7 @@ pub(crate) mod tests {
         }
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1518,7 +1916,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let err = unwrap_error_message(run_evaluate(&Value::Num(9999.0), &Vec::new()).unwrap_err());
-        assert!(err.contains("Invalid file identifier"));
+        assert_eq!(err, FREAD_ERROR_INVALID_IDENTIFIER.message);
     }
 
     fn unique_path(prefix: &str) -> PathBuf {

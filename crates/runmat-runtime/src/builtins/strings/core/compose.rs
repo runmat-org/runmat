@@ -1,5 +1,9 @@
 //! MATLAB-compatible `compose` builtin that formats data into string arrays.
-use runmat_builtins::{StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -40,12 +44,105 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Formatting builtin; not eligible for fusion and materialises host string arrays.",
 };
 
-fn compose_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("compose").build()
+const BUILTIN_NAME: &str = "compose";
+
+const COMPOSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Formatted string array output.",
+}];
+
+const COMPOSE_INPUT_NO_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "formatSpec",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Format text or array returned as strings when no data args are supplied.",
+}];
+
+const COMPOSE_INPUT_WITH_ARGS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "formatSpec",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Format template text.",
+    },
+    BuiltinParamDescriptor {
+        name: "A...",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Values substituted into formatSpec placeholders.",
+    },
+];
+
+const COMPOSE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "S = compose(formatSpec)",
+        inputs: &COMPOSE_INPUT_NO_ARGS,
+        outputs: &COMPOSE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = compose(formatSpec, A...)",
+        inputs: &COMPOSE_INPUT_WITH_ARGS,
+        outputs: &COMPOSE_OUTPUT,
+    },
+];
+
+const COMPOSE_ERROR_INVALID_FORMAT_SPEC: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COMPOSE.INVALID_FORMAT_SPEC",
+    identifier: Some("RunMat:compose:InvalidFormatSpec"),
+    when: "formatSpec is not valid text input for compose formatting.",
+    message: "compose: invalid formatSpec",
+};
+
+const COMPOSE_ERROR_ARGUMENT_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COMPOSE.ARGUMENT_MISMATCH",
+    identifier: Some("RunMat:compose:ArgumentMismatch"),
+    when: "Data arguments are not scalar or broadcast-compatible with formatSpec.",
+    message: "compose: format data arguments must be scalars or match formatSpec size",
+};
+
+const COMPOSE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COMPOSE.INTERNAL",
+    identifier: Some("RunMat:compose:InternalError"),
+    when: "Internal string-array construction failed.",
+    message: "compose: internal error",
+};
+
+const COMPOSE_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    COMPOSE_ERROR_INVALID_FORMAT_SPEC,
+    COMPOSE_ERROR_ARGUMENT_MISMATCH,
+    COMPOSE_ERROR_INTERNAL,
+];
+
+pub const COMPOSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &COMPOSE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &COMPOSE_ERRORS,
+};
+
+fn compose_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    compose_error_with_message(error.message, error)
+}
+
+fn compose_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn remap_compose_flow(mut err: RuntimeError) -> RuntimeError {
-    err = map_control_flow_with_builtin(err, "compose");
+    err = map_control_flow_with_builtin(err, BUILTIN_NAME);
     if let Some(message) = err.message.strip_prefix("string: ") {
         err.message = format!("compose: {message}");
         return err;
@@ -59,10 +156,11 @@ fn remap_compose_flow(mut err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "compose",
     category = "strings/core",
-    summary = "Format values into MATLAB string arrays using printf-style placeholders.",
+    summary = "Format values into string arrays using printf-style placeholders.",
     keywords = "compose,format,string array,gpu",
     accel = "sink",
     type_resolver(string_array_type),
+    descriptor(crate::builtins::strings::core::compose::COMPOSE_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::core::compose"
 )]
 async fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -101,7 +199,7 @@ fn format_spec_data_to_string_array(spec: FormatSpecData) -> BuiltinResult<Strin
     } else {
         spec.shape
     };
-    StringArray::new(spec.specs, shape).map_err(|e| compose_flow(format!("compose: {e}")))
+    StringArray::new(spec.specs, shape).map_err(|_| compose_error(&COMPOSE_ERROR_INTERNAL))
 }
 
 #[cfg(test)]

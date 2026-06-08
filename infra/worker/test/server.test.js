@@ -12,14 +12,14 @@ const { createApp } = await import('../src/server.js');
 
 describe('telemetry worker', () => {
   beforeEach(() => {
-    process.env.POSTHOG_API_KEY = 'phc_test';
     process.env.INGESTION_KEY = 'secret';
+    process.env.TELEMETRY_COLLECTOR_ENDPOINT = 'https://api.runmat.com/v1/t';
     fetch.mockReset();
   });
 
   afterEach(() => {
-    delete process.env.POSTHOG_API_KEY;
     delete process.env.INGESTION_KEY;
+    delete process.env.TELEMETRY_COLLECTOR_ENDPOINT;
   });
 
   it('rejects when ingestion key mismatch', async () => {
@@ -27,16 +27,6 @@ describe('telemetry worker', () => {
     const res = await request(app).post('/ingest').send({});
     expect(res.status).toBe(401);
     expect(res.body.error).toBe('unauthorized');
-  });
-
-  it('rejects invalid events', async () => {
-    const app = createApp();
-    const res = await request(app)
-      .post('/ingest')
-      .set('x-telemetry-key', 'secret')
-      .send({ event_label: 'nope' });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('invalid_event');
   });
 
   it('forwards valid payloads', async () => {
@@ -48,58 +38,51 @@ describe('telemetry worker', () => {
       .send({
         event_label: 'runtime_finished',
         cid: 'abc123',
-        session_id: 'session-123',
-        run_kind: 'script',
+        arch: 'arm64',
         payload: { success: true, jit_enabled: true, accelerate_enabled: true },
       });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(fetch).toHaveBeenCalled();
     const body = JSON.parse(fetch.mock.calls[0][1].body);
-    expect(body.event).toBe('runtime_finished');
-    expect(body.properties.event_label).toBe('Runtime execution finished');
-    expect(body.properties.summary).toContain('jit=on');
-    expect(body.properties.success).toBe(true);
+    expect(body.event).toBe('runtime.run.finished');
+    expect(body.distinctId).toBe('abc123');
+    expect(body.arch).toBe('arm64');
+    expect(body.payload.arch).toBe('arm64');
+    expect(body.properties).toEqual({});
+    expect(body.context).toEqual({});
   });
 
-  it('formats installer payload without runtime flags', async () => {
+  it('returns forward failure when collector errors', async () => {
+    fetch.mockResolvedValue({ ok: false, status: 502 });
+    const app = createApp();
+    const res = await request(app)
+      .post('/ingest')
+      .set('x-telemetry-key', 'secret')
+      .send({ event_label: 'runtime_finished', cid: 'abc123' });
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBe('forward_failed');
+  });
+
+  it('rejects payloads missing distinct id', async () => {
     fetch.mockResolvedValue({ ok: true });
     const app = createApp();
     const res = await request(app)
       .post('/ingest')
       .set('x-telemetry-key', 'secret')
-      .send({
-        event_label: 'install_complete',
-        session_id: 'install-session',
-        run_kind: 'install',
-        os: 'macos',
-        arch: 'arm64',
-        platform: 'macos-aarch64',
-        method: 'shell',
-      });
-    expect(res.status).toBe(200);
-    const body = JSON.parse(fetch.mock.calls[0][1].body);
-    expect(body.properties.summary).toContain('platform=macos-aarch64');
-    expect(body.properties.summary).not.toContain('jit=');
-    expect(body.properties.$current_url).toBe('runmat://install.complete?platform=macos-aarch64&method=shell&arch=arm64&status=ok');
+      .send({ event_label: 'runtime_started', session_id: 'install-session' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_event');
   });
 
-  it('prefers provided current_url when present', async () => {
+  it('rejects unknown event labels', async () => {
     fetch.mockResolvedValue({ ok: true });
     const app = createApp();
     const res = await request(app)
       .post('/ingest')
       .set('x-telemetry-key', 'secret')
-      .send({
-        event_label: 'runtime_started',
-        cid: 'abc123',
-        session_id: 'session-xyz',
-        run_kind: 'repl',
-        current_url: 'https://runmat.com/sandbox?it=off',
-        payload: { jit_enabled: true, accelerate_enabled: true },
-      });
-    expect(res.status).toBe(200);
-    const body = JSON.parse(fetch.mock.calls[0][1].body);
-    expect(body.properties.$current_url).toBe('https://runmat.com/sandbox?it=off');
+      .send({ event_label: 'something_else', cid: 'abc123' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_event');
   });
 });

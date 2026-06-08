@@ -1,14 +1,18 @@
 //! MATLAB-compatible `endsWith` builtin for RunMat.
 
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
@@ -44,13 +48,198 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "endsWith";
 
+const ENDSWITH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical result indicating whether each text element ends with the pattern.",
+}];
+
+const ENDSWITH_INPUTS_BASE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+];
+
+const ENDSWITH_INPUTS_IGNORE_CASE_POSITIONAL: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "ignoreCase",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: Some("false"),
+        description: "Logical flag controlling case-sensitive matching.",
+    },
+];
+
+const ENDSWITH_INPUTS_IGNORE_CASE_PAIR: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"IgnoreCase\""),
+        description: "Option name (`\"IgnoreCase\"`).",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Option value for `\"IgnoreCase\"`.",
+    },
+];
+
+const ENDSWITH_INPUTS_OPTION_PAIRS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValuePairs...",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name-value option pairs (`\"IgnoreCase\"`, value).",
+    },
+];
+
+const ENDSWITH_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "tf = endsWith(str, pat)",
+        inputs: &ENDSWITH_INPUTS_BASE,
+        outputs: &ENDSWITH_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = endsWith(str, pat, ignoreCase)",
+        inputs: &ENDSWITH_INPUTS_IGNORE_CASE_POSITIONAL,
+        outputs: &ENDSWITH_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = endsWith(str, pat, \"IgnoreCase\", value)",
+        inputs: &ENDSWITH_INPUTS_IGNORE_CASE_PAIR,
+        outputs: &ENDSWITH_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = endsWith(str, pat, nameValuePairs...)",
+        inputs: &ENDSWITH_INPUTS_OPTION_PAIRS,
+        outputs: &ENDSWITH_OUTPUT,
+    },
+];
+
+const ENDSWITH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ENDSWITH.INVALID_INPUT",
+    identifier: Some("RunMat:endsWith:InvalidInput"),
+    when: "Text or pattern input is not a supported text container.",
+    message: "endsWith: text and pattern inputs must be text values",
+};
+
+const ENDSWITH_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ENDSWITH.INVALID_OPTION",
+    identifier: Some("RunMat:endsWith:InvalidOption"),
+    when: "IgnoreCase option arguments are invalid or malformed.",
+    message: "endsWith: invalid option arguments",
+};
+
+const ENDSWITH_ERROR_SHAPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ENDSWITH.SHAPE_MISMATCH",
+    identifier: Some("RunMat:endsWith:ShapeMismatch"),
+    when: "Text and pattern inputs are not broadcast-compatible.",
+    message: "endsWith: input sizes are not broadcast-compatible",
+};
+
+const ENDSWITH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ENDSWITH.INTERNAL",
+    identifier: Some("RunMat:endsWith:InternalError"),
+    when: "Internal logical result assembly failed.",
+    message: "endsWith: internal error",
+};
+
+const ENDSWITH_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    ENDSWITH_ERROR_INVALID_INPUT,
+    ENDSWITH_ERROR_INVALID_OPTION,
+    ENDSWITH_ERROR_SHAPE_MISMATCH,
+    ENDSWITH_ERROR_INTERNAL,
+];
+
+pub const ENDSWITH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ENDSWITH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ENDSWITH_ERRORS,
+};
+
+fn endswith_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn remap_endswith_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
+}
+
 #[runtime_builtin(
     name = "endsWith",
     category = "strings/search",
-    summary = "Return logical values indicating whether text inputs end with specific patterns.",
+    summary = "Test whether text inputs end with patterns.",
     keywords = "endswith,suffix,text,ignorecase,search",
     accel = "sink",
     type_resolver(logical_text_match_type),
+    descriptor(crate::builtins::strings::search::endswith::ENDSWITH_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::search::endswith"
 )]
 async fn endswith_builtin(
@@ -58,15 +247,29 @@ async fn endswith_builtin(
     pattern: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let text = gather_if_needed_async(&text).await?;
-    let pattern = gather_if_needed_async(&pattern).await?;
+    let text = gather_if_needed_async(&text)
+        .await
+        .map_err(remap_endswith_flow)?;
+    let pattern = gather_if_needed_async(&pattern)
+        .await
+        .map_err(remap_endswith_flow)?;
     let mut option_args = Vec::with_capacity(rest.len());
     for value in rest {
-        option_args.push(gather_if_needed_async(&value).await?);
+        option_args.push(
+            gather_if_needed_async(&value)
+                .await
+                .map_err(remap_endswith_flow)?,
+        );
     }
-    let ignore_case = parse_ignore_case(BUILTIN_NAME, &option_args)?;
-    let subject = TextCollection::from_subject(BUILTIN_NAME, text)?;
-    let patterns = TextCollection::from_pattern(BUILTIN_NAME, pattern)?;
+    let ignore_case = parse_ignore_case(BUILTIN_NAME, &option_args).map_err(|err| {
+        endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INVALID_OPTION)
+    })?;
+    let subject = TextCollection::from_subject(BUILTIN_NAME, text).map_err(|err| {
+        endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INVALID_INPUT)
+    })?;
+    let patterns = TextCollection::from_pattern(BUILTIN_NAME, pattern).map_err(|err| {
+        endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INVALID_INPUT)
+    })?;
     evaluate_endswith(&subject, &patterns, ignore_case)
 }
 
@@ -76,10 +279,12 @@ fn evaluate_endswith(
     ignore_case: bool,
 ) -> BuiltinResult<Value> {
     let output_shape = broadcast_shapes(BUILTIN_NAME, &subject.shape, &patterns.shape)
-        .map_err(|err| build_runtime_error(err).with_builtin(BUILTIN_NAME).build())?;
+        .map_err(|err| endswith_error_with_message(err, &ENDSWITH_ERROR_SHAPE_MISMATCH))?;
     let total = tensor::element_count(&output_shape);
     if total == 0 {
-        return logical_result(BUILTIN_NAME, Vec::new(), output_shape);
+        return logical_result(BUILTIN_NAME, Vec::new(), output_shape).map_err(|err| {
+            endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INTERNAL)
+        });
     }
 
     let subject_strides = compute_strides(&subject.shape);
@@ -125,7 +330,9 @@ fn evaluate_endswith(
         };
         data.push(if value { 1 } else { 0 });
     }
-    logical_result(BUILTIN_NAME, data, output_shape)
+    logical_result(BUILTIN_NAME, data, output_shape).map_err(|err| {
+        endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INTERNAL)
+    })
 }
 
 #[cfg(test)]

@@ -15,11 +15,93 @@ use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
 const NAME: &str = "nnz";
+
+const NNZ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "N",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Count of nonzero elements.",
+}];
+
+const NNZ_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array.",
+}];
+
+const NNZ_INPUTS_DIM: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Dimension selector.",
+    },
+];
+
+const NNZ_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "N = nnz(A)",
+        inputs: &NNZ_INPUTS_CORE,
+        outputs: &NNZ_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "N = nnz(A, dim)",
+        inputs: &NNZ_INPUTS_DIM,
+        outputs: &NNZ_OUTPUT,
+    },
+];
+
+const NNZ_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NNZ.INVALID_ARGUMENT",
+    identifier: Some("RunMat:nnz:InvalidArgument"),
+    when: "Dimension argument grammar is invalid.",
+    message: "nnz: invalid argument",
+};
+
+const NNZ_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NNZ.INVALID_INPUT",
+    identifier: Some("RunMat:nnz:InvalidInput"),
+    when: "Input type is unsupported for nnz.",
+    message: "nnz: invalid input",
+};
+
+const NNZ_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NNZ.INTERNAL",
+    identifier: Some("RunMat:nnz:Internal"),
+    when: "Reduction execution fails due to provider, conversion, or shape operations.",
+    message: "nnz: internal reduction failure",
+};
+
+const NNZ_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    NNZ_ERROR_INVALID_ARGUMENT,
+    NNZ_ERROR_INVALID_INPUT,
+    NNZ_ERROR_INTERNAL,
+];
+
+pub const NNZ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &NNZ_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &NNZ_ERRORS,
+};
 
 fn nnz_type(args: &[Type], ctx: &ResolveContext) -> Type {
     count_nonzero_type(args, ctx)
@@ -48,8 +130,44 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers that implement reduce_nnz[_dim] keep counting on-device; the builtin downloads the MATLAB-compatible double result afterwards.",
 };
 
-fn nnz_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn nnz_descriptor_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    nnz_descriptor_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn map_dim_error(message: String) -> RuntimeError {
+    if message.contains("finite") {
+        return nnz_descriptor_error_with_detail(
+            &NNZ_ERROR_INVALID_ARGUMENT,
+            "dimension must be finite",
+        );
+    }
+    if message.contains("integer") {
+        return nnz_descriptor_error_with_detail(
+            &NNZ_ERROR_INVALID_ARGUMENT,
+            "dimension must be an integer",
+        );
+    }
+    if message.contains("non-negative") {
+        return nnz_descriptor_error_with_detail(
+            &NNZ_ERROR_INVALID_ARGUMENT,
+            "dimension must be >= 1",
+        );
+    }
+    nnz_descriptor_error_with_detail(&NNZ_ERROR_INVALID_ARGUMENT, message)
+}
+
+fn nnz_descriptor_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::nnz")]
@@ -82,10 +200,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "nnz",
     category = "math/reduction",
-    summary = "Count the number of nonzero elements in an array with MATLAB-compatible semantics.",
+    summary = "Count nonzero elements in arrays.",
     keywords = "nnz,nonzero,count,sparsity,gpu",
     accel = "reduction",
     type_resolver(nnz_type),
+    descriptor(crate::builtins::math::reduction::nnz::NNZ_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::nnz"
 )]
 async fn nnz_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -102,16 +221,19 @@ async fn parse_dimension_arg(args: &[Value]) -> BuiltinResult<Option<usize>> {
         1 => {
             let dim = tensor::dimension_from_value_async(&args[0], "nnz", false)
                 .await
-                .map_err(nnz_error)?;
+                .map_err(map_dim_error)?;
             match dim {
                 Some(dim) => Ok(Some(dim)),
-                None => Err(nnz_error(format!(
-                    "nnz: dimension must be numeric, got {:?}",
-                    args[0]
-                ))),
+                None => Err(nnz_descriptor_error_with_detail(
+                    &NNZ_ERROR_INVALID_ARGUMENT,
+                    format!("dimension must be numeric, got {:?}", args[0]),
+                )),
             }
         }
-        _ => Err(nnz_error("nnz: too many input arguments")),
+        _ => Err(nnz_descriptor_error_with_detail(
+            &NNZ_ERROR_INVALID_ARGUMENT,
+            "too many input arguments",
+        )),
     }
 }
 
@@ -121,9 +243,9 @@ async fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<V
         None => {
             if let Some(p) = provider {
                 if let Ok(result) = p.reduce_nnz(&handle).await {
-                    let host = download_handle_async(p, &result)
-                        .await
-                        .map_err(|e| nnz_error(format!("nnz: {e}")))?;
+                    let host = download_handle_async(p, &result).await.map_err(|e| {
+                        nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, e.to_string())
+                    })?;
                     let _ = p.free(&result);
                     let count = host.data.into_iter().next().unwrap_or(0.0);
                     return Ok(Value::Num(count));
@@ -137,12 +259,13 @@ async fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<V
                 let zero_based = dim.saturating_sub(1);
                 if zero_based < handle.shape.len() {
                     if let Ok(result) = p.reduce_nnz_dim(&handle, zero_based).await {
-                        let host = download_handle_async(p, &result)
-                            .await
-                            .map_err(|e| nnz_error(format!("nnz: {e}")))?;
+                        let host = download_handle_async(p, &result).await.map_err(|e| {
+                            nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, e.to_string())
+                        })?;
                         let _ = p.free(&result);
-                        let tensor = Tensor::new(host.data, host.shape)
-                            .map_err(|e| nnz_error(format!("nnz: {e}")))?;
+                        let tensor = Tensor::new(host.data, host.shape).map_err(|e| {
+                            nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e)
+                        })?;
                         return Ok(tensor::tensor_into_value(tensor));
                     }
                 }
@@ -177,13 +300,17 @@ fn count_nonzero_value(value: &Value) -> BuiltinResult<usize> {
         Value::Int(i) => Ok(if i.to_i64() != 0 { 1 } else { 0 }),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Complex(re, im) => Ok(if is_nonzero_complex(*re, *im) { 1 } else { 0 }),
-        Value::GpuTensor(_) => Err(nnz_error(
-            "nnz: GPU inputs are handled before host evaluation",
+        Value::GpuTensor(_) => Err(nnz_descriptor_error_with_detail(
+            &NNZ_ERROR_INTERNAL,
+            "GPU inputs are handled before host evaluation",
         )),
-        other => Err(nnz_error(format!(
-            "nnz: expected numeric, logical, complex, or char array, got {}",
-            describe_value_kind(other)
-        ))),
+        other => Err(nnz_descriptor_error_with_detail(
+            &NNZ_ERROR_INVALID_INPUT,
+            format!(
+                "expected numeric, logical, complex, or char array, got {}",
+                describe_value_kind(other)
+            ),
+        )),
     }
 }
 
@@ -283,19 +410,26 @@ fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
             bits: vec![if is_nonzero_complex(*re, *im) { 1 } else { 0 }],
             shape: vec![1, 1],
         }),
-        Value::GpuTensor(_) => Err(nnz_error(
-            "nnz: GPU inputs are handled before host evaluation",
+        Value::GpuTensor(_) => Err(nnz_descriptor_error_with_detail(
+            &NNZ_ERROR_INTERNAL,
+            "GPU inputs are handled before host evaluation",
         )),
-        other => Err(nnz_error(format!(
-            "nnz: expected numeric, logical, complex, or char array, got {}",
-            describe_value_kind(other)
-        ))),
+        other => Err(nnz_descriptor_error_with_detail(
+            &NNZ_ERROR_INVALID_INPUT,
+            format!(
+                "expected numeric, logical, complex, or char array, got {}",
+                describe_value_kind(other)
+            ),
+        )),
     }
 }
 
 fn reduce_mask_dim(mask: &Mask, dim: usize) -> BuiltinResult<Tensor> {
     if dim == 0 {
-        return Err(nnz_error("nnz: dimension must be >= 1"));
+        return Err(nnz_descriptor_error_with_detail(
+            &NNZ_ERROR_INVALID_ARGUMENT,
+            "dimension must be >= 1",
+        ));
     }
     if mask.bits.is_empty() {
         let mut out_shape = canonical_shape(&mask.shape, 0);
@@ -304,12 +438,13 @@ fn reduce_mask_dim(mask: &Mask, dim: usize) -> BuiltinResult<Tensor> {
         }
         let out_len = out_shape.iter().copied().product::<usize>();
         let zeros = vec![0.0; out_len];
-        return Tensor::new(zeros, out_shape).map_err(|e| nnz_error(format!("nnz: {e}")));
+        return Tensor::new(zeros, out_shape)
+            .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e));
     }
     if is_scalar_shape(&mask.shape) {
         let data = vec![mask.bits[0] as f64];
         return Tensor::new(data, canonical_scalar_shape())
-            .map_err(|e| nnz_error(format!("nnz: {e}")));
+            .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e));
     }
     if dim > mask.shape.len() {
         return mask_to_tensor(mask);
@@ -329,9 +464,9 @@ fn reduce_mask_dim(mask: &Mask, dim: usize) -> BuiltinResult<Tensor> {
             .copied()
             .product::<usize>()
     };
-    let out_len = stride_before
-        .checked_mul(stride_after)
-        .ok_or_else(|| "nnz: dimension too large".to_string())?;
+    let out_len = stride_before.checked_mul(stride_after).ok_or_else(|| {
+        nnz_descriptor_error_with_detail(&NNZ_ERROR_INVALID_ARGUMENT, "dimension too large")
+    })?;
     let mut out_shape = mask.shape.clone();
     out_shape[dim_index] = 1;
     let mut output = vec![0f64; out_len];
@@ -350,13 +485,14 @@ fn reduce_mask_dim(mask: &Mask, dim: usize) -> BuiltinResult<Tensor> {
             }
         }
     }
-    Tensor::new(output, out_shape).map_err(|e| nnz_error(format!("nnz: {e}")))
+    Tensor::new(output, out_shape)
+        .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e))
 }
 
 fn mask_to_tensor(mask: &Mask) -> BuiltinResult<Tensor> {
     let data = mask.bits.iter().map(|&b| b as f64).collect::<Vec<_>>();
     Tensor::new(data, canonical_shape(&mask.shape, mask.bits.len()))
-        .map_err(|e| nnz_error(format!("nnz: {e}")))
+        .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e))
 }
 
 fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
@@ -390,7 +526,11 @@ fn describe_value_kind(value: &Value) -> String {
         Value::Object(obj) => format!("{} object", obj.class_name),
         Value::HandleObject(h) => format!("handle object ({})", h.class_name),
         Value::Listener(l) => format!("listener for {}", l.event_name),
-        Value::FunctionHandle(_) | Value::Closure(_) => "function handle".to_string(),
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
+        | Value::Closure(_) => "function handle".to_string(),
         Value::ClassRef(_) => "class reference".to_string(),
         Value::MException(_) => "exception".to_string(),
         Value::OutputList(_) => "output list".to_string(),
@@ -401,7 +541,12 @@ fn describe_value_kind(value: &Value) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray};
+
+    fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
+        error.identifier()
+    }
 
     #[test]
     fn nnz_type_returns_num() {
@@ -412,6 +557,25 @@ pub(crate) mod tests {
             ),
             Type::Num
         );
+    }
+
+    #[test]
+    fn nnz_descriptor_signatures_and_errors() {
+        let labels: Vec<&str> = NNZ_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"N = nnz(A)"));
+        assert!(labels.contains(&"N = nnz(A, dim)"));
+        assert!(NNZ_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|err| err.code == NNZ_ERROR_INVALID_ARGUMENT.code));
+        assert!(NNZ_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|err| err.code == NNZ_ERROR_INVALID_INPUT.code));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -606,6 +770,8 @@ pub(crate) mod tests {
     #[test]
     fn nnz_rejects_strings() {
         let err = nnz_host_value(Value::from("hello"), None).unwrap_err();
+        assert_eq!(error_identifier(&err), NNZ_ERROR_INVALID_INPUT.identifier);
+        assert!(err.message().contains(NNZ_ERROR_INVALID_INPUT.message));
         assert!(
             err.message()
                 .contains("expected numeric, logical, complex, or char array"),
@@ -615,5 +781,20 @@ pub(crate) mod tests {
             err.message().contains("string scalar"),
             "unexpected error: {err}"
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn nnz_too_many_args_sets_invalid_argument_identifier() {
+        let err = block_on(nnz_builtin(
+            Value::Num(1.0),
+            vec![Value::Num(1.0), Value::Num(2.0)],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            error_identifier(&err),
+            NNZ_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(err.message().contains(NNZ_ERROR_INVALID_ARGUMENT.message));
     }
 }

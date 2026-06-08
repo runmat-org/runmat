@@ -1,4 +1,4 @@
-use crate::backend::wgpu::provider_impl::host_tensor_from_value;
+use crate::backend::wgpu::provider::host_tensor_from_value;
 use anyhow::{anyhow, Result};
 use runmat_builtins::{NumericDType, Tensor, Value};
 

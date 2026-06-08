@@ -6,12 +6,16 @@
 use crate::core::{BoundingBox, GpuPackContext, RenderData};
 use crate::plots::surface::ColorMap;
 use crate::plots::{
-    AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, ImagePlot, LinePlot, PieChart,
-    QuiverPlot, Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
+    AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Line3Plot, LinePlot, PatchPlot,
+    PieChart, QuiverPlot, ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot,
+    StairsPlot, StemPlot, SurfacePlot,
 };
 use glam::Vec4;
 use log::trace;
 use std::collections::HashMap;
+
+type ViewBounds2D = (f64, f64, f64, f64);
+type PerAxesViewBoundsRef<'a> = &'a [Option<ViewBounds2D>];
 
 /// A figure that can contain multiple overlaid plots
 #[derive(Debug, Clone)]
@@ -21,8 +25,10 @@ pub struct Figure {
 
     /// Figure-level settings
     pub title: Option<String>,
+    pub sg_title: Option<String>,
     pub x_label: Option<String>,
     pub y_label: Option<String>,
+    pub z_label: Option<String>,
     pub legend_enabled: bool,
     pub grid_enabled: bool,
     pub box_enabled: bool,
@@ -31,6 +37,7 @@ pub struct Figure {
     /// Axis limits (None = auto-scale)
     pub x_limits: Option<(f64, f64)>,
     pub y_limits: Option<(f64, f64)>,
+    pub z_limits: Option<(f64, f64)>,
 
     /// Axis scales
     pub x_log: bool,
@@ -55,6 +62,103 @@ pub struct Figure {
     pub axes_cols: usize,
     /// For each plot element, the axes index (row-major, 0..rows*cols-1)
     plot_axes_indices: Vec<usize>,
+
+    /// The axes index whose annotation metadata is currently active.
+    pub active_axes_index: usize,
+
+    /// Per-axes metadata used for subplot-correct annotations and legend state.
+    pub axes_metadata: Vec<AxesMetadata>,
+    pub sg_title_style: TextStyle,
+}
+
+#[derive(Debug, Clone)]
+pub struct TextStyle {
+    pub color: Option<Vec4>,
+    pub font_size: Option<f32>,
+    pub font_weight: Option<String>,
+    pub font_angle: Option<String>,
+    pub interpreter: Option<String>,
+    pub visible: bool,
+}
+
+impl Default for TextStyle {
+    fn default() -> Self {
+        Self {
+            color: None,
+            font_size: None,
+            font_weight: None,
+            font_angle: None,
+            interpreter: None,
+            visible: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LegendStyle {
+    pub location: Option<String>,
+    pub visible: bool,
+    pub font_size: Option<f32>,
+    pub font_weight: Option<String>,
+    pub font_angle: Option<String>,
+    pub interpreter: Option<String>,
+    pub box_visible: Option<bool>,
+    pub orientation: Option<String>,
+    pub text_color: Option<Vec4>,
+}
+
+impl Default for LegendStyle {
+    fn default() -> Self {
+        Self {
+            location: None,
+            visible: true,
+            font_size: None,
+            font_weight: None,
+            font_angle: None,
+            interpreter: None,
+            box_visible: None,
+            orientation: None,
+            text_color: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AxesMetadata {
+    pub title: Option<String>,
+    pub x_label: Option<String>,
+    pub y_label: Option<String>,
+    pub z_label: Option<String>,
+    pub x_tick_labels: Option<Vec<String>>,
+    pub y_tick_labels: Option<Vec<String>>,
+    pub x_limits: Option<(f64, f64)>,
+    pub y_limits: Option<(f64, f64)>,
+    pub z_limits: Option<(f64, f64)>,
+    pub x_log: bool,
+    pub y_log: bool,
+    pub view_azimuth_deg: Option<f32>,
+    pub view_elevation_deg: Option<f32>,
+    pub view_revision: u64,
+    pub grid_enabled: bool,
+    pub box_enabled: bool,
+    pub axis_equal: bool,
+    pub legend_enabled: bool,
+    pub colorbar_enabled: bool,
+    pub colormap: ColorMap,
+    pub color_limits: Option<(f64, f64)>,
+    pub title_style: TextStyle,
+    pub x_label_style: TextStyle,
+    pub y_label_style: TextStyle,
+    pub z_label_style: TextStyle,
+    pub legend_style: LegendStyle,
+    pub world_text_annotations: Vec<TextAnnotation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TextAnnotation {
+    pub position: glam::Vec3,
+    pub text: String,
+    pub style: TextStyle,
 }
 
 /// A plot element that can be any type of plot
@@ -69,11 +173,13 @@ pub enum PlotElement {
     Area(AreaPlot),
     Quiver(QuiverPlot),
     Pie(PieChart),
-    Image(ImagePlot),
     Surface(SurfacePlot),
+    Patch(PatchPlot),
+    Line3(Line3Plot),
     Scatter3(Scatter3Plot),
     Contour(ContourPlot),
     ContourFill(ContourFillPlot),
+    ReferenceLine(ReferenceLine),
 }
 
 /// Legend entry for a plot
@@ -82,6 +188,12 @@ pub struct LegendEntry {
     pub label: String,
     pub color: Vec4,
     pub plot_type: PlotType,
+}
+
+#[derive(Debug, Clone)]
+pub struct PieLabelEntry {
+    pub label: String,
+    pub position: glam::Vec2,
 }
 
 /// Type of plot for legend rendering
@@ -96,11 +208,13 @@ pub enum PlotType {
     Area,
     Quiver,
     Pie,
-    Image,
     Surface,
+    Patch,
+    Line3,
     Scatter3,
     Contour,
     ContourFill,
+    ReferenceLine,
 }
 
 impl Figure {
@@ -109,14 +223,17 @@ impl Figure {
         Self {
             plots: Vec::new(),
             title: None,
+            sg_title: None,
             x_label: None,
             y_label: None,
+            z_label: None,
             legend_enabled: true,
             grid_enabled: true,
             box_enabled: true,
             background_color: Vec4::new(1.0, 1.0, 1.0, 1.0), // White background
             x_limits: None,
             y_limits: None,
+            z_limits: None,
             x_log: false,
             y_log: false,
             axis_equal: false,
@@ -128,7 +245,107 @@ impl Figure {
             axes_rows: 1,
             axes_cols: 1,
             plot_axes_indices: Vec::new(),
+            active_axes_index: 0,
+            axes_metadata: vec![AxesMetadata {
+                x_limits: None,
+                y_limits: None,
+                z_limits: None,
+                grid_enabled: true,
+                box_enabled: true,
+                axis_equal: false,
+                legend_enabled: true,
+                colorbar_enabled: false,
+                colormap: ColorMap::Parula,
+                color_limits: None,
+                ..Default::default()
+            }],
+            sg_title_style: TextStyle::default(),
         }
+    }
+
+    fn ensure_axes_metadata_capacity(&mut self, min_len: usize) {
+        while self.axes_metadata.len() < min_len.max(1) {
+            self.axes_metadata.push(AxesMetadata {
+                x_limits: None,
+                y_limits: None,
+                z_limits: None,
+                grid_enabled: true,
+                box_enabled: true,
+                axis_equal: false,
+                legend_enabled: true,
+                colorbar_enabled: false,
+                colormap: ColorMap::Parula,
+                color_limits: None,
+                ..Default::default()
+            });
+        }
+    }
+
+    fn sync_legacy_fields_from_active_axes(&mut self) {
+        self.ensure_axes_metadata_capacity(self.active_axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get(self.active_axes_index).cloned() {
+            self.title = meta.title;
+            self.x_label = meta.x_label;
+            self.y_label = meta.y_label;
+            self.z_label = meta.z_label;
+            self.x_limits = meta.x_limits;
+            self.y_limits = meta.y_limits;
+            self.z_limits = meta.z_limits;
+            self.x_log = meta.x_log;
+            self.y_log = meta.y_log;
+            self.grid_enabled = meta.grid_enabled;
+            self.box_enabled = meta.box_enabled;
+            self.axis_equal = meta.axis_equal;
+            self.legend_enabled = meta.legend_enabled;
+            self.colorbar_enabled = meta.colorbar_enabled;
+            self.colormap = meta.colormap;
+            self.color_limits = meta.color_limits;
+        }
+    }
+
+    pub fn set_active_axes_index(&mut self, axes_index: usize) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        self.active_axes_index = axes_index;
+        self.sync_legacy_fields_from_active_axes();
+        self.dirty = true;
+    }
+
+    pub fn axes_metadata(&self, axes_index: usize) -> Option<&AxesMetadata> {
+        self.axes_metadata.get(axes_index)
+    }
+
+    pub fn active_axes_metadata(&self) -> Option<&AxesMetadata> {
+        self.axes_metadata(self.active_axes_index)
+    }
+
+    pub fn with_sg_title<S: Into<String>>(mut self, title: S) -> Self {
+        self.set_sg_title(title);
+        self
+    }
+
+    pub fn set_sg_title<S: Into<String>>(&mut self, title: S) {
+        self.sg_title = Some(title.into());
+        self.dirty = true;
+    }
+
+    pub fn clear_sg_title(&mut self) {
+        self.sg_title = None;
+        self.dirty = true;
+    }
+
+    pub fn set_sg_title_style(&mut self, style: TextStyle) {
+        self.sg_title_style = style;
+        self.dirty = true;
+    }
+
+    pub fn has_any_titles(&self) -> bool {
+        let non_empty = |s: Option<&str>| s.map(str::trim).is_some_and(|t| !t.is_empty());
+        non_empty(self.sg_title.as_deref())
+            || non_empty(self.title.as_deref())
+            || self
+                .axes_metadata
+                .iter()
+                .any(|meta| non_empty(meta.title.as_deref()))
     }
 
     /// Set the figure title
@@ -139,8 +356,7 @@ impl Figure {
 
     /// Set the figure title in-place
     pub fn set_title<S: Into<String>>(&mut self, title: S) {
-        self.title = Some(title.into());
-        self.dirty = true;
+        self.set_axes_title(self.active_axes_index, title);
     }
 
     /// Set axis labels
@@ -151,8 +367,194 @@ impl Figure {
 
     /// Set axis labels in-place
     pub fn set_axis_labels<S: Into<String>>(&mut self, x_label: S, y_label: S) {
-        self.x_label = Some(x_label.into());
-        self.y_label = Some(y_label.into());
+        self.set_axes_labels(self.active_axes_index, x_label, y_label);
+        self.dirty = true;
+    }
+
+    pub fn set_axes_title<S: Into<String>>(&mut self, axes_index: usize, title: S) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.title = Some(title.into());
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_xlabel<S: Into<String>>(&mut self, axes_index: usize, label: S) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_label = Some(label.into());
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_ylabel<S: Into<String>>(&mut self, axes_index: usize, label: S) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.y_label = Some(label.into());
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_zlabel<S: Into<String>>(&mut self, axes_index: usize, label: S) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.z_label = Some(label.into());
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn add_axes_text_annotation<S: Into<String>>(
+        &mut self,
+        axes_index: usize,
+        position: glam::Vec3,
+        text: S,
+        style: TextStyle,
+    ) -> usize {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        let Some(meta) = self.axes_metadata.get_mut(axes_index) else {
+            return 0;
+        };
+        meta.world_text_annotations.push(TextAnnotation {
+            position,
+            text: text.into(),
+            style,
+        });
+        self.dirty = true;
+        meta.world_text_annotations.len() - 1
+    }
+
+    pub fn axes_text_annotation(
+        &self,
+        axes_index: usize,
+        annotation_index: usize,
+    ) -> Option<&TextAnnotation> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.world_text_annotations.get(annotation_index))
+    }
+
+    pub fn set_axes_text_annotation_text<S: Into<String>>(
+        &mut self,
+        axes_index: usize,
+        annotation_index: usize,
+        text: S,
+    ) {
+        if let Some(annotation) = self
+            .axes_metadata
+            .get_mut(axes_index)
+            .and_then(|meta| meta.world_text_annotations.get_mut(annotation_index))
+        {
+            annotation.text = text.into();
+            self.dirty = true;
+        }
+    }
+
+    pub fn set_axes_text_annotation_position(
+        &mut self,
+        axes_index: usize,
+        annotation_index: usize,
+        position: glam::Vec3,
+    ) {
+        if let Some(annotation) = self
+            .axes_metadata
+            .get_mut(axes_index)
+            .and_then(|meta| meta.world_text_annotations.get_mut(annotation_index))
+        {
+            annotation.position = position;
+            self.dirty = true;
+        }
+    }
+
+    pub fn set_axes_text_annotation_style(
+        &mut self,
+        axes_index: usize,
+        annotation_index: usize,
+        style: TextStyle,
+    ) {
+        if let Some(annotation) = self
+            .axes_metadata
+            .get_mut(axes_index)
+            .and_then(|meta| meta.world_text_annotations.get_mut(annotation_index))
+        {
+            annotation.style = style;
+            self.dirty = true;
+        }
+    }
+
+    pub fn axes_text_annotations(&self, axes_index: usize) -> &[TextAnnotation] {
+        self.axes_metadata
+            .get(axes_index)
+            .map(|meta| meta.world_text_annotations.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn set_axes_labels<S: Into<String>>(&mut self, axes_index: usize, x_label: S, y_label: S) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_label = Some(x_label.into());
+            meta.y_label = Some(y_label.into());
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_tick_labels(
+        &mut self,
+        axes_index: usize,
+        x_labels: Option<Vec<String>>,
+        y_labels: Option<Vec<String>>,
+    ) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_tick_labels = x_labels;
+            meta.y_tick_labels = y_labels;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_title_style(&mut self, axes_index: usize, style: TextStyle) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.title_style = style;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_xlabel_style(&mut self, axes_index: usize, style: TextStyle) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_label_style = style;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_ylabel_style(&mut self, axes_index: usize, style: TextStyle) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.y_label_style = style;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_zlabel_style(&mut self, axes_index: usize, style: TextStyle) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.z_label_style = style;
+        }
         self.dirty = true;
     }
 
@@ -166,8 +568,53 @@ impl Figure {
 
     /// Enable or disable the legend
     pub fn with_legend(mut self, enabled: bool) -> Self {
-        self.legend_enabled = enabled;
+        self.set_legend(enabled);
         self
+    }
+
+    pub fn set_legend(&mut self, enabled: bool) {
+        self.set_axes_legend_enabled(self.active_axes_index, enabled);
+    }
+
+    pub fn set_axes_legend_enabled(&mut self, axes_index: usize, enabled: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.legend_enabled = enabled;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_legend_style(&mut self, axes_index: usize, style: LegendStyle) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.legend_style = style;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_log_modes(&mut self, axes_index: usize, x_log: bool, y_log: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_log = x_log;
+            meta.y_log = y_log;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_view(&mut self, axes_index: usize, azimuth_deg: f32, elevation_deg: f32) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.view_azimuth_deg = Some(azimuth_deg);
+            meta.view_elevation_deg = Some(elevation_deg);
+            meta.view_revision = meta.view_revision.wrapping_add(1);
+        }
+        self.dirty = true;
     }
 
     /// Enable or disable the grid
@@ -177,7 +624,18 @@ impl Figure {
     }
 
     pub fn set_grid(&mut self, enabled: bool) {
-        self.grid_enabled = enabled;
+        self.set_axes_grid_enabled(self.active_axes_index, enabled);
+        self.dirty = true;
+    }
+
+    pub fn set_axes_grid_enabled(&mut self, axes_index: usize, enabled: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.grid_enabled = enabled;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
         self.dirty = true;
     }
 
@@ -189,11 +647,11 @@ impl Figure {
 
     /// Set log scale flags
     pub fn with_xlog(mut self, enabled: bool) -> Self {
-        self.x_log = enabled;
+        self.set_axes_log_modes(self.active_axes_index, enabled, self.y_log);
         self
     }
     pub fn with_ylog(mut self, enabled: bool) -> Self {
-        self.y_log = enabled;
+        self.set_axes_log_modes(self.active_axes_index, self.x_log, enabled);
         self
     }
     pub fn with_axis_equal(mut self, enabled: bool) -> Self {
@@ -202,19 +660,29 @@ impl Figure {
     }
 
     pub fn set_axis_equal(&mut self, enabled: bool) {
-        self.axis_equal = enabled;
+        self.set_axes_axis_equal(self.active_axes_index, enabled);
+        self.dirty = true;
+    }
+    pub fn set_axes_axis_equal(&mut self, axes_index: usize, enabled: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.axis_equal = enabled;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
         self.dirty = true;
     }
     pub fn with_colormap(mut self, cmap: ColorMap) -> Self {
-        self.colormap = cmap;
+        self.set_axes_colormap(self.active_axes_index, cmap);
         self
     }
     pub fn with_colorbar(mut self, enabled: bool) -> Self {
-        self.colorbar_enabled = enabled;
+        self.set_axes_colorbar_enabled(self.active_axes_index, enabled);
         self
     }
     pub fn with_color_limits(mut self, limits: Option<(f64, f64)>) -> Self {
-        self.color_limits = limits;
+        self.set_axes_color_limits(self.active_axes_index, limits);
         self
     }
 
@@ -255,16 +723,111 @@ impl Figure {
     pub fn set_subplot_grid(&mut self, rows: usize, cols: usize) {
         self.axes_rows = rows.max(1);
         self.axes_cols = cols.max(1);
+        self.ensure_axes_metadata_capacity(self.axes_rows * self.axes_cols);
+        self.active_axes_index = self.active_axes_index.min(
+            self.axes_rows
+                .saturating_mul(self.axes_cols)
+                .saturating_sub(1),
+        );
+        self.sync_legacy_fields_from_active_axes();
         self.dirty = true;
     }
 
     /// Set color limits and propagate to existing surface plots
     pub fn set_color_limits(&mut self, limits: Option<(f64, f64)>) {
-        self.color_limits = limits;
-        for plot in &mut self.plots {
-            if let PlotElement::Surface(s) = plot {
-                s.set_color_limits(limits);
+        self.set_axes_color_limits(self.active_axes_index, limits);
+        self.dirty = true;
+    }
+
+    pub fn set_z_limits(&mut self, limits: Option<(f64, f64)>) {
+        self.set_axes_z_limits(self.active_axes_index, limits);
+        self.dirty = true;
+    }
+
+    pub fn set_axes_limits(
+        &mut self,
+        axes_index: usize,
+        x: Option<(f64, f64)>,
+        y: Option<(f64, f64)>,
+    ) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_limits = x;
+            meta.y_limits = y;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_z_limits(&mut self, axes_index: usize, limits: Option<(f64, f64)>) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.z_limits = limits;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_box_enabled(&mut self, axes_index: usize, enabled: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.box_enabled = enabled;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_colorbar_enabled(&mut self, axes_index: usize, enabled: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.colorbar_enabled = enabled;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_colormap(&mut self, axes_index: usize, cmap: ColorMap) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.colormap = cmap;
+        }
+        for (idx, plot) in self.plots.iter_mut().enumerate() {
+            if self.plot_axes_indices.get(idx).copied().unwrap_or(0) != axes_index {
+                continue;
             }
+            if let PlotElement::Surface(surface) = plot {
+                *surface = surface.clone().with_colormap(cmap);
+            }
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_color_limits(&mut self, axes_index: usize, limits: Option<(f64, f64)>) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.color_limits = limits;
+        }
+        for (idx, plot) in self.plots.iter_mut().enumerate() {
+            if self.plot_axes_indices.get(idx).copied().unwrap_or(0) != axes_index {
+                continue;
+            }
+            if let PlotElement::Surface(surface) = plot {
+                surface.set_color_limits(limits);
+            }
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
         }
         self.dirty = true;
     }
@@ -293,6 +856,10 @@ impl Figure {
 
     pub fn add_line_plot_on_axes(&mut self, plot: LinePlot, axes_index: usize) -> usize {
         self.push_plot(PlotElement::Line(plot), axes_index)
+    }
+
+    pub fn add_reference_line_on_axes(&mut self, plot: ReferenceLine, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::ReferenceLine(plot), axes_index)
     }
 
     /// Add a scatter plot to the figure
@@ -349,14 +916,6 @@ impl Figure {
         self.push_plot(PlotElement::Area(plot), axes_index)
     }
 
-    pub fn add_image_plot(&mut self, plot: ImagePlot) -> usize {
-        self.add_image_plot_on_axes(plot, 0)
-    }
-
-    pub fn add_image_plot_on_axes(&mut self, plot: ImagePlot, axes_index: usize) -> usize {
-        self.push_plot(PlotElement::Image(plot), axes_index)
-    }
-
     pub fn add_quiver_plot(&mut self, plot: QuiverPlot) -> usize {
         self.add_quiver_plot_on_axes(plot, 0)
     }
@@ -380,6 +939,22 @@ impl Figure {
 
     pub fn add_surface_plot_on_axes(&mut self, plot: SurfacePlot, axes_index: usize) -> usize {
         self.push_plot(PlotElement::Surface(plot), axes_index)
+    }
+
+    pub fn add_patch_plot(&mut self, plot: PatchPlot) -> usize {
+        self.add_patch_plot_on_axes(plot, 0)
+    }
+
+    pub fn add_patch_plot_on_axes(&mut self, plot: PatchPlot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Patch(plot), axes_index)
+    }
+
+    pub fn add_line3_plot(&mut self, plot: Line3Plot) -> usize {
+        self.add_line3_plot_on_axes(plot, self.active_axes_index)
+    }
+
+    pub fn add_line3_plot_on_axes(&mut self, plot: Line3Plot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Line3(plot), axes_index)
     }
 
     /// Add a 3D scatter plot to the figure
@@ -441,6 +1016,10 @@ impl Figure {
                 i += 1;
             }
         }
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.world_text_annotations.clear();
+        }
         self.dirty = true;
     }
 
@@ -481,9 +1060,14 @@ impl Figure {
         }
 
         let mut combined_bounds = None;
+        let mut reference_lines = Vec::new();
 
         for plot in &mut self.plots {
             if !plot.is_visible() {
+                continue;
+            }
+            if let PlotElement::ReferenceLine(reference_line) = plot {
+                reference_lines.push(reference_line.clone());
                 continue;
             }
 
@@ -492,6 +1076,33 @@ impl Figure {
             combined_bounds = match combined_bounds {
                 None => Some(plot_bounds),
                 Some(existing) => Some(existing.union(&plot_bounds)),
+            };
+        }
+
+        for line in reference_lines {
+            let mut point_bounds = line.coordinate_bounds();
+            if let Some(existing) = combined_bounds {
+                match line.orientation {
+                    ReferenceLineOrientation::Vertical => {
+                        point_bounds.min.y = existing.min.y;
+                        point_bounds.max.y = existing.max.y;
+                    }
+                    ReferenceLineOrientation::Horizontal => {
+                        point_bounds.min.x = existing.min.x;
+                        point_bounds.max.x = existing.max.x;
+                    }
+                }
+            } else {
+                let (x_range, y_range) =
+                    Self::reference_line_ranges(self.x_limits, self.y_limits, None, None, &line);
+                point_bounds.min.x = x_range.0 as f32;
+                point_bounds.max.x = x_range.1 as f32;
+                point_bounds.min.y = y_range.0 as f32;
+                point_bounds.max.y = y_range.1 as f32;
+            }
+            combined_bounds = match combined_bounds {
+                None => Some(point_bounds),
+                Some(existing) => Some(existing.union(&point_bounds)),
             };
         }
 
@@ -521,43 +1132,213 @@ impl Figure {
         viewport_px: Option<(u32, u32)>,
         gpu: Option<&GpuPackContext<'_>>,
     ) -> Vec<RenderData> {
+        self.render_data_with_axes_with_viewport_and_gpu(viewport_px, None, None, gpu)
+            .into_iter()
+            .map(|(_, render_data)| render_data)
+            .collect()
+    }
+
+    pub fn render_data_with_axes_with_viewport_and_gpu(
+        &mut self,
+        viewport_px: Option<(u32, u32)>,
+        axes_viewports_px: Option<&[(u32, u32)]>,
+        axes_view_bounds: Option<PerAxesViewBoundsRef<'_>>,
+        gpu: Option<&GpuPackContext<'_>>,
+    ) -> Vec<(usize, RenderData)> {
+        fn push_with_optional_markers(
+            out: &mut Vec<(usize, RenderData)>,
+            axes_index: usize,
+            render_data: RenderData,
+            marker_data: Option<RenderData>,
+        ) {
+            out.push((axes_index, render_data));
+            if let Some(marker_data) = marker_data {
+                out.push((axes_index, marker_data));
+            }
+        }
+
+        let reference_base_bounds = self.reference_base_bounds_by_axes();
         let mut out = Vec::new();
-        for p in self.plots.iter_mut() {
+        for (plot_idx, p) in self.plots.iter_mut().enumerate() {
             if !p.is_visible() {
                 continue;
             }
-            // Apply figure-level color limits to surfaces before generating
+            let axes_index = self.plot_axes_indices.get(plot_idx).copied().unwrap_or(0);
+            let axes_view_bounds = axes_view_bounds
+                .and_then(|bounds| bounds.get(axes_index).copied())
+                .flatten();
             if let PlotElement::Surface(s) = p {
-                if self.color_limits.is_some() {
-                    s.set_color_limits(self.color_limits);
+                if let Some(meta) = self.axes_metadata.get(axes_index) {
+                    s.set_color_limits(meta.color_limits);
+                    *s = s.clone().with_colormap(meta.colormap);
                 }
             }
 
             match p {
                 PlotElement::Line(plot) => {
+                    let axes_viewport_px = axes_viewports_px
+                        .and_then(|viewports| viewports.get(axes_index).copied())
+                        .or(viewport_px);
                     trace!(
                         target: "runmat_plot",
-                        "figure: render_data line viewport_px={:?} gpu_ctx_present={} gpu_line_inputs_present={} gpu_vertices_present={}",
+                        "figure: render_data line viewport_px={:?} axes_index={} axes_viewport_px={:?} axes_view_bounds={:?} gpu_ctx_present={} gpu_line_inputs_present={} gpu_vertices_present={}",
                         viewport_px,
+                        axes_index,
+                        axes_viewport_px,
+                        axes_view_bounds,
                         gpu.is_some(),
                         plot.has_gpu_line_inputs(),
                         plot.has_gpu_vertices()
                     );
-                    out.push(plot.render_data_with_viewport_gpu(viewport_px, gpu));
-                    if let Some(marker_data) = plot.marker_render_data() {
-                        out.push(marker_data);
-                    }
+                    push_with_optional_markers(
+                        &mut out,
+                        axes_index,
+                        plot.render_data_with_viewport_gpu(axes_viewport_px, axes_view_bounds, gpu),
+                        plot.marker_render_data(),
+                    );
+                }
+                PlotElement::ErrorBar(plot) => {
+                    push_with_optional_markers(
+                        &mut out,
+                        axes_index,
+                        plot.render_data_with_viewport_gpu(
+                            axes_viewports_px
+                                .and_then(|viewports| viewports.get(axes_index).copied())
+                                .or(viewport_px),
+                            gpu,
+                        ),
+                        plot.marker_render_data(),
+                    );
                 }
                 PlotElement::Stairs(plot) => {
-                    out.push(plot.render_data());
-                    if let Some(marker_data) = plot.marker_render_data() {
-                        out.push(marker_data);
+                    push_with_optional_markers(
+                        &mut out,
+                        axes_index,
+                        plot.render_data_with_viewport(
+                            axes_viewports_px
+                                .and_then(|viewports| viewports.get(axes_index).copied())
+                                .or(viewport_px),
+                        ),
+                        plot.marker_render_data(),
+                    );
+                }
+                PlotElement::Stem(plot) => {
+                    push_with_optional_markers(
+                        &mut out,
+                        axes_index,
+                        plot.render_data_with_viewport(
+                            axes_viewports_px
+                                .and_then(|viewports| viewports.get(axes_index).copied())
+                                .or(viewport_px),
+                        ),
+                        plot.marker_render_data(),
+                    );
+                }
+                PlotElement::Contour(plot) => out.push((
+                    axes_index,
+                    plot.render_data_with_viewport(
+                        axes_viewports_px
+                            .and_then(|viewports| viewports.get(axes_index).copied())
+                            .or(viewport_px),
+                    ),
+                )),
+                PlotElement::ReferenceLine(plot) => {
+                    let (x_range, y_range) = Self::reference_line_ranges(
+                        self.x_limits,
+                        self.y_limits,
+                        self.axes_metadata.get(axes_index),
+                        reference_base_bounds.get(axes_index).copied().flatten(),
+                        plot,
+                    );
+                    out.push((
+                        axes_index,
+                        plot.render_data_with_range(
+                            x_range,
+                            y_range,
+                            axes_viewports_px
+                                .and_then(|viewports| viewports.get(axes_index).copied())
+                                .or(viewport_px),
+                        ),
+                    ));
+                }
+                PlotElement::Patch(plot) => {
+                    out.push((axes_index, plot.render_data()));
+                    if let Some(edge_data) = plot.edge_render_data_with_viewport(
+                        axes_viewports_px
+                            .and_then(|viewports| viewports.get(axes_index).copied())
+                            .or(viewport_px),
+                    ) {
+                        out.push((axes_index, edge_data));
                     }
                 }
-                _ => out.push(p.render_data()),
+                PlotElement::Line3(plot) => out.push((
+                    axes_index,
+                    plot.render_data_with_viewport_gpu(
+                        axes_viewports_px
+                            .and_then(|viewports| viewports.get(axes_index).copied())
+                            .or(viewport_px),
+                        self.axes_metadata.get(axes_index).and_then(|meta| {
+                            match (meta.view_azimuth_deg, meta.view_elevation_deg) {
+                                (Some(az), Some(el)) => Some((az, el)),
+                                _ => None,
+                            }
+                        }),
+                        gpu,
+                    ),
+                )),
+                _ => out.push((axes_index, p.render_data())),
             }
         }
         out
+    }
+
+    fn reference_base_bounds_by_axes(&mut self) -> Vec<Option<BoundingBox>> {
+        let axes_count = self.total_axes().max(1);
+        let mut bounds: Vec<Option<BoundingBox>> = vec![None; axes_count];
+        for (plot_idx, plot) in self.plots.iter_mut().enumerate() {
+            if !plot.is_visible() || matches!(plot, PlotElement::ReferenceLine(_)) {
+                continue;
+            }
+            let axes_index = self
+                .plot_axes_indices
+                .get(plot_idx)
+                .copied()
+                .unwrap_or(0)
+                .min(axes_count - 1);
+            let plot_bounds = plot.bounds();
+            bounds[axes_index] = Some(match bounds[axes_index] {
+                None => plot_bounds,
+                Some(existing) => existing.union(&plot_bounds),
+            });
+        }
+        bounds
+    }
+
+    fn reference_line_ranges(
+        x_limits: Option<(f64, f64)>,
+        y_limits: Option<(f64, f64)>,
+        meta: Option<&AxesMetadata>,
+        base: Option<BoundingBox>,
+        line: &ReferenceLine,
+    ) -> ((f64, f64), (f64, f64)) {
+        let x_range = x_limits
+            .or_else(|| meta.and_then(|m| m.x_limits))
+            .or_else(|| base.map(|b| (b.min.x as f64, b.max.x as f64)))
+            .unwrap_or(match line.orientation {
+                ReferenceLineOrientation::Vertical => (line.value - 0.5, line.value + 0.5),
+                ReferenceLineOrientation::Horizontal => (0.0, 1.0),
+            });
+        let y_range = y_limits
+            .or_else(|| meta.and_then(|m| m.y_limits))
+            .or_else(|| base.map(|b| (b.min.y as f64, b.max.y as f64)))
+            .unwrap_or(match line.orientation {
+                ReferenceLineOrientation::Vertical => (0.0, 1.0),
+                ReferenceLineOrientation::Horizontal => (line.value - 0.5, line.value + 0.5),
+            });
+        (
+            normalize_reference_range(x_range),
+            normalize_reference_range(y_range),
+        )
     }
 
     /// Get legend entries for all labeled plots
@@ -577,18 +1358,93 @@ impl Figure {
         entries
     }
 
+    pub fn legend_entries_for_axes(&self, axes_index: usize) -> Vec<LegendEntry> {
+        let mut entries = Vec::new();
+        for (plot_idx, plot) in self.plots.iter().enumerate() {
+            let plot_axes = *self.plot_axes_indices.get(plot_idx).unwrap_or(&0);
+            if plot_axes != axes_index {
+                continue;
+            }
+            match plot {
+                PlotElement::Pie(pie) => {
+                    for slice in pie.slice_meta() {
+                        entries.push(LegendEntry {
+                            label: slice.label,
+                            color: slice.color,
+                            plot_type: plot.plot_type(),
+                        });
+                    }
+                }
+                _ => {
+                    if let Some(label) = plot.label() {
+                        entries.push(LegendEntry {
+                            label,
+                            color: plot.color(),
+                            plot_type: plot.plot_type(),
+                        });
+                    }
+                }
+            }
+        }
+        entries
+    }
+
+    pub fn pie_labels_for_axes(&self, axes_index: usize) -> Vec<PieLabelEntry> {
+        let mut out = Vec::new();
+        for (plot_idx, plot) in self.plots.iter().enumerate() {
+            let plot_axes = *self.plot_axes_indices.get(plot_idx).unwrap_or(&0);
+            if plot_axes != axes_index {
+                continue;
+            }
+            if let PlotElement::Pie(pie) = plot {
+                for slice in pie.slice_meta() {
+                    out.push(PieLabelEntry {
+                        label: slice.label,
+                        position: glam::Vec2::new(
+                            slice.mid_angle.cos() * 1.15 + slice.offset.x,
+                            slice.mid_angle.sin() * 1.15 + slice.offset.y,
+                        ),
+                    });
+                }
+            }
+        }
+        out
+    }
+
     /// Assign labels to visible plots in order
     pub fn set_labels(&mut self, labels: &[String]) {
+        self.set_labels_for_axes(self.active_axes_index, labels);
+    }
+
+    pub fn set_labels_for_axes(&mut self, axes_index: usize, labels: &[String]) {
         let mut idx = 0usize;
-        for plot in &mut self.plots {
+        for (plot_idx, plot) in self.plots.iter_mut().enumerate() {
+            let plot_axes = *self.plot_axes_indices.get(plot_idx).unwrap_or(&0);
+            if plot_axes != axes_index {
+                continue;
+            }
             if !plot.is_visible() {
                 continue;
             }
             if idx >= labels.len() {
                 break;
             }
-            plot.set_label(Some(labels[idx].clone()));
-            idx += 1;
+            match plot {
+                PlotElement::Pie(pie) => {
+                    let remaining = &labels[idx..];
+                    if remaining.len() >= pie.values.len() {
+                        pie.set_slice_labels(remaining[..pie.values.len()].to_vec());
+                        idx += pie.values.len();
+                    } else {
+                        pie.set_slice_labels(remaining.to_vec());
+                        idx = labels.len();
+                    }
+                }
+                _ => {
+                    plot.set_label(Some(labels[idx].clone()));
+                    idx += 1;
+                }
+            }
         }
         self.dirty = true;
     }
@@ -624,8 +1480,59 @@ impl Figure {
     pub fn categorical_axis_labels(&self) -> Option<(bool, Vec<String>)> {
         for plot in &self.plots {
             if let PlotElement::Bar(b) = plot {
+                if b.histogram_bin_edges().is_some() {
+                    continue;
+                }
                 let is_x = matches!(b.orientation, crate::plots::bar::Orientation::Vertical);
                 return Some((is_x, b.labels.clone()));
+            }
+        }
+        None
+    }
+
+    pub fn categorical_axis_labels_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Option<(bool, Vec<String>)> {
+        for (plot_idx, plot) in self.plots.iter().enumerate() {
+            let plot_axes = *self.plot_axes_indices.get(plot_idx).unwrap_or(&0);
+            if plot_axes != axes_index {
+                continue;
+            }
+            if let PlotElement::Bar(b) = plot {
+                if b.histogram_bin_edges().is_some() {
+                    continue;
+                }
+                let is_x = matches!(b.orientation, crate::plots::bar::Orientation::Vertical);
+                return Some((is_x, b.labels.clone()));
+            }
+        }
+        None
+    }
+
+    pub fn x_axis_tick_labels_for_axes(&self, axes_index: usize) -> Option<Vec<String>> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.x_tick_labels.clone())
+    }
+
+    pub fn y_axis_tick_labels_for_axes(&self, axes_index: usize) -> Option<Vec<String>> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.y_tick_labels.clone())
+    }
+
+    pub fn histogram_axis_edges_for_axes(&self, axes_index: usize) -> Option<(bool, Vec<f64>)> {
+        for (plot_idx, plot) in self.plots.iter().enumerate() {
+            let plot_axes = *self.plot_axes_indices.get(plot_idx).unwrap_or(&0);
+            if plot_axes != axes_index {
+                continue;
+            }
+            if let PlotElement::Bar(b) = plot {
+                if let Some(edges) = b.histogram_bin_edges() {
+                    let is_x = matches!(b.orientation, crate::plots::bar::Orientation::Vertical);
+                    return Some((is_x, edges.to_vec()));
+                }
             }
         }
         None
@@ -636,6 +1543,21 @@ impl Default for Figure {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn normalize_reference_range(range: (f64, f64)) -> (f64, f64) {
+    let (mut lo, mut hi) = range;
+    if !lo.is_finite() || !hi.is_finite() {
+        return (0.0, 1.0);
+    }
+    if hi < lo {
+        std::mem::swap(&mut lo, &mut hi);
+    }
+    if (hi - lo).abs() < f64::EPSILON {
+        let pad = lo.abs().max(1.0) * 0.5;
+        return (lo - pad, hi + pad);
+    }
+    (lo, hi)
 }
 
 impl PlotElement {
@@ -651,11 +1573,13 @@ impl PlotElement {
             PlotElement::Area(plot) => plot.visible,
             PlotElement::Quiver(plot) => plot.visible,
             PlotElement::Pie(plot) => plot.visible,
-            PlotElement::Image(plot) => plot.visible,
             PlotElement::Surface(plot) => plot.visible,
+            PlotElement::Patch(plot) => plot.is_visible(),
+            PlotElement::Line3(plot) => plot.visible,
             PlotElement::Scatter3(plot) => plot.visible,
             PlotElement::Contour(plot) => plot.visible,
             PlotElement::ContourFill(plot) => plot.visible,
+            PlotElement::ReferenceLine(plot) => plot.visible,
         }
     }
 
@@ -671,11 +1595,13 @@ impl PlotElement {
             PlotElement::Area(plot) => plot.label.clone(),
             PlotElement::Quiver(plot) => plot.label.clone(),
             PlotElement::Pie(plot) => plot.label.clone(),
-            PlotElement::Image(plot) => plot.label.clone(),
             PlotElement::Surface(plot) => plot.label.clone(),
+            PlotElement::Patch(plot) => plot.label().map(str::to_string),
+            PlotElement::Line3(plot) => plot.label.clone(),
             PlotElement::Scatter3(plot) => plot.label.clone(),
             PlotElement::Contour(plot) => plot.label.clone(),
             PlotElement::ContourFill(plot) => plot.label.clone(),
+            PlotElement::ReferenceLine(plot) => plot.label_for_legend(),
         }
     }
 
@@ -691,11 +1617,13 @@ impl PlotElement {
             PlotElement::Area(plot) => plot.label = label,
             PlotElement::Quiver(plot) => plot.label = label,
             PlotElement::Pie(plot) => plot.label = label,
-            PlotElement::Image(plot) => plot.label = label,
             PlotElement::Surface(plot) => plot.label = label,
+            PlotElement::Patch(plot) => plot.set_label(label),
+            PlotElement::Line3(plot) => plot.label = label,
             PlotElement::Scatter3(plot) => plot.label = label,
             PlotElement::Contour(plot) => plot.label = label,
             PlotElement::ContourFill(plot) => plot.label = label,
+            PlotElement::ReferenceLine(plot) => plot.label = label,
         }
     }
 
@@ -711,11 +1639,13 @@ impl PlotElement {
             PlotElement::Area(plot) => plot.color,
             PlotElement::Quiver(plot) => plot.color,
             PlotElement::Pie(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
-            PlotElement::Image(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
             PlotElement::Surface(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
+            PlotElement::Patch(plot) => plot.effective_face_color(),
+            PlotElement::Line3(plot) => plot.color,
             PlotElement::Scatter3(plot) => plot.colors.first().copied().unwrap_or(Vec4::ONE),
             PlotElement::Contour(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
             PlotElement::ContourFill(_plot) => Vec4::new(0.9, 0.9, 0.9, 1.0),
+            PlotElement::ReferenceLine(plot) => plot.color,
         }
     }
 
@@ -731,11 +1661,13 @@ impl PlotElement {
             PlotElement::Area(_) => PlotType::Area,
             PlotElement::Quiver(_) => PlotType::Quiver,
             PlotElement::Pie(_) => PlotType::Pie,
-            PlotElement::Image(_) => PlotType::Image,
             PlotElement::Surface(_) => PlotType::Surface,
+            PlotElement::Patch(_) => PlotType::Patch,
+            PlotElement::Line3(_) => PlotType::Line3,
             PlotElement::Scatter3(_) => PlotType::Scatter3,
             PlotElement::Contour(_) => PlotType::Contour,
             PlotElement::ContourFill(_) => PlotType::ContourFill,
+            PlotElement::ReferenceLine(_) => PlotType::ReferenceLine,
         }
     }
 
@@ -751,11 +1683,13 @@ impl PlotElement {
             PlotElement::Area(plot) => plot.bounds(),
             PlotElement::Quiver(plot) => plot.bounds(),
             PlotElement::Pie(plot) => plot.bounds(),
-            PlotElement::Image(plot) => plot.bounds(),
             PlotElement::Surface(plot) => plot.bounds(),
+            PlotElement::Patch(plot) => plot.bounds(),
+            PlotElement::Line3(plot) => plot.bounds(),
             PlotElement::Scatter3(plot) => plot.bounds(),
             PlotElement::Contour(plot) => plot.bounds(),
             PlotElement::ContourFill(plot) => plot.bounds(),
+            PlotElement::ReferenceLine(plot) => plot.coordinate_bounds(),
         }
     }
 
@@ -771,11 +1705,15 @@ impl PlotElement {
             PlotElement::Area(plot) => plot.render_data(),
             PlotElement::Quiver(plot) => plot.render_data(),
             PlotElement::Pie(plot) => plot.render_data(),
-            PlotElement::Image(plot) => plot.render_data(),
             PlotElement::Surface(plot) => plot.render_data(),
+            PlotElement::Patch(plot) => plot.render_data(),
+            PlotElement::Line3(plot) => plot.render_data(),
             PlotElement::Scatter3(plot) => plot.render_data(),
             PlotElement::Contour(plot) => plot.render_data(),
             PlotElement::ContourFill(plot) => plot.render_data(),
+            PlotElement::ReferenceLine(plot) => {
+                plot.render_data_with_range((0.0, 1.0), (0.0, 1.0), None)
+            }
         }
     }
 
@@ -791,11 +1729,13 @@ impl PlotElement {
             PlotElement::Area(plot) => plot.estimated_memory_usage(),
             PlotElement::Quiver(plot) => plot.estimated_memory_usage(),
             PlotElement::Pie(plot) => plot.estimated_memory_usage(),
-            PlotElement::Image(plot) => plot.estimated_memory_usage(),
             PlotElement::Surface(_plot) => 0,
+            PlotElement::Patch(plot) => plot.estimated_memory_usage(),
+            PlotElement::Line3(plot) => plot.estimated_memory_usage(),
             PlotElement::Scatter3(plot) => plot.estimated_memory_usage(),
             PlotElement::Contour(plot) => plot.estimated_memory_usage(),
             PlotElement::ContourFill(plot) => plot.estimated_memory_usage(),
+            PlotElement::ReferenceLine(plot) => plot.estimated_memory_usage(),
         }
     }
 }
@@ -911,15 +1851,32 @@ mod tests {
     fn test_figure_styling() {
         let figure = Figure::new()
             .with_title("Test Figure")
+            .with_sg_title("Overview")
             .with_labels("X Axis", "Y Axis")
             .with_legend(false)
             .with_grid(false);
 
         assert_eq!(figure.title, Some("Test Figure".to_string()));
+        assert_eq!(figure.sg_title, Some("Overview".to_string()));
         assert_eq!(figure.x_label, Some("X Axis".to_string()));
         assert_eq!(figure.y_label, Some("Y Axis".to_string()));
         assert!(!figure.legend_enabled);
         assert!(!figure.grid_enabled);
+    }
+
+    #[test]
+    fn test_has_any_titles_tracks_super_and_axes_titles() {
+        let mut figure = Figure::new();
+        assert!(!figure.has_any_titles());
+
+        figure.set_sg_title("Summary");
+        assert!(figure.has_any_titles());
+
+        figure.clear_sg_title();
+        assert!(!figure.has_any_titles());
+
+        figure.set_axes_title(0, "Panel");
+        assert!(figure.has_any_titles());
     }
 
     #[test]
@@ -1024,6 +1981,58 @@ mod tests {
     }
 
     #[test]
+    fn test_reference_line_only_bounds_use_default_span() {
+        let mut vertical_figure = Figure::new();
+        vertical_figure.add_reference_line_on_axes(
+            ReferenceLine::new(ReferenceLineOrientation::Vertical, 2.0).unwrap(),
+            0,
+        );
+        let vertical_bounds = vertical_figure.bounds();
+        assert_eq!(vertical_bounds.min.x, 1.5);
+        assert_eq!(vertical_bounds.max.x, 2.5);
+        assert_eq!(vertical_bounds.min.y, 0.0);
+        assert_eq!(vertical_bounds.max.y, 1.0);
+
+        let mut horizontal_figure = Figure::new();
+        horizontal_figure.add_reference_line_on_axes(
+            ReferenceLine::new(ReferenceLineOrientation::Horizontal, 3.0).unwrap(),
+            0,
+        );
+        let horizontal_bounds = horizontal_figure.bounds();
+        assert_eq!(horizontal_bounds.min.x, 0.0);
+        assert_eq!(horizontal_bounds.max.x, 1.0);
+        assert_eq!(horizontal_bounds.min.y, 2.5);
+        assert_eq!(horizontal_bounds.max.y, 3.5);
+    }
+
+    #[test]
+    fn test_reference_line_render_data_prefers_figure_limits() {
+        let mut horizontal_figure = Figure::new().with_limits((-2.0, 8.0), (-10.0, 10.0));
+        horizontal_figure.axes_metadata[0].x_limits = Some((0.0, 1.0));
+        horizontal_figure.add_reference_line_on_axes(
+            ReferenceLine::new(ReferenceLineOrientation::Horizontal, 3.0).unwrap(),
+            0,
+        );
+        let horizontal_bounds = horizontal_figure.render_data()[0].bounds.unwrap();
+        assert_eq!(horizontal_bounds.min.x, -2.0);
+        assert_eq!(horizontal_bounds.max.x, 8.0);
+        assert_eq!(horizontal_bounds.min.y, 3.0);
+        assert_eq!(horizontal_bounds.max.y, 3.0);
+
+        let mut vertical_figure = Figure::new().with_limits((-2.0, 8.0), (-10.0, 10.0));
+        vertical_figure.axes_metadata[0].y_limits = Some((0.0, 1.0));
+        vertical_figure.add_reference_line_on_axes(
+            ReferenceLine::new(ReferenceLineOrientation::Vertical, 4.0).unwrap(),
+            0,
+        );
+        let vertical_bounds = vertical_figure.render_data()[0].bounds.unwrap();
+        assert_eq!(vertical_bounds.min.x, 4.0);
+        assert_eq!(vertical_bounds.max.x, 4.0);
+        assert_eq!(vertical_bounds.min.y, -10.0);
+        assert_eq!(vertical_bounds.max.y, 10.0);
+    }
+
+    #[test]
     fn test_matlab_compat_multiple_lines() {
         use super::matlab_compat::*;
 
@@ -1057,5 +2066,245 @@ mod tests {
         assert_eq!(legend.len(), 3);
         assert_ne!(legend[0].color, legend[1].color);
         assert_ne!(legend[1].color, legend[2].color);
+    }
+
+    #[test]
+    fn axes_metadata_and_labels_are_isolated_per_subplot() {
+        let mut figure = Figure::new();
+        figure.set_subplot_grid(1, 2);
+        figure.set_axes_title(0, "Left Title");
+        figure.set_axes_xlabel(0, "Left X");
+        figure.set_axes_ylabel(0, "Left Y");
+        figure.set_axes_title(1, "Right Title");
+        figure.set_axes_legend_enabled(0, false);
+        figure.set_axes_legend_style(
+            1,
+            LegendStyle {
+                location: Some("southwest".into()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            figure.axes_metadata(0).and_then(|m| m.title.as_deref()),
+            Some("Left Title")
+        );
+        assert_eq!(
+            figure.axes_metadata(1).and_then(|m| m.title.as_deref()),
+            Some("Right Title")
+        );
+        assert_eq!(
+            figure.axes_metadata(0).and_then(|m| m.x_label.as_deref()),
+            Some("Left X")
+        );
+        assert_eq!(
+            figure.axes_metadata(0).and_then(|m| m.y_label.as_deref()),
+            Some("Left Y")
+        );
+        assert!(!figure.axes_metadata(0).unwrap().legend_enabled);
+        assert_eq!(
+            figure
+                .axes_metadata(1)
+                .unwrap()
+                .legend_style
+                .location
+                .as_deref(),
+            Some("southwest")
+        );
+    }
+
+    #[test]
+    fn set_labels_for_axes_only_updates_target_subplot() {
+        let mut figure = Figure::new();
+        figure.set_subplot_grid(1, 2);
+        figure.add_line_plot_on_axes(
+            LinePlot::new(vec![0.0, 1.0], vec![1.0, 2.0])
+                .unwrap()
+                .with_label("L0"),
+            0,
+        );
+        figure.add_line_plot_on_axes(
+            LinePlot::new(vec![0.0, 1.0], vec![2.0, 3.0])
+                .unwrap()
+                .with_label("R0"),
+            1,
+        );
+        figure.set_labels_for_axes(1, &["Right Only".into()]);
+
+        let left_entries = figure.legend_entries_for_axes(0);
+        let right_entries = figure.legend_entries_for_axes(1);
+        assert_eq!(left_entries[0].label, "L0");
+        assert_eq!(right_entries[0].label, "Right Only");
+    }
+
+    #[test]
+    fn axes_log_modes_are_isolated_per_subplot() {
+        let mut figure = Figure::new();
+        figure.set_subplot_grid(1, 2);
+        figure.set_axes_log_modes(1, true, false);
+
+        assert!(!figure.axes_metadata(0).unwrap().x_log);
+        assert!(!figure.axes_metadata(0).unwrap().y_log);
+        assert!(figure.axes_metadata(1).unwrap().x_log);
+        assert!(!figure.axes_metadata(1).unwrap().y_log);
+
+        figure.set_active_axes_index(1);
+        assert!(figure.x_log);
+        assert!(!figure.y_log);
+    }
+
+    #[test]
+    fn z_label_and_view_state_are_isolated_per_subplot() {
+        let mut figure = Figure::new();
+        figure.set_subplot_grid(1, 2);
+        figure.set_axes_zlabel(1, "Height");
+        figure.set_axes_view(1, 45.0, 20.0);
+
+        assert_eq!(figure.axes_metadata(0).unwrap().z_label, None);
+        assert_eq!(
+            figure.axes_metadata(1).unwrap().z_label.as_deref(),
+            Some("Height")
+        );
+        assert_eq!(
+            figure.axes_metadata(1).unwrap().view_azimuth_deg,
+            Some(45.0)
+        );
+        assert_eq!(
+            figure.axes_metadata(1).unwrap().view_elevation_deg,
+            Some(20.0)
+        );
+    }
+
+    #[test]
+    fn axes_view_revision_advances_for_each_explicit_view_update() {
+        let mut figure = Figure::new();
+
+        assert_eq!(figure.axes_metadata(0).unwrap().view_revision, 0);
+
+        figure.set_axes_view(0, 45.0, 20.0);
+        assert_eq!(figure.axes_metadata(0).unwrap().view_revision, 1);
+
+        figure.set_axes_view(0, 45.0, 20.0);
+        assert_eq!(figure.axes_metadata(0).unwrap().view_revision, 2);
+    }
+
+    #[test]
+    fn pie_legend_entries_are_slice_based() {
+        let mut figure = Figure::new();
+        let pie = PieChart::new(vec![1.0, 2.0], None)
+            .unwrap()
+            .with_slice_labels(vec!["A".into(), "B".into()]);
+        figure.add_pie_chart(pie);
+        let entries = figure.legend_entries_for_axes(0);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].label, "A");
+        assert_eq!(entries[1].label, "B");
+    }
+
+    #[test]
+    fn histogram_bars_do_not_use_categorical_axis_labels() {
+        let mut figure = Figure::new();
+        let mut bar = BarChart::new(vec!["a".into(), "b".into()], vec![2.0, 3.0]).unwrap();
+        bar.set_histogram_bin_edges(vec![0.0, 0.5, 1.0]);
+        figure.add_bar_chart(bar);
+
+        assert!(figure.categorical_axis_labels().is_none());
+        assert_eq!(
+            figure.histogram_axis_edges_for_axes(0),
+            Some((true, vec![0.0, 0.5, 1.0]))
+        );
+    }
+
+    #[test]
+    fn plain_bar_charts_keep_categorical_axis_labels() {
+        let mut figure = Figure::new();
+        let bar = BarChart::new(vec!["A".into(), "B".into()], vec![1.0, 2.0]).unwrap();
+        figure.add_bar_chart(bar);
+
+        assert_eq!(
+            figure.categorical_axis_labels(),
+            Some((true, vec!["A".to_string(), "B".to_string()]))
+        );
+    }
+
+    #[test]
+    fn line3_contributes_to_3d_bounds_and_metadata() {
+        let mut figure = Figure::new();
+        let line3 = Line3Plot::new(vec![0.0, 1.0], vec![1.0, 2.0], vec![2.0, 4.0])
+            .unwrap()
+            .with_label("Trajectory");
+        figure.add_line3_plot(line3);
+        let bounds = figure.bounds();
+        assert_eq!(bounds.min.z, 2.0);
+        assert_eq!(bounds.max.z, 4.0);
+        let entries = figure.legend_entries_for_axes(0);
+        assert_eq!(entries[0].plot_type, PlotType::Line3);
+    }
+
+    #[test]
+    fn stem_render_data_includes_marker_pass() {
+        let mut figure = Figure::new();
+        figure.add_stem_plot(StemPlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap());
+
+        let render_data = figure.render_data();
+        assert_eq!(render_data.len(), 2);
+        assert_eq!(
+            render_data[0].pipeline_type,
+            crate::core::PipelineType::Lines
+        );
+        assert_eq!(
+            render_data[1].pipeline_type,
+            crate::core::PipelineType::Points
+        );
+    }
+
+    #[test]
+    fn errorbar_render_data_includes_marker_pass() {
+        let mut figure = Figure::new();
+        figure.add_errorbar(
+            ErrorBar::new_vertical(
+                vec![0.0, 1.0],
+                vec![1.0, 2.0],
+                vec![0.1, 0.2],
+                vec![0.1, 0.2],
+            )
+            .unwrap(),
+        );
+
+        let render_data = figure.render_data();
+        assert_eq!(render_data.len(), 2);
+        assert_eq!(
+            render_data[0].pipeline_type,
+            crate::core::PipelineType::Lines
+        );
+        assert_eq!(
+            render_data[1].pipeline_type,
+            crate::core::PipelineType::Points
+        );
+    }
+
+    #[test]
+    fn subplot_sensitive_axes_state_is_isolated_per_subplot() {
+        let mut figure = Figure::new();
+        figure.set_subplot_grid(1, 2);
+        figure.set_axes_limits(1, Some((1.0, 2.0)), Some((3.0, 4.0)));
+        figure.set_axes_z_limits(1, Some((5.0, 6.0)));
+        figure.set_axes_grid_enabled(1, false);
+        figure.set_axes_box_enabled(1, false);
+        figure.set_axes_axis_equal(1, true);
+        figure.set_axes_colorbar_enabled(1, true);
+        figure.set_axes_colormap(1, ColorMap::Hot);
+        figure.set_axes_color_limits(1, Some((0.0, 10.0)));
+
+        let left = figure.axes_metadata(0).unwrap();
+        let right = figure.axes_metadata(1).unwrap();
+        assert_eq!(left.x_limits, None);
+        assert_eq!(right.x_limits, Some((1.0, 2.0)));
+        assert!(!right.grid_enabled);
+        assert!(!right.box_enabled);
+        assert!(right.axis_equal);
+        assert!(right.colorbar_enabled);
+        assert_eq!(format!("{:?}", right.colormap), "Hot");
+        assert_eq!(right.color_limits, Some((0.0, 10.0)));
     }
 }

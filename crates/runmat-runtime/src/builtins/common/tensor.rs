@@ -305,3 +305,85 @@ pub fn parse_dimension(value: &Value, name: &str) -> Result<usize, String> {
 pub fn value_to_string(value: &Value) -> Option<String> {
     String::try_from(value).ok()
 }
+
+/// Return a canonical 2-D shape for a tensor given its shape slice and element count.
+///
+/// * Empty data (`len == 0`) → `[0, 1]` (MATLAB convention for empty arrays).
+/// * No shape info (`shape.is_empty()`) → `[1, 1]` (scalar).
+/// * Otherwise → the tensor's own shape.
+pub fn default_shape_for(shape: &[usize], len: usize) -> Vec<usize> {
+    if len == 0 {
+        vec![0, 1]
+    } else if shape.is_empty() {
+        vec![1, 1]
+    } else {
+        shape.to_vec()
+    }
+}
+
+/// Clamp a scalar f64 to the uint8 range [0, 255], rounding to the nearest integer.
+pub fn clamp_u8(value: f64) -> f64 {
+    value.round().clamp(0.0, u8::MAX as f64)
+}
+
+/// Clamp a scalar f64 to the uint16 range [0, 65535], rounding to the nearest integer.
+pub fn clamp_u16(value: f64) -> f64 {
+    value.round().clamp(0.0, u16::MAX as f64)
+}
+
+/// Cast all elements of a tensor to the target dtype in-place, preserving the f64 backing store.
+pub fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
+    match dtype {
+        NumericDType::F64 => {
+            tensor.dtype = NumericDType::F64;
+        }
+        NumericDType::F32 => {
+            for value in &mut tensor.data {
+                *value = (*value as f32) as f64;
+            }
+            tensor.dtype = NumericDType::F32;
+        }
+        NumericDType::U8 => {
+            for value in &mut tensor.data {
+                *value = clamp_u8(*value);
+            }
+            tensor.dtype = NumericDType::U8;
+        }
+        NumericDType::U16 => {
+            for value in &mut tensor.data {
+                *value = clamp_u16(*value);
+            }
+            tensor.dtype = NumericDType::U16;
+        }
+    }
+    tensor
+}
+
+/// Align two numeric tensors for a binary element-wise operation with scalar broadcasting.
+///
+/// Returns `(lhs_data, rhs_data, output_shape)`.  If either operand is a
+/// single element it is broadcast to the other's length.  `builtin` names the
+/// calling builtin and is embedded in the error message when the shapes are
+/// incompatible.
+pub fn binary_numeric_tensors(
+    lhs: &Tensor,
+    rhs: &Tensor,
+    context: &str,
+    builtin: &str,
+) -> crate::BuiltinResult<(Vec<f64>, Vec<f64>, Vec<usize>)> {
+    let lhs_shape = default_shape_for(&lhs.shape, lhs.data.len());
+    let rhs_shape = default_shape_for(&rhs.shape, rhs.data.len());
+    match (lhs.data.len(), rhs.data.len()) {
+        (1, 1) => Ok((vec![lhs.data[0]], vec![rhs.data[0]], vec![1, 1])),
+        (1, len) => Ok((vec![lhs.data[0]; len], rhs.data.clone(), rhs_shape)),
+        (len, 1) => Ok((lhs.data.clone(), vec![rhs.data[0]; len], lhs_shape)),
+        (left, right) if left == right && lhs_shape == rhs_shape => {
+            Ok((lhs.data.clone(), rhs.data.clone(), lhs_shape))
+        }
+        _ => Err(crate::build_runtime_error(format!(
+            "{context}: operands must be scalar or have matching sizes"
+        ))
+        .with_builtin(builtin)
+        .build()),
+    }
+}

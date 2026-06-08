@@ -36,6 +36,7 @@ fn store_insert(shape: Vec<usize>, data: Vec<f64>) -> anyhow::Result<GpuTensorHa
         HostTensorOwned {
             data,
             shape: shape.clone(),
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
         },
     );
     Ok(GpuTensorHandle {

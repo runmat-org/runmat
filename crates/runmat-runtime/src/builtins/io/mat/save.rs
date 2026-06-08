@@ -6,7 +6,11 @@ use std::path::{Path, PathBuf};
 
 use futures::future::LocalBoxFuture;
 use regex::Regex;
-use runmat_builtins::{CharArray, StructValue, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, StructValue, Value,
+};
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
@@ -21,6 +25,168 @@ use crate::builtins::common::spec::{
 };
 use crate::workspace;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+
+const SAVE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "status",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Zero status code on success.",
+}];
+const SAVE_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const SAVE_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "filename",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: Some("\"matlab.mat\""),
+    description: "MAT-file output path.",
+}];
+const SAVE_INPUTS_FILENAME_VARS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"matlab.mat\""),
+        description: "MAT-file output path.",
+    },
+    BuiltinParamDescriptor {
+        name: "varName",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Workspace variable names to persist.",
+    },
+];
+const SAVE_INPUTS_STRUCT: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"matlab.mat\""),
+        description: "MAT-file output path.",
+    },
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"-struct\""),
+        description: "Struct field export option.",
+    },
+    BuiltinParamDescriptor {
+        name: "structVar",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Workspace struct variable name.",
+    },
+];
+const SAVE_INPUTS_REGEXP: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"matlab.mat\""),
+        description: "MAT-file output path.",
+    },
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"-regexp\""),
+        description: "Regex selection option.",
+    },
+    BuiltinParamDescriptor {
+        name: "pattern",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Regex patterns matched against workspace variable names.",
+    },
+];
+const SAVE_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "status = save()",
+        inputs: &SAVE_INPUTS_NONE,
+        outputs: &SAVE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "status = save(filename)",
+        inputs: &SAVE_INPUTS_FILENAME,
+        outputs: &SAVE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "status = save(filename, varName1, varName2, ...)",
+        inputs: &SAVE_INPUTS_FILENAME_VARS,
+        outputs: &SAVE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "status = save(filename, \"-struct\", structVar, field1, ...)",
+        inputs: &SAVE_INPUTS_STRUCT,
+        outputs: &SAVE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "status = save(filename, \"-regexp\", pattern1, ...)",
+        inputs: &SAVE_INPUTS_REGEXP,
+        outputs: &SAVE_OUTPUT,
+    },
+];
+const SAVE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAVE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:save:InvalidArgument"),
+    when: "Arguments do not match supported save invocation forms.",
+    message: "save: invalid argument",
+};
+const SAVE_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAVE.INVALID_OPTION",
+    identifier: Some("RunMat:save:InvalidOption"),
+    when: "Option token or option value is invalid.",
+    message: "save: invalid option",
+};
+const SAVE_ERROR_SELECTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAVE.SELECTION",
+    identifier: Some("RunMat:save:Selection"),
+    when: "Requested variables or struct fields cannot be resolved.",
+    message: "save: variable selection failed",
+};
+const SAVE_ERROR_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAVE.FILENAME",
+    identifier: Some("RunMat:save:Filename"),
+    when: "Filename is invalid or cannot be normalized.",
+    message: "save: invalid filename",
+};
+const SAVE_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAVE.IO",
+    identifier: Some("RunMat:save:Io"),
+    when: "MAT-file cannot be written or finalized.",
+    message: "save: MAT-file I/O failure",
+};
+const SAVE_ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAVE.UNSUPPORTED",
+    identifier: Some("RunMat:save:Unsupported"),
+    when: "Unsupported save mode or value type is requested.",
+    message: "save: unsupported operation",
+};
+const SAVE_ERROR_WORKSPACE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAVE.WORKSPACE",
+    identifier: Some("RunMat:save:Workspace"),
+    when: "Workspace state is unavailable.",
+    message: "save: workspace state unavailable",
+};
+const SAVE_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    SAVE_ERROR_INVALID_ARGUMENT,
+    SAVE_ERROR_INVALID_OPTION,
+    SAVE_ERROR_SELECTION,
+    SAVE_ERROR_FILENAME,
+    SAVE_ERROR_IO,
+    SAVE_ERROR_UNSUPPORTED,
+    SAVE_ERROR_WORKSPACE,
+];
+pub const SAVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SAVE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SAVE_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::mat::save")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -52,10 +218,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "save",
     category = "io/mat",
-    summary = "Persist workspace variables to a MAT-file.",
+    summary = "Save workspace variables to a MAT-file.",
     keywords = "save,mat,workspace",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::save_type),
+    descriptor(crate::builtins::io::mat::save::SAVE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::mat::save"
 )]
 async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -79,7 +246,10 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     let request = parse_arguments(&host_args[option_start..]).await?;
     if request.append {
-        return Err(save_error("save: -append is not supported yet"));
+        return Err(save_error_with(
+            &SAVE_ERROR_UNSUPPORTED,
+            "save: -append is not supported yet",
+        ));
     }
 
     let mut workspace_entries: Option<Vec<(String, Value)>> = None;
@@ -117,10 +287,10 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             let struct_value = match value {
                 Value::Struct(s) => s,
                 _ => {
-                    return Err(save_error(format!(
-                        "save: variable '{}' is not a struct",
-                        struct_req.source
-                    )))
+                    return Err(save_error_with(
+                        &SAVE_ERROR_SELECTION,
+                        format!("save: variable '{}' is not a struct", struct_req.source),
+                    ))
                 }
             };
             append_struct_fields(
@@ -138,6 +308,7 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             for pattern in &request.regex_patterns {
                 let regex = Regex::new(pattern).map_err(|err| {
                     save_error_with_source(
+                        &SAVE_ERROR_INVALID_OPTION,
                         format!("save: invalid regular expression '{pattern}': {err}"),
                         err,
                     )
@@ -152,13 +323,19 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                 }
             }
             if matched == 0 {
-                return Err(save_error("save: no variables matched '-regexp' patterns"));
+                return Err(save_error_with(
+                    &SAVE_ERROR_SELECTION,
+                    "save: no variables matched '-regexp' patterns",
+                ));
             }
         }
     }
 
     if entries.is_empty() {
-        return Err(save_error("save: no variables selected"));
+        return Err(save_error_with(
+            &SAVE_ERROR_SELECTION,
+            "save: no variables selected",
+        ));
     }
 
     // Deduplicate while preserving the last occurrence for MATLAB compatibility
@@ -199,21 +376,30 @@ struct SaveRequest {
 
 const BUILTIN_NAME: &str = "save";
 
-fn save_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn save_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn save_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
     source: impl std::fmt::Display,
 ) -> RuntimeError {
     let source = std::io::Error::new(std::io::ErrorKind::Other, source.to_string());
-    build_runtime_error(message)
+    let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
-        .with_source(source)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 async fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
@@ -230,13 +416,15 @@ async fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
                 "-struct" => {
                     idx += 1;
                     if idx >= values.len() {
-                        return Err(save_error(
+                        return Err(save_error_with(
+                            &SAVE_ERROR_INVALID_OPTION,
                             "save: '-struct' requires a struct variable name",
                         ));
                     }
                     let struct_names = extract_names(&values[idx]).await?;
                     if struct_names.len() != 1 {
-                        return Err(save_error(
+                        return Err(save_error_with(
+                            &SAVE_ERROR_INVALID_OPTION,
                             "save: '-struct' requires a single struct variable name",
                         ));
                     }
@@ -265,7 +453,10 @@ async fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
                 "-regexp" => {
                     idx += 1;
                     if idx >= values.len() {
-                        return Err(save_error("save: '-regexp' requires at least one pattern"));
+                        return Err(save_error_with(
+                            &SAVE_ERROR_INVALID_OPTION,
+                            "save: '-regexp' requires at least one pattern",
+                        ));
                     }
                     let mut patterns = Vec::new();
                     while idx < values.len() {
@@ -274,7 +465,8 @@ async fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
                         }
                         let names = extract_names(&values[idx]).await?;
                         if names.is_empty() {
-                            return Err(save_error(
+                            return Err(save_error_with(
+                                &SAVE_ERROR_INVALID_OPTION,
                                 "save: '-regexp' requires pattern strings or character rows",
                             ));
                         }
@@ -282,13 +474,19 @@ async fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
                         idx += 1;
                     }
                     if patterns.is_empty() {
-                        return Err(save_error("save: '-regexp' requires at least one pattern"));
+                        return Err(save_error_with(
+                            &SAVE_ERROR_INVALID_OPTION,
+                            "save: '-regexp' requires at least one pattern",
+                        ));
                     }
                     idx -= 1;
                     regex_patterns.extend(patterns);
                 }
                 other => {
-                    return Err(save_error(format!("save: unsupported option '{other}'")));
+                    return Err(save_error_with(
+                        &SAVE_ERROR_INVALID_OPTION,
+                        format!("save: unsupported option '{other}'"),
+                    ));
                 }
             }
         } else {
@@ -317,8 +515,8 @@ async fn ensure_workspace_entries(
 }
 
 async fn collect_workspace_entries() -> BuiltinResult<Vec<(String, Value)>> {
-    let snapshot =
-        workspace::snapshot().ok_or_else(|| save_error("save: workspace state unavailable"))?;
+    let snapshot = workspace::snapshot()
+        .ok_or_else(|| save_error_with(&SAVE_ERROR_WORKSPACE, SAVE_ERROR_WORKSPACE.message))?;
     let mut entries = Vec::with_capacity(snapshot.len());
     for (name, value) in snapshot {
         let gathered = gather_if_needed_async(&value).await?;
@@ -349,7 +547,8 @@ async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
         Value::CharArray(ca) => {
             let rows = char_array_rows_as_strings(ca);
             if rows.is_empty() && ca.rows > 0 {
-                return Err(save_error(
+                return Err(save_error_with(
+                    &SAVE_ERROR_INVALID_ARGUMENT,
                     "save: character arrays used for variable names must contain non-empty rows",
                 ));
             }
@@ -367,7 +566,8 @@ async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
             for handle in &ca.data {
                 let inner = unsafe { &*handle.as_raw() };
                 let text = value_to_string_scalar(inner).ok_or_else(|| {
-                    save_error(
+                    save_error_with(
+                        &SAVE_ERROR_INVALID_ARGUMENT,
                         "save: cell arrays must contain string scalars when specifying variable names",
                     )
                 })?;
@@ -381,7 +581,8 @@ async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
             if let Some(text) = value_to_string_scalar(&gathered) {
                 return Ok(vec![text]);
             }
-            Err(save_error(
+            Err(save_error_with(
+                &SAVE_ERROR_INVALID_ARGUMENT,
                 "save: variable names must be strings, character arrays, string arrays, or cell arrays of strings",
             ))
         }
@@ -411,10 +612,13 @@ async fn append_struct_fields(
                     out.push((field.clone(), gathered));
                 }
                 None => {
-                    return Err(save_error(format!(
-                        "save: struct '{}' does not have a field named '{}'",
-                        struct_name, field
-                    )));
+                    return Err(save_error_with(
+                        &SAVE_ERROR_SELECTION,
+                        format!(
+                            "save: struct '{}' does not have a field named '{}'",
+                            struct_name, field
+                        ),
+                    ));
                 }
             }
         }
@@ -445,17 +649,21 @@ fn char_array_rows_as_strings(ca: &CharArray) -> Vec<String> {
 
 async fn lookup_workspace(name: &str) -> BuiltinResult<Value> {
     let value = workspace::lookup(name).ok_or_else(|| {
-        save_error(format!(
-            "save: variable '{}' was not found in the workspace",
-            name
-        ))
+        save_error_with(
+            &SAVE_ERROR_SELECTION,
+            format!("save: variable '{}' was not found in the workspace", name),
+        )
     })?;
     gather_if_needed_async(&value).await
 }
 
 fn normalise_path(path: &Value) -> BuiltinResult<PathBuf> {
-    let raw = value_to_string_scalar(path)
-        .ok_or_else(|| save_error("save: filename must be a character vector or string scalar"))?;
+    let raw = value_to_string_scalar(path).ok_or_else(|| {
+        save_error_with(
+            &SAVE_ERROR_FILENAME,
+            "save: filename must be a character vector or string scalar",
+        )
+    })?;
     let mut path = PathBuf::from(raw);
     if path.extension().is_none() {
         path.set_extension("mat");
@@ -595,7 +803,10 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 let mut field_values = Vec::with_capacity(field_names.len());
                 for field in &field_names {
                     let val = struct_value.fields.get(field).ok_or_else(|| {
-                        save_error(format!("save: missing struct field '{field}'"))
+                        save_error_with(
+                            &SAVE_ERROR_SELECTION,
+                            format!("save: missing struct field '{field}'"),
+                        )
                     })?;
                     let gathered = gather_if_needed_async(val).await?;
                     field_values.push(convert_value(gathered).await?);
@@ -613,10 +824,10 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 let gathered = gather_if_needed_async(&Value::GpuTensor(handle)).await?;
                 convert_value(gathered).await
             }
-            unsupported => Err(save_error(format!(
-                "save: value of type '{:?}' is not supported",
-                unsupported
-            ))),
+            unsupported => Err(save_error_with(
+                &SAVE_ERROR_UNSUPPORTED,
+                format!("save: value of type '{:?}' is not supported", unsupported),
+            )),
         }
     })
 }
@@ -634,7 +845,11 @@ fn char_array_to_utf16(ca: &CharArray) -> Vec<u16> {
 
 fn write_mat_file(path: &Path, vars: &[MatVar]) -> BuiltinResult<()> {
     let file = File::create(path).map_err(|e| {
-        save_error_with_source(format!("save: failed to open '{}': {e}", path.display()), e)
+        save_error_with_source(
+            &SAVE_ERROR_IO,
+            format!("save: failed to open '{}': {e}", path.display()),
+            e,
+        )
     })?;
     let mut writer = BufWriter::new(file);
 
@@ -647,9 +862,13 @@ fn write_mat_file(path: &Path, vars: &[MatVar]) -> BuiltinResult<()> {
     header[125] = 0x01;
     header[126] = b'I';
     header[127] = b'M';
-    writer
-        .write_all(&header)
-        .map_err(|e| save_error_with_source(format!("save: failed to write header: {e}"), e))?;
+    writer.write_all(&header).map_err(|e| {
+        save_error_with_source(
+            &SAVE_ERROR_IO,
+            format!("save: failed to write header: {e}"),
+            e,
+        )
+    })?;
 
     for var in vars {
         let matrix_bytes = build_matrix_bytes(&var.array, Some(&var.name))?;
@@ -658,7 +877,7 @@ fn write_mat_file(path: &Path, vars: &[MatVar]) -> BuiltinResult<()> {
 
     writer
         .flush()
-        .map_err(|e| save_error_with_source(format!("save: flush failed: {e}"), e))
+        .map_err(|e| save_error_with_source(&SAVE_ERROR_IO, format!("save: flush failed: {e}"), e))
 }
 
 pub async fn encode_workspace_to_mat_bytes(entries: &[(String, Value)]) -> BuiltinResult<Vec<u8>> {
@@ -684,21 +903,27 @@ fn write_mat_bytes(vars: &[MatVar]) -> BuiltinResult<Vec<u8>> {
     header[125] = 0x01;
     header[126] = b'I';
     header[127] = b'M';
-    writer
-        .write_all(&header)
-        .map_err(|e| save_error_with_source(format!("save: failed to write header: {e}"), e))?;
+    writer.write_all(&header).map_err(|e| {
+        save_error_with_source(
+            &SAVE_ERROR_IO,
+            format!("save: failed to write header: {e}"),
+            e,
+        )
+    })?;
 
     for var in vars {
         let matrix_bytes = build_matrix_bytes(&var.array, Some(&var.name))?;
         write_tagged(&mut writer, MI_MATRIX, &matrix_bytes)?;
     }
 
-    writer
-        .flush()
-        .map_err(|e| save_error_with_source(format!("save: flush failed: {e}"), e))?;
+    writer.flush().map_err(|e| {
+        save_error_with_source(&SAVE_ERROR_IO, format!("save: flush failed: {e}"), e)
+    })?;
     Ok(writer
         .into_inner()
-        .map_err(|e| save_error_with_source("save: failed to finalize MAT bytes", e))?
+        .map_err(|e| {
+            save_error_with_source(&SAVE_ERROR_IO, "save: failed to finalize MAT bytes", e)
+        })?
         .into_inner())
 }
 
@@ -767,7 +992,10 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
             field_values,
         } => {
             if array.dims != [1, 1] {
-                return Err(save_error("save: struct arrays are not supported"));
+                return Err(save_error_with(
+                    &SAVE_ERROR_UNSUPPORTED,
+                    "save: struct arrays are not supported",
+                ));
             }
             let max_len = field_names
                 .iter()
@@ -798,23 +1026,28 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
 
 fn write_tagged<W: Write>(writer: &mut W, data_type: u32, data: &[u8]) -> BuiltinResult<()> {
     if data.len() > u32::MAX as usize {
-        return Err(save_error("save: data too large for MAT-file"));
+        return Err(save_error_with(
+            &SAVE_ERROR_IO,
+            "save: data too large for MAT-file",
+        ));
     }
-    writer
-        .write_all(&data_type.to_le_bytes())
-        .map_err(|e| save_error_with_source(format!("save: write failed: {e}"), e))?;
+    writer.write_all(&data_type.to_le_bytes()).map_err(|e| {
+        save_error_with_source(&SAVE_ERROR_IO, format!("save: write failed: {e}"), e)
+    })?;
     writer
         .write_all(&(data.len() as u32).to_le_bytes())
-        .map_err(|e| save_error_with_source(format!("save: write failed: {e}"), e))?;
-    writer
-        .write_all(data)
-        .map_err(|e| save_error_with_source(format!("save: write failed: {e}"), e))?;
+        .map_err(|e| {
+            save_error_with_source(&SAVE_ERROR_IO, format!("save: write failed: {e}"), e)
+        })?;
+    writer.write_all(data).map_err(|e| {
+        save_error_with_source(&SAVE_ERROR_IO, format!("save: write failed: {e}"), e)
+    })?;
     let padding = (8 - (data.len() % 8)) % 8;
     if padding != 0 {
         let pad = [0u8; 8];
-        writer
-            .write_all(&pad[..padding])
-            .map_err(|e| save_error_with_source(format!("save: write failed: {e}"), e))?;
+        writer.write_all(&pad[..padding]).map_err(|e| {
+            save_error_with_source(&SAVE_ERROR_IO, format!("save: write failed: {e}"), e)
+        })?;
     }
     Ok(())
 }
@@ -859,6 +1092,8 @@ pub(crate) mod tests {
             },
             globals: || Vec::new(),
             assign: None,
+            clear: None,
+            remove: None,
         });
     }
 
@@ -887,6 +1122,20 @@ pub(crate) mod tests {
             }
             Ok(_) => panic!("expected error containing '{snippet}'"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn save_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SAVE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"status = save()"));
+        assert!(labels.contains(&"status = save(filename)"));
+        assert!(labels.contains(&"status = save(filename, varName1, varName2, ...)"));
+        assert!(labels.contains(&"status = save(filename, \"-struct\", structVar, field1, ...)"));
     }
 
     fn lock_env_override() -> std::sync::MutexGuard<'static, ()> {

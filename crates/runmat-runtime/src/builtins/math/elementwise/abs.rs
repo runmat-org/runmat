@@ -1,7 +1,11 @@
 //! MATLAB-compatible `abs` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -48,19 +52,65 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "abs";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const ABS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Absolute value or magnitude.",
+}];
+const ABS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric, logical, char, or complex input.",
+}];
+const ABS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = abs(X)",
+    inputs: &ABS_INPUTS,
+    outputs: &ABS_OUTPUT,
+}];
+const ABS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ABS.INVALID_INPUT",
+    identifier: Some("RunMat:abs:InvalidInput"),
+    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
+    message: "abs: invalid input",
+};
+const ABS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ABS.INTERNAL",
+    identifier: Some("RunMat:abs:Internal"),
+    when: "Internal tensor conversion/allocation/provider interaction failed.",
+    message: "abs: internal error",
+};
+const ABS_ERRORS: [BuiltinErrorDescriptor; 2] = [ABS_ERROR_INVALID_INPUT, ABS_ERROR_INTERNAL];
+pub const ABS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ABS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ABS_ERRORS,
+};
+
+fn builtin_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "abs",
     category = "math/elementwise",
-    summary = "Absolute value or magnitude of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Absolute value and complex magnitude for scalars and arrays.",
     keywords = "abs,absolute value,magnitude,complex,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::elementwise::abs::ABS_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::abs"
 )]
 async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
@@ -69,9 +119,10 @@ async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Complex(re, im) => Ok(Value::Num(complex_magnitude(re, im))),
         Value::ComplexTensor(ct) => abs_complex_tensor(ct),
         Value::CharArray(ca) => abs_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("abs: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(builtin_error_with_detail(
+            &ABS_ERROR_INVALID_INPUT,
+            "expected numeric input",
+        )),
         other => abs_real(other),
     }
 }
@@ -82,18 +133,22 @@ async fn abs_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|err| builtin_error_with_detail(&ABS_ERROR_INTERNAL, err.to_string()))?;
     Ok(tensor::tensor_into_value(abs_tensor(tensor)?))
 }
 
 fn abs_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("abs", value)?;
+    let tensor = tensor::value_into_tensor_for("abs", value)
+        .map_err(|err| builtin_error_with_detail(&ABS_ERROR_INVALID_INPUT, err))?;
     Ok(tensor::tensor_into_value(abs_tensor(tensor)?))
 }
 
 fn abs_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.abs()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("abs: {e}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| builtin_error_with_detail(&ABS_ERROR_INTERNAL, e))
 }
 
 fn abs_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -102,8 +157,8 @@ fn abs_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         .iter()
         .map(|&(re, im)| complex_magnitude(re, im))
         .collect::<Vec<_>>();
-    let tensor =
-        Tensor::new(data, ct.shape.clone()).map_err(|e| builtin_error(format!("abs: {e}")))?;
+    let tensor = Tensor::new(data, ct.shape.clone())
+        .map_err(|e| builtin_error_with_detail(&ABS_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -114,7 +169,7 @@ fn abs_char_array(ca: CharArray) -> BuiltinResult<Value> {
         .map(|&ch| ch as u32 as f64)
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-        .map_err(|e| builtin_error(format!("abs: {e}")))?;
+        .map_err(|e| builtin_error_with_detail(&ABS_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -132,6 +187,16 @@ pub(crate) mod tests {
 
     fn abs_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::abs_builtin(value))
+    }
+
+    #[test]
+    fn abs_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = ABS_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = abs(X)"));
     }
 
     #[test]
@@ -238,7 +303,9 @@ pub(crate) mod tests {
     #[test]
     fn abs_string_rejected() {
         let err = abs_builtin(Value::from("hello")).expect_err("should error");
+        let identifier = err.identifier().map(str::to_string);
         assert!(err.message().contains("expected numeric"));
+        assert_eq!(identifier.as_deref(), ABS_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

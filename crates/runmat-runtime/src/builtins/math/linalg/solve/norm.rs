@@ -3,7 +3,11 @@
 use nalgebra::{DMatrix, SVD};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderNormOrder};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -15,6 +19,86 @@ use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "norm";
+
+const NORM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Norm value of A.",
+}];
+
+const NORM_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input vector or matrix.",
+}];
+
+const NORM_INPUTS_ORDER: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input vector or matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Norm order selector.",
+    },
+];
+
+const NORM_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "n = norm(A)",
+        inputs: &NORM_INPUTS,
+        outputs: &NORM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "n = norm(A, p)",
+        inputs: &NORM_INPUTS_ORDER,
+        outputs: &NORM_OUTPUT,
+    },
+];
+
+const NORM_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NORM.INVALID_ARGUMENT",
+    identifier: Some("RunMat:norm:InvalidArgument"),
+    when: "Norm-order argument is malformed or unsupported for the requested domain.",
+    message: "norm: invalid argument",
+};
+
+const NORM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NORM.INVALID_INPUT",
+    identifier: Some("RunMat:norm:InvalidInput"),
+    when: "Input shape/type cannot be processed for norm evaluation.",
+    message: "norm: invalid input",
+};
+
+const NORM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NORM.INTERNAL",
+    identifier: Some("RunMat:norm:Internal"),
+    when: "Runtime fails while computing norm or executing fallback/upload paths.",
+    message: "norm: internal runtime failure",
+};
+
+const NORM_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    NORM_ERROR_INVALID_ARGUMENT,
+    NORM_ERROR_INVALID_INPUT,
+    NORM_ERROR_INTERNAL,
+];
+
+pub const NORM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &NORM_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &NORM_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::norm")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -32,8 +116,27 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Awaiting specialized kernels; RunMat gathers to host when providers omit the optional norm hook.",
 };
 
+fn norm_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+    norm_error_with_message(message, &NORM_ERROR_INVALID_INPUT)
+}
+
+fn argument_error(message: impl Into<String>) -> RuntimeError {
+    norm_error_with_message(message, &NORM_ERROR_INVALID_ARGUMENT)
+}
+
+fn internal_error(message: impl Into<String>) -> RuntimeError {
+    norm_error_with_message(message, &NORM_ERROR_INTERNAL)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -73,10 +176,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "norm",
     category = "math/linalg/solve",
-    summary = "Vector and matrix norms with MATLAB semantics.",
+    summary = "Compute vector and matrix norms.",
     keywords = "norm,vector norm,matrix norm,frobenius,nuclear,gpu",
     accel = "reduction",
     type_resolver(numeric_scalar_type),
+    descriptor(crate::builtins::math::linalg::solve::norm::NORM_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::solve::norm"
 )]
 async fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -253,15 +357,15 @@ fn vector_norm_from_magnitudes(magnitudes: &[f64], order: NormOrder) -> BuiltinR
             }
             Ok(count)
         }
-        NormOrder::Nuc => Err(builtin_error(format!(
+        NormOrder::Nuc => Err(argument_error(format!(
             "{NAME}: nuclear norm is only defined for matrices."
         ))),
         NormOrder::P(p) => {
             if !p.is_finite() {
-                return Err(builtin_error(format!("{NAME}: invalid norm order {p}")));
+                return Err(argument_error(format!("{NAME}: invalid norm order {p}")));
             }
             if p < 1.0 {
-                return Err(builtin_error(format!(
+                return Err(argument_error(format!(
                     "{NAME}: vector norm order {p} must satisfy p >= 1 (or use 0, Inf, or -Inf)."
                 )));
             }
@@ -331,13 +435,13 @@ fn matrix_norm_real(
             Ok(root_sum_of_squares(&magnitudes))
         }
         NormOrder::Nuc => nuclear_norm_real(tensor, rows, cols),
-        NormOrder::Zero => Err(builtin_error(format!(
+        NormOrder::Zero => Err(argument_error(format!(
             "{NAME}: matrix norm order 0 is not supported; use 1, 2, Inf, 'fro', or 'nuc'."
         ))),
-        NormOrder::NegInf => Err(builtin_error(format!(
+        NormOrder::NegInf => Err(argument_error(format!(
             "{NAME}: matrix norm order -Inf is not supported; use 1, 2, Inf, 'fro', or 'nuc'."
         ))),
-        NormOrder::P(p) => Err(builtin_error(format!(
+        NormOrder::P(p) => Err(argument_error(format!(
             "{NAME}: matrix norm order {p} is not supported; use 1, 2, Inf, 'fro', or 'nuc'."
         ))),
     }
@@ -375,13 +479,13 @@ fn matrix_norm_complex(
             Ok(root_sum_of_squares(&magnitudes))
         }
         NormOrder::Nuc => nuclear_norm_complex(tensor, rows, cols),
-        NormOrder::Zero => Err(builtin_error(format!(
+        NormOrder::Zero => Err(argument_error(format!(
             "{NAME}: matrix norm order 0 is not supported for complex inputs; use 1, 2, Inf, 'fro', or 'nuc'."
         ))),
-        NormOrder::NegInf => Err(builtin_error(format!(
+        NormOrder::NegInf => Err(argument_error(format!(
             "{NAME}: matrix norm order -Inf is not supported for complex inputs; use 1, 2, Inf, 'fro', or 'nuc'."
         ))),
-        NormOrder::P(p) => Err(builtin_error(format!(
+        NormOrder::P(p) => Err(argument_error(format!(
             "{NAME}: matrix norm order {p} is not supported for complex inputs; use 1, 2, Inf, 'fro', or 'nuc'."
         ))),
     }
@@ -477,7 +581,7 @@ fn parse_order(args: &[Value]) -> BuiltinResult<NormOrder> {
     match args.len() {
         0 => Ok(NormOrder::Default),
         1 => parse_order_value(&args[0]),
-        _ => Err(builtin_error(format!(
+        _ => Err(argument_error(format!(
             "{NAME}: expected a single optional norm order argument."
         ))),
     }
@@ -492,7 +596,7 @@ fn parse_order_value(value: &Value) -> BuiltinResult<NormOrder> {
             if tensor::is_scalar_tensor(t) {
                 parse_numeric(t.data[0])
             } else {
-                Err(builtin_error(format!(
+                Err(argument_error(format!(
                     "{NAME}: norm order must be a scalar."
                 )))
             }
@@ -502,22 +606,22 @@ fn parse_order_value(value: &Value) -> BuiltinResult<NormOrder> {
                 let val = if l.data[0] != 0 { 1.0 } else { 0.0 };
                 parse_numeric(val)
             } else {
-                Err(builtin_error(format!(
+                Err(argument_error(format!(
                     "{NAME}: norm order must be a scalar logical value."
                 )))
             }
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(format!(
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(argument_error(format!(
             "{NAME}: norm order must be real-valued."
         ))),
-        Value::GpuTensor(_) => Err(builtin_error(format!(
+        Value::GpuTensor(_) => Err(argument_error(format!(
             "{NAME}: norm order cannot be a GPU-resident tensor."
         ))),
         _ => {
             if let Some(text) = tensor::value_to_string(value) {
                 parse_order_string(&text)
             } else {
-                Err(builtin_error(format!(
+                Err(argument_error(format!(
                     "{NAME}: unsupported norm order argument {value:?}"
                 )))
             }
@@ -527,7 +631,7 @@ fn parse_order_value(value: &Value) -> BuiltinResult<NormOrder> {
 
 fn parse_numeric(raw: f64) -> BuiltinResult<NormOrder> {
     if raw.is_nan() {
-        return Err(builtin_error(format!(
+        return Err(argument_error(format!(
             "{NAME}: norm order must be a real scalar."
         )));
     }
@@ -553,7 +657,7 @@ fn parse_numeric(raw: f64) -> BuiltinResult<NormOrder> {
 fn parse_order_string(raw: &str) -> BuiltinResult<NormOrder> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err(builtin_error(format!(
+        return Err(argument_error(format!(
             "{NAME}: norm order string cannot be empty."
         )));
     }
@@ -567,7 +671,7 @@ fn parse_order_string(raw: &str) -> BuiltinResult<NormOrder> {
             if let Ok(value) = trimmed.parse::<f64>() {
                 parse_numeric(value)
             } else {
-                Err(builtin_error(format!(
+                Err(argument_error(format!(
                     "{NAME}: unrecognised norm order '{trimmed}'."
                 )))
             }
@@ -590,7 +694,7 @@ fn upload_scalar(
             data: &data,
             shape: &shape,
         })
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
+        .map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 impl From<ProviderNormOrder> for NormOrder {
@@ -662,6 +766,25 @@ pub(crate) mod tests {
             &ResolveContext::new(Vec::new()),
         );
         assert_eq!(out, Type::Num);
+    }
+
+    #[test]
+    fn norm_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = NORM_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"n = norm(A)"));
+        assert!(labels.contains(&"n = norm(A, p)"));
+    }
+
+    #[test]
+    fn norm_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = NORM_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.NORM.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.NORM.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.NORM.INTERNAL"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -737,6 +860,7 @@ pub(crate) mod tests {
             err.message().contains("p >= 1"),
             "expected p >= 1 error, got {err}"
         );
+        assert_eq!(err.identifier(), NORM_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -848,6 +972,7 @@ pub(crate) mod tests {
             err.message().contains("scalar"),
             "expected scalar error, got {err}"
         );
+        assert_eq!(err.identifier(), NORM_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -860,6 +985,7 @@ pub(crate) mod tests {
             err.message().contains("vector or 2-D matrix"),
             "expected dimensionality error, got {err}"
         );
+        assert_eq!(err.identifier(), NORM_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

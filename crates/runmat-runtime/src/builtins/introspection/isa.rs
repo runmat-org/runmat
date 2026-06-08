@@ -6,9 +6,13 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::isa_type;
-use crate::{build_runtime_error, BuiltinResult};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::handle_is_logical;
-use runmat_builtins::{get_class, Value};
+use runmat_builtins::{
+    get_class, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isa")]
@@ -39,13 +43,63 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Not eligible for fusion planning; isa executes on the host and produces a logical scalar.",
 };
 
+const ISA_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when input belongs to the requested class/category.",
+}];
+
+const ISA_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input value to inspect.",
+    },
+    BuiltinParamDescriptor {
+        name: "type_name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Class or abstract type name.",
+    },
+];
+
+const ISA_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isa(A, type_name)",
+    inputs: &ISA_INPUTS,
+    outputs: &ISA_OUTPUT,
+}];
+
+const BUILTIN_NAME: &str = "isa";
+
+const ISA_ERROR_TYPE_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISA.TYPE_NAME_INVALID",
+    identifier: None,
+    when: "Second argument is not a string scalar or row character vector.",
+    message: "isa: TYPE must be a string scalar or character vector",
+};
+
+const ISA_ERRORS: [BuiltinErrorDescriptor; 1] = [ISA_ERROR_TYPE_NAME_INVALID];
+
+pub const ISA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISA_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISA_ERRORS,
+};
+
 #[runtime_builtin(
     name = "isa",
     category = "introspection",
-    summary = "Test whether a value belongs to a specified MATLAB class or abstract category.",
+    summary = "Test whether a value belongs to a specified class or category.",
     keywords = "isa,type checking,class comparison,numeric category,gpuArray",
     accel = "metadata",
     type_resolver(isa_type),
+    descriptor(crate::builtins::introspection::isa::ISA_DESCRIPTOR),
     builtin_path = "crate::builtins::introspection::isa"
 )]
 fn isa_builtin(value: Value, class_designator: Value) -> crate::BuiltinResult<Value> {
@@ -61,33 +115,26 @@ fn parse_type_name(value: &Value) -> BuiltinResult<String> {
             if sa.rows == 1 && sa.cols == 1 && !sa.data.is_empty() {
                 Ok(sa.data[0].clone())
             } else {
-                Err(
-                    build_runtime_error("isa: TYPE must be a string scalar or character vector")
-                        .with_builtin("isa")
-                        .build()
-                        .into(),
-                )
+                Err(isa_error(&ISA_ERROR_TYPE_NAME_INVALID).into())
             }
         }
         Value::CharArray(ca) => {
             if ca.rows == 1 {
                 Ok(ca.data.iter().collect())
             } else {
-                Err(
-                    build_runtime_error("isa: TYPE must be a string scalar or character vector")
-                        .with_builtin("isa")
-                        .build()
-                        .into(),
-                )
+                Err(isa_error(&ISA_ERROR_TYPE_NAME_INVALID).into())
             }
         }
-        _ => Err(
-            build_runtime_error("isa: TYPE must be a string scalar or character vector")
-                .with_builtin("isa")
-                .build()
-                .into(),
-        ),
+        _ => Err(isa_error(&ISA_ERROR_TYPE_NAME_INVALID).into()),
     }
+}
+
+fn isa_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn value_is_a(value: &Value, requested: &str) -> bool {
@@ -105,7 +152,14 @@ fn value_is_a(value: &Value, requested: &str) -> bool {
         "string" => matches!(value, Value::String(_) | Value::StringArray(_)),
         "cell" => matches!(value, Value::Cell(_)),
         "struct" => matches!(value, Value::Struct(_)),
-        "function_handle" => matches!(value, Value::FunctionHandle(_) | Value::Closure(_)),
+        "function_handle" => matches!(
+            value,
+            Value::FunctionHandle(_)
+                | Value::ExternalFunctionHandle(_)
+                | Value::MethodFunctionHandle(_)
+                | Value::BoundFunctionHandle { .. }
+                | Value::Closure(_)
+        ),
         "gpuarray" => matches!(value, Value::GpuTensor(_)),
         "listener" | "event.listener" => matches!(value, Value::Listener(_)),
         "meta.class" => matches!(value, Value::ClassRef(_)),
@@ -173,7 +227,11 @@ fn class_inherits(class_name: &str, requested_lower: &str) -> bool {
         return true;
     }
     let mut cursor = Some(class_name.to_string());
+    let mut visited = std::collections::HashSet::new();
     while let Some(name) = cursor {
+        if !visited.insert(name.clone()) {
+            break;
+        }
         if name.eq_ignore_ascii_case(requested_lower) {
             return true;
         }
@@ -197,6 +255,14 @@ pub(crate) mod tests {
     };
     use runmat_gc_api::GcPtr;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_class_name(prefix: &str) -> String {
+        let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", prefix, id)
+    }
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -343,6 +409,33 @@ pub(crate) mod tests {
         assert_eq!(handle_result, Value::Bool(true));
         let exact = isa_builtin(obj, Value::from(class_name)).expect("isa");
         assert_eq!(exact, Value::Bool(true));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn isa_inheritance_walk_handles_parent_cycles() {
+        let class_a = unique_class_name("runmat.unittest.CycleA");
+        let class_b = unique_class_name("runmat.unittest.CycleB");
+
+        runmat_builtins::register_class(ClassDef {
+            name: class_a.clone(),
+            parent: Some(class_b.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        runmat_builtins::register_class(ClassDef {
+            name: class_b.clone(),
+            parent: Some(class_a.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let obj = Value::Object(ObjectInstance::new(class_a.clone()));
+        let not_found = isa_builtin(obj.clone(), Value::from("nonexistentType")).expect("isa");
+        assert_eq!(not_found, Value::Bool(false));
+
+        let parent_match = isa_builtin(obj, Value::from(class_b)).expect("isa");
+        assert_eq!(parent_match, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

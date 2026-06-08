@@ -2478,6 +2478,7 @@ fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
                 Ok(runmat_accelerate_api::HostTensorOwned {
                     data: vec![0.0; h.shape.iter().product()],
                     shape: h.shape.clone(),
+                    storage: runmat_accelerate_api::handle_storage(h),
                 })
             })
         }
@@ -2562,6 +2563,7 @@ fn analysis_run_gpu_upload_failure_records_fallback_contract() {
                 Ok(runmat_accelerate_api::HostTensorOwned {
                     data: vec![0.0; h.shape.iter().product()],
                     shape: h.shape.clone(),
+                    storage: runmat_accelerate_api::handle_storage(h),
                 })
             })
         }
@@ -2681,6 +2683,7 @@ fn balanced_and_strict_diverge_for_same_field_promotion_fallback() {
                 Ok(runmat_accelerate_api::HostTensorOwned {
                     data: vec![0.0; h.shape.iter().product()],
                     shape: h.shape.clone(),
+                    storage: runmat_accelerate_api::handle_storage(h),
                 })
             })
         }
@@ -2774,6 +2777,7 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
                 Ok(runmat_accelerate_api::HostTensorOwned {
                     data: vec![0.0; h.shape.iter().product()],
                     shape: h.shape.clone(),
+                    storage: runmat_accelerate_api::handle_storage(h),
                 })
             })
         }

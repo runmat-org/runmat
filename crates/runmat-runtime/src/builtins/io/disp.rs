@@ -1,6 +1,8 @@
 //! MATLAB-compatible `disp` builtin with GPU-aware formatting semantics.
 
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, StructValue, Tensor,
     Value,
 };
@@ -12,7 +14,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::char_row_to_string;
-use crate::console::{record_console_output, ConsoleStream};
+use crate::console::{record_console_line, ConsoleStream};
 use crate::gather_if_needed_async;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::disp")]
@@ -63,34 +65,84 @@ enum Align {
     Right,
 }
 
+const DISP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "ans",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Empty matrix placeholder returned by sink invocation.",
+}];
+const DISP_INPUTS_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Value to display in the Command Window.",
+}];
+const DISP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "disp(X)",
+    inputs: &DISP_INPUTS_VALUE,
+    outputs: &DISP_OUTPUT,
+}];
+const DISP_ERROR_ARG_CONFIG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DISP.ARG_CONFIG",
+    identifier: None,
+    when: "Too many input arguments are passed to disp.",
+    message: "disp: too many input arguments",
+};
+const DISP_ERROR_GATHER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DISP.GATHER",
+    identifier: None,
+    when: "Input value cannot be gathered onto the host for rendering.",
+    message: "disp: failed to gather value for display",
+};
+const DISP_ERRORS: [BuiltinErrorDescriptor; 2] = [DISP_ERROR_ARG_CONFIG, DISP_ERROR_GATHER];
+pub const DISP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DISP_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DISP_ERRORS,
+};
+
+fn disp_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
+    disp_error_with(error, error.message)
+}
+
+fn disp_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = crate::build_runtime_error(message).with_builtin("disp");
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "disp",
     category = "io",
-    summary = "Display value in the Command Window without returning output.",
+    summary = "Display values without returning output.",
     keywords = "disp,display,print,gpu",
     sink = true,
     accel = "sink",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::disp_type),
+    descriptor(crate::builtins::io::disp::DISP_DESCRIPTOR),
     builtin_path = "crate::builtins::io::disp"
 )]
 async fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err(("disp: too many input arguments".to_string()).into());
+        return Err(disp_error(&DISP_ERROR_ARG_CONFIG));
     }
 
     let host_value = gather_if_needed_async(&value)
         .await
-        .map_err(|e| format!("disp: {e}"))?;
+        .map_err(|e| disp_error_with(&DISP_ERROR_GATHER, format!("disp: {e}")))?;
     let lines = format_for_disp(&host_value);
 
-    if lines.is_empty() {
-        record_console_output(ConsoleStream::Stdout, "");
-    } else {
-        for line in lines {
-            record_console_output(ConsoleStream::Stdout, line.as_str());
-        }
-    }
+    let body = lines.join("\n");
+    record_console_line(ConsoleStream::Stdout, body);
 
     Ok(empty_return_value())
 }
@@ -101,6 +153,30 @@ fn format_for_disp(value: &Value) -> Vec<String> {
 
 fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
     match value {
+        Value::Object(obj) if obj.is_class("datetime") => match mode {
+            RenderMode::TopLevel => crate::builtins::datetime::datetime_display_text(value)
+                .map(|text| text.unwrap_or_else(|| value.to_string()))
+                .unwrap_or_else(|_| value.to_string())
+                .lines()
+                .map(|line| line.to_string())
+                .collect(),
+            RenderMode::Nested => vec![crate::builtins::datetime::datetime_summary(value)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| value.to_string())],
+        },
+        Value::Object(obj) if obj.is_class("duration") => match mode {
+            RenderMode::TopLevel => crate::builtins::duration::duration_display_text(value)
+                .map(|text| text.unwrap_or_else(|| value.to_string()))
+                .unwrap_or_else(|_| value.to_string())
+                .lines()
+                .map(|line| line.to_string())
+                .collect(),
+            RenderMode::Nested => vec![crate::builtins::duration::duration_summary(value)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| value.to_string())],
+        },
         Value::String(text) => match mode {
             RenderMode::TopLevel => split_lines(text),
             RenderMode::Nested => vec![quote_double(text)],
@@ -135,6 +211,9 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
             )],
         },
         Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -508,6 +587,9 @@ fn summarize_for_cell(value: &Value) -> String {
         Value::Struct(_) => "[1x1 struct]".to_string(),
         Value::Cell(inner) => format!("[{} cell]", dims_to_string(&canonical_dims(&inner.shape))),
         Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -681,6 +763,16 @@ pub(crate) mod tests {
     use crate::make_cell;
     use runmat_builtins::{ComplexTensor, IntValue, StringArray, Tensor};
 
+    #[test]
+    fn disp_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = DISP_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"disp(X)"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_scalar_without_quotes() {
@@ -751,8 +843,8 @@ pub(crate) mod tests {
                 "     2       4".to_string(),
                 String::new(),
                 "(:,:,2) =".to_string(),
-                "5+0.5i  7+0.5i".to_string(),
-                "6+0.5i  8+0.5i".to_string()
+                "5+0.5000i  7+0.5000i".to_string(),
+                "6+0.5000i  8+0.5000i".to_string()
             ]
         );
     }

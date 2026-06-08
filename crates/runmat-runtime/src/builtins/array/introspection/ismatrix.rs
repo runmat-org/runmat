@@ -5,7 +5,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use runmat_builtins::{ResolveContext, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(
@@ -46,6 +50,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "ismatrix,matrix detection,metadata query,logical,gpu",
     accel = "metadata",
     type_resolver(bool_scalar_type),
+    descriptor(crate::builtins::array::introspection::ismatrix::ISMATRIX_DESCRIPTOR),
     builtin_path = "crate::builtins::array::introspection::ismatrix"
 )]
 async fn ismatrix_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -55,6 +60,37 @@ async fn ismatrix_builtin(value: Value) -> crate::BuiltinResult<Value> {
 fn bool_scalar_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
+
+const ISMATRIX_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when input has at most two dimensions.",
+}];
+
+const ISMATRIX_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to inspect.",
+}];
+
+const ISMATRIX_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = ismatrix(A)",
+    inputs: &ISMATRIX_INPUTS,
+    outputs: &ISMATRIX_OUTPUT,
+}];
+
+const ISMATRIX_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+pub const ISMATRIX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISMATRIX_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISMATRIX_ERRORS,
+};
 
 async fn value_is_matrix(value: &Value) -> crate::BuiltinResult<bool> {
     Ok(value_dimensions(value).await?.len() <= 2)

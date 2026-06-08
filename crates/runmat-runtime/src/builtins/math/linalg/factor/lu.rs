@@ -10,10 +10,155 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderLuResult};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 const BUILTIN_NAME: &str = "lu";
+
+const LU_OUTPUT_COMBINED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "LU",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Combined LU factors.",
+}];
+
+const LU_OUTPUT_LU: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "L",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Lower-triangular factor.",
+    },
+    BuiltinParamDescriptor {
+        name: "U",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper-triangular factor.",
+    },
+];
+
+const LU_OUTPUT_LUP: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "L",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Lower-triangular factor.",
+    },
+    BuiltinParamDescriptor {
+        name: "U",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper-triangular factor.",
+    },
+    BuiltinParamDescriptor {
+        name: "P",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Permutation matrix or vector based on pivot mode.",
+    },
+];
+
+const LU_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix to factorize.",
+}];
+
+const LU_INPUTS_A_MODE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix to factorize.",
+    },
+    BuiltinParamDescriptor {
+        name: "pivotMode",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"matrix\""),
+        description: "Permutation mode (`\"matrix\"` or `\"vector\"`).",
+    },
+];
+
+const LU_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "LU = lu(A)",
+        inputs: &LU_INPUTS_A,
+        outputs: &LU_OUTPUT_COMBINED,
+    },
+    BuiltinSignatureDescriptor {
+        label: "LU = lu(A, pivotMode)",
+        inputs: &LU_INPUTS_A_MODE,
+        outputs: &LU_OUTPUT_COMBINED,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L, U] = lu(A)",
+        inputs: &LU_INPUTS_A,
+        outputs: &LU_OUTPUT_LU,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L, U] = lu(A, pivotMode)",
+        inputs: &LU_INPUTS_A_MODE,
+        outputs: &LU_OUTPUT_LU,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L, U, P] = lu(A)",
+        inputs: &LU_INPUTS_A,
+        outputs: &LU_OUTPUT_LUP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L, U, P] = lu(A, pivotMode)",
+        inputs: &LU_INPUTS_A_MODE,
+        outputs: &LU_OUTPUT_LUP,
+    },
+];
+
+const LU_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LU.INVALID_ARGUMENT",
+    identifier: Some("RunMat:lu:InvalidArgument"),
+    when: "Option arguments or requested output count are invalid.",
+    message: "lu currently supports at most three outputs",
+};
+
+const LU_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LU.INVALID_INPUT",
+    identifier: Some("RunMat:lu:InvalidInput"),
+    when: "Input is unsupported for LU factorization.",
+    message: "lu: expected numeric or logical input values",
+};
+
+const LU_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LU.INTERNAL",
+    identifier: Some("RunMat:lu:Internal"),
+    when: "Runtime cannot materialize LU outputs.",
+    message: "lu: internal runtime failure",
+};
+
+const LU_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    LU_ERROR_INVALID_ARGUMENT,
+    LU_ERROR_INVALID_INPUT,
+    LU_ERROR_INTERNAL,
+];
+
+pub const LU_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LU_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LU_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::lu")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -31,10 +176,31 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider `lu` hook; automatically gathers and falls back to the CPU implementation when no provider support is registered.",
 };
 
-fn lu_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn lu_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    lu_error_with_message(error.message, error)
+}
+
+fn lu_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn lu_invalid_argument(message: impl Into<String>) -> RuntimeError {
+    lu_error_with_message(message, &LU_ERROR_INVALID_ARGUMENT)
+}
+
+fn lu_invalid_input(message: impl Into<String>) -> RuntimeError {
+    lu_error_with_message(message, &LU_ERROR_INVALID_INPUT)
+}
+
+fn lu_internal_error(message: impl Into<String>) -> RuntimeError {
+    lu_error_with_message(message, &LU_ERROR_INTERNAL)
 }
 
 fn with_lu_context(mut error: RuntimeError) -> RuntimeError {
@@ -63,11 +229,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "lu",
     category = "math/linalg/factor",
-    summary = "LU decomposition with partial pivoting.",
+    summary = "Compute LU decompositions with partial pivoting.",
     keywords = "lu,factorization,decomposition,permutation",
     accel = "sink",
     sink = true,
     type_resolver(matrix_unary_type),
+    descriptor(crate::builtins::math::linalg::factor::lu::LU_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::factor::lu"
 )]
 async fn lu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -89,7 +256,7 @@ async fn lu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Valu
                 eval.permutation(),
             ]));
         }
-        return Err(lu_error("lu currently supports at most three outputs"));
+        return Err(lu_error(&LU_ERROR_INVALID_ARGUMENT));
     }
     Ok(eval.combined())
 }
@@ -225,15 +392,17 @@ fn parse_pivot_mode(args: &[Value]) -> BuiltinResult<PivotMode> {
         return Ok(PivotMode::Matrix);
     }
     if args.len() > 1 {
-        return Err(lu_error("lu: too many option arguments"));
+        return Err(lu_invalid_argument("lu: too many option arguments"));
     }
     let Some(option) = tensor::value_to_string(&args[0]) else {
-        return Err(lu_error("lu: option must be a string or character vector"));
+        return Err(lu_invalid_argument(
+            "lu: option must be a string or character vector",
+        ));
     };
     match option.trim().to_ascii_lowercase().as_str() {
         "matrix" => Ok(PivotMode::Matrix),
         "vector" => Ok(PivotMode::Vector),
-        other => Err(lu_error(format!("lu: unknown option '{other}'"))),
+        other => Err(lu_invalid_argument(format!("lu: unknown option '{other}'"))),
     }
 }
 
@@ -249,7 +418,7 @@ async fn extract_matrix(value: Value) -> BuiltinResult<RowMajorMatrix> {
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|err| lu_error(format!("lu: {err}")))?;
+                .map_err(|err| lu_invalid_input(format!("lu: {err}")))?;
             RowMajorMatrix::from_tensor(&tensor)
         }
         Value::Num(n) => Ok(RowMajorMatrix::from_scalar(Complex64::new(n, 0.0))),
@@ -259,10 +428,13 @@ async fn extract_matrix(value: Value) -> BuiltinResult<RowMajorMatrix> {
             0.0,
         ))),
         Value::Complex(re, im) => Ok(RowMajorMatrix::from_scalar(Complex64::new(re, im))),
-        Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => Err(lu_error(
+        Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => Err(lu_invalid_input(
             "lu: character data is not supported; convert to numeric values first",
         )),
-        other => Err(lu_error(format!("lu: unsupported input type {:?}", other))),
+        other => Err(lu_invalid_input(format!(
+            "lu: unsupported input type {:?}",
+            other
+        ))),
     }
 }
 
@@ -391,7 +563,7 @@ fn matrix_to_value(matrix: &RowMajorMatrix) -> BuiltinResult<Value> {
             }
         }
         let tensor = ComplexTensor::new(data, vec![matrix.rows, matrix.cols])
-            .map_err(|e| lu_error(format!("lu: {e}")))?;
+            .map_err(|e| lu_internal_error(format!("lu: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     } else {
         let mut data = Vec::with_capacity(matrix.rows * matrix.cols);
@@ -402,15 +574,15 @@ fn matrix_to_value(matrix: &RowMajorMatrix) -> BuiltinResult<Value> {
             }
         }
         let tensor = Tensor::new(data, vec![matrix.rows, matrix.cols])
-            .map_err(|e| lu_error(format!("lu: {e}")))?;
+            .map_err(|e| lu_internal_error(format!("lu: {e}")))?;
         Ok(Value::Tensor(tensor))
     }
 }
 
 fn pivot_vector_to_value(pivot: &[f64]) -> BuiltinResult<Value> {
     let rows = pivot.len();
-    let tensor =
-        Tensor::new(pivot.to_vec(), vec![rows, 1]).map_err(|e| lu_error(format!("lu: {e}")))?;
+    let tensor = Tensor::new(pivot.to_vec(), vec![rows, 1])
+        .map_err(|e| lu_internal_error(format!("lu: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -448,7 +620,7 @@ impl RowMajorMatrix {
 
     fn from_tensor(tensor: &Tensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err(lu_error("lu: input must be 2-D"));
+            return Err(lu_invalid_input("lu: input must be 2-D"));
         }
         let rows = tensor.rows();
         let cols = tensor.cols();
@@ -465,7 +637,7 @@ impl RowMajorMatrix {
 
     fn from_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err(lu_error("lu: input must be 2-D"));
+            return Err(lu_invalid_input("lu: input must be 2-D"));
         }
         let rows = tensor.rows;
         let cols = tensor.cols;
@@ -543,6 +715,29 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn lu_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = LU_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"LU = lu(A)"));
+        assert!(labels.contains(&"LU = lu(A, pivotMode)"));
+        assert!(labels.contains(&"[L, U] = lu(A)"));
+        assert!(labels.contains(&"[L, U] = lu(A, pivotMode)"));
+        assert!(labels.contains(&"[L, U, P] = lu(A)"));
+        assert!(labels.contains(&"[L, U, P] = lu(A, pivotMode)"));
+    }
+
+    #[test]
+    fn lu_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = LU_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.LU.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.LU.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.LU.INTERNAL"));
+    }
+
     fn row_major_matmul(a: &RowMajorMatrix, b: &RowMajorMatrix) -> RowMajorMatrix {
         assert_eq!(a.cols, b.rows, "incompatible shapes for matmul");
         let mut out = RowMajorMatrix::zeros(a.rows, b.cols);
@@ -609,8 +804,8 @@ pub(crate) mod tests {
         let u = tensor_from_value(eval.upper());
         let p = tensor_from_value(eval.permutation_matrix());
 
-        let pa = crate::matrix::matrix_mul(&p, &a).expect("P*A");
-        let lu_product = crate::matrix::matrix_mul(&l, &u).expect("L*U");
+        let pa = crate::builtins::common::matrix::matrix_mul(&p, &a).expect("P*A");
+        let lu_product = crate::builtins::common::matrix::matrix_mul(&l, &u).expect("L*U");
         assert_tensor_close(&pa, &lu_product, 1e-9);
     }
 
@@ -642,8 +837,8 @@ pub(crate) mod tests {
 
         assert!(u.data.iter().any(|&v| v.abs() <= 1e-12));
 
-        let pa = crate::matrix::matrix_mul(&p, &a).expect("P*A");
-        let lu_product = crate::matrix::matrix_mul(&l, &u).expect("L*U");
+        let pa = crate::builtins::common::matrix::matrix_mul(&p, &a).expect("P*A");
+        let lu_product = crate::builtins::common::matrix::matrix_mul(&l, &u).expect("L*U");
         assert_tensor_close(&pa, &lu_product, 1e-9);
     }
 
@@ -693,8 +888,8 @@ pub(crate) mod tests {
         assert_eq!(u.shape, vec![2, 3]);
         assert_eq!(p.shape, vec![2, 2]);
 
-        let pa = crate::matrix::matrix_mul(&p, &a).expect("P*A");
-        let lu_product = crate::matrix::matrix_mul(&l, &u).expect("L*U");
+        let pa = crate::builtins::common::matrix::matrix_mul(&p, &a).expect("P*A");
+        let lu_product = crate::builtins::common::matrix::matrix_mul(&l, &u).expect("L*U");
         assert_tensor_close(&pa, &lu_product, 1e-9);
     }
 
@@ -704,7 +899,10 @@ pub(crate) mod tests {
         let a = Matrix::new(vec![1.0], vec![1, 1]).unwrap();
         let err = match evaluate(Value::Tensor(a), &[Value::from("invalid")]) {
             Ok(_) => panic!("expected option parse failure"),
-            Err(err) => error_message(err),
+            Err(err) => {
+                assert_eq!(err.identifier(), LU_ERROR_INVALID_ARGUMENT.identifier);
+                error_message(err)
+            }
         };
         assert!(err.contains("unknown option"));
     }
@@ -715,7 +913,10 @@ pub(crate) mod tests {
         let a = Matrix::new(vec![1.0], vec![1, 1]).unwrap();
         let err = match evaluate(Value::Tensor(a), &[Value::Num(2.0)]) {
             Ok(_) => panic!("expected option parse failure"),
-            Err(err) => error_message(err),
+            Err(err) => {
+                assert_eq!(err.identifier(), LU_ERROR_INVALID_ARGUMENT.identifier);
+                error_message(err)
+            }
         };
         assert!(err.contains("unknown option"));
     }
@@ -729,9 +930,22 @@ pub(crate) mod tests {
             &[Value::from("matrix"), Value::from("vector")],
         ) {
             Ok(_) => panic!("expected option arity failure"),
-            Err(err) => error_message(err),
+            Err(err) => {
+                assert_eq!(err.identifier(), LU_ERROR_INVALID_ARGUMENT.identifier);
+                error_message(err)
+            }
         };
         assert!(err.contains("too many option arguments"));
+    }
+
+    #[test]
+    fn lu_invalid_input_identifier_is_stable() {
+        let tensor = Matrix::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]).expect("tensor");
+        let err = match evaluate(Value::Tensor(tensor), &[]) {
+            Ok(_) => panic!("expected 2-D input failure"),
+            Err(err) => err,
+        };
+        assert_eq!(err.identifier(), LU_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -754,8 +968,8 @@ pub(crate) mod tests {
             let l = test_support::gather(lower_val).expect("gather lower");
             let u = test_support::gather(upper_val).expect("gather upper");
             let p = test_support::gather(perm_val).expect("gather permutation");
-            let pa = crate::matrix::matrix_mul(&p, &host).expect("P*A");
-            let lu_product = crate::matrix::matrix_mul(&l, &u).expect("L*U");
+            let pa = crate::builtins::common::matrix::matrix_mul(&p, &host).expect("P*A");
+            let lu_product = crate::builtins::common::matrix::matrix_mul(&l, &u).expect("L*U");
             assert_tensor_close(&pa, &lu_product, 1e-9);
         });
     }

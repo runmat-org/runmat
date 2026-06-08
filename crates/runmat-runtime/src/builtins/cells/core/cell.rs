@@ -1,6 +1,8 @@
 //! MATLAB-compatible `cell` builtin implemented for the modern RunMat runtime.
 
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -42,28 +44,199 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Cell creation acts as a fusion sink and terminates GPU fusion plans.",
 };
 
-const IDENT_INVALID_INPUT: &str = "MATLAB:cell:InvalidInput";
-const IDENT_INVALID_SIZE: &str = "MATLAB:cell:InvalidSize";
+const BUILTIN_NAME: &str = "cell";
 
-fn cell_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("cell").build()
-}
+const CELL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Output cell array.",
+}];
 
-fn cell_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("cell")
-        .with_identifier(identifier)
-        .build()
+const CELL_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const CELL_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Square size.",
+}];
+
+const CELL_SIG_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "sz",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Size vector.",
+}];
+
+const CELL_SIG_DIMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "dims",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Dimension sizes.",
+}];
+
+const CELL_SIG_LIKE_ONLY_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype value used to infer element class.",
+    },
+];
+
+const CELL_SIG_SIZE_VECTOR_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "sz",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Size vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype value used to infer element class.",
+    },
+];
+
+const CELL_SIG_DIMS_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype value used to infer element class.",
+    },
+];
+
+const CELL_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "C = cell()",
+        inputs: &CELL_SIG_EMPTY_INPUTS,
+        outputs: &CELL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = cell(n)",
+        inputs: &CELL_SIG_N_INPUTS,
+        outputs: &CELL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = cell(sz)",
+        inputs: &CELL_SIG_SIZE_VECTOR_INPUTS,
+        outputs: &CELL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = cell(m, n, ...)",
+        inputs: &CELL_SIG_DIMS_INPUTS,
+        outputs: &CELL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = cell(\"like\", prototype)",
+        inputs: &CELL_SIG_LIKE_ONLY_INPUTS,
+        outputs: &CELL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = cell(sz, \"like\", prototype)",
+        inputs: &CELL_SIG_SIZE_VECTOR_LIKE_INPUTS,
+        outputs: &CELL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = cell(m, n, ..., \"like\", prototype)",
+        inputs: &CELL_SIG_DIMS_LIKE_INPUTS,
+        outputs: &CELL_OUTPUT,
+    },
+];
+
+const CELL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELL.INVALID_INPUT",
+    identifier: Some("RunMat:cell:InvalidInput"),
+    when: "Input arguments or option forms are invalid.",
+    message: "cell: invalid input arguments",
+};
+
+const CELL_ERROR_INVALID_SIZE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELL.INVALID_SIZE",
+    identifier: Some("RunMat:cell:InvalidSize"),
+    when: "Requested size arguments are invalid or unsupported.",
+    message: "cell: invalid size arguments",
+};
+
+const CELL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELL.INTERNAL",
+    identifier: None,
+    when: "Internal cell allocation or conversion failed.",
+    message: "cell: internal error",
+};
+
+const CELL_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    CELL_ERROR_INVALID_INPUT,
+    CELL_ERROR_INVALID_SIZE,
+    CELL_ERROR_INTERNAL,
+];
+
+pub const CELL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CELL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CELL_ERRORS,
+};
+
+fn cell_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "cell",
     category = "cells/core",
-    summary = "Create empty MATLAB cell arrays.",
+    summary = "Create empty cell arrays.",
     keywords = "cell,cell array,container,empty",
     accel = "array_construct",
     sink = true,
     type_resolver(cell_type),
+    descriptor(crate::builtins::cells::core::cell::CELL_DESCRIPTOR),
     builtin_path = "crate::builtins::cells::core::cell"
 )]
 async fn cell_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -88,15 +261,15 @@ impl ParsedCell {
                 match keyword.as_str() {
                     "like" => {
                         if prototype.is_some() {
-                            return Err(cell_error_with_identifier(
+                            return Err(cell_error_with_message(
                                 "cell: multiple 'like' specifications are not supported",
-                                IDENT_INVALID_INPUT,
+                                &CELL_ERROR_INVALID_INPUT,
                             ));
                         }
                         let Some(proto) = args.get(idx + 1) else {
-                            return Err(cell_error_with_identifier(
+                            return Err(cell_error_with_message(
                                 "cell: expected prototype after 'like'",
-                                IDENT_INVALID_INPUT,
+                                &CELL_ERROR_INVALID_INPUT,
                             ));
                         };
                         prototype = Some(proto.clone());
@@ -104,9 +277,9 @@ impl ParsedCell {
                         continue;
                     }
                     other => {
-                        return Err(cell_error_with_identifier(
+                        return Err(cell_error_with_message(
                             format!("cell: unrecognised option '{other}'"),
-                            IDENT_INVALID_INPUT,
+                            &CELL_ERROR_INVALID_INPUT,
                         ));
                     }
                 }
@@ -130,22 +303,23 @@ fn build_cell(parsed: ParsedCell) -> BuiltinResult<Value> {
             .iter()
             .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
             .ok_or_else(|| {
-                cell_error_with_identifier(
+                cell_error_with_message(
                     "cell: requested size exceeds platform limits",
-                    IDENT_INVALID_SIZE,
+                    &CELL_ERROR_INVALID_SIZE,
                 )
             })?
     };
 
     if total == 0 {
         return make_cell_with_shape(Vec::new(), shape)
-            .map_err(|e| cell_error(format!("cell: {e}")));
+            .map_err(|e| cell_error_with_message(format!("cell: {e}"), &CELL_ERROR_INTERNAL));
     }
 
     let default_value = empty_value_like(parsed.prototype.as_ref())?;
     let mut values = Vec::with_capacity(total);
     values.resize(total, default_value);
-    make_cell_with_shape(values, shape).map_err(|e| cell_error(format!("cell: {e}")))
+    make_cell_with_shape(values, shape)
+        .map_err(|e| cell_error_with_message(format!("cell: {e}"), &CELL_ERROR_INTERNAL))
 }
 
 fn ensure_min_rank(dims: Vec<usize>) -> Vec<usize> {
@@ -163,7 +337,7 @@ async fn parse_shape_arguments(
     if args.is_empty() {
         if let Some(proto) = prototype {
             return shape_from_value(proto, "cell")
-                .map_err(|err| cell_error_with_identifier(err, IDENT_INVALID_INPUT));
+                .map_err(|err| cell_error_with_message(err, &CELL_ERROR_INVALID_INPUT));
         }
         return Ok(vec![0, 0]);
     }
@@ -189,9 +363,9 @@ fn parse_single_argument(value: &Value) -> BuiltinResult<Vec<usize>> {
         }
         Value::Tensor(t) => parse_size_tensor(t),
         Value::LogicalArray(arr) => parse_size_logical_array(arr),
-        other => Err(cell_error_with_identifier(
+        other => Err(cell_error_with_message(
             format!("cell: size arguments must be numeric scalars or vectors, got {other:?}"),
-            IDENT_INVALID_INPUT,
+            &CELL_ERROR_INVALID_INPUT,
         )),
     }
 }
@@ -203,26 +377,26 @@ fn parse_size_scalar(value: &Value, context: &str) -> BuiltinResult<usize> {
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
             if t.data.len() != 1 {
-                return Err(cell_error_with_identifier(
+                return Err(cell_error_with_message(
                     format!("{context}: size inputs must be scalar"),
-                    IDENT_INVALID_SIZE,
+                    &CELL_ERROR_INVALID_SIZE,
                 ));
             }
             parse_numeric(t.data[0], context)
         }
         Value::LogicalArray(arr) => {
             if arr.data.len() != 1 {
-                return Err(cell_error_with_identifier(
+                return Err(cell_error_with_message(
                     format!("{context}: size inputs must be scalar"),
-                    IDENT_INVALID_SIZE,
+                    &CELL_ERROR_INVALID_SIZE,
                 ));
             }
             let numeric = if arr.data[0] != 0 { 1.0 } else { 0.0 };
             parse_numeric(numeric, context)
         }
-        other => Err(cell_error_with_identifier(
+        other => Err(cell_error_with_message(
             format!("{context}: size inputs must be numeric scalars, got {other:?}"),
-            IDENT_INVALID_INPUT,
+            &CELL_ERROR_INVALID_INPUT,
         )),
     }
 }
@@ -232,9 +406,9 @@ fn parse_size_tensor(t: &Tensor) -> BuiltinResult<Vec<usize>> {
         return Ok(vec![0, 0]);
     }
     if !is_vector_shape(&t.shape) {
-        return Err(cell_error_with_identifier(
+        return Err(cell_error_with_message(
             "cell: size vector must be 1-D",
-            IDENT_INVALID_SIZE,
+            &CELL_ERROR_INVALID_SIZE,
         ));
     }
     let dims = t
@@ -254,9 +428,9 @@ fn parse_size_logical_array(arr: &LogicalArray) -> BuiltinResult<Vec<usize>> {
         return Ok(vec![0, 0]);
     }
     if !is_vector_shape(&arr.shape) {
-        return Err(cell_error_with_identifier(
+        return Err(cell_error_with_message(
             "cell: size vector must be 1-D",
-            IDENT_INVALID_SIZE,
+            &CELL_ERROR_INVALID_SIZE,
         ));
     }
     let dims = arr
@@ -288,21 +462,23 @@ fn empty_value_like(proto: Option<&Value>) -> BuiltinResult<Value> {
         Some(value) => match value {
             Value::LogicalArray(_) | Value::Bool(_) => LogicalArray::new(Vec::new(), vec![0, 0])
                 .map(Value::LogicalArray)
-                .map_err(|e| cell_error(format!("cell: {e}"))),
+                .map_err(|e| cell_error_with_message(format!("cell: {e}"), &CELL_ERROR_INTERNAL)),
             Value::ComplexTensor(_) | Value::Complex(_, _) => {
                 ComplexTensor::new(Vec::new(), vec![0, 0])
                     .map(Value::ComplexTensor)
-                    .map_err(|e| cell_error(format!("cell: {e}")))
+                    .map_err(|e| {
+                        cell_error_with_message(format!("cell: {e}"), &CELL_ERROR_INTERNAL)
+                    })
             }
             Value::String(_) => Ok(Value::String(String::new())),
             Value::StringArray(_) => StringArray::new(Vec::new(), vec![0, 0])
                 .map(Value::StringArray)
-                .map_err(|e| cell_error(format!("cell: {e}"))),
+                .map_err(|e| cell_error_with_message(format!("cell: {e}"), &CELL_ERROR_INTERNAL)),
             Value::CharArray(_) => CharArray::new(Vec::new(), 0, 0)
                 .map(Value::CharArray)
-                .map_err(|e| cell_error(format!("cell: {e}"))),
+                .map_err(|e| cell_error_with_message(format!("cell: {e}"), &CELL_ERROR_INTERNAL)),
             Value::Cell(_) => make_cell_with_shape(Vec::new(), vec![0, 0])
-                .map_err(|e| cell_error(format!("cell: {e}"))),
+                .map_err(|e| cell_error_with_message(format!("cell: {e}"), &CELL_ERROR_INTERNAL)),
             Value::Struct(_) => Ok(Value::Struct(StructValue::new())),
             Value::Tensor(_) | Value::Num(_) | Value::Int(_) | Value::GpuTensor(_) => {
                 default_empty_double()
@@ -311,6 +487,9 @@ fn empty_value_like(proto: Option<&Value>) -> BuiltinResult<Value> {
             | Value::HandleObject(_)
             | Value::Listener(_)
             | Value::FunctionHandle(_)
+            | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
+            | Value::BoundFunctionHandle { .. }
             | Value::Closure(_)
             | Value::ClassRef(_)
             | Value::MException(_)
@@ -323,7 +502,7 @@ fn empty_value_like(proto: Option<&Value>) -> BuiltinResult<Value> {
 fn default_empty_double() -> BuiltinResult<Value> {
     Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
-        .map_err(|e| cell_error(format!("cell: {e}")))
+        .map_err(|e| cell_error_with_message(format!("cell: {e}"), &CELL_ERROR_INTERNAL))
 }
 
 fn parse_intvalue(value: &IntValue, context: &str) -> BuiltinResult<usize> {
@@ -338,15 +517,15 @@ fn parse_intvalue(value: &IntValue, context: &str) -> BuiltinResult<usize> {
         IntValue::U64(v) => *v as i128,
     };
     if raw < 0 {
-        return Err(cell_error_with_identifier(
+        return Err(cell_error_with_message(
             format!("{context}: size inputs must be non-negative integers"),
-            IDENT_INVALID_SIZE,
+            &CELL_ERROR_INVALID_SIZE,
         ));
     }
     if raw as u128 > usize::MAX as u128 {
-        return Err(cell_error_with_identifier(
+        return Err(cell_error_with_message(
             "cell: requested size exceeds platform limits",
-            IDENT_INVALID_SIZE,
+            &CELL_ERROR_INVALID_SIZE,
         ));
     }
     Ok(raw as usize)
@@ -354,34 +533,34 @@ fn parse_intvalue(value: &IntValue, context: &str) -> BuiltinResult<usize> {
 
 fn parse_numeric(value: f64, context: &str) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(cell_error_with_identifier(
+        return Err(cell_error_with_message(
             format!("{context}: size inputs must be finite"),
-            IDENT_INVALID_SIZE,
+            &CELL_ERROR_INVALID_SIZE,
         ));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(cell_error_with_identifier(
+        return Err(cell_error_with_message(
             format!("{context}: size inputs must be integers"),
-            IDENT_INVALID_SIZE,
+            &CELL_ERROR_INVALID_SIZE,
         ));
     }
     if rounded < 0.0 {
-        return Err(cell_error_with_identifier(
+        return Err(cell_error_with_message(
             format!("{context}: size inputs must be non-negative integers"),
-            IDENT_INVALID_SIZE,
+            &CELL_ERROR_INVALID_SIZE,
         ));
     }
     if rounded > (1u64 << 53) as f64 {
-        return Err(cell_error_with_identifier(
+        return Err(cell_error_with_message(
             "cell: size inputs larger than 2^53 are not supported",
-            IDENT_INVALID_SIZE,
+            &CELL_ERROR_INVALID_SIZE,
         ));
     }
     if rounded > usize::MAX as f64 {
-        return Err(cell_error_with_identifier(
+        return Err(cell_error_with_message(
             "cell: requested size exceeds platform limits",
-            IDENT_INVALID_SIZE,
+            &CELL_ERROR_INVALID_SIZE,
         ));
     }
     Ok(rounded as usize)
@@ -395,6 +574,19 @@ pub(crate) mod tests {
 
     fn cell_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::cell_builtin(args))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn descriptor_signatures_cover_cell_forms() {
+        let labels: Vec<&str> = CELL_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"C = cell()"));
+        assert!(labels.contains(&"C = cell(sz)"));
+        assert!(labels.contains(&"C = cell(m, n, ..., \"like\", prototype)"));
     }
 
     fn expect_cell_with<F>(value: Value, expected_shape: &[usize], mut check: F)

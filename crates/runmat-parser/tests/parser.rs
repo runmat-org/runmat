@@ -1,4 +1,6 @@
-use runmat_parser::{Attr, BinOp, ClassMember, Expr, LValue, Program, Span, Stmt, UnOp};
+use runmat_parser::{
+    Attr, BinOp, ClassMember, Expr, FunctionArgumentsBlockKind, LValue, Program, Span, Stmt, UnOp,
+};
 
 mod parse;
 mod support;
@@ -106,13 +108,21 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
             name,
             params,
             outputs,
+            argument_validations,
+            argument_block_kinds,
             body,
+            isolated,
+            is_async,
             ..
         } => Stmt::Function {
             name: name.clone(),
             params: params.clone(),
             outputs: outputs.clone(),
+            argument_validations: argument_validations.clone(),
+            argument_block_kinds: argument_block_kinds.clone(),
             body: body.iter().map(strip_stmt).collect(),
+            isolated: *isolated,
+            is_async: *is_async,
             span: Span::default(),
         },
         Stmt::Import { path, wildcard, .. } => Stmt::Import {
@@ -121,11 +131,13 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
             span: Span::default(),
         },
         Stmt::ClassDef {
+            attributes,
             name,
             super_class,
             members,
             ..
         } => Stmt::ClassDef {
+            attributes: attributes.clone(),
             name: name.clone(),
             super_class: super_class.clone(),
             members: members.iter().map(strip_class_member).collect(),
@@ -149,6 +161,21 @@ fn strip_expr(expr: &Expr) -> Expr {
         ),
         Expr::Tensor(rows, _) => Expr::Tensor(strip_rows(rows), Span::default()),
         Expr::Cell(rows, _) => Expr::Cell(strip_rows(rows), Span::default()),
+        Expr::StructLiteral(fields, _) => Expr::StructLiteral(
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), strip_expr(value)))
+                .collect(),
+            Span::default(),
+        ),
+        Expr::ObjectLiteral(class_name, fields, _) => Expr::ObjectLiteral(
+            class_name.clone(),
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), strip_expr(value)))
+                .collect(),
+            Span::default(),
+        ),
         Expr::Index(base, indices, _) => Expr::Index(
             Box::new(strip_expr(base)),
             indices.iter().map(strip_expr).collect(),
@@ -171,12 +198,47 @@ fn strip_expr(expr: &Expr) -> Expr {
             args.iter().map(strip_expr).collect(),
             Span::default(),
         ),
+        Expr::SuperConstructorCall {
+            current_class,
+            super_class,
+            args,
+            ..
+        } => Expr::SuperConstructorCall {
+            current_class: current_class.clone(),
+            super_class: super_class.clone(),
+            args: args.iter().map(strip_expr).collect(),
+            span: Span::default(),
+        },
+        Expr::SuperMethodCall {
+            current_class,
+            super_class,
+            method,
+            args,
+            ..
+        } => Expr::SuperMethodCall {
+            current_class: current_class.clone(),
+            super_class: super_class.clone(),
+            method: method.clone(),
+            args: args.iter().map(strip_expr).collect(),
+            span: Span::default(),
+        },
+        Expr::CommandCall(name, args, _) => Expr::CommandCall(
+            name.clone(),
+            args.iter().map(strip_expr).collect(),
+            Span::default(),
+        ),
         Expr::Member(base, name, _) => {
             Expr::Member(Box::new(strip_expr(base)), name.clone(), Span::default())
         }
         Expr::MemberDynamic(base, name_expr, _) => Expr::MemberDynamic(
             Box::new(strip_expr(base)),
             Box::new(strip_expr(name_expr)),
+            Span::default(),
+        ),
+        Expr::DottedInvoke(base, name, args, _) => Expr::DottedInvoke(
+            Box::new(strip_expr(base)),
+            name.clone(),
+            args.iter().map(strip_expr).collect(),
             Span::default(),
         ),
         Expr::MethodCall(base, name, args, _) => Expr::MethodCall(
@@ -296,6 +358,49 @@ fn parse_assignment() {
 }
 
 #[test]
+fn parse_struct_aggregate_literal() {
+    let program = parse("x = struct{name = 1, age = 2};").unwrap();
+    assert_program_eq(
+        program,
+        Program {
+            body: vec![assign(
+                "x".to_string(),
+                Expr::StructLiteral(
+                    vec![
+                        ("name".to_string(), num("1".to_string())),
+                        ("age".to_string(), num("2".to_string())),
+                    ],
+                    Span::default(),
+                ),
+                true,
+            )],
+        },
+    );
+}
+
+#[test]
+fn parse_object_aggregate_literal() {
+    let program = parse("p = ?Point{x = 1, y = 2};").unwrap();
+    assert_program_eq(
+        program,
+        Program {
+            body: vec![assign(
+                "p".to_string(),
+                Expr::ObjectLiteral(
+                    "Point".to_string(),
+                    vec![
+                        ("x".to_string(), num("1".to_string())),
+                        ("y".to_string(), num("2".to_string())),
+                    ],
+                    Span::default(),
+                ),
+                true,
+            )],
+        },
+    );
+}
+
+#[test]
 fn precedence_and_associativity() {
     let program = parse("1 - 2 - 3").unwrap();
     assert_program_eq(
@@ -402,6 +507,28 @@ fn parse_imaginary_unit_adjacent_number_in_matrix() {
 }
 
 #[test]
+fn parse_imaginary_unit_adjacent_leading_dot_number_in_matrix() {
+    let program = parse("A = [.1i .5e-2j];").unwrap();
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &program.body[0] else {
+        panic!("expected matrix assignment");
+    };
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].len(), 2);
+
+    let Expr::Binary(lhs_l, BinOp::Mul, lhs_r, _) = &rows[0][0] else {
+        panic!("expected .1*i");
+    };
+    assert!(matches!(**lhs_l, Expr::Number(ref n, _) if n == ".1"));
+    assert!(matches!(**lhs_r, Expr::Ident(ref n, _) if n == "i"));
+
+    let Expr::Binary(rhs_l, BinOp::Mul, rhs_r, _) = &rows[0][1] else {
+        panic!("expected .5e-2*j");
+    };
+    assert!(matches!(**rhs_l, Expr::Number(ref n, _) if n == ".5e-2"));
+    assert!(matches!(**rhs_r, Expr::Ident(ref n, _) if n == "j"));
+}
+
+#[test]
 fn final_semicolon_not_required() {
     let program = parse("1 + 2").unwrap();
     assert_eq!(program.body.len(), 1);
@@ -416,6 +543,35 @@ fn empty_input_yields_empty_program() {
 #[test]
 fn missing_closing_paren_produces_error() {
     assert!(parse("(1 + 2").is_err());
+}
+
+#[test]
+fn unclosed_call_argument_reports_current_token_position() {
+    let src = "t0 = sqrt(2h0/g);";
+    let err = parse(src).unwrap_err();
+    assert_eq!(err.message, "expected ')' after arguments");
+    assert_eq!(err.position, src.find("h0").unwrap());
+    assert_eq!(err.found_token.as_deref(), Some("h0"));
+    assert_eq!(err.expected.as_deref(), Some("')'"));
+}
+
+#[test]
+fn expected_identifier_reports_offending_token_position() {
+    let src = "?1";
+    let err = parse(src).unwrap_err();
+    assert_eq!(err.message, "expected identifier");
+    assert_eq!(err.position, src.find('1').unwrap());
+    assert_eq!(err.found_token.as_deref(), Some("1"));
+}
+
+#[test]
+fn expected_member_name_reports_offending_token_position() {
+    let src = "x = a.;";
+    let err = parse(src).unwrap_err();
+    assert_eq!(err.message, "expected member name after '.'");
+    assert_eq!(err.position, src.find(';').unwrap());
+    assert_eq!(err.found_token.as_deref(), Some(";"));
+    assert_eq!(err.expected.as_deref(), Some("identifier"));
 }
 
 #[test]
@@ -694,6 +850,8 @@ fn parse_function_definition() {
                 name: "add".to_string(),
                 params: vec!["x".to_string()],
                 outputs: vec!["y".to_string()],
+                argument_validations: vec![],
+                argument_block_kinds: vec![],
                 body: vec![assign(
                     "y".to_string(),
                     binary_boxed(
@@ -703,10 +861,351 @@ fn parse_function_definition() {
                     ),
                     true,
                 )],
+                isolated: false,
+                is_async: false,
                 span: span_value(),
             }],
         },
     );
+}
+
+#[test]
+fn parse_function_definition_with_arguments_block() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double
+            end
+            y = x * 2;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with arguments block");
+    assert_eq!(parsed.body.len(), 1);
+    let Stmt::Function {
+        name, params, body, ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(name, "typed");
+    assert_eq!(params, &vec!["x".to_string()]);
+    let Stmt::Function {
+        argument_validations,
+        argument_block_kinds,
+        ..
+    } = &parsed.body[0]
+    else {
+        unreachable!()
+    };
+    assert_eq!(argument_block_kinds, &[FunctionArgumentsBlockKind::Input]);
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(argument_validations[0].name, "x");
+    assert_eq!(
+        argument_validations[0].class_name.as_deref(),
+        Some("double")
+    );
+    assert!(!argument_validations[0].has_unsupported_trailing);
+    assert!(
+        body.iter()
+            .any(|stmt| matches!(stmt, Stmt::Assign(var, _, _, _) if var == "y"),),
+        "expected function body assignment after arguments block"
+    );
+}
+
+#[test]
+fn parse_mixed_script_function_arguments_block_preserves_input_kind() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double
+            end
+            y = x * 2;
+        end
+        r = typed(3);
+    "#;
+    let parsed = parse(source).expect("parse mixed script and function source");
+    assert_eq!(parsed.body.len(), 2);
+    let Stmt::Function {
+        argument_validations,
+        argument_block_kinds,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected leading function statement");
+    };
+
+    assert_eq!(argument_block_kinds, &[FunctionArgumentsBlockKind::Input]);
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(argument_validations[0].name, "x");
+    assert_eq!(
+        argument_validations[0].class_name.as_deref(),
+        Some("double")
+    );
+}
+
+#[test]
+fn parse_function_arguments_block_supports_input_attribute() {
+    let source = r#"
+        function y = typed(x)
+            arguments (Input)
+                x (1,1) double
+            end
+            y = x * 2;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with input arguments block");
+    let Stmt::Function {
+        argument_validations,
+        argument_block_kinds,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+
+    assert_eq!(argument_block_kinds, &[FunctionArgumentsBlockKind::Input]);
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(argument_validations[0].name, "x");
+    assert_eq!(
+        argument_validations[0].class_name.as_deref(),
+        Some("double")
+    );
+    assert!(!argument_validations[0].has_unsupported_trailing);
+}
+
+#[test]
+fn parse_function_arguments_block_records_repeating_and_output_kinds() {
+    let source = r#"
+        function [y, z] = typed(x, varargin)
+            arguments
+                x double
+            end
+            arguments (Repeating)
+                varargin double
+            end
+            arguments (Output)
+                y double
+                z double
+            end
+            y = x;
+            z = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with advanced arguments blocks");
+    let Stmt::Function {
+        argument_validations,
+        argument_block_kinds,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+
+    assert_eq!(
+        argument_block_kinds,
+        &[
+            FunctionArgumentsBlockKind::Input,
+            FunctionArgumentsBlockKind::Repeating,
+            FunctionArgumentsBlockKind::Output,
+        ]
+    );
+    assert_eq!(argument_validations.len(), 4);
+}
+
+#[test]
+fn parse_function_arguments_block_tracks_unsupported_trailing_tokens() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double mustBeFinite
+            end
+            y = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with validator");
+    let Stmt::Function {
+        argument_validations,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(
+        argument_validations[0].validators,
+        vec![runmat_parser::FunctionArgValidatorDecl {
+            name: "mustBeFinite".to_string(),
+            args: vec![],
+        }]
+    );
+    assert!(!argument_validations[0].has_unsupported_trailing);
+}
+
+#[test]
+fn parse_function_arguments_block_marks_unsupported_trailing_syntax() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double < 10
+            end
+            y = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with unsupported trailing syntax");
+    let Stmt::Function {
+        argument_validations,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(argument_validations[0].name, "x");
+    assert_eq!(
+        argument_validations[0].class_name.as_deref(),
+        Some("double")
+    );
+    assert!(argument_validations[0].has_unsupported_trailing);
+}
+
+#[test]
+fn parse_function_arguments_block_marks_name_value_declaration_unsupported() {
+    let source = r#"
+        function y = typed(opts)
+            arguments
+                opts.Name (1,1) double = 1
+            end
+            y = opts.Name;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with unsupported name-value syntax");
+    let Stmt::Function {
+        argument_validations,
+        argument_block_kinds,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+
+    assert_eq!(argument_block_kinds, &[FunctionArgumentsBlockKind::Input]);
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(argument_validations[0].name, "opts");
+    assert!(argument_validations[0].has_unsupported_trailing);
+}
+
+#[test]
+fn parse_function_arguments_block_supports_default_literal() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double = 3
+            end
+            y = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with default literal");
+    let Stmt::Function {
+        argument_validations,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(argument_validations.len(), 1);
+    assert!(argument_validations[0].default_value.is_some());
+}
+
+#[test]
+fn parse_function_arguments_block_supports_empty_array_default() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x = []
+            end
+            y = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with [] default");
+    let Stmt::Function {
+        argument_validations,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(argument_validations.len(), 1);
+    assert!(argument_validations[0].default_value.is_some());
+}
+
+#[test]
+fn parse_function_arguments_block_supports_brace_validators() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double {mustBeFinite}
+            end
+            y = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with brace validators");
+    let Stmt::Function {
+        argument_validations,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(
+        argument_validations[0].validators,
+        vec![runmat_parser::FunctionArgValidatorDecl {
+            name: "mustBeFinite".to_string(),
+            args: vec![],
+        }]
+    );
+    assert!(!argument_validations[0].has_unsupported_trailing);
+}
+
+#[test]
+fn parse_function_arguments_block_supports_parameterized_validator() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeGreaterThanOrEqual(x, 0)
+            end
+            y = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with parameterized validator");
+    let Stmt::Function {
+        argument_validations,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(argument_validations[0].validators.len(), 1);
+    assert_eq!(
+        argument_validations[0].validators[0].name,
+        "mustBeGreaterThanOrEqual"
+    );
+    assert_eq!(argument_validations[0].validators[0].args.len(), 2);
+}
+
+#[test]
+fn parse_function_modifiers() {
+    let program = parse("isolated async function y=f(x); y=x; end").unwrap();
+    match &program.body[0] {
+        Stmt::Function {
+            isolated, is_async, ..
+        } => {
+            assert!(*isolated);
+            assert!(*is_async);
+        }
+        _ => panic!("expected function stmt"),
+    }
 }
 
 #[test]

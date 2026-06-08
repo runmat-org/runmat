@@ -267,18 +267,23 @@ fn append_extension(path: &Path, ext: &str) -> PathBuf {
 
 /// Return the first existing file for a symbol given the list of candidate
 /// extensions.
-pub fn find_file_with_extensions(
+pub async fn find_file_with_extensions(
     name: &str,
     extensions: &[&str],
     error_prefix: &str,
 ) -> Result<Option<PathBuf>, String> {
     let candidates = file_candidates(name, extensions, error_prefix)?;
-    Ok(candidates.into_iter().find(|path| path_is_file(path)))
+    for path in candidates {
+        if path_is_file(&path).await {
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
 }
 
 /// Return all existing files for a symbol given the list of candidate
 /// extensions. Duplicates are removed while preserving discovery order.
-pub fn find_all_files_with_extensions(
+pub async fn find_all_files_with_extensions(
     name: &str,
     extensions: &[&str],
     error_prefix: &str,
@@ -286,7 +291,7 @@ pub fn find_all_files_with_extensions(
     let mut matches = Vec::new();
     let mut seen = HashSet::new();
     for path in file_candidates(name, extensions, error_prefix)? {
-        if path_is_file(&path) && seen.insert(path.clone()) {
+        if path_is_file(&path).await && seen.insert(path.clone()) {
             matches.push(path);
         }
     }
@@ -335,14 +340,14 @@ pub fn class_folder_candidates(name: &str, error_prefix: &str) -> Result<Vec<Pat
 
 /// Return `true` when a MATLAB class definition exists in a file and contains
 /// the specified keyword (typically `classdef`).
-pub fn class_file_exists(
+pub async fn class_file_exists(
     name: &str,
     class_extensions: &[&str],
     keyword: &str,
     error_prefix: &str,
 ) -> Result<bool, String> {
-    if let Some(path) = find_file_with_extensions(name, class_extensions, error_prefix)? {
-        if file_contains_keyword(&path, keyword) {
+    if let Some(path) = find_file_with_extensions(name, class_extensions, error_prefix).await? {
+        if file_contains_keyword(&path, keyword).await {
             return Ok(true);
         }
     }
@@ -350,24 +355,24 @@ pub fn class_file_exists(
 }
 
 /// Return every class definition file that contains the required keyword.
-pub fn class_file_paths(
+pub async fn class_file_paths(
     name: &str,
     class_extensions: &[&str],
     keyword: &str,
     error_prefix: &str,
 ) -> Result<Vec<PathBuf>, String> {
     let mut matches = Vec::new();
-    for path in find_all_files_with_extensions(name, class_extensions, error_prefix)? {
-        if file_contains_keyword(&path, keyword) {
+    for path in find_all_files_with_extensions(name, class_extensions, error_prefix).await? {
+        if file_contains_keyword(&path, keyword).await {
             matches.push(path);
         }
     }
     Ok(matches)
 }
 
-fn file_contains_keyword(path: &Path, keyword: &str) -> bool {
+async fn file_contains_keyword(path: &Path, keyword: &str) -> bool {
     const MAX_BYTES: usize = 64 * 1024;
-    match vfs::read(path) {
+    match vfs::read_async(path).await {
         Ok(mut buffer) => {
             if buffer.len() > MAX_BYTES {
                 buffer.truncate(MAX_BYTES);
@@ -392,14 +397,16 @@ fn push_unique_dir(vec: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, value: P
     }
 }
 
-pub fn path_is_file(path: &Path) -> bool {
-    vfs::metadata(path)
+pub async fn path_is_file(path: &Path) -> bool {
+    vfs::metadata_async(path)
+        .await
         .map(|meta| meta.is_file())
         .unwrap_or(false)
 }
 
-pub fn path_is_directory(path: &Path) -> bool {
-    vfs::metadata(path)
+pub async fn path_is_directory(path: &Path) -> bool {
+    vfs::metadata_async(path)
+        .await
         .map(|meta| meta.is_dir())
         .unwrap_or(false)
 }

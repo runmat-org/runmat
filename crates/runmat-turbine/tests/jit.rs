@@ -1,13 +1,28 @@
 use cranelift::prelude::isa::CallConv;
-use runmat_builtins::{Type, Value};
-use runmat_ignition::{Bytecode, Instr};
+use runmat_builtins::{CellArray, StructValue, Value};
 use runmat_turbine::{
     CompilerConfig, FunctionCache, HotspotProfiler, OptimizationLevel, ThreadSafeFunctionCache,
     TurbineEngine,
 };
+use runmat_vm::{ArgSpec, Bytecode, FunctionBytecode, Instr};
 use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
+
+mod runmat_hir {
+    pub use ::runmat_hir::FunctionId;
+}
+
+fn named_call_instr(name: &str, arg_count: usize, out_count: usize) -> Instr {
+    Instr::CallFunctionMulti {
+        identity: ::runmat_hir::CallableIdentity::DynamicName(::runmat_hir::SymbolName(
+            name.to_string(),
+        )),
+        fallback_policy: ::runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+        arg_count,
+        out_count,
+    }
+}
 
 #[test]
 fn test_turbine_engine_creation() {
@@ -337,10 +352,10 @@ fn test_complex_bytecode_compilation() {
             Instr::LoadConst(0.0), // else: result = 0
             Instr::StoreVar(0),    // update x
             // After control flow
-            Instr::CallBuiltin("abs".to_string(), 1), // abs(result)
+            Instr::CallBuiltinMulti("abs".to_string(), 1, 1), // abs(result)
             Instr::LoadConst(10.0),
-            Instr::CallBuiltin("max".to_string(), 2), // max(result, 10)
-            Instr::StoreVar(1),                       // store final result
+            Instr::CallBuiltinMulti("max".to_string(), 2, 1), // max(result, 10)
+            Instr::StoreVar(1),                               // store final result
             // Add 4 elements for a 2x2 matrix
             Instr::LoadConst(1.0),
             Instr::LoadConst(2.0),
@@ -620,8 +635,8 @@ fn test_error_handling() {
     let result = engine.execute_compiled(999, &mut []);
     assert!(result.is_err());
 
-    // Test executing with unsupported value types
-    let bytecode = Bytecode::with_instructions(vec![Instr::LoadConst(1.0)], 0);
+    // Test executing with non-numeric variables does not crash the compiled entrypoint.
+    let bytecode = Bytecode::with_instructions(vec![Instr::LoadVar(0), Instr::StoreVar(0)], 1);
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
     for _ in 0..15 {
@@ -631,7 +646,7 @@ fn test_error_handling() {
 
     let mut vars = vec![Value::String("test".to_string())];
     let result = engine.execute_compiled(hash, &mut vars);
-    assert!(result.is_err());
+    assert!(result.is_ok());
 }
 
 #[test]
@@ -902,7 +917,7 @@ fn test_runtime_functions_available() {
     let bytecode_with_builtin = Bytecode::with_instructions(
         vec![
             Instr::LoadConst(5.0),
-            Instr::CallBuiltin("abs".to_string(), 1), // This should generate a call to runmat_call_builtin
+            Instr::CallBuiltinMulti("abs".to_string(), 1, 1), // This should generate a call to runmat_call_builtin
             Instr::StoreVar(0),
         ],
         1,
@@ -970,80 +985,629 @@ fn test_runtime_functions_available() {
 }
 
 #[test]
-fn test_jit_user_function_fallback() {
-    // Test: User-defined functions should fallback to interpreter correctly
+fn test_jit_legacy_user_function_fallback_removed() {
+    // Test: unresolved user calls no longer trigger interpreter recompilation fallback.
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
-    // Create bytecode with user function definition and call
-    use std::collections::HashMap;
-    let mut functions = HashMap::new();
-    functions.insert(
-        "my_double".to_string(),
-        runmat_ignition::UserFunction {
-            name: "my_double".to_string(),
-            params: vec![runmat_hir::VarId(0)],
-            outputs: vec![runmat_hir::VarId(1)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(1),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::Binary(
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                        runmat_parser::BinOp::Mul,
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Number("2".to_string()),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                    ),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false, // Assignment suppression flag for test
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 2,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
-            source_id: None,
-        },
+    let bytecode = Bytecode::with_instructions(
+        vec![
+            Instr::LoadConst(5.0),               // Load argument
+            named_call_instr("my_double", 1, 1), // Call function
+            Instr::StoreVar(0),                  // Store result
+        ],
+        1,
     );
 
+    let mut vars = vec![Value::Num(0.0)];
+
+    // Execute - fallback recompilation has been removed, so this must fail cleanly.
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_err(),
+        "legacy user-function fallback should not execute"
+    );
+}
+
+#[test]
+fn test_jit_direct_semantic_function_call() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let function = runmat_hir::FunctionId(1);
+    let bound_function = FunctionBytecode {
+        function,
+        display_name: "inc".to_string(),
+        source_id: None,
+        instructions: vec![
+            Instr::LoadVar(0),
+            Instr::LoadConst(1.0),
+            Instr::Add,
+            Instr::StoreVar(1),
+        ],
+        instr_spans: Vec::new(),
+        call_arg_spans: Vec::new(),
+        var_count: 2,
+        input_slots: vec![0],
+        varargin_slot: None,
+        implicit_nargin_slot: None,
+        output_slots: vec![1],
+        varargout_slot: None,
+        implicit_nargout_slot: None,
+        capture_slots: Vec::new(),
+        ..FunctionBytecode::default()
+    };
+
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
     let bytecode = Bytecode {
-        functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
-                Instr::LoadConst(5.0),                           // Load argument
-                Instr::CallFunction("my_double".to_string(), 1), // Call function
-                Instr::StoreVar(0),                              // Store result
+                Instr::LoadConst(41.0),
+                Instr::CallSemanticFunctionMulti(function, 1, 1),
+                Instr::StoreVar(0),
             ],
             1,
         )
     };
 
-    let mut vars = vec![Value::Num(0.0)];
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
 
-    // Execute - should fallback to interpreter for function calls
+    let mut vars = vec![Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(result.is_ok(), "semantic call should execute through JIT");
+    assert_eq!(result.unwrap(), (0, true));
+    assert_eq!(vars[0], Value::Num(42.0));
+}
+
+#[test]
+fn test_jit_named_call_resolves_semantic_registry() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let function = runmat_hir::FunctionId(1);
+    let bound_function = FunctionBytecode {
+        function,
+        display_name: "inc".to_string(),
+        source_id: None,
+        instructions: vec![
+            Instr::LoadVar(0),
+            Instr::LoadConst(1.0),
+            Instr::Add,
+            Instr::StoreVar(1),
+        ],
+        instr_spans: Vec::new(),
+        call_arg_spans: Vec::new(),
+        var_count: 2,
+        input_slots: vec![0],
+        varargin_slot: None,
+        implicit_nargin_slot: None,
+        output_slots: vec![1],
+        varargout_slot: None,
+        implicit_nargout_slot: None,
+        capture_slots: Vec::new(),
+        ..FunctionBytecode::default()
+    };
+
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
+    let bytecode = Bytecode {
+        bound_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(5.0),
+                named_call_instr("inc", 1, 1),
+                Instr::StoreVar(0),
+            ],
+            1,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0)];
     let result = engine.execute_or_compile(&bytecode, &mut vars);
     assert!(
         result.is_ok(),
-        "Function execution should work via interpreter fallback"
+        "named user call should compile when semantic registry resolves it"
+    );
+    assert_eq!(result.unwrap(), (0, true));
+    assert_eq!(vars[0], Value::Num(6.0));
+}
+
+#[test]
+fn test_jit_named_call_prefers_semantic_registry_over_legacy_shape() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let function = runmat_hir::FunctionId(1);
+    let bound_function = FunctionBytecode {
+        function,
+        display_name: "inc".to_string(),
+        source_id: None,
+        instructions: vec![
+            Instr::LoadVar(0),
+            Instr::LoadConst(1.0),
+            Instr::Add,
+            Instr::StoreVar(1),
+        ],
+        instr_spans: Vec::new(),
+        call_arg_spans: Vec::new(),
+        var_count: 2,
+        input_slots: vec![0],
+        varargin_slot: None,
+        implicit_nargin_slot: None,
+        output_slots: vec![1],
+        varargout_slot: None,
+        implicit_nargout_slot: None,
+        capture_slots: Vec::new(),
+        ..FunctionBytecode::default()
+    };
+
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
+    let bytecode = Bytecode {
+        bound_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(9.0),
+                named_call_instr("inc", 1, 1),
+                Instr::StoreVar(0),
+            ],
+            1,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_ok(),
+        "semantic registry identity should resolve named user calls"
+    );
+    assert_eq!(result.unwrap(), (0, true));
+    assert_eq!(vars[0], Value::Num(10.0));
+}
+
+#[test]
+fn test_jit_semantic_multi_output_call() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let function = runmat_hir::FunctionId(1);
+    let bound_function = FunctionBytecode {
+        function,
+        display_name: "pair".to_string(),
+        source_id: None,
+        instructions: vec![
+            Instr::LoadVar(0),
+            Instr::StoreVar(1),
+            Instr::LoadVar(0),
+            Instr::LoadConst(2.0),
+            Instr::Mul,
+            Instr::StoreVar(2),
+        ],
+        instr_spans: Vec::new(),
+        call_arg_spans: Vec::new(),
+        var_count: 3,
+        input_slots: vec![0],
+        varargin_slot: None,
+        implicit_nargin_slot: None,
+        output_slots: vec![1, 2],
+        varargout_slot: None,
+        implicit_nargout_slot: None,
+        capture_slots: Vec::new(),
+        ..FunctionBytecode::default()
+    };
+
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
+    let bytecode = Bytecode {
+        bound_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(7.0),
+                Instr::CallSemanticFunctionMulti(function, 1, 2),
+                Instr::Unpack(2),
+                Instr::StoreVar(1),
+                Instr::StoreVar(0),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(result.is_ok(), "semantic multi-output call should JIT");
+    assert_eq!(result.unwrap(), (0, true));
+    assert_eq!(vars[0], Value::Num(7.0));
+    assert_eq!(vars[1], Value::Num(14.0));
+}
+
+#[test]
+fn test_jit_named_semantic_multi_output_call() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let function = runmat_hir::FunctionId(1);
+    let bound_function = FunctionBytecode {
+        function,
+        display_name: "pair".to_string(),
+        source_id: None,
+        instructions: vec![
+            Instr::LoadVar(0),
+            Instr::StoreVar(1),
+            Instr::LoadVar(0),
+            Instr::LoadConst(3.0),
+            Instr::Mul,
+            Instr::StoreVar(2),
+        ],
+        instr_spans: Vec::new(),
+        call_arg_spans: Vec::new(),
+        var_count: 3,
+        input_slots: vec![0],
+        varargin_slot: None,
+        implicit_nargin_slot: None,
+        output_slots: vec![1, 2],
+        varargout_slot: None,
+        implicit_nargout_slot: None,
+        capture_slots: Vec::new(),
+        ..FunctionBytecode::default()
+    };
+
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
+    let bytecode = Bytecode {
+        bound_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(5.0),
+                named_call_instr("pair", 1, 2),
+                Instr::Unpack(2),
+                Instr::StoreVar(1),
+                Instr::StoreVar(0),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_ok(),
+        "semantic registry named multi-output call should JIT"
+    );
+    assert_eq!(result.unwrap(), (0, true));
+    assert_eq!(vars[0], Value::Num(5.0));
+    assert_eq!(vars[1], Value::Num(15.0));
+}
+
+#[test]
+fn test_jit_semantic_expand_multi_uses_value_abi_for_scalar_args() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let function = runmat_hir::FunctionId(1);
+    let bound_function = FunctionBytecode {
+        function,
+        display_name: "inc".to_string(),
+        source_id: None,
+        instructions: vec![
+            Instr::LoadVar(0),
+            Instr::LoadConst(1.0),
+            Instr::Add,
+            Instr::StoreVar(1),
+        ],
+        instr_spans: Vec::new(),
+        call_arg_spans: Vec::new(),
+        var_count: 2,
+        input_slots: vec![0],
+        varargin_slot: None,
+        implicit_nargin_slot: None,
+        output_slots: vec![1],
+        varargout_slot: None,
+        implicit_nargout_slot: None,
+        capture_slots: Vec::new(),
+        ..FunctionBytecode::default()
+    };
+
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
+    let bytecode = Bytecode {
+        bound_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(11.0),
+                Instr::CallSemanticFunctionExpandMultiOutput(
+                    function,
+                    vec![ArgSpec {
+                        is_expand: false,
+                        num_indices: 0,
+                        expand_all: false,
+                    }],
+                    1,
+                ),
+                Instr::StoreVar(0),
+            ],
+            1,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_ok(),
+        "semantic expanded value ABI call should JIT"
+    );
+    assert_eq!(result.unwrap(), (0, true));
+    assert_eq!(vars[0], Value::Num(12.0));
+}
+
+#[test]
+fn test_jit_semantic_expand_multi_output_uses_value_abi_for_scalar_args() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let function = runmat_hir::FunctionId(1);
+    let bound_function = FunctionBytecode {
+        function,
+        display_name: "pair".to_string(),
+        source_id: None,
+        instructions: vec![
+            Instr::LoadVar(0),
+            Instr::StoreVar(1),
+            Instr::LoadVar(0),
+            Instr::LoadConst(2.0),
+            Instr::Mul,
+            Instr::StoreVar(2),
+        ],
+        instr_spans: Vec::new(),
+        call_arg_spans: Vec::new(),
+        var_count: 3,
+        input_slots: vec![0],
+        varargin_slot: None,
+        implicit_nargin_slot: None,
+        output_slots: vec![1, 2],
+        varargout_slot: None,
+        implicit_nargout_slot: None,
+        capture_slots: Vec::new(),
+        ..FunctionBytecode::default()
+    };
+
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
+    let bytecode = Bytecode {
+        bound_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(6.0),
+                Instr::CallSemanticFunctionExpandMultiOutput(
+                    function,
+                    vec![ArgSpec {
+                        is_expand: false,
+                        num_indices: 0,
+                        expand_all: false,
+                    }],
+                    2,
+                ),
+                Instr::Unpack(2),
+                Instr::StoreVar(1),
+                Instr::StoreVar(0),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_ok(),
+        "semantic expanded multi-output value ABI call should JIT"
+    );
+    assert_eq!(result.unwrap(), (0, true));
+    assert_eq!(vars[0], Value::Num(6.0));
+    assert_eq!(vars[1], Value::Num(12.0));
+}
+
+#[test]
+fn test_jit_semantic_expand_multi_expands_cell_args_through_value_abi() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let function = runmat_hir::FunctionId(1);
+    let bound_function = FunctionBytecode {
+        function,
+        display_name: "add2".to_string(),
+        source_id: None,
+        instructions: vec![
+            Instr::LoadVar(0),
+            Instr::LoadVar(1),
+            Instr::Add,
+            Instr::StoreVar(2),
+        ],
+        instr_spans: Vec::new(),
+        call_arg_spans: Vec::new(),
+        var_count: 3,
+        input_slots: vec![0, 1],
+        varargin_slot: None,
+        implicit_nargin_slot: None,
+        output_slots: vec![2],
+        varargout_slot: None,
+        implicit_nargout_slot: None,
+        capture_slots: Vec::new(),
+        ..FunctionBytecode::default()
+    };
+
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
+    let bytecode = Bytecode {
+        bound_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadVar(0),
+                Instr::CallSemanticFunctionExpandMultiOutput(
+                    function,
+                    vec![ArgSpec {
+                        is_expand: true,
+                        num_indices: 0,
+                        expand_all: true,
+                    }],
+                    1,
+                ),
+                Instr::StoreVar(1),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let cell = CellArray::new(vec![Value::Num(5.0), Value::Num(7.0)], 1, 2).unwrap();
+    let mut vars = vec![Value::Cell(cell), Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(result.is_ok(), "semantic cell expansion should JIT");
+    assert_eq!(result.unwrap(), (0, true));
+    assert_eq!(vars[1], Value::Num(12.0));
+}
+
+#[test]
+fn test_jit_method_member_expand_unresolved_struct_member_stays_on_jit_path() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let bytecode = Bytecode::with_instructions(
+        vec![
+            Instr::LoadVar(0),
+            Instr::CallMethodOrMemberIndexExpandMultiOutput {
+                identity: ::runmat_hir::CallableIdentity::DynamicName(::runmat_hir::SymbolName(
+                    "a".to_string(),
+                )),
+                fallback_policy: ::runmat_hir::CallableFallbackPolicy::ObjectDispatch,
+                specs: vec![ArgSpec {
+                    is_expand: false,
+                    num_indices: 0,
+                    expand_all: false,
+                }],
+                out_count: 1,
+            },
+            Instr::StoreVar(1),
+        ],
+        2,
     );
 
-    let (status, used_jit) = result.unwrap();
-    assert_eq!(status, 0, "Execution should succeed");
-    assert!(!used_jit, "Should use interpreter fallback for functions");
-
-    // Check result
-    if let Value::Num(value) = &vars[0] {
-        assert_eq!(*value, 10.0, "my_double(5) should equal 10");
-    } else {
-        panic!("Result should be Num(10.0), got {:?}", vars[0]);
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
     }
+
+    let mut st = StructValue::new();
+    st.insert("a", Value::Num(9.0));
+    let mut vars = vec![Value::Struct(st), Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_ok(),
+        "unresolved method/member expanded struct member access should JIT through typed host bridge"
+    );
+    assert_eq!(result.unwrap(), (0, true));
+    assert_eq!(vars[1], Value::Num(9.0));
+}
+
+#[test]
+fn test_jit_method_member_expand_missing_struct_member_does_not_succeed_with_zero_fill() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let bytecode = Bytecode::with_instructions(
+        vec![
+            Instr::LoadVar(0),
+            Instr::CallMethodOrMemberIndexExpandMultiOutput {
+                identity: ::runmat_hir::CallableIdentity::DynamicName(::runmat_hir::SymbolName(
+                    "missing_field".to_string(),
+                )),
+                fallback_policy: ::runmat_hir::CallableFallbackPolicy::ObjectDispatch,
+                specs: vec![ArgSpec {
+                    is_expand: false,
+                    num_indices: 0,
+                    expand_all: false,
+                }],
+                out_count: 1,
+            },
+            Instr::StoreVar(1),
+        ],
+        2,
+    );
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut st = StructValue::new();
+    st.insert("a", Value::Num(9.0));
+    let mut vars = vec![Value::Struct(st), Value::Num(123.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_err(),
+        "missing method/member target should not be converted into successful zero-filled JIT outputs"
+    );
+    assert_eq!(
+        vars[1],
+        Value::Num(123.0),
+        "failed call should not overwrite output slot with synthetic JIT zeros"
+    );
 }
 
 #[test]
@@ -1072,61 +1636,17 @@ fn test_jit_function_variable_preservation() {
     assert_eq!(vars[0], Value::Num(42.0));
     assert_eq!(vars[1], Value::Num(100.0));
 
-    // Now execute function code that uses those variables
-    let mut functions = HashMap::new();
-    functions.insert(
-        "add_globals".to_string(),
-        runmat_ignition::UserFunction {
-            name: "add_globals".to_string(),
-            params: vec![],
-            outputs: vec![runmat_hir::VarId(2)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(2),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::Binary(
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                        runmat_parser::BinOp::Add,
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(1)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                    ),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false,
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 3,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
-            source_id: None,
-        },
+    let function_bytecode = Bytecode::with_instructions(
+        vec![named_call_instr("add_globals", 0, 1), Instr::StoreVar(2)],
+        3,
     );
-
-    let function_bytecode = Bytecode {
-        functions,
-        ..Bytecode::with_instructions(
-            vec![
-                Instr::CallFunction("add_globals".to_string(), 0),
-                Instr::StoreVar(2),
-            ],
-            3,
-        )
-    };
 
     // Extend vars array
     vars.push(Value::Num(0.0));
 
-    // Execute function code (should preserve existing variables)
+    // Execute function code; removed legacy fallback should fail without mutating existing variables.
     let result2 = engine.execute_or_compile(&function_bytecode, &mut vars);
-    assert!(result2.is_ok(), "Function code should execute");
+    assert!(result2.is_err(), "legacy fallback should not execute");
 
     // Verify original variables are preserved and result is computed
     assert_eq!(
@@ -1141,8 +1661,8 @@ fn test_jit_function_variable_preservation() {
     );
     assert_eq!(
         vars[2],
-        Value::Num(142.0),
-        "Function should compute 42 + 100 = 142"
+        Value::Num(0.0),
+        "failed legacy call must not write output"
     );
 }
 
@@ -1151,47 +1671,37 @@ fn test_jit_mixed_execution_patterns() {
     // Test: Mix of JIT-compiled code and function calls
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
-    // Define a function
-    let mut functions = HashMap::new();
-    functions.insert(
-        "square".to_string(),
-        runmat_ignition::UserFunction {
-            name: "square".to_string(),
-            params: vec![runmat_hir::VarId(0)],
-            outputs: vec![runmat_hir::VarId(1)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(1),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::Binary(
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                        runmat_parser::BinOp::Mul,
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                    ),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false, // Assignment suppression flag for test
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 2,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
+    let function = runmat_hir::FunctionId(1);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
+        function,
+        FunctionBytecode {
+            function,
+            display_name: "my_square".to_string(),
             source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadVar(0),
+                Instr::Mul,
+                Instr::StoreVar(1),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 2,
+            input_slots: vec![0],
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: vec![1],
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            ..FunctionBytecode::default()
         },
     );
 
     // Bytecode that mixes arithmetic (JIT-able) with function calls (interpreter)
     let mixed_bytecode = Bytecode {
-        functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 // JIT-able: x = 5
@@ -1202,9 +1712,9 @@ fn test_jit_mixed_execution_patterns() {
                 Instr::LoadConst(3.0),
                 Instr::Add,
                 Instr::StoreVar(1),
-                // Function call: z = square(y) = 64
+                // Function call: z = my_square(y) = 64
                 Instr::LoadVar(1),
-                Instr::CallFunction("square".to_string(), 1),
+                named_call_instr("my_square", 1, 1),
                 Instr::StoreVar(2),
                 // JIT-able: result = z + 10 = 74
                 Instr::LoadVar(2),
@@ -1225,8 +1735,393 @@ fn test_jit_mixed_execution_patterns() {
     // Verify results
     assert_eq!(vars[0], Value::Num(5.0), "x should be 5");
     assert_eq!(vars[1], Value::Num(8.0), "y should be 8");
-    assert_eq!(vars[2], Value::Num(64.0), "z should be square(8) = 64");
+    assert_eq!(vars[2], Value::Num(64.0), "z should be my_square(8) = 64");
     assert_eq!(vars[3], Value::Num(74.0), "result should be 64 + 10 = 74");
+}
+
+#[test]
+fn test_jit_named_multi_output_call_resolves_identity_without_display_name() {
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+
+    let function = runmat_hir::FunctionId(1);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
+        function,
+        FunctionBytecode {
+            function,
+            display_name: "double_pair".to_string(),
+            source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(2.0),
+                Instr::Mul,
+                Instr::StoreVar(1),
+                Instr::LoadVar(0),
+                Instr::LoadConst(3.0),
+                Instr::Mul,
+                Instr::StoreVar(2),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 3,
+            input_slots: vec![0],
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: vec![1, 2],
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            ..FunctionBytecode::default()
+        },
+    );
+
+    let bytecode = Bytecode {
+        bound_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(4.0),
+                Instr::CallFunctionMulti {
+                    identity: ::runmat_hir::CallableIdentity::DynamicName(
+                        ::runmat_hir::SymbolName("double_pair".to_string()),
+                    ),
+                    fallback_policy: ::runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+                    arg_count: 1,
+                    out_count: 2,
+                },
+                Instr::Unpack(2),
+                Instr::StoreVar(0),
+                Instr::StoreVar(1),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_ok(),
+        "named multi-output call should JIT via identity"
+    );
+    assert_eq!(vars[0], Value::Num(12.0));
+    assert_eq!(vars[1], Value::Num(8.0));
+}
+
+#[test]
+fn test_jit_named_multi_output_call_does_not_resolve_imported_identity_by_display_name() {
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+
+    let function = runmat_hir::FunctionId(1);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
+        function,
+        FunctionBytecode {
+            function,
+            display_name: "double_pair".to_string(),
+            source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(2.0),
+                Instr::Mul,
+                Instr::StoreVar(1),
+                Instr::LoadVar(0),
+                Instr::LoadConst(3.0),
+                Instr::Mul,
+                Instr::StoreVar(2),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 3,
+            input_slots: vec![0],
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: vec![1, 2],
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            ..FunctionBytecode::default()
+        },
+    );
+
+    let imported_identity = ::runmat_hir::CallableIdentity::Imported(::runmat_hir::DefPath {
+        package: ::runmat_hir::PackageName("pkg".to_string()),
+        module: ::runmat_hir::QualifiedName(vec![
+            ::runmat_hir::SymbolName("pkg".to_string()),
+            ::runmat_hir::SymbolName("double_pair".to_string()),
+        ]),
+        item: vec![::runmat_hir::DefPathSegment::Function(
+            ::runmat_hir::SymbolName("double_pair".to_string()),
+        )],
+    });
+
+    let bytecode = Bytecode {
+        bound_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(4.0),
+                Instr::CallFunctionMulti {
+                    identity: imported_identity,
+                    fallback_policy: ::runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+                    arg_count: 1,
+                    out_count: 2,
+                },
+                Instr::Unpack(2),
+                Instr::StoreVar(0),
+                Instr::StoreVar(1),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    let err = engine
+        .execute_or_compile(&bytecode, &mut vars)
+        .expect_err("imported identity should not resolve through display-name lookup");
+    assert!(
+        err.to_string().contains("Undefined function")
+            && err.to_string().contains("pkg.double_pair"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn test_jit_named_multi_output_call_resolves_imported_identity_with_qualified_name() {
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+
+    let function = runmat_hir::FunctionId(1);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
+        function,
+        FunctionBytecode {
+            function,
+            display_name: "pkg.double_pair".to_string(),
+            source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(2.0),
+                Instr::Mul,
+                Instr::StoreVar(1),
+                Instr::LoadVar(0),
+                Instr::LoadConst(3.0),
+                Instr::Mul,
+                Instr::StoreVar(2),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 3,
+            input_slots: vec![0],
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: vec![1, 2],
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            ..FunctionBytecode::default()
+        },
+    );
+
+    let imported_identity = ::runmat_hir::CallableIdentity::Imported(::runmat_hir::DefPath {
+        package: ::runmat_hir::PackageName("pkg".to_string()),
+        module: ::runmat_hir::QualifiedName(vec![
+            ::runmat_hir::SymbolName("pkg".to_string()),
+            ::runmat_hir::SymbolName("double_pair".to_string()),
+        ]),
+        item: vec![::runmat_hir::DefPathSegment::Function(
+            ::runmat_hir::SymbolName("double_pair".to_string()),
+        )],
+    });
+
+    let bytecode = Bytecode {
+        bound_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(4.0),
+                Instr::CallFunctionMulti {
+                    identity: imported_identity,
+                    fallback_policy: ::runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+                    arg_count: 1,
+                    out_count: 2,
+                },
+                Instr::Unpack(2),
+                Instr::StoreVar(0),
+                Instr::StoreVar(1),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_ok(),
+        "well-formed imported identity should resolve through semantic registry"
+    );
+    assert_eq!(vars[0], Value::Num(12.0));
+    assert_eq!(vars[1], Value::Num(8.0));
+}
+
+#[test]
+fn test_jit_named_multi_output_call_resolves_well_formed_external_identity() {
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+
+    let function = runmat_hir::FunctionId(1);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
+        function,
+        FunctionBytecode {
+            function,
+            display_name: "pkg.remote_pair".to_string(),
+            source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(2.0),
+                Instr::Mul,
+                Instr::StoreVar(1),
+                Instr::LoadVar(0),
+                Instr::LoadConst(3.0),
+                Instr::Mul,
+                Instr::StoreVar(2),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 3,
+            input_slots: vec![0],
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: vec![1, 2],
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            ..FunctionBytecode::default()
+        },
+    );
+
+    let bytecode = Bytecode {
+        bound_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(4.0),
+                Instr::CallFunctionMulti {
+                    identity: ::runmat_hir::CallableIdentity::ExternalName(
+                        ::runmat_hir::QualifiedName(vec![
+                            ::runmat_hir::SymbolName("pkg".to_string()),
+                            ::runmat_hir::SymbolName("remote_pair".to_string()),
+                        ]),
+                    ),
+                    fallback_policy: ::runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+                    arg_count: 1,
+                    out_count: 2,
+                },
+                Instr::Unpack(2),
+                Instr::StoreVar(0),
+                Instr::StoreVar(1),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_ok(),
+        "well-formed external identity should resolve through semantic registry"
+    );
+    assert_eq!(vars[0], Value::Num(12.0));
+    assert_eq!(vars[1], Value::Num(8.0));
+}
+
+#[test]
+fn test_jit_named_multi_output_call_does_not_resolve_malformed_external_identity() {
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+
+    let function = runmat_hir::FunctionId(1);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
+        function,
+        FunctionBytecode {
+            function,
+            display_name: "pkg..remote_pair".to_string(),
+            source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(2.0),
+                Instr::Mul,
+                Instr::StoreVar(1),
+                Instr::LoadVar(0),
+                Instr::LoadConst(3.0),
+                Instr::Mul,
+                Instr::StoreVar(2),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 3,
+            input_slots: vec![0],
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: vec![1, 2],
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            ..FunctionBytecode::default()
+        },
+    );
+
+    let bytecode = Bytecode {
+        bound_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(4.0),
+                Instr::CallFunctionMulti {
+                    identity: ::runmat_hir::CallableIdentity::ExternalName(
+                        ::runmat_hir::QualifiedName(vec![::runmat_hir::SymbolName(
+                            "pkg..remote_pair".to_string(),
+                        )]),
+                    ),
+                    fallback_policy: ::runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+                    arg_count: 1,
+                    out_count: 2,
+                },
+                Instr::Unpack(2),
+                Instr::StoreVar(0),
+                Instr::StoreVar(1),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    let err = engine
+        .execute_or_compile(&bytecode, &mut vars)
+        .expect_err("malformed external identity should remain unresolved");
+    assert!(
+        err.to_string().contains("Undefined function")
+            && err.to_string().contains("pkg..remote_pair"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
@@ -1238,11 +2133,11 @@ fn test_jit_function_compilation_attempts() {
     let function_instructions_bytecode = Bytecode::with_instructions(
         vec![
             Instr::LoadConst(42.0),
-            Instr::LoadLocal(0),  // Should be handled gracefully
-            Instr::StoreLocal(1), // Should be handled gracefully
-            Instr::EnterScope(5), // Should be handled gracefully
-            Instr::ExitScope(5),  // Should be handled gracefully
-            Instr::CallFunction("test".to_string(), 1), // Should trigger fallback
+            Instr::LoadLocal(0),            // Should be handled gracefully
+            Instr::StoreLocal(1),           // Should be handled gracefully
+            Instr::EnterScope(5),           // Should be handled gracefully
+            Instr::ExitScope(5),            // Should be handled gracefully
+            named_call_instr("test", 1, 1), // Should trigger fallback
             Instr::StoreVar(0),
         ],
         1,
@@ -1288,29 +2183,11 @@ fn test_jit_engine_statistics_with_functions() {
         let _ = engine.execute_or_compile(&jit_bytecode, &mut vars);
     }
 
-    // Now execute function code
-    let mut functions = HashMap::new();
-    functions.insert(
-        "noop".to_string(),
-        runmat_ignition::UserFunction {
-            name: "noop".to_string(),
-            params: vec![],
-            outputs: vec![],
-            body: vec![],
-            local_var_count: 0,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
-            source_id: None,
-        },
-    );
+    let function_bytecode = Bytecode::with_instructions(vec![named_call_instr("noop", 0, 1)], 1);
 
-    let function_bytecode = Bytecode {
-        functions,
-        ..Bytecode::with_instructions(vec![Instr::CallFunction("noop".to_string(), 0)], 1)
-    };
-
-    let _ = engine.execute_or_compile(&function_bytecode, &mut vars);
+    assert!(engine
+        .execute_or_compile(&function_bytecode, &mut vars)
+        .is_err());
 
     // Get statistics (should not crash)
     let stats = engine.stats();
@@ -1324,57 +2201,47 @@ fn test_jit_engine_statistics_with_functions() {
 
 #[test]
 fn test_jit_simple_function_compilation() {
-    // Test: Simple arithmetic function should compile to native JIT code
+    // Test: Simple semantic arithmetic function should compile to native JIT code
     if !TurbineEngine::is_jit_supported() {
         return; // Skip on unsupported platforms
     }
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
-    // Create a simple function: double(x) = x * 2
-    let mut functions = HashMap::new();
-    functions.insert(
-        "double".to_string(),
-        runmat_ignition::UserFunction {
-            name: "double".to_string(),
-            params: vec![runmat_hir::VarId(0)],
-            outputs: vec![runmat_hir::VarId(1)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(1),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::Binary(
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                        runmat_parser::BinOp::Mul,
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Number("2".to_string()),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                    ),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false,
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 2,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
+    let function = runmat_hir::FunctionId(1);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
+        function,
+        FunctionBytecode {
+            function,
+            display_name: "double".to_string(),
             source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(2.0),
+                Instr::Mul,
+                Instr::StoreVar(1),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 2,
+            input_slots: vec![0],
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: vec![1],
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            ..FunctionBytecode::default()
         },
     );
 
     let bytecode = Bytecode {
-        functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(5.0),
-                Instr::CallFunction("double".to_string(), 1),
+                named_call_instr("double", 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1420,113 +2287,70 @@ fn test_jit_nested_function_calls_compilation() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
-    // Create two functions: add(a,b) = a + b, multiply_and_add(x) = add(x*2, x*3)
-    let mut functions = HashMap::new();
-
-    functions.insert(
-        "add".to_string(),
-        runmat_ignition::UserFunction {
-            name: "add".to_string(),
-            params: vec![runmat_hir::VarId(0), runmat_hir::VarId(1)],
-            outputs: vec![runmat_hir::VarId(2)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(2),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::Binary(
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                        runmat_parser::BinOp::Add,
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(1)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                    ),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false, // Assignment suppression flag for test
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 3,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
+    let add = runmat_hir::FunctionId(1);
+    let multiply_and_add = runmat_hir::FunctionId(2);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
+        add,
+        FunctionBytecode {
+            function: add,
+            display_name: "add".to_string(),
             source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadVar(1),
+                Instr::Add,
+                Instr::StoreVar(2),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 3,
+            input_slots: vec![0, 1],
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: vec![2],
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            ..FunctionBytecode::default()
         },
     );
-
-    functions.insert(
-        "multiply_and_add".to_string(),
-        runmat_ignition::UserFunction {
-            name: "multiply_and_add".to_string(),
-            params: vec![runmat_hir::VarId(3)],
-            outputs: vec![runmat_hir::VarId(4)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(4),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::FuncCall(
-                        "add".to_string(),
-                        vec![
-                            runmat_hir::HirExpr {
-                                kind: runmat_hir::HirExprKind::Binary(
-                                    Box::new(runmat_hir::HirExpr {
-                                        kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(3)),
-                                        ty: Type::Num,
-                                        span: runmat_hir::Span::default(),
-                                    }),
-                                    runmat_parser::BinOp::Mul,
-                                    Box::new(runmat_hir::HirExpr {
-                                        kind: runmat_hir::HirExprKind::Number("2".to_string()),
-                                        ty: Type::Num,
-                                        span: runmat_hir::Span::default(),
-                                    }),
-                                ),
-                                ty: Type::Num,
-                                span: runmat_hir::Span::default(),
-                            },
-                            runmat_hir::HirExpr {
-                                kind: runmat_hir::HirExprKind::Binary(
-                                    Box::new(runmat_hir::HirExpr {
-                                        kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(3)),
-                                        ty: Type::Num,
-                                        span: runmat_hir::Span::default(),
-                                    }),
-                                    runmat_parser::BinOp::Mul,
-                                    Box::new(runmat_hir::HirExpr {
-                                        kind: runmat_hir::HirExprKind::Number("3".to_string()),
-                                        ty: Type::Num,
-                                        span: runmat_hir::Span::default(),
-                                    }),
-                                ),
-                                ty: Type::Num,
-                                span: runmat_hir::Span::default(),
-                            },
-                        ],
-                    ),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false, // Assignment suppression flag for test
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 5,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
+    bound_functions.insert(
+        multiply_and_add,
+        FunctionBytecode {
+            function: multiply_and_add,
+            display_name: "multiply_and_add".to_string(),
             source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(2.0),
+                Instr::Mul,
+                Instr::LoadVar(0),
+                Instr::LoadConst(3.0),
+                Instr::Mul,
+                Instr::CallSemanticFunctionMulti(add, 2, 1),
+                Instr::StoreVar(1),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 2,
+            input_slots: vec![0],
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: vec![1],
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            ..FunctionBytecode::default()
         },
     );
 
     let bytecode = Bytecode {
-        functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(4.0),
-                Instr::CallFunction("multiply_and_add".to_string(), 1),
+                named_call_instr("multiply_and_add", 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1567,52 +2391,42 @@ fn test_jit_function_parameter_validation() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
-    // Create a function that expects 2 parameters
-    let mut functions = HashMap::new();
-    functions.insert(
-        "add_two".to_string(),
-        runmat_ignition::UserFunction {
-            name: "add_two".to_string(),
-            params: vec![runmat_hir::VarId(0), runmat_hir::VarId(1)],
-            outputs: vec![runmat_hir::VarId(2)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(2),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::Binary(
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                        runmat_parser::BinOp::Add,
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(1)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                    ),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false,
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 3,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
+    let function = runmat_hir::FunctionId(1);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
+        function,
+        FunctionBytecode {
+            function,
+            display_name: "add_two".to_string(),
             source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadVar(1),
+                Instr::Add,
+                Instr::StoreVar(2),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 3,
+            input_slots: vec![0, 1],
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: vec![2],
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            ..FunctionBytecode::default()
         },
     );
 
     // Test with wrong number of arguments (should fallback to interpreter which will handle the error)
     let bytecode_wrong_args = Bytecode {
-        functions: functions.clone(),
+        bound_functions: bound_functions.clone(),
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(5.0),
                 // Only 1 argument but function expects 2
-                Instr::CallFunction("add_two".to_string(), 1),
+                named_call_instr("add_two", 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1632,12 +2446,12 @@ fn test_jit_function_parameter_validation() {
 
     // Test with correct number of arguments
     let bytecode_correct = Bytecode {
-        functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(3.0),
                 Instr::LoadConst(7.0),
-                Instr::CallFunction("add_two".to_string(), 2),
+                named_call_instr("add_two", 2, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1665,52 +2479,42 @@ fn test_jit_function_variable_isolation() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
-    // Create a function that uses local variables
-    let mut functions = HashMap::new();
-    functions.insert(
-        "isolate_test".to_string(),
-        runmat_ignition::UserFunction {
-            name: "isolate_test".to_string(),
-            params: vec![runmat_hir::VarId(0)],
-            outputs: vec![runmat_hir::VarId(1)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(1),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::Binary(
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                        runmat_parser::BinOp::Add,
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Number("42".to_string()),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                    ),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false,
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 2,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
+    let function = runmat_hir::FunctionId(1);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
+        function,
+        FunctionBytecode {
+            function,
+            display_name: "isolate_test".to_string(),
             source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(42.0),
+                Instr::Add,
+                Instr::StoreVar(1),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 2,
+            input_slots: vec![0],
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: vec![1],
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            ..FunctionBytecode::default()
         },
     );
 
     let bytecode = Bytecode {
-        functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(100.0),
                 Instr::StoreVar(1), // Store in global var 1
                 Instr::LoadConst(8.0),
-                Instr::CallFunction("isolate_test".to_string(), 1),
+                named_call_instr("isolate_test", 1, 1),
                 Instr::StoreVar(0),
             ],
             2,
@@ -1749,76 +2553,44 @@ fn test_jit_function_compilation_performance() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
-    // Create a computationally intensive function
-    let mut functions = HashMap::new();
-    functions.insert(
-        "compute_intensive".to_string(),
-        runmat_ignition::UserFunction {
-            name: "compute_intensive".to_string(),
-            params: vec![runmat_hir::VarId(0)],
-            outputs: vec![runmat_hir::VarId(1)],
-            body: vec![
-                // temp = x * x
-                runmat_hir::HirStmt::Assign(
-                    runmat_hir::VarId(2),
-                    runmat_hir::HirExpr {
-                        kind: runmat_hir::HirExprKind::Binary(
-                            Box::new(runmat_hir::HirExpr {
-                                kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                                ty: Type::Num,
-                                span: runmat_hir::Span::default(),
-                            }),
-                            runmat_parser::BinOp::Mul,
-                            Box::new(runmat_hir::HirExpr {
-                                kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                                ty: Type::Num,
-                                span: runmat_hir::Span::default(),
-                            }),
-                        ),
-                        ty: Type::Num,
-                        span: runmat_hir::Span::default(),
-                    },
-                    false, // Assignment suppression flag for test
-                    runmat_hir::Span::default(),
-                ),
-                // result = temp + temp
-                runmat_hir::HirStmt::Assign(
-                    runmat_hir::VarId(1),
-                    runmat_hir::HirExpr {
-                        kind: runmat_hir::HirExprKind::Binary(
-                            Box::new(runmat_hir::HirExpr {
-                                kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(2)),
-                                ty: Type::Num,
-                                span: runmat_hir::Span::default(),
-                            }),
-                            runmat_parser::BinOp::Add,
-                            Box::new(runmat_hir::HirExpr {
-                                kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(2)),
-                                ty: Type::Num,
-                                span: runmat_hir::Span::default(),
-                            }),
-                        ),
-                        ty: Type::Num,
-                        span: runmat_hir::Span::default(),
-                    },
-                    false, // Assignment suppression flag for test
-                    runmat_hir::Span::default(),
-                ),
-            ],
-            local_var_count: 3,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
+    let function = runmat_hir::FunctionId(1);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
+        function,
+        FunctionBytecode {
+            function,
+            display_name: "compute_intensive".to_string(),
             source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadVar(0),
+                Instr::Mul,
+                Instr::StoreVar(2),
+                Instr::LoadVar(2),
+                Instr::LoadVar(2),
+                Instr::Add,
+                Instr::StoreVar(1),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 3,
+            input_slots: vec![0],
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: vec![1],
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            ..FunctionBytecode::default()
         },
     );
 
     let bytecode = Bytecode {
-        functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(6.0),
-                Instr::CallFunction("compute_intensive".to_string(), 1),
+                named_call_instr("compute_intensive", 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1866,7 +2638,7 @@ fn test_jit_function_error_handling() {
     let bytecode_undefined = Bytecode::with_instructions(
         vec![
             Instr::LoadConst(5.0),
-            Instr::CallFunction("undefined_function".to_string(), 1),
+            named_call_instr("undefined_function", 1, 1),
             Instr::StoreVar(0),
         ],
         1,
@@ -1878,38 +2650,35 @@ fn test_jit_function_error_handling() {
     // Should get an error about undefined function
     assert!(result.is_err(), "Undefined function should cause error");
 
-    // Test compilation that might fail and fallback to interpreter
-    let mut functions = HashMap::new();
-    functions.insert(
-        "simple".to_string(),
-        runmat_ignition::UserFunction {
-            name: "simple".to_string(),
-            params: vec![runmat_hir::VarId(0)],
-            outputs: vec![runmat_hir::VarId(1)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(1),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false, // Assignment suppression flag for test
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 2,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
+    let function = runmat_hir::FunctionId(1);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
+        function,
+        FunctionBytecode {
+            function,
+            display_name: "simple".to_string(),
             source_id: None,
+            instructions: vec![Instr::LoadVar(0), Instr::StoreVar(1)],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 2,
+            input_slots: vec![0],
+            varargin_slot: None,
+            implicit_nargin_slot: None,
+            output_slots: vec![1],
+            varargout_slot: None,
+            implicit_nargout_slot: None,
+            capture_slots: Vec::new(),
+            ..FunctionBytecode::default()
         },
     );
 
     let bytecode_simple = Bytecode {
-        functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(42.0),
-                Instr::CallFunction("simple".to_string(), 1),
+                named_call_instr("simple", 1, 1),
                 Instr::StoreVar(0),
             ],
             1,

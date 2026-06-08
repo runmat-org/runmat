@@ -1,6 +1,10 @@
 //! MATLAB-compatible `strcat` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{CellArray, CharArray, StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
@@ -43,20 +47,106 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "strcat";
-const ERROR_NOT_ENOUGH_INPUTS: &str = "strcat: not enough input arguments";
-const ERROR_INVALID_INPUT: &str =
-    "strcat: inputs must be strings, character arrays, or cell arrays of character vectors";
-const ERROR_INVALID_CELL_ELEMENT: &str =
-    "strcat: cell array elements must be character vectors or string scalars";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
+const STRCAT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Concatenated text preserving strcat output container semantics.",
+}];
+
+const STRCAT_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "str1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First text input (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "str2",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional text inputs to concatenate element-wise.",
+    },
+];
+
+const STRCAT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "out = strcat(str1, str2, ...)",
+    inputs: &STRCAT_INPUTS,
+    outputs: &STRCAT_OUTPUT,
+}];
+
+const STRCAT_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRCAT.NOT_ENOUGH_INPUTS",
+    identifier: Some("RunMat:strcat:NotEnoughInputs"),
+    when: "No arguments are supplied.",
+    message: "strcat: not enough input arguments",
+};
+
+const STRCAT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRCAT.INVALID_INPUT",
+    identifier: Some("RunMat:strcat:InvalidInput"),
+    when: "An input is not a string, character array, or cell array of text scalars.",
+    message:
+        "strcat: inputs must be strings, character arrays, or cell arrays of character vectors",
+};
+
+const STRCAT_ERROR_INVALID_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRCAT.CELL_ELEMENT",
+    identifier: Some("RunMat:strcat:CellElement"),
+    when: "A cell array contains a non-text element or non-row char array element.",
+    message: "strcat: cell array elements must be character vectors or string scalars",
+};
+
+const STRCAT_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRCAT.SIZE_MISMATCH",
+    identifier: Some("RunMat:strcat:SizeMismatch"),
+    when: "Input shapes are not broadcast-compatible.",
+    message: "strcat: array sizes are not compatible for broadcasting",
+};
+
+const STRCAT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRCAT.INTERNAL",
+    identifier: Some("RunMat:strcat:InternalError"),
+    when: "Internal output container construction failed.",
+    message: "strcat: internal error",
+};
+
+const STRCAT_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    STRCAT_ERROR_NOT_ENOUGH_INPUTS,
+    STRCAT_ERROR_INVALID_INPUT,
+    STRCAT_ERROR_INVALID_CELL_ELEMENT,
+    STRCAT_ERROR_SIZE_MISMATCH,
+    STRCAT_ERROR_INTERNAL,
+];
+
+pub const STRCAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STRCAT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STRCAT_ERRORS,
+};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
+}
+
+fn strcat_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn strcat_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    strcat_error_with_message(error.message, error)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -87,7 +177,7 @@ impl TextOperand {
             Value::StringArray(sa) => Ok(Self::from_string_array(sa)),
             Value::CharArray(ca) => Self::from_char_array(&ca),
             Value::Cell(ca) => Self::from_cell_array(&ca),
-            _ => Err(runtime_error_for(ERROR_INVALID_INPUT)),
+            _ => Err(strcat_error(&STRCAT_ERROR_INVALID_INPUT)),
         }
     }
 
@@ -251,23 +341,24 @@ fn cell_element_to_text(value: &Value) -> BuiltinResult<TextElement> {
                 missing: false,
             })
         }
-        Value::CharArray(_) => Err(runtime_error_for(ERROR_INVALID_CELL_ELEMENT)),
-        _ => Err(runtime_error_for(ERROR_INVALID_CELL_ELEMENT)),
+        Value::CharArray(_) => Err(strcat_error(&STRCAT_ERROR_INVALID_CELL_ELEMENT)),
+        _ => Err(strcat_error(&STRCAT_ERROR_INVALID_CELL_ELEMENT)),
     }
 }
 
 #[runtime_builtin(
     name = "strcat",
     category = "strings/transform",
-    summary = "Concatenate strings, character arrays, or cell arrays of character vectors element-wise.",
+    summary = "Concatenate text inputs element-wise across compatible array sizes.",
     keywords = "strcat,string concatenation,character arrays,cell arrays",
     accel = "sink",
     type_resolver(text_concat_type),
+    descriptor(crate::builtins::strings::transform::strcat::STRCAT_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::strcat"
 )]
 async fn strcat_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     if rest.is_empty() {
-        return Err(runtime_error_for(ERROR_NOT_ENOUGH_INPUTS));
+        return Err(strcat_error(&STRCAT_ERROR_NOT_ENOUGH_INPUTS));
     }
 
     let mut operands = Vec::with_capacity(rest.len());
@@ -285,8 +376,13 @@ async fn strcat_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         .map(|op| op.shape.clone())
         .unwrap_or_else(|| vec![1, 1]);
     for operand in operands.iter().skip(1) {
-        output_shape = broadcast_shapes(BUILTIN_NAME, &output_shape, &operand.shape)
-            .map_err(runtime_error_for)?;
+        output_shape =
+            broadcast_shapes(BUILTIN_NAME, &output_shape, &operand.shape).map_err(|e| {
+                strcat_error_with_message(
+                    format!("{}: {e}", STRCAT_ERROR_SIZE_MISMATCH.message),
+                    &STRCAT_ERROR_SIZE_MISMATCH,
+                )
+            })?;
     }
 
     let total_len: usize = output_shape.iter().product();
@@ -320,8 +416,9 @@ async fn strcat_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
 
 fn build_string_output(data: Vec<String>, shape: &[usize]) -> BuiltinResult<Value> {
     if data.is_empty() {
-        let array = StringArray::new(data, shape.to_vec())
-            .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+        let array = StringArray::new(data, shape.to_vec()).map_err(|e| {
+            strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
+        })?;
         return Ok(Value::StringArray(array));
     }
 
@@ -330,15 +427,17 @@ fn build_string_output(data: Vec<String>, shape: &[usize]) -> BuiltinResult<Valu
         return Ok(Value::String(data[0].clone()));
     }
 
-    let array = StringArray::new(data, shape.to_vec())
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let array = StringArray::new(data, shape.to_vec()).map_err(|e| {
+        strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
+    })?;
     Ok(Value::StringArray(array))
 }
 
 fn build_cell_output(mut data: Vec<String>, shape: &[usize]) -> BuiltinResult<Value> {
     if data.is_empty() {
-        return make_cell_with_shape(Vec::new(), shape.to_vec())
-            .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")));
+        return make_cell_with_shape(Vec::new(), shape.to_vec()).map_err(|e| {
+            strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
+        });
     }
     if shape.len() > 1 {
         let mut reordered = vec![String::new(); data.len()];
@@ -354,15 +453,17 @@ fn build_cell_output(mut data: Vec<String>, shape: &[usize]) -> BuiltinResult<Va
         let char_array = CharArray::new_row(&text);
         values.push(Value::CharArray(char_array));
     }
-    make_cell_with_shape(values, shape.to_vec())
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+    make_cell_with_shape(values, shape.to_vec()).map_err(|e| {
+        strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
+    })
 }
 
 fn build_char_output(data: Vec<String>) -> BuiltinResult<Value> {
     let rows = data.len();
     if rows == 0 {
-        let array = CharArray::new(Vec::new(), 0, 0)
-            .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+        let array = CharArray::new(Vec::new(), 0, 0).map_err(|e| {
+            strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
+        })?;
         return Ok(Value::CharArray(array));
     }
 
@@ -375,8 +476,9 @@ fn build_char_output(data: Vec<String>) -> BuiltinResult<Value> {
         }
         chars.extend(row_chars.into_iter());
     }
-    let array = CharArray::new(chars, rows, max_cols)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let array = CharArray::new(chars, rows, max_cols).map_err(|e| {
+        strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
+    })?;
     Ok(Value::CharArray(array))
 }
 
@@ -604,7 +706,11 @@ pub(crate) mod tests {
     #[test]
     fn strcat_errors_on_invalid_input_type() {
         let err = run_strcat(vec![Value::Int(IntValue::I32(4))]).expect_err("expected error");
-        assert!(err.to_string().contains("inputs must be strings"));
+        assert_eq!(err.to_string(), STRCAT_ERROR_INVALID_INPUT.message);
+        assert_eq!(
+            err.identifier.as_deref(),
+            STRCAT_ERROR_INVALID_INPUT.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -614,10 +720,12 @@ pub(crate) mod tests {
         let right = CharArray::new(vec!['C', 'D', 'E'], 3, 1).expect("char");
         let err = run_strcat(vec![Value::CharArray(left), Value::CharArray(right)])
             .expect_err("expected broadcast error");
-        let err_text = err.to_string();
-        assert!(
-            err_text.contains("size mismatch"),
-            "unexpected error text: {err_text}"
+        assert!(err
+            .to_string()
+            .starts_with(STRCAT_ERROR_SIZE_MISMATCH.message));
+        assert_eq!(
+            err.identifier.as_deref(),
+            STRCAT_ERROR_SIZE_MISMATCH.identifier
         );
     }
 
@@ -626,16 +734,22 @@ pub(crate) mod tests {
     fn strcat_errors_on_invalid_cell_element() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell");
         let err = run_strcat(vec![Value::Cell(cell)]).expect_err("expected error");
-        assert!(err
-            .to_string()
-            .contains("cell array elements must be character vectors"));
+        assert_eq!(err.to_string(), STRCAT_ERROR_INVALID_CELL_ELEMENT.message);
+        assert_eq!(
+            err.identifier.as_deref(),
+            STRCAT_ERROR_INVALID_CELL_ELEMENT.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_errors_on_empty_argument_list() {
         let err = run_strcat(Vec::new()).expect_err("expected error");
-        assert_eq!(err.to_string(), ERROR_NOT_ENOUGH_INPUTS);
+        assert_eq!(err.to_string(), STRCAT_ERROR_NOT_ENOUGH_INPUTS.message);
+        assert_eq!(
+            err.identifier.as_deref(),
+            STRCAT_ERROR_NOT_ENOUGH_INPUTS.identifier
+        );
     }
 
     #[cfg(feature = "wgpu")]
@@ -650,7 +764,7 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             let err = run_strcat(vec![Value::GpuTensor(handle)]).expect_err("expected error");
-            assert!(err.to_string().contains("inputs must be strings"));
+            assert_eq!(err.to_string(), STRCAT_ERROR_INVALID_INPUT.message);
         });
     }
 

@@ -1,5 +1,9 @@
 //! MATLAB-compatible `upper` builtin with GPU-aware semantics for RunMat.
-use runmat_builtins::{CellArray, CharArray, StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -40,28 +44,91 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "upper";
-const ARG_TYPE_ERROR: &str =
-    "upper: first argument must be a string array, character array, or cell array of character vectors";
-const CELL_ELEMENT_ERROR: &str =
-    "upper: cell array elements must be string scalars or character vectors";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
+const UPPER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Uppercased text preserving input container kind and shape.",
+}];
+
+const UPPER_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "str",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "String/char/cell text input to transform.",
+}];
+
+const UPPER_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "out = upper(str)",
+    inputs: &UPPER_INPUTS,
+    outputs: &UPPER_OUTPUT,
+}];
+
+const UPPER_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UPPER.INVALID_INPUT",
+    identifier: Some("RunMat:upper:InvalidInput"),
+    when: "Input is not a string array, character array, or cell array of text scalars.",
+    message:
+        "upper: first argument must be a string array, character array, or cell array of character vectors",
+};
+
+const UPPER_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UPPER.CELL_ELEMENT",
+    identifier: Some("RunMat:upper:CellElement"),
+    when: "Cell array contains a non-text element or non-row char array element.",
+    message: "upper: cell array elements must be string scalars or character vectors",
+};
+
+const UPPER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UPPER.INTERNAL",
+    identifier: Some("RunMat:upper:InternalError"),
+    when: "Internal output container construction failed.",
+    message: "upper: internal error",
+};
+
+const UPPER_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    UPPER_ERROR_INVALID_INPUT,
+    UPPER_ERROR_CELL_ELEMENT,
+    UPPER_ERROR_INTERNAL,
+];
+
+pub const UPPER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &UPPER_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &UPPER_ERRORS,
+};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
 
+fn upper_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn upper_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    upper_error_with_message(error.message, error)
+}
+
 #[runtime_builtin(
     name = "upper",
     category = "strings/transform",
-    summary = "Convert strings, character arrays, and cell arrays of character vectors to uppercase.",
+    summary = "Convert text inputs to uppercase character forms.",
     keywords = "upper,uppercase,strings,character array,text",
     accel = "sink",
     type_resolver(text_preserve_type),
+    descriptor(crate::builtins::strings::transform::upper::UPPER_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::upper"
 )]
 async fn upper_builtin(value: Value) -> BuiltinResult<Value> {
@@ -71,7 +138,7 @@ async fn upper_builtin(value: Value) -> BuiltinResult<Value> {
         Value::StringArray(array) => upper_string_array(array),
         Value::CharArray(array) => upper_char_array(array),
         Value::Cell(cell) => upper_cell_array(cell),
-        _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
+        _ => Err(upper_error(&UPPER_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -81,8 +148,9 @@ fn upper_string_array(array: StringArray) -> BuiltinResult<Value> {
         .into_iter()
         .map(uppercase_preserving_missing)
         .collect::<Vec<_>>();
-    let upper_array = StringArray::new(uppered, shape)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let upper_array = StringArray::new(uppered, shape).map_err(|e| {
+        upper_error_with_message(format!("{BUILTIN_NAME}: {e}"), &UPPER_ERROR_INTERNAL)
+    })?;
     Ok(Value::StringArray(upper_array))
 }
 
@@ -112,7 +180,9 @@ fn upper_char_array(array: CharArray) -> BuiltinResult<Value> {
 
     CharArray::new(upper_data, rows, target_cols)
         .map(Value::CharArray)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+        .map_err(|e| {
+            upper_error_with_message(format!("{BUILTIN_NAME}: {e}"), &UPPER_ERROR_INTERNAL)
+        })
 }
 
 fn upper_cell_array(cell: CellArray) -> BuiltinResult<Value> {
@@ -127,8 +197,9 @@ fn upper_cell_array(cell: CellArray) -> BuiltinResult<Value> {
             upper_values.push(upper);
         }
     }
-    make_cell(upper_values, rows, cols)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+    make_cell(upper_values, rows, cols).map_err(|e| {
+        upper_error_with_message(format!("{BUILTIN_NAME}: {e}"), &UPPER_ERROR_INTERNAL)
+    })
 }
 
 fn upper_cell_element(value: &Value) -> BuiltinResult<Value> {
@@ -138,8 +209,8 @@ fn upper_cell_element(value: &Value) -> BuiltinResult<Value> {
             uppercase_preserving_missing(sa.data[0].clone()),
         )),
         Value::CharArray(ca) if ca.rows <= 1 => upper_char_array(ca.clone()),
-        Value::CharArray(_) => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
-        _ => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+        Value::CharArray(_) => Err(upper_error(&UPPER_ERROR_CELL_ELEMENT)),
+        _ => Err(upper_error(&UPPER_ERROR_CELL_ELEMENT)),
     }
 }
 
@@ -267,7 +338,7 @@ pub(crate) mod tests {
     #[test]
     fn upper_errors_on_invalid_input() {
         let err = run_upper(Value::Num(1.0)).unwrap_err();
-        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
+        assert_eq!(err.to_string(), UPPER_ERROR_INVALID_INPUT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -275,7 +346,7 @@ pub(crate) mod tests {
     fn upper_cell_errors_on_invalid_element() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
         let err = run_upper(Value::Cell(cell)).unwrap_err();
-        assert_eq!(err.to_string(), CELL_ELEMENT_ERROR);
+        assert_eq!(err.to_string(), UPPER_ERROR_CELL_ELEMENT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -317,7 +388,7 @@ pub(crate) mod tests {
             })
             .expect("upload");
         let err = run_upper(Value::GpuTensor(handle.clone())).unwrap_err();
-        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
+        assert_eq!(err.to_string(), UPPER_ERROR_INVALID_INPUT.message);
         provider.free(&handle).ok();
     }
 

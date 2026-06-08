@@ -1,6 +1,6 @@
 [package]
 name = "runmat-macros"
-version = "0.2.8"
+version = "0.5.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
@@ -20,4 +20,3 @@ runmat-builtins = { workspace = true }
 
 [dev-dependencies]
 trybuild = "1"
-runmat-async = { workspace = true }

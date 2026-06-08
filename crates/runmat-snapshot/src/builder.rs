@@ -516,14 +516,16 @@ impl SnapshotBuilder {
         _name: &str,
         category: &BuiltinCategory,
     ) -> OptimizationLevel {
-        match category {
+        let inferred = match category {
             BuiltinCategory::LinearAlgebra | BuiltinCategory::MatrixOps => {
                 OptimizationLevel::MaxPerformance
             }
             BuiltinCategory::Math | BuiltinCategory::Trigonometric => OptimizationLevel::Aggressive,
             BuiltinCategory::Statistics => OptimizationLevel::Basic,
             _ => OptimizationLevel::None,
-        }
+        };
+
+        cap_optimization_level(inferred, self.config.max_optimization_level)
     }
 
     /// Build HIR cache for standard library functions
@@ -607,18 +609,18 @@ impl SnapshotBuilder {
         ]
     }
 
-    /// Compile source to HIR
-    fn compile_to_hir(&self, source: &str) -> Result<runmat_hir::HirProgram> {
+    /// Compile source to semantic HIR
+    fn compile_to_hir(&self, source: &str) -> Result<runmat_hir::HirAssembly> {
         let ast = runmat_parser::parse(source).map_err(|e| anyhow::anyhow!(e))?;
         let hir =
             runmat_hir::lower(&ast, &LoweringContext::empty()).map_err(|e| anyhow::anyhow!(e))?;
-        Ok(hir.hir)
+        Ok(hir.assembly)
     }
 
     /// Extract type information from HIR
     fn extract_type_info(
         &self,
-        _hir: &runmat_hir::HirProgram,
+        _hir: &runmat_hir::HirAssembly,
         _type_cache: &mut HashMap<String, runmat_hir::Type>,
     ) {
         // Type extraction would analyze HIR and populate type cache
@@ -646,13 +648,10 @@ impl SnapshotBuilder {
     }
 
     /// Create HIR pattern (simplified)
-    fn create_pattern_hir(&self, source: &str) -> runmat_hir::HirProgram {
+    fn create_pattern_hir(&self, source: &str) -> runmat_hir::HirAssembly {
         self.compile_to_hir(source).unwrap_or_else(|_| {
             // Fallback to empty program
-            runmat_hir::HirProgram {
-                body: Vec::new(),
-                var_types: Vec::new(),
-            }
+            runmat_hir::HirAssembly::default()
         })
     }
 
@@ -663,10 +662,16 @@ impl SnapshotBuilder {
         let mut stdlib_bytecode = HashMap::new();
         let mut operation_sequences = Vec::new();
         let mut hotspots = Vec::new();
+        let stdlib_sources: HashMap<_, _> =
+            self.get_stdlib_function_sources().into_iter().collect();
 
         // Compile HIR functions to bytecode
         for (name, hir) in &hir_cache.functions {
-            match runmat_ignition::compile(hir, &HashMap::new()) {
+            let compiled = stdlib_sources
+                .get(name)
+                .map(|source| self.compile_source_to_bytecode(source))
+                .unwrap_or_else(|| self.compile_assembly_to_bytecode(hir));
+            match compiled {
                 Ok(bytecode) => {
                     stdlib_bytecode.insert(name.clone(), bytecode);
 
@@ -727,18 +732,39 @@ impl SnapshotBuilder {
     }
 
     /// Create bytecode for sequence
-    fn create_sequence_bytecode(&self, source: &str) -> runmat_ignition::Bytecode {
-        match self.compile_to_hir(source) {
-            Ok(hir) => runmat_ignition::compile(&hir, &HashMap::new())
-                .unwrap_or_else(|_| runmat_ignition::Bytecode::empty()),
-            Err(_) => runmat_ignition::Bytecode::empty(),
-        }
+    fn create_sequence_bytecode(&self, source: &str) -> runmat_vm::Bytecode {
+        self.compile_source_to_bytecode(source)
+            .unwrap_or_else(|_| runmat_vm::Bytecode::empty())
+    }
+
+    fn compile_source_to_bytecode(&self, source: &str) -> Result<runmat_vm::Bytecode> {
+        let ast = runmat_parser::parse(source).map_err(|e| anyhow::anyhow!(e))?;
+        let lowering =
+            runmat_hir::lower(&ast, &LoweringContext::empty()).map_err(|e| anyhow::anyhow!(e))?;
+        self.compile_assembly_to_bytecode(&lowering.assembly)
+    }
+
+    fn compile_assembly_to_bytecode(
+        &self,
+        assembly: &runmat_hir::HirAssembly,
+    ) -> Result<runmat_vm::Bytecode> {
+        let entrypoint = assembly
+            .entrypoints
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("semantic HIR assembly has no entrypoint"))?;
+        let mir = runmat_mir::lowering::lower_assembly(assembly).map_err(|err| {
+            anyhow::anyhow!(format!(
+                "failed to lower semantic HIR assembly to MIR: {err:?}"
+            ))
+        })?;
+        let _analysis = runmat_mir::analysis::analyze_assembly(&mir);
+        runmat_vm::compile(assembly, &mir, entrypoint.id).map_err(Into::into)
     }
 
     /// Identify hotspot bytecode for JIT optimization
     fn identify_hotspot_bytecode(
         &self,
-        stdlib_bytecode: &HashMap<String, runmat_ignition::Bytecode>,
+        stdlib_bytecode: &HashMap<String, runmat_vm::Bytecode>,
     ) -> Vec<HotspotBytecode> {
         let mut hotspots = Vec::new();
 
@@ -758,7 +784,7 @@ impl SnapshotBuilder {
     }
 
     /// Check if bytecode is a hotspot candidate
-    fn is_hotspot_candidate(&self, name: &str, bytecode: &runmat_ignition::Bytecode) -> bool {
+    fn is_hotspot_candidate(&self, name: &str, bytecode: &runmat_vm::Bytecode) -> bool {
         // Functions with loops or many instructions are good candidates
         bytecode.instructions.len() > 10
             || name.contains("loop")
@@ -766,7 +792,7 @@ impl SnapshotBuilder {
             || bytecode.instructions.iter().any(|instr| {
                 matches!(
                     instr,
-                    runmat_ignition::Instr::Jump(_) | runmat_ignition::Instr::JumpIfFalse(_)
+                    runmat_vm::Instr::Jump(_) | runmat_vm::Instr::JumpIfFalse(_)
                 )
             })
     }
@@ -798,7 +824,7 @@ impl SnapshotBuilder {
     fn generate_bytecode_optimization_hints(
         &self,
         name: &str,
-        _bytecode: &runmat_ignition::Bytecode,
+        _bytecode: &runmat_vm::Bytecode,
     ) -> Vec<OptimizationHint> {
         let mut hints = Vec::new();
 
@@ -915,7 +941,7 @@ impl SnapshotBuilder {
                 jit_hints.push(JitHint {
                     pattern: builtin.name.clone(),
                     hint_type: self.determine_jit_hint_type(&builtin.category),
-                    priority: builtin.optimization_level.clone(),
+                    priority: builtin.optimization_level,
                     expected_performance_gain: self
                         .estimate_jit_performance_gain(&builtin.complexity),
                 });
@@ -1197,6 +1223,26 @@ impl SnapshotBuilder {
     }
 }
 
+fn cap_optimization_level(
+    inferred: OptimizationLevel,
+    max_level: OptimizationLevel,
+) -> OptimizationLevel {
+    if optimization_rank(inferred) > optimization_rank(max_level) {
+        max_level
+    } else {
+        inferred
+    }
+}
+
+fn optimization_rank(level: OptimizationLevel) -> u8 {
+    match level {
+        OptimizationLevel::None => 0,
+        OptimizationLevel::Basic => 1,
+        OptimizationLevel::Aggressive => 2,
+        OptimizationLevel::MaxPerformance => 3,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1280,6 +1326,32 @@ mod tests {
             builder.infer_computational_complexity("abs"),
             ComputationalComplexity::Constant
         ));
+    }
+
+    #[test]
+    fn test_optimization_level_respects_config_cap() {
+        let config = SnapshotConfig {
+            max_optimization_level: OptimizationLevel::Basic,
+            ..SnapshotConfig::default()
+        };
+        let builder = SnapshotBuilder::new(config);
+
+        assert_eq!(
+            builder.infer_optimization_level("matmul", &BuiltinCategory::LinearAlgebra),
+            OptimizationLevel::Basic
+        );
+        assert_eq!(
+            builder.infer_optimization_level("sin", &BuiltinCategory::Trigonometric),
+            OptimizationLevel::Basic
+        );
+        assert_eq!(
+            builder.infer_optimization_level("mean", &BuiltinCategory::Statistics),
+            OptimizationLevel::Basic
+        );
+        assert_eq!(
+            builder.infer_optimization_level("disp", &BuiltinCategory::Utility),
+            OptimizationLevel::None
+        );
     }
 
     #[test]

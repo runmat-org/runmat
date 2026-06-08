@@ -3,6 +3,8 @@
 //! Optimized for fast startup times with parallel loading, compression,
 //! and integration with the RunMat runtime.
 
+#[cfg(target_arch = "wasm32")]
+use futures::executor;
 use runmat_time::Instant;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
@@ -141,7 +143,7 @@ impl SnapshotLoader {
             "Loading snapshot via filesystem provider from {}",
             path_ref.display()
         );
-        let bytes = runmat_filesystem::read(path_ref)?;
+        let bytes = executor::block_on(runmat_filesystem::read_async(path_ref))?;
         let read_duration = start_time.elapsed();
 
         let (snapshot, _) = self.load_from_bytes(&bytes)?;
@@ -775,7 +777,8 @@ impl SnapshotLoader {
 #[cfg(target_arch = "wasm32")]
 impl SnapshotLoader {
     pub fn peek_header<P: AsRef<Path>>(path: P) -> SnapshotResult<SnapshotHeader> {
-        let bytes = runmat_filesystem::read(path.as_ref()).map_err(SnapshotError::Io)?;
+        let bytes = executor::block_on(runmat_filesystem::read_async(path.as_ref()))
+            .map_err(SnapshotError::Io)?;
         let header = parse_snapshot_header(&bytes)?;
         header.validate()?;
         Ok(header)

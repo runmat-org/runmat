@@ -80,6 +80,7 @@ pub enum GpuOpKind {
     Reduction,
     MatMul,
     Transpose,
+    PlotRender,
     Custom(&'static str),
 }
 
@@ -263,7 +264,7 @@ fn build_residency_policy_map() -> HashMap<String, ResidencyPolicy> {
 pub fn builtin_residency_policy(name: &str) -> Option<ResidencyPolicy> {
     #[cfg(target_arch = "wasm32")]
     {
-        return wasm_registry::residency_policy(name);
+        wasm_registry::residency_policy(name)
     }
 
     #[cfg(not(target_arch = "wasm32"))]

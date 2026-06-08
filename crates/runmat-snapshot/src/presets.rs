@@ -54,7 +54,8 @@ impl SnapshotPreset {
             validation_enabled: true,
             memory_mapping_enabled: true,
             parallel_loading: true,
-            progress_reporting: true,         // Helpful during development
+            progress_reporting: true, // Helpful during development
+            max_optimization_level: crate::OptimizationLevel::MaxPerformance,
             max_cache_size: 64 * 1024 * 1024, // 64MB
             cache_eviction_policy: crate::CacheEvictionPolicy::LeastRecentlyUsed,
         }
@@ -69,7 +70,8 @@ impl SnapshotPreset {
             validation_enabled: true,
             memory_mapping_enabled: true,
             parallel_loading: true,
-            progress_reporting: false,         // No progress in production
+            progress_reporting: false, // No progress in production
+            max_optimization_level: crate::OptimizationLevel::MaxPerformance,
             max_cache_size: 128 * 1024 * 1024, // 128MB
             cache_eviction_policy: crate::CacheEvictionPolicy::Adaptive,
         }
@@ -85,6 +87,7 @@ impl SnapshotPreset {
             memory_mapping_enabled: true,
             parallel_loading: true,
             progress_reporting: false,
+            max_optimization_level: crate::OptimizationLevel::MaxPerformance,
             max_cache_size: 256 * 1024 * 1024, // 256MB - more cache
             cache_eviction_policy: crate::CacheEvictionPolicy::LeastRecentlyUsed,
         }
@@ -100,6 +103,7 @@ impl SnapshotPreset {
             memory_mapping_enabled: false, // Avoid memory mapping
             parallel_loading: false,       // Reduce memory overhead
             progress_reporting: false,
+            max_optimization_level: crate::OptimizationLevel::MaxPerformance,
             max_cache_size: 16 * 1024 * 1024, // 16MB - minimal cache
             cache_eviction_policy: crate::CacheEvictionPolicy::TimeToLive(Duration::from_secs(60)),
         }
@@ -115,6 +119,7 @@ impl SnapshotPreset {
             memory_mapping_enabled: true,
             parallel_loading: true,
             progress_reporting: false,
+            max_optimization_level: crate::OptimizationLevel::MaxPerformance,
             max_cache_size: 32 * 1024 * 1024, // 32MB
             cache_eviction_policy: crate::CacheEvictionPolicy::LeastFrequentlyUsed,
         }
@@ -130,6 +135,7 @@ impl SnapshotPreset {
             memory_mapping_enabled: false, // Easier to debug without mmap
             parallel_loading: false,       // Sequential for easier debugging
             progress_reporting: true,      // Detailed progress
+            max_optimization_level: crate::OptimizationLevel::MaxPerformance,
             max_cache_size: 128 * 1024 * 1024, // 128MB
             cache_eviction_policy: crate::CacheEvictionPolicy::LeastRecentlyUsed,
         }

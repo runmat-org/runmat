@@ -5,7 +5,11 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
 use base64::Engine;
-use runmat_builtins::{CellArray, CharArray, StructValue, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StructValue, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use url::Url;
 
@@ -21,6 +25,214 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 const DEFAULT_USER_AGENT: &str = "RunMat webread/0.0";
+const BUILTIN_NAME: &str = "webread";
+
+const WEBREAD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "data",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Downloaded payload decoded as JSON, text, or binary tensor.",
+}];
+const WEBREAD_INPUTS_URL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "url",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "HTTP/HTTPS URL to fetch.",
+}];
+const WEBREAD_INPUTS_URL_OPTIONS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "url",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "HTTP/HTTPS URL to fetch.",
+    },
+    BuiltinParamDescriptor {
+        name: "optionsStruct",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "weboptions struct or option struct literal.",
+    },
+];
+const WEBREAD_INPUTS_URL_QUERY_CELL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "url",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "HTTP/HTTPS URL to fetch.",
+    },
+    BuiltinParamDescriptor {
+        name: "queryParameters",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Two-column cell array of query parameter names and values.",
+    },
+];
+const WEBREAD_INPUTS_URL_NAME_VALUE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "url",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "HTTP/HTTPS URL to fetch.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option or query parameter name.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option or query parameter value.",
+    },
+];
+const WEBREAD_INPUTS_URL_OPTIONS_NAME_VALUE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "url",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "HTTP/HTTPS URL to fetch.",
+    },
+    BuiltinParamDescriptor {
+        name: "optionsStruct",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "weboptions struct or option struct literal.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option or query parameter name.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option or query parameter value.",
+    },
+];
+
+const WEBREAD_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "data = webread(url)",
+        inputs: &WEBREAD_INPUTS_URL,
+        outputs: &WEBREAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = webread(url, optionsStruct)",
+        inputs: &WEBREAD_INPUTS_URL_OPTIONS,
+        outputs: &WEBREAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = webread(url, queryParameters)",
+        inputs: &WEBREAD_INPUTS_URL_QUERY_CELL,
+        outputs: &WEBREAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = webread(url, name, value, ...)",
+        inputs: &WEBREAD_INPUTS_URL_NAME_VALUE,
+        outputs: &WEBREAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = webread(url, optionsStruct, name, value, ...)",
+        inputs: &WEBREAD_INPUTS_URL_OPTIONS_NAME_VALUE,
+        outputs: &WEBREAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = webread(url, queryParameters, name, value, ...)",
+        inputs: &WEBREAD_INPUTS_URL_OPTIONS_NAME_VALUE,
+        outputs: &WEBREAD_OUTPUT,
+    },
+];
+
+const WEBREAD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBREAD.INVALID_ARGUMENT",
+    identifier: Some("RunMat:webread:InvalidArgument"),
+    when: "Argument type/shape does not match webread call contract.",
+    message: "webread: invalid argument",
+};
+const WEBREAD_ERROR_INVALID_URL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBREAD.INVALID_URL",
+    identifier: Some("RunMat:webread:InvalidUrl"),
+    when: "URL input is empty or invalid.",
+    message: "webread: invalid URL",
+};
+const WEBREAD_ERROR_MISSING_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBREAD.MISSING_OPTION_VALUE",
+    identifier: Some("RunMat:webread:MissingOptionValue"),
+    when: "A name-value key has no corresponding value.",
+    message: "webread: missing option value",
+};
+const WEBREAD_ERROR_INVALID_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBREAD.INVALID_OPTION_VALUE",
+    identifier: Some("RunMat:webread:InvalidOptionValue"),
+    when: "An option value fails validation.",
+    message: "webread: invalid option value",
+};
+const WEBREAD_ERROR_INVALID_CREDENTIALS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBREAD.INVALID_CREDENTIALS",
+    identifier: Some("RunMat:webread:InvalidCredentials"),
+    when: "Password is provided without username.",
+    message: "webread: invalid credentials",
+};
+const WEBREAD_ERROR_TRANSPORT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBREAD.TRANSPORT",
+    identifier: Some("RunMat:webread:Transport"),
+    when: "HTTP transport fails.",
+    message: "webread: transport failure",
+};
+const WEBREAD_ERROR_RESPONSE_JSON: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBREAD.RESPONSE_JSON",
+    identifier: Some("RunMat:webread:ResponseJson"),
+    when: "Response body cannot be decoded as JSON.",
+    message: "webread: failed to parse JSON response",
+};
+const WEBREAD_ERROR_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBREAD.OUTPUT",
+    identifier: Some("RunMat:webread:Output"),
+    when: "Output payload cannot be materialized.",
+    message: "webread: output materialization failure",
+};
+const WEBREAD_ERROR_FLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBREAD.FLOW",
+    identifier: Some("RunMat:webread:Flow"),
+    when: "Nested flow fails while gathering inputs.",
+    message: "webread: flow failure",
+};
+
+const WEBREAD_ERRORS: [BuiltinErrorDescriptor; 9] = [
+    WEBREAD_ERROR_INVALID_ARGUMENT,
+    WEBREAD_ERROR_INVALID_URL,
+    WEBREAD_ERROR_MISSING_OPTION_VALUE,
+    WEBREAD_ERROR_INVALID_OPTION_VALUE,
+    WEBREAD_ERROR_INVALID_CREDENTIALS,
+    WEBREAD_ERROR_TRANSPORT,
+    WEBREAD_ERROR_RESPONSE_JSON,
+    WEBREAD_ERROR_OUTPUT,
+    WEBREAD_ERROR_FLOW,
+];
+
+pub const WEBREAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &WEBREAD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &WEBREAD_ERRORS,
+};
 
 #[allow(clippy::too_many_lines)]
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::http::webread")]
@@ -40,21 +252,58 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn webread_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("webread").build()
+    webread_error_with(&WEBREAD_ERROR_INVALID_ARGUMENT, message)
 }
 
-fn remap_webread_flow<F>(err: RuntimeError, message: F) -> RuntimeError
+fn webread_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn webread_error_with_source<E>(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+    source: E,
+) -> RuntimeError
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn remap_webread_flow<F>(
+    error: &'static BuiltinErrorDescriptor,
+    err: RuntimeError,
+    message: F,
+) -> RuntimeError
 where
     F: FnOnce(&RuntimeError) -> String,
 {
-    build_runtime_error(message(&err))
-        .with_builtin("webread")
-        .with_source(err)
-        .build()
+    let mut builder = build_runtime_error(message(&err))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn webread_flow_with_context(err: RuntimeError) -> RuntimeError {
-    remap_webread_flow(err, |err| format!("webread: {}", err.message()))
+    remap_webread_flow(&WEBREAD_ERROR_FLOW, err, |err| {
+        format!("webread: {}", err.message())
+    })
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::http::webread")]
@@ -71,10 +320,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "webread",
     category = "io/http",
-    summary = "Download web content (JSON, text, or binary) over HTTP/HTTPS.",
+    summary = "Read web content over HTTP/HTTPS with optional request options.",
     keywords = "webread,http get,rest client,json,api",
     accel = "sink",
     type_resolver(crate::builtins::io::type_resolvers::webread_type),
+    descriptor(crate::builtins::io::http::webread::WEBREAD_DESCRIPTOR),
     builtin_path = "crate::builtins::io::http::webread"
 )]
 async fn webread_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -87,7 +337,10 @@ async fn webread_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         "webread: URL must be a character vector or string scalar",
     )?;
     if url_text.trim().is_empty() {
-        return Err(webread_error("webread: URL must not be empty"));
+        return Err(webread_error_with(
+            &WEBREAD_ERROR_INVALID_URL,
+            "webread: URL must not be empty",
+        ));
     }
     let (options, query_params) = parse_arguments(gathered_args)?;
     execute_request(&url_text, options, &query_params)
@@ -125,9 +378,12 @@ fn parse_arguments(args: Vec<Value>) -> BuiltinResult<(WebReadOptions, Vec<(Stri
             &name_value,
             "webread: parameter names must be character vectors or string scalars",
         )?;
-        let value = queue
-            .pop_front()
-            .ok_or_else(|| webread_error("webread: missing value for name-value argument"))?;
+        let value = queue.pop_front().ok_or_else(|| {
+            webread_error_with(
+                &WEBREAD_ERROR_MISSING_OPTION_VALUE,
+                "webread: missing value for name-value argument",
+            )
+        })?;
         process_name_value_pair(&name, &value, &mut options, &mut query_params)?;
     }
 
@@ -221,7 +477,8 @@ fn append_query_from_value(
             Ok(())
         }
         Value::Cell(cell) => append_query_from_cell(cell, query_params),
-        _ => Err(webread_error(
+        _ => Err(webread_error_with(
+            &WEBREAD_ERROR_INVALID_OPTION_VALUE,
             "webread: QueryParameters must be a struct or cell array",
         )),
     }
@@ -269,16 +526,18 @@ fn execute_request(
         .map(|s| !s.is_empty())
         .unwrap_or(false);
     if password_present && !username_present {
-        return Err(webread_error(
+        return Err(webread_error_with(
+            &WEBREAD_ERROR_INVALID_CREDENTIALS,
             "webread: Password requires a Username option",
         ));
     }
 
     let mut url = Url::parse(url_text).map_err(|err| {
-        build_runtime_error(format!("webread: invalid URL '{url_text}': {err}"))
-            .with_builtin("webread")
-            .with_source(err)
-            .build()
+        webread_error_with_source(
+            &WEBREAD_ERROR_INVALID_URL,
+            format!("webread: invalid URL '{url_text}': {err}"),
+            err,
+        )
     })?;
     if !query_params.is_empty() {
         {
@@ -317,10 +576,11 @@ fn execute_request(
     };
 
     let response = transport::send_request(&request).map_err(|err| {
-        build_runtime_error(err.message_with_prefix("webread"))
-            .with_builtin("webread")
-            .with_source(err)
-            .build()
+        webread_error_with_source(
+            &WEBREAD_ERROR_TRANSPORT,
+            err.message_with_prefix("webread"),
+            err,
+        )
     })?;
 
     let header_content_type =
@@ -341,8 +601,9 @@ fn execute_request(
         ResolvedContentType::Binary => {
             let data: Vec<f64> = response.body.iter().map(|b| f64::from(*b)).collect();
             let cols = response.body.len();
-            let tensor = Tensor::new(data, vec![1, cols])
-                .map_err(|err| webread_error(format!("webread: {err}")))?;
+            let tensor = Tensor::new(data, vec![1, cols]).map_err(|err| {
+                webread_error_with(&WEBREAD_ERROR_OUTPUT, format!("webread: {err}"))
+            })?;
             Ok(Value::Tensor(tensor))
         }
     }
@@ -354,10 +615,7 @@ fn map_json_error(err: RuntimeError) -> RuntimeError {
     } else {
         format!("webread: failed to parse JSON response ({})", err.message())
     };
-    build_runtime_error(message)
-        .with_builtin("webread")
-        .with_source(err)
-        .build()
+    webread_error_with_source(&WEBREAD_ERROR_RESPONSE_JSON, message, err)
 }
 
 fn parse_header_fields(value: &Value) -> BuiltinResult<Vec<(String, String)>> {
@@ -645,6 +903,19 @@ pub(crate) mod tests {
             }
         }
         String::from_utf8_lossy(&buffer).to_string()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn webread_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = WEBREAD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"data = webread(url)"));
+        assert!(labels.contains(&"data = webread(url, optionsStruct)"));
+        assert!(labels.contains(&"data = webread(url, name, value, ...)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -109,6 +109,7 @@ static AUTO_OFFLOAD_OPTIONS: Lazy<RwLock<AutoOffloadOptions>> =
     Lazy::new(|| RwLock::new(AutoOffloadOptions::default()));
 
 static API_HOOKS: Lazy<()> = Lazy::new(|| {
+    runmat_accelerate_api::register_residency_mark(fusion_residency::mark);
     runmat_accelerate_api::register_residency_clear(fusion_residency::clear);
     runmat_accelerate_api::register_sequence_threshold_provider(sequence_threshold_hint_bridge);
     runmat_accelerate_api::register_workgroup_size_hint_provider(workgroup_size_hint_bridge);
@@ -134,6 +135,7 @@ fn workgroup_size_hint_bridge() -> Option<u32> {
 }
 
 pub fn configure_auto_offload(options: AutoOffloadOptions) {
+    ensure_residency_hooks();
     if let Ok(mut guard) = AUTO_OFFLOAD_OPTIONS.write() {
         *guard = options;
     }

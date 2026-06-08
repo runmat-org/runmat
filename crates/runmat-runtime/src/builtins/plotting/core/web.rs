@@ -41,7 +41,9 @@ pub enum PlotCameraProjection {
 }
 
 fn web_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).build()
+    build_runtime_error(message)
+        .with_identifier("RunMat:plot:WebError")
+        .build()
 }
 
 #[allow(dead_code)]
@@ -49,7 +51,10 @@ fn web_error_with_source(
     message: impl Into<String>,
     source: impl std::error::Error + Send + Sync + 'static,
 ) -> RuntimeError {
-    build_runtime_error(message).with_source(source).build()
+    build_runtime_error(message)
+        .with_identifier("RunMat:plot:WebError")
+        .with_source(source)
+        .build()
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
@@ -109,6 +114,23 @@ pub(crate) mod wasm {
             let keys: Vec<u32> = slot.borrow().keys().copied().collect();
             debug!("plot-web: detached surface surface_id={surface_id} (active_surfaces={keys:?})");
         });
+    }
+
+    pub(super) fn clear_closed_figure_surfaces_impl(handle: u32) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            for entry in map.values_mut() {
+                if entry.bound_handle == Some(handle) {
+                    entry.bound_handle = None;
+                    entry.last_revision = None;
+                    entry
+                        .renderer
+                        .clear_surface()
+                        .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+                }
+            }
+            Ok(())
+        })
     }
 
     pub fn web_renderer_ready() -> bool {
@@ -177,6 +199,10 @@ pub(crate) mod wasm {
             }
             Ok(())
         })
+    }
+
+    pub(super) fn current_theme_config_impl() -> PlotThemeConfig {
+        ACTIVE_THEME.with(|slot| slot.borrow().clone())
     }
 
     pub(super) fn present_figure_on_surface_impl(
@@ -386,6 +412,15 @@ pub(crate) mod wasm {
         Ok(())
     }
 
+    pub fn invalidate_surface_revisions() {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            for entry in map.values_mut() {
+                entry.last_revision = None;
+            }
+        });
+    }
+
     // expose type to outer module
     pub(super) use runmat_plot::web::WebRenderer as RendererType;
 }
@@ -405,6 +440,10 @@ pub(crate) mod wasm {
 
     pub(super) fn detach_surface_impl(_surface_id: u32) {}
 
+    pub(super) fn clear_closed_figure_surfaces_impl(_handle: u32) -> BuiltinResult<()> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
+
     pub fn web_renderer_ready() -> bool {
         false
     }
@@ -423,6 +462,8 @@ pub(crate) mod wasm {
     pub fn render_current_scene(_handle: u32) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
+
+    pub fn invalidate_surface_revisions() {}
 
     pub(super) fn bind_surface_to_figure_impl(_surface_id: u32, _handle: u32) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
@@ -465,8 +506,13 @@ pub(crate) mod wasm {
     ) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
+
+    pub(super) fn current_theme_config_impl() -> runmat_plot::styling::PlotThemeConfig {
+        runmat_plot::styling::PlotThemeConfig::default()
+    }
 }
 
+pub use wasm::invalidate_surface_revisions;
 pub use wasm::render_current_scene;
 pub use wasm::web_renderer_ready;
 
@@ -476,6 +522,10 @@ pub fn install_surface(surface_id: u32, renderer: wasm::RendererType) -> Builtin
 
 pub fn detach_surface(surface_id: u32) {
     wasm::detach_surface_impl(surface_id)
+}
+
+pub fn clear_closed_figure_surfaces(handle: u32) -> BuiltinResult<()> {
+    wasm::clear_closed_figure_surfaces_impl(handle)
 }
 
 pub fn resize_surface(
@@ -528,6 +578,10 @@ pub fn set_surface_camera_state(
 
 pub fn set_plot_theme_config(theme: runmat_plot::styling::PlotThemeConfig) -> BuiltinResult<()> {
     wasm::set_theme_config_impl(theme)
+}
+
+pub fn current_plot_theme_config() -> runmat_plot::styling::PlotThemeConfig {
+    wasm::current_theme_config_impl()
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]

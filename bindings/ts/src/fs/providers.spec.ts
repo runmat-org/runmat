@@ -69,9 +69,63 @@ describe("indexeddb filesystem provider", () => {
 
     await deleteDatabase(dbName);
   });
+
+  it("shares a live volume across same-page handles", async () => {
+    const dbName = `runmat-test-live-${Date.now()}`;
+    const handle1 = await createIndexedDbFsHandle({ dbName, flushDebounceMs: 0 });
+    const handle2 = await createIndexedDbFsHandle({ dbName, flushDebounceMs: 0 });
+
+    try {
+      handle2.provider.writeFile("/test.jpg", new Uint8Array([1, 2, 3]));
+      expect(handle1.provider.readFile("/test.jpg")).toEqual(new Uint8Array([1, 2, 3]));
+
+      handle1.close();
+      handle2.provider.writeFile("/after-close.txt", encoder.encode("still-live"));
+      await handle2.flush();
+      handle2.close();
+
+      const handle3 = await createIndexedDbFsHandle({ dbName, flushDebounceMs: 0 });
+      try {
+        expect(toText(handle3.provider.readFile("/after-close.txt"))).toBe("still-live");
+      } finally {
+        handle3.close();
+      }
+    } finally {
+      handle1.close();
+      handle2.close();
+      await deleteDatabase(dbName);
+    }
+  });
+
+  it("rejects incompatible shared backing options for the same database", async () => {
+    const dbName = `runmat-test-options-${Date.now()}`;
+    const now = () => 1;
+    const handle = await createIndexedDbFsHandle({ dbName, flushDebounceMs: 5_000, now });
+
+    try {
+      await expect(createIndexedDbFsHandle({ dbName, flushDebounceMs: 0, now })).rejects.toThrow(
+        /flushDebounceMs/
+      );
+      await expect(
+        createIndexedDbFsHandle({ dbName, flushDebounceMs: 5_000, now: () => 2 })
+      ).rejects.toThrow(/now/);
+    } finally {
+      handle.close();
+      await deleteDatabase(dbName);
+    }
+  });
 });
 
 describe("default filesystem provider", () => {
+  it("shares one live provider across default calls", async () => {
+    const provider1 = await createDefaultFsProvider();
+    const provider2 = await createDefaultFsProvider();
+
+    expect(provider2).toBe(provider1);
+    provider1.writeFile("/default-shared.txt", encoder.encode("shared"));
+    expect(toText(provider2.readFile("/default-shared.txt"))).toBe("shared");
+  });
+
   it("uses persistent storage when IndexedDB is available", async () => {
     const provider1 = await createDefaultFsProvider();
     provider1.createDirAll?.("/auto");
@@ -99,24 +153,24 @@ describe("remote filesystem provider", () => {
     }
   });
 
-  it("streams multi-chunk payloads", () => {
+  it("streams multi-chunk payloads", async () => {
     const provider = createRemoteFsProvider({
       baseUrl: server.baseUrl,
       chunkBytes: 512,
       timeoutMs: 5_000
     });
 
-    provider.createDirAll?.("/reports");
+    await provider.createDirAll?.("/reports");
     const payload = new Uint8Array(5_000).map((_, idx) => (idx * 31) & 0xff);
-    provider.writeFile("/reports/data.bin", payload);
-    const metadata = provider.metadata("/reports/data.bin");
+    await provider.writeFile("/reports/data.bin", payload);
+    const metadata = await provider.metadata("/reports/data.bin");
     expect(metadata.len).toBe(payload.length);
 
-    const readBack = new Uint8Array(provider.readFile("/reports/data.bin"));
+    const readBack = new Uint8Array(await provider.readFile("/reports/data.bin"));
     expect(readBack).toEqual(payload);
 
-    provider.removeFile("/reports/data.bin");
-    expect(() => provider.metadata("/reports/data.bin")).toThrow();
+    await provider.removeFile("/reports/data.bin");
+    await expect(provider.metadata("/reports/data.bin")).rejects.toThrow();
   });
 
   it("respects auth tokens when provided", async () => {
@@ -128,20 +182,36 @@ describe("remote filesystem provider", () => {
       baseUrl: server.baseUrl,
       authToken: "secret"
     });
-    authed.writeFile("/secured/info.txt", encoder.encode("ok"));
-    expect(toText(authed.readFile("/secured/info.txt"))).toBe("ok");
+    await authed.writeFile("/secured/info.txt", encoder.encode("ok"));
+    expect(toText(await authed.readFile("/secured/info.txt"))).toBe("ok");
 
     const unauth = createRemoteFsProvider({ baseUrl: server.baseUrl });
-    expect(() => unauth.readDir("/")).toThrow(/unauthorized/i);
+    await expect(unauth.readDir("/")).rejects.toThrow(/unauthorized/i);
+    await expect(unauth.readMany?.(["/secured/info.txt"]) ?? Promise.resolve([])).rejects.toThrow(/unauthorized/i);
   });
 
-  it("propagates readonly flags", () => {
+  it("propagates readonly flags", async () => {
     const provider = createRemoteFsProvider({ baseUrl: server.baseUrl });
-    provider.writeFile("/reports/lock.txt", encoder.encode("locked"));
-    provider.setReadonly?.("/reports/lock.txt", true);
-    const meta = provider.metadata("/reports/lock.txt");
+    await provider.writeFile("/reports/lock.txt", encoder.encode("locked"));
+    await provider.setReadonly?.("/reports/lock.txt", true);
+    const meta = await provider.metadata("/reports/lock.txt");
     expect(meta.readonly).toBe(true);
-    expect(() => provider.writeFile("/reports/lock.txt", encoder.encode("fail"))).toThrow();
+    await expect(provider.writeFile("/reports/lock.txt", encoder.encode("fail"))).rejects.toThrow();
+  });
+
+  it("keeps readMany stable when method is unbound", async () => {
+    const provider = createRemoteFsProvider({ baseUrl: server.baseUrl });
+    await provider.writeFile("/reports/chunk.bin", encoder.encode("payload"));
+
+    const readMany = provider.readMany;
+    expect(typeof readMany).toBe("function");
+    if (!readMany) {
+      throw new Error("readMany is required for remote provider");
+    }
+
+    const [bytes] = await readMany(["/reports/chunk.bin"]);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(toText(bytes as Uint8Array)).toBe("payload");
   });
 });
 

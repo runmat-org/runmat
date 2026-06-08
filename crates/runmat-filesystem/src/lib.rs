@@ -1,3 +1,5 @@
+use async_trait::async_trait;
+use log::warn;
 use once_cell::sync::OnceCell;
 use std::ffi::OsString;
 use std::fmt;
@@ -30,9 +32,23 @@ use data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
 
-pub trait FileHandle: Read + Write + Seek + Send + Sync {}
+#[async_trait(?Send)]
+pub trait FileHandle: Read + Write + Seek + Send + Sync {
+    async fn flush_async(&mut self) -> io::Result<()> {
+        self.flush()
+    }
 
-impl<T> FileHandle for T where T: Read + Write + Seek + Send + Sync + 'static {}
+    async fn sync_all_async(&mut self) -> io::Result<()> {
+        self.flush_async().await
+    }
+}
+
+#[async_trait(?Send)]
+impl FileHandle for std::fs::File {
+    async fn sync_all_async(&mut self) -> io::Result<()> {
+        std::fs::File::sync_all(self)
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct OpenFlags {
@@ -89,6 +105,15 @@ impl OpenOptions {
     pub fn open(&self, path: impl AsRef<Path>) -> io::Result<File> {
         let resolved = resolve_path(path.as_ref());
         with_provider(|provider| provider.open(&resolved, &self.flags)).map(File::from_handle)
+    }
+
+    pub async fn open_async(&self, path: impl AsRef<Path>) -> io::Result<File> {
+        let resolved = resolve_path(path.as_ref());
+        let provider = current_provider();
+        provider
+            .open_async(&resolved, &self.flags)
+            .await
+            .map(File::from_handle)
     }
 
     pub fn flags(&self) -> &OpenFlags {
@@ -196,6 +221,47 @@ pub struct DirEntry {
     file_type: FsFileType,
 }
 
+#[derive(Clone, Debug)]
+pub struct ReadManyEntry {
+    path: PathBuf,
+    bytes: Option<Vec<u8>>,
+    error: Option<String>,
+}
+
+impl ReadManyEntry {
+    pub fn new(path: PathBuf, bytes: Option<Vec<u8>>) -> Self {
+        Self {
+            path,
+            bytes,
+            error: None,
+        }
+    }
+
+    pub fn with_error(path: PathBuf, error: String) -> Self {
+        Self {
+            path,
+            bytes: None,
+            error: Some(error),
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn bytes(&self) -> Option<&[u8]> {
+        self.bytes.as_deref()
+    }
+
+    pub fn into_bytes(self) -> Option<Vec<u8>> {
+        self.bytes
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+}
+
 impl DirEntry {
     pub fn new(path: PathBuf, file_name: OsString, file_type: FsFileType) -> Self {
         Self {
@@ -222,23 +288,50 @@ impl DirEntry {
     }
 }
 
+#[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>>;
-    fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
-    fn write(&self, path: &Path, data: &[u8]) -> io::Result<()>;
-    fn remove_file(&self, path: &Path) -> io::Result<()>;
-    fn metadata(&self, path: &Path) -> io::Result<FsMetadata>;
-    fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata>;
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>>;
-    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf>;
-    fn create_dir(&self, path: &Path) -> io::Result<()>;
-    fn create_dir_all(&self, path: &Path) -> io::Result<()>;
-    fn remove_dir(&self, path: &Path) -> io::Result<()>;
-    fn remove_dir_all(&self, path: &Path) -> io::Result<()>;
-    fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
-    fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()>;
+    async fn open_async(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
+        self.open(path, flags)
+    }
+    async fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
+    async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()>;
+    async fn remove_file(&self, path: &Path) -> io::Result<()>;
+    async fn metadata(&self, path: &Path) -> io::Result<FsMetadata>;
+    async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata>;
+    async fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>>;
+    async fn canonicalize(&self, path: &Path) -> io::Result<PathBuf>;
+    async fn create_dir(&self, path: &Path) -> io::Result<()>;
+    async fn create_dir_all(&self, path: &Path) -> io::Result<()>;
+    async fn remove_dir(&self, path: &Path) -> io::Result<()>;
+    async fn remove_dir_all(&self, path: &Path) -> io::Result<()>;
+    async fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
+    async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()>;
 
-    fn data_manifest_descriptor(
+    async fn read_many(&self, paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
+        let mut entries = Vec::with_capacity(paths.len());
+        for path in paths {
+            let entry = match self.read(path).await {
+                Ok(payload) => ReadManyEntry::new(path.clone(), Some(payload)),
+                Err(error) => {
+                    warn!(
+                        "fs.read_many.miss path={} kind={:?} error={}",
+                        path.to_string_lossy(),
+                        error.kind(),
+                        error
+                    );
+                    ReadManyEntry::with_error(
+                        path.clone(),
+                        format!("kind={:?}; error={}", error.kind(), error),
+                    )
+                }
+            };
+            entries.push(entry);
+        }
+        Ok(entries)
+    }
+
+    async fn data_manifest_descriptor(
         &self,
         _request: &DataManifestRequest,
     ) -> io::Result<DataManifestDescriptor> {
@@ -248,7 +341,7 @@ pub trait FsProvider: Send + Sync + 'static {
         ))
     }
 
-    fn data_chunk_upload_targets(
+    async fn data_chunk_upload_targets(
         &self,
         _request: &DataChunkUploadRequest,
     ) -> io::Result<Vec<DataChunkUploadTarget>> {
@@ -258,7 +351,11 @@ pub trait FsProvider: Send + Sync + 'static {
         ))
     }
 
-    fn data_upload_chunk(&self, _target: &DataChunkUploadTarget, _data: &[u8]) -> io::Result<()> {
+    async fn data_upload_chunk(
+        &self,
+        _target: &DataChunkUploadTarget,
+        _data: &[u8],
+    ) -> io::Result<()> {
         Err(io::Error::new(
             ErrorKind::Unsupported,
             "data chunk upload is unsupported by this provider",
@@ -281,10 +378,30 @@ impl File {
         opts.open(path)
     }
 
+    pub async fn open_async(path: impl AsRef<Path>) -> io::Result<Self> {
+        let mut opts = OpenOptions::new();
+        opts.read(true);
+        opts.open_async(path).await
+    }
+
     pub fn create(path: impl AsRef<Path>) -> io::Result<Self> {
         let mut opts = OpenOptions::new();
         opts.write(true).create(true).truncate(true);
         opts.open(path)
+    }
+
+    pub async fn create_async(path: impl AsRef<Path>) -> io::Result<Self> {
+        let mut opts = OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        opts.open_async(path).await
+    }
+
+    pub async fn flush_async(&mut self) -> io::Result<()> {
+        self.inner.flush_async().await
+    }
+
+    pub async fn sync_all_async(&mut self) -> io::Result<()> {
+        self.inner.sync_all_async().await
     }
 }
 
@@ -345,7 +462,7 @@ fn resolve_path(path: &Path) -> PathBuf {
         if let Ok(base) = current_dir() {
             return base.join(path);
         }
-        return PathBuf::from("/").join(path);
+        PathBuf::from("/").join(path)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -411,8 +528,9 @@ pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
             let base = current_dir()?;
             target = base.join(target);
         }
-        let canonical = canonicalize(&target).unwrap_or(target.clone());
-        let metadata = metadata(&canonical)?;
+        let canonical =
+            futures::executor::block_on(canonicalize_async(&target)).unwrap_or(target.clone());
+        let metadata = futures::executor::block_on(metadata_async(&canonical))?;
         if !metadata.is_dir() {
             return Err(io::Error::new(
                 ErrorKind::NotFound,
@@ -423,7 +541,7 @@ pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
             .write()
             .expect("filesystem current dir lock poisoned");
         *guard = canonical;
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -441,92 +559,119 @@ impl Drop for ProviderGuard {
     }
 }
 
-pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-    let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.read(&resolved))
+pub async fn read_many_async(paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
+    let resolved = paths
+        .iter()
+        .map(|path| resolve_path(path.as_path()))
+        .collect::<Vec<_>>();
+    let provider = current_provider();
+    provider.read_many(&resolved).await
 }
 
-pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
-    let bytes = read(path)?;
+pub async fn read_async(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+    let resolved = resolve_path(path.as_ref());
+    let provider = current_provider();
+    provider.read(&resolved).await
+}
+
+pub async fn read_to_string_async(path: impl AsRef<Path>) -> io::Result<String> {
+    let bytes = read_async(path).await?;
     String::from_utf8(bytes).map_err(|err| io::Error::new(ErrorKind::InvalidData, err.utf8_error()))
 }
 
-pub fn write(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
+pub async fn write_async(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.write(&resolved, data.as_ref()))
+    let provider = current_provider();
+    provider.write(&resolved, data.as_ref()).await
 }
 
-pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
+pub async fn remove_file_async(path: impl AsRef<Path>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.remove_file(&resolved))
+    let provider = current_provider();
+    provider.remove_file(&resolved).await
 }
 
-pub fn metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
+pub async fn metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.metadata(&resolved))
+    let provider = current_provider();
+    provider.metadata(&resolved).await
 }
 
-pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
+pub async fn symlink_metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.symlink_metadata(&resolved))
+    let provider = current_provider();
+    provider.symlink_metadata(&resolved).await
 }
 
-pub fn read_dir(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
+pub async fn read_dir_async(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.read_dir(&resolved))
+    let provider = current_provider();
+    provider.read_dir(&resolved).await
 }
 
-pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
+pub async fn canonicalize_async(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.canonicalize(&resolved))
+    let provider = current_provider();
+    provider.canonicalize(&resolved).await
 }
 
-pub fn create_dir(path: impl AsRef<Path>) -> io::Result<()> {
+pub async fn create_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.create_dir(&resolved))
+    let provider = current_provider();
+    provider.create_dir(&resolved).await
 }
 
-pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
+pub async fn create_dir_all_async(path: impl AsRef<Path>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.create_dir_all(&resolved))
+    let provider = current_provider();
+    provider.create_dir_all(&resolved).await
 }
 
-pub fn remove_dir(path: impl AsRef<Path>) -> io::Result<()> {
+pub async fn remove_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.remove_dir(&resolved))
+    let provider = current_provider();
+    provider.remove_dir(&resolved).await
 }
 
-pub fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
+pub async fn remove_dir_all_async(path: impl AsRef<Path>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.remove_dir_all(&resolved))
+    let provider = current_provider();
+    provider.remove_dir_all(&resolved).await
 }
 
-pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
+pub async fn rename_async(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     let resolved_from = resolve_path(from.as_ref());
     let resolved_to = resolve_path(to.as_ref());
-    with_provider(|provider| provider.rename(&resolved_from, &resolved_to))
+    let provider = current_provider();
+    provider.rename(&resolved_from, &resolved_to).await
 }
 
-/// Update the readonly flag for a file or directory if the provider supports it.
-pub fn set_readonly(path: impl AsRef<Path>, readonly: bool) -> io::Result<()> {
+pub async fn set_readonly_async(path: impl AsRef<Path>, readonly: bool) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.set_readonly(&resolved, readonly))
+    let provider = current_provider();
+    provider.set_readonly(&resolved, readonly).await
 }
 
-pub fn data_manifest_descriptor(
+pub async fn data_manifest_descriptor_async(
     request: &DataManifestRequest,
 ) -> io::Result<DataManifestDescriptor> {
-    with_provider(|provider| provider.data_manifest_descriptor(request))
+    let provider = current_provider();
+    provider.data_manifest_descriptor(request).await
 }
 
-pub fn data_chunk_upload_targets(
+pub async fn data_chunk_upload_targets_async(
     request: &DataChunkUploadRequest,
 ) -> io::Result<Vec<DataChunkUploadTarget>> {
-    with_provider(|provider| provider.data_chunk_upload_targets(request))
+    let provider = current_provider();
+    provider.data_chunk_upload_targets(request).await
 }
 
-pub fn data_upload_chunk(target: &DataChunkUploadTarget, data: &[u8]) -> io::Result<()> {
-    with_provider(|provider| provider.data_upload_chunk(target, data))
+pub async fn data_upload_chunk_async(
+    target: &DataChunkUploadTarget,
+    data: &[u8],
+) -> io::Result<()> {
+    let provider = current_provider();
+    provider.data_upload_chunk(target, data).await
 }
 
 /// Copy a file from `from` to `to`, truncating the destination when it exists.
@@ -556,7 +701,7 @@ fn default_provider() -> Arc<dyn FsProvider> {
 mod tests {
     use super::*;
     use once_cell::sync::Lazy;
-    use std::io::{Read, Write};
+    use std::io::{Read, Seek, SeekFrom, Write};
     use std::sync::Mutex;
     use tempfile::tempdir;
 
@@ -564,82 +709,215 @@ mod tests {
 
     struct UnsupportedProvider;
 
+    struct AsyncOpenProvider {
+        opened_async: Arc<Mutex<bool>>,
+        flushed_async: Arc<Mutex<bool>>,
+    }
+
+    struct AsyncTestHandle {
+        cursor: usize,
+        data: Vec<u8>,
+        flushed_async: Arc<Mutex<bool>>,
+    }
+
+    impl Read for AsyncTestHandle {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let remaining = self.data.len().saturating_sub(self.cursor);
+            let to_read = remaining.min(buf.len());
+            buf[..to_read].copy_from_slice(&self.data[self.cursor..self.cursor + to_read]);
+            self.cursor += to_read;
+            Ok(to_read)
+        }
+    }
+
+    impl Write for AsyncTestHandle {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let end = self.cursor + buf.len();
+            if end > self.data.len() {
+                self.data.resize(end, 0);
+            }
+            self.data[self.cursor..end].copy_from_slice(buf);
+            self.cursor = end;
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Seek for AsyncTestHandle {
+        fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+            let next = match pos {
+                SeekFrom::Start(offset) => offset as i64,
+                SeekFrom::End(offset) => self.data.len() as i64 + offset,
+                SeekFrom::Current(offset) => self.cursor as i64 + offset,
+            };
+            if next < 0 {
+                return Err(io::Error::new(ErrorKind::InvalidInput, "seek before start"));
+            }
+            self.cursor = next as usize;
+            Ok(self.cursor as u64)
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl FileHandle for AsyncTestHandle {
+        async fn flush_async(&mut self) -> io::Result<()> {
+            *self.flushed_async.lock().unwrap() = true;
+            Ok(())
+        }
+    }
+
+    #[async_trait(?Send)]
     impl FsProvider for UnsupportedProvider {
         fn open(&self, _path: &Path, _flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
             Err(unsupported())
         }
 
-        fn read(&self, _path: &Path) -> io::Result<Vec<u8>> {
+        async fn read(&self, _path: &Path) -> io::Result<Vec<u8>> {
             Err(unsupported())
         }
 
-        fn write(&self, _path: &Path, _data: &[u8]) -> io::Result<()> {
+        async fn write(&self, _path: &Path, _data: &[u8]) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn remove_file(&self, _path: &Path) -> io::Result<()> {
+        async fn remove_file(&self, _path: &Path) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn metadata(&self, _path: &Path) -> io::Result<FsMetadata> {
+        async fn metadata(&self, _path: &Path) -> io::Result<FsMetadata> {
             Err(unsupported())
         }
 
-        fn symlink_metadata(&self, _path: &Path) -> io::Result<FsMetadata> {
+        async fn symlink_metadata(&self, _path: &Path) -> io::Result<FsMetadata> {
             Err(unsupported())
         }
 
-        fn read_dir(&self, _path: &Path) -> io::Result<Vec<DirEntry>> {
+        async fn read_dir(&self, _path: &Path) -> io::Result<Vec<DirEntry>> {
             Err(unsupported())
         }
 
-        fn canonicalize(&self, _path: &Path) -> io::Result<PathBuf> {
+        async fn canonicalize(&self, _path: &Path) -> io::Result<PathBuf> {
             Err(unsupported())
         }
 
-        fn create_dir(&self, _path: &Path) -> io::Result<()> {
+        async fn create_dir(&self, _path: &Path) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn create_dir_all(&self, _path: &Path) -> io::Result<()> {
+        async fn create_dir_all(&self, _path: &Path) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn remove_dir(&self, _path: &Path) -> io::Result<()> {
+        async fn remove_dir(&self, _path: &Path) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn remove_dir_all(&self, _path: &Path) -> io::Result<()> {
+        async fn remove_dir_all(&self, _path: &Path) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn rename(&self, _from: &Path, _to: &Path) -> io::Result<()> {
+        async fn rename(&self, _from: &Path, _to: &Path) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn set_readonly(&self, _path: &Path, _readonly: bool) -> io::Result<()> {
+        async fn set_readonly(&self, _path: &Path, _readonly: bool) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn data_manifest_descriptor(
+        async fn data_manifest_descriptor(
             &self,
             _request: &DataManifestRequest,
         ) -> io::Result<DataManifestDescriptor> {
             Err(unsupported())
         }
 
-        fn data_chunk_upload_targets(
+        async fn data_chunk_upload_targets(
             &self,
             _request: &DataChunkUploadRequest,
         ) -> io::Result<Vec<DataChunkUploadTarget>> {
             Err(unsupported())
         }
 
-        fn data_upload_chunk(
+        async fn data_upload_chunk(
             &self,
             _target: &DataChunkUploadTarget,
             _data: &[u8],
         ) -> io::Result<()> {
+            Err(unsupported())
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl FsProvider for AsyncOpenProvider {
+        fn open(&self, _path: &Path, _flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
+            Err(unsupported())
+        }
+
+        async fn open_async(
+            &self,
+            _path: &Path,
+            _flags: &OpenFlags,
+        ) -> io::Result<Box<dyn FileHandle>> {
+            *self.opened_async.lock().unwrap() = true;
+            Ok(Box::new(AsyncTestHandle {
+                cursor: 0,
+                data: b"async contents".to_vec(),
+                flushed_async: self.flushed_async.clone(),
+            }))
+        }
+
+        async fn read(&self, _path: &Path) -> io::Result<Vec<u8>> {
+            Err(unsupported())
+        }
+
+        async fn write(&self, _path: &Path, _data: &[u8]) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn remove_file(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn metadata(&self, _path: &Path) -> io::Result<FsMetadata> {
+            Err(unsupported())
+        }
+
+        async fn symlink_metadata(&self, _path: &Path) -> io::Result<FsMetadata> {
+            Err(unsupported())
+        }
+
+        async fn read_dir(&self, _path: &Path) -> io::Result<Vec<DirEntry>> {
+            Err(unsupported())
+        }
+
+        async fn canonicalize(&self, _path: &Path) -> io::Result<PathBuf> {
+            Err(unsupported())
+        }
+
+        async fn create_dir(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn create_dir_all(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn remove_dir(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn remove_dir_all(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn rename(&self, _from: &Path, _to: &Path) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn set_readonly(&self, _path: &Path, _readonly: bool) -> io::Result<()> {
             Err(unsupported())
         }
     }
@@ -673,14 +951,14 @@ mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("flag.txt");
-        write(&path, b"flag").expect("write");
+        futures::executor::block_on(write_async(&path, b"flag")).expect("write");
 
-        set_readonly(&path, true).expect("set readonly");
-        let meta = metadata(&path).expect("metadata");
+        futures::executor::block_on(set_readonly_async(&path, true)).expect("set readonly");
+        let meta = futures::executor::block_on(metadata_async(&path)).expect("metadata");
         assert!(meta.is_readonly());
 
-        set_readonly(&path, false).expect("unset readonly");
-        let meta = metadata(&path).expect("metadata");
+        futures::executor::block_on(set_readonly_async(&path, false)).expect("unset readonly");
+        let meta = futures::executor::block_on(metadata_async(&path)).expect("metadata");
         assert!(!meta.is_readonly());
     }
 
@@ -696,6 +974,29 @@ mod tests {
         }
         let final_provider = current_provider();
         assert!(Arc::ptr_eq(&final_provider, &original));
+    }
+
+    #[test]
+    fn open_async_and_flush_async_use_provider_async_paths() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let opened_async = Arc::new(Mutex::new(false));
+        let flushed_async = Arc::new(Mutex::new(false));
+        let provider = Arc::new(AsyncOpenProvider {
+            opened_async: opened_async.clone(),
+            flushed_async: flushed_async.clone(),
+        });
+        let _provider_guard = replace_provider(provider);
+
+        let mut file =
+            futures::executor::block_on(OpenOptions::new().read(true).open_async("data.txt"))
+                .expect("async open");
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).expect("read contents");
+        futures::executor::block_on(file.flush_async()).expect("async flush");
+
+        assert_eq!(contents, "async contents");
+        assert!(*opened_async.lock().unwrap());
+        assert!(*flushed_async.lock().unwrap());
     }
 
     #[test]

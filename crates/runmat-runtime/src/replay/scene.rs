@@ -1,4 +1,5 @@
 use chrono::Utc;
+use futures::executor;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "plot-core")]
 use serde_json::Value;
@@ -79,6 +80,21 @@ pub fn decode_figure_scene_payload_with_limits(
     bytes: &[u8],
     limits: ReplayLimits,
 ) -> Result<runmat_plot::event::FigureScene, RuntimeError> {
+    executor::block_on(decode_figure_scene_payload_with_limits_async(bytes, limits))
+}
+
+#[cfg(feature = "plot-core")]
+pub async fn decode_figure_scene_payload_async(
+    bytes: &[u8],
+) -> Result<runmat_plot::event::FigureScene, RuntimeError> {
+    decode_figure_scene_payload_with_limits_async(bytes, ReplayLimits::default()).await
+}
+
+#[cfg(feature = "plot-core")]
+pub async fn decode_figure_scene_payload_with_limits_async(
+    bytes: &[u8],
+    limits: ReplayLimits,
+) -> Result<runmat_plot::event::FigureScene, RuntimeError> {
     if bytes.len() > limits.max_scene_payload_bytes {
         return Err(replay_error(
             ReplayErrorKind::PayloadTooLarge,
@@ -96,11 +112,11 @@ pub fn decode_figure_scene_payload_with_limits(
             err,
         )
     })?;
-    hydrate_scene_data_refs(&mut payload_json)?;
+    hydrate_scene_data_refs_async(&mut payload_json).await?;
     let payload: FigureScenePayload = serde_json::from_value(payload_json).map_err(|err| {
         replay_error_with_source(
             ReplayErrorKind::DecodeFailed,
-            "failed to decode hydrated figure replay payload",
+            format!("failed to decode hydrated figure replay payload: {err}"),
             err,
         )
     })?;
@@ -133,7 +149,7 @@ pub fn decode_figure_scene_payload_with_limits(
 }
 
 #[cfg(feature = "plot-core")]
-fn hydrate_scene_data_refs(payload: &mut Value) -> Result<(), RuntimeError> {
+async fn hydrate_scene_data_refs_async(payload: &mut Value) -> Result<(), RuntimeError> {
     let Some(plots) = payload
         .get_mut("figure")
         .and_then(Value::as_object_mut)
@@ -148,14 +164,14 @@ fn hydrate_scene_data_refs(payload: &mut Value) -> Result<(), RuntimeError> {
         };
         match kind {
             "surface" => {
-                hydrate_plot_field(plot, "x")?;
-                hydrate_plot_field(plot, "y")?;
-                hydrate_plot_field(plot, "z")?;
+                hydrate_plot_field_async(plot, "x").await?;
+                hydrate_plot_field_async(plot, "y").await?;
+                hydrate_plot_field_async(plot, "z").await?;
             }
             "scatter3" => {
-                hydrate_plot_field(plot, "points")?;
-                hydrate_plot_field(plot, "colorsRgba")?;
-                hydrate_plot_field(plot, "pointSizes")?;
+                hydrate_plot_field_async(plot, "points").await?;
+                hydrate_plot_field_async(plot, "colorsRgba").await?;
+                hydrate_plot_field_async(plot, "pointSizes").await?;
             }
             _ => {}
         }
@@ -164,7 +180,7 @@ fn hydrate_scene_data_refs(payload: &mut Value) -> Result<(), RuntimeError> {
 }
 
 #[cfg(feature = "plot-core")]
-fn hydrate_plot_field(plot: &mut Value, field: &str) -> Result<(), RuntimeError> {
+async fn hydrate_plot_field_async(plot: &mut Value, field: &str) -> Result<(), RuntimeError> {
     let Some(obj) = plot.as_object_mut() else {
         return Ok(());
     };
@@ -174,7 +190,7 @@ fn hydrate_plot_field(plot: &mut Value, field: &str) -> Result<(), RuntimeError>
     let Some(data_ref) = parse_data_ref(&value) else {
         return Ok(());
     };
-    let payload = read_scene_array_payload(&data_ref)?;
+    let payload = read_scene_array_payload_async(&data_ref).await?;
     let target_shape = if data_ref.shape.is_empty() {
         payload.shape.as_slice()
     } else {
@@ -185,11 +201,11 @@ fn hydrate_plot_field(plot: &mut Value, field: &str) -> Result<(), RuntimeError>
     Ok(())
 }
 
-fn read_scene_array_payload(
+async fn read_scene_array_payload_async(
     data_ref: &SceneDataRef,
 ) -> Result<crate::data::DataArrayPayload, RuntimeError> {
     let dataset_root = crate::data::dataset_root(&data_ref.dataset_path);
-    match crate::data::read_manifest(&dataset_root) {
+    match crate::data::read_manifest_async(&dataset_root).await {
         Ok(manifest) => {
             let meta = manifest.arrays.get(&data_ref.array).ok_or_else(|| {
                 replay_error(
@@ -200,15 +216,17 @@ fn read_scene_array_payload(
                     ),
                 )
             })?;
-            crate::data::read_array_payload(&dataset_root, meta).map_err(|err| {
-                replay_error(
-                    ReplayErrorKind::ImportRejected,
-                    format!(
-                        "failed reading scene dataset array '{}.{}': {}",
-                        data_ref.dataset_path, data_ref.array, err
-                    ),
-                )
-            })
+            crate::data::read_array_payload_async(&dataset_root, meta)
+                .await
+                .map_err(|err| {
+                    replay_error(
+                        ReplayErrorKind::ImportRejected,
+                        format!(
+                            "failed reading scene dataset array '{}.{}': {}",
+                            data_ref.dataset_path, data_ref.array, err
+                        ),
+                    )
+                })
         }
         Err(manifest_err) => {
             if data_ref.chunks.is_empty() {
@@ -221,21 +239,15 @@ fn read_scene_array_payload(
                 ));
             }
             let mut values = Vec::new();
-            for chunk in &data_ref.chunks {
-                let bytes = read_scene_chunk_bytes(chunk, data_ref).map_err(|err| {
+            let chunk_payloads = read_scene_chunks_bytes_async(&data_ref.chunks, data_ref)
+                .await
+                .map_err(|err| {
                     replay_error(
                         ReplayErrorKind::ImportRejected,
-                        format!(
-                            "failed reading scene data chunk '{}': {}",
-                            chunk
-                                .src
-                                .as_deref()
-                                .or(chunk.artifact_id.as_deref())
-                                .unwrap_or("<unknown>"),
-                            err
-                        ),
+                        format!("failed reading scene data chunks: {}", err),
                     )
                 })?;
+            for (chunk, bytes) in data_ref.chunks.iter().zip(chunk_payloads.into_iter()) {
                 let payload: crate::data::DataArrayPayload = serde_json::from_slice(&bytes)
                     .map_err(|err| {
                         replay_error(
@@ -262,10 +274,101 @@ fn read_scene_array_payload(
     }
 }
 
+#[cfg(feature = "plot-core")]
+#[cfg(test)]
 fn read_scene_chunk_bytes(
     chunk: &SceneDataChunkRef,
     data_ref: &SceneDataRef,
 ) -> std::io::Result<Vec<u8>> {
+    let chunks = vec![chunk.clone()];
+    let mut batch = executor::block_on(read_scene_chunks_bytes_async(&chunks, data_ref))?;
+    batch
+        .pop()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "scene chunk missing"))
+}
+
+async fn read_scene_chunks_bytes_async(
+    chunks: &[SceneDataChunkRef],
+    data_ref: &SceneDataRef,
+) -> std::io::Result<Vec<Vec<u8>>> {
+    let per_chunk_candidates = chunks
+        .iter()
+        .map(|chunk| build_scene_chunk_candidates(chunk, data_ref))
+        .collect::<std::io::Result<Vec<_>>>()?;
+
+    let mut unique_paths = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for candidates in &per_chunk_candidates {
+        for candidate in candidates {
+            if seen.insert(candidate.clone()) {
+                unique_paths.push(candidate.clone());
+            }
+        }
+    }
+
+    let request_paths = unique_paths
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect::<Vec<_>>();
+    let batch = runmat_filesystem::read_many_async(&request_paths).await?;
+    let mut resolved = std::collections::HashMap::new();
+    let mut failures = std::collections::HashMap::new();
+    for (index, entry) in batch.into_iter().enumerate() {
+        if let Some(path) = unique_paths.get(index) {
+            let error = entry.error().map(|value| value.to_string());
+            resolved.insert(path.clone(), entry.into_bytes());
+            failures.insert(path.clone(), error);
+        }
+    }
+
+    let mut out = Vec::with_capacity(chunks.len());
+    for (chunk, candidates) in chunks.iter().zip(per_chunk_candidates.into_iter()) {
+        let mut found = None;
+        for candidate in &candidates {
+            if let Some(Some(bytes)) = resolved.get(candidate) {
+                found = Some(bytes.clone());
+                break;
+            }
+        }
+        let bytes = found.ok_or_else(|| {
+            let attempted = candidates.join(", ");
+            let failure_details = candidates
+                .iter()
+                .filter_map(|candidate| {
+                    failures
+                        .get(candidate)
+                        .and_then(|value| value.as_ref())
+                        .map(|err| format!("{candidate} => {err}"))
+                })
+                .collect::<Vec<_>>()
+                .join(" | ");
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!(
+                    "unable to resolve scene chunk from refs {} (attempted: {}){}",
+                    chunk
+                        .src
+                        .as_deref()
+                        .or(chunk.artifact_id.as_deref())
+                        .unwrap_or("<unknown>"),
+                    attempted,
+                    if failure_details.is_empty() {
+                        String::new()
+                    } else {
+                        format!("; failures: {failure_details}")
+                    }
+                ),
+            )
+        })?;
+        out.push(bytes);
+    }
+    Ok(out)
+}
+
+fn build_scene_chunk_candidates(
+    chunk: &SceneDataChunkRef,
+    data_ref: &SceneDataRef,
+) -> std::io::Result<Vec<String>> {
     let mut base_paths: Vec<String> = Vec::new();
     if let Some(src) = &chunk.src {
         let normalized = src.trim();
@@ -274,9 +377,11 @@ fn read_scene_chunk_bytes(
         }
     }
     if let Some(artifact_id) = &chunk.artifact_id {
+        let artifact_root = artifact_root_from_dataset_path(&data_ref.dataset_path);
         base_paths.extend(chunk_paths_from_artifact_id(
             artifact_id,
             data_ref.dtype.as_deref(),
+            artifact_root.as_deref(),
         ));
     }
     if base_paths.is_empty() {
@@ -298,86 +403,21 @@ fn read_scene_chunk_bytes(
     };
 
     for base in &base_paths {
-        push(base.clone());
-        let stripped = base.trim_start_matches("./");
-        if !stripped.is_empty() {
-            push(stripped.to_string());
-            if !stripped.starts_with('/') {
-                push(format!("/{stripped}"));
-            }
-        }
-        if !base.starts_with('/') {
-            push(format!("/{base}"));
+        let normalized = normalize_scene_chunk_ref(base);
+        push(normalized.clone());
+        if !normalized.starts_with('/') {
+            push(format!("/{normalized}"));
         }
     }
 
-    let cwd = runmat_filesystem::current_dir().ok();
-    if let Some(cwd) = &cwd {
-        for base in &base_paths {
-            let stripped = base.trim_start_matches("./");
-            push(cwd.join(base).to_string_lossy().to_string());
-            if !stripped.is_empty() {
-                push(cwd.join(stripped).to_string_lossy().to_string());
-                let mut current = Some(cwd.as_path());
-                while let Some(dir) = current {
-                    push(dir.join(stripped).to_string_lossy().to_string());
-                    current = dir.parent();
-                }
-            }
-        }
-    }
-
-    tracing::debug!(
-        target: "runmat.replay",
-        requested_ref = ?chunk,
-        base_paths = ?base_paths,
-        cwd = ?cwd,
-        candidates = ?candidates,
-        "scene chunk read candidates"
-    );
-
-    let mut errors = Vec::new();
-    for candidate in candidates {
-        match runmat_filesystem::read(&candidate) {
-            Ok(bytes) => {
-                tracing::debug!(
-                    target: "runmat.replay",
-                    requested_ref = ?chunk,
-                    resolved_path = candidate,
-                    bytes = bytes.len(),
-                    "scene chunk read resolved"
-                );
-                return Ok(bytes);
-            }
-            Err(err) => {
-                errors.push(format!("{}: {}", candidate, err));
-            }
-        }
-    }
-
-    tracing::warn!(
-        target: "runmat.replay",
-        requested_ref = ?chunk,
-        base_paths = ?base_paths,
-        cwd = ?cwd,
-        attempts = ?errors,
-        "scene chunk read failed for all candidates"
-    );
-
-    Err(std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        format!(
-            "scene chunk not found: {}",
-            chunk
-                .src
-                .as_deref()
-                .or(chunk.artifact_id.as_deref())
-                .unwrap_or("<unknown>")
-        ),
-    ))
+    Ok(candidates)
 }
 
-fn chunk_paths_from_artifact_id(artifact_id: &str, dtype: Option<&str>) -> Vec<String> {
+fn chunk_paths_from_artifact_id(
+    artifact_id: &str,
+    dtype: Option<&str>,
+    artifact_root: Option<&str>,
+) -> Vec<String> {
     let Some(hash_hex) = artifact_id.strip_prefix("sha256:") else {
         return Vec::new();
     };
@@ -399,10 +439,42 @@ fn chunk_paths_from_artifact_id(artifact_id: &str, dtype: Option<&str>) -> Vec<S
     suffixes.push("chunk.json");
     suffixes.push("json");
     suffixes.push("bin");
+    let root = normalize_scene_artifact_root(artifact_root.unwrap_or(".artifacts"));
     suffixes
         .into_iter()
-        .map(|suffix| format!(".artifacts/objects/{prefix}/{hash_hex}.{suffix}"))
+        .map(|suffix| format!("{root}/objects/{prefix}/{hash_hex}.{suffix}"))
         .collect()
+}
+
+fn artifact_root_from_dataset_path(dataset_path: &str) -> Option<String> {
+    let normalized = normalize_scene_chunk_ref(dataset_path);
+    let marker = "/datasets/";
+    let idx = normalized.find(marker)?;
+    if idx == 0 {
+        return None;
+    }
+    Some(normalized[..idx].to_string())
+}
+
+fn normalize_scene_artifact_root(root: &str) -> String {
+    let normalized = normalize_scene_chunk_ref(root);
+    if normalized.is_empty() {
+        return ".artifacts".to_string();
+    }
+    normalized.trim_end_matches('/').to_string()
+}
+
+fn normalize_scene_chunk_ref(path: &str) -> String {
+    let normalized = path.trim().replace('\\', "/");
+    let collapsed = normalized
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .collect::<Vec<_>>()
+        .join("/");
+    collapsed
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .to_string()
 }
 
 #[cfg(feature = "plot-core")]
@@ -546,8 +618,9 @@ mod tests {
                 values: values.clone(),
             };
             let chunk = vec![std::cmp::max(1usize, values.len())];
-            let (payload_path, chunk_index_path) =
-                crate::data::write_array_payload(&root, array_name, &payload, &chunk)?;
+            let (payload_path, chunk_index_path) = futures::executor::block_on(
+                crate::data::write_array_payload_async(&root, array_name, &payload, &chunk),
+            )?;
             let data_path = payload_path
                 .strip_prefix(&root)
                 .map_err(|err| replay_error(ReplayErrorKind::ImportRejected, err.to_string()))?
@@ -571,7 +644,7 @@ mod tests {
                 },
             );
         }
-        crate::data::write_manifest(&root, &manifest)?;
+        futures::executor::block_on(crate::data::write_manifest_async(&root, &manifest))?;
         Ok(())
     }
 
@@ -678,7 +751,8 @@ mod tests {
                 .expect("unix epoch")
                 .as_nanos()
         ));
-        runmat_filesystem::create_dir_all(&root).expect("create temp root");
+        futures::executor::block_on(runmat_filesystem::create_dir_all_async(&root))
+            .expect("create temp root");
         let dataset_path = root.join("surface_values.data");
         let dataset_str = dataset_path.to_string_lossy().to_string();
         write_scene_dataset(
@@ -714,7 +788,8 @@ mod tests {
                 .expect("unix epoch")
                 .as_nanos()
         ));
-        runmat_filesystem::create_dir_all(&root).expect("create temp root");
+        futures::executor::block_on(runmat_filesystem::create_dir_all_async(&root))
+            .expect("create temp root");
         let dataset_path = root.join("surface_values.data");
         let dataset_str = dataset_path.to_string_lossy().to_string();
         write_scene_dataset(
@@ -727,7 +802,8 @@ mod tests {
         )
         .expect("write scene dataset");
         let missing_chunk = dataset_path.join("arrays/z/chunks/obj_0.json");
-        runmat_filesystem::remove_file(&missing_chunk).expect("remove z chunk");
+        futures::executor::block_on(runmat_filesystem::remove_file_async(&missing_chunk))
+            .expect("remove z chunk");
         let bytes = make_surface_ref_payload(&dataset_str);
         let err = decode_figure_scene_payload_with_limits(&bytes, ReplayLimits::default())
             .expect_err("expected import rejection");
@@ -747,7 +823,8 @@ mod tests {
                 .expect("unix epoch")
                 .as_nanos()
         ));
-        runmat_filesystem::create_dir_all(&root).expect("create temp root");
+        futures::executor::block_on(runmat_filesystem::create_dir_all_async(&root))
+            .expect("create temp root");
         let dataset_path = root.join("surface_values.data");
         let dataset_str = dataset_path.to_string_lossy().to_string();
         write_scene_dataset(
@@ -760,7 +837,8 @@ mod tests {
         )
         .expect("write scene dataset");
         let corrupt_chunk = dataset_path.join("arrays/z/chunks/obj_0.json");
-        runmat_filesystem::write(&corrupt_chunk, b"not-json").expect("corrupt z chunk");
+        futures::executor::block_on(runmat_filesystem::write_async(&corrupt_chunk, b"not-json"))
+            .expect("corrupt z chunk");
         let bytes = make_surface_ref_payload(&dataset_str);
         let err = decode_figure_scene_payload_with_limits(&bytes, ReplayLimits::default())
             .expect_err("expected import rejection");
@@ -780,7 +858,8 @@ mod tests {
                 .expect("unix epoch")
                 .as_nanos()
         ));
-        runmat_filesystem::create_dir_all(&root).expect("create temp root");
+        futures::executor::block_on(runmat_filesystem::create_dir_all_async(&root))
+            .expect("create temp root");
 
         let chunk_path = root.join("z_chunk.json");
         let chunk_payload = serde_json::json!({
@@ -788,10 +867,10 @@ mod tests {
             "shape": [4],
             "values": [0.0, 1.0, 1.0, 2.0]
         });
-        runmat_filesystem::write(
+        futures::executor::block_on(runmat_filesystem::write_async(
             &chunk_path,
             serde_json::to_vec(&chunk_payload).expect("chunk json"),
-        )
+        ))
         .expect("write chunk");
 
         let mut payload = serde_json::from_slice::<serde_json::Value>(&make_surface_ref_payload(
@@ -838,9 +917,15 @@ mod tests {
         ));
         let chunk_rel = ".artifacts/objects/ab/test_chunk.f64.chunk.json";
         let chunk_path = root.join(chunk_rel);
-        runmat_filesystem::create_dir_all(chunk_path.parent().expect("chunk parent"))
-            .expect("create chunk dir");
-        runmat_filesystem::write(&chunk_path, b"{\"values\":[1,2,3]}").expect("write chunk");
+        futures::executor::block_on(runmat_filesystem::create_dir_all_async(
+            chunk_path.parent().expect("chunk parent"),
+        ))
+        .expect("create chunk dir");
+        futures::executor::block_on(runmat_filesystem::write_async(
+            &chunk_path,
+            b"{\"values\":[1,2,3]}",
+        ))
+        .expect("write chunk");
 
         let previous = runmat_filesystem::current_dir().expect("current dir");
         runmat_filesystem::set_current_dir(&root).expect("set cwd");
@@ -866,10 +951,54 @@ mod tests {
     #[test]
     fn scene_chunk_paths_from_artifact_id_includes_expected_candidates() {
         let hash_hex = "7af8faff9e5fe6ba87fec8e4ce6d79dca7f29bbee9f9809a36119346b411ee36";
-        let candidates = chunk_paths_from_artifact_id(&format!("sha256:{hash_hex}"), Some("f64"));
+        let candidates = chunk_paths_from_artifact_id(
+            &format!("sha256:{hash_hex}"),
+            Some("f64"),
+            Some(".artifacts"),
+        );
         assert!(candidates.iter().any(|path| {
             path == ".artifacts/objects/7a/7af8faff9e5fe6ba87fec8e4ce6d79dca7f29bbee9f9809a36119346b411ee36.f64.chunk.json"
         }));
+    }
+
+    #[cfg(feature = "plot-core")]
+    #[test]
+    fn scene_chunk_paths_from_artifact_id_uses_dataset_artifact_root() {
+        let hash_hex = "7af8faff9e5fe6ba87fec8e4ce6d79dca7f29bbee9f9809a36119346b411ee36";
+        let candidates = chunk_paths_from_artifact_id(
+            &format!("sha256:{hash_hex}"),
+            Some("f64"),
+            Some("custom-artifacts"),
+        );
+        assert!(candidates
+            .iter()
+            .any(|path| path == "custom-artifacts/objects/7a/7af8faff9e5fe6ba87fec8e4ce6d79dca7f29bbee9f9809a36119346b411ee36.f64.chunk.json"));
+    }
+
+    #[cfg(feature = "plot-core")]
+    #[test]
+    fn scene_chunk_candidates_include_dot_slash_artifact_prefix() {
+        let chunk = SceneDataChunkRef {
+            src: Some(
+                ".artifacts/objects/6a/6ac838c06809d12de7c81db7dbf1f17a7fcf7cb21d30a7288f5ad71d3a5b520d.f64.chunk.json"
+                    .to_string(),
+            ),
+            artifact_id: None,
+        };
+        let data_ref = SceneDataRef {
+            dataset_path: ".artifacts/datasets/unused".to_string(),
+            array: "values".to_string(),
+            shape: vec![1],
+            dtype: Some("f64".to_string()),
+            chunks: vec![chunk.clone()],
+        };
+        let candidates = build_scene_chunk_candidates(&chunk, &data_ref).expect("chunk candidates");
+        assert!(candidates
+            .iter()
+            .any(|path| path == ".artifacts/objects/6a/6ac838c06809d12de7c81db7dbf1f17a7fcf7cb21d30a7288f5ad71d3a5b520d.f64.chunk.json"));
+        assert!(candidates
+            .iter()
+            .any(|path| path == "/.artifacts/objects/6a/6ac838c06809d12de7c81db7dbf1f17a7fcf7cb21d30a7288f5ad71d3a5b520d.f64.chunk.json"));
     }
 
     #[cfg(feature = "plot-core")]
@@ -882,7 +1011,8 @@ mod tests {
                 .expect("unix epoch")
                 .as_nanos()
         ));
-        runmat_filesystem::create_dir_all(&root).expect("create temp root");
+        futures::executor::block_on(runmat_filesystem::create_dir_all_async(&root))
+            .expect("create temp root");
         let dataset_a = root.join("surface_a.data");
         let dataset_b = root.join("surface_b.data");
         let dataset_a_str = dataset_a.to_string_lossy().to_string();
@@ -935,7 +1065,8 @@ mod tests {
                 .expect("unix epoch")
                 .as_nanos()
         ));
-        runmat_filesystem::create_dir_all(&root).expect("create temp root");
+        futures::executor::block_on(runmat_filesystem::create_dir_all_async(&root))
+            .expect("create temp root");
         let dataset_path = root.join("surface_bench.data");
         let dataset_str = dataset_path.to_string_lossy().to_string();
         let n = 512usize;

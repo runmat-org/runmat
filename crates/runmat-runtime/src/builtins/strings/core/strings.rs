@@ -1,6 +1,10 @@
 //! MATLAB-compatible `strings` builtin that preallocates string arrays filled with empty scalars.
 
-use runmat_builtins::{LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    LogicalArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -16,11 +20,173 @@ const FN_NAME: &str = "strings";
 const SIZE_INTEGER_ERR: &str = "size inputs must be integers";
 const SIZE_NONNEGATIVE_ERR: &str = "size inputs must be nonnegative integers";
 const SIZE_FINITE_ERR: &str = "size inputs must be finite";
-const SIZE_NUMERIC_ERR: &str = "size arguments must be numeric scalars or vectors";
 const SIZE_SCALAR_ERR: &str = "size inputs must be scalar";
 
-fn strings_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(FN_NAME).build()
+const STRINGS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Preallocated string array.",
+}];
+
+const STRINGS_INPUT_SZ: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "sz",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Size vector or scalar side length.",
+}];
+
+const STRINGS_INPUT_DIMS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "m",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First array dimension.",
+    },
+    BuiltinParamDescriptor {
+        name: "n...",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional array dimensions.",
+    },
+];
+
+const STRINGS_INPUT_LIKE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "dims...",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional explicit size dimensions.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Literal option keyword \"like\".",
+    },
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype value supplying output shape when dims are omitted.",
+    },
+];
+
+const STRINGS_INPUT_FILL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "dims...",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional explicit size dimensions.",
+    },
+    BuiltinParamDescriptor {
+        name: "fill",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"empty\""),
+        description: "Fill mode keyword: \"empty\" or \"missing\".",
+    },
+];
+
+const STRINGS_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "S = strings()",
+        inputs: &[],
+        outputs: &STRINGS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = strings(sz)",
+        inputs: &STRINGS_INPUT_SZ,
+        outputs: &STRINGS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = strings(m, n...)",
+        inputs: &STRINGS_INPUT_DIMS,
+        outputs: &STRINGS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = strings(___, \"like\", p)",
+        inputs: &STRINGS_INPUT_LIKE,
+        outputs: &STRINGS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = strings(___, fill)",
+        inputs: &STRINGS_INPUT_FILL,
+        outputs: &STRINGS_OUTPUT,
+    },
+];
+
+const STRINGS_ERROR_INVALID_SIZE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRINGS.INVALID_SIZE",
+    identifier: Some("RunMat:strings:InvalidSize"),
+    when: "Size arguments are not valid numeric scalar/vector dimensions.",
+    message: "strings: size arguments must be numeric scalars or vectors",
+};
+
+const STRINGS_ERROR_LIKE_MISSING_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRINGS.LIKE_MISSING_PROTOTYPE",
+    identifier: Some("RunMat:strings:LikeMissingPrototype"),
+    when: "\"like\" is provided without a following prototype.",
+    message: "strings: expected prototype after 'like'",
+};
+
+const STRINGS_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRINGS.LIKE_DUPLICATE",
+    identifier: Some("RunMat:strings:LikeDuplicate"),
+    when: "Multiple \"like\" options are supplied in one call.",
+    message: "strings: multiple 'like' specifications are not supported",
+};
+
+const STRINGS_ERROR_SIZE_OVERFLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRINGS.SIZE_OVERFLOW",
+    identifier: Some("RunMat:strings:SizeOverflow"),
+    when: "Requested dimensions overflow platform limits.",
+    message: "strings: requested size exceeds platform limits",
+};
+
+const STRINGS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRINGS.INTERNAL",
+    identifier: Some("RunMat:strings:InternalError"),
+    when: "Internal string array construction failed.",
+    message: "strings: internal error",
+};
+
+const STRINGS_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    STRINGS_ERROR_INVALID_SIZE,
+    STRINGS_ERROR_LIKE_MISSING_PROTOTYPE,
+    STRINGS_ERROR_LIKE_DUPLICATE,
+    STRINGS_ERROR_SIZE_OVERFLOW,
+    STRINGS_ERROR_INTERNAL,
+];
+
+pub const STRINGS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STRINGS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STRINGS_ERRORS,
+};
+
+fn strings_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    strings_error_with_message(error.message, error)
+}
+
+fn strings_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(FN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn remap_strings_flow(err: RuntimeError) -> RuntimeError {
@@ -68,18 +234,18 @@ enum FillKind {
 #[runtime_builtin(
     name = "strings",
     category = "strings/core",
-    summary = "Preallocate string arrays filled with empty string scalars.",
+    summary = "Preallocate string arrays filled with empty string scalars (`\"\"`).",
     keywords = "strings,string array,empty,preallocate",
     accel = "array_construct",
     type_resolver(string_array_type),
+    descriptor(crate::builtins::strings::core::strings::STRINGS_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::core::strings"
 )]
 async fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let ParsedStrings { shape, fill } = parse_arguments(rest).await?;
     let total = shape.iter().try_fold(1usize, |acc, &dim| {
-        acc.checked_mul(dim).ok_or_else(|| {
-            strings_flow(format!("{FN_NAME}: requested size exceeds platform limits"))
-        })
+        acc.checked_mul(dim)
+            .ok_or_else(|| strings_error(&STRINGS_ERROR_SIZE_OVERFLOW))
     })?;
 
     let fill_text = match fill {
@@ -93,7 +259,7 @@ async fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 
     let array =
-        StringArray::new(data, shape).map_err(|e| strings_flow(format!("{FN_NAME}: {e}")))?;
+        StringArray::new(data, shape).map_err(|_| strings_error(&STRINGS_ERROR_INTERNAL))?;
     Ok(Value::StringArray(array))
 }
 
@@ -111,14 +277,10 @@ async fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
             match keyword.as_str() {
                 "like" => {
                     if like_proto.is_some() {
-                        return Err(strings_flow(format!(
-                            "{FN_NAME}: multiple 'like' specifications are not supported"
-                        )));
+                        return Err(strings_error(&STRINGS_ERROR_LIKE_DUPLICATE));
                     }
                     let Some(proto_raw) = args.get(idx + 1) else {
-                        return Err(strings_flow(format!(
-                            "{FN_NAME}: expected prototype after 'like'"
-                        )));
+                        return Err(strings_error(&STRINGS_ERROR_LIKE_MISSING_PROTOTYPE));
                     };
                     let proto = gather_if_needed_async(proto_raw)
                         .await
@@ -163,20 +325,31 @@ async fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
 fn prototype_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::StringArray(sa) => Ok(sa.shape.clone()),
-        _ => shape_from_value(value, FN_NAME).map_err(strings_flow),
+        _ => {
+            shape_from_value(value, FN_NAME).map_err(|_| strings_error(&STRINGS_ERROR_INVALID_SIZE))
+        }
     }
 }
 
 fn err_integer() -> RuntimeError {
-    strings_flow(format!("{FN_NAME}: {SIZE_INTEGER_ERR}"))
+    strings_error_with_message(
+        format!("{FN_NAME}: {SIZE_INTEGER_ERR}"),
+        &STRINGS_ERROR_INVALID_SIZE,
+    )
 }
 
 fn err_nonnegative() -> RuntimeError {
-    strings_flow(format!("{FN_NAME}: {SIZE_NONNEGATIVE_ERR}"))
+    strings_error_with_message(
+        format!("{FN_NAME}: {SIZE_NONNEGATIVE_ERR}"),
+        &STRINGS_ERROR_INVALID_SIZE,
+    )
 }
 
 fn err_finite() -> RuntimeError {
-    strings_flow(format!("{FN_NAME}: {SIZE_FINITE_ERR}"))
+    strings_error_with_message(
+        format!("{FN_NAME}: {SIZE_FINITE_ERR}"),
+        &STRINGS_ERROR_INVALID_SIZE,
+    )
 }
 
 fn parse_size_values(values: Vec<Value>) -> BuiltinResult<Option<Vec<usize>>> {
@@ -200,9 +373,7 @@ fn parse_single_argument(value: Value) -> BuiltinResult<Vec<usize>> {
         Value::Bool(b) => Ok(vec![if b { 1 } else { 0 }]),
         Value::Tensor(t) => parse_size_tensor(&t),
         Value::LogicalArray(arr) => parse_size_logical_array(&arr),
-        other => Err(strings_flow(format!(
-            "{FN_NAME}: {SIZE_NUMERIC_ERR}, got {other:?}"
-        ))),
+        _ => Err(strings_error(&STRINGS_ERROR_INVALID_SIZE)),
     }
 }
 
@@ -216,19 +387,23 @@ fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
             if t.data.len() != 1 {
-                return Err(strings_flow(format!("{FN_NAME}: {SIZE_SCALAR_ERR}")));
+                return Err(strings_error_with_message(
+                    format!("{FN_NAME}: {SIZE_SCALAR_ERR}"),
+                    &STRINGS_ERROR_INVALID_SIZE,
+                ));
             }
             parse_numeric_dimension(t.data[0])
         }
         Value::LogicalArray(arr) => {
             if arr.data.len() != 1 {
-                return Err(strings_flow(format!("{FN_NAME}: {SIZE_SCALAR_ERR}")));
+                return Err(strings_error_with_message(
+                    format!("{FN_NAME}: {SIZE_SCALAR_ERR}"),
+                    &STRINGS_ERROR_INVALID_SIZE,
+                ));
             }
             Ok(if arr.data[0] != 0 { 1 } else { 0 })
         }
-        other => Err(strings_flow(format!(
-            "{FN_NAME}: {SIZE_NUMERIC_ERR}, got {other:?}"
-        ))),
+        _ => Err(strings_error(&STRINGS_ERROR_INVALID_SIZE)),
     }
 }
 
@@ -237,9 +412,10 @@ fn parse_size_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
         return Ok(vec![0, 0]);
     }
     if !is_vector_shape(&tensor.shape) {
-        return Err(strings_flow(format!(
-            "{FN_NAME}: size vector must be a row or column vector"
-        )));
+        return Err(strings_error_with_message(
+            format!("{FN_NAME}: size vector must be a row or column vector"),
+            &STRINGS_ERROR_INVALID_SIZE,
+        ));
     }
     tensor
         .data
@@ -253,9 +429,10 @@ fn parse_size_logical_array(array: &LogicalArray) -> BuiltinResult<Vec<usize>> {
         return Ok(vec![0, 0]);
     }
     if !is_vector_shape(&array.shape) {
-        return Err(strings_flow(format!(
-            "{FN_NAME}: size vector must be a row or column vector"
-        )));
+        return Err(strings_error_with_message(
+            format!("{FN_NAME}: size vector must be a row or column vector"),
+            &STRINGS_ERROR_INVALID_SIZE,
+        ));
     }
     array
         .data
@@ -276,9 +453,10 @@ fn parse_numeric_dimension(value: f64) -> BuiltinResult<usize> {
         return Err(err_nonnegative());
     }
     if rounded > usize::MAX as f64 {
-        return Err(strings_flow(format!(
-            "{FN_NAME}: requested dimension exceeds platform limits"
-        )));
+        return Err(strings_error_with_message(
+            format!("{FN_NAME}: requested dimension exceeds platform limits"),
+            &STRINGS_ERROR_SIZE_OVERFLOW,
+        ));
     }
     Ok(rounded as usize)
 }
@@ -307,9 +485,10 @@ fn validate_i64_dimension(raw: i64) -> BuiltinResult<usize> {
         return Err(err_nonnegative());
     }
     if (raw as u128) > (usize::MAX as u128) {
-        return Err(strings_flow(format!(
-            "{FN_NAME}: requested dimension exceeds platform limits"
-        )));
+        return Err(strings_error_with_message(
+            format!("{FN_NAME}: requested dimension exceeds platform limits"),
+            &STRINGS_ERROR_SIZE_OVERFLOW,
+        ));
     }
     Ok(raw as usize)
 }

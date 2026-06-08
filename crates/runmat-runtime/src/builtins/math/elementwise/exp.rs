@@ -5,7 +5,11 @@
 //! and falls back to host computation otherwise.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -56,19 +60,71 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "exp";
 
+const EXP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Elementwise exponential result.",
+}];
+const EXP_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric, logical, char, or complex input.",
+}];
+const EXP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = exp(X)",
+    inputs: &EXP_INPUTS,
+    outputs: &EXP_OUTPUT,
+}];
+const EXP_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXP.INVALID_INPUT",
+    identifier: Some("RunMat:exp:InvalidInput"),
+    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
+    message: "exp: invalid input",
+};
+const EXP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXP.INTERNAL",
+    identifier: Some("RunMat:exp:Internal"),
+    when: "Internal tensor construction or provider interaction failed.",
+    message: "exp: internal error",
+};
+const EXP_ERRORS: [BuiltinErrorDescriptor; 2] = [EXP_ERROR_INVALID_INPUT, EXP_ERROR_INTERNAL];
+pub const EXP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &EXP_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &EXP_ERRORS,
+};
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
 }
 
+fn exp_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "exp",
     category = "math/elementwise",
-    summary = "Element-wise exponential of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute element-wise exponential values.",
     keywords = "exp,exponential,elementwise,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::elementwise::exp::EXP_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::exp"
 )]
 async fn exp_builtin(value: Value) -> BuiltinResult<Value> {
@@ -80,9 +136,10 @@ async fn exp_builtin(value: Value) -> BuiltinResult<Value> {
         )),
         Value::ComplexTensor(ct) => exp_complex_tensor(ct),
         Value::CharArray(ca) => exp_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("exp: expected numeric input, got string"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(exp_error_with_detail(
+            &EXP_ERROR_INVALID_INPUT,
+            "expected numeric input, got string",
+        )),
         other => exp_real(other),
     }
 }
@@ -90,7 +147,7 @@ async fn exp_builtin(value: Value) -> BuiltinResult<Value> {
 async fn exp_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_exp(&handle).await {
-            return Ok(Value::GpuTensor(out));
+            return Ok(gpu_helpers::resident_gpu_value(out));
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle)
@@ -149,6 +206,22 @@ pub(crate) mod tests {
 
     fn exp_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::exp_builtin(value))
+    }
+
+    #[test]
+    fn exp_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = EXP_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = exp(X)"));
+    }
+
+    #[test]
+    fn exp_string_rejected_with_stable_identifier() {
+        let err = exp_builtin(Value::from("bad")).expect_err("expected input error");
+        assert_eq!(err.identifier(), EXP_ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]

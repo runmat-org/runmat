@@ -10,6 +10,7 @@ pub(crate) mod horzcat;
 pub(crate) mod ipermute;
 pub(crate) mod kron;
 pub(crate) mod permute;
+pub(crate) mod repelem;
 pub(crate) mod repmat;
 pub(crate) mod reshape;
 pub(crate) mod rot90;

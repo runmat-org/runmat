@@ -1,7 +1,11 @@
 //! MATLAB-compatible `accept` builtin for RunMat networking.
 
 use once_cell::sync::OnceCell;
-use runmat_builtins::{IntValue, StructValue, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, StructValue, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::tcpserver::{default_user_data, server_handle, TcpServerState, HANDLE_ID_FIELD};
@@ -19,11 +23,122 @@ use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const MESSAGE_ID_INVALID_SERVER: &str = "MATLAB:accept:InvalidTcpServer";
-const MESSAGE_ID_TIMEOUT: &str = "MATLAB:accept:Timeout";
-const MESSAGE_ID_INVALID_NAME_VALUE: &str = "MATLAB:accept:InvalidNameValue";
-const MESSAGE_ID_INTERNAL: &str = "MATLAB:accept:InternalError";
-const MESSAGE_ID_ACCEPT_FAILED: &str = "MATLAB:accept:AcceptFailed";
+const BUILTIN_NAME: &str = "accept";
+
+const ACCEPT_OUTPUT_CLIENT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "client",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "tcpclient handle struct representing the accepted connection.",
+}];
+const ACCEPT_INPUTS_SERVER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "server",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "tcpserver handle struct returned by tcpserver.",
+}];
+const ACCEPT_INPUTS_SERVER_TIMEOUT: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "server",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "tcpserver handle struct returned by tcpserver.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"Timeout\""),
+        description: "Name token. Supported value: \"Timeout\".",
+    },
+    BuiltinParamDescriptor {
+        name: "timeout",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Per-call accept timeout in seconds (non-negative, supports Inf).",
+    },
+];
+const ACCEPT_INPUTS_SERVER_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "server",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "tcpserver handle struct returned by tcpserver.",
+    },
+    BuiltinParamDescriptor {
+        name: "name_value_pairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/Value option pairs (currently Timeout only).",
+    },
+];
+const ACCEPT_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "client = accept(server)",
+        inputs: &ACCEPT_INPUTS_SERVER,
+        outputs: &ACCEPT_OUTPUT_CLIENT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "client = accept(server, \"Timeout\", timeout)",
+        inputs: &ACCEPT_INPUTS_SERVER_TIMEOUT,
+        outputs: &ACCEPT_OUTPUT_CLIENT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "client = accept(server, Name, Value, ...)",
+        inputs: &ACCEPT_INPUTS_SERVER_NAME_VALUE,
+        outputs: &ACCEPT_OUTPUT_CLIENT,
+    },
+];
+
+const ACCEPT_ERROR_INVALID_SERVER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ACCEPT.INVALID_SERVER",
+    identifier: Some("RunMat:accept:InvalidTcpServer"),
+    when: "Server argument is missing/invalid or references a stale tcpserver handle.",
+    message: "accept: invalid tcpserver handle",
+};
+const ACCEPT_ERROR_TIMEOUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ACCEPT.TIMEOUT",
+    identifier: Some("RunMat:accept:Timeout"),
+    when: "No incoming connection arrives before timeout elapses.",
+    message: "accept: timed out waiting for a client connection",
+};
+const ACCEPT_ERROR_INVALID_NAME_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ACCEPT.INVALID_NAME_VALUE",
+    identifier: Some("RunMat:accept:InvalidNameValue"),
+    when: "Name/Value options are malformed, unsupported, or have invalid values.",
+    message: "accept: invalid name-value arguments",
+};
+const ACCEPT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ACCEPT.INTERNAL",
+    identifier: Some("RunMat:accept:InternalError"),
+    when: "Internal lock/stream setup operation fails.",
+    message: "accept: internal error",
+};
+const ACCEPT_ERROR_ACCEPT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ACCEPT.ACCEPT_FAILED",
+    identifier: Some("RunMat:accept:AcceptFailed"),
+    when: "Underlying socket accept call fails for reasons other than timeout.",
+    message: "accept: failed to accept client",
+};
+const ACCEPT_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    ACCEPT_ERROR_INVALID_SERVER,
+    ACCEPT_ERROR_TIMEOUT,
+    ACCEPT_ERROR_INVALID_NAME_VALUE,
+    ACCEPT_ERROR_INTERNAL,
+    ACCEPT_ERROR_ACCEPT_FAILED,
+];
+pub const ACCEPT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ACCEPT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ACCEPT_ERRORS,
+};
 
 pub(crate) const CLIENT_HANDLE_FIELD: &str = "__tcpclient_id";
 
@@ -62,7 +177,7 @@ pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
     TCP_CLIENT_TEST_GUARD
         .get_or_init(|| Mutex::new(()))
         .lock()
-        .unwrap()
+        .unwrap_or_else(|poison| poison.into_inner())
 }
 
 pub(crate) fn insert_client(
@@ -210,27 +325,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "accept",
     category = "io/net",
-    summary = "Accept a pending client connection on a TCP server.",
+    summary = "Accept pending TCP client connections with MATLAB-compatible socket semantics.",
     keywords = "accept,tcpserver,tcpclient",
     type_resolver(crate::builtins::io::type_resolvers::accept_type),
+    descriptor(crate::builtins::io::net::accept::ACCEPT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::net::accept"
 )]
 pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let server = gather_if_needed_async(&server).await?;
+    let server = gather_if_needed_async(&server)
+        .await
+        .map_err(|err| accept_flow(&ACCEPT_ERROR_INTERNAL, err.message()))?;
     let server_id = extract_server_id(&server)?;
 
     let options = parse_accept_options(rest).await?;
 
     let shared_server = server_handle(server_id).ok_or_else(|| {
-        accept_error(
-            MESSAGE_ID_INVALID_SERVER,
+        accept_flow(
+            &ACCEPT_ERROR_INVALID_SERVER,
             "accept: tcpserver handle is no longer valid",
         )
     })?;
 
     let server_guard = shared_server
         .lock()
-        .map_err(|_| accept_error(MESSAGE_ID_INTERNAL, "accept: server lock poisoned"))?;
+        .map_err(|_| accept_flow(&ACCEPT_ERROR_INTERNAL, "accept: server lock poisoned"))?;
 
     let timeout = options.timeout.unwrap_or(server_guard.timeout);
     validate_timeout(timeout)?;
@@ -239,8 +357,8 @@ pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::Bu
         Ok((stream, peer_addr)) => {
             if let Err(err) = configure_stream(&stream, timeout) {
                 drop(server_guard);
-                return Err(accept_error(
-                    MESSAGE_ID_INTERNAL,
+                return Err(accept_flow(
+                    &ACCEPT_ERROR_INTERNAL,
                     format!("accept: failed to configure stream timeouts ({err})"),
                 ));
             }
@@ -260,15 +378,15 @@ pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::Bu
         Err(err) => {
             drop(server_guard);
             let message = match err.kind() {
-                ErrorKind::WouldBlock => accept_error(
-                    MESSAGE_ID_TIMEOUT,
+                ErrorKind::WouldBlock => accept_flow(
+                    &ACCEPT_ERROR_TIMEOUT,
                     format!(
                         "accept: timed out waiting for a client connection after {:.3} seconds",
                         timeout
                     ),
                 ),
-                _ => accept_error(
-                    MESSAGE_ID_ACCEPT_FAILED,
+                _ => accept_flow(
+                    &ACCEPT_ERROR_ACCEPT_FAILED,
                     format!("accept: failed to accept client ({err})"),
                 ),
             };
@@ -281,8 +399,8 @@ fn extract_server_id(value: &Value) -> BuiltinResult<u64> {
     match value {
         Value::Struct(struct_value) => {
             let id_value = struct_value.fields.get(HANDLE_ID_FIELD).ok_or_else(|| {
-                accept_error(
-                    MESSAGE_ID_INVALID_SERVER,
+                accept_flow(
+                    &ACCEPT_ERROR_INVALID_SERVER,
                     "accept: tcpserver struct missing internal identifier",
                 )
             })?;
@@ -290,16 +408,16 @@ fn extract_server_id(value: &Value) -> BuiltinResult<u64> {
                 Value::Int(IntValue::U64(id)) => *id,
                 Value::Int(iv) => iv.to_i64() as u64,
                 other => {
-                    return Err(accept_error(
-                        MESSAGE_ID_INVALID_SERVER,
+                    return Err(accept_flow(
+                        &ACCEPT_ERROR_INVALID_SERVER,
                         format!("accept: expected numeric tcpserver identifier, got {other:?}"),
                     ));
                 }
             };
             Ok(id)
         }
-        _ => Err(accept_error(
-            MESSAGE_ID_INVALID_SERVER,
+        _ => Err(accept_flow(
+            &ACCEPT_ERROR_INVALID_SERVER,
             "accept: first argument must be the struct returned by tcpserver",
         )),
     }
@@ -315,8 +433,8 @@ async fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> 
         return Ok(AcceptOptions::default());
     }
     if !rest.len().is_multiple_of(2) {
-        return Err(accept_error(
-            MESSAGE_ID_INVALID_NAME_VALUE,
+        return Err(accept_flow(
+            &ACCEPT_ERROR_INVALID_NAME_VALUE,
             "accept: name-value arguments must appear in pairs",
         ));
     }
@@ -327,14 +445,16 @@ async fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> 
         let value_raw = iter
             .next()
             .expect("paired iteration guarantees value exists");
-        let name_value = gather_if_needed_async(&name_raw).await?;
+        let name_value = gather_if_needed_async(&name_raw)
+            .await
+            .map_err(|err| accept_flow(&ACCEPT_ERROR_INTERNAL, err.message()))?;
         let name = match name_value {
             Value::String(ref s) => s.clone(),
             Value::CharArray(ref ca) if ca.rows == 1 => ca.data.iter().collect(),
             Value::StringArray(ref sa) if sa.data.len() == 1 => sa.data[0].clone(),
             other => {
-                return Err(accept_error(
-                    MESSAGE_ID_INVALID_NAME_VALUE,
+                return Err(accept_flow(
+                    &ACCEPT_ERROR_INVALID_NAME_VALUE,
                     format!("accept: invalid option name ({other:?})"),
                 ));
             }
@@ -342,18 +462,20 @@ async fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> 
         let lower = name.to_ascii_lowercase();
         match lower.as_str() {
             "timeout" => {
-                let gathered = gather_if_needed_async(&value_raw).await?;
+                let gathered = gather_if_needed_async(&value_raw)
+                    .await
+                    .map_err(|err| accept_flow(&ACCEPT_ERROR_INTERNAL, err.message()))?;
                 let timeout = parse_timeout_value(&gathered).map_err(|msg| {
-                    accept_error(
-                        MESSAGE_ID_INVALID_NAME_VALUE,
+                    accept_flow(
+                        &ACCEPT_ERROR_INVALID_NAME_VALUE,
                         format!("accept: invalid Timeout value: {msg}"),
                     )
                 })?;
                 options.timeout = Some(timeout);
             }
             _ => {
-                return Err(accept_error(
-                    MESSAGE_ID_INVALID_NAME_VALUE,
+                return Err(accept_flow(
+                    &ACCEPT_ERROR_INVALID_NAME_VALUE,
                     format!("accept: unsupported option '{name}'"),
                 ));
             }
@@ -395,14 +517,14 @@ pub(crate) fn parse_timeout_value(value: &Value) -> Result<f64, TimeoutParseErro
 
 fn validate_timeout(timeout: f64) -> BuiltinResult<()> {
     if timeout.is_nan() {
-        return Err(accept_error(
-            MESSAGE_ID_INVALID_NAME_VALUE,
+        return Err(accept_flow(
+            &ACCEPT_ERROR_INVALID_NAME_VALUE,
             "accept: Timeout must not be NaN",
         ));
     }
     if timeout.is_sign_negative() {
-        return Err(accept_error(
-            MESSAGE_ID_INVALID_NAME_VALUE,
+        return Err(accept_flow(
+            &ACCEPT_ERROR_INVALID_NAME_VALUE,
             "accept: Timeout must be non-negative",
         ));
     }
@@ -517,11 +639,28 @@ fn build_tcpclient_value(
     Value::Struct(st)
 }
 
-fn accept_error(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier(message_id)
-        .with_builtin("accept")
-        .build()
+fn accept_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn accept_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let detail = detail.strip_prefix("accept: ").unwrap_or(detail);
+    accept_error_with_message(format!("{}: {}", error.message, detail), error)
+}
+
+fn accept_flow(error: &'static BuiltinErrorDescriptor, message: impl AsRef<str>) -> RuntimeError {
+    accept_error_with_detail(error, message)
 }
 
 #[cfg(test)]
@@ -561,6 +700,19 @@ pub(crate) mod tests {
         futures::executor::block_on(accept_builtin(server, rest))
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn accept_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = ACCEPT_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"client = accept(server)"));
+        assert!(labels.contains(&"client = accept(server, \"Timeout\", timeout)"));
+        assert!(labels.contains(&"client = accept(server, Name, Value, ...)"));
+    }
+
     fn run_tcpserver(address: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(tcpserver_builtin(address, port, rest))
     }
@@ -582,7 +734,7 @@ pub(crate) mod tests {
     fn accept_rejects_non_struct() {
         let _guard = net_guard();
         let err = run_accept(Value::Num(1.0), Vec::new()).unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_INVALID_SERVER);
+        assert_error_identifier(err, ACCEPT_ERROR_INVALID_SERVER.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -642,7 +794,7 @@ pub(crate) mod tests {
             vec![Value::from("Timeout"), Value::Num(0.05)],
         )
         .unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_TIMEOUT);
+        assert_error_identifier(err, ACCEPT_ERROR_TIMEOUT.identifier.unwrap());
         remove_server_for_test(server_id(&server_value));
     }
 
@@ -661,7 +813,7 @@ pub(crate) mod tests {
             vec![Value::from("Timeout"), Value::Num(-1.0)],
         )
         .unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_INVALID_NAME_VALUE);
+        assert_error_identifier(err, ACCEPT_ERROR_INVALID_NAME_VALUE.identifier.unwrap());
         remove_server_for_test(server_id(&server_value));
     }
 

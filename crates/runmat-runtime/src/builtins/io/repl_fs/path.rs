@@ -1,7 +1,11 @@
 //! MATLAB-compatible `path` builtin for inspecting and updating the RunMat
 //! search path.
 
-use runmat_builtins::{CharArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::path_state::{
@@ -12,8 +16,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-const ERROR_ARG_TYPE: &str = "path: arguments must be character vectors or string scalars";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::path")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -44,6 +46,76 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "path";
 
+const PATH_OUTPUT_PREVIOUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "oldpath",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Previous search path string.",
+}];
+const PATH_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const PATH_INPUTS_PATH1: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "path1",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Replacement path string.",
+}];
+const PATH_INPUTS_PATH1_PATH2: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "path1",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left path fragment.",
+    },
+    BuiltinParamDescriptor {
+        name: "path2",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right path fragment.",
+    },
+];
+const PATH_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "oldpath = path()",
+        inputs: &PATH_INPUTS_NONE,
+        outputs: &PATH_OUTPUT_PREVIOUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "oldpath = path(path1)",
+        inputs: &PATH_INPUTS_PATH1,
+        outputs: &PATH_OUTPUT_PREVIOUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "oldpath = path(path1, path2)",
+        inputs: &PATH_INPUTS_PATH1_PATH2,
+        outputs: &PATH_OUTPUT_PREVIOUS,
+    },
+];
+
+const PATH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PATH.INVALID_INPUT",
+    identifier: None,
+    when: "Path arguments are not character vectors or string scalars.",
+    message: "path: arguments must be character vectors or string scalars",
+};
+const PATH_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PATH.TOO_MANY_INPUTS",
+    identifier: None,
+    when: "More than two positional arguments are provided.",
+    message: "path: too many input arguments",
+};
+const PATH_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [PATH_ERROR_INVALID_INPUT, PATH_ERROR_TOO_MANY_INPUTS];
+pub const PATH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PATH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &PATH_ERRORS,
+};
+
 fn path_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -64,11 +136,12 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "path",
     category = "io/repl_fs",
-    summary = "Query or replace the MATLAB search path used by RunMat.",
+    summary = "Query or replace the active MATLAB search path string.",
     keywords = "path,search path,matlab path,addpath,rmpath",
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::path_type),
+    descriptor(crate::builtins::io::repl_fs::path::PATH_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::path"
 )]
 async fn path_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -77,7 +150,7 @@ async fn path_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         0 => Ok(path_value()),
         1 => set_single_argument(&gathered[0]),
         2 => set_two_arguments(&gathered[0], &gathered[1]),
-        _ => Err(path_error("path: too many input arguments")),
+        _ => Err(path_error(PATH_ERROR_TOO_MANY_INPUTS.message)),
     }
 }
 
@@ -121,47 +194,48 @@ fn extract_text(value: &Value) -> BuiltinResult<String> {
         Value::String(text) => Ok(text.clone()),
         Value::StringArray(StringArray { data, .. }) => {
             if data.len() != 1 {
-                Err(path_error(ERROR_ARG_TYPE))
+                Err(path_error(PATH_ERROR_INVALID_INPUT.message))
             } else {
                 Ok(data[0].clone())
             }
         }
         Value::CharArray(chars) => {
             if chars.rows != 1 {
-                return Err(path_error(ERROR_ARG_TYPE));
+                return Err(path_error(PATH_ERROR_INVALID_INPUT.message));
             }
             Ok(chars.data.iter().collect())
         }
         Value::Tensor(tensor) => tensor_to_string(tensor),
-        Value::GpuTensor(_) => Err(path_error(ERROR_ARG_TYPE)),
-        _ => Err(path_error(ERROR_ARG_TYPE)),
+        Value::GpuTensor(_) => Err(path_error(PATH_ERROR_INVALID_INPUT.message)),
+        _ => Err(path_error(PATH_ERROR_INVALID_INPUT.message)),
     }
 }
 
 fn tensor_to_string(tensor: &Tensor) -> BuiltinResult<String> {
     if tensor.shape.len() > 2 {
-        return Err(path_error(ERROR_ARG_TYPE));
+        return Err(path_error(PATH_ERROR_INVALID_INPUT.message));
     }
 
     let rows = tensor.rows();
     if rows > 1 {
-        return Err(path_error(ERROR_ARG_TYPE));
+        return Err(path_error(PATH_ERROR_INVALID_INPUT.message));
     }
 
     let mut text = String::with_capacity(tensor.data.len());
     for &code in &tensor.data {
         if !code.is_finite() {
-            return Err(path_error(ERROR_ARG_TYPE));
+            return Err(path_error(PATH_ERROR_INVALID_INPUT.message));
         }
         let rounded = code.round();
         if (code - rounded).abs() > 1e-6 {
-            return Err(path_error(ERROR_ARG_TYPE));
+            return Err(path_error(PATH_ERROR_INVALID_INPUT.message));
         }
         let int_code = rounded as i64;
         if !(0..=0x10FFFF).contains(&int_code) {
-            return Err(path_error(ERROR_ARG_TYPE));
+            return Err(path_error(PATH_ERROR_INVALID_INPUT.message));
         }
-        let ch = char::from_u32(int_code as u32).ok_or_else(|| path_error(ERROR_ARG_TYPE))?;
+        let ch = char::from_u32(int_code as u32)
+            .ok_or_else(|| path_error(PATH_ERROR_INVALID_INPUT.message))?;
         text.push(ch);
     }
 
@@ -195,6 +269,19 @@ pub(crate) mod tests {
 
     fn path_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::path_builtin(args))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn path_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = PATH_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"oldpath = path()"));
+        assert!(labels.contains(&"oldpath = path(path1)"));
+        assert!(labels.contains(&"oldpath = path(path1, path2)"));
     }
 
     struct PathGuard {
@@ -328,7 +415,7 @@ pub(crate) mod tests {
 
         let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
         let err = path_builtin(vec![Value::CharArray(chars)]).expect_err("expected error");
-        assert_eq!(err.message(), ERROR_ARG_TYPE);
+        assert_eq!(err.message(), PATH_ERROR_INVALID_INPUT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -341,7 +428,7 @@ pub(crate) mod tests {
 
         let array = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).expect("array");
         let err = path_builtin(vec![Value::StringArray(array)]).expect_err("expected error");
-        assert_eq!(err.message(), ERROR_ARG_TYPE);
+        assert_eq!(err.message(), PATH_ERROR_INVALID_INPUT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

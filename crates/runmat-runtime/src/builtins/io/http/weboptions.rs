@@ -2,7 +2,11 @@
 
 use std::collections::VecDeque;
 
-use runmat_builtins::{StructValue, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    StructValue, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -12,6 +16,146 @@ use crate::builtins::common::spec::{
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
+const BUILTIN_NAME: &str = "weboptions";
+
+const WEBOPTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "options",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "HTTP options struct for webread/webwrite.",
+}];
+
+const WEBOPTIONS_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const WEBOPTIONS_INPUTS_STRUCT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "optionsStruct",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Existing options struct to copy and override.",
+}];
+const WEBOPTIONS_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option field name.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option field value.",
+    },
+];
+const WEBOPTIONS_INPUTS_STRUCT_NAME_VALUE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "optionsStruct",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Existing options struct to copy and override.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option field name.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option field value.",
+    },
+];
+
+const WEBOPTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "options = weboptions()",
+        inputs: &WEBOPTIONS_INPUTS_NONE,
+        outputs: &WEBOPTIONS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "options = weboptions(optionsStruct)",
+        inputs: &WEBOPTIONS_INPUTS_STRUCT,
+        outputs: &WEBOPTIONS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "options = weboptions(name, value, ...)",
+        inputs: &WEBOPTIONS_INPUTS_NAME_VALUE,
+        outputs: &WEBOPTIONS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "options = weboptions(optionsStruct, name, value, ...)",
+        inputs: &WEBOPTIONS_INPUTS_STRUCT_NAME_VALUE,
+        outputs: &WEBOPTIONS_OUTPUT,
+    },
+];
+
+const WEBOPTIONS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBOPTIONS.INVALID_ARGUMENT",
+    identifier: Some("RunMat:weboptions:InvalidArgument"),
+    when: "Argument shape/type does not match supported weboptions forms.",
+    message: "weboptions: invalid argument",
+};
+const WEBOPTIONS_ERROR_INVALID_OPTION_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBOPTIONS.INVALID_OPTION_NAME",
+    identifier: Some("RunMat:weboptions:InvalidOptionName"),
+    when: "Name-value option key is missing or not text scalar.",
+    message: "weboptions: invalid option name",
+};
+const WEBOPTIONS_ERROR_MISSING_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBOPTIONS.MISSING_OPTION_VALUE",
+    identifier: Some("RunMat:weboptions:MissingOptionValue"),
+    when: "A name-value key is not followed by a value.",
+    message: "weboptions: missing option value",
+};
+const WEBOPTIONS_ERROR_INVALID_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBOPTIONS.INVALID_OPTION_VALUE",
+    identifier: Some("RunMat:weboptions:InvalidOptionValue"),
+    when: "An option value fails type or domain validation.",
+    message: "weboptions: invalid option value",
+};
+const WEBOPTIONS_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBOPTIONS.UNKNOWN_OPTION",
+    identifier: Some("RunMat:weboptions:UnknownOption"),
+    when: "Name-value key does not map to a supported option.",
+    message: "weboptions: unknown option",
+};
+const WEBOPTIONS_ERROR_INVALID_CREDENTIALS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBOPTIONS.INVALID_CREDENTIALS",
+    identifier: Some("RunMat:weboptions:InvalidCredentials"),
+    when: "Password is provided without a username.",
+    message: "weboptions: invalid credentials",
+};
+const WEBOPTIONS_ERROR_FLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBOPTIONS.FLOW",
+    identifier: Some("RunMat:weboptions:Flow"),
+    when: "Nested flow fails while gathering input values.",
+    message: "weboptions: flow failure",
+};
+
+const WEBOPTIONS_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    WEBOPTIONS_ERROR_INVALID_ARGUMENT,
+    WEBOPTIONS_ERROR_INVALID_OPTION_NAME,
+    WEBOPTIONS_ERROR_MISSING_OPTION_VALUE,
+    WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
+    WEBOPTIONS_ERROR_UNKNOWN_OPTION,
+    WEBOPTIONS_ERROR_INVALID_CREDENTIALS,
+    WEBOPTIONS_ERROR_FLOW,
+];
+
+pub const WEBOPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &WEBOPTIONS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &WEBOPTIONS_ERRORS,
+};
 
 #[allow(clippy::too_many_lines)]
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::http::weboptions")]
@@ -44,17 +188,20 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "weboptions",
     category = "io/http",
-    summary = "Create an options struct that configures webread and webwrite HTTP behaviour.",
+    summary = "Create HTTP options structs for `webread` and `webwrite` requests.",
     keywords = "weboptions,http options,timeout,headers,rest client",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::weboptions_type),
+    descriptor(crate::builtins::io::http::weboptions::WEBOPTIONS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::http::weboptions"
 )]
 async fn weboptions_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut gathered = Vec::with_capacity(rest.len());
     for value in rest {
         gathered.push(gather_if_needed_async(&value).await.map_err(|flow| {
-            remap_weboptions_flow(flow, |err| format!("weboptions: {}", err.message()))
+            remap_weboptions_flow(&WEBOPTIONS_ERROR_FLOW, flow, |err| {
+                format!("weboptions: {}", err.message())
+            })
         })?);
     }
     let mut queue: VecDeque<Value> = gathered.into();
@@ -70,10 +217,14 @@ async fn weboptions_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         let name = expect_string_scalar(
             &name_value,
             "weboptions: option names must be character vectors or string scalars",
+            &WEBOPTIONS_ERROR_INVALID_OPTION_NAME,
         )?;
-        let value = queue
-            .pop_front()
-            .ok_or_else(|| weboptions_error("weboptions: missing value for name-value argument"))?;
+        let value = queue.pop_front().ok_or_else(|| {
+            weboptions_error_with(
+                &WEBOPTIONS_ERROR_MISSING_OPTION_VALUE,
+                "weboptions: missing value for name-value argument",
+            )
+        })?;
         set_option_field(&mut options, &name, &value)?;
     }
 
@@ -82,20 +233,32 @@ async fn weboptions_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     Ok(Value::Struct(options))
 }
 
-fn weboptions_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("weboptions")
-        .build()
+fn weboptions_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-fn remap_weboptions_flow<F>(err: RuntimeError, message: F) -> RuntimeError
+fn remap_weboptions_flow<F>(
+    error: &'static BuiltinErrorDescriptor,
+    err: RuntimeError,
+    message: F,
+) -> RuntimeError
 where
     F: FnOnce(&RuntimeError) -> String,
 {
-    build_runtime_error(message(&err))
-        .with_builtin("weboptions")
-        .with_source(err)
-        .build()
+    let mut builder = build_runtime_error(message(&err))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn default_options_struct() -> StructValue {
@@ -143,9 +306,11 @@ fn set_option_field(options: &mut StructValue, name: &str, value: &Value) -> Bui
             let seconds = numeric_scalar(
                 value,
                 "weboptions: Timeout must be a finite, positive scalar",
+                &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
             )?;
             if !seconds.is_finite() || seconds <= 0.0 {
-                return Err(weboptions_error(
+                return Err(weboptions_error_with(
+                    &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
                     "weboptions: Timeout must be a finite, positive scalar",
                 ));
             }
@@ -163,6 +328,7 @@ fn set_option_field(options: &mut StructValue, name: &str, value: &Value) -> Bui
             let ua = expect_string_scalar(
                 value,
                 "weboptions: UserAgent must be a character vector or string scalar",
+                &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
             )?;
             options
                 .fields
@@ -173,6 +339,7 @@ fn set_option_field(options: &mut StructValue, name: &str, value: &Value) -> Bui
             let username = expect_string_scalar(
                 value,
                 "weboptions: Username must be a character vector or string scalar",
+                &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
             )?;
             options
                 .fields
@@ -183,6 +350,7 @@ fn set_option_field(options: &mut StructValue, name: &str, value: &Value) -> Bui
             let password = expect_string_scalar(
                 value,
                 "weboptions: Password must be a character vector or string scalar",
+                &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
             )?;
             options
                 .fields
@@ -200,6 +368,7 @@ fn set_option_field(options: &mut StructValue, name: &str, value: &Value) -> Bui
             let media = expect_string_scalar(
                 value,
                 "weboptions: MediaType must be a character vector or string scalar",
+                &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
             )?;
             options
                 .fields
@@ -211,10 +380,10 @@ fn set_option_field(options: &mut StructValue, name: &str, value: &Value) -> Bui
             options.fields.insert("QueryParameters".to_string(), qp);
             Ok(())
         }
-        _ => Err(weboptions_error(format!(
-            "weboptions: unknown option '{}'",
-            name
-        ))),
+        _ => Err(weboptions_error_with(
+            &WEBOPTIONS_ERROR_UNKNOWN_OPTION,
+            format!("weboptions: unknown option '{}'", name),
+        )),
     }
 }
 
@@ -222,16 +391,20 @@ fn parse_content_type_option(value: &Value) -> BuiltinResult<String> {
     let text = expect_string_scalar(
         value,
         "weboptions: ContentType must be a character vector or string scalar",
+        &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
     )?;
     match text.trim().to_ascii_lowercase().as_str() {
         "auto" => Ok("auto".to_string()),
         "json" => Ok("json".to_string()),
         "text" | "char" | "string" => Ok("text".to_string()),
         "binary" | "raw" | "octet-stream" => Ok("binary".to_string()),
-        other => Err(weboptions_error(format!(
-            "weboptions: unsupported ContentType '{}'; use 'auto', 'json', 'text', or 'binary'",
-            other
-        ))),
+        other => Err(weboptions_error_with(
+            &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
+            format!(
+                "weboptions: unsupported ContentType '{}'; use 'auto', 'json', 'text', or 'binary'",
+                other
+            ),
+        )),
     }
 }
 
@@ -239,14 +412,18 @@ fn parse_request_method_option(value: &Value) -> BuiltinResult<String> {
     let text = expect_string_scalar(
         value,
         "weboptions: RequestMethod must be a character vector or string scalar",
+        &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
     )?;
     let lower = text.trim().to_ascii_lowercase();
     match lower.as_str() {
         "auto" | "get" | "post" | "put" | "patch" | "delete" => Ok(lower),
-        _ => Err(weboptions_error(format!(
-            "weboptions: unsupported RequestMethod '{}'; expected auto, get, post, put, patch, or delete",
-            text
-        ))),
+        _ => Err(weboptions_error_with(
+            &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
+            format!(
+                "weboptions: unsupported RequestMethod '{}'; expected auto, get, post, put, patch, or delete",
+                text
+            ),
+        )),
     }
 }
 
@@ -258,14 +435,17 @@ fn canonical_header_fields(value: &Value) -> BuiltinResult<Value> {
                 let header_value = expect_string_scalar(
                     val,
                     "weboptions: HeaderFields values must be character vectors or string scalars",
+                    &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
                 )?;
                 if header_value.trim().is_empty() {
-                    return Err(weboptions_error(
+                    return Err(weboptions_error_with(
+                        &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
                         "weboptions: header values must not be empty",
                     ));
                 }
                 if key.trim().is_empty() {
-                    return Err(weboptions_error(
+                    return Err(weboptions_error_with(
+                        &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
                         "weboptions: header names must not be empty",
                     ));
                 }
@@ -275,34 +455,45 @@ fn canonical_header_fields(value: &Value) -> BuiltinResult<Value> {
         }
         Value::Cell(cell) => {
             if cell.cols != 2 {
-                return Err(weboptions_error(
+                return Err(weboptions_error_with(
+                    &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
                     "weboptions: HeaderFields cell array must have exactly two columns",
                 ));
             }
             let mut out = StructValue::new();
             for row in 0..cell.rows {
-                let name_val = cell
-                    .get(row, 0)
-                    .map_err(|err| weboptions_error(format!("weboptions: {err}")))?;
-                let value_val = cell
-                    .get(row, 1)
-                    .map_err(|err| weboptions_error(format!("weboptions: {err}")))?;
+                let name_val = cell.get(row, 0).map_err(|err| {
+                    weboptions_error_with(
+                        &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                        format!("weboptions: {err}"),
+                    )
+                })?;
+                let value_val = cell.get(row, 1).map_err(|err| {
+                    weboptions_error_with(
+                        &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                        format!("weboptions: {err}"),
+                    )
+                })?;
 
                 let name = expect_string_scalar(
                     &name_val,
                     "weboptions: header names must be character vectors or string scalars",
+                    &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
                 )?;
                 if name.trim().is_empty() {
-                    return Err(weboptions_error(
+                    return Err(weboptions_error_with(
+                        &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
                         "weboptions: header names must not be empty",
                     ));
                 }
                 let header_value = expect_string_scalar(
                     &value_val,
                     "weboptions: header values must be character vectors or string scalars",
+                    &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
                 )?;
                 if header_value.trim().is_empty() {
-                    return Err(weboptions_error(
+                    return Err(weboptions_error_with(
+                        &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
                         "weboptions: header values must not be empty",
                     ));
                 }
@@ -310,7 +501,8 @@ fn canonical_header_fields(value: &Value) -> BuiltinResult<Value> {
             }
             Ok(Value::Struct(out))
         }
-        _ => Err(weboptions_error(
+        _ => Err(weboptions_error_with(
+            &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
             "weboptions: HeaderFields must be a struct or two-column cell array",
         )),
     }
@@ -327,27 +519,36 @@ fn canonical_query_parameters(value: &Value) -> BuiltinResult<Value> {
         }
         Value::Cell(cell) => {
             if cell.cols != 2 {
-                return Err(weboptions_error(
+                return Err(weboptions_error_with(
+                    &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
                     "weboptions: QueryParameters cell array must have exactly two columns",
                 ));
             }
             let mut out = StructValue::new();
             for row in 0..cell.rows {
-                let name_val = cell
-                    .get(row, 0)
-                    .map_err(|err| weboptions_error(format!("weboptions: {err}")))?;
-                let value_val = cell
-                    .get(row, 1)
-                    .map_err(|err| weboptions_error(format!("weboptions: {err}")))?;
+                let name_val = cell.get(row, 0).map_err(|err| {
+                    weboptions_error_with(
+                        &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                        format!("weboptions: {err}"),
+                    )
+                })?;
+                let value_val = cell.get(row, 1).map_err(|err| {
+                    weboptions_error_with(
+                        &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                        format!("weboptions: {err}"),
+                    )
+                })?;
                 let name = expect_string_scalar(
                     &name_val,
                     "weboptions: query parameter names must be character vectors or string scalars",
+                    &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
                 )?;
                 out.fields.insert(name, value_val);
             }
             Ok(Value::Struct(out))
         }
-        _ => Err(weboptions_error(
+        _ => Err(weboptions_error_with(
+            &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
             "weboptions: QueryParameters must be a struct or two-column cell array",
         )),
     }
@@ -357,7 +558,8 @@ fn validate_credentials(options: &StructValue) -> BuiltinResult<()> {
     let username = string_field(options, "Username").unwrap_or_default();
     let password = string_field(options, "Password").unwrap_or_default();
     if !password.trim().is_empty() && username.trim().is_empty() {
-        return Err(weboptions_error(
+        return Err(weboptions_error_with(
+            &WEBOPTIONS_ERROR_INVALID_CREDENTIALS,
             "weboptions: Password requires a Username option",
         ));
     }
@@ -373,7 +575,11 @@ fn string_field(options: &StructValue, field: &str) -> Option<String> {
     })
 }
 
-fn numeric_scalar(value: &Value, context: &str) -> BuiltinResult<f64> {
+fn numeric_scalar(
+    value: &Value,
+    context: &str,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
@@ -381,19 +587,23 @@ fn numeric_scalar(value: &Value, context: &str) -> BuiltinResult<f64> {
             if tensor.data.len() == 1 {
                 Ok(tensor.data[0])
             } else {
-                Err(weboptions_error(context))
+                Err(weboptions_error_with(error, context))
             }
         }
-        _ => Err(weboptions_error(context)),
+        _ => Err(weboptions_error_with(error, context)),
     }
 }
 
-fn expect_string_scalar(value: &Value, context: &str) -> BuiltinResult<String> {
+fn expect_string_scalar(
+    value: &Value,
+    context: &str,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(weboptions_error(context)),
+        _ => Err(weboptions_error_with(error, context)),
     }
 }
 
@@ -467,6 +677,19 @@ pub(crate) mod tests {
         );
         let _ = stream.write_all(response.as_bytes());
         let _ = stream.write_all(body);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn weboptions_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = WEBOPTIONS_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"options = weboptions()"));
+        assert!(labels.contains(&"options = weboptions(name, value, ...)"));
+        assert!(labels.contains(&"options = weboptions(optionsStruct, name, value, ...)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -467,6 +467,26 @@ pub fn build_fusion_bgl(device: &wgpu::Device, n_inputs: usize) -> wgpu::BindGro
     })
 }
 
+/// Multi-output variant: N read-only inputs + `n_outputs` read-write outputs + 1 uniform params.
+pub fn build_fusion_multi_bgl(
+    device: &wgpu::Device,
+    n_inputs: usize,
+    n_outputs: usize,
+) -> wgpu::BindGroupLayout {
+    let mut entries = Vec::with_capacity(n_inputs + n_outputs + 1);
+    for i in 0..n_inputs {
+        entries.push(storage_read_entry(i as u32));
+    }
+    for k in 0..n_outputs {
+        entries.push(storage_read_write_entry((n_inputs + k) as u32));
+    }
+    entries.push(uniform_entry((n_inputs + n_outputs) as u32));
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("runmat-fusion-multi-bgl"),
+        entries: &entries,
+    })
+}
+
 pub fn build_scatter_col_bgl(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("runmat-scatter-col-bgl"),

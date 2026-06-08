@@ -5,7 +5,11 @@
 
 use num_complex::Complex64;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -20,6 +24,51 @@ use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResul
 const BUILTIN_NAME: &str = "atanh";
 const ZERO_EPS: f64 = 1.0e-12;
 const DOMAIN_EPS: f64 = 1.0e-12;
+
+const ATANH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise inverse hyperbolic tangent result.",
+}];
+
+const ATANH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, array, char array, complex value, or gpuArray.",
+}];
+
+const ATANH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = atanh(X)",
+    inputs: &ATANH_INPUTS,
+    outputs: &ATANH_OUTPUT,
+}];
+
+const ATANH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ATANH.INVALID_INPUT",
+    identifier: Some("RunMat:atanh:InvalidInput"),
+    when: "Input cannot be interpreted as supported numeric/char/complex data.",
+    message: "atanh: invalid input",
+};
+
+const ATANH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ATANH.INTERNAL",
+    identifier: Some("RunMat:atanh:Internal"),
+    when: "Internal gather/reduction/conversion/allocation/provider flow failed.",
+    message: "atanh: internal error",
+};
+
+const ATANH_ERRORS: [BuiltinErrorDescriptor; 2] = [ATANH_ERROR_INVALID_INPUT, ATANH_ERROR_INTERNAL];
+
+pub const ATANH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ATANH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ATANH_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::atanh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -37,10 +86,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Keeps tensors on the device when the provider exposes unary_atanh and every element satisfies |x| ≤ 1; otherwise gathers to the host for complex promotion.",
 };
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn atanh_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn atanh_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::atanh")]
@@ -63,10 +126,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "atanh",
     category = "math/trigonometry",
-    summary = "Inverse hyperbolic tangent with MATLAB-compatible complex promotion.",
+    summary = "Element-wise inverse hyperbolic tangent, with complex promotion for |x| > 1.",
     keywords = "atanh,inverse hyperbolic tangent,artanh,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::trigonometry::atanh::ATANH_DESCRIPTOR),
     builtin_path = "crate::builtins::math::trigonometry::atanh"
 )]
 async fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
@@ -75,9 +139,7 @@ async fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Complex(re, im) => Ok(atanh_complex_scalar(re, im)),
         Value::ComplexTensor(ct) => atanh_complex_tensor(ct),
         Value::CharArray(ca) => atanh_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(runtime_error_for("atanh: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(atanh_error(&ATANH_ERROR_INVALID_INPUT)),
         other => atanh_real(other),
     }
 }
@@ -87,7 +149,7 @@ async fn atanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         match gpu_domain_is_real(provider, &handle).await {
             Ok(true) => {
                 if let Ok(out) = provider.unary_atanh(&handle).await {
-                    return Ok(Value::GpuTensor(out));
+                    return Ok(gpu_helpers::resident_gpu_value(out));
                 }
             }
             Ok(false) => {
@@ -106,13 +168,12 @@ async fn gpu_domain_is_real(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<bool> {
-    let min_handle = provider
-        .reduce_min(handle)
-        .await
-        .map_err(|e| runtime_error_for(format!("atanh: reduce_min failed: {e}")))?;
+    let min_handle = provider.reduce_min(handle).await.map_err(|e| {
+        atanh_error_with_detail(&ATANH_ERROR_INTERNAL, format!("reduce_min failed: {e}"))
+    })?;
     let max_handle = provider.reduce_max(handle).await.map_err(|e| {
         let _ = provider.free(&min_handle);
-        runtime_error_for(format!("atanh: reduce_max failed: {e}"))
+        atanh_error_with_detail(&ATANH_ERROR_INTERNAL, format!("reduce_max failed: {e}"))
     })?;
 
     let min_host = match download_handle_async(provider, &min_handle).await {
@@ -120,9 +181,10 @@ async fn gpu_domain_is_real(
         Err(err) => {
             let _ = provider.free(&min_handle);
             let _ = provider.free(&max_handle);
-            return Err(runtime_error_for(format!(
-                "atanh: reduce_min download failed: {err}"
-            )));
+            return Err(atanh_error_with_detail(
+                &ATANH_ERROR_INTERNAL,
+                format!("reduce_min download failed: {err}"),
+            ));
         }
     };
     let max_host = match download_handle_async(provider, &max_handle).await {
@@ -130,9 +192,10 @@ async fn gpu_domain_is_real(
         Err(err) => {
             let _ = provider.free(&min_handle);
             let _ = provider.free(&max_handle);
-            return Err(runtime_error_for(format!(
-                "atanh: reduce_max download failed: {err}"
-            )));
+            return Err(atanh_error_with_detail(
+                &ATANH_ERROR_INTERNAL,
+                format!("reduce_max download failed: {err}"),
+            ));
         }
     };
 
@@ -140,8 +203,9 @@ async fn gpu_domain_is_real(
     let _ = provider.free(&max_handle);
 
     if min_host.data.is_empty() || max_host.data.is_empty() {
-        return Err(runtime_error_for(
-            "atanh: reduce_min/reduce_max returned empty result",
+        return Err(atanh_error_with_detail(
+            &ATANH_ERROR_INTERNAL,
+            "reduce_min/reduce_max returned empty result",
         ));
     }
 
@@ -164,7 +228,8 @@ async fn gpu_domain_is_real(
 }
 
 fn atanh_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("atanh", value).map_err(runtime_error_for)?;
+    let tensor = tensor::value_into_tensor_for("atanh", value)
+        .map_err(|e| atanh_error_with_detail(&ATANH_ERROR_INVALID_INPUT, e))?;
     atanh_tensor_real(tensor)
 }
 
@@ -207,12 +272,12 @@ fn atanh_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
             Ok(Value::Complex(re, im))
         } else {
             let tensor = ComplexTensor::new(complex_values, tensor.shape.clone())
-                .map_err(|e| runtime_error_for(format!("atanh: {e}")))?;
+                .map_err(|e| atanh_error_with_detail(&ATANH_ERROR_INTERNAL, e))?;
             Ok(Value::ComplexTensor(tensor))
         }
     } else {
         let tensor = Tensor::new(real_values, tensor.shape.clone())
-            .map_err(|e| runtime_error_for(format!("atanh: {e}")))?;
+            .map_err(|e| atanh_error_with_detail(&ATANH_ERROR_INTERNAL, e))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }
@@ -231,7 +296,7 @@ fn atanh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         Ok(Value::Complex(re, im))
     } else {
         let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-            .map_err(|e| runtime_error_for(format!("atanh: {e}")))?;
+            .map_err(|e| atanh_error_with_detail(&ATANH_ERROR_INTERNAL, e))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
@@ -244,12 +309,12 @@ fn atanh_complex_scalar(re: f64, im: f64) -> Value {
 fn atanh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     if ca.data.is_empty() {
         let tensor = Tensor::new(Vec::new(), vec![ca.rows, ca.cols])
-            .map_err(|e| runtime_error_for(format!("atanh: {e}")))?;
+            .map_err(|e| atanh_error_with_detail(&ATANH_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-        .map_err(|e| runtime_error_for(format!("atanh: {e}")))?;
+        .map_err(|e| atanh_error_with_detail(&ATANH_ERROR_INTERNAL, e))?;
     atanh_tensor_real(tensor)
 }
 
@@ -283,8 +348,18 @@ pub(crate) mod tests {
         block_on(super::atanh_builtin(value))
     }
 
-    fn error_message(err: RuntimeError) -> String {
+    fn error_message(err: &RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn atanh_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = ATANH_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = atanh(X)"));
     }
 
     #[test]
@@ -439,8 +514,9 @@ pub(crate) mod tests {
     #[test]
     fn atanh_string_input_errors() {
         let err = atanh_builtin(Value::from("hello")).expect_err("expected error");
-        let message = error_message(err);
-        assert!(message.contains("numeric"));
+        let message = error_message(&err);
+        assert!(message.contains("invalid input"));
+        assert_eq!(err.identifier(), ATANH_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

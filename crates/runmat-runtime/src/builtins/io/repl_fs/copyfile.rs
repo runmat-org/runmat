@@ -5,7 +5,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use glob::Pattern;
-use runmat_builtins::{CharArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{contains_wildcards, expand_user_path};
@@ -14,21 +18,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-const MESSAGE_ID_OS_ERROR: &str = "MATLAB:COPYFILE:OSError";
-const MESSAGE_ID_SOURCE_NOT_FOUND: &str = "MATLAB:COPYFILE:FileDoesNotExist";
-const MESSAGE_ID_DEST_EXISTS: &str = "MATLAB:COPYFILE:DestinationExists";
-const MESSAGE_ID_DEST_MISSING: &str = "MATLAB:COPYFILE:DestinationNotFound";
-const MESSAGE_ID_DEST_NOT_DIR: &str = "MATLAB:COPYFILE:DestinationNotDirectory";
-const MESSAGE_ID_EMPTY_SOURCE: &str = "MATLAB:COPYFILE:EmptySource";
-const MESSAGE_ID_EMPTY_DEST: &str = "MATLAB:COPYFILE:EmptyDestination";
-const MESSAGE_ID_PATTERN_ERROR: &str = "MATLAB:COPYFILE:InvalidPattern";
-const MESSAGE_ID_SAME_PATH: &str = "MATLAB:COPYFILE:SourceEqualsDestination";
-
-const ERR_SOURCE_ARG: &str = "copyfile: source must be a character vector or string scalar";
-const ERR_DEST_ARG: &str = "copyfile: destination must be a character vector or string scalar";
-const ERR_FLAG_ARG: &str =
-    "copyfile: flag must be the character 'f' supplied as a char vector or string scalar";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::copyfile")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -61,6 +50,212 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "copyfile";
 
+const COPYFILE_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "status",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "1 on success, 0 when copy fails.",
+}];
+const COPYFILE_OUTPUT_STATUS_MSG_MSGID: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "status",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "1 on success, 0 when copy fails.",
+    },
+    BuiltinParamDescriptor {
+        name: "msg",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Diagnostic message for failures.",
+    },
+    BuiltinParamDescriptor {
+        name: "msgID",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Stable diagnostic identifier string.",
+    },
+];
+const COPYFILE_INPUTS_SOURCE_DEST: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "source",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Source file/folder path or wildcard pattern.",
+    },
+    BuiltinParamDescriptor {
+        name: "destination",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Destination path.",
+    },
+];
+const COPYFILE_INPUTS_SOURCE_DEST_FLAG: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "source",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Source file/folder path or wildcard pattern.",
+    },
+    BuiltinParamDescriptor {
+        name: "destination",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Destination path.",
+    },
+    BuiltinParamDescriptor {
+        name: "flag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"f\""),
+        description: "Overwrite flag; only \"f\" is accepted.",
+    },
+];
+const COPYFILE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "status = copyfile(source, destination)",
+        inputs: &COPYFILE_INPUTS_SOURCE_DEST,
+        outputs: &COPYFILE_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "status = copyfile(source, destination, flag)",
+        inputs: &COPYFILE_INPUTS_SOURCE_DEST_FLAG,
+        outputs: &COPYFILE_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[status, msg, msgID] = copyfile(source, destination)",
+        inputs: &COPYFILE_INPUTS_SOURCE_DEST,
+        outputs: &COPYFILE_OUTPUT_STATUS_MSG_MSGID,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[status, msg, msgID] = copyfile(source, destination, flag)",
+        inputs: &COPYFILE_INPUTS_SOURCE_DEST_FLAG,
+        outputs: &COPYFILE_OUTPUT_STATUS_MSG_MSGID,
+    },
+];
+const COPYFILE_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COPYFILE.NOT_ENOUGH_INPUTS",
+    identifier: Some("RunMat:copyfile:NotEnoughInputs"),
+    when: "Fewer than two input arguments are provided.",
+    message: "copyfile: not enough input arguments",
+};
+const COPYFILE_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COPYFILE.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:copyfile:TooManyInputs"),
+    when: "More than three input arguments are provided.",
+    message: "copyfile: too many input arguments",
+};
+const COPYFILE_ERROR_SOURCE_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COPYFILE.SOURCE_ARG",
+    identifier: Some("RunMat:copyfile:SourceArgType"),
+    when: "Source argument is not a character vector or string scalar.",
+    message: "copyfile: source must be a character vector or string scalar",
+};
+const COPYFILE_ERROR_DEST_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COPYFILE.DEST_ARG",
+    identifier: Some("RunMat:copyfile:DestinationArgType"),
+    when: "Destination argument is not a character vector or string scalar.",
+    message: "copyfile: destination must be a character vector or string scalar",
+};
+const COPYFILE_ERROR_FLAG_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COPYFILE.FLAG_ARG",
+    identifier: Some("RunMat:copyfile:FlagArgType"),
+    when: "Flag argument is not the scalar character 'f'.",
+    message: "copyfile: flag must be the character 'f' supplied as a char vector or string scalar",
+};
+const COPYFILE_RESULT_OS_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COPYFILE.OS_ERROR",
+    identifier: Some("RunMat:copyfile:OSError"),
+    when: "Filesystem copy operation fails.",
+    message: "copyfile: unable to copy",
+};
+const COPYFILE_RESULT_SOURCE_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COPYFILE.SOURCE_NOT_FOUND",
+    identifier: Some("RunMat:copyfile:FileDoesNotExist"),
+    when: "Source path or wildcard match does not exist.",
+    message: "copyfile: source not found",
+};
+const COPYFILE_RESULT_DEST_EXISTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COPYFILE.DEST_EXISTS",
+    identifier: Some("RunMat:copyfile:DestinationExists"),
+    when: "Destination already exists and overwrite is not requested.",
+    message: "copyfile: destination already exists",
+};
+const COPYFILE_RESULT_DEST_MISSING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COPYFILE.DEST_MISSING",
+    identifier: Some("RunMat:copyfile:DestinationNotFound"),
+    when: "Destination directory is missing for wildcard source copies.",
+    message: "copyfile: destination folder not found",
+};
+const COPYFILE_RESULT_DEST_NOT_DIR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COPYFILE.DEST_NOT_DIR",
+    identifier: Some("RunMat:copyfile:DestinationNotDirectory"),
+    when: "Destination must be a directory for wildcard or directory copy modes.",
+    message: "copyfile: destination is not a directory",
+};
+const COPYFILE_RESULT_EMPTY_SOURCE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COPYFILE.EMPTY_SOURCE",
+    identifier: Some("RunMat:copyfile:EmptySource"),
+    when: "Source path is empty.",
+    message: "Source file or folder name must not be empty.",
+};
+const COPYFILE_RESULT_EMPTY_DEST: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COPYFILE.EMPTY_DEST",
+    identifier: Some("RunMat:copyfile:EmptyDestination"),
+    when: "Destination path is empty.",
+    message: "Destination file or folder name must not be empty.",
+};
+const COPYFILE_RESULT_PATTERN_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COPYFILE.PATTERN_ERROR",
+    identifier: Some("RunMat:copyfile:InvalidPattern"),
+    when: "Source wildcard pattern is invalid.",
+    message: "copyfile: invalid source pattern",
+};
+const COPYFILE_RESULT_SAME_PATH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COPYFILE.SAME_PATH",
+    identifier: Some("RunMat:copyfile:SourceEqualsDestination"),
+    when: "Source and destination resolve to the same path.",
+    message: "copyfile: source and destination are the same",
+};
+const COPYFILE_ERRORS: [BuiltinErrorDescriptor; 14] = [
+    COPYFILE_ERROR_NOT_ENOUGH_INPUTS,
+    COPYFILE_ERROR_TOO_MANY_INPUTS,
+    COPYFILE_ERROR_SOURCE_ARG,
+    COPYFILE_ERROR_DEST_ARG,
+    COPYFILE_ERROR_FLAG_ARG,
+    COPYFILE_RESULT_OS_ERROR,
+    COPYFILE_RESULT_SOURCE_NOT_FOUND,
+    COPYFILE_RESULT_DEST_EXISTS,
+    COPYFILE_RESULT_DEST_MISSING,
+    COPYFILE_RESULT_DEST_NOT_DIR,
+    COPYFILE_RESULT_EMPTY_SOURCE,
+    COPYFILE_RESULT_EMPTY_DEST,
+    COPYFILE_RESULT_PATTERN_ERROR,
+    COPYFILE_RESULT_SAME_PATH,
+];
+pub const COPYFILE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &COPYFILE_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &COPYFILE_ERRORS,
+};
+
+fn copyfile_error_row(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn copyfile_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -81,11 +276,12 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "copyfile",
     category = "io/repl_fs",
-    summary = "Copy files or folders with MATLAB-compatible status, diagnostic message, and message ID outputs.",
+    summary = "Copy files or folders.",
     keywords = "copyfile,copy file,copy folder,filesystem,status,message,messageid,force,overwrite",
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::copyfile_type),
+    descriptor(crate::builtins::io::repl_fs::copyfile::COPYFILE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::copyfile"
 )]
 async fn copyfile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -106,13 +302,13 @@ async fn copyfile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<CopyfileResult> {
     let gathered = gather_arguments(args).await?;
     match gathered.len() {
-        0 | 1 => Err(copyfile_error("copyfile: not enough input arguments")),
-        2 => copy_operation(&gathered[0], &gathered[1], false),
+        0 | 1 => Err(copyfile_error_row(&COPYFILE_ERROR_NOT_ENOUGH_INPUTS)),
+        2 => copy_operation(&gathered[0], &gathered[1], false).await,
         3 => {
             let force = parse_force_flag(&gathered[2])?;
-            copy_operation(&gathered[0], &gathered[1], force)
+            copy_operation(&gathered[0], &gathered[1], force).await
         }
-        _ => Err(copyfile_error("copyfile: too many input arguments")),
+        _ => Err(copyfile_error_row(&COPYFILE_ERROR_TOO_MANY_INPUTS)),
     }
 }
 
@@ -132,32 +328,32 @@ impl CopyfileResult {
         }
     }
 
-    fn failure(message: String, message_id: &str) -> Self {
+    fn failure(message: String, error: &'static BuiltinErrorDescriptor) -> Self {
         Self {
             status: 0.0,
             message,
-            message_id: message_id.to_string(),
+            message_id: message_identifier(error).to_string(),
         }
     }
 
     fn empty_source() -> Self {
         Self::failure(
-            "Source file or folder name must not be empty.".to_string(),
-            MESSAGE_ID_EMPTY_SOURCE,
+            COPYFILE_RESULT_EMPTY_SOURCE.message.to_string(),
+            &COPYFILE_RESULT_EMPTY_SOURCE,
         )
     }
 
     fn empty_destination() -> Self {
         Self::failure(
-            "Destination file or folder name must not be empty.".to_string(),
-            MESSAGE_ID_EMPTY_DEST,
+            COPYFILE_RESULT_EMPTY_DEST.message.to_string(),
+            &COPYFILE_RESULT_EMPTY_DEST,
         )
     }
 
     fn source_not_found(display: &str) -> Self {
         Self::failure(
             format!("Source \"{}\" does not exist.", display),
-            MESSAGE_ID_SOURCE_NOT_FOUND,
+            &COPYFILE_RESULT_SOURCE_NOT_FOUND,
         )
     }
 
@@ -167,7 +363,7 @@ impl CopyfileResult {
                 "Cannot copy to \"{}\": destination already exists.",
                 display
             ),
-            MESSAGE_ID_DEST_EXISTS,
+            &COPYFILE_RESULT_DEST_EXISTS,
         )
     }
 
@@ -177,35 +373,35 @@ impl CopyfileResult {
                 "Destination folder \"{}\" must exist when copying multiple sources.",
                 display
             ),
-            MESSAGE_ID_DEST_MISSING,
+            &COPYFILE_RESULT_DEST_MISSING,
         )
     }
 
     fn destination_not_directory(display: &str) -> Self {
         Self::failure(
             format!("Destination \"{}\" must refer to a folder.", display),
-            MESSAGE_ID_DEST_NOT_DIR,
+            &COPYFILE_RESULT_DEST_NOT_DIR,
         )
     }
 
     fn same_path(display: &str) -> Self {
         Self::failure(
             format!("Cannot copy \"{}\" onto itself.", display),
-            MESSAGE_ID_SAME_PATH,
+            &COPYFILE_RESULT_SAME_PATH,
         )
     }
 
     fn glob_pattern_error(pattern: &str, err: &str) -> Self {
         Self::failure(
             format!("Invalid source pattern \"{}\": {}", pattern, err),
-            MESSAGE_ID_PATTERN_ERROR,
+            &COPYFILE_RESULT_PATTERN_ERROR,
         )
     }
 
     fn os_error(source: &str, target: &str, err: &io::Error) -> Self {
         Self::failure(
             format!("Unable to copy \"{}\" to \"{}\": {}", source, target, err),
-            MESSAGE_ID_OS_ERROR,
+            &COPYFILE_RESULT_OS_ERROR,
         )
     }
 
@@ -237,17 +433,17 @@ impl CopyfileResult {
     }
 }
 
-fn copy_operation(
+async fn copy_operation(
     source: &Value,
     destination: &Value,
     force: bool,
 ) -> BuiltinResult<CopyfileResult> {
-    let source_raw = extract_path(source, ERR_SOURCE_ARG)?;
+    let source_raw = extract_path(source, &COPYFILE_ERROR_SOURCE_ARG)?;
     if source_raw.is_empty() {
         return Ok(CopyfileResult::empty_source());
     }
 
-    let destination_raw = extract_path(destination, ERR_DEST_ARG)?;
+    let destination_raw = extract_path(destination, &COPYFILE_ERROR_DEST_ARG)?;
     if destination_raw.is_empty() {
         return Ok(CopyfileResult::empty_destination());
     }
@@ -257,34 +453,26 @@ fn copy_operation(
         expand_user_path(&destination_raw, "copyfile").map_err(copyfile_error)?;
 
     if contains_wildcards(&source_expanded) {
-        Ok(copy_with_pattern(
-            &source_expanded,
-            &destination_expanded,
-            force,
-        ))
+        Ok(copy_with_pattern(&source_expanded, &destination_expanded, force).await)
     } else {
-        Ok(copy_single_source(
-            &source_expanded,
-            &destination_expanded,
-            force,
-        ))
+        Ok(copy_single_source(&source_expanded, &destination_expanded, force).await)
     }
 }
 
-fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileResult {
+async fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileResult {
     let source_path = PathBuf::from(source);
-    let source_meta = match vfs::metadata(&source_path) {
+    let source_meta = match vfs::metadata_async(&source_path).await {
         Ok(meta) => meta,
         Err(_) => return CopyfileResult::source_not_found(source),
     };
     let source_display = path_to_display(&source_path);
 
     let destination_path = PathBuf::from(destination);
-    if same_physical_path(&source_path, &destination_path) {
+    if same_physical_path(&source_path, &destination_path).await {
         return CopyfileResult::same_path(&source_display);
     }
 
-    let destination_meta = vfs::metadata(&destination_path).ok();
+    let destination_meta = vfs::metadata_async(&destination_path).await.ok();
     let mut target_path = destination_path.clone();
     let mut remove_target = false;
     let mut remove_is_dir = false;
@@ -299,16 +487,16 @@ fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileR
                 );
             };
             target_path = destination_path.join(name);
-            if same_physical_path(&source_path, &target_path) {
+            if same_physical_path(&source_path, &target_path).await {
                 return CopyfileResult::same_path(&source_display);
             }
-            if source_meta.is_dir() && is_descendant(&source_path, &target_path) {
+            if source_meta.is_dir() && is_descendant(&source_path, &target_path).await {
                 return CopyfileResult::failure(
                     "Cannot copy a folder into one of its descendants.".to_string(),
-                    MESSAGE_ID_OS_ERROR,
+                    &COPYFILE_RESULT_OS_ERROR,
                 );
             }
-            match vfs::metadata(&target_path) {
+            match vfs::metadata_async(&target_path).await {
                 Ok(existing) => {
                     if !force {
                         return CopyfileResult::destination_exists(&path_to_display(&target_path));
@@ -338,10 +526,10 @@ fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileR
         }
     } else if source_meta.is_dir() {
         // When copying a directory to a new path, ensure we don't copy into a child of itself.
-        if is_descendant(&source_path, &destination_path) {
+        if is_descendant(&source_path, &destination_path).await {
             return CopyfileResult::failure(
                 "Cannot copy a folder into one of its descendants.".to_string(),
-                MESSAGE_ID_OS_ERROR,
+                &COPYFILE_RESULT_OS_ERROR,
             );
         }
     }
@@ -357,13 +545,13 @@ fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileR
         remove_is_dir,
     )];
 
-    match execute_plan(&plan) {
+    match execute_plan(&plan).await {
         Ok(()) => CopyfileResult::success(),
         Err(err) => CopyfileResult::os_error(&err.source_display, &err.target_display, &err.error),
     }
 }
 
-fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileResult {
+async fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileResult {
     let pattern_path = Path::new(pattern);
     let (base_dir, name_pattern) = match pattern_path.file_name() {
         Some(name) => (
@@ -380,7 +568,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
     };
 
     let mut matches = Vec::new();
-    let entries = match vfs::read_dir(base_dir) {
+    let entries = match vfs::read_dir_async(base_dir).await {
         Ok(entries) => entries,
         Err(err) => {
             let display = path_to_display(base_dir);
@@ -400,7 +588,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
     }
 
     let destination_path = PathBuf::from(destination);
-    let destination_meta = match vfs::metadata(&destination_path) {
+    let destination_meta = match vfs::metadata_async(&destination_path).await {
         Ok(meta) => meta,
         Err(_) => return CopyfileResult::destination_missing(destination),
     };
@@ -412,7 +600,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
     let mut plan = Vec::with_capacity(matches.len());
     for source_path in matches {
         let display_source = path_to_display(&source_path);
-        let meta = match vfs::metadata(&source_path) {
+        let meta = match vfs::metadata_async(&source_path).await {
             Ok(meta) => meta,
             Err(_) => return CopyfileResult::source_not_found(&display_source),
         };
@@ -424,11 +612,11 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
             );
         };
         let target_path = destination_path.join(name);
-        if same_physical_path(&source_path, &target_path) {
+        if same_physical_path(&source_path, &target_path).await {
             return CopyfileResult::same_path(&display_source);
         }
         let target_display = path_to_display(&target_path);
-        match vfs::metadata(&target_path) {
+        match vfs::metadata_async(&target_path).await {
             Ok(existing) => {
                 if !force {
                     return CopyfileResult::destination_exists(&target_display);
@@ -464,7 +652,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
         return CopyfileResult::success();
     }
 
-    match execute_plan(&plan) {
+    match execute_plan(&plan).await {
         Ok(()) => CopyfileResult::success(),
         Err(err) => CopyfileResult::os_error(&err.source_display, &err.target_display, &err.error),
     }
@@ -509,13 +697,13 @@ struct CopyError {
     error: io::Error,
 }
 
-fn execute_plan(plan: &[CopyPlanEntry]) -> Result<(), CopyError> {
+async fn execute_plan(plan: &[CopyPlanEntry]) -> Result<(), CopyError> {
     for entry in plan {
         if entry.remove_target {
             let result = if entry.remove_is_dir {
-                vfs::remove_dir_all(&entry.target_path)
+                vfs::remove_dir_all_async(&entry.target_path).await
             } else {
-                vfs::remove_file(&entry.target_path)
+                vfs::remove_file_async(&entry.target_path).await
             };
             if let Err(err) = result {
                 if err.kind() != io::ErrorKind::NotFound {
@@ -528,7 +716,9 @@ fn execute_plan(plan: &[CopyPlanEntry]) -> Result<(), CopyError> {
             }
         }
 
-        if let Err(err) = copy_path(&entry.source_path, &entry.target_path, entry.source_is_dir) {
+        if let Err(err) =
+            copy_path(&entry.source_path, &entry.target_path, entry.source_is_dir).await
+        {
             return Err(CopyError {
                 source_display: entry.source_display.clone(),
                 target_display: entry.target_display.clone(),
@@ -540,18 +730,19 @@ fn execute_plan(plan: &[CopyPlanEntry]) -> Result<(), CopyError> {
     Ok(())
 }
 
-fn copy_path(source: &Path, destination: &Path, is_directory: bool) -> io::Result<()> {
+async fn copy_path(source: &Path, destination: &Path, is_directory: bool) -> io::Result<()> {
     if is_directory {
-        copy_directory_recursive(source, destination)
+        copy_directory_recursive(source, destination).await
     } else {
-        copy_file_to_path(source, destination)
+        copy_file_to_path(source, destination).await
     }
 }
 
-fn copy_directory_recursive(source: &Path, destination: &Path) -> io::Result<()> {
-    ensure_parent_exists(destination)?;
+#[async_recursion::async_recursion(?Send)]
+async fn copy_directory_recursive(source: &Path, destination: &Path) -> io::Result<()> {
+    ensure_parent_exists(destination).await?;
 
-    match vfs::metadata(destination) {
+    match vfs::metadata_async(destination).await {
         Ok(meta) => {
             if !meta.is_dir() {
                 return Err(io::Error::new(
@@ -564,46 +755,46 @@ fn copy_directory_recursive(source: &Path, destination: &Path) -> io::Result<()>
             if err.kind() != io::ErrorKind::NotFound {
                 return Err(err);
             }
-            vfs::create_dir_all(destination)?;
+            vfs::create_dir_all_async(destination).await?;
         }
     }
 
-    if let Ok(metadata) = vfs::metadata(source) {
-        let _ = vfs::set_readonly(destination, metadata.is_readonly());
+    if let Ok(metadata) = vfs::metadata_async(source).await {
+        let _ = vfs::set_readonly_async(destination, metadata.is_readonly()).await;
     }
 
-    for entry in vfs::read_dir(source)? {
+    for entry in vfs::read_dir_async(source).await? {
         let child_source = entry.path().to_path_buf();
         let child_dest = destination.join(PathBuf::from(entry.file_name()));
-        let child_meta = vfs::metadata(&child_source)?;
+        let child_meta = vfs::metadata_async(&child_source).await?;
         if child_meta.is_dir() {
-            copy_directory_recursive(&child_source, &child_dest)?;
+            copy_directory_recursive(&child_source, &child_dest).await?;
         } else {
-            copy_file_to_path(&child_source, &child_dest)?;
+            copy_file_to_path(&child_source, &child_dest).await?;
         }
     }
 
     Ok(())
 }
 
-fn copy_file_to_path(source: &Path, destination: &Path) -> io::Result<()> {
-    ensure_parent_exists(destination)?;
+async fn copy_file_to_path(source: &Path, destination: &Path) -> io::Result<()> {
+    ensure_parent_exists(destination).await?;
 
     vfs::copy_file(source, destination)?;
 
-    if let Ok(metadata) = vfs::metadata(source) {
-        let _ = vfs::set_readonly(destination, metadata.is_readonly());
+    if let Ok(metadata) = vfs::metadata_async(source).await {
+        let _ = vfs::set_readonly_async(destination, metadata.is_readonly()).await;
     }
 
     Ok(())
 }
 
-fn ensure_parent_exists(path: &Path) -> io::Result<()> {
+async fn ensure_parent_exists(path: &Path) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         if parent.as_os_str().is_empty() || parent == Path::new(".") {
             return Ok(());
         }
-        if vfs::metadata(parent).is_err() {
+        if vfs::metadata_async(parent).await.is_err() {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 format!("Destination parent \"{}\" does not exist", parent.display()),
@@ -613,21 +804,27 @@ fn ensure_parent_exists(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn same_physical_path(a: &Path, b: &Path) -> bool {
+async fn same_physical_path(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
     }
-    match (vfs::canonicalize(a), vfs::canonicalize(b)) {
+    match (
+        vfs::canonicalize_async(a).await,
+        vfs::canonicalize_async(b).await,
+    ) {
         (Ok(ca), Ok(cb)) => ca == cb,
         _ => false,
     }
 }
 
-fn is_descendant(parent: &Path, candidate: &Path) -> bool {
+async fn is_descendant(parent: &Path, candidate: &Path) -> bool {
     if candidate.starts_with(parent) && candidate != parent {
         return true;
     }
-    match (vfs::canonicalize(parent), vfs::canonicalize(candidate)) {
+    match (
+        vfs::canonicalize_async(parent).await,
+        vfs::canonicalize_async(candidate).await,
+    ) {
         (Ok(parent_canon), Ok(candidate_canon)) => {
             candidate_canon.starts_with(&parent_canon) && candidate_canon != parent_canon
         }
@@ -636,33 +833,37 @@ fn is_descendant(parent: &Path, candidate: &Path) -> bool {
 }
 
 fn parse_force_flag(value: &Value) -> BuiltinResult<bool> {
-    let text = extract_path(value, ERR_FLAG_ARG)?;
+    let text = extract_path(value, &COPYFILE_ERROR_FLAG_ARG)?;
     if text.eq_ignore_ascii_case("f") {
         Ok(true)
     } else {
-        Err(copyfile_error(ERR_FLAG_ARG))
+        Err(copyfile_error_row(&COPYFILE_ERROR_FLAG_ARG))
     }
 }
 
-fn extract_path(value: &Value, error_message: &str) -> BuiltinResult<String> {
+fn extract_path(value: &Value, error: &'static BuiltinErrorDescriptor) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(array) => {
             if array.rows == 1 {
                 Ok(array.data.iter().collect())
             } else {
-                Err(copyfile_error(error_message))
+                Err(copyfile_error_row(error))
             }
         }
         Value::StringArray(array) => {
             if array.data.len() == 1 {
                 Ok(array.data[0].clone())
             } else {
-                Err(copyfile_error(error_message))
+                Err(copyfile_error_row(error))
             }
         }
-        _ => Err(copyfile_error(error_message)),
+        _ => Err(copyfile_error_row(error)),
     }
+}
+
+fn message_identifier(error: &'static BuiltinErrorDescriptor) -> &'static str {
+    error.identifier.unwrap_or("")
 }
 
 async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
@@ -694,6 +895,20 @@ pub(crate) mod tests {
 
     fn evaluate(args: &[Value]) -> BuiltinResult<CopyfileResult> {
         futures::executor::block_on(super::evaluate(args))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn copyfile_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = COPYFILE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"status = copyfile(source, destination)"));
+        assert!(labels.contains(&"status = copyfile(source, destination, flag)"));
+        assert!(labels.contains(&"[status, msg, msgID] = copyfile(source, destination)"));
+        assert!(labels.contains(&"[status, msg, msgID] = copyfile(source, destination, flag)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -784,7 +999,10 @@ pub(crate) mod tests {
         ])
         .expect("copyfile");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_DEST_EXISTS);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&COPYFILE_RESULT_DEST_EXISTS)
+        );
         assert!(
             eval.message().contains("destination already exists"),
             "expected descriptive destination-exists message"
@@ -840,7 +1058,10 @@ pub(crate) mod tests {
         ])
         .expect("copyfile");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_DEST_MISSING);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&COPYFILE_RESULT_DEST_MISSING)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -912,7 +1133,10 @@ pub(crate) mod tests {
         ])
         .expect("copyfile");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_SOURCE_NOT_FOUND);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&COPYFILE_RESULT_SOURCE_NOT_FOUND)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -948,7 +1172,7 @@ pub(crate) mod tests {
 
         let err = evaluate(&[Value::from("a"), Value::from("b"), Value::Num(1.0)])
             .expect_err("expected error");
-        assert_eq!(err.message(), ERR_FLAG_ARG);
+        assert_eq!(err.message(), COPYFILE_ERROR_FLAG_ARG.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1012,7 +1236,10 @@ pub(crate) mod tests {
         ])
         .expect("copyfile");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_SAME_PATH);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&COPYFILE_RESULT_SAME_PATH)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1024,7 +1251,10 @@ pub(crate) mod tests {
 
         let eval = evaluate(&[Value::from(""), Value::from("dest.txt")]).expect("copyfile");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_EMPTY_SOURCE);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&COPYFILE_RESULT_EMPTY_SOURCE)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1036,7 +1266,10 @@ pub(crate) mod tests {
 
         let eval = evaluate(&[Value::from("source.txt"), Value::from("")]).expect("copyfile");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_EMPTY_DEST);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&COPYFILE_RESULT_EMPTY_DEST)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1048,6 +1281,9 @@ pub(crate) mod tests {
 
         let eval = evaluate(&[Value::from("[*.txt"), Value::from("dest")]).expect("copyfile");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_PATTERN_ERROR);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&COPYFILE_RESULT_PATTERN_ERROR)
+        );
     }
 }

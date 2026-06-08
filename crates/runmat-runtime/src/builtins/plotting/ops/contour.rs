@@ -3,31 +3,355 @@
 use glam::{Vec2, Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
-use runmat_plot::core::Vertex;
+use runmat_plot::core::{BoundingBox, Vertex};
 use runmat_plot::gpu::contour_fill;
 use runmat_plot::gpu::ScalarType;
-use runmat_plot::plots::contour::contour_bounds;
+use runmat_plot::plots::contour::{contour_bounds, contour_bounds_3d};
 use runmat_plot::plots::{ColorMap, ContourFillPlot, ContourPlot};
 
 use super::common::{numeric_vector, tensor_to_surface_grid, value_as_f64, SurfaceDataInput};
+use super::op_common::surface_inputs::{extract_meshgrid_axes_from_xy_matrices, AxisSource};
 use super::style::{parse_color_value, value_as_string, LineStyleParseOptions};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 
-use super::gpu_helpers::axis_bounds;
+use super::gpu_helpers::{axis_bounds, axis_bounds_async};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::surf::build_color_lut;
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::build_runtime_error;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
-use crate::BuiltinResult;
+use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "contour";
 const DEFAULT_LEVELS: usize = 10;
+
+const CONTOUR_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to contour line plot.",
+}];
+
+const CONTOUR_INPUTS_Z: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Z",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Contour height grid.",
+}];
+
+const CONTOUR_INPUTS_Z_LEVEL_COUNT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Requested contour level count.",
+    },
+];
+
+const CONTOUR_INPUTS_Z_LEVEL_VALUES: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Explicit contour level values.",
+    },
+];
+
+const CONTOUR_INPUTS_Z_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value contour options.",
+    },
+];
+
+const CONTOUR_INPUTS_Z_LEVEL_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour level count/value vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value contour options.",
+    },
+];
+
+const CONTOUR_INPUTS_X_Y_Z: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X axis vector/meshgrid matrix matching Z rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y axis vector/meshgrid matrix matching Z columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+];
+
+const CONTOUR_INPUTS_X_Y_Z_LEVEL_COUNT: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X axis vector/meshgrid matrix matching Z rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y axis vector/meshgrid matrix matching Z columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Requested contour level count.",
+    },
+];
+
+const CONTOUR_INPUTS_X_Y_Z_LEVEL_VALUES: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X axis vector/meshgrid matrix matching Z rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y axis vector/meshgrid matrix matching Z columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Explicit contour level values.",
+    },
+];
+
+const CONTOUR_INPUTS_X_Y_Z_LEVEL_PROPS: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X axis vector/meshgrid matrix matching Z rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y axis vector/meshgrid matrix matching Z columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour level count/value vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value contour options.",
+    },
+];
+
+const CONTOUR_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+    BuiltinSignatureDescriptor {
+        label: "h = contour(Z)",
+        inputs: &CONTOUR_INPUTS_Z,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(Z, N)",
+        inputs: &CONTOUR_INPUTS_Z_LEVEL_COUNT,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(Z, V)",
+        inputs: &CONTOUR_INPUTS_Z_LEVEL_VALUES,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(Z, Name, Value, ...)",
+        inputs: &CONTOUR_INPUTS_Z_PROPS,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(Z, V, Name, Value, ...)",
+        inputs: &CONTOUR_INPUTS_Z_LEVEL_PROPS,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(X, Y, Z)",
+        inputs: &CONTOUR_INPUTS_X_Y_Z,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(X, Y, Z, N)",
+        inputs: &CONTOUR_INPUTS_X_Y_Z_LEVEL_COUNT,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(X, Y, Z, V)",
+        inputs: &CONTOUR_INPUTS_X_Y_Z_LEVEL_VALUES,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(X, Y, Z, V, Name, Value, ...)",
+        inputs: &CONTOUR_INPUTS_X_Y_Z_LEVEL_PROPS,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(X, Y, Z, N, Name, Value, ...)",
+        inputs: &CONTOUR_INPUTS_X_Y_Z_LEVEL_PROPS,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+];
+
+pub const CONTOUR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONTOUR.INVALID_ARGUMENT",
+    identifier: Some("RunMat:contour:InvalidArgument"),
+    when: "Contour input arrays, level arguments, or name/value options are invalid.",
+    message: "contour: invalid argument",
+};
+
+pub const CONTOUR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONTOUR.INTERNAL",
+    identifier: Some("RunMat:contour:Internal"),
+    when: "Internal contour render preparation fails unexpectedly.",
+    message: "contour: internal operation failed",
+};
+
+const CONTOUR_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [CONTOUR_ERROR_INVALID_ARGUMENT, CONTOUR_ERROR_INTERNAL];
+
+pub const CONTOUR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CONTOUR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CONTOUR_ERRORS,
+};
+
+pub(crate) fn contour_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+pub(crate) fn map_contour_invalid_argument(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    contour_error_with_detail(&CONTOUR_ERROR_INVALID_ARGUMENT, err.message)
+}
+
+pub(crate) fn map_contour_internal(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    contour_error_with_detail(&CONTOUR_ERROR_INTERNAL, err.message)
+}
 
 #[derive(Clone, Debug, Default)]
 pub(crate) enum ContourLevelSpec {
@@ -112,6 +436,12 @@ pub(crate) enum ContourLineColor {
     None,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ContourZMode {
+    Base,
+    Level,
+}
+
 #[derive(Clone)]
 pub(crate) struct ContourArgs {
     pub name: &'static str,
@@ -120,6 +450,7 @@ pub(crate) struct ContourArgs {
     pub z_input: SurfaceDataInput,
     pub level_spec: ContourLevelSpec,
     pub line_color: ContourLineColor,
+    pub line_width: f32,
 }
 
 pub(crate) fn parse_contour_args(
@@ -133,31 +464,39 @@ pub(crate) fn parse_contour_args(
     if is_option_token(&rest[0]) {
         return from_implicit_args(name, first, None, &rest);
     }
+    if is_implicit_level_style_value(&rest[0], name)
+        && rest
+            .get(1)
+            .and_then(value_as_string)
+            .is_some_and(|s| !s.trim().is_empty())
+    {
+        return from_implicit_args(name, first, Some(rest[0].clone()), &rest[1..]);
+    }
     match rest.len() {
         1 => from_implicit_args(name, first, Some(rest[0].clone()), &rest[1..]),
         2 => from_explicit_args(
             name,
+            first,
             rest[0].clone(),
             rest[1].clone(),
-            first,
             None,
             &rest[2..],
         ),
         3 => from_explicit_args(
             name,
+            first,
             rest[0].clone(),
             rest[1].clone(),
-            rest[2].clone(),
-            None,
+            Some(rest[2].clone()),
             &rest[3..],
         ),
         _ => from_explicit_args(
             name,
+            first,
             rest[0].clone(),
             rest[1].clone(),
-            rest[2].clone(),
-            Some(rest[3].clone()),
-            &rest[4..],
+            Some(rest[2].clone()),
+            &rest[3..],
         ),
     }
 }
@@ -189,6 +528,7 @@ fn from_implicit_args(
         z_input,
         level_spec,
         line_color: ContourLineColor::default(),
+        line_width: 1.0,
     };
     apply_contour_options(&mut args, options)?;
     Ok(args)
@@ -215,16 +555,25 @@ fn from_explicit_args(
             Tensor::try_from(&y_value).map_err(|e| plotting_error(name, format!("{name}: {e}")))?
         }
     };
-    let x_axis = numeric_vector(x_tensor);
-    let y_axis = numeric_vector(y_tensor);
-    if x_axis.len() < 2 || y_axis.len() < 2 {
-        return Err(plotting_error(
-            name,
-            format!("{name}: axis vectors must contain at least two elements"),
-        ));
-    }
     let z_input = SurfaceDataInput::from_value(z_value, name)?;
     let (rows, cols) = z_input.grid_shape(name)?;
+    let (x_axis, y_axis) = if x_tensor.rows == rows
+        && x_tensor.cols == cols
+        && y_tensor.rows == rows
+        && y_tensor.cols == cols
+    {
+        extract_meshgrid_axes_from_xy_matrices(&x_tensor, &y_tensor, rows, cols, name)?
+    } else {
+        let x_axis = numeric_vector(x_tensor);
+        let y_axis = numeric_vector(y_tensor);
+        if x_axis.len() < 2 || y_axis.len() < 2 {
+            return Err(plotting_error(
+                name,
+                format!("{name}: axis vectors must contain at least two elements"),
+            ));
+        }
+        (x_axis, y_axis)
+    };
     if rows != x_axis.len() || cols != y_axis.len() {
         return Err(plotting_error(
             name,
@@ -246,6 +595,7 @@ fn from_explicit_args(
         z_input,
         level_spec,
         line_color: ContourLineColor::default(),
+        line_width: 1.0,
     };
     apply_contour_options(&mut args, options)?;
     Ok(args)
@@ -258,7 +608,7 @@ pub(crate) fn default_level_count() -> usize {
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::contour")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "contour",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
@@ -287,15 +637,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "contour",
     category = "plotting",
-    summary = "Render MATLAB-compatible contour plots.",
+    summary = "Create contour line plots.",
     keywords = "contour,plotting,isolines",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::contour::CONTOUR_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::contour"
 )]
-pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
-    let mut call = Some(ContourCall::parse(BUILTIN_NAME, first, rest)?);
+pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
+    let mut call =
+        Some(ContourCall::parse(BUILTIN_NAME, first, rest).map_err(map_contour_invalid_argument)?);
     let opts = PlotRenderOptions {
         title: "Contour Plot",
         x_label: "X",
@@ -303,11 +655,34 @@ pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<S
         axis_equal: true,
         ..Default::default()
     };
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let current = call.take().expect("contour call consumed once");
-        current.render(figure, axes)
-    })?;
-    Ok(rendered)
+        let before = figure.plots().count();
+        current
+            .render(figure, axes)
+            .map_err(map_contour_invalid_argument)?;
+        let after = figure.plots().count();
+        if after > before {
+            *plot_index_slot.borrow_mut() = Some((axes, after - 1));
+        }
+        Ok(())
+    });
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle =
+        crate::builtins::plotting::state::register_contour_handle(figure_handle, axes, plot_index);
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(map_contour_internal(err));
+    }
+    Ok(handle)
 }
 
 struct ContourCall {
@@ -339,6 +714,7 @@ impl ContourCall {
             z_input,
             level_spec,
             line_color,
+            line_width,
         } = args;
 
         if matches!(line_color, ContourLineColor::None) {
@@ -357,7 +733,7 @@ impl ContourCall {
                 &line_color,
             ) {
                 Ok(contour) => {
-                    figure.add_contour_plot_on_axes(contour, axes);
+                    figure.add_contour_plot_on_axes(contour.with_line_width(line_width), axes);
                     return Ok(());
                 }
                 Err(err) => {
@@ -380,7 +756,8 @@ impl ContourCall {
             base_z,
             &level_spec,
             &line_color,
-        )?;
+        )?
+        .with_line_width(line_width);
         figure.add_contour_plot_on_axes(contour, axes);
         Ok(())
     }
@@ -434,6 +811,9 @@ fn parse_tensor_levels(tensor: Tensor, context: &str) -> BuiltinResult<ContourLe
     if tensor.data.len() == 1 {
         return parse_scalar_level_count(tensor.data[0], context);
     }
+    if tensor.data.iter().all(|value| *value == tensor.data[0]) {
+        return Ok(ContourLevelSpec::Values(vec![tensor.data[0]]));
+    }
     for pair in tensor.data.windows(2) {
         if pair[1] <= pair[0] {
             return Err(plotting_error(
@@ -449,6 +829,18 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> BuiltinRe
     if options.is_empty() {
         return Ok(());
     }
+    let mut option_start = 0usize;
+    if let Some(token) = options.first().and_then(value_as_string) {
+        let trimmed = token.trim();
+        if !trimmed.is_empty()
+            && !is_contour_option_name(trimmed)
+            && !super::style::looks_like_option_name(trimmed)
+        {
+            apply_contour_linespec(args, trimmed)?;
+            option_start = 1;
+        }
+    }
+    let options = &options[option_start..];
     if !options.len().is_multiple_of(2) {
         return Err(plotting_error(
             args.name,
@@ -489,6 +881,24 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> BuiltinRe
             }
             "linecolor" => {
                 args.line_color = parse_line_color_option(&opts, &pair[1])?;
+            }
+            "color" => {
+                args.line_color = parse_line_color_option(&opts, &pair[1])?;
+            }
+            "linewidth" => {
+                let width = value_as_f64(&pair[1]).ok_or_else(|| {
+                    plotting_error(
+                        args.name,
+                        format!("{}: LineWidth must be numeric", args.name),
+                    )
+                })?;
+                if !width.is_finite() || width <= 0.0 {
+                    return Err(plotting_error(
+                        args.name,
+                        format!("{}: LineWidth must be a positive, finite number", args.name),
+                    ));
+                }
+                args.line_width = width as f32;
             }
             "levellistmode" => {
                 let Some(mode) = value_as_string(&pair[1]) else {
@@ -538,6 +948,47 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> BuiltinRe
     Ok(())
 }
 
+fn apply_contour_linespec(args: &mut ContourArgs, token: &str) -> BuiltinResult<()> {
+    let mut saw_supported = false;
+    let mut chars = token.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '-' => {
+                if matches!(chars.peek(), Some('-' | '.')) {
+                    chars.next();
+                }
+                saw_supported = true;
+            }
+            ':' => {
+                saw_supported = true;
+            }
+            'o' | '+' | '*' | '.' | 'x' | '^' | 'v' | '<' | '>' | 's' | 'd' | 'p' | 'h' => {
+                saw_supported = true;
+            }
+            c if super::style::color_from_token(c).is_some() => {
+                args.line_color = ContourLineColor::Color(
+                    super::style::color_from_token(c).expect("checked color token"),
+                );
+                saw_supported = true;
+            }
+            _ => {
+                return Err(plotting_error(
+                    args.name,
+                    format!("{}: unrecognised line specification `{token}`", args.name),
+                ));
+            }
+        }
+    }
+    if saw_supported {
+        Ok(())
+    } else {
+        Err(plotting_error(
+            args.name,
+            format!("{}: unrecognised line specification `{token}`", args.name),
+        ))
+    }
+}
+
 fn parse_line_color_option(
     opts: &LineStyleParseOptions,
     value: &Value,
@@ -563,11 +1014,51 @@ fn is_option_token(value: &Value) -> bool {
         .unwrap_or(false)
 }
 
+fn is_implicit_level_style_value(value: &Value, context: &str) -> bool {
+    matches!(
+        value,
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Tensor(_)
+    ) && parse_level_spec(value.clone(), context).is_ok()
+}
+
 fn is_contour_option_name(token: &str) -> bool {
     matches!(
         token.trim().to_ascii_lowercase().as_str(),
-        "levellist" | "levels" | "levelstep" | "linecolor" | "levellistmode"
+        "levellist"
+            | "levels"
+            | "levelstep"
+            | "linecolor"
+            | "linewidth"
+            | "levellistmode"
+            | "color"
     )
+}
+
+fn host_axis_bounds(values: &[f64]) -> (f32, f32) {
+    let min = values
+        .iter()
+        .fold(f32::INFINITY, |acc, &v| acc.min(v as f32));
+    let max = values
+        .iter()
+        .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32));
+    (min, max)
+}
+
+fn axis_source_bounds(axis: &AxisSource, name: &'static str) -> BuiltinResult<(f32, f32)> {
+    match axis {
+        AxisSource::Host(values) => Ok(host_axis_bounds(values)),
+        AxisSource::Gpu(handle) => axis_bounds(handle, name),
+    }
+}
+
+async fn axis_source_bounds_async(
+    axis: &AxisSource,
+    name: &'static str,
+) -> BuiltinResult<(f32, f32)> {
+    match axis {
+        AxisSource::Host(values) => Ok(host_axis_bounds(values)),
+        AxisSource::Gpu(handle) => axis_bounds_async(handle, name).await,
+    }
 }
 
 pub(crate) fn build_contour_gpu_plot(
@@ -580,11 +1071,170 @@ pub(crate) fn build_contour_gpu_plot(
     level_spec: &ContourLevelSpec,
     line_color: &ContourLineColor,
 ) -> BuiltinResult<ContourPlot> {
+    build_contour_gpu_plot_with_z_mode(
+        name,
+        x_axis,
+        y_axis,
+        z,
+        color_map,
+        base_z,
+        level_spec,
+        line_color,
+        ContourZMode::Base,
+    )
+}
+
+pub(crate) fn build_contour_gpu_plot_with_z_mode(
+    name: &'static str,
+    x_axis: &[f64],
+    y_axis: &[f64],
+    z: &GpuTensorHandle,
+    color_map: ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
+    z_mode: ContourZMode,
+) -> BuiltinResult<ContourPlot> {
+    build_contour_gpu_plot_with_axes_and_z_mode(
+        name,
+        &AxisSource::Host(x_axis.to_vec()),
+        &AxisSource::Host(y_axis.to_vec()),
+        z,
+        color_map,
+        base_z,
+        level_spec,
+        line_color,
+        z_mode,
+    )
+}
+
+pub(crate) async fn build_contour_gpu_plot_with_z_mode_async(
+    name: &'static str,
+    x_axis: &[f64],
+    y_axis: &[f64],
+    z: &GpuTensorHandle,
+    color_map: ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
+    z_mode: ContourZMode,
+) -> BuiltinResult<ContourPlot> {
+    build_contour_gpu_plot_with_axes_and_z_mode_async(
+        name,
+        &AxisSource::Host(x_axis.to_vec()),
+        &AxisSource::Host(y_axis.to_vec()),
+        z,
+        color_map,
+        base_z,
+        level_spec,
+        line_color,
+        z_mode,
+    )
+    .await
+}
+
+pub(crate) fn build_contour_gpu_plot_with_axes(
+    name: &'static str,
+    x_axis: &AxisSource,
+    y_axis: &AxisSource,
+    z: &GpuTensorHandle,
+    color_map: ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
+) -> BuiltinResult<ContourPlot> {
+    build_contour_gpu_plot_with_axes_and_z_mode(
+        name,
+        x_axis,
+        y_axis,
+        z,
+        color_map,
+        base_z,
+        level_spec,
+        line_color,
+        ContourZMode::Base,
+    )
+}
+
+pub(crate) async fn build_contour_gpu_plot_with_axes_and_z_mode_async(
+    name: &'static str,
+    x_axis: &AxisSource,
+    y_axis: &AxisSource,
+    z: &GpuTensorHandle,
+    color_map: ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
+    z_mode: ContourZMode,
+) -> BuiltinResult<ContourPlot> {
+    let (min_z, max_z) = axis_bounds_async(z, name).await?;
+    let (min_x, max_x) = axis_source_bounds_async(x_axis, name).await?;
+    let (min_y, max_y) = axis_source_bounds_async(y_axis, name).await?;
+    build_contour_gpu_plot_with_axes_bounds_and_z_mode(
+        name,
+        x_axis,
+        y_axis,
+        z,
+        color_map,
+        base_z,
+        level_spec,
+        line_color,
+        z_mode,
+        (min_x, max_x),
+        (min_y, max_y),
+        (min_z, max_z),
+    )
+}
+
+pub(crate) fn build_contour_gpu_plot_with_axes_and_z_mode(
+    name: &'static str,
+    x_axis: &AxisSource,
+    y_axis: &AxisSource,
+    z: &GpuTensorHandle,
+    color_map: ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
+    z_mode: ContourZMode,
+) -> BuiltinResult<ContourPlot> {
+    let (min_z, max_z) = axis_bounds(z, name)?;
+    let (min_x, max_x) = axis_source_bounds(x_axis, name)?;
+    let (min_y, max_y) = axis_source_bounds(y_axis, name)?;
+    build_contour_gpu_plot_with_axes_bounds_and_z_mode(
+        name,
+        x_axis,
+        y_axis,
+        z,
+        color_map,
+        base_z,
+        level_spec,
+        line_color,
+        z_mode,
+        (min_x, max_x),
+        (min_y, max_y),
+        (min_z, max_z),
+    )
+}
+
+fn build_contour_gpu_plot_with_axes_bounds_and_z_mode(
+    name: &'static str,
+    x_axis: &AxisSource,
+    y_axis: &AxisSource,
+    z: &GpuTensorHandle,
+    color_map: ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
+    z_mode: ContourZMode,
+    x_bounds: (f32, f32),
+    y_bounds: (f32, f32),
+    z_bounds: (f32, f32),
+) -> BuiltinResult<ContourPlot> {
     let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
     let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
         .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Z data")))?;
 
-    let (min_z, max_z) = axis_bounds(z, name)?;
+    let (min_z, max_z) = z_bounds;
     let levels = level_spec.resolve(name, min_z, max_z)?;
     if levels.is_empty() {
         return Err(plotting_error(
@@ -594,49 +1244,74 @@ pub(crate) fn build_contour_gpu_plot(
     }
 
     let scalar = ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64);
-    let x_f32 = if scalar == ScalarType::F32 {
-        Some(x_axis.iter().map(|&v| v as f32).collect::<Vec<f32>>())
-    } else {
-        None
-    };
-    let y_f32 = if scalar == ScalarType::F32 {
-        Some(y_axis.iter().map(|&v| v as f32).collect::<Vec<f32>>())
-    } else {
-        None
-    };
     let color_table = match line_color {
         ContourLineColor::Auto => build_color_lut(color_map, 512, 1.0),
         ContourLineColor::Color(color) => vec![color.to_array()],
         ContourLineColor::None => vec![[0.0, 0.0, 0.0, 0.0]],
     };
-    let (min_x, max_x) = (
-        x_axis
-            .iter()
-            .fold(f32::INFINITY, |acc, &v| acc.min(v as f32)),
-        x_axis
-            .iter()
-            .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
-    );
-    let (min_y, max_y) = (
-        y_axis
-            .iter()
-            .fold(f32::INFINITY, |acc, &v| acc.min(v as f32)),
-        y_axis
-            .iter()
-            .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
-    );
-    let bounds = contour_bounds(min_x, max_x, min_y, max_y, base_z);
+    let (min_x, max_x) = x_bounds;
+    let (min_y, max_y) = y_bounds;
+    let bounds = contour_plot_bounds(min_x, max_x, min_y, max_y, base_z, min_z, max_z, z_mode);
 
-    let x_axis_data = if let Some(values) = x_f32.as_ref() {
-        runmat_plot::gpu::axis::AxisData::F32(values.as_slice())
-    } else {
-        runmat_plot::gpu::axis::AxisData::F64(x_axis)
+    let mut x_f32_storage: Vec<f32> = Vec::new();
+    let x_axis_data = match x_axis {
+        AxisSource::Gpu(h) => {
+            let exported = runmat_accelerate_api::export_wgpu_buffer(h).ok_or_else(|| {
+                plotting_error(name, format!("{name}: unable to export GPU X axis buffer"))
+            })?;
+            if exported.len as usize != x_axis.len() {
+                return Err(plotting_error(
+                    name,
+                    format!("{name}: X axis length mismatch"),
+                ));
+            }
+            if exported.precision != z_ref.precision {
+                return Err(plotting_error(
+                    name,
+                    format!("{name}: X axis precision must match Z precision"),
+                ));
+            }
+            runmat_plot::gpu::axis::AxisData::Buffer(exported.buffer.clone())
+        }
+        AxisSource::Host(v) => {
+            if scalar == ScalarType::F32 {
+                x_f32_storage = v.iter().map(|&val| val as f32).collect();
+                runmat_plot::gpu::axis::AxisData::F32(x_f32_storage.as_slice())
+            } else {
+                runmat_plot::gpu::axis::AxisData::F64(v.as_slice())
+            }
+        }
     };
-    let y_axis_data = if let Some(values) = y_f32.as_ref() {
-        runmat_plot::gpu::axis::AxisData::F32(values.as_slice())
-    } else {
-        runmat_plot::gpu::axis::AxisData::F64(y_axis)
+    let mut y_f32_storage: Vec<f32> = Vec::new();
+    let y_axis_data = match y_axis {
+        AxisSource::Gpu(h) => {
+            let exported = runmat_accelerate_api::export_wgpu_buffer(h).ok_or_else(|| {
+                plotting_error(name, format!("{name}: unable to export GPU Y axis buffer"))
+            })?;
+            if exported.len as usize != y_axis.len() {
+                return Err(plotting_error(
+                    name,
+                    format!("{name}: Y axis length mismatch"),
+                ));
+            }
+            if exported.precision != z_ref.precision {
+                return Err(plotting_error(
+                    name,
+                    format!("{name}: Y axis precision must match Z precision"),
+                ));
+            }
+            runmat_plot::gpu::axis::AxisData::Buffer(exported.buffer.clone())
+        }
+        AxisSource::Host(v) => {
+            if scalar == ScalarType::F32 {
+                y_f32_storage = v.iter().map(|&val| val as f32).collect();
+                runmat_plot::gpu::axis::AxisData::F32(y_f32_storage.as_slice())
+            } else {
+                runmat_plot::gpu::axis::AxisData::F64(v.as_slice())
+            }
+        }
     };
+    let _keep_alive = (&x_f32_storage, &y_f32_storage);
 
     let inputs = runmat_plot::gpu::contour::ContourGpuInputs {
         x_axis: x_axis_data,
@@ -653,6 +1328,7 @@ pub(crate) fn build_contour_gpu_plot(
         min_z,
         max_z,
         base_z,
+        level_z: z_mode == ContourZMode::Level,
         level_count: levels.len() as u32,
     };
 
@@ -667,6 +1343,7 @@ pub(crate) fn build_contour_gpu_plot(
     let vertex_count = gpu_vertices.vertex_count;
     Ok(
         ContourPlot::from_gpu_buffer(gpu_vertices, vertex_count, base_z, bounds)
+            .with_force_3d(z_mode == ContourZMode::Level)
             .with_label("Contours"),
     )
 }
@@ -680,6 +1357,30 @@ pub(crate) fn build_contour_plot(
     base_z: f32,
     level_spec: &ContourLevelSpec,
     line_color: &ContourLineColor,
+) -> BuiltinResult<ContourPlot> {
+    build_contour_plot_with_z_mode(
+        name,
+        x_axis,
+        y_axis,
+        grid,
+        color_map,
+        base_z,
+        level_spec,
+        line_color,
+        ContourZMode::Base,
+    )
+}
+
+pub(crate) fn build_contour_plot_with_z_mode(
+    name: &'static str,
+    x_axis: &[f64],
+    y_axis: &[f64],
+    grid: &[Vec<f64>],
+    color_map: ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
+    z_mode: ContourZMode,
 ) -> BuiltinResult<ContourPlot> {
     let (min_z, max_z) = grid_extents(name, grid)?;
     let levels = level_spec.resolve(name, min_z, max_z)?;
@@ -696,10 +1397,19 @@ pub(crate) fn build_contour_plot(
             ContourLineColor::Color(color) => *color,
             ContourLineColor::None => Vec4::new(0.0, 0.0, 0.0, 0.0),
         };
-        march_cells(x_axis, y_axis, grid, *level, color, base_z, &mut vertices);
+        march_cells(
+            x_axis,
+            y_axis,
+            grid,
+            *level,
+            color,
+            base_z,
+            z_mode,
+            &mut vertices,
+        );
     }
 
-    let bounds = contour_bounds(
+    let bounds = contour_plot_bounds(
         x_axis
             .iter()
             .fold(f32::INFINITY, |acc, &v| acc.min(v as f32)),
@@ -713,9 +1423,14 @@ pub(crate) fn build_contour_plot(
             .iter()
             .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
         base_z,
+        min_z,
+        max_z,
+        z_mode,
     );
 
-    Ok(ContourPlot::from_vertices(vertices, base_z, bounds).with_label("Contours"))
+    Ok(ContourPlot::from_vertices(vertices, base_z, bounds)
+        .with_force_3d(z_mode == ContourZMode::Level)
+        .with_label("Contours"))
 }
 
 pub(crate) fn build_contour_fill_gpu_plot(
@@ -821,36 +1536,44 @@ pub(crate) fn build_contour_fill_plot(
         ));
     }
 
-    let mut vertices = Vec::with_capacity((nx - 1) * (ny - 1) * 6);
+    let band_count = levels.len() - 1;
+    let mut vertices = Vec::with_capacity((nx - 1) * (ny - 1) * band_count * 12);
     for col in 0..ny - 1 {
         for row in 0..nx - 1 {
-            let z00 = grid[row][col] as f32;
-            let z10 = grid[row + 1][col] as f32;
-            let z11 = grid[row + 1][col + 1] as f32;
-            let z01 = grid[row][col + 1] as f32;
-
-            let colors = [
-                fill_color(z00, &levels, &palette),
-                fill_color(z10, &levels, &palette),
-                fill_color(z11, &levels, &palette),
-                fill_color(z01, &levels, &palette),
-            ];
-
-            let p0 = Vec3::new(x_axis[row] as f32, y_axis[col] as f32, base_z);
-            let p1 = Vec3::new(x_axis[row + 1] as f32, y_axis[col] as f32, base_z);
-            let p2 = Vec3::new(x_axis[row + 1] as f32, y_axis[col + 1] as f32, base_z);
-            let p3 = Vec3::new(x_axis[row] as f32, y_axis[col + 1] as f32, base_z);
-
-            push_fill_triangle(
-                &mut vertices,
-                [p0, p1, p2],
-                [colors[0], colors[1], colors[2]],
-            );
-            push_fill_triangle(
-                &mut vertices,
-                [p0, p2, p3],
-                [colors[0], colors[2], colors[3]],
-            );
+            let p0 = ScalarPoint2 {
+                pos: Vec2::new(x_axis[row] as f32, y_axis[col] as f32),
+                value: grid[row][col] as f32,
+            };
+            let p1 = ScalarPoint2 {
+                pos: Vec2::new(x_axis[row + 1] as f32, y_axis[col] as f32),
+                value: grid[row + 1][col] as f32,
+            };
+            let p2 = ScalarPoint2 {
+                pos: Vec2::new(x_axis[row + 1] as f32, y_axis[col + 1] as f32),
+                value: grid[row + 1][col + 1] as f32,
+            };
+            let p3 = ScalarPoint2 {
+                pos: Vec2::new(x_axis[row] as f32, y_axis[col + 1] as f32),
+                value: grid[row][col + 1] as f32,
+            };
+            for band_idx in 0..band_count {
+                let lo = levels[band_idx];
+                let hi = levels[band_idx + 1];
+                let include_hi = band_idx + 1 == band_count;
+                let color = palette[band_idx.min(palette.len() - 1)];
+                let cell_tris = [[p0, p1, p2], [p0, p2, p3]];
+                for tri in cell_tris {
+                    triangulate_band_triangle(
+                        tri,
+                        lo,
+                        hi,
+                        include_hi,
+                        color,
+                        base_z,
+                        &mut vertices,
+                    );
+                }
+            }
         }
     }
 
@@ -937,6 +1660,7 @@ fn march_cells(
     level: f32,
     color: Vec4,
     base_z: f32,
+    z_mode: ContourZMode,
     out: &mut Vec<Vertex>,
 ) {
     let nx = x_axis.len();
@@ -1002,46 +1726,14 @@ fn march_cells(
                     &mut segments,
                     &mut segment_count,
                 ),
-                5 => {
-                    add_segment(
-                        3,
-                        2,
-                        &corners,
-                        &values,
-                        level,
-                        &mut segments,
-                        &mut segment_count,
-                    );
-                    add_segment(
-                        0,
-                        1,
-                        &corners,
-                        &values,
-                        level,
-                        &mut segments,
-                        &mut segment_count,
-                    );
-                }
-                10 => {
-                    add_segment(
-                        0,
-                        1,
-                        &corners,
-                        &values,
-                        level,
-                        &mut segments,
-                        &mut segment_count,
-                    );
-                    add_segment(
-                        3,
-                        2,
-                        &corners,
-                        &values,
-                        level,
-                        &mut segments,
-                        &mut segment_count,
-                    );
-                }
+                5 | 10 => add_ambiguous_segments(
+                    case_index,
+                    &corners,
+                    &values,
+                    level,
+                    &mut segments,
+                    &mut segment_count,
+                ),
                 6 | 9 => add_segment(
                     0,
                     2,
@@ -1066,7 +1758,7 @@ fn march_cells(
             for idx in 0..segment_count {
                 let start = segments[(idx * 2) as usize];
                 let end = segments[(idx * 2 + 1) as usize];
-                push_segment(start, end, color, base_z, out);
+                push_segment(start, end, color, base_z, level, z_mode, out);
             }
         }
     }
@@ -1090,6 +1782,34 @@ fn add_segment(
     *io_count += 1;
 }
 
+fn add_ambiguous_segments(
+    case_index: u32,
+    corners: &[Vec2; 4],
+    values: &[f32; 4],
+    level: f32,
+    io_segments: &mut [Vec2; 4],
+    io_count: &mut u32,
+) {
+    let f00 = values[0] - level;
+    let f10 = values[1] - level;
+    let f11 = values[2] - level;
+    let f01 = values[3] - level;
+    let q = f00 * f11 - f10 * f01;
+
+    let use_default = q > 0.0 || (q.abs() <= 1e-6 && case_index == 5);
+    match (case_index, use_default) {
+        (5, true) | (10, true) => {
+            add_segment(3, 2, corners, values, level, io_segments, io_count);
+            add_segment(0, 1, corners, values, level, io_segments, io_count);
+        }
+        (5, false) | (10, false) => {
+            add_segment(3, 0, corners, values, level, io_segments, io_count);
+            add_segment(1, 2, corners, values, level, io_segments, io_count);
+        }
+        _ => {}
+    }
+}
+
 fn interpolate_edge(edge: u32, corners: &[Vec2; 4], values: &[f32; 4], level: f32) -> Vec2 {
     let (a_idx, b_idx) = match edge {
         0 => (0, 1),
@@ -1101,25 +1821,57 @@ fn interpolate_edge(edge: u32, corners: &[Vec2; 4], values: &[f32; 4], level: f3
     let b = corners[b_idx];
     let va = values[a_idx];
     let vb = values[b_idx];
-    let denom = (vb - va).abs().max(1e-6);
-    let t = ((level - va) / denom).clamp(0.0, 1.0);
+    let delta = vb - va;
+    let t = if delta.abs() <= 1e-6 {
+        0.5
+    } else {
+        ((level - va) / delta).clamp(0.0, 1.0)
+    };
     a + (b - a) * t
 }
 
-fn push_segment(start: Vec2, end: Vec2, color: Vec4, base_z: f32, out: &mut Vec<Vertex>) {
+fn push_segment(
+    start: Vec2,
+    end: Vec2,
+    color: Vec4,
+    base_z: f32,
+    level: f32,
+    z_mode: ContourZMode,
+    out: &mut Vec<Vertex>,
+) {
     let z = Vec3::new(0.0, 0.0, 1.0);
+    let z_value = match z_mode {
+        ContourZMode::Base => base_z,
+        ContourZMode::Level => level,
+    };
     out.push(Vertex {
-        position: Vec3::new(start.x, start.y, base_z).to_array(),
+        position: Vec3::new(start.x, start.y, z_value).to_array(),
         color: color.to_array(),
         normal: z.to_array(),
         tex_coords: [0.0, 0.0],
     });
     out.push(Vertex {
-        position: Vec3::new(end.x, end.y, base_z).to_array(),
+        position: Vec3::new(end.x, end.y, z_value).to_array(),
         color: color.to_array(),
         normal: z.to_array(),
         tex_coords: [0.0, 0.0],
     });
+}
+
+fn contour_plot_bounds(
+    min_x: f32,
+    max_x: f32,
+    min_y: f32,
+    max_y: f32,
+    base_z: f32,
+    min_z: f32,
+    max_z: f32,
+    z_mode: ContourZMode,
+) -> BoundingBox {
+    match z_mode {
+        ContourZMode::Base => contour_bounds(min_x, max_x, min_y, max_y, base_z),
+        ContourZMode::Level => contour_bounds_3d(min_x, max_x, min_y, max_y, min_z, max_z),
+    }
 }
 
 fn implicit_axis(len: usize) -> Vec<f64> {
@@ -1148,17 +1900,6 @@ fn palette_size(levels: &[f32]) -> usize {
     levels.len().saturating_sub(1).max(1)
 }
 
-fn fill_color(value: f32, levels: &[f32], palette: &[Vec4]) -> Vec4 {
-    if palette.is_empty() {
-        return Vec4::new(1.0, 1.0, 1.0, 1.0);
-    }
-    let mut idx = 0usize;
-    while idx + 1 < levels.len() && value >= levels[idx + 1] {
-        idx += 1;
-    }
-    palette[idx.min(palette.len() - 1)]
-}
-
 fn push_fill_triangle(vertices: &mut Vec<Vertex>, positions: [Vec3; 3], colors: [Vec4; 3]) {
     let normal = Vec3::new(0.0, 0.0, 1.0);
     for i in 0..3 {
@@ -1168,6 +1909,88 @@ fn push_fill_triangle(vertices: &mut Vec<Vertex>, positions: [Vec3; 3], colors: 
             normal: normal.to_array(),
             tex_coords: [0.0, 0.0],
         });
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ScalarPoint2 {
+    pos: Vec2,
+    value: f32,
+}
+
+fn interpolate_scalar_point(a: ScalarPoint2, b: ScalarPoint2, threshold: f32) -> ScalarPoint2 {
+    let delta = b.value - a.value;
+    let t = if delta.abs() <= 1e-6 {
+        0.5
+    } else {
+        ((threshold - a.value) / delta).clamp(0.0, 1.0)
+    };
+    ScalarPoint2 {
+        pos: a.pos + (b.pos - a.pos) * t,
+        value: threshold,
+    }
+}
+
+fn clip_polygon_lower(poly: &[ScalarPoint2], threshold: f32) -> Vec<ScalarPoint2> {
+    clip_polygon(poly, |v| v >= threshold, threshold)
+}
+
+fn clip_polygon_upper(poly: &[ScalarPoint2], threshold: f32, inclusive: bool) -> Vec<ScalarPoint2> {
+    if inclusive {
+        clip_polygon(poly, |v| v <= threshold, threshold)
+    } else {
+        clip_polygon(poly, |v| v < threshold, threshold)
+    }
+}
+
+fn clip_polygon<F>(poly: &[ScalarPoint2], inside: F, threshold: f32) -> Vec<ScalarPoint2>
+where
+    F: Fn(f32) -> bool,
+{
+    if poly.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut prev = *poly.last().unwrap();
+    let mut prev_inside = inside(prev.value);
+    for &curr in poly {
+        let curr_inside = inside(curr.value);
+        if curr_inside != prev_inside {
+            out.push(interpolate_scalar_point(prev, curr, threshold));
+        }
+        if curr_inside {
+            out.push(curr);
+        }
+        prev = curr;
+        prev_inside = curr_inside;
+    }
+    out
+}
+
+fn triangulate_band_triangle(
+    tri: [ScalarPoint2; 3],
+    lo: f32,
+    hi: f32,
+    include_hi: bool,
+    color: Vec4,
+    base_z: f32,
+    out: &mut Vec<Vertex>,
+) {
+    let poly = clip_polygon_upper(&clip_polygon_lower(&tri, lo), hi, include_hi);
+    if poly.len() < 3 {
+        return;
+    }
+    let p0 = poly[0].pos;
+    for idx in 1..poly.len() - 1 {
+        push_fill_triangle(
+            out,
+            [
+                Vec3::new(p0.x, p0.y, base_z),
+                Vec3::new(poly[idx].pos.x, poly[idx].pos.y, base_z),
+                Vec3::new(poly[idx + 1].pos.x, poly[idx + 1].pos.y, base_z),
+            ],
+            [color, color, color],
+        );
     }
 }
 
@@ -1196,6 +2019,21 @@ pub(crate) mod tests {
         }
     }
 
+    fn assert_contour_vertices_within_bounds(vertices: &[Vertex], x_axis: &[f64], y_axis: &[f64]) {
+        assert_eq!(vertices.len() % 2, 0);
+        let min_x = x_axis.iter().copied().fold(f64::INFINITY, f64::min) as f32;
+        let max_x = x_axis.iter().copied().fold(f64::NEG_INFINITY, f64::max) as f32;
+        let min_y = y_axis.iter().copied().fold(f64::INFINITY, f64::min) as f32;
+        let max_y = y_axis.iter().copied().fold(f64::NEG_INFINITY, f64::max) as f32;
+        for vertex in vertices {
+            assert!(vertex.position[0].is_finite());
+            assert!(vertex.position[1].is_finite());
+            assert!(vertex.position[2].is_finite());
+            assert!(vertex.position[0] >= min_x - 1e-4 && vertex.position[0] <= max_x + 1e-4);
+            assert!(vertex.position[1] >= min_y - 1e-4 && vertex.position[1] <= max_y + 1e-4);
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn explicit_axes_must_match_grid() {
@@ -1219,10 +2057,222 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn explicit_axes_plus_scalar_level_count_parse_correctly() {
+        setup_plot_tests();
+        let x = Value::Tensor(tensor_from(&[0.0, 1.0], 2, 1));
+        let y = Value::Tensor(tensor_from(&[0.0, 1.0], 2, 1));
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2));
+        let args = parse_contour_args("contour", x, vec![y, z, Value::Num(12.0)]).unwrap();
+        assert_eq!(args.x_axis, vec![0.0, 1.0]);
+        assert_eq!(args.y_axis, vec![0.0, 1.0]);
+        match args.level_spec {
+            ContourLevelSpec::Count(count) => assert_eq!(count, 12),
+            other => panic!("expected scalar level count, found {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn implicit_scalar_levels_with_style_parse_correctly() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z.clone(),
+            vec![Value::Num(12.0), Value::String("k".into())],
+        )
+        .unwrap();
+        match args.level_spec {
+            ContourLevelSpec::Count(count) => assert_eq!(count, 12),
+            other => panic!("expected scalar level count, found {other:?}"),
+        }
+        match args.line_color {
+            ContourLineColor::Color(color) => assert_eq!(color.to_array(), [0.0, 0.0, 0.0, 1.0]),
+            other => panic!("expected black linespec, found {other:?}"),
+        }
+
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![
+                Value::Num(12.0),
+                Value::String("LineWidth".into()),
+                Value::Num(2.0),
+            ],
+        )
+        .unwrap();
+        assert!((args.line_width - 2.0).abs() < f32::EPSILON);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn implicit_repeated_single_level_with_style_parses_correctly() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![
+                Value::Tensor(tensor_from(&[0.5, 0.5], 1, 2)),
+                Value::String("k".into()),
+            ],
+        )
+        .unwrap();
+        match args.level_spec {
+            ContourLevelSpec::Values(values) => assert_eq!(values, vec![0.5]),
+            other => panic!("expected repeated single level, found {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn implicit_distinct_levels_with_style_parse_correctly() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![
+                Value::Tensor(tensor_from(&[0.25, 0.5, 0.75], 1, 3)),
+                Value::String("k".into()),
+            ],
+        )
+        .unwrap();
+        match args.level_spec {
+            ContourLevelSpec::Values(values) => assert_eq!(values, vec![0.25, 0.5, 0.75]),
+            other => panic!("expected distinct levels, found {other:?}"),
+        }
+        match args.line_color {
+            ContourLineColor::Color(color) => assert_eq!(color.to_array(), [0.0, 0.0, 0.0, 1.0]),
+            other => panic!("expected black linespec, found {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn missing_explicit_z_is_not_reinterpreted_as_implicit_levels() {
+        setup_plot_tests();
+        let x = Value::Tensor(tensor_from(&[0.0, 1.0], 2, 1));
+        let y = Value::Tensor(tensor_from(&[0.0, 1.0], 2, 1));
+
+        let linespec = parse_contour_args(
+            "contour",
+            x.clone(),
+            vec![y.clone(), Value::String("k".into())],
+        );
+        assert!(linespec.is_err());
+
+        let option = parse_contour_args(
+            "contour",
+            x,
+            vec![y, Value::String("LineWidth".into()), Value::Num(2.0)],
+        );
+        assert!(option.is_err());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn explicit_meshgrid_axes_parse_correctly() {
+        setup_plot_tests();
+        let x = Value::Tensor(tensor_from(&[10.0, 10.0, 20.0, 20.0], 2, 2));
+        let y = Value::Tensor(tensor_from(&[1.0, 2.0, 1.0, 2.0], 2, 2));
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2));
+        let args = parse_contour_args("contour", x, vec![y, z]).unwrap();
+        assert_eq!(args.x_axis, vec![10.0, 20.0]);
+        assert_eq!(args.y_axis, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn interpolate_edge_handles_descending_values() {
+        let corners = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(2.0, 0.0),
+            Vec2::new(2.0, 1.0),
+            Vec2::new(0.0, 1.0),
+        ];
+        let values = [2.0, 0.0, 0.0, 2.0];
+        let point = interpolate_edge(0, &corners, &values, 1.0);
+        assert!((point.x - 1.0).abs() < 1e-6);
+        assert!(point.y.abs() < 1e-6);
+    }
+
+    #[test]
+    fn ambiguous_case_uses_asymptotic_decider() {
+        let corners = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(0.0, 1.0),
+        ];
+        let values = [2.0, 0.8, 2.0, 0.0];
+        let mut segments = [Vec2::ZERO; 4];
+        let mut count = 0;
+        add_ambiguous_segments(5, &corners, &values, 1.0, &mut segments, &mut count);
+        assert_eq!(count, 2);
+        assert!(segments[0].x.abs() < 1e-6 || (segments[0].y - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn contour_cpu_matrix_handles_nonuniform_axes_fixture() {
+        let x_axis = vec![-3.0, -1.0, 0.5, 2.0];
+        let y_axis = vec![-2.0, -0.25, 1.5, 3.0];
+        let grid = vec![
+            vec![0.0, 0.3, 0.9, 1.2],
+            vec![-0.4, 0.2, 0.8, 1.0],
+            vec![-0.8, -0.1, 0.4, 0.9],
+            vec![-1.0, -0.5, 0.1, 0.6],
+        ];
+        let mut plot = build_contour_plot(
+            "contour",
+            &x_axis,
+            &y_axis,
+            &grid,
+            ColorMap::Parula,
+            0.0,
+            &ContourLevelSpec::Values(vec![-0.5, 0.0, 0.5, 1.0]),
+            &ContourLineColor::Auto,
+        )
+        .expect("contour plot");
+        let render = plot.render_data();
+        assert!(!render.vertices.is_empty());
+        assert_contour_vertices_within_bounds(&render.vertices, &x_axis, &y_axis);
+    }
+
+    #[test]
+    fn contour_cpu_saddle_fixture_emits_finite_segments() {
+        let x_axis = vec![0.0, 1.0, 2.0];
+        let y_axis = vec![0.0, 1.0, 2.0];
+        let grid = vec![
+            vec![1.0, -1.0, 1.0],
+            vec![-1.0, 1.0, -1.0],
+            vec![1.0, -1.0, 1.0],
+        ];
+        let mut plot = build_contour_plot(
+            "contour",
+            &x_axis,
+            &y_axis,
+            &grid,
+            ColorMap::Parula,
+            0.0,
+            &ContourLevelSpec::Values(vec![0.0]),
+            &ContourLineColor::Auto,
+        )
+        .expect("contour plot");
+        let render = plot.render_data();
+        assert!(!render.vertices.is_empty());
+        assert_contour_vertices_within_bounds(&render.vertices, &x_axis, &y_axis);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn level_vector_must_increase() {
         setup_plot_tests();
         let bad_levels = Value::Tensor(tensor_from(&[0.0, 0.0], 1, 2));
-        assert!(parse_level_spec(bad_levels, "contour").is_err());
+        let repeated = parse_level_spec(bad_levels, "contour").unwrap();
+        match repeated {
+            ContourLevelSpec::Values(values) => assert_eq!(values, vec![0.0]),
+            other => panic!("expected repeated single contour level, found {other:?}"),
+        }
 
         let good_levels = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0], 1, 3));
         let spec = parse_level_spec(good_levels, "contour").unwrap();
@@ -1271,6 +2321,20 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn linewidth_option_parses() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![Value::String("LineWidth".into()), Value::Num(2.0)],
+        )
+        .unwrap();
+        assert!((args.line_width - 2.0).abs() < f32::EPSILON);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn level_list_option_accepts_explicit_vector() {
         setup_plot_tests();
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
@@ -1313,6 +2377,34 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn color_option_accepts_line_color_tokens() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let none_args = parse_contour_args(
+            "contour",
+            z.clone(),
+            vec![Value::String("Color".into()), Value::String("none".into())],
+        )
+        .unwrap();
+        match none_args.line_color {
+            ContourLineColor::None => {}
+            other => panic!("expected Color none, found {other:?}"),
+        }
+
+        let auto_args = parse_contour_args(
+            "contour",
+            z,
+            vec![Value::String("Color".into()), Value::String("auto".into())],
+        )
+        .unwrap();
+        match auto_args.line_color {
+            ContourLineColor::Auto => {}
+            other => panic!("expected Color auto, found {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn level_list_mode_manual_requires_explicit_levels() {
         setup_plot_tests();
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
@@ -1340,10 +2432,41 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn contour_type_is_string() {
+    fn contour_type_is_numeric_handle() {
         assert_eq!(
-            string_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
-            Type::String
+            handle_scalar_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::Num
         );
+    }
+
+    #[test]
+    fn contour_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = CONTOUR_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = contour(Z)"));
+        assert!(labels.contains(&"h = contour(Z, V)"));
+        assert!(labels.contains(&"h = contour(X, Y, Z)"));
+        assert!(labels.contains(&"h = contour(X, Y, Z, V, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn contour_missing_input_uses_stable_identifier() {
+        setup_plot_tests();
+        let err = contour_builtin(Value::Num(0.0), vec![]).expect_err("invalid z");
+        assert_eq!(err.identifier(), CONTOUR_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn contour_returns_handle() {
+        setup_plot_tests();
+        let handle = contour_builtin(
+            Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2)),
+            Vec::new(),
+        )
+        .expect("contour should return handle");
+        assert!(handle.is_finite());
     }
 }

@@ -1,6 +1,10 @@
 //! MATLAB-compatible `true`/`false` builtins for logical array creation.
 
-use runmat_builtins::{LogicalArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    LogicalArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{shape::normalize_scalar_shape, tensor};
@@ -10,12 +14,240 @@ fn builtin_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
 }
 
+const LOGICAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "L",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical output array.",
+}];
+
+const LOGICAL_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const LOGICAL_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Square size.",
+}];
+
+const LOGICAL_SIG_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "size_vector",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Size vector defining output dimensions.",
+}];
+
+const LOGICAL_SIG_DIMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "dims",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Dimension sizes.",
+}];
+
+const LOGICAL_SIG_PROTOTYPE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "prototype",
+    ty: BuiltinParamType::LikePrototype,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Prototype value when no numeric dimension arguments are provided.",
+}];
+
+const LOGICAL_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"logical\""),
+        description: "Class override keyword (logical).",
+    },
+];
+
+const LOGICAL_SIG_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype array used for class/device.",
+    },
+];
+
+const TRUE_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "L = true()",
+        inputs: &LOGICAL_SIG_EMPTY_INPUTS,
+        outputs: &LOGICAL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "L = true(n)",
+        inputs: &LOGICAL_SIG_N_INPUTS,
+        outputs: &LOGICAL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "L = true(size_vector)",
+        inputs: &LOGICAL_SIG_SIZE_VECTOR_INPUTS,
+        outputs: &LOGICAL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "L = true(m, n, ...)",
+        inputs: &LOGICAL_SIG_DIMS_INPUTS,
+        outputs: &LOGICAL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "L = true(prototype)",
+        inputs: &LOGICAL_SIG_PROTOTYPE_INPUTS,
+        outputs: &LOGICAL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "L = true(..., \"logical\")",
+        inputs: &LOGICAL_SIG_CLASS_INPUTS,
+        outputs: &LOGICAL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "L = true(..., \"like\", prototype)",
+        inputs: &LOGICAL_SIG_LIKE_INPUTS,
+        outputs: &LOGICAL_OUTPUT,
+    },
+];
+
+const FALSE_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "L = false()",
+        inputs: &LOGICAL_SIG_EMPTY_INPUTS,
+        outputs: &LOGICAL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "L = false(n)",
+        inputs: &LOGICAL_SIG_N_INPUTS,
+        outputs: &LOGICAL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "L = false(size_vector)",
+        inputs: &LOGICAL_SIG_SIZE_VECTOR_INPUTS,
+        outputs: &LOGICAL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "L = false(m, n, ...)",
+        inputs: &LOGICAL_SIG_DIMS_INPUTS,
+        outputs: &LOGICAL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "L = false(prototype)",
+        inputs: &LOGICAL_SIG_PROTOTYPE_INPUTS,
+        outputs: &LOGICAL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "L = false(..., \"logical\")",
+        inputs: &LOGICAL_SIG_CLASS_INPUTS,
+        outputs: &LOGICAL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "L = false(..., \"like\", prototype)",
+        inputs: &LOGICAL_SIG_LIKE_INPUTS,
+        outputs: &LOGICAL_OUTPUT,
+    },
+];
+
+const TRUE_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    BuiltinErrorDescriptor {
+        code: "RM.TRUE.LIKE_EXPECTED_PROTOTYPE",
+        identifier: None,
+        when: "The 'like' keyword is provided without a prototype argument.",
+        message: "true: expected prototype after 'like'",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.TRUE.MULTIPLE_LIKE",
+        identifier: None,
+        when: "The 'like' keyword is provided multiple times.",
+        message: "true: multiple 'like' specifications are not supported",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.TRUE.UNRECOGNIZED_OPTION",
+        identifier: None,
+        when: "A trailing option string is not supported.",
+        message: "true: unrecognised option",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.TRUE.INVALID_DIMS",
+        identifier: None,
+        when: "Dimension arguments fail numeric/shape parsing.",
+        message: "true: dimension arguments must be numeric and nonnegative",
+    },
+];
+
+const FALSE_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    BuiltinErrorDescriptor {
+        code: "RM.FALSE.LIKE_EXPECTED_PROTOTYPE",
+        identifier: None,
+        when: "The 'like' keyword is provided without a prototype argument.",
+        message: "false: expected prototype after 'like'",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.FALSE.MULTIPLE_LIKE",
+        identifier: None,
+        when: "The 'like' keyword is provided multiple times.",
+        message: "false: multiple 'like' specifications are not supported",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.FALSE.UNRECOGNIZED_OPTION",
+        identifier: None,
+        when: "A trailing option string is not supported.",
+        message: "false: unrecognised option",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.FALSE.INVALID_DIMS",
+        identifier: None,
+        when: "Dimension arguments fail numeric/shape parsing.",
+        message: "false: dimension arguments must be numeric and nonnegative",
+    },
+];
+
+pub const TRUE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TRUE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TRUE_ERRORS,
+};
+
+pub const FALSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FALSE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FALSE_ERRORS,
+};
+
 #[runtime_builtin(
     name = "true",
     category = "array/creation",
-    summary = "Create logical arrays filled with true values.",
+    summary = "Create logical arrays filled with `true` values.",
     keywords = "true,logical,array",
     accel = "array_construct",
+    descriptor(crate::builtins::array::creation::true_false::TRUE_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::true_false"
 )]
 async fn true_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -28,6 +260,7 @@ async fn true_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Create logical arrays filled with false values.",
     keywords = "false,logical,array",
     accel = "array_construct",
+    descriptor(crate::builtins::array::creation::true_false::FALSE_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::true_false"
 )]
 async fn false_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {

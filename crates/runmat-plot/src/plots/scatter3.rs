@@ -4,7 +4,19 @@ use crate::core::{
     vertex_utils, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData,
     Vertex,
 };
+use crate::plots::scatter::MarkerStyle;
 use glam::{Vec3, Vec4};
+
+#[derive(Clone, Copy, Debug)]
+pub struct Scatter3GpuStyle {
+    pub color: Vec4,
+    pub edge_color: Vec4,
+    pub edge_thickness: f32,
+    pub marker_style: MarkerStyle,
+    pub filled: bool,
+    pub has_per_point_colors: bool,
+    pub edge_from_vertex_colors: bool,
+}
 
 /// GPU-accelerated scatter3 plot for MATLAB semantics.
 #[derive(Debug, Clone)]
@@ -17,6 +29,16 @@ pub struct Scatter3Plot {
     pub point_size: f32,
     /// Optional per-point marker sizes.
     pub point_sizes: Option<Vec<f32>>,
+    /// Marker edge color.
+    pub edge_color: Vec4,
+    /// Marker edge thickness in pixels.
+    pub edge_thickness: f32,
+    /// Marker shape.
+    pub marker_style: MarkerStyle,
+    /// Whether marker faces are filled.
+    pub filled: bool,
+    /// Whether edge color should come from per-vertex colors.
+    pub edge_color_from_vertex_colors: bool,
     /// Legend label.
     pub label: Option<String>,
     /// Visibility flag.
@@ -25,6 +47,7 @@ pub struct Scatter3Plot {
     bounds: Option<BoundingBox>,
     gpu_vertices: Option<GpuVertexBuffer>,
     gpu_point_count: Option<usize>,
+    gpu_has_per_point_colors: bool,
 }
 
 impl Scatter3Plot {
@@ -37,12 +60,18 @@ impl Scatter3Plot {
             colors,
             point_size: 8.0,
             point_sizes: None,
+            edge_color: default_color,
+            edge_thickness: 1.0,
+            marker_style: MarkerStyle::Circle,
+            filled: true,
+            edge_color_from_vertex_colors: false,
             label: None,
             visible: true,
             vertices: None,
             bounds: None,
             gpu_vertices: None,
             gpu_point_count: None,
+            gpu_has_per_point_colors: false,
         })
     }
 
@@ -50,21 +79,27 @@ impl Scatter3Plot {
     pub fn from_gpu_buffer(
         buffer: GpuVertexBuffer,
         point_count: usize,
-        color: Vec4,
+        style: Scatter3GpuStyle,
         point_size: f32,
         bounds: BoundingBox,
     ) -> Self {
         Self {
             points: Vec::new(),
-            colors: vec![color],
+            colors: vec![style.color],
             point_size,
             point_sizes: None,
+            edge_color: style.edge_color,
+            edge_thickness: style.edge_thickness,
+            marker_style: style.marker_style,
+            filled: style.filled,
+            edge_color_from_vertex_colors: style.edge_from_vertex_colors,
             label: None,
             visible: true,
             vertices: None,
             bounds: Some(bounds),
             gpu_vertices: Some(buffer),
             gpu_point_count: Some(point_count),
+            gpu_has_per_point_colors: style.has_per_point_colors,
         }
     }
 
@@ -74,6 +109,7 @@ impl Scatter3Plot {
         self.vertices = None;
         self.gpu_vertices = None;
         self.gpu_point_count = None;
+        self.gpu_has_per_point_colors = false;
         self
     }
 
@@ -90,6 +126,7 @@ impl Scatter3Plot {
         self.vertices = None;
         self.gpu_vertices = None;
         self.gpu_point_count = None;
+        self.gpu_has_per_point_colors = false;
         Ok(self)
     }
 
@@ -105,7 +142,43 @@ impl Scatter3Plot {
         self.point_sizes = None;
         self.gpu_vertices = None;
         self.gpu_point_count = None;
+        self.gpu_has_per_point_colors = false;
         self
+    }
+
+    pub fn set_marker_style(&mut self, style: MarkerStyle) {
+        self.marker_style = style;
+        self.gpu_vertices = None;
+        self.gpu_point_count = None;
+        self.gpu_has_per_point_colors = false;
+    }
+
+    pub fn set_filled(&mut self, filled: bool) {
+        self.filled = filled;
+        self.gpu_vertices = None;
+        self.gpu_point_count = None;
+        self.gpu_has_per_point_colors = false;
+    }
+
+    pub fn set_edge_color(&mut self, color: Vec4) {
+        self.edge_color = color;
+        self.gpu_vertices = None;
+        self.gpu_point_count = None;
+        self.gpu_has_per_point_colors = false;
+    }
+
+    pub fn set_edge_thickness(&mut self, px: f32) {
+        self.edge_thickness = px.max(0.0);
+        self.gpu_vertices = None;
+        self.gpu_point_count = None;
+        self.gpu_has_per_point_colors = false;
+    }
+
+    pub fn set_edge_color_from_vertex(&mut self, enabled: bool) {
+        self.edge_color_from_vertex_colors = enabled;
+        self.gpu_vertices = None;
+        self.gpu_point_count = None;
+        self.gpu_has_per_point_colors = false;
     }
 
     /// Enable or disable visibility.
@@ -119,6 +192,7 @@ impl Scatter3Plot {
         self.gpu_vertices = Some(buffer);
         self.gpu_point_count = Some(point_count);
         self.vertices = None;
+        self.gpu_has_per_point_colors = false;
         self
     }
 
@@ -128,6 +202,7 @@ impl Scatter3Plot {
         self.vertices = None;
         self.gpu_vertices = None;
         self.gpu_point_count = None;
+        self.gpu_has_per_point_colors = false;
     }
 
     fn ensure_vertices(&mut self) {
@@ -171,6 +246,7 @@ impl Scatter3Plot {
 
     /// Generate render data for the renderer.
     pub fn render_data(&mut self) -> RenderData {
+        let bounds = self.bounds();
         let vertex_count = self.gpu_point_count.unwrap_or_else(|| {
             self.ensure_vertices();
             self.vertices
@@ -186,20 +262,51 @@ impl Scatter3Plot {
             self.vertices.clone().unwrap_or_default()
         };
 
+        let is_multi_color = if self.gpu_vertices.is_some() {
+            self.gpu_has_per_point_colors || self.colors.len() > 1
+        } else if vertices.is_empty() {
+            false
+        } else {
+            let first = vertices[0].color;
+            vertices.iter().any(|v| v.color != first)
+        };
+        let has_vertex_colors = if self.gpu_vertices.is_some() {
+            self.gpu_has_per_point_colors
+        } else {
+            self.colors.len() > 1
+        };
+        let use_vertex_edge_color = self.edge_color_from_vertex_colors && has_vertex_colors;
+        let mut material = Material {
+            albedo: self.colors.first().copied().unwrap_or(Vec4::ONE),
+            roughness: self.edge_thickness,
+            metallic: match self.marker_style {
+                MarkerStyle::Circle => 0.0,
+                MarkerStyle::Square => 1.0,
+                MarkerStyle::Triangle => 2.0,
+                MarkerStyle::Diamond => 3.0,
+                MarkerStyle::Plus => 4.0,
+                MarkerStyle::Cross => 5.0,
+                MarkerStyle::Star => 6.0,
+                MarkerStyle::Hexagon => 7.0,
+            },
+            emissive: self.edge_color,
+            alpha_mode: crate::core::scene::AlphaMode::Blend,
+            double_sided: true,
+        };
+        if is_multi_color {
+            material.albedo.w = 0.0;
+        } else if self.filled {
+            material.albedo.w = 1.0;
+        }
+        material.emissive.w = if use_vertex_edge_color { 0.0 } else { 1.0 };
+
         RenderData {
             pipeline_type: PipelineType::Scatter3,
             vertices,
             indices: None,
             gpu_vertices: self.gpu_vertices.clone(),
-            bounds: None,
-            material: Material {
-                albedo: Vec4::ONE,
-                roughness: 0.0,
-                metallic: 0.0,
-                emissive: Vec4::ZERO,
-                alpha_mode: crate::core::scene::AlphaMode::Blend,
-                double_sided: true,
-            },
+            bounds: Some(bounds),
+            material,
             draw_calls: vec![DrawCall {
                 vertex_offset: 0,
                 vertex_count,
@@ -249,5 +356,22 @@ mod tests {
         let render_data = cloud.render_data();
         assert_eq!(render_data.vertices.len(), 2);
         assert_eq!(render_data.pipeline_type, PipelineType::Scatter3);
+    }
+
+    #[test]
+    fn scatter3_marker_style_encodes_material_shape_channel() {
+        let points = vec![Vec3::new(0.0, 0.0, 0.0)];
+        let mut cloud = Scatter3Plot::new(points).unwrap();
+        cloud.set_marker_style(MarkerStyle::Diamond);
+        let render_data = cloud.render_data();
+        assert_eq!(render_data.material.metallic, 3.0);
+    }
+
+    #[test]
+    fn scatter3_default_material_uses_plot_color_not_white_override() {
+        let points = vec![Vec3::new(0.0, 0.0, 0.0)];
+        let mut cloud = Scatter3Plot::new(points).unwrap();
+        let render_data = cloud.render_data();
+        assert_ne!(render_data.material.albedo.truncate(), Vec4::ONE.truncate());
     }
 }

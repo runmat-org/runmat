@@ -1,4 +1,4 @@
-use runmat_builtins::{ResolveContext, Type};
+use runmat_builtins::{LiteralValue, ResolveContext, Type};
 
 use runmat_builtins::shape_rules::element_count_if_known;
 
@@ -29,6 +29,52 @@ pub fn filter_type(args: &[Type], _context: &ResolveContext) -> Type {
     match signal {
         Some(ty) => numeric_like(ty),
         None => Type::Unknown,
+    }
+}
+
+pub fn window_vector_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    let Some(arg) = args.first() else {
+        return Type::Unknown;
+    };
+    if let Some(n) = literal_nonnegative_scalar(ctx) {
+        return Type::Tensor {
+            shape: Some(vec![Some(n), Some(1)]),
+        };
+    }
+    match arg {
+        Type::Num | Type::Int | Type::Bool => Type::Tensor {
+            shape: Some(vec![None, Some(1)]),
+        },
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            if element_count_if_known(shape).unwrap_or(1) == 1 {
+                Type::Tensor {
+                    shape: Some(vec![None, Some(1)]),
+                }
+            } else {
+                Type::Unknown
+            }
+        }
+        Type::Tensor { shape: None } | Type::Logical { shape: None } | Type::Unknown => {
+            Type::Tensor {
+                shape: Some(vec![None, Some(1)]),
+            }
+        }
+        _ => Type::Unknown,
+    }
+}
+
+fn literal_nonnegative_scalar(ctx: &ResolveContext) -> Option<usize> {
+    match ctx.literal_args.first() {
+        Some(LiteralValue::Number(value)) if value.is_finite() => {
+            let rounded = value.round();
+            if rounded < 0.0 || (rounded - value).abs() > 1e-9 {
+                None
+            } else {
+                Some(rounded as usize)
+            }
+        }
+        Some(LiteralValue::Bool(value)) => Some(usize::from(*value)),
+        _ => None,
     }
 }
 

@@ -7,7 +7,11 @@
 
 use num_complex::Complex64;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -22,6 +26,51 @@ use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResul
 const BUILTIN_NAME: &str = "acos";
 const ZERO_EPS: f64 = 1e-12;
 const DOMAIN_TOL: f64 = 1e-12;
+
+const ACOS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise inverse cosine result.",
+}];
+
+const ACOS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, array, char array, complex value, or gpuArray.",
+}];
+
+const ACOS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = acos(X)",
+    inputs: &ACOS_INPUTS,
+    outputs: &ACOS_OUTPUT,
+}];
+
+const ACOS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ACOS.INVALID_INPUT",
+    identifier: Some("RunMat:acos:InvalidInput"),
+    when: "Input cannot be interpreted as supported numeric/char/complex data.",
+    message: "acos: invalid input",
+};
+
+const ACOS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ACOS.INTERNAL",
+    identifier: Some("RunMat:acos:Internal"),
+    when: "Internal gather/reduction/conversion/allocation flow failed.",
+    message: "acos: internal error",
+};
+
+const ACOS_ERRORS: [BuiltinErrorDescriptor; 2] = [ACOS_ERROR_INVALID_INPUT, ACOS_ERROR_INTERNAL];
+
+pub const ACOS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ACOS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ACOS_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::acos")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -39,10 +88,16 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute acos in-place when inputs stay within [-1, 1]; otherwise the runtime gathers to host to honour MATLAB-compatible complex promotion.",
 };
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn acos_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::acos")]
@@ -65,10 +120,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "acos",
     category = "math/trigonometry",
-    summary = "Element-wise inverse cosine with MATLAB-compatible complex promotion.",
+    summary = "Element-wise inverse cosine, with complex promotion outside [-1, 1].",
     keywords = "acos,inverse cosine,arccos,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::trigonometry::acos::ACOS_DESCRIPTOR),
     builtin_path = "crate::builtins::math::trigonometry::acos"
 )]
 async fn acos_builtin(value: Value) -> BuiltinResult<Value> {
@@ -77,9 +133,10 @@ async fn acos_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Complex(re, im) => Ok(acos_complex_value(re, im)),
         Value::ComplexTensor(ct) => acos_complex_tensor(ct),
         Value::CharArray(ca) => acos_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(runtime_error_for("acos: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(acos_error_with_detail(
+            &ACOS_ERROR_INVALID_INPUT,
+            "expected numeric input",
+        )),
         other => acos_real(other),
     }
 }
@@ -109,15 +166,17 @@ async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<bool> {
-    let min_handle = provider
-        .reduce_min(handle)
-        .await
-        .map_err(|e| runtime_error_for(format!("acos: reduce_min failed: {e}")))?;
+    let min_handle = provider.reduce_min(handle).await.map_err(|e| {
+        acos_error_with_detail(&ACOS_ERROR_INTERNAL, format!("reduce_min failed: {e}"))
+    })?;
     let max_handle = match provider.reduce_max(handle).await {
         Ok(handle) => handle,
         Err(err) => {
             let _ = provider.free(&min_handle);
-            return Err(runtime_error_for(format!("acos: reduce_max failed: {err}")));
+            return Err(acos_error_with_detail(
+                &ACOS_ERROR_INTERNAL,
+                format!("reduce_max failed: {err}"),
+            ));
         }
     };
     let min_host = match download_handle_async(provider, &min_handle).await {
@@ -125,9 +184,10 @@ async fn detect_gpu_requires_complex(
         Err(err) => {
             let _ = provider.free(&min_handle);
             let _ = provider.free(&max_handle);
-            return Err(runtime_error_for(format!(
-                "acos: reduce_min download failed: {err}"
-            )));
+            return Err(acos_error_with_detail(
+                &ACOS_ERROR_INTERNAL,
+                format!("reduce_min download failed: {err}"),
+            ));
         }
     };
     let max_host = match download_handle_async(provider, &max_handle).await {
@@ -135,15 +195,19 @@ async fn detect_gpu_requires_complex(
         Err(err) => {
             let _ = provider.free(&min_handle);
             let _ = provider.free(&max_handle);
-            return Err(runtime_error_for(format!(
-                "acos: reduce_max download failed: {err}"
-            )));
+            return Err(acos_error_with_detail(
+                &ACOS_ERROR_INTERNAL,
+                format!("reduce_max download failed: {err}"),
+            ));
         }
     };
     let _ = provider.free(&min_handle);
     let _ = provider.free(&max_handle);
     if min_host.data.iter().any(|&v| v.is_nan()) || max_host.data.iter().any(|&v| v.is_nan()) {
-        return Err(runtime_error_for("acos: reduction results contained NaN"));
+        return Err(acos_error_with_detail(
+            &ACOS_ERROR_INTERNAL,
+            "reduction results contained NaN",
+        ));
     }
     let min_val = min_host.data.iter().copied().fold(f64::INFINITY, f64::min);
     let max_val = max_host
@@ -155,7 +219,8 @@ async fn detect_gpu_requires_complex(
 }
 
 fn acos_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("acos", value).map_err(runtime_error_for)?;
+    let tensor = tensor::value_into_tensor_for("acos", value)
+        .map_err(|e| acos_error_with_detail(&ACOS_ERROR_INVALID_INPUT, e))?;
     acos_tensor_real(tensor)
 }
 
@@ -186,12 +251,12 @@ fn acos_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
             Ok(Value::Complex(re, im))
         } else {
             let tensor = ComplexTensor::new(complex_data, tensor.shape.clone())
-                .map_err(|e| runtime_error_for(format!("acos: {e}")))?;
+                .map_err(|e| acos_error_with_detail(&ACOS_ERROR_INTERNAL, e))?;
             Ok(Value::ComplexTensor(tensor))
         }
     } else {
         let tensor = Tensor::new(real_data, tensor.shape.clone())
-            .map_err(|e| runtime_error_for(format!("acos: {e}")))?;
+            .map_err(|e| acos_error_with_detail(&ACOS_ERROR_INTERNAL, e))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }
@@ -239,7 +304,7 @@ fn acos_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         Ok(Value::Complex(re, im))
     } else {
         let tensor = ComplexTensor::new(data, ct.shape.clone())
-            .map_err(|e| runtime_error_for(format!("acos: {e}")))?;
+            .map_err(|e| acos_error_with_detail(&ACOS_ERROR_INTERNAL, e))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
@@ -247,12 +312,12 @@ fn acos_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 fn acos_char_array(ca: CharArray) -> BuiltinResult<Value> {
     if ca.data.is_empty() {
         let tensor = Tensor::new(Vec::new(), vec![ca.rows, ca.cols])
-            .map_err(|e| runtime_error_for(format!("acos: {e}")))?;
+            .map_err(|e| acos_error_with_detail(&ACOS_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-        .map_err(|e| runtime_error_for(format!("acos: {e}")))?;
+        .map_err(|e| acos_error_with_detail(&ACOS_ERROR_INTERNAL, e))?;
     acos_tensor_real(tensor)
 }
 
@@ -277,6 +342,16 @@ pub(crate) mod tests {
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn acos_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = ACOS_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = acos(X)"));
     }
 
     #[test]
@@ -462,6 +537,7 @@ pub(crate) mod tests {
     #[test]
     fn acos_string_errors() {
         let err = acos_builtin(Value::from("hello")).expect_err("acos string should error");
+        assert_eq!(err.identifier(), ACOS_ERROR_INVALID_INPUT.identifier);
         let message = error_message(err);
         assert!(message.contains("expected numeric input"));
     }

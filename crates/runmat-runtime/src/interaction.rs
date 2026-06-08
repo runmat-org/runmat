@@ -1,4 +1,5 @@
 use once_cell::sync::OnceCell;
+use runmat_builtins::Value;
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::future::Future;
@@ -63,6 +64,12 @@ fn async_handler_slot() -> &'static RwLock<Option<Arc<AsyncInteractionHandler>>>
     ASYNC_HANDLER.get_or_init(|| RwLock::new(None))
 }
 
+fn interaction_error(identifier: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(identifier.to_string())
+        .build()
+}
+
 pub struct AsyncHandlerGuard {
     previous: Option<Arc<AsyncInteractionHandler>>,
 }
@@ -86,11 +93,14 @@ pub fn replace_async_handler(handler: Option<Arc<AsyncInteractionHandler>>) -> A
 
 pub async fn request_line_async(prompt: &str, echo: bool) -> Result<String, RuntimeError> {
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
-        return match response.map_err(|err| build_runtime_error(err).build())? {
+        return match response
+            .map_err(|err| interaction_error("RunMat:interaction:QueuedResponseError", err))?
+        {
             InteractionResponse::Line(value) => Ok(value),
-            InteractionResponse::KeyPress => {
-                Err(build_runtime_error("queued keypress response used for line request").build())
-            }
+            InteractionResponse::KeyPress => Err(interaction_error(
+                "RunMat:interaction:UnexpectedQueuedKeypress",
+                "queued keypress response used for line request",
+            )),
         };
     }
 
@@ -105,25 +115,29 @@ pub async fn request_line_async(prompt: &str, echo: bool) -> Result<String, Runt
         };
         let value = handler(owned)
             .await
-            .map_err(|err| build_runtime_error(err).build())?;
+            .map_err(|err| interaction_error("RunMat:interaction:AsyncHandlerError", err))?;
         return match value {
             InteractionResponse::Line(line) => Ok(line),
-            InteractionResponse::KeyPress => Err(build_runtime_error(
+            InteractionResponse::KeyPress => Err(interaction_error(
+                "RunMat:interaction:UnexpectedAsyncKeypress",
                 "interaction async handler returned keypress for line request",
-            )
-            .build()),
+            )),
         };
     }
 
-    default_read_line(prompt, echo).map_err(|err| build_runtime_error(err).build())
+    default_read_line(prompt, echo)
+        .map_err(|err| interaction_error("RunMat:interaction:ReadLineFailed", err))
 }
 
 pub async fn wait_for_key_async(prompt: &str) -> Result<(), RuntimeError> {
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
-        return match response.map_err(|err| build_runtime_error(err).build())? {
-            InteractionResponse::Line(_) => {
-                Err(build_runtime_error("queued line response used for keypress request").build())
-            }
+        return match response
+            .map_err(|err| interaction_error("RunMat:interaction:QueuedResponseError", err))?
+        {
+            InteractionResponse::Line(_) => Err(interaction_error(
+                "RunMat:interaction:UnexpectedQueuedLine",
+                "queued line response used for keypress request",
+            )),
             InteractionResponse::KeyPress => Ok(()),
         };
     }
@@ -139,17 +153,18 @@ pub async fn wait_for_key_async(prompt: &str) -> Result<(), RuntimeError> {
         };
         let value = handler(owned)
             .await
-            .map_err(|err| build_runtime_error(err).build())?;
+            .map_err(|err| interaction_error("RunMat:interaction:AsyncHandlerError", err))?;
         return match value {
-            InteractionResponse::Line(_) => Err(build_runtime_error(
+            InteractionResponse::Line(_) => Err(interaction_error(
+                "RunMat:interaction:UnexpectedAsyncLine",
                 "interaction async handler returned line value for keypress request",
-            )
-            .build()),
+            )),
             InteractionResponse::KeyPress => Ok(()),
         };
     }
 
-    default_wait_for_key(prompt).map_err(|err| build_runtime_error(err).build())
+    default_wait_for_key(prompt)
+        .map_err(|err| interaction_error("RunMat:interaction:WaitForKeyFailed", err))
 }
 
 pub fn default_read_line(prompt: &str, echo: bool) -> Result<String, String> {
@@ -216,3 +231,51 @@ pub fn push_queued_response(response: Result<InteractionResponse, String>) {
 }
 
 // NOTE: The old suspend/resume control flow has been removed.
+
+// ---------------------------------------------------------------------------
+// Eval hook – lets runmat-core install a stateless expression evaluator so
+// that `input()` can parse numeric responses through the full MATLAB pipeline
+// instead of falling back to `str2double` (which cannot handle matrix literals,
+// named constants like `pi`, arithmetic, etc.).
+// ---------------------------------------------------------------------------
+
+/// Future returned by the eval hook.
+pub type EvalHookFuture = Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'static>>;
+
+/// Function signature for the eval hook.
+pub type EvalHookFn = dyn Fn(String) -> EvalHookFuture + Send + Sync;
+
+static EVAL_HOOK: OnceCell<RwLock<Option<Arc<EvalHookFn>>>> = OnceCell::new();
+
+fn eval_hook_slot() -> &'static RwLock<Option<Arc<EvalHookFn>>> {
+    EVAL_HOOK.get_or_init(|| RwLock::new(None))
+}
+
+/// RAII guard that restores the previous eval hook on drop.
+pub struct EvalHookGuard {
+    previous: Option<Arc<EvalHookFn>>,
+}
+
+impl Drop for EvalHookGuard {
+    fn drop(&mut self) {
+        let mut slot = eval_hook_slot()
+            .write()
+            .unwrap_or_else(|_| panic!("interaction eval hook lock poisoned"));
+        *slot = self.previous.take();
+    }
+}
+
+/// Replace the global eval hook for the duration of the returned guard's
+/// lifetime. Mirrors the pattern used by `replace_async_handler`.
+pub fn replace_eval_hook(hook: Option<Arc<EvalHookFn>>) -> EvalHookGuard {
+    let mut slot = eval_hook_slot()
+        .write()
+        .unwrap_or_else(|_| panic!("interaction eval hook lock poisoned"));
+    let previous = std::mem::replace(&mut *slot, hook);
+    EvalHookGuard { previous }
+}
+
+/// Return the currently installed eval hook, if any.
+pub fn current_eval_hook() -> Option<Arc<EvalHookFn>> {
+    eval_hook_slot().read().ok().and_then(|slot| slot.clone())
+}

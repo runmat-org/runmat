@@ -1,5 +1,4 @@
-use once_cell::sync::Lazy;
-use std::sync::Mutex;
+use std::cell::RefCell;
 
 #[derive(Clone, Debug)]
 pub struct RuntimeWarning {
@@ -7,26 +6,23 @@ pub struct RuntimeWarning {
     pub message: String,
 }
 
-static WARNINGS: Lazy<Mutex<Vec<RuntimeWarning>>> = Lazy::new(|| Mutex::new(Vec::new()));
+thread_local! {
+    static WARNINGS: RefCell<Vec<RuntimeWarning>> = const { RefCell::new(Vec::new()) };
+}
 
 pub fn push(identifier: &str, message: &str) {
-    if let Ok(mut guard) = WARNINGS.lock() {
-        guard.push(RuntimeWarning {
+    WARNINGS.with(|warnings| {
+        warnings.borrow_mut().push(RuntimeWarning {
             identifier: identifier.to_string(),
             message: message.to_string(),
-        });
-    }
+        })
+    });
 }
 
 pub fn take_all() -> Vec<RuntimeWarning> {
-    WARNINGS
-        .lock()
-        .map(|mut guard| guard.drain(..).collect())
-        .unwrap_or_default()
+    WARNINGS.with(|warnings| warnings.borrow_mut().drain(..).collect())
 }
 
 pub fn reset() {
-    if let Ok(mut guard) = WARNINGS.lock() {
-        guard.clear();
-    }
+    WARNINGS.with(|warnings| warnings.borrow_mut().clear());
 }

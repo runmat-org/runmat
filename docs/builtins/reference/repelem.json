@@ -1,0 +1,124 @@
+{
+  "title": "repelem",
+  "category": "array/shape",
+  "keywords": [
+    "repelem",
+    "replicate",
+    "repeat",
+    "array",
+    "cell"
+  ],
+  "summary": "Repeat each element of an array by per-dimension replication factors, matching MATLAB `repelem` semantics.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host memory before replication; no provider hook exists yet."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::shape::repelem::tests",
+    "integration": "crates/runmat-runtime/tests/nd_ops.rs"
+  },
+  "description": "`repelem(A, r1, r2, ..., rN)` repeats each element of `A` along the requested dimensions. Unlike `repmat`, which tiles whole arrays, `repelem` expands individual elements into repeated runs or blocks.",
+  "behaviors": [
+    "`repelem(v, n)` repeats each element of a row or column vector `v` `n` times and preserves vector orientation.",
+    "`repelem(v, counts)` accepts a count vector with one non-negative integer count per element of `v`.",
+    "`repelem(A, r1, r2, ..., rN)` repeats matrix or N-D array elements along each dimension; scalar factors create element blocks and vector factors provide per-index counts for that dimension.",
+    "Numeric, logical, complex, string, char, and cell inputs are supported. Numeric, logical, complex, string, and cell arrays support N-D replication; char arrays are represented as 2-D character matrices.",
+    "Zero counts are allowed and remove the corresponding element or dimension slice from the output.",
+    "Replication counts must be finite, non-negative integers. Count vectors must match the size of the dimension they apply to.",
+    "The builtin checks shape and size overflow before materializing output arrays."
+  ],
+  "examples": [
+    {
+      "description": "Repeating every element of a row vector",
+      "input": "u = repelem([1 2 3], 2)",
+      "output": "u =\n     1     1     2     2     3     3"
+    },
+    {
+      "description": "Using a per-element count vector",
+      "input": "u = repelem([1 2 3], [1 2 3])",
+      "output": "u =\n     1     2     2     3     3     3"
+    },
+    {
+      "description": "Expanding a matrix into element blocks",
+      "input": "A = [1 2; 3 4];\nB = repelem(A, 2, 3)",
+      "output": "B =\n     1     1     1     2     2     2\n     1     1     1     2     2     2\n     3     3     3     4     4     4\n     3     3     3     4     4     4"
+    },
+    {
+      "description": "Dropping elements with zero counts",
+      "input": "u = repelem([1 2 3 4 5], [0 1 0 2 1])",
+      "output": "u =\n     2     4     4     5"
+    },
+    {
+      "description": "Repeating along a higher dimension",
+      "input": "C = {1; 2};\nD = repelem(reshape(C, [1 1 2]), 1, 1, 2);\nsize(D)",
+      "output": "ans =\n     1     1     4"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `repelem` different from `repmat`?",
+      "answer": "`repmat` tiles a whole array. `repelem` repeats each individual element, so matrix inputs expand into element-wise blocks."
+    },
+    {
+      "question": "Can counts be different for each element?",
+      "answer": "Yes. In vector form, the count vector must have one entry for each vector element. In multi-dimensional form, a count vector applies to the dimension at the same argument position."
+    },
+    {
+      "question": "Are zero counts valid?",
+      "answer": "Yes. A zero count omits that element or dimension index from the output."
+    },
+    {
+      "question": "Does `repelem` preserve row and column vector orientation?",
+      "answer": "Yes. Row vectors remain row vectors, column vectors remain column vectors, including empty column vectors."
+    },
+    {
+      "question": "Does `repelem` run on the GPU?",
+      "answer": "Not yet. The runtime gathers GPU tensors to host memory for this builtin, computes the replicated result on the CPU, and returns a host value."
+    }
+  ],
+  "links": [
+    {
+      "label": "repmat",
+      "url": "./repmat"
+    },
+    {
+      "label": "kron",
+      "url": "./kron"
+    },
+    {
+      "label": "reshape",
+      "url": "./reshape"
+    },
+    {
+      "label": "cat",
+      "url": "./cat"
+    },
+    {
+      "label": "size",
+      "url": "./size"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/array/shape/repelem.rs",
+    "url": "crates/runmat-runtime/src/builtins/array/shape/repelem.rs"
+  },
+  "gpu_residency": "`repelem` is currently a host-resident array construction builtin. If a GPU tensor reaches this builtin, RunMat gathers it before replication.",
+  "gpu_behavior": [
+    "RunMat does not yet expose a provider hook for element-wise replication. Backends can add one later without changing the MATLAB-facing behavior."
+  ],
+  "extended_capabilities": [
+    "`repelem` preserves the input value class for numeric dtype metadata, logical arrays, complex tensors, string arrays, char arrays, and cell arrays.",
+    "N-D numeric, logical, complex, string, and cell replication uses the runtime's native storage order for each value kind."
+  ]
+}

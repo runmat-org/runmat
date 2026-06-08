@@ -13,10 +13,12 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 
+type ResidencyMarkFn = fn(&GpuTensorHandle);
 type ResidencyClearFn = fn(&GpuTensorHandle);
 type SequenceThresholdFn = fn() -> Option<usize>;
 type WorkgroupSizeHintFn = fn() -> Option<u32>;
 
+static RESIDENCY_MARK: OnceCell<ResidencyMarkFn> = OnceCell::new();
 static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
 static SEQUENCE_THRESHOLD_PROVIDER: OnceCell<SequenceThresholdFn> = OnceCell::new();
 static WORKGROUP_SIZE_HINT_PROVIDER: OnceCell<WorkgroupSizeHintFn> = OnceCell::new();
@@ -29,11 +31,27 @@ static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<u64, TransposeInfo>>> =
 
 static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<u64, ProviderPrecision>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static HANDLE_STORAGES: Lazy<RwLock<HashMap<u64, GpuTensorStorage>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TransposeInfo {
     pub base_rows: usize,
     pub base_cols: usize,
+}
+
+/// Register a callback used to mark residency tracking when GPU tensors are
+/// created or returned by device-side execution paths.
+pub fn register_residency_mark(handler: ResidencyMarkFn) {
+    let _ = RESIDENCY_MARK.set(handler);
+}
+
+/// Mark residency metadata for the provided GPU tensor handle, if a backend
+/// has registered a handler via [`register_residency_mark`].
+pub fn mark_residency(handle: &GpuTensorHandle) {
+    if let Some(handler) = RESIDENCY_MARK.get() {
+        handler(handle);
+    }
 }
 
 /// Register a callback used to clear residency tracking when GPU tensors are
@@ -184,6 +202,18 @@ pub fn handle_is_transposed(handle: &GpuTensorHandle) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GpuTensorStorage {
+    Real,
+    ComplexInterleaved,
+}
+
+impl Default for GpuTensorStorage {
+    fn default() -> Self {
+        Self::Real
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GpuTensorHandle {
     pub shape: Vec<usize>,
     pub device_id: u32,
@@ -262,6 +292,26 @@ pub struct WgpuBufferRef {
     pub shape: Vec<usize>,
     pub element_size: usize,
     pub precision: ProviderPrecision,
+}
+
+pub fn set_handle_storage(handle: &GpuTensorHandle, storage: GpuTensorStorage) {
+    if let Ok(mut guard) = HANDLE_STORAGES.write() {
+        guard.insert(handle.buffer_id, storage);
+    }
+}
+
+pub fn handle_storage(handle: &GpuTensorHandle) -> GpuTensorStorage {
+    HANDLE_STORAGES
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&handle.buffer_id).cloned())
+        .unwrap_or(GpuTensorStorage::Real)
+}
+
+pub fn clear_handle_storage(handle: &GpuTensorHandle) {
+    if let Ok(mut guard) = HANDLE_STORAGES.write() {
+        guard.remove(&handle.buffer_id);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -351,6 +401,7 @@ pub struct ProviderLinsolveOptions {
     pub conjugate: bool,
     pub symmetric: bool,
     pub posdef: bool,
+    pub need_rcond: bool,
     pub rcond: Option<f64>,
 }
 
@@ -450,6 +501,33 @@ impl Default for ProviderQrOptions {
 pub enum ProviderPrecision {
     F32,
     F64,
+}
+
+/// Declares how provider-owned GPU handles may cross async spawn boundaries.
+///
+/// This is a runtime/provider policy surface (not a semantic type fact) used by
+/// VM/runtime spawn handling to prevent unsynchronized device-handle races.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpawnHandleConcurrency {
+    /// Provider supports immutable sharing of handle-backed values across spawned tasks.
+    ImmutableShare,
+    /// Provider supports copy-on-write semantics when spawned and parent tasks diverge.
+    CopyOnWrite,
+    /// Provider supports synchronized mutation for shared handles.
+    SynchronizedMutation,
+    /// Provider rejects spawned sharing of raw handles.
+    Reject,
+}
+
+impl SpawnHandleConcurrency {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SpawnHandleConcurrency::ImmutableShare => "immutable_share",
+            SpawnHandleConcurrency::CopyOnWrite => "copy_on_write",
+            SpawnHandleConcurrency::SynchronizedMutation => "synchronized_mutation",
+            SpawnHandleConcurrency::Reject => "reject",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -838,13 +916,23 @@ pub struct ProviderDispatchStats {
     pub total_wall_time_ns: u64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderFallbackStat {
+    pub reason: String,
+    pub count: u64,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProviderTelemetry {
     pub fused_elementwise: ProviderDispatchStats,
     pub fused_reduction: ProviderDispatchStats,
     pub matmul: ProviderDispatchStats,
+    pub linsolve: ProviderDispatchStats,
+    pub mldivide: ProviderDispatchStats,
+    pub mrdivide: ProviderDispatchStats,
     pub upload_bytes: u64,
     pub download_bytes: u64,
+    pub solve_fallbacks: Vec<ProviderFallbackStat>,
     pub fusion_cache_hits: u64,
     pub fusion_cache_misses: u64,
     pub bind_group_cache_hits: u64,
@@ -891,6 +979,15 @@ pub trait AccelProvider: Send + Sync {
     fn device_info(&self) -> String;
     fn device_id(&self) -> u32 {
         0
+    }
+
+    /// Declares provider policy for sharing `GpuTensorHandle` values across
+    /// spawned async boundaries.
+    ///
+    /// Default is conservative rejection. Providers that can safely support
+    /// cross-task sharing should override this.
+    fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
+        SpawnHandleConcurrency::Reject
     }
 
     /// Export a shared GPU context handle, allowing downstream systems (plotting, visualization)
@@ -1147,6 +1244,33 @@ pub trait AccelProvider: Send + Sync {
         self.random_normal(&prototype.shape)
     }
 
+    /// Exponentially-distributed random values with mean `mu`.
+    fn random_exponential(&self, _mu: f64, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "random_exponential not supported by provider"
+        ))
+    }
+
+    /// Normal random values with mean `mu` and standard deviation `sigma`.
+    fn random_normrnd(
+        &self,
+        _mu: f64,
+        _sigma: f64,
+        _shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("random_normrnd not supported by provider"))
+    }
+
+    /// Uniform random values on the interval `[a, b)`.
+    fn random_unifrnd(
+        &self,
+        _a: f64,
+        _b: f64,
+        _shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("random_unifrnd not supported by provider"))
+    }
+
     fn stochastic_evolution(
         &self,
         _state: &GpuTensorHandle,
@@ -1167,6 +1291,34 @@ pub trait AccelProvider: Send + Sync {
     /// Generate a 2-D correlation kernel matching MATLAB's `fspecial` builtin.
     fn fspecial(&self, _request: &FspecialRequest) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("fspecial not supported by provider"))
+    }
+
+    /// Evaluate the `peaks` test surface on an n×n grid spanning [-3,3]×[-3,3].
+    /// Returns the Z matrix (n×n) as a GPU tensor.
+    fn peaks(&self, _n: usize) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("peaks not supported by provider"))
+    }
+
+    /// Evaluate the `peaks` formula element-wise on caller-supplied GPU coordinate tensors.
+    /// X and Y must have the same shape. Returns a Z tensor of the same shape.
+    fn peaks_xy(
+        &self,
+        _x: &GpuTensorHandle,
+        _y: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("peaks_xy not supported by provider"))
+    }
+
+    fn hann_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("hann_window not supported by provider"))
+    }
+
+    fn hamming_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("hamming_window not supported by provider"))
+    }
+
+    fn blackman_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("blackman_window not supported by provider"))
     }
 
     /// Apply an N-D correlation/convolution with padding semantics matching MATLAB's `imfilter`.
@@ -1394,6 +1546,12 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("unary_sin not supported by provider")
     }
+    fn unary_sinc<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_sinc not supported by provider")
+    }
     fn unary_gamma<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
@@ -1591,6 +1749,12 @@ pub trait AccelProvider: Send + Sync {
         _a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("unary_pow2 not supported by provider")
+    }
+    fn unary_nextpow2<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_nextpow2 not supported by provider")
     }
     fn pow2_scale(
         &self,
@@ -1847,6 +2011,14 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("diff_dim not supported by provider"))
     }
+    fn gradient_dim(
+        &self,
+        _handle: &GpuTensorHandle,
+        _dim: usize,
+        _spacing: f64,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("gradient_dim not supported by provider"))
+    }
     /// Perform an in-place FFT along a zero-based dimension, optionally padding/truncating to `len`.
     fn fft_dim<'a>(
         &'a self,
@@ -1863,6 +2035,12 @@ pub trait AccelProvider: Send + Sync {
         _dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("ifft_dim not supported by provider")
+    }
+    fn fft_extract_real<'a>(
+        &'a self,
+        _handle: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("fft_extract_real not supported by provider")
     }
     fn unique<'a>(
         &'a self,
@@ -1918,6 +2096,15 @@ pub trait AccelProvider: Send + Sync {
     /// Compute the Kronecker product of two tensors, matching MATLAB semantics.
     fn kron(&self, _a: &GpuTensorHandle, _b: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("kron not supported by provider"))
+    }
+    /// Compute the cross product of 3-element vectors along a matching dimension.
+    fn cross(
+        &self,
+        _lhs: &GpuTensorHandle,
+        _rhs: &GpuTensorHandle,
+        _dim: Option<usize>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("cross not supported by provider"))
     }
     fn reduce_sum<'a>(
         &'a self,
@@ -2140,6 +2327,27 @@ pub trait AccelProvider: Send + Sync {
         ))
     }
 
+    /// Execute a single fused elementwise kernel that writes `num_outputs` output buffers in one
+    /// dispatch. The shader is expected to declare `output0`, `output1`, … `output{N-1}` storage
+    /// bindings (at binding indices `inputs.len()` through `inputs.len() + num_outputs - 1`) and a
+    /// uniform `params` binding at `inputs.len() + num_outputs`.
+    ///
+    /// Providers that do not override this method fall back to calling `fused_elementwise` once
+    /// per output, which preserves correctness at the cost of the O(N²) dispatch overhead this
+    /// method is designed to eliminate.
+    fn fused_elementwise_multi(
+        &self,
+        _shader: &str,
+        _inputs: &[GpuTensorHandle],
+        _output_shape: &[usize],
+        _len: usize,
+        _num_outputs: usize,
+    ) -> anyhow::Result<Vec<GpuTensorHandle>> {
+        Err(anyhow::anyhow!(
+            "fused_elementwise_multi not supported by provider"
+        ))
+    }
+
     /// Build a numeric tensor where NaNs in `a` are replaced with 0.0 (device side).
     fn map_nan_to_zero(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("map_nan_to_zero not supported by provider"))
@@ -2190,8 +2398,12 @@ pub trait AccelProvider: Send + Sync {
             fused_elementwise: ProviderDispatchStats::default(),
             fused_reduction: ProviderDispatchStats::default(),
             matmul: ProviderDispatchStats::default(),
+            linsolve: ProviderDispatchStats::default(),
+            mldivide: ProviderDispatchStats::default(),
+            mrdivide: ProviderDispatchStats::default(),
             upload_bytes: 0,
             download_bytes: 0,
+            solve_fallbacks: Vec::new(),
             fusion_cache_hits: hits,
             fusion_cache_misses: misses,
             bind_group_cache_hits: 0,
@@ -2395,6 +2607,7 @@ pub fn provider() -> Option<&'static dyn AccelProvider> {
 
 /// Clear the globally registered provider. Intended for tests to ensure deterministic behaviour.
 pub fn clear_provider() {
+    replace_thread_provider(None);
     if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
         *guard = None;
     }
@@ -2404,15 +2617,32 @@ pub fn clear_provider() {
 }
 
 pub fn provider_for_device(device_id: u32) -> Option<&'static dyn AccelProvider> {
-    PROVIDER_REGISTRY
+    if let Some(registered) = PROVIDER_REGISTRY
         .read()
         .ok()
         .and_then(|guard| guard.get(&device_id).copied())
-        .or_else(|| provider())
+    {
+        return Some(registered);
+    }
+    if let Some(thread_provider) = current_thread_provider() {
+        if thread_provider.device_id() == device_id {
+            return Some(thread_provider);
+        }
+    }
+    // Preserve legacy behavior: when no explicit per-device registration exists,
+    // fall back to the globally active provider regardless of handle device id.
+    GLOBAL_PROVIDER
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().copied())
 }
 
 pub fn provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {
     provider_for_device(handle.device_id)
+}
+
+pub fn spawn_handle_concurrency_for(handle: &GpuTensorHandle) -> Option<SpawnHandleConcurrency> {
+    provider_for_handle(handle).map(AccelProvider::spawn_handle_concurrency)
 }
 
 pub fn next_device_id() -> u32 {
@@ -2496,6 +2726,7 @@ pub async fn try_elem_atan2(y: &GpuTensorHandle, x: &GpuTensorHandle) -> Option<
 pub struct HostTensorOwned {
     pub data: Vec<f64>,
     pub shape: Vec<usize>,
+    pub storage: GpuTensorStorage,
 }
 
 #[derive(Debug)]
@@ -2605,4 +2836,151 @@ pub struct ImageNormalizeDescriptor {
     pub bias: Option<f64>,
     #[serde(default)]
     pub gamma: Option<f64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestProvider {
+        device_id: u32,
+        name: &'static str,
+        spawn_concurrency: SpawnHandleConcurrency,
+    }
+
+    impl AccelProvider for TestProvider {
+        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Err(anyhow!("test provider upload should not be called"))
+        }
+
+        fn download<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            unsupported_future("test provider download should not be called")
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Err(anyhow!("test provider free should not be called"))
+        }
+
+        fn device_info(&self) -> String {
+            self.name.to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            self.device_id
+        }
+
+        fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
+            self.spawn_concurrency
+        }
+    }
+
+    static PROVIDER_TEST_LOCK: Lazy<std::sync::Mutex<()>> = Lazy::new(|| std::sync::Mutex::new(()));
+    static PROVIDER_A: TestProvider = TestProvider {
+        device_id: 101,
+        name: "provider-a",
+        spawn_concurrency: SpawnHandleConcurrency::ImmutableShare,
+    };
+    static PROVIDER_B: TestProvider = TestProvider {
+        device_id: 202,
+        name: "provider-b",
+        spawn_concurrency: SpawnHandleConcurrency::Reject,
+    };
+    static PROVIDER_C: TestProvider = TestProvider {
+        device_id: 303,
+        name: "provider-c",
+        spawn_concurrency: SpawnHandleConcurrency::CopyOnWrite,
+    };
+
+    fn register_test_providers() {
+        clear_provider();
+        unsafe {
+            register_provider(&PROVIDER_A);
+            register_provider(&PROVIDER_B);
+        }
+    }
+
+    fn test_handle(device_id: u32) -> GpuTensorHandle {
+        GpuTensorHandle {
+            shape: vec![1],
+            device_id,
+            buffer_id: 42,
+        }
+    }
+
+    #[test]
+    fn provider_for_device_prefers_registered_device_over_thread_provider() {
+        let _lock = PROVIDER_TEST_LOCK
+            .lock()
+            .expect("provider test lock poisoned");
+        register_test_providers();
+        let _thread_provider = ThreadProviderGuard::set(Some(&PROVIDER_B));
+
+        let provider = provider_for_device(PROVIDER_A.device_id()).expect("provider for device");
+
+        assert_eq!(provider.device_info(), PROVIDER_A.name);
+        clear_provider();
+    }
+
+    #[test]
+    fn provider_for_handle_uses_handle_device_owner() {
+        let _lock = PROVIDER_TEST_LOCK
+            .lock()
+            .expect("provider test lock poisoned");
+        register_test_providers();
+        let _thread_provider = ThreadProviderGuard::set(Some(&PROVIDER_B));
+
+        let provider =
+            provider_for_handle(&test_handle(PROVIDER_A.device_id())).expect("provider for handle");
+
+        assert_eq!(provider.device_info(), PROVIDER_A.name);
+        clear_provider();
+    }
+
+    #[test]
+    fn spawn_handle_concurrency_for_uses_registered_owner() {
+        let _lock = PROVIDER_TEST_LOCK
+            .lock()
+            .expect("provider test lock poisoned");
+        register_test_providers();
+        let _thread_provider = ThreadProviderGuard::set(Some(&PROVIDER_B));
+
+        let concurrency = spawn_handle_concurrency_for(&test_handle(PROVIDER_A.device_id()))
+            .expect("spawn concurrency");
+
+        assert_eq!(concurrency, PROVIDER_A.spawn_concurrency);
+        clear_provider();
+    }
+
+    #[test]
+    fn provider_keeps_thread_local_active_provider_semantics() {
+        let _lock = PROVIDER_TEST_LOCK
+            .lock()
+            .expect("provider test lock poisoned");
+        register_test_providers();
+        let _thread_provider = ThreadProviderGuard::set(Some(&PROVIDER_A));
+
+        let active = provider().expect("active provider");
+
+        assert_eq!(active.device_info(), PROVIDER_A.name);
+        clear_provider();
+    }
+
+    #[test]
+    fn unregistered_thread_provider_only_matches_own_device_before_global_fallback() {
+        let _lock = PROVIDER_TEST_LOCK
+            .lock()
+            .expect("provider test lock poisoned");
+        clear_provider();
+        unsafe {
+            register_provider(&PROVIDER_A);
+        }
+        let _thread_provider = ThreadProviderGuard::set(Some(&PROVIDER_C));
+
+        let own_device = provider_for_device(PROVIDER_C.device_id()).expect("own provider");
+        let fallback = provider_for_device(404).expect("global fallback provider");
+
+        assert_eq!(own_device.device_info(), PROVIDER_C.name);
+        assert_eq!(fallback.device_info(), PROVIDER_A.name);
+        clear_provider();
+    }
 }

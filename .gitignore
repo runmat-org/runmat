@@ -12,6 +12,7 @@
 /core.*
 **/core.*
 **/*.core
+!**/core.rs
 
 # Generated website content
 website/content/builtins.json
@@ -28,6 +29,7 @@ benchmarks/results/
 bindings/ts/node_modules/
 bindings/ts/pkg/
 bindings/ts/pkg-web/
+bindings/ts/src/generated/
 bindings/ts/dist/**/*
 bindings/ts/stdlib.snapshot
 

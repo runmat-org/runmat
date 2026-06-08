@@ -14,10 +14,129 @@ use crate::builtins::math::linalg::type_resolvers::matrix_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderCholResult};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 const BUILTIN_NAME: &str = "chol";
+
+const CHOL_OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "R",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Upper or lower triangular Cholesky factor.",
+}];
+
+const CHOL_OUTPUT_RP: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "R",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper or lower triangular Cholesky factor.",
+    },
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Failure flag (0 means positive definite).",
+    },
+];
+
+const CHOL_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix to factorize.",
+}];
+
+const CHOL_INPUTS_A_TRIANGLE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix to factorize.",
+    },
+    BuiltinParamDescriptor {
+        name: "triangle",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"upper\""),
+        description: "Triangle form (`\"upper\"` or `\"lower\"`).",
+    },
+];
+
+const CHOL_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "R = chol(A)",
+        inputs: &CHOL_INPUTS_A,
+        outputs: &CHOL_OUTPUT_R,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = chol(A, triangle)",
+        inputs: &CHOL_INPUTS_A_TRIANGLE,
+        outputs: &CHOL_OUTPUT_R,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[R, p] = chol(A)",
+        inputs: &CHOL_INPUTS_A,
+        outputs: &CHOL_OUTPUT_RP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[R, p] = chol(A, triangle)",
+        inputs: &CHOL_INPUTS_A_TRIANGLE,
+        outputs: &CHOL_OUTPUT_RP,
+    },
+];
+
+const CHOL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CHOL.INVALID_ARGUMENT",
+    identifier: Some("RunMat:chol:InvalidArgument"),
+    when: "Option arguments or requested output count are invalid.",
+    message: "chol currently supports at most two outputs",
+};
+
+const CHOL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CHOL.INVALID_INPUT",
+    identifier: Some("RunMat:chol:InvalidInput"),
+    when: "Input is unsupported or not a square matrix.",
+    message: "chol: expected a square numeric matrix",
+};
+
+const CHOL_ERROR_NOT_POSITIVE_DEFINITE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CHOL.NOT_POSITIVE_DEFINITE",
+    identifier: Some("RunMat:chol:NotPositiveDefinite"),
+    when: "Single-output form receives a matrix that is not positive definite.",
+    message: "Matrix must be positive definite.",
+};
+
+const CHOL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CHOL.INTERNAL",
+    identifier: Some("RunMat:chol:Internal"),
+    when: "Runtime cannot materialize Cholesky outputs.",
+    message: "chol: internal runtime failure",
+};
+
+const CHOL_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    CHOL_ERROR_INVALID_ARGUMENT,
+    CHOL_ERROR_INVALID_INPUT,
+    CHOL_ERROR_NOT_POSITIVE_DEFINITE,
+    CHOL_ERROR_INTERNAL,
+];
+
+pub const CHOL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CHOL_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CHOL_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::chol")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -36,10 +155,31 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses the provider 'chol' hook when present; otherwise gathers to the host implementation.",
 };
 
-fn chol_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn chol_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    chol_error_with_message(error.message, error)
+}
+
+fn chol_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn chol_invalid_argument(message: impl Into<String>) -> RuntimeError {
+    chol_error_with_message(message, &CHOL_ERROR_INVALID_ARGUMENT)
+}
+
+fn chol_invalid_input(message: impl Into<String>) -> RuntimeError {
+    chol_error_with_message(message, &CHOL_ERROR_INVALID_INPUT)
+}
+
+fn chol_internal_error(message: impl Into<String>) -> RuntimeError {
+    chol_error_with_message(message, &CHOL_ERROR_INTERNAL)
 }
 
 fn with_chol_context(mut error: RuntimeError) -> RuntimeError {
@@ -68,11 +208,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "chol",
     category = "math/linalg/factor",
-    summary = "Cholesky factorization with MATLAB-compatible upper and lower forms.",
+    summary = "Compute Cholesky factorizations.",
     keywords = "chol,cholesky,factorization,positive-definite",
     accel = "sink",
     sink = true,
     type_resolver(matrix_unary_type),
+    descriptor(crate::builtins::math::linalg::factor::chol::CHOL_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::factor::chol"
 )]
 async fn chol_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -83,17 +224,17 @@ async fn chol_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         }
         if out_count == 1 {
             if !eval.is_positive_definite() {
-                return Err(chol_error("Matrix must be positive definite."));
+                return Err(chol_error(&CHOL_ERROR_NOT_POSITIVE_DEFINITE));
             }
             return Ok(Value::OutputList(vec![eval.factor()]));
         }
         if out_count == 2 {
             return Ok(Value::OutputList(vec![eval.factor(), eval.flag()]));
         }
-        return Err(chol_error("chol currently supports at most two outputs"));
+        return Err(chol_error(&CHOL_ERROR_INVALID_ARGUMENT));
     }
     if !eval.is_positive_definite() {
-        return Err(chol_error("Matrix must be positive definite."));
+        return Err(chol_error(&CHOL_ERROR_NOT_POSITIVE_DEFINITE));
     }
     Ok(eval.factor())
 }
@@ -181,7 +322,7 @@ pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<CholEval> {
 async fn evaluate_host_value(value: Value, triangle: CholTriangle) -> BuiltinResult<CholEval> {
     let matrix = extract_matrix(value).await?;
     if matrix.rows != matrix.cols {
-        return Err(chol_error("chol: input matrix must be square"));
+        return Err(chol_invalid_input("chol: input matrix must be square"));
     }
     let components = chol_factor(matrix)?;
     CholEval::from_components(components, triangle)
@@ -205,17 +346,19 @@ fn parse_triangle(args: &[Value]) -> BuiltinResult<CholTriangle> {
         return Ok(CholTriangle::Upper);
     }
     if args.len() > 1 {
-        return Err(chol_error("chol: too many option arguments"));
+        return Err(chol_invalid_argument("chol: too many option arguments"));
     }
     let Some(option) = tensor::value_to_string(&args[0]) else {
-        return Err(chol_error(
+        return Err(chol_invalid_argument(
             "chol: option must be a string or character vector",
         ));
     };
     match option.trim().to_ascii_lowercase().as_str() {
         "upper" => Ok(CholTriangle::Upper),
         "lower" => Ok(CholTriangle::Lower),
-        other => Err(chol_error(format!("chol: unknown option '{other}'"))),
+        other => Err(chol_invalid_argument(format!(
+            "chol: unknown option '{other}'"
+        ))),
     }
 }
 
@@ -295,7 +438,7 @@ async fn extract_matrix(value: Value) -> BuiltinResult<RowMajorMatrix> {
         Value::ComplexTensor(ct) => RowMajorMatrix::from_complex_tensor(&ct, "chol"),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|err| chol_error(format!("chol: {err}")))?;
+                .map_err(|err| chol_invalid_input(format!("chol: {err}")))?;
             RowMajorMatrix::from_tensor(&tensor, "chol")
         }
         Value::Num(n) => Ok(RowMajorMatrix::from_scalar(Complex64::new(n, 0.0))),
@@ -311,7 +454,7 @@ async fn extract_matrix(value: Value) -> BuiltinResult<RowMajorMatrix> {
                 .map_err(with_chol_context)?;
             RowMajorMatrix::from_tensor(&tensor, "chol")
         }
-        other => Err(chol_error(format!(
+        other => Err(chol_invalid_input(format!(
             "chol: unsupported input type {:?}; expected numeric or logical values",
             other
         ))),
@@ -336,7 +479,7 @@ fn matrix_to_value(label: &str, matrix: &RowMajorMatrix) -> BuiltinResult<Value>
             }
         }
         let tensor = ComplexTensor::new(data, vec![matrix.rows, matrix.cols])
-            .map_err(|e| chol_error(format!("{label}: {e}")))?;
+            .map_err(|e| chol_internal_error(format!("{label}: {e}")))?;
         Ok(random_args::complex_tensor_into_value(tensor))
     } else {
         let mut data = Vec::with_capacity(matrix.rows * matrix.cols);
@@ -347,7 +490,7 @@ fn matrix_to_value(label: &str, matrix: &RowMajorMatrix) -> BuiltinResult<Value>
             }
         }
         let tensor = Tensor::new(data, vec![matrix.rows, matrix.cols])
-            .map_err(|e| chol_error(format!("{label}: {e}")))?;
+            .map_err(|e| chol_internal_error(format!("{label}: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }
@@ -383,7 +526,7 @@ impl RowMajorMatrix {
 
     fn from_tensor(tensor: &Tensor, label: &str) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err(chol_error(format!("{label}: input must be 2-D")));
+            return Err(chol_invalid_input(format!("{label}: input must be 2-D")));
         }
         let rows = tensor.rows();
         let cols = tensor.cols();
@@ -400,7 +543,7 @@ impl RowMajorMatrix {
 
     fn from_complex_tensor(tensor: &ComplexTensor, label: &str) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err(chol_error(format!("{label}: input must be 2-D")));
+            return Err(chol_invalid_input(format!("{label}: input must be 2-D")));
         }
         let rows = tensor.rows;
         let cols = tensor.cols;
@@ -469,6 +612,28 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(3), Some(3)])
             }
         );
+    }
+
+    #[test]
+    fn chol_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = CHOL_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"R = chol(A)"));
+        assert!(labels.contains(&"R = chol(A, triangle)"));
+        assert!(labels.contains(&"[R, p] = chol(A)"));
+        assert!(labels.contains(&"[R, p] = chol(A, triangle)"));
+    }
+
+    #[test]
+    fn chol_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = CHOL_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.CHOL.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.CHOL.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.CHOL.NOT_POSITIVE_DEFINITE"));
+        assert!(codes.contains(&"RM.CHOL.INTERNAL"));
     }
 
     fn reconstruct_from_upper(matrix: &Matrix) -> Matrix {
@@ -728,7 +893,12 @@ pub(crate) mod tests {
     #[test]
     fn chol_single_output_errors_on_failure() {
         let a = Matrix::new(vec![1.0, 2.0, 2.0, 1.0], vec![2, 2]).expect("matrix");
-        let err = error_message(chol_builtin(Value::Tensor(a), Vec::new()).unwrap_err());
+        let err = chol_builtin(Value::Tensor(a), Vec::new()).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            CHOL_ERROR_NOT_POSITIVE_DEFINITE.identifier
+        );
+        let err = error_message(err);
         assert!(err.contains("positive definite"));
     }
 
@@ -736,9 +906,9 @@ pub(crate) mod tests {
     #[test]
     fn chol_invalid_option_errors() {
         let a = Matrix::new(vec![4.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap();
-        let err = error_message(
-            chol_builtin(Value::Tensor(a), vec![Value::from("diagonal")]).unwrap_err(),
-        );
+        let err = chol_builtin(Value::Tensor(a), vec![Value::from("diagonal")]).unwrap_err();
+        assert_eq!(err.identifier(), CHOL_ERROR_INVALID_ARGUMENT.identifier);
+        let err = error_message(err);
         assert!(err.to_ascii_lowercase().contains("unknown option"));
     }
 
@@ -746,7 +916,9 @@ pub(crate) mod tests {
     #[test]
     fn chol_non_square_errors() {
         let a = Matrix::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
-        let err = error_message(chol_builtin(Value::Tensor(a), Vec::new()).unwrap_err());
+        let err = chol_builtin(Value::Tensor(a), Vec::new()).unwrap_err();
+        assert_eq!(err.identifier(), CHOL_ERROR_INVALID_INPUT.identifier);
+        let err = error_message(err);
         assert!(err.to_ascii_lowercase().contains("square"));
     }
 

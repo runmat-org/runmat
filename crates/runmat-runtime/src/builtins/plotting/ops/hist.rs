@@ -3,7 +3,11 @@
 use glam::{Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
-use runmat_builtins::{NumericDType, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NumericDType, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
 use runmat_plot::gpu::bar::{BarGpuInputs, BarGpuParams, BarLayoutMode, BarOrientation};
@@ -21,17 +25,16 @@ use crate::builtins::common::spec::{
 
 use super::bar::apply_bar_style;
 use super::common::{numeric_vector, value_as_f64};
-use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
 use crate::builtins::plotting::gpu_helpers::{axis_bounds_async, gather_tensor_from_gpu_async};
 use crate::builtins::plotting::type_resolvers::hist_type;
-use crate::{BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::hist")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "hist",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
@@ -61,8 +64,181 @@ const HIST_BAR_WIDTH: f32 = 0.95;
 const HIST_DEFAULT_COLOR: Vec4 = Vec4::new(0.15, 0.5, 0.8, 0.95);
 const HIST_DEFAULT_LABEL: &str = "Frequency";
 
+const HIST_OUTPUT_COUNTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "N",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Histogram bin counts.",
+}];
+
+const HIST_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input sample data.",
+}];
+
+const HIST_INPUTS_X_BINS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input sample data.",
+    },
+    BuiltinParamDescriptor {
+        name: "bins",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Bin count scalar or explicit center vector.",
+    },
+];
+
+const HIST_INPUTS_X_NORMALIZATION: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input sample data.",
+    },
+    BuiltinParamDescriptor {
+        name: "normalization",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("count"),
+        description: "Normalization mode: count, probability, or pdf.",
+    },
+];
+
+const HIST_INPUTS_X_NAMEVALUE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input sample data.",
+    },
+    BuiltinParamDescriptor {
+        name: "name_value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value options and style properties.",
+    },
+];
+
+const HIST_INPUTS_X_BINS_NAMEVALUE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input sample data.",
+    },
+    BuiltinParamDescriptor {
+        name: "bins",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Bin count scalar or explicit center vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "name_value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional name/value options and style properties.",
+    },
+];
+
+const HIST_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "N = hist(X)",
+        inputs: &HIST_INPUTS_X,
+        outputs: &HIST_OUTPUT_COUNTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "N = hist(X, bins)",
+        inputs: &HIST_INPUTS_X_BINS,
+        outputs: &HIST_OUTPUT_COUNTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "N = hist(X, normalization)",
+        inputs: &HIST_INPUTS_X_NORMALIZATION,
+        outputs: &HIST_OUTPUT_COUNTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "N = hist(X, Name, Value, ...)",
+        inputs: &HIST_INPUTS_X_NAMEVALUE,
+        outputs: &HIST_OUTPUT_COUNTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "N = hist(X, bins, Name, Value, ...)",
+        inputs: &HIST_INPUTS_X_BINS_NAMEVALUE,
+        outputs: &HIST_OUTPUT_COUNTS,
+    },
+];
+
+const HIST_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HIST.INVALID_ARGUMENT",
+    identifier: Some("RunMat:hist:InvalidArgument"),
+    when: "Histogram inputs, bins, normalization, weights, or style arguments are invalid.",
+    message: "hist: invalid argument",
+};
+
+const HIST_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HIST.INTERNAL",
+    identifier: Some("RunMat:hist:Internal"),
+    when: "Internal histogram rendering or device conversion fails.",
+    message: "hist: internal operation failed",
+};
+
+const HIST_ERRORS: [BuiltinErrorDescriptor; 2] = [HIST_ERROR_INVALID_ARGUMENT, HIST_ERROR_INTERNAL];
+
+pub const HIST_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &HIST_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &HIST_ERRORS,
+};
+
+fn hist_descriptor_error(
+    error: &'static BuiltinErrorDescriptor,
+    detail: Option<impl AsRef<str>>,
+) -> RuntimeError {
+    let message = match detail {
+        Some(detail) => {
+            let raw = detail.as_ref().trim();
+            let normalized = raw.strip_prefix("hist:").map(str::trim).unwrap_or(raw);
+            if normalized.is_empty() {
+                error.message.to_string()
+            } else {
+                format!("{}: {}", error.message, normalized)
+            }
+        }
+        None => error.message.to_string(),
+    };
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn hist_invalid_argument(detail: impl AsRef<str>) -> RuntimeError {
+    hist_descriptor_error(&HIST_ERROR_INVALID_ARGUMENT, Some(detail))
+}
+
+fn hist_internal(detail: impl AsRef<str>) -> RuntimeError {
+    hist_descriptor_error(&HIST_ERROR_INTERNAL, Some(detail))
+}
+
 fn hist_err(message: impl Into<String>) -> RuntimeError {
-    plotting_error(BUILTIN_NAME, message)
+    hist_invalid_argument(message.into())
 }
 
 struct HistComputation {
@@ -88,7 +264,7 @@ impl HistEvaluation {
         normalization: HistNormalization,
     ) -> BuiltinResult<Self> {
         if counts.len() != centers.len() {
-            return Err(hist_err("hist: mismatch between counts and bin centers"));
+            return Err(hist_internal("mismatch between counts and bin centers"));
         }
         let cols = counts.len();
         let shape = vec![1, cols];
@@ -275,11 +451,15 @@ impl HistWeightsInput {
                         data: values,
                         total_weight: total,
                     }),
+                    NumericDType::U8 | NumericDType::U16 => Ok(HistogramGpuWeights::HostF64 {
+                        data: values,
+                        total_weight: total,
+                    }),
                 }
             }
             HistWeightsInput::Gpu(handle) => {
                 let exported = runmat_accelerate_api::export_wgpu_buffer(handle)
-                    .ok_or_else(|| hist_err("hist: unable to export GPU weights"))?;
+                    .ok_or_else(|| hist_internal("unable to export GPU weights"))?;
                 match exported.precision {
                     ProviderPrecision::F32 => Ok(HistogramGpuWeights::GpuF32 {
                         buffer: exported.buffer.clone(),
@@ -296,11 +476,12 @@ impl HistWeightsInput {
 #[runtime_builtin(
     name = "hist",
     category = "plotting",
-    summary = "Plot a histogram with MATLAB-compatible defaults.",
+    summary = "Create legacy center-based histograms.",
     keywords = "hist,histogram,frequency",
     sink = true,
     suppress_auto_output = true,
     type_resolver(hist_type),
+    descriptor(crate::builtins::plotting::hist::HIST_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::hist"
 )]
 pub async fn hist_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -722,7 +903,7 @@ fn determine_bin_count(options: &HistBinOptions, sample_len: usize) -> BuiltinRe
             HistBinMethod::Sqrt => sqrt_bin_count(sample_len),
             HistBinMethod::Sturges => sturges_bin_count(sample_len),
             HistBinMethod::Integers => {
-                return Err(hist_err("hist: internal integer bin method misuse"))
+                return Err(hist_internal("internal integer bin method misuse"))
             }
         });
     }
@@ -1116,7 +1297,7 @@ async fn build_histogram_gpu_chart_async(
 ) -> BuiltinResult<HistComputation> {
     let context = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
     let exported = runmat_accelerate_api::export_wgpu_buffer(values)
-        .ok_or_else(|| hist_err("hist: unable to export GPU data"))?;
+        .ok_or_else(|| hist_internal("unable to export GPU data"))?;
     if exported.len == 0 {
         let total_hint = weights
             .total_weight_hint(sample_len)
@@ -1174,7 +1355,7 @@ async fn build_histogram_gpu_chart_async(
         normalization_mode,
     )
     .await
-    .map_err(|e| hist_err(format!("hist: failed to build GPU histogram counts: {e}")))?;
+    .map_err(|e| hist_internal(format!("failed to build GPU histogram counts: {e}")))?;
 
     let HistogramGpuOutput {
         values_buffer,
@@ -1203,7 +1384,7 @@ async fn build_histogram_gpu_chart_async(
         &bar_inputs,
         &bar_params,
     )
-    .map_err(|e| hist_err(format!("hist: failed to build GPU vertices: {e}")))?;
+    .map_err(|e| hist_internal(format!("failed to build GPU vertices: {e}")))?;
 
     let bin_count = bins.bin_count();
     let normalization_scale = match normalization {
@@ -1246,7 +1427,7 @@ async fn build_histogram_gpu_chart_async(
         bin_count,
     )
     .await
-    .map_err(|e| hist_err(format!("hist: failed to read GPU histogram counts: {e}")))?;
+    .map_err(|e| hist_internal(format!("failed to read GPU histogram counts: {e}")))?;
     let counts: Vec<f64> = counts_f32.iter().map(|v| *v as f64).collect();
 
     Ok(HistComputation {
@@ -1532,5 +1713,30 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(1), Some(5)])
             }
         );
+    }
+
+    #[test]
+    fn hist_descriptor_includes_core_signatures() {
+        let labels: Vec<&str> = HIST_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"N = hist(X)"));
+        assert!(labels.contains(&"N = hist(X, bins)"));
+        assert!(labels.contains(&"N = hist(X, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn hist_missing_option_value_uses_stable_identifier() {
+        let result = block_on(evaluate_async(
+            Value::Tensor(tensor_from(&[1.0, 2.0, 3.0])),
+            &[Value::String("BinEdges".into())],
+        ));
+        let err = match result {
+            Ok(_) => panic!("expected histogram parse failure"),
+            Err(err) => err,
+        };
+        assert_eq!(err.identifier(), HIST_ERROR_INVALID_ARGUMENT.identifier);
     }
 }

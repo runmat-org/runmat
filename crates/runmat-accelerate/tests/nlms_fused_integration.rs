@@ -1,6 +1,6 @@
 #![cfg(feature = "wgpu")]
 
-use runmat_accelerate::backend::wgpu::provider_impl::WgpuProviderOptions;
+use runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate::fusion::{
     detect_fusion_groups, FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
@@ -17,7 +17,7 @@ use runmat_builtins::{Type, Value};
 use std::collections::HashMap;
 
 fn upload(
-    provider: &runmat_accelerate::backend::wgpu::provider_impl::WgpuProvider,
+    provider: &runmat_accelerate::backend::wgpu::provider::WgpuProvider,
     rows: usize,
     cols: usize,
     data: &[f64],
@@ -161,6 +161,7 @@ fn nlms_two_fused_reductions_integration() {
                 cv.insert(v_dim, Value::Num(1.0));
                 cv
             },
+            materialized_stores: Vec::new(),
             output: Some(v_sum),
             kernel: FusionKernelSpec {
                 kind: FusionKind::Reduction,
@@ -305,6 +306,7 @@ fn nlms_two_fused_reductions_integration() {
                 cv.insert(v_dim, Value::Num(1.0));
                 cv
             },
+            materialized_stores: Vec::new(),
             output: Some(v_sum),
             kernel: FusionKernelSpec {
                 kind: FusionKind::Reduction,
@@ -344,6 +346,7 @@ fn nlms_two_fused_reductions_integration() {
                 shape: ShapeInfo::Tensor(vec![Some(cols)]),
                 span: InstrSpan { start: 0, end: 0 },
                 pattern: None,
+                stack_layout: None,
             },
             operations: vec![FusionOp::Primitive {
                 op: PrimitiveOp::Sub,
@@ -354,6 +357,7 @@ fn nlms_two_fused_reductions_integration() {
             stack_pattern: vec![],
             constants: HashMap::new(),
             const_values: HashMap::new(),
+            materialized_stores: Vec::new(),
             output: Some(v_out),
             kernel: FusionKernelSpec {
                 kind: FusionKind::ElementwiseChain,
@@ -373,7 +377,7 @@ fn nlms_two_fused_reductions_integration() {
             ],
         };
         let e_val = execute_elementwise(req).expect("fused elementwise sub");
-        match e_val {
+        match e_val.final_value {
             Value::GpuTensor(h) => h,
             _ => panic!("expected GPU tensor for e"),
         }
@@ -481,6 +485,7 @@ fn nlms_two_fused_reductions_integration() {
                 cv.insert(v_all, Value::String("all".to_string()));
                 cv
             },
+            materialized_stores: Vec::new(),
             output: Some(v_mean),
             kernel: FusionKernelSpec {
                 kind: FusionKind::Reduction,

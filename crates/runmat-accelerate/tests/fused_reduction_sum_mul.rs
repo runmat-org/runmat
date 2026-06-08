@@ -1,6 +1,6 @@
 #![cfg(feature = "wgpu")]
 
-use runmat_accelerate::backend::wgpu::provider_impl::{WgpuProvider, WgpuProviderOptions};
+use runmat_accelerate::backend::wgpu::provider::{WgpuProvider, WgpuProviderOptions};
 use runmat_accelerate::fusion::{
     FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
@@ -67,6 +67,7 @@ async fn fused_sum_mul_dim0_matches_manual() {
         shape: ShapeInfo::Tensor(vec![Some(cols)]),
         span: InstrSpan { start: 0, end: 0 },
         pattern: None,
+        stack_layout: None,
     };
 
     let operations = vec![FusionOp::Primitive {
@@ -87,6 +88,7 @@ async fn fused_sum_mul_dim0_matches_manual() {
         stack_pattern: vec![],
         constants,
         const_values: HashMap::new(),
+        materialized_stores: Vec::new(),
         output: None,
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,
@@ -165,6 +167,7 @@ async fn fused_mean_mul_dim0_matches_manual() {
         shape: ShapeInfo::Tensor(vec![Some(cols)]),
         span: InstrSpan { start: 0, end: 0 },
         pattern: None,
+        stack_layout: None,
     };
     let operations = vec![FusionOp::Primitive {
         op: runmat_accelerate::graph::PrimitiveOp::ElemMul,
@@ -181,6 +184,7 @@ async fn fused_mean_mul_dim0_matches_manual() {
         stack_pattern: vec![],
         constants,
         const_values: HashMap::new(),
+        materialized_stores: Vec::new(),
         output: None,
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,
@@ -253,6 +257,7 @@ async fn fused_sum_mul_dim1_matches_manual() {
         shape: ShapeInfo::Tensor(vec![Some(rows)]),
         span: InstrSpan { start: 0, end: 0 },
         pattern: None,
+        stack_layout: None,
     };
 
     let operations = vec![FusionOp::Primitive {
@@ -272,6 +277,7 @@ async fn fused_sum_mul_dim1_matches_manual() {
         stack_pattern: vec![],
         constants,
         const_values: HashMap::new(),
+        materialized_stores: Vec::new(),
         output: None,
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,

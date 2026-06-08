@@ -3,7 +3,11 @@
 //! Mirrors MATLAB semantics for checking whether a variable, file, folder,
 //! builtin, class, or other entity is available in the current session.
 
-use runmat_builtins::{builtin_functions, lookup_method, Value};
+use runmat_builtins::{
+    builtin_functions, lookup_method, BuiltinCompletionPolicy, BuiltinDescriptor,
+    BuiltinErrorDescriptor, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::contains_wildcards;
@@ -20,10 +24,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-const ERROR_NAME_ARG: &str = "exist: name must be a character vector or string scalar";
-const ERROR_TYPE_ARG: &str = "exist: type must be a character vector or string scalar";
-const ERROR_INVALID_TYPE: &str = "exist: invalid type. Type must be one of 'var', 'variable', 'file', 'dir', 'directory', 'folder', 'builtin', 'built-in', 'class', 'handle', 'method', 'mex', 'pcode', 'simulink', 'thunk', 'lib', 'library', or 'java'";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::exist")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -54,10 +54,97 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "exist";
 
+const EXIST_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "code",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Existence code (0,1,2,3,4,5,6,7,8) following MATLAB semantics.",
+}];
+const EXIST_INPUTS_NAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "name",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Variable/function/file/class name to query.",
+}];
+const EXIST_INPUTS_NAME_TYPE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Variable/function/file/class name to query.",
+    },
+    BuiltinParamDescriptor {
+        name: "type",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query kind: var|file|dir|builtin|class|handle|method|mex|pcode|simulink|thunk|lib|java.",
+    },
+];
+const EXIST_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "code = exist(name)",
+        inputs: &EXIST_INPUTS_NAME,
+        outputs: &EXIST_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "code = exist(name, type)",
+        inputs: &EXIST_INPUTS_NAME_TYPE,
+        outputs: &EXIST_OUTPUT,
+    },
+];
+const EXIST_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXIST.TOO_MANY_INPUTS",
+    identifier: None,
+    when: "More than two total input arguments are provided.",
+    message: "exist: too many input arguments",
+};
+const EXIST_ERROR_NAME_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXIST.NAME_ARG",
+    identifier: None,
+    when: "Name input is not a character vector or string scalar/array scalar.",
+    message: "exist: name must be a character vector or string scalar",
+};
+const EXIST_ERROR_TYPE_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXIST.TYPE_ARG",
+    identifier: None,
+    when: "Type input is not a character vector or string scalar/array scalar.",
+    message: "exist: type must be a character vector or string scalar",
+};
+const EXIST_ERROR_INVALID_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXIST.INVALID_TYPE",
+    identifier: None,
+    when: "Type input is not one of the supported exist query types.",
+    message: "exist: invalid type. Type must be one of 'var', 'variable', 'file', 'dir', 'directory', 'folder', 'builtin', 'built-in', 'class', 'handle', 'method', 'mex', 'pcode', 'simulink', 'thunk', 'lib', 'library', or 'java'",
+};
+const EXIST_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    EXIST_ERROR_TOO_MANY_INPUTS,
+    EXIST_ERROR_NAME_ARG,
+    EXIST_ERROR_TYPE_ARG,
+    EXIST_ERROR_INVALID_TYPE,
+];
+pub const EXIST_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &EXIST_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &EXIST_ERRORS,
+};
+
 fn exist_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
+}
+
+fn exist_error_row(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -74,15 +161,16 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "exist",
     category = "io/repl_fs",
-    summary = "Determine whether a variable, file, folder, built-in, or class exists.",
+    summary = "Determine whether variables, files, folders, or symbols exist.",
     keywords = "exist,file,dir,var,builtin,class",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::exist_type),
+    descriptor(crate::builtins::io::repl_fs::exist::EXIST_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::exist"
 )]
 async fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(exist_error("exist: too many input arguments"));
+        return Err(exist_error_row(&EXIST_ERROR_TOO_MANY_INPUTS));
     }
 
     let name_host = gather_if_needed_async(&name)
@@ -106,8 +194,9 @@ async fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     let result = match query {
         ExistQuery::Handle => exist_handle(&name_host),
         _ => {
-            let text = value_to_string(&name_host).ok_or_else(|| exist_error(ERROR_NAME_ARG))?;
-            exist_for_query(&text, query)?
+            let text = value_to_string(&name_host)
+                .ok_or_else(|| exist_error_row(&EXIST_ERROR_NAME_ARG))?;
+            exist_for_query(&text, query).await?
         }
     };
 
@@ -162,7 +251,7 @@ impl ExistResultKind {
 }
 
 fn parse_type_argument(value: &Value) -> BuiltinResult<ExistQuery> {
-    let text = value_to_string(value).ok_or_else(|| exist_error(ERROR_TYPE_ARG))?;
+    let text = value_to_string(value).ok_or_else(|| exist_error_row(&EXIST_ERROR_TYPE_ARG))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "" => Ok(ExistQuery::Any),
         "var" | "variable" => Ok(ExistQuery::Var),
@@ -178,17 +267,17 @@ fn parse_type_argument(value: &Value) -> BuiltinResult<ExistQuery> {
         "thunk" => Ok(ExistQuery::Thunk),
         "lib" | "library" => Ok(ExistQuery::Lib),
         "java" => Ok(ExistQuery::Java),
-        _ => Err(exist_error(ERROR_INVALID_TYPE)),
+        _ => Err(exist_error_row(&EXIST_ERROR_INVALID_TYPE)),
     }
 }
 
-fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKind> {
+async fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKind> {
     if contains_wildcards(name) {
         return Ok(ExistResultKind::NotFound);
     }
 
     match query {
-        ExistQuery::Any => evaluate_default(name),
+        ExistQuery::Any => evaluate_default(name).await,
         ExistQuery::Var => Ok(if variable_exists(name) {
             ExistResultKind::Variable
         } else {
@@ -199,19 +288,22 @@ fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKi
         } else {
             ExistResultKind::NotFound
         }),
-        ExistQuery::Class => Ok(if class_exists(name)? {
+        ExistQuery::Class => Ok(if class_exists(name).await? {
             ExistResultKind::Class
         } else {
             ExistResultKind::NotFound
         }),
-        ExistQuery::Dir => Ok(if directory_exists(name)? {
+        ExistQuery::Dir => Ok(if directory_exists(name).await? {
             ExistResultKind::Directory
         } else {
             ExistResultKind::NotFound
         }),
-        ExistQuery::File => Ok(detect_file_kind(name)?.unwrap_or(ExistResultKind::NotFound)),
+        ExistQuery::File => Ok(detect_file_kind(name)
+            .await?
+            .unwrap_or(ExistResultKind::NotFound)),
         ExistQuery::Mex => Ok(
             if path_find_file_with_extensions(name, MEX_EXTENSIONS, "exist")
+                .await
                 .map_err(exist_error)?
                 .is_some()
             {
@@ -222,6 +314,7 @@ fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKi
         ),
         ExistQuery::Pcode => Ok(
             if path_find_file_with_extensions(name, PCODE_EXTENSIONS, "exist")
+                .await
                 .map_err(exist_error)?
                 .is_some()
             {
@@ -237,6 +330,7 @@ fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKi
         }),
         ExistQuery::Simulink => Ok(
             if path_find_file_with_extensions(name, SIMULINK_EXTENSIONS, "exist")
+                .await
                 .map_err(exist_error)?
                 .is_some()
             {
@@ -247,6 +341,7 @@ fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKi
         ),
         ExistQuery::Thunk => Ok(
             if path_find_file_with_extensions(name, THUNK_EXTENSIONS, "exist")
+                .await
                 .map_err(exist_error)?
                 .is_some()
             {
@@ -257,6 +352,7 @@ fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKi
         ),
         ExistQuery::Lib => Ok(
             if path_find_file_with_extensions(name, LIB_EXTENSIONS, "exist")
+                .await
                 .map_err(exist_error)?
                 .is_some()
             {
@@ -270,20 +366,20 @@ fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKi
     }
 }
 
-fn evaluate_default(name: &str) -> BuiltinResult<ExistResultKind> {
+async fn evaluate_default(name: &str) -> BuiltinResult<ExistResultKind> {
     if variable_exists(name) {
         return Ok(ExistResultKind::Variable);
     }
     if builtin_exists(name) {
         return Ok(ExistResultKind::Builtin);
     }
-    if class_exists(name)? {
+    if class_exists(name).await? {
         return Ok(ExistResultKind::Class);
     }
-    if let Some(kind) = detect_file_kind(name)? {
+    if let Some(kind) = detect_file_kind(name).await? {
         return Ok(kind);
     }
-    if directory_exists(name)? {
+    if directory_exists(name).await? {
         return Ok(ExistResultKind::Directory);
     }
     Ok(ExistResultKind::NotFound)
@@ -292,7 +388,7 @@ fn evaluate_default(name: &str) -> BuiltinResult<ExistResultKind> {
 fn exist_handle(value: &Value) -> ExistResultKind {
     match value {
         Value::HandleObject(handle) => {
-            if handle.valid {
+            if runmat_builtins::is_handle_valid(handle) {
                 ExistResultKind::Variable
             } else {
                 ExistResultKind::NotFound
@@ -320,28 +416,32 @@ fn builtin_exists(name: &str) -> bool {
         .any(|b| b.name.eq_ignore_ascii_case(&lowered))
 }
 
-fn class_exists(name: &str) -> BuiltinResult<bool> {
+async fn class_exists(name: &str) -> BuiltinResult<bool> {
     if runmat_builtins::get_class(name).is_some() {
         return Ok(true);
     }
-    if class_folder_exists(name)? {
+    if class_folder_exists(name).await? {
         return Ok(true);
     }
-    if class_file_exists(name)? {
+    if class_file_exists(name).await? {
         return Ok(true);
     }
     Ok(false)
 }
 
-fn class_folder_exists(name: &str) -> BuiltinResult<bool> {
-    Ok(path_class_folder_candidates(name, "exist")
-        .map_err(exist_error)?
-        .into_iter()
-        .any(|path| path_is_directory(&path)))
+async fn class_folder_exists(name: &str) -> BuiltinResult<bool> {
+    for path in path_class_folder_candidates(name, "exist").map_err(exist_error)? {
+        if path_is_directory(&path).await {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
-fn class_file_exists(name: &str) -> BuiltinResult<bool> {
-    path_class_file_exists(name, CLASS_M_FILE_EXTENSIONS, "classdef", "exist").map_err(exist_error)
+async fn class_file_exists(name: &str) -> BuiltinResult<bool> {
+    path_class_file_exists(name, CLASS_M_FILE_EXTENSIONS, "classdef", "exist")
+        .await
+        .map_err(exist_error)
 }
 
 fn method_exists(name: &str) -> bool {
@@ -352,33 +452,39 @@ fn method_exists(name: &str) -> bool {
     }
 }
 
-fn directory_exists(name: &str) -> BuiltinResult<bool> {
-    Ok(path_directory_candidates(name, "exist")
-        .map_err(exist_error)?
-        .into_iter()
-        .any(|path| path_is_directory(&path)))
+async fn directory_exists(name: &str) -> BuiltinResult<bool> {
+    for path in path_directory_candidates(name, "exist").map_err(exist_error)? {
+        if path_is_directory(&path).await {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
-fn detect_file_kind(name: &str) -> BuiltinResult<Option<ExistResultKind>> {
+async fn detect_file_kind(name: &str) -> BuiltinResult<Option<ExistResultKind>> {
     if path_find_file_with_extensions(name, MEX_EXTENSIONS, "exist")
+        .await
         .map_err(exist_error)?
         .is_some()
     {
         return Ok(Some(ExistResultKind::Mex));
     }
     if path_find_file_with_extensions(name, PCODE_EXTENSIONS, "exist")
+        .await
         .map_err(exist_error)?
         .is_some()
     {
         return Ok(Some(ExistResultKind::Pcode));
     }
     if path_find_file_with_extensions(name, SIMULINK_EXTENSIONS, "exist")
+        .await
         .map_err(exist_error)?
         .is_some()
     {
         return Ok(Some(ExistResultKind::Simulink));
     }
     if path_find_file_with_extensions(name, GENERAL_FILE_EXTENSIONS, "exist")
+        .await
         .map_err(exist_error)?
         .is_some()
     {
@@ -416,7 +522,7 @@ fn split_method_name(name: &str) -> Option<(String, String)> {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use runmat_builtins::Value;
+    use runmat_builtins::{Access, ClassDef, MethodDef, Value};
     use runmat_filesystem as vfs;
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
@@ -425,10 +531,30 @@ pub(crate) mod tests {
     use std::fs::File;
     use std::io::Write;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use tempfile::tempdir;
+
+    static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_class_name(prefix: &str) -> String {
+        let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", prefix, id)
+    }
 
     fn exist_builtin(name: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::exist_builtin(name, rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn exist_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = EXIST_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"code = exist(name)"));
+        assert!(labels.contains(&"code = exist(name, type)"));
     }
 
     fn workspace_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -461,6 +587,8 @@ pub(crate) mod tests {
             },
             globals: || Vec::new(),
             assign: None,
+            clear: None,
+            remove: None,
         });
     }
 
@@ -548,7 +676,7 @@ pub(crate) mod tests {
         let temp = tempdir().expect("tempdir");
         let _guard = DirGuard::new();
         env::set_current_dir(temp.path()).expect("set temp");
-        vfs::create_dir("data").expect("mkdir data");
+        futures::executor::block_on(vfs::create_dir_async("data")).expect("mkdir data");
 
         let dir = exist_builtin(Value::from("data"), vec![Value::from("dir")]).expect("exist");
         assert_eq!(dir, Value::Num(7.0));
@@ -573,7 +701,8 @@ pub(crate) mod tests {
         )
         .expect("write classdef");
 
-        vfs::create_dir_all("+pkg/@Gizmo").expect("create package class folder");
+        futures::executor::block_on(vfs::create_dir_all_async("+pkg/@Gizmo"))
+            .expect("create package class folder");
 
         let widget =
             exist_builtin(Value::from("Widget"), vec![Value::from("class")]).expect("exist");
@@ -591,7 +720,7 @@ pub(crate) mod tests {
 
         let err = exist_builtin(Value::from("foo"), vec![Value::from("unknown")])
             .expect_err("expected error");
-        assert_eq!(err.message(), ERROR_INVALID_TYPE);
+        assert_eq!(err.message(), EXIST_ERROR_INVALID_TYPE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -600,7 +729,7 @@ pub(crate) mod tests {
         let (_guard, _lock) = test_guard();
 
         let err = exist_builtin(Value::Num(5.0), Vec::new()).expect_err("expected error");
-        assert_eq!(err.message(), ERROR_NAME_ARG);
+        assert_eq!(err.message(), EXIST_ERROR_NAME_ARG.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -611,5 +740,60 @@ pub(crate) mod tests {
         let value =
             exist_builtin(Value::Num(17.0), vec![Value::from("handle")]).expect("exist handle");
         assert_eq!(value, Value::Num(0.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn exist_method_uses_registered_class_metadata_including_inheritance() {
+        let (_guard, _lock) = test_guard();
+
+        let parent_name = unique_class_name("existParent");
+        let child_name = unique_class_name("existChild");
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            "parentOnly".to_string(),
+            MethodDef {
+                name: "parentOnly".to_string(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: "parent_only_impl".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        runmat_builtins::register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        runmat_builtins::register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let direct = exist_builtin(
+            Value::from(format!("{parent_name}.parentOnly")),
+            vec![Value::from("method")],
+        )
+        .expect("direct class method lookup should succeed");
+        assert_eq!(direct, Value::Num(5.0));
+
+        let inherited = exist_builtin(
+            Value::from(format!("{child_name}.parentOnly")),
+            vec![Value::from("method")],
+        )
+        .expect("inherited class method lookup should succeed");
+        assert_eq!(inherited, Value::Num(5.0));
+
+        let missing = exist_builtin(
+            Value::from(format!("{child_name}.missingMethod")),
+            vec![Value::from("method")],
+        )
+        .expect("missing method lookup should return not found");
+        assert_eq!(missing, Value::Num(0.0));
     }
 }

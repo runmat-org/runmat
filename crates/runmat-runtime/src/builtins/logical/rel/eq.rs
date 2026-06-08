@@ -1,7 +1,11 @@
 //! MATLAB-compatible `eq` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
@@ -58,23 +62,77 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "eq";
-const IDENT_INVALID_INPUT: &str = "MATLAB:eq:InvalidInput";
-const IDENT_SIZE_MISMATCH: &str = "MATLAB:eq:SizeMismatch";
 
-fn eq_error(message: impl Into<String>, identifier: &'static str) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier(identifier)
-        .build()
+const EQ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical equality result.",
+}];
+
+const EQ_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right operand.",
+    },
+];
+
+const EQ_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = eq(A, B)",
+    inputs: &EQ_INPUTS,
+    outputs: &EQ_OUTPUT,
+}];
+
+const EQ_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EQ.INVALID_INPUT",
+    identifier: Some("RunMat:eq:InvalidInput"),
+    when: "Operands contain unsupported types or mixed numeric/string domains.",
+    message: "eq: mixing numeric and string inputs is not supported",
+};
+
+const EQ_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EQ.SIZE_MISMATCH",
+    identifier: Some("RunMat:eq:SizeMismatch"),
+    when: "Operands are not broadcast-compatible.",
+    message: "eq: array sizes are not compatible for broadcasting",
+};
+
+const EQ_ERRORS: [BuiltinErrorDescriptor; 2] = [EQ_ERROR_INVALID_INPUT, EQ_ERROR_SIZE_MISMATCH];
+
+pub const EQ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &EQ_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &EQ_ERRORS,
+};
+
+fn eq_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "eq",
     category = "logical/rel",
-    summary = "Element-wise equality comparison for scalars, arrays, and gpuArray inputs.",
+    summary = "Compute element-wise equality.",
     keywords = "eq,equality,comparison,logical,gpu",
     accel = "elementwise",
     type_resolver(logical_binary_type),
+    descriptor(crate::builtins::logical::rel::eq::EQ_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::rel::eq"
 )]
 async fn eq_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
@@ -140,10 +198,7 @@ async fn eq_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         (EqOperand::Numeric(_), EqOperand::String(_))
         | (EqOperand::Complex(_), EqOperand::String(_))
         | (EqOperand::String(_), EqOperand::Numeric(_))
-        | (EqOperand::String(_), EqOperand::Complex(_)) => Err(eq_error(
-            "eq: mixing numeric and string inputs is not supported",
-            IDENT_INVALID_INPUT,
-        )),
+        | (EqOperand::String(_), EqOperand::Complex(_)) => Err(eq_error(&EQ_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -238,7 +293,7 @@ fn logical_result(data: Vec<u8>, shape: Vec<usize>) -> crate::BuiltinResult<Valu
     } else {
         LogicalArray::new(data, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| eq_error(format!("eq: {e}"), IDENT_INVALID_INPUT))
+            .map_err(|_| eq_error(&EQ_ERROR_INVALID_INPUT))
     }
 }
 
@@ -371,15 +426,10 @@ impl EqOperand {
             Value::GpuTensor(handle) => {
                 let tensor = gpu_helpers::gather_tensor_async(&handle)
                     .await
-                    .map_err(|err| {
-                        eq_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT)
-                    })?;
+                    .map_err(|_| eq_error(&EQ_ERROR_INVALID_INPUT))?;
                 Ok(EqOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
-            unsupported => Err(eq_error(
-                format!("eq: unsupported input type {unsupported:?}"),
-                IDENT_INVALID_INPUT,
-            )),
+            _ => Err(eq_error(&EQ_ERROR_INVALID_INPUT)),
         }
     }
 }
@@ -389,7 +439,7 @@ fn numeric_eq(
     rhs: &NumericBuffer,
 ) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
     let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
-        .map_err(|err| eq_error(err, IDENT_SIZE_MISMATCH))?;
+        .map_err(|_| eq_error(&EQ_ERROR_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -420,7 +470,7 @@ fn complex_eq(
     rhs: &ComplexBuffer,
 ) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
     let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
-        .map_err(|err| eq_error(err, IDENT_SIZE_MISMATCH))?;
+        .map_err(|_| eq_error(&EQ_ERROR_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -455,7 +505,7 @@ fn string_eq(
     rhs: &StringBuffer,
 ) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
     let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
-        .map_err(|err| eq_error(err, IDENT_SIZE_MISMATCH))?;
+        .map_err(|_| eq_error(&EQ_ERROR_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -614,7 +664,7 @@ pub(crate) mod tests {
     fn eq_numeric_and_string_error() {
         let err = run_eq(Value::Num(1.0), Value::String("a".into())).unwrap_err();
         assert!(err.message().contains("mixing numeric and string inputs"));
-        assert_eq!(err.identifier(), Some(IDENT_INVALID_INPUT));
+        assert_eq!(err.identifier(), EQ_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

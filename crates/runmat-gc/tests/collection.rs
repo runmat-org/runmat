@@ -276,14 +276,16 @@ fn test_allocation_after_collection() {
 fn test_force_collection() {
     use runmat_gc::gc_force_collect;
 
-    // Allocate some objects
-    for i in 0..5 {
-        let _ptr = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
-    }
+    gc_test_context(|| {
+        // Allocate some objects
+        for i in 0..5 {
+            let _ptr = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
+        }
 
-    // Force collection (debug feature)
-    let _collected = gc_force_collect().expect("forced collection should succeed");
-    // collected is always valid (usize)
+        // Force collection (debug feature)
+        let _collected = gc_force_collect().expect("forced collection should succeed");
+        // collected is always valid (usize)
+    });
 }
 
 #[test]

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+const INCLUDE_BUNDLER_ARTIFACTS = false;
+
 const fs = require("node:fs/promises");
 const fsSync = require("node:fs");
 const path = require("node:path");
@@ -41,10 +43,10 @@ async function main() {
   ];
   const snapshotSrc = snapshotSrcCandidates.find((candidate) => fsSync.existsSync(candidate));
   const copies = [
-    {
+    ...(INCLUDE_BUNDLER_ARTIFACTS ? [{
       src: path.join(repoRoot, "pkg"),
       dest: path.join(repoRoot, "dist", "pkg"),
-    },
+    }] : []),
     {
       src: path.join(repoRoot, "pkg-web"),
       dest: path.join(repoRoot, "dist", "pkg-web"),

@@ -3,7 +3,11 @@
 use std::cmp::Ordering;
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
-use runmat_builtins::{Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -15,6 +19,186 @@ use runmat_builtins::ResolveContext;
 fn median_type(args: &[Type], ctx: &ResolveContext) -> Type {
     reduce_numeric_type(args, ctx)
 }
+
+const MEDIAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "M",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Median reduction result.",
+}];
+
+const MEDIAN_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array.",
+}];
+
+const MEDIAN_INPUTS_A_AXES: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "axes",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector, vector of dimensions, or \"all\".",
+    },
+];
+
+const MEDIAN_INPUTS_A_NANFLAG: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+];
+
+const MEDIAN_INPUTS_A_AXES_NANFLAG: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "axes",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector, vector of dimensions, or \"all\".",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+];
+
+const MEDIAN_INPUTS_A_NANFLAG_AXES: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+    BuiltinParamDescriptor {
+        name: "axes",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector, vector of dimensions, or \"all\".",
+    },
+];
+
+const MEDIAN_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
+    BuiltinSignatureDescriptor {
+        label: "M = median(A)",
+        inputs: &MEDIAN_INPUTS_A,
+        outputs: &MEDIAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = median(A, dim)",
+        inputs: &MEDIAN_INPUTS_A_AXES,
+        outputs: &MEDIAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = median(A, vecdim)",
+        inputs: &MEDIAN_INPUTS_A_AXES,
+        outputs: &MEDIAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = median(A, \"all\")",
+        inputs: &MEDIAN_INPUTS_A_AXES,
+        outputs: &MEDIAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = median(A, [])",
+        inputs: &MEDIAN_INPUTS_A_AXES,
+        outputs: &MEDIAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = median(A, nanflag)",
+        inputs: &MEDIAN_INPUTS_A_NANFLAG,
+        outputs: &MEDIAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = median(A, axes, nanflag)",
+        inputs: &MEDIAN_INPUTS_A_AXES_NANFLAG,
+        outputs: &MEDIAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = median(A, nanflag, axes)",
+        inputs: &MEDIAN_INPUTS_A_NANFLAG_AXES,
+        outputs: &MEDIAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = median(A, nanflag, \"all\")",
+        inputs: &MEDIAN_INPUTS_A_NANFLAG_AXES,
+        outputs: &MEDIAN_OUTPUT,
+    },
+];
+
+const MEDIAN_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MEDIAN.INVALID_ARGUMENT",
+    identifier: Some("RunMat:median:InvalidArgument"),
+    when: "Dimension selectors, nanflags, or argument ordering are invalid.",
+    message: "median: invalid argument",
+};
+
+const MEDIAN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MEDIAN.INVALID_INPUT",
+    identifier: Some("RunMat:median:InvalidInput"),
+    when: "Input values cannot be converted to supported median reduction domains.",
+    message: "median: invalid input",
+};
+
+const MEDIAN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MEDIAN.INTERNAL",
+    identifier: Some("RunMat:median:Internal"),
+    when: "Median reduction fails due to tensor allocation or device fallback internals.",
+    message: "median: internal reduction failure",
+};
+
+const MEDIAN_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    MEDIAN_ERROR_INVALID_ARGUMENT,
+    MEDIAN_ERROR_INVALID_INPUT,
+    MEDIAN_ERROR_INTERNAL,
+];
+
+pub const MEDIAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MEDIAN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &MEDIAN_ERRORS,
+};
 
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::keyword_of;
@@ -49,8 +233,34 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute medians entirely on device; runtimes fall back to host when hooks are missing or omitnan is requested.",
 };
 
-fn median_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn median_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn median_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    median_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn median_invalid_argument(detail: impl AsRef<str>) -> RuntimeError {
+    median_error_with_detail(&MEDIAN_ERROR_INVALID_ARGUMENT, detail)
+}
+
+fn median_invalid_input(detail: impl AsRef<str>) -> RuntimeError {
+    median_error_with_detail(&MEDIAN_ERROR_INVALID_INPUT, detail)
+}
+
+fn median_internal_error(detail: impl AsRef<str>) -> RuntimeError {
+    median_error_with_detail(&MEDIAN_ERROR_INTERNAL, detail)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::median")]
@@ -85,6 +295,7 @@ struct ParsedArguments {
     keywords = "median,reduction,omitnan,includenan,statistics,gpu",
     accel = "reduction",
     type_resolver(median_type),
+    descriptor(crate::builtins::math::reduction::median::MEDIAN_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::median"
 )]
 async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -119,7 +330,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "all" => {
                     if axes_set && !matches!(axes, MedianAxes::Default) {
-                        return Err(median_error(
+                        return Err(median_invalid_argument(
                             "median: 'all' cannot be combined with an explicit dimension",
                         ));
                     }
@@ -146,7 +357,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "all" => {
                     if axes_set && !matches!(axes, MedianAxes::Default) {
-                        return Err(median_error(
+                        return Err(median_invalid_argument(
                             "median: 'all' cannot be combined with an explicit dimension",
                         ));
                     }
@@ -156,17 +367,17 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     continue;
                 }
                 "" => {
-                    return Err(median_error(
+                    return Err(median_invalid_argument(
                         "median: keyword arguments must not be empty strings",
                     ));
                 }
                 _ => {
                     if let Some(original) = value_as_str(arg) {
-                        return Err(median_error(format!(
+                        return Err(median_invalid_argument(format!(
                             "median: unrecognised argument '{original}'"
                         )));
                     } else {
-                        return Err(median_error(format!(
+                        return Err(median_invalid_argument(format!(
                             "median: unrecognised argument {arg:?}"
                         )));
                     }
@@ -178,7 +389,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
             if let Some(selection) = parse_axes(arg).await? {
                 if matches!(selection, MedianAxes::All) {
                     if axes_set && !matches!(axes, MedianAxes::Default) {
-                        return Err(median_error(
+                        return Err(median_invalid_argument(
                             "median: 'all' cannot be combined with an explicit dimension",
                         ));
                     }
@@ -191,12 +402,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 continue;
             }
         } else if parse_axes(arg).await?.is_some() {
-            return Err(median_error(
+            return Err(median_invalid_argument(
                 "median: multiple dimension specifications provided",
             ));
         }
 
-        return Err(median_error(format!(
+        return Err(median_invalid_argument(format!(
             "median: unrecognised argument {arg:?}"
         )));
     }
@@ -205,7 +416,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
 }
 
 fn median_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("median", value).map_err(median_error)?;
+    let tensor = tensor::value_into_tensor_for("median", value).map_err(median_invalid_input)?;
     let reduced = median_tensor(tensor, args.axes.clone(), args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
@@ -334,13 +545,15 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MedianAxes>> {
     if let Some(text) = value_as_str(value) {
         let trimmed = text.trim();
         if trimmed.is_empty() {
-            return Err(median_error("median: dimension string must not be empty"));
+            return Err(median_invalid_argument(
+                "median: dimension string must not be empty",
+            ));
         }
         let lowered = trimmed.to_ascii_lowercase();
         return match lowered.as_str() {
             "all" => Ok(Some(MedianAxes::All)),
             "omitnan" | "includenan" => Ok(None),
-            _ => Err(median_error(format!(
+            _ => Err(median_invalid_argument(format!(
                 "median: unrecognised argument '{trimmed}'"
             ))),
         };
@@ -369,7 +582,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MedianAxes>> {
             .await
             .map_err(|err| map_dims_error(err, scalar_hint))?,
         Value::Bool(_) => {
-            return Err(median_error("median: dimension must be numeric"));
+            return Err(median_invalid_argument("median: dimension must be numeric"));
         }
         _ => return Ok(None),
     };
@@ -383,13 +596,15 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MedianAxes>> {
     if dims.len() == 1 {
         let dim = dims[0];
         if dim < 1 {
-            return Err(median_error("median: dimension must be >= 1"));
+            return Err(median_invalid_argument("median: dimension must be >= 1"));
         }
         return Ok(Some(MedianAxes::Dim(dim)));
     }
     for &dim in &dims {
         if dim < 1 {
-            return Err(median_error("median: dimension entries must be >= 1"));
+            return Err(median_invalid_argument(
+                "median: dimension entries must be >= 1",
+            ));
         }
     }
     Ok(Some(MedianAxes::Vec(dims)))
@@ -398,23 +613,23 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MedianAxes>> {
 fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
     if message.contains("non-negative") {
         if scalar {
-            return median_error("median: dimension must be >= 1");
+            return median_invalid_argument("median: dimension must be >= 1");
         }
-        return median_error("median: dimension entries must be >= 1");
+        return median_invalid_argument("median: dimension entries must be >= 1");
     }
     if message.contains("finite") {
         if scalar {
-            return median_error("median: dimension must be finite");
+            return median_invalid_argument("median: dimension must be finite");
         }
-        return median_error("median: dimension entries must be finite integers");
+        return median_invalid_argument("median: dimension entries must be finite integers");
     }
     if message.contains("integer") {
         if scalar {
-            return median_error("median: dimension must be an integer");
+            return median_invalid_argument("median: dimension must be an integer");
         }
-        return median_error("median: dimension entries must be integers");
+        return median_invalid_argument("median: dimension entries must be integers");
     }
-    median_error(message)
+    median_invalid_argument(message)
 }
 
 fn value_as_str(value: &Value) -> Option<String> {
@@ -432,13 +647,13 @@ fn reduce_tensor_median_dim(
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Tensor> {
     if dim == 0 {
-        return Err(median_error("median: dimension must be >= 1"));
+        return Err(median_invalid_argument("median: dimension must be >= 1"));
     }
 
     if tensor.shape.is_empty() {
         let value = tensor.data.first().copied().unwrap_or(f64::NAN);
         return Tensor::new(vec![value], vec![1, 1])
-            .map_err(|e| median_error(format!("median: {e}")));
+            .map_err(|e| median_internal_error(format!("median: {e}")));
     }
 
     if dim > tensor.shape.len() {
@@ -453,12 +668,13 @@ fn reduce_tensor_median_dim(
 
     if reduce_len == 0 || tensor.data.is_empty() {
         let fill = vec![f64::NAN; tensor::element_count(&output_shape)];
-        return Tensor::new(fill, output_shape).map_err(|e| median_error(format!("median: {e}")));
+        return Tensor::new(fill, output_shape)
+            .map_err(|e| median_internal_error(format!("median: {e}")));
     }
 
     if reduce_len == 1 {
         return Tensor::new(tensor.data.clone(), tensor.shape.clone())
-            .map_err(|e| median_error(format!("median: {e}")));
+            .map_err(|e| median_internal_error(format!("median: {e}")));
     }
 
     let stride_before = dim_product(&tensor.shape[..dim_index]);
@@ -507,7 +723,7 @@ fn reduce_tensor_median_dim(
         }
     }
 
-    Tensor::new(output, output_shape).map_err(|e| median_error(format!("median: {e}")))
+    Tensor::new(output, output_shape).map_err(|e| median_internal_error(format!("median: {e}")))
 }
 
 pub fn compute_median_inplace(values: &mut [f64]) -> f64 {
@@ -583,6 +799,34 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(1), Some(5)])
             }
         );
+    }
+
+    #[test]
+    fn median_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = MEDIAN_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"M = median(A)"));
+        assert!(labels.contains(&"M = median(A, dim)"));
+        assert!(labels.contains(&"M = median(A, vecdim)"));
+        assert!(labels.contains(&"M = median(A, \"all\")"));
+        assert!(labels.contains(&"M = median(A, nanflag)"));
+        assert!(labels.contains(&"M = median(A, axes, nanflag)"));
+        assert!(labels.contains(&"M = median(A, nanflag, axes)"));
+    }
+
+    #[test]
+    fn median_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = MEDIAN_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|err| err.code)
+            .collect();
+        assert!(codes.contains(&"RM.MEDIAN.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.MEDIAN.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.MEDIAN.INTERNAL"));
     }
 
     fn median_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -721,10 +965,18 @@ pub(crate) mod tests {
     #[test]
     fn median_rejects_unknown_keyword() {
         let err = median_builtin(Value::Num(1.0), vec![Value::from("like")]).unwrap_err();
+        assert_eq!(err.identifier(), MEDIAN_ERROR_INVALID_ARGUMENT.identifier);
         assert!(
             err.message().contains("unrecognised argument"),
             "unexpected error message: {err}"
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn median_invalid_input_identifier() {
+        let err = median_builtin(Value::String("abc".to_string()), Vec::new()).unwrap_err();
+        assert_eq!(err.identifier(), MEDIAN_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

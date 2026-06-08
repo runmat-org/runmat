@@ -1,7 +1,11 @@
 //! MATLAB-compatible `sin` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -10,7 +14,7 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -33,10 +37,135 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 
 const BUILTIN_NAME: &str = "sin";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const SIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise sine result.",
+}];
+
+const SIN_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, array, char array, complex value, or gpuArray.",
+}];
+
+const SIN_INPUTS_X_LIKE_P: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input scalar, array, char array, complex value, or gpuArray.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Output template selector keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "P",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype determining host vs gpuArray output residency.",
+    },
+];
+
+const SIN_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = sin(X)",
+        inputs: &SIN_INPUTS_X,
+        outputs: &SIN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = sin(X, \"like\", P)",
+        inputs: &SIN_INPUTS_X_LIKE_P,
+        outputs: &SIN_OUTPUT,
+    },
+];
+
+const SIN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIN.INVALID_INPUT",
+    identifier: Some("RunMat:sin:InvalidInput"),
+    when: "Input cannot be interpreted as supported numeric/logical/char/complex data.",
+    message: "sin: invalid input",
+};
+
+const SIN_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIN.INVALID_OPTION",
+    identifier: Some("RunMat:sin:InvalidOption"),
+    when: "Optional arguments after X are malformed or unsupported.",
+    message: "sin: invalid option",
+};
+
+const SIN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIN.ARG_COUNT",
+    identifier: Some("RunMat:sin:ArgCount"),
+    when: "Too many input arguments were supplied.",
+    message: "sin: too many input arguments",
+};
+
+const SIN_ERROR_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIN.LIKE_PROTOTYPE",
+    identifier: Some("RunMat:sin:LikePrototype"),
+    when: "The \"like\" prototype is unsupported for this output conversion path.",
+    message: "sin: invalid \"like\" prototype",
+};
+
+const SIN_ERROR_GPU_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIN.GPU_UNAVAILABLE",
+    identifier: Some("RunMat:sin:GpuUnavailable"),
+    when: "GPU output was requested via \"like\" but no active provider is available.",
+    message: "sin: GPU provider unavailable",
+};
+
+const SIN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIN.INTERNAL",
+    identifier: Some("RunMat:sin:Internal"),
+    when: "Internal tensor conversion/allocation/provider flow failed.",
+    message: "sin: internal error",
+};
+
+const SIN_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    SIN_ERROR_INVALID_INPUT,
+    SIN_ERROR_INVALID_OPTION,
+    SIN_ERROR_ARG_COUNT,
+    SIN_ERROR_LIKE_PROTOTYPE,
+    SIN_ERROR_GPU_UNAVAILABLE,
+    SIN_ERROR_INTERNAL,
+];
+
+pub const SIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SIN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SIN_ERRORS,
+};
+
+fn sin_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn sin_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::sin")]
@@ -59,10 +188,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "sin",
     category = "math/trigonometry",
-    summary = "Sine of scalars, vectors, matrices, or N-D tensors (element-wise).",
+    summary = "Compute element-wise sine values in radians.",
     keywords = "sin,sine,trigonometry,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::trigonometry::sin::SIN_DESCRIPTOR),
     builtin_path = "crate::builtins::math::trigonometry::sin"
 )]
 async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -73,7 +203,10 @@ async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::ComplexTensor(ct) => sin_complex_tensor(ct)?,
         Value::CharArray(ca) => sin_char_array(ca)?,
         Value::String(_) | Value::StringArray(_) => {
-            return Err(runtime_error_for("sin: expected numeric input"))
+            return Err(sin_error_with_detail(
+                &SIN_ERROR_INVALID_INPUT,
+                "expected numeric input, got string",
+            ))
         }
         other => sin_real(other)?,
     };
@@ -83,21 +216,25 @@ async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 async fn sin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_sin(&handle).await {
-            return Ok(Value::GpuTensor(out));
+            return Ok(gpu_helpers::resident_gpu_value(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     sin_tensor(tensor).map(tensor::tensor_into_value)
 }
 
 fn sin_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("sin", value).map_err(runtime_error_for)?;
+    let tensor = tensor::value_into_tensor_for("sin", value)
+        .map_err(|e| sin_error_with_detail(&SIN_ERROR_INVALID_INPUT, e))?;
     sin_tensor(tensor).map(tensor::tensor_into_value)
 }
 
 fn sin_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.sin()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("sin: {e}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))
 }
 
 fn sin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -107,7 +244,7 @@ fn sin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         .map(|&(re, im)| (sin_complex_re(re, im), sin_complex_im(re, im)))
         .collect::<Vec<_>>();
     let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-        .map_err(|e| runtime_error_for(format!("sin: {e}")))?;
+        .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -118,7 +255,7 @@ fn sin_char_array(ca: CharArray) -> BuiltinResult<Value> {
         .map(|&ch| (ch as u32 as f64).sin())
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-        .map_err(|e| runtime_error_for(format!("sin: {e}")))?;
+        .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -143,21 +280,28 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
         0 => Ok(OutputTemplate::Default),
         1 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-                Err(runtime_error_for("sin: expected prototype after 'like'"))
+                Err(sin_error_with_detail(
+                    &SIN_ERROR_INVALID_OPTION,
+                    "expected prototype after 'like'",
+                ))
             } else {
-                Err(runtime_error_for("sin: unrecognised argument for sin"))
+                Err(sin_error_with_detail(
+                    &SIN_ERROR_INVALID_OPTION,
+                    "unrecognised argument for sin",
+                ))
             }
         }
         2 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
                 Ok(OutputTemplate::Like(args[1].clone()))
             } else {
-                Err(runtime_error_for(
-                    "sin: unsupported option; only 'like' is accepted",
+                Err(sin_error_with_detail(
+                    &SIN_ERROR_INVALID_OPTION,
+                    "unsupported option; only 'like' is accepted",
                 ))
             }
         }
-        _ => Err(runtime_error_for("sin: too many input arguments")),
+        _ => Err(sin_error(&SIN_ERROR_ARG_COUNT)),
     }
 }
 
@@ -171,11 +315,13 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
             | Value::Int(_)
             | Value::Bool(_)
             | Value::LogicalArray(_) => convert_to_host_like(value).await,
-            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(runtime_error_for(
-                "sin: complex prototypes for 'like' are not supported yet",
+            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(sin_error_with_detail(
+                &SIN_ERROR_LIKE_PROTOTYPE,
+                "complex prototypes for 'like' are not supported yet",
             )),
-            _ => Err(runtime_error_for(
-                "sin: unsupported prototype for 'like'; provide a numeric or gpuArray prototype",
+            _ => Err(sin_error_with_detail(
+                &SIN_ERROR_LIKE_PROTOTYPE,
+                "unsupported prototype; provide a numeric or gpuArray prototype",
             )),
         },
     }
@@ -183,8 +329,9 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
 
 fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        runtime_error_for(
-            "sin: GPU output requested via 'like' but no acceleration provider is active",
+        sin_error_with_detail(
+            &SIN_ERROR_GPU_UNAVAILABLE,
+            "GPU output requested via 'like' but no acceleration provider is active",
         )
     })?;
     match value {
@@ -196,26 +343,29 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             };
             let handle = provider
                 .upload(&view)
-                .map_err(|e| runtime_error_for(format!("sin: {e}")))?;
+                .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
             let tensor = Tensor::new(vec![n], vec![1, 1])
-                .map_err(|e| runtime_error_for(format!("sin: {e}")))?;
+                .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
         Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(runtime_error_for)?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(runtime_error_for(
-            "sin: GPU prototypes for 'like' only support real numeric outputs",
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(sin_error_with_detail(
+            &SIN_ERROR_LIKE_PROTOTYPE,
+            "GPU prototypes for 'like' only support real numeric outputs",
         )),
-        other => Err(runtime_error_for(format!(
-            "sin: unsupported result type for GPU output via 'like' ({other:?})"
-        ))),
+        other => Err(sin_error_with_detail(
+            &SIN_ERROR_INTERNAL,
+            format!("unsupported result type for GPU output via 'like' ({other:?})"),
+        )),
     }
 }
 
@@ -240,6 +390,17 @@ pub(crate) mod tests {
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn sin_descriptor_signatures_cover_like_overload() {
+        let labels: Vec<&str> = SIN_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = sin(X)"));
+        assert!(labels.contains(&"Y = sin(X, \"like\", P)"));
     }
 
     #[test]
@@ -359,6 +520,7 @@ pub(crate) mod tests {
     fn sin_like_missing_prototype_errors() {
         let err = block_on(sin_builtin(Value::Num(1.0), vec![Value::from("like")]))
             .expect_err("expected error");
+        assert_eq!(err.identifier(), SIN_ERROR_INVALID_OPTION.identifier);
         let message = error_message(err);
         assert!(message.contains("prototype"));
     }

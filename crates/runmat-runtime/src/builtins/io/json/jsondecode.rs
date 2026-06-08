@@ -2,6 +2,8 @@
 
 use once_cell::sync::Lazy;
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -13,8 +15,63 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const INPUT_TYPE_ERROR: &str = "jsondecode: JSON text must be a character vector or string scalar";
-const PARSE_ERROR_PREFIX: &str = "jsondecode: invalid JSON text";
+const BUILTIN_NAME: &str = "jsondecode";
+
+const JSONDECODE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Decoded MATLAB-compatible value (numeric/logical/string/struct/cell).",
+}];
+const JSONDECODE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "text",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "JSON text as a char row vector, string scalar, or 1x1 string array.",
+}];
+const JSONDECODE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "value = jsondecode(text)",
+    inputs: &JSONDECODE_INPUTS,
+    outputs: &JSONDECODE_OUTPUT,
+}];
+const JSONDECODE_ERROR_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JSONDECODE.INPUT_TYPE",
+    identifier: None,
+    when: "Input text argument is not a character vector or string scalar.",
+    message: "jsondecode: JSON text must be a character vector or string scalar",
+};
+const JSONDECODE_ERROR_PARSE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JSONDECODE.PARSE",
+    identifier: None,
+    when: "Input text is not valid JSON.",
+    message: "jsondecode: invalid JSON text",
+};
+const JSONDECODE_ERROR_NUMERIC_LITERAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JSONDECODE.NUMERIC_LITERAL",
+    identifier: None,
+    when: "A JSON numeric literal cannot be represented as a finite RunMat double.",
+    message: "jsondecode: invalid JSON numeric literal",
+};
+const JSONDECODE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JSONDECODE.INTERNAL",
+    identifier: None,
+    when: "Internal conversion from parsed JSON to RunMat values fails.",
+    message: "jsondecode: internal conversion failed",
+};
+const JSONDECODE_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    JSONDECODE_ERROR_INPUT_TYPE,
+    JSONDECODE_ERROR_PARSE,
+    JSONDECODE_ERROR_NUMERIC_LITERAL,
+    JSONDECODE_ERROR_INTERNAL,
+];
+pub const JSONDECODE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &JSONDECODE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &JSONDECODE_ERRORS,
+};
 
 #[allow(clippy::too_many_lines)]
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::json::jsondecode")]
@@ -33,17 +90,44 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "No GPU kernels: jsondecode gathers gpuArray input to host memory before parsing the JSON text.",
 };
 
-fn jsondecode_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("jsondecode")
-        .build()
+fn jsondecode_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    jsondecode_error_with(error, error.message)
+}
+
+fn jsondecode_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn jsondecode_error_with_source<E>(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+    source: E,
+) -> RuntimeError
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn jsondecode_flow_with_context(err: RuntimeError) -> RuntimeError {
-    build_runtime_error(err.message().to_string())
-        .with_builtin("jsondecode")
-        .with_source(err)
-        .build()
+    let mut builder = build_runtime_error(err.message().to_string()).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = err.identifier() {
+        builder = builder.with_identifier(identifier.to_string());
+    }
+    builder.with_source(err).build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::json::jsondecode")]
@@ -60,10 +144,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "jsondecode",
     category = "io/json",
-    summary = "Parse UTF-8 JSON text into MATLAB-compatible RunMat values.",
+    summary = "Parse UTF-8 JSON text into runtime values.",
     keywords = "jsondecode,json,parse json,struct,gpu",
     accel = "sink",
     type_resolver(crate::builtins::io::type_resolvers::jsondecode_type),
+    descriptor(crate::builtins::io::json::jsondecode::JSONDECODE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::json::jsondecode"
 )]
 async fn jsondecode_builtin(text: Value) -> crate::BuiltinResult<Value> {
@@ -72,20 +157,22 @@ async fn jsondecode_builtin(text: Value) -> crate::BuiltinResult<Value> {
         .map_err(jsondecode_flow_with_context)?;
     let source = extract_text(gathered)?;
     let parsed: JsonValue = serde_json::from_str(&source).map_err(|err| {
-        build_runtime_error(format!("{PARSE_ERROR_PREFIX} ({err})"))
-            .with_builtin("jsondecode")
-            .with_source(err)
-            .build()
+        jsondecode_error_with_source(
+            &JSONDECODE_ERROR_PARSE,
+            format!("{} ({err})", JSONDECODE_ERROR_PARSE.message),
+            err,
+        )
     })?;
     value_from_json(&parsed)
 }
 
 pub(crate) fn decode_json_text(text: &str) -> BuiltinResult<Value> {
     let parsed: JsonValue = serde_json::from_str(text).map_err(|err| {
-        build_runtime_error(format!("{PARSE_ERROR_PREFIX} ({err})"))
-            .with_builtin("jsondecode")
-            .with_source(err)
-            .build()
+        jsondecode_error_with_source(
+            &JSONDECODE_ERROR_PARSE,
+            format!("{} ({err})", JSONDECODE_ERROR_PARSE.message),
+            err,
+        )
     })?;
     value_from_json(&parsed)
 }
@@ -94,7 +181,7 @@ fn extract_text(value: Value) -> BuiltinResult<String> {
     match value {
         Value::CharArray(array) => {
             if array.rows > 1 {
-                return Err(jsondecode_error(INPUT_TYPE_ERROR));
+                return Err(jsondecode_error(&JSONDECODE_ERROR_INPUT_TYPE));
             }
             Ok(array.data.into_iter().collect::<String>())
         }
@@ -103,10 +190,10 @@ fn extract_text(value: Value) -> BuiltinResult<String> {
             if sa.data.len() == 1 {
                 Ok(sa.data[0].clone())
             } else {
-                Err(jsondecode_error(INPUT_TYPE_ERROR))
+                Err(jsondecode_error(&JSONDECODE_ERROR_INPUT_TYPE))
             }
         }
-        _other => Err(jsondecode_error(INPUT_TYPE_ERROR)),
+        _other => Err(jsondecode_error(&JSONDECODE_ERROR_INPUT_TYPE)),
     }
 }
 
@@ -142,9 +229,13 @@ fn parse_json_number(number: &serde_json::Number) -> BuiltinResult<f64> {
     match text.parse::<f64>() {
         Ok(value) => {
             if value.is_nan() {
-                Err(jsondecode_error(format!(
-                    "{PARSE_ERROR_PREFIX}: unsupported numeric literal ({text})"
-                )))
+                Err(jsondecode_error_with(
+                    &JSONDECODE_ERROR_NUMERIC_LITERAL,
+                    format!(
+                        "{}: unsupported numeric literal ({text})",
+                        JSONDECODE_ERROR_NUMERIC_LITERAL.message
+                    ),
+                ))
             } else {
                 Ok(value)
             }
@@ -155,35 +246,55 @@ fn parse_json_number(number: &serde_json::Number) -> BuiltinResult<f64> {
             } else {
                 text
             };
-            Err(jsondecode_error(format!(
-                "{PARSE_ERROR_PREFIX}: numeric literal out of range ({display})"
-            )))
+            Err(jsondecode_error_with(
+                &JSONDECODE_ERROR_NUMERIC_LITERAL,
+                format!(
+                    "{}: numeric literal out of range ({display})",
+                    JSONDECODE_ERROR_NUMERIC_LITERAL.message
+                ),
+            ))
         }
     }
 }
 
 fn decode_json_array(values: &[JsonValue]) -> BuiltinResult<Value> {
     if values.is_empty() {
-        let tensor = Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|e| jsondecode_error(format!("jsondecode: {e}")))?;
+        let tensor = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| {
+            jsondecode_error_with(
+                &JSONDECODE_ERROR_INTERNAL,
+                format!("{} ({e})", JSONDECODE_ERROR_INTERNAL.message),
+            )
+        })?;
         return Ok(Value::Tensor(tensor));
     }
 
     if let Some(numeric) = parse_numeric_array(values)? {
-        let tensor = Tensor::new(numeric.data, numeric.shape)
-            .map_err(|e| jsondecode_error(format!("jsondecode: {e}")))?;
+        let tensor = Tensor::new(numeric.data, numeric.shape).map_err(|e| {
+            jsondecode_error_with(
+                &JSONDECODE_ERROR_INTERNAL,
+                format!("{} ({e})", JSONDECODE_ERROR_INTERNAL.message),
+            )
+        })?;
         return Ok(Value::Tensor(tensor));
     }
 
     if let Some(logical) = parse_logical_array(values) {
-        let array = LogicalArray::new(logical.data, logical.shape)
-            .map_err(|e| jsondecode_error(format!("jsondecode: {e}")))?;
+        let array = LogicalArray::new(logical.data, logical.shape).map_err(|e| {
+            jsondecode_error_with(
+                &JSONDECODE_ERROR_INTERNAL,
+                format!("{} ({e})", JSONDECODE_ERROR_INTERNAL.message),
+            )
+        })?;
         return Ok(Value::LogicalArray(array));
     }
 
     if let Some(strings) = parse_string_array(values) {
-        let array = StringArray::new(strings.data, strings.shape)
-            .map_err(|e| jsondecode_error(format!("jsondecode: {e}")))?;
+        let array = StringArray::new(strings.data, strings.shape).map_err(|e| {
+            jsondecode_error_with(
+                &JSONDECODE_ERROR_INTERNAL,
+                format!("{} ({e})", JSONDECODE_ERROR_INTERNAL.message),
+            )
+        })?;
         return Ok(Value::StringArray(array));
     }
 
@@ -206,12 +317,21 @@ fn empty_double() -> BuiltinResult<Value> {
     }
     Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
-        .map_err(|e| jsondecode_error(format!("jsondecode: {e}")))
+        .map_err(|e| {
+            jsondecode_error_with(
+                &JSONDECODE_ERROR_INTERNAL,
+                format!("{} ({e})", JSONDECODE_ERROR_INTERNAL.message),
+            )
+        })
 }
 
 fn cell_matrix(elements: Vec<Value>, rows: usize, cols: usize) -> BuiltinResult<Value> {
-    let cell = CellArray::new(elements, rows, cols)
-        .map_err(|e| jsondecode_error(format!("jsondecode: {e}")))?;
+    let cell = CellArray::new(elements, rows, cols).map_err(|e| {
+        jsondecode_error_with(
+            &JSONDECODE_ERROR_INTERNAL,
+            format!("{} ({e})", JSONDECODE_ERROR_INTERNAL.message),
+        )
+    })?;
     Ok(Value::Cell(cell))
 }
 
@@ -416,7 +536,10 @@ fn parse_rectangular_cell_array(values: &[JsonValue]) -> BuiltinResult<Option<Va
     for value in values {
         let arr = value.as_array().ok_or_else(|| {
             // Should be unreachable due to the `all(|v| v.is_array())` guard above.
-            jsondecode_error("jsondecode: inconsistent array state")
+            jsondecode_error_with(
+                &JSONDECODE_ERROR_INTERNAL,
+                "jsondecode: inconsistent array state",
+            )
         })?;
         match expected_len {
             Some(len) if arr.len() != len => return Ok(None),
@@ -456,6 +579,17 @@ pub(crate) mod tests {
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn jsondecode_descriptor_signature_covers_core_form() {
+        let labels: Vec<&str> = JSONDECODE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"value = jsondecode(text)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -674,7 +808,7 @@ pub(crate) mod tests {
             block_on(jsondecode_builtin(char_row("{not json}"))).expect_err("expected failure");
         let err = error_message(err);
         assert!(
-            err.starts_with(PARSE_ERROR_PREFIX),
+            err.starts_with(JSONDECODE_ERROR_PARSE.message),
             "unexpected error message: {err}"
         );
     }
@@ -685,7 +819,7 @@ pub(crate) mod tests {
         let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
         let err =
             block_on(jsondecode_builtin(Value::CharArray(chars))).expect_err("expected type error");
-        assert_eq!(error_message(err), INPUT_TYPE_ERROR);
+        assert_eq!(error_message(err), JSONDECODE_ERROR_INPUT_TYPE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

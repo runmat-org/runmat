@@ -193,3 +193,25 @@ fn test_matrix_literal_semicolon_preservation() {
         },
     );
 }
+
+/// Regression: bracketed call-list expression statements should parse
+/// as normal expressions, not as malformed assignment target syntax.
+#[test]
+fn test_bracketed_call_list_expression_statement_parses() {
+    let program = parse(
+        "x = logspace(0, 2, 50); loglog(x, x.^2); ax = gca; [get(ax, 'XScale'), get(ax, 'YScale')]",
+    )
+    .unwrap();
+    assert_eq!(program.body.len(), 4);
+
+    match &program.body[3] {
+        Stmt::ExprStmt(Expr::Tensor(rows, _), suppressed, _) => {
+            assert!(!*suppressed);
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].len(), 2);
+            assert!(matches!(rows[0][0], Expr::FuncCall(_, _, _)));
+            assert!(matches!(rows[0][1], Expr::FuncCall(_, _, _)));
+        }
+        other => panic!("expected bracketed call-list expression statement, got {other:?}"),
+    }
+}

@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
@@ -17,12 +17,28 @@ fn get_binary_path() -> PathBuf {
 
 // Helper function to run runmat with arguments
 fn run_runmat(args: &[&str]) -> std::process::Output {
+    let temp_dir = TempDir::new().expect("failed to create temp dir for config");
+    let config_path = write_test_config(temp_dir.path());
     Command::new(get_binary_path())
         .args(args)
-        .env("RUNMAT_ACCEL_ENABLE", "0")
-        .env("RUNMAT_ACCEL_PROVIDER", "inprocess")
+        .env("RUNMAT_CONFIG", &config_path)
+        .env("NO_GUI", "1")
         .output()
         .expect("Failed to execute runmat binary")
+}
+
+fn write_test_config(dir: &Path) -> PathBuf {
+    let config_path = dir.join("runmat.toml");
+    fs::write(
+        &config_path,
+        r#"
+[runtime.accelerate]
+enabled = false
+provider = "inprocess"
+"#,
+    )
+    .expect("failed to write test config");
+    config_path
 }
 
 #[test]
@@ -194,12 +210,6 @@ fn test_debug_flag() {
 }
 
 #[test]
-fn test_timeout_configuration() {
-    let output = run_runmat(&["--timeout", "60", "info"]);
-    assert!(output.status.success());
-}
-
-#[test]
 fn test_jit_threshold_configuration() {
     let output = run_runmat(&["--jit-threshold", "5", "info"]);
     assert!(output.status.success());
@@ -234,11 +244,17 @@ fn test_script_execution_with_run_command() {
 
 #[test]
 fn test_nonexistent_script() {
-    let output = run_runmat(&["run", "/nonexistent/script.m"]);
+    let temp_dir = TempDir::new().unwrap();
+    let script_path = temp_dir.path().join("nonexistent.m");
+
+    let output = run_runmat(&["run", script_path.to_str().unwrap()]);
     assert!(!output.status.success());
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Failed to read") || stderr.contains("No such file"));
+    assert!(
+        stderr.contains("RunMat:SourceReadFailed") || stderr.contains("failed to read source path"),
+        "stderr did not include a source read failure:\n{stderr}"
+    );
 }
 
 #[test]
@@ -343,10 +359,12 @@ fn test_repl_command() {
 
 #[test]
 fn test_repl_processes_piped_input() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = TempDir::new()?;
+    let config_path = write_test_config(temp_dir.path());
     let mut child = Command::new(get_binary_path())
         .args(["repl"])
-        .env("RUNMAT_ACCEL_ENABLE", "0")
-        .env("RUNMAT_ACCEL_PROVIDER", "inprocess")
+        .env("RUNMAT_CONFIG", &config_path)
+        .env("NO_GUI", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()?;
@@ -362,14 +380,34 @@ fn test_repl_processes_piped_input() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn test_kernel_command_help() {
-    let output = run_runmat(&["kernel", "--help"]);
+fn test_project_command_help_includes_fs_namespace() {
+    let output = run_runmat(&["project", "--help"]);
     assert!(output.status.success());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Jupyter kernel"));
-    assert!(stdout.contains("--ip"));
-    assert!(stdout.contains("--key"));
+    assert!(stdout.contains("fs"));
+    assert!(stdout.contains("members"));
+    assert!(stdout.contains("retention"));
+}
+
+#[test]
+fn test_project_fs_command_help() {
+    let output = run_runmat(&["project", "fs", "--help"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("read"));
+    assert!(stdout.contains("write"));
+    assert!(stdout.contains("ls"));
+}
+
+#[test]
+fn test_remote_run_help_mentions_remote_script_path() {
+    let output = run_runmat(&["remote", "run", "--help"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Remote script path"));
 }
 
 #[test]
@@ -401,12 +439,6 @@ fn test_invalid_jit_threshold() {
 }
 
 #[test]
-fn test_invalid_timeout() {
-    let output = run_runmat(&["--timeout", "invalid", "info"]);
-    assert!(!output.status.success());
-}
-
-#[test]
 fn test_script_with_syntax_error() {
     let temp_dir = TempDir::new().unwrap();
     let script_path = temp_dir.path().join("syntax_error.m");
@@ -419,6 +451,7 @@ fn test_script_with_syntax_error() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("error") || stderr.contains("failed"));
+    assert!(!stderr.contains("Error: command failed"));
 }
 
 #[test]
@@ -428,9 +461,9 @@ fn test_help_shows_environment_variables() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Environment Variables"));
-    assert!(stdout.contains("RUNMAT_DEBUG"));
-    assert!(stdout.contains("RUNMAT_GC_PRESET"));
-    assert!(stdout.contains("RUNMAT_JIT_ENABLE"));
+    assert!(stdout.contains("RUNMAT_CONFIG"));
+    assert!(stdout.contains("RUNMAT_SERVER_URL"));
+    assert!(stdout.contains("RUNMAT_API_KEY"));
 }
 
 #[test]
@@ -445,7 +478,8 @@ fn test_command_output_is_structured() {
     assert!(stdout.contains("Version:"));
     assert!(stdout.contains("Runtime Configuration:"));
     assert!(stdout.contains("Environment:"));
-    assert!(stdout.contains("Available Commands:"));
+    assert!(stdout.contains("Help:"));
+    assert!(stdout.contains("runmat --help"));
 }
 
 #[test]

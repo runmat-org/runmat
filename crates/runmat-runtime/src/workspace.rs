@@ -8,12 +8,16 @@ use std::sync::Mutex;
 /// Resolver used by the runtime to access the caller workspace when builtins
 /// (such as `save`) need to look up variables by name.
 type AssignFn = fn(&str, Value) -> Result<(), String>;
+type ClearFn = fn() -> Result<(), String>;
+type RemoveFn = fn(&str) -> Result<(), String>;
 
 pub struct WorkspaceResolver {
     pub lookup: fn(&str) -> Option<Value>,
     pub snapshot: fn() -> Vec<(String, Value)>,
     pub globals: fn() -> Vec<String>,
     pub assign: Option<AssignFn>,
+    pub clear: Option<ClearFn>,
+    pub remove: Option<RemoveFn>,
 }
 
 mod resolver_storage {
@@ -79,7 +83,7 @@ mod resolver_storage {
 #[cfg(test)]
 static TEST_WORKSPACE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-/// Register the workspace resolver. Ignition installs this once during
+/// Register the workspace resolver. The VM installs this once during
 /// initialization so that language builtins can query variables lazily.
 pub fn register_workspace_resolver(resolver: WorkspaceResolver) {
     resolver_storage::set(resolver);
@@ -108,6 +112,26 @@ pub fn assign(name: &str, value: Value) -> Result<(), String> {
             .assign
             .ok_or_else(|| "workspace assignment unavailable".to_string())?;
         (assign)(name, value)
+    })
+}
+
+pub fn clear() -> Result<(), String> {
+    resolver_storage::with(|resolver| {
+        let resolver = resolver.ok_or_else(|| "workspace state unavailable".to_string())?;
+        let clear = resolver
+            .clear
+            .ok_or_else(|| "workspace clearing unavailable".to_string())?;
+        (clear)()
+    })
+}
+
+pub fn remove(name: &str) -> Result<(), String> {
+    resolver_storage::with(|resolver| {
+        let resolver = resolver.ok_or_else(|| "workspace state unavailable".to_string())?;
+        let remove = resolver
+            .remove
+            .ok_or_else(|| "workspace removal unavailable".to_string())?;
+        (remove)(name)
     })
 }
 

@@ -1,7 +1,11 @@
 //! MATLAB-compatible `ones` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, LogicalArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -40,6 +44,28 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("ones").build()
 }
 
+fn ones_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
+    ones_error_with_message(error.message, error)
+}
+
+fn ones_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> crate::RuntimeError {
+    ones_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn ones_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin("ones");
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn ones_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Num;
@@ -49,6 +75,169 @@ fn ones_type(args: &[Type], ctx: &ResolveContext) -> Type {
     }
     tensor_type_from_rank(args, ctx)
 }
+
+const ONES_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Output array.",
+}];
+
+const ONES_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const ONES_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Square size.",
+}];
+
+const ONES_SIG_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "size_vector",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Size vector defining output dimensions.",
+}];
+
+const ONES_SIG_DIMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "dims",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Dimension sizes.",
+}];
+
+const ONES_SIG_PROTOTYPE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "prototype",
+    ty: BuiltinParamType::LikePrototype,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Prototype value when no numeric dimension arguments are provided.",
+}];
+
+const ONES_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Class name override (double|single|logical).",
+    },
+];
+
+const ONES_SIG_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype array used for class/device.",
+    },
+];
+
+const ONES_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "A = ones()",
+        inputs: &ONES_SIG_EMPTY_INPUTS,
+        outputs: &ONES_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = ones(n)",
+        inputs: &ONES_SIG_N_INPUTS,
+        outputs: &ONES_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = ones(size_vector)",
+        inputs: &ONES_SIG_SIZE_VECTOR_INPUTS,
+        outputs: &ONES_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = ones(m, n, ...)",
+        inputs: &ONES_SIG_DIMS_INPUTS,
+        outputs: &ONES_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = ones(prototype)",
+        inputs: &ONES_SIG_PROTOTYPE_INPUTS,
+        outputs: &ONES_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = ones(..., typename)",
+        inputs: &ONES_SIG_CLASS_INPUTS,
+        outputs: &ONES_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = ones(..., \"like\", prototype)",
+        inputs: &ONES_SIG_LIKE_INPUTS,
+        outputs: &ONES_OUTPUT,
+    },
+];
+
+const ONES_ERROR_LIKE_EXPECTED_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ONES.LIKE_EXPECTED_PROTOTYPE",
+    identifier: None,
+    when: "The 'like' keyword is provided without a prototype argument.",
+    message: "ones: expected prototype after 'like'",
+};
+
+const ONES_ERROR_CLASS_CONFLICT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ONES.CLASS_CONFLICT",
+    identifier: None,
+    when: "A class keyword and a 'like' prototype are both provided.",
+    message: "ones: cannot combine 'like' with other class specifiers",
+};
+
+const ONES_ERROR_UNRECOGNIZED_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ONES.UNRECOGNIZED_OPTION",
+    identifier: None,
+    when: "A trailing option string is not a supported class keyword.",
+    message: "ones: unrecognised option",
+};
+
+const ONES_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ONES.LIKE_DUPLICATE",
+    identifier: None,
+    when: "The 'like' keyword is specified more than once.",
+    message: "ones: multiple 'like' specifications are not supported",
+};
+
+const ONES_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    ONES_ERROR_LIKE_EXPECTED_PROTOTYPE,
+    ONES_ERROR_CLASS_CONFLICT,
+    ONES_ERROR_UNRECOGNIZED_OPTION,
+    ONES_ERROR_LIKE_DUPLICATE,
+];
+
+pub const ONES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ONES_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ONES_ERRORS,
+};
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::ones")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -75,10 +264,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "ones",
     category = "array/creation",
-    summary = "Create arrays filled with ones.",
+    summary = "Create arrays of ones.",
     keywords = "ones,array,logical,gpu,like",
     accel = "array_construct",
     type_resolver(ones_type),
+    descriptor(crate::builtins::array::creation::ones::ONES_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::ones"
 )]
 async fn ones_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -117,17 +307,13 @@ impl ParsedOnes {
                 match keyword.as_str() {
                     "like" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "ones: multiple 'like' specifications are not supported",
-                            ));
+                            return Err(ones_error(&ONES_ERROR_LIKE_DUPLICATE));
                         }
                         if class_override.is_some() {
-                            return Err(builtin_error(
-                                "ones: cannot combine 'like' with other class specifiers",
-                            ));
+                            return Err(ones_error(&ONES_ERROR_CLASS_CONFLICT));
                         }
                         let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err(builtin_error("ones: expected prototype after 'like'"));
+                            return Err(ones_error(&ONES_ERROR_LIKE_EXPECTED_PROTOTYPE));
                         };
                         like_proto = Some(proto.clone());
                         if shape_source.is_none() && !saw_dims_arg {
@@ -138,8 +324,9 @@ impl ParsedOnes {
                     }
                     "logical" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "ones: cannot combine 'like' with 'logical'",
+                            return Err(ones_error_with_detail(
+                                &ONES_ERROR_CLASS_CONFLICT,
+                                "logical class override",
                             ));
                         }
                         class_override = Some(OutputTemplate::Logical);
@@ -148,7 +335,10 @@ impl ParsedOnes {
                     }
                     "double" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error("ones: cannot combine 'like' with 'double'"));
+                            return Err(ones_error_with_detail(
+                                &ONES_ERROR_CLASS_CONFLICT,
+                                "double class override",
+                            ));
                         }
                         class_override = Some(OutputTemplate::Double);
                         idx += 1;
@@ -156,16 +346,20 @@ impl ParsedOnes {
                     }
                     "single" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error("ones: cannot combine 'like' with 'single'"));
+                            return Err(ones_error_with_detail(
+                                &ONES_ERROR_CLASS_CONFLICT,
+                                "single class override",
+                            ));
                         }
                         class_override = Some(OutputTemplate::Single);
                         idx += 1;
                         continue;
                     }
                     other => {
-                        return Err(builtin_error(format!(
-                            "ones: unrecognised option '{other}'"
-                        )));
+                        return Err(ones_error_with_detail(
+                            &ONES_ERROR_UNRECOGNIZED_OPTION,
+                            format!("'{other}'"),
+                        ));
                     }
                 }
             }
@@ -259,6 +453,9 @@ async fn ones_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value
         Value::Tensor(t) => match t.dtype {
             NumericDType::F32 => ones_single(shape),
             NumericDType::F64 => ones_double(shape),
+            NumericDType::U8 | NumericDType::U16 => tensor::ones_with_dtype(shape, t.dtype)
+                .map(Value::Tensor)
+                .map_err(|e| builtin_error(format!("ones: {e}"))),
         },
         Value::Num(_) | Value::Int(_) => ones_double(shape),
         Value::CharArray(_) | Value::Cell(_) => ones_double(shape),

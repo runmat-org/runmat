@@ -3,11 +3,16 @@
 use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    RwLock,
+    OnceLock, RwLock,
 };
 
 use once_cell::sync::Lazy;
-use runmat_builtins::{CharArray, HandleRef, IntValue, LogicalArray, StructValue, Tensor, Value};
+use runmat_builtins::{
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ClassDef, HandleRef, IntValue, LogicalArray, MethodDef, PropertyDef, StructValue,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::keyword_of;
@@ -18,10 +23,12 @@ use crate::builtins::common::spec::{
 use crate::builtins::containers::type_resolvers::{
     map_cell_type, map_handle_type, map_is_key_type, map_unknown_type,
 };
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError, OBJECT_INDEX_BRACE,
+    OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN, OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
+};
 
 const CLASS_NAME: &str = "containers.Map";
-const MISSING_KEY_ERR: &str = "containers.Map: The specified key is not present in this container.";
 const BUILTIN_CONSTRUCTOR: &str = "containers.Map";
 const BUILTIN_KEYS: &str = "containers.Map.keys";
 const BUILTIN_VALUES: &str = "containers.Map.values";
@@ -29,6 +36,316 @@ const BUILTIN_IS_KEY: &str = "containers.Map.isKey";
 const BUILTIN_REMOVE: &str = "containers.Map.remove";
 const BUILTIN_SUBSREF: &str = "containers.Map.subsref";
 const BUILTIN_SUBSASGN: &str = "containers.Map.subsasgn";
+
+const CONTAINERS_MAP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "M",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "containers.Map handle object.",
+}];
+
+const CONTAINERS_MAP_INPUTS_KEYS_VALUES: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "keys",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Key container (cell, string/char, or numeric vector).",
+    },
+    BuiltinParamDescriptor {
+        name: "values",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Value container aligned with keys.",
+    },
+];
+
+const CONTAINERS_MAP_INPUTS_KEYS_VALUES_OPTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "keys",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Key container (cell, string/char, or numeric vector).",
+    },
+    BuiltinParamDescriptor {
+        name: "values",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Value container aligned with keys.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value options (KeyType, ValueType, UniformValues, ComparisonMethod).",
+    },
+];
+
+const CONTAINERS_MAP_INPUTS_OPTIONS_ONLY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "options",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Name/value options (KeyType, ValueType, UniformValues, ComparisonMethod).",
+}];
+
+const CONTAINERS_MAP_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "M = containers.Map()",
+        inputs: &[],
+        outputs: &CONTAINERS_MAP_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = containers.Map(keys, values)",
+        inputs: &CONTAINERS_MAP_INPUTS_KEYS_VALUES,
+        outputs: &CONTAINERS_MAP_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = containers.Map(keys, values, Name, Value, ...)",
+        inputs: &CONTAINERS_MAP_INPUTS_KEYS_VALUES_OPTS,
+        outputs: &CONTAINERS_MAP_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = containers.Map(Name, Value, ...)",
+        inputs: &CONTAINERS_MAP_INPUTS_OPTIONS_ONLY,
+        outputs: &CONTAINERS_MAP_OUTPUT,
+    },
+];
+
+const CONTAINERS_MAP_METHOD_INPUT_MAP: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "M",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "containers.Map handle object.",
+}];
+
+const CONTAINERS_MAP_KEYS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "K",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Row cell array containing map keys.",
+}];
+
+const CONTAINERS_MAP_VALUES_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "V",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Row cell array containing map values.",
+}];
+
+const CONTAINERS_MAP_INPUTS_KEY_SPEC: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "containers.Map handle object.",
+    },
+    BuiltinParamDescriptor {
+        name: "keySet",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Key scalar or key collection to query/mutate.",
+    },
+];
+
+const CONTAINERS_MAP_ISKEY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical membership result for each key.",
+}];
+
+const CONTAINERS_MAP_INPUTS_SUBSREF: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "containers.Map handle object.",
+    },
+    BuiltinParamDescriptor {
+        name: "kind",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexing kind: (), ., or {}.",
+    },
+    BuiltinParamDescriptor {
+        name: "payload",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexing payload cell/property argument.",
+    },
+];
+
+const CONTAINERS_MAP_INPUTS_SUBSASGN: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "containers.Map handle object.",
+    },
+    BuiltinParamDescriptor {
+        name: "kind",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Assignment kind: (), ., or {}.",
+    },
+    BuiltinParamDescriptor {
+        name: "payload",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Assignment payload cell/property argument.",
+    },
+    BuiltinParamDescriptor {
+        name: "rhs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Assigned value (scalar or collection).",
+    },
+];
+
+const CONTAINERS_MAP_SUBSREF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Lookup/property value result.",
+}];
+
+const CONTAINERS_MAP_KEYS_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "K = containers.Map.keys(M)",
+        inputs: &CONTAINERS_MAP_METHOD_INPUT_MAP,
+        outputs: &CONTAINERS_MAP_KEYS_OUTPUT,
+    }];
+
+const CONTAINERS_MAP_VALUES_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "V = containers.Map.values(M)",
+        inputs: &CONTAINERS_MAP_METHOD_INPUT_MAP,
+        outputs: &CONTAINERS_MAP_VALUES_OUTPUT,
+    }];
+
+const CONTAINERS_MAP_ISKEY_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "tf = containers.Map.isKey(M, keySet)",
+        inputs: &CONTAINERS_MAP_INPUTS_KEY_SPEC,
+        outputs: &CONTAINERS_MAP_ISKEY_OUTPUT,
+    }];
+
+const CONTAINERS_MAP_REMOVE_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "M = containers.Map.remove(M, keySet)",
+        inputs: &CONTAINERS_MAP_INPUTS_KEY_SPEC,
+        outputs: &CONTAINERS_MAP_OUTPUT,
+    }];
+
+const CONTAINERS_MAP_SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "value = containers.Map.subsref(M, kind, payload)",
+        inputs: &CONTAINERS_MAP_INPUTS_SUBSREF,
+        outputs: &CONTAINERS_MAP_SUBSREF_OUTPUT,
+    }];
+
+const CONTAINERS_MAP_SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "M = containers.Map.subsasgn(M, kind, payload, rhs)",
+        inputs: &CONTAINERS_MAP_INPUTS_SUBSASGN,
+        outputs: &CONTAINERS_MAP_OUTPUT,
+    }];
+
+const CONTAINERS_MAP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONTAINERS_MAP.INVALID_ARGUMENT",
+    identifier: Some("RunMat:containers.Map:InvalidArgument"),
+    when: "Map constructor/method inputs, option grammar, or key/value payloads are invalid.",
+    message: "containers.Map: invalid argument",
+};
+
+const CONTAINERS_MAP_ERROR_MISSING_KEY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONTAINERS_MAP.MISSING_KEY",
+    identifier: Some("RunMat:containers.Map:MissingKey"),
+    when: "Lookup/removal targets a key that is not present in the map.",
+    message: "containers.Map: The specified key is not present in this container.",
+};
+
+const CONTAINERS_MAP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONTAINERS_MAP.INTERNAL",
+    identifier: Some("RunMat:containers.Map:Internal"),
+    when: "Map registry/storage operations fail unexpectedly.",
+    message: "containers.Map: internal operation failed",
+};
+
+const CONTAINERS_MAP_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    CONTAINERS_MAP_ERROR_INVALID_ARGUMENT,
+    CONTAINERS_MAP_ERROR_MISSING_KEY,
+    CONTAINERS_MAP_ERROR_INTERNAL,
+];
+
+pub const CONTAINERS_MAP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CONTAINERS_MAP_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CONTAINERS_MAP_ERRORS,
+};
+
+pub const CONTAINERS_MAP_KEYS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CONTAINERS_MAP_KEYS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CONTAINERS_MAP_ERRORS,
+};
+
+pub const CONTAINERS_MAP_VALUES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CONTAINERS_MAP_VALUES_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CONTAINERS_MAP_ERRORS,
+};
+
+pub const CONTAINERS_MAP_ISKEY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CONTAINERS_MAP_ISKEY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CONTAINERS_MAP_ERRORS,
+};
+
+pub const CONTAINERS_MAP_REMOVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CONTAINERS_MAP_REMOVE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CONTAINERS_MAP_ERRORS,
+};
+
+pub const CONTAINERS_MAP_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CONTAINERS_MAP_SUBSREF_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CONTAINERS_MAP_ERRORS,
+};
+
+pub const CONTAINERS_MAP_SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CONTAINERS_MAP_SUBSASGN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CONTAINERS_MAP_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::containers::map::containers_map"
@@ -48,8 +365,45 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Map storage is host-resident; GPU inputs are gathered only when split into multiple entries.",
 };
 
+fn map_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+    builtin: &'static str,
+) -> RuntimeError {
+    let raw = detail.as_ref().trim();
+    let normalized = raw
+        .strip_prefix("containers.Map:")
+        .map(str::trim)
+        .unwrap_or(raw);
+    let message = if normalized.is_empty() {
+        error.message.to_string()
+    } else {
+        format!("{}: {}", error.message, normalized)
+    };
+    let mut builder = build_runtime_error(message).with_builtin(builtin);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_descriptor_error(
+    error: &'static BuiltinErrorDescriptor,
+    builtin: &'static str,
+) -> RuntimeError {
+    map_error_with_detail(error, "", builtin)
+}
+
+fn map_invalid(detail: impl AsRef<str>, builtin: &'static str) -> RuntimeError {
+    map_error_with_detail(&CONTAINERS_MAP_ERROR_INVALID_ARGUMENT, detail, builtin)
+}
+
+fn map_internal(detail: impl AsRef<str>, builtin: &'static str) -> RuntimeError {
+    map_error_with_detail(&CONTAINERS_MAP_ERROR_INTERNAL, detail, builtin)
+}
+
 fn map_error(message: impl Into<String>, builtin: &'static str) -> RuntimeError {
-    build_runtime_error(message).with_builtin(builtin).build()
+    map_invalid(message.into(), builtin)
 }
 
 fn attach_builtin_context(mut error: RuntimeError, builtin: &'static str) -> RuntimeError {
@@ -75,6 +429,57 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 static MAP_REGISTRY: Lazy<RwLock<HashMap<u64, MapStore>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static CONTAINERS_MAP_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
+
+fn ensure_containers_map_class_registered() {
+    CONTAINERS_MAP_CLASS_REGISTERED.get_or_init(|| {
+        let mut properties = HashMap::new();
+        for name in ["Count", "KeyType", "ValueType"] {
+            properties.insert(
+                name.to_string(),
+                PropertyDef {
+                    name: name.to_string(),
+                    is_static: false,
+                    is_constant: false,
+                    is_dependent: true,
+                    get_access: Access::Public,
+                    set_access: Access::Private,
+                    default_value: None,
+                },
+            );
+        }
+
+        let mut methods = HashMap::new();
+        for (name, function_name) in [
+            ("keys", BUILTIN_KEYS),
+            ("values", BUILTIN_VALUES),
+            ("isKey", BUILTIN_IS_KEY),
+            ("remove", BUILTIN_REMOVE),
+            (OBJECT_SUBSREF_METHOD, BUILTIN_SUBSREF),
+            (OBJECT_SUBSASGN_METHOD, BUILTIN_SUBSASGN),
+        ] {
+            methods.insert(
+                name.to_string(),
+                MethodDef {
+                    name: name.to_string(),
+                    is_static: false,
+                    is_abstract: false,
+                    is_sealed: false,
+                    access: Access::Public,
+                    function_name: function_name.to_string(),
+                    implicit_class_argument: None,
+                },
+            );
+        }
+
+        runmat_builtins::register_class(ClassDef {
+            name: CLASS_NAME.to_string(),
+            parent: None,
+            properties,
+            methods,
+        });
+    });
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum KeyType {
@@ -275,7 +680,10 @@ impl MapStore {
         let idx = match self.index.get(key) {
             Some(&idx) => idx,
             None => {
-                return Err(map_error(MISSING_KEY_ERR, builtin));
+                return Err(map_descriptor_error(
+                    &CONTAINERS_MAP_ERROR_MISSING_KEY,
+                    builtin,
+                ));
             }
         };
         self.entries.remove(idx);
@@ -379,11 +787,12 @@ struct KeyCandidate {
 #[runtime_builtin(
     name = "containers.Map",
     category = "containers/map",
-    summary = "Create MATLAB-style dictionary objects that map keys to values.",
+    summary = "Create key-value dictionary objects.",
     keywords = "map,containers.Map,dictionary,hash map,lookup",
     accel = "metadata",
     sink = true,
     type_resolver(map_handle_type),
+    descriptor(crate::builtins::containers::map::containers_map::CONTAINERS_MAP_DESCRIPTOR),
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -395,6 +804,7 @@ async fn containers_map_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value>
 #[runtime_builtin(
     name = "containers.Map.keys",
     type_resolver(map_cell_type),
+    descriptor(crate::builtins::containers::map::containers_map::CONTAINERS_MAP_KEYS_DESCRIPTOR),
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_keys(map: Value) -> crate::BuiltinResult<Value> {
@@ -407,6 +817,7 @@ async fn containers_map_keys(map: Value) -> crate::BuiltinResult<Value> {
 #[runtime_builtin(
     name = "containers.Map.values",
     type_resolver(map_cell_type),
+    descriptor(crate::builtins::containers::map::containers_map::CONTAINERS_MAP_VALUES_DESCRIPTOR),
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_values(map: Value) -> crate::BuiltinResult<Value> {
@@ -419,6 +830,7 @@ async fn containers_map_values(map: Value) -> crate::BuiltinResult<Value> {
 #[runtime_builtin(
     name = "containers.Map.isKey",
     type_resolver(map_is_key_type),
+    descriptor(crate::builtins::containers::map::containers_map::CONTAINERS_MAP_ISKEY_DESCRIPTOR),
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_is_key(map: Value, key_spec: Value) -> crate::BuiltinResult<Value> {
@@ -444,6 +856,7 @@ async fn containers_map_is_key(map: Value, key_spec: Value) -> crate::BuiltinRes
 #[runtime_builtin(
     name = "containers.Map.remove",
     type_resolver(map_handle_type),
+    descriptor(crate::builtins::containers::map::containers_map::CONTAINERS_MAP_REMOVE_DESCRIPTOR),
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_remove(map: Value, key_spec: Value) -> crate::BuiltinResult<Value> {
@@ -462,6 +875,9 @@ async fn containers_map_remove(map: Value, key_spec: Value) -> crate::BuiltinRes
 #[runtime_builtin(
     name = "containers.Map.subsref",
     type_resolver(map_unknown_type),
+    descriptor(
+        crate::builtins::containers::map::containers_map::CONTAINERS_MAP_SUBSREF_DESCRIPTOR
+    ),
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_subsref(
@@ -476,7 +892,7 @@ async fn containers_map_subsref(
         ));
     }
     match kind.as_str() {
-        "()" => {
+        OBJECT_INDEX_PAREN => {
             let mut args = extract_key_arguments(&payload, BUILTIN_SUBSREF)?;
             if args.is_empty() {
                 return Err(map_error(
@@ -501,16 +917,16 @@ async fn containers_map_subsref(
                 if collection.values.len() == 1 {
                     let normalized =
                         normalize_key(&collection.values[0], store.key_type, BUILTIN_SUBSREF)?;
-                    store
-                        .get(&normalized)
-                        .ok_or_else(|| map_error(MISSING_KEY_ERR, BUILTIN_SUBSREF))
+                    store.get(&normalized).ok_or_else(|| {
+                        map_descriptor_error(&CONTAINERS_MAP_ERROR_MISSING_KEY, BUILTIN_SUBSREF)
+                    })
                 } else {
                     let mut results = Vec::with_capacity(collection.values.len());
                     for value in &collection.values {
                         let normalized = normalize_key(value, store.key_type, BUILTIN_SUBSREF)?;
-                        let stored = store
-                            .get(&normalized)
-                            .ok_or_else(|| map_error(MISSING_KEY_ERR, BUILTIN_SUBSREF))?;
+                        let stored = store.get(&normalized).ok_or_else(|| {
+                            map_descriptor_error(&CONTAINERS_MAP_ERROR_MISSING_KEY, BUILTIN_SUBSREF)
+                        })?;
                         results.push(stored);
                     }
                     crate::make_cell_with_shape(results, collection.shape.clone())
@@ -518,7 +934,7 @@ async fn containers_map_subsref(
                 }
             })
         }
-        "." => {
+        OBJECT_INDEX_MEMBER => {
             let field = string_from_value(
                 &payload,
                 "containers.Map: property name must be text",
@@ -538,7 +954,7 @@ async fn containers_map_subsref(
                 }
             })
         }
-        "{}" => Err(map_error(
+        OBJECT_INDEX_BRACE => Err(map_error(
             "containers.Map: curly-brace indexing is not supported.",
             BUILTIN_SUBSREF,
         )),
@@ -552,6 +968,9 @@ async fn containers_map_subsref(
 #[runtime_builtin(
     name = "containers.Map.subsasgn",
     type_resolver(map_handle_type),
+    descriptor(
+        crate::builtins::containers::map::containers_map::CONTAINERS_MAP_SUBSASGN_DESCRIPTOR
+    ),
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_subsasgn(
@@ -567,7 +986,7 @@ async fn containers_map_subsasgn(
         ));
     }
     match kind.as_str() {
-        "()" => {
+        OBJECT_INDEX_PAREN => {
             let mut args = extract_key_arguments(&payload, BUILTIN_SUBSASGN)?;
             if args.is_empty() {
                 return Err(map_error(
@@ -603,11 +1022,11 @@ async fn containers_map_subsasgn(
             })?;
             Ok(map)
         }
-        "." => Err(map_error(
+        OBJECT_INDEX_MEMBER => Err(map_error(
             "containers.Map: property assignments are not supported.",
             BUILTIN_SUBSASGN,
         )),
-        "{}" => Err(map_error(
+        OBJECT_INDEX_BRACE => Err(map_error(
             "containers.Map: curly-brace assignment is not supported.",
             BUILTIN_SUBSASGN,
         )),
@@ -735,10 +1154,12 @@ fn build_store(args: ConstructorArgs, builtin: &'static str) -> BuiltinResult<Ma
 }
 
 fn allocate_handle(store: MapStore, builtin: &'static str) -> BuiltinResult<Value> {
+    ensure_containers_map_class_registered();
+
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     MAP_REGISTRY
         .write()
-        .map_err(|_| map_error("containers.Map: registry lock poisoned", builtin))?
+        .map_err(|_| map_internal("containers.Map: registry lock poisoned", builtin))?
         .insert(id, store);
     let mut struct_value = StructValue::new();
     struct_value
@@ -763,10 +1184,10 @@ where
     let id = map_id(handle, builtin)?;
     let guard = MAP_REGISTRY
         .read()
-        .map_err(|_| map_error("containers.Map: registry lock poisoned", builtin))?;
+        .map_err(|_| map_internal("containers.Map: registry lock poisoned", builtin))?;
     let store = guard
         .get(&id)
-        .ok_or_else(|| map_error("containers.Map: internal storage not found", builtin))?;
+        .ok_or_else(|| map_internal("containers.Map: internal storage not found", builtin))?;
     f(store)
 }
 
@@ -779,10 +1200,10 @@ where
     let id = map_id(handle, builtin)?;
     let mut guard = MAP_REGISTRY
         .write()
-        .map_err(|_| map_error("containers.Map: registry lock poisoned", builtin))?;
+        .map_err(|_| map_internal("containers.Map: registry lock poisoned", builtin))?;
     let store = guard
         .get_mut(&id)
-        .ok_or_else(|| map_error("containers.Map: internal storage not found", builtin))?;
+        .ok_or_else(|| map_internal("containers.Map: internal storage not found", builtin))?;
     f(store)
 }
 
@@ -797,7 +1218,7 @@ fn extract_handle<'a>(value: &'a Value, builtin: &'static str) -> BuiltinResult<
 }
 
 fn ensure_handle(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<()> {
-    if !handle.valid {
+    if !runmat_builtins::is_handle_valid(handle) {
         return Err(map_error("containers.Map: handle is invalid", builtin));
     }
     if handle.class_name != CLASS_NAME {
@@ -820,7 +1241,7 @@ fn map_id(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<u64> {
             Some(Value::Int(other)) => {
                 let id = other.to_i64();
                 if id < 0 {
-                    Err(map_error(
+                    Err(map_internal(
                         "containers.Map: negative map identifier",
                         builtin,
                     ))
@@ -829,12 +1250,12 @@ fn map_id(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<u64> {
                 }
             }
             Some(Value::Num(n)) if *n >= 0.0 => Ok(*n as u64),
-            _ => Err(map_error(
+            _ => Err(map_internal(
                 "containers.Map: corrupted storage identifier",
                 builtin,
             )),
         },
-        other => Err(map_error(
+        other => Err(map_internal(
             format!("containers.Map: internal storage has unexpected shape {other:?}"),
             builtin,
         )),
@@ -1176,6 +1597,9 @@ fn normalize_numeric_value(value: Value, builtin: &'static str) -> BuiltinResult
         | Value::Complex(_, _)
         | Value::ComplexTensor(_)
         | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
@@ -1213,6 +1637,9 @@ fn normalize_logical_value(value: Value, builtin: &'static str) -> BuiltinResult
         | Value::Complex(_, _)
         | Value::ComplexTensor(_)
         | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
@@ -1426,7 +1853,7 @@ async fn collect_key_spec(
 
 pub fn map_length(value: &Value) -> Option<usize> {
     if let Value::HandleObject(handle) = value {
-        if handle.valid && handle.class_name == CLASS_NAME {
+        if runmat_builtins::is_handle_valid(handle) && handle.class_name == CLASS_NAME {
             if let Ok(id) = map_id(handle, BUILTIN_CONSTRUCTOR) {
                 if let Ok(registry) = MAP_REGISTRY.read() {
                     return registry.get(&id).map(|store| store.len());
@@ -1519,6 +1946,24 @@ pub(crate) mod tests {
         assert_eq!(map_cell_type(&[], &ctx), Type::cell());
         assert_eq!(map_is_key_type(&[Type::String], &ctx), Type::logical());
         assert_eq!(map_unknown_type(&[], &ctx), Type::Unknown);
+    }
+
+    #[test]
+    fn containers_map_descriptor_includes_constructor_and_method_signatures() {
+        let constructor_labels: Vec<&str> = CONTAINERS_MAP_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(constructor_labels.contains(&"M = containers.Map()"));
+        assert!(constructor_labels.contains(&"M = containers.Map(keys, values)"));
+
+        let method_labels: Vec<&str> = CONTAINERS_MAP_SUBSREF_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(method_labels.contains(&"value = containers.Map.subsref(M, kind, payload)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1838,8 +2283,12 @@ pub(crate) mod tests {
             crate::make_cell(vec![Value::from("missing")], 1, 1).unwrap(),
         )
         .expect_err("remove missing");
+        assert_eq!(
+            err.identifier(),
+            CONTAINERS_MAP_ERROR_MISSING_KEY.identifier
+        );
         let message = error_message(err);
-        assert_eq!(message, MISSING_KEY_ERR);
+        assert_eq!(message, CONTAINERS_MAP_ERROR_MISSING_KEY.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

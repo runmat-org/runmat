@@ -1,17 +1,24 @@
 //! MATLAB-compatible `fft2` builtin with GPU-aware semantics for RunMat.
 
-use super::common::{parse_length, tensor_to_complex_tensor, value_to_complex_tensor};
-use super::fft::{fft_complex_tensor, fft_download_gpu_result};
+use super::common::{
+    download_provider_complex_tensor, gather_gpu_complex_tensor, parse_2d_lengths_from_data,
+    parse_length, transform_axes_complex_tensor, value_to_complex_tensor, TransformDirection,
+};
+use super::fft::fft_complex_tensor;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::tensor;
 use crate::builtins::math::fft::type_resolvers::fft2_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
-use runmat_builtins::{ComplexTensor, Value};
+use runmat_accelerate_api::GpuTensorHandle;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::fft2")]
@@ -44,18 +51,174 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "fft2";
 
-fn fft2_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
+const FFT2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "2-D complex Fourier spectrum output.",
+}];
+
+const FFT2_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array.",
+}];
+
+const FFT2_INPUTS_SIZE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "SIZE",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Scalar N or two-element [M N] size vector.",
+    },
+];
+
+const FFT2_INPUTS_M_N: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Output row count for transform.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Output column count for transform.",
+    },
+];
+
+const FFT2_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = fft2(X)",
+        inputs: &FFT2_INPUTS_CORE,
+        outputs: &FFT2_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = fft2(X, SIZE)",
+        inputs: &FFT2_INPUTS_SIZE,
+        outputs: &FFT2_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = fft2(X, M, N)",
+        inputs: &FFT2_INPUTS_M_N,
+        outputs: &FFT2_OUTPUT,
+    },
+];
+
+const FFT2_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FFT2.ARG_COUNT",
+    identifier: Some("RunMat:fft2:ArgCount"),
+    when: "More than three input arguments are supplied.",
+    message: "fft2: invalid argument count",
+};
+
+const FFT2_ERROR_INVALID_LENGTH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FFT2.INVALID_LENGTH",
+    identifier: Some("RunMat:fft2:InvalidLength"),
+    when: "Length/size arguments are invalid.",
+    message: "fft2: invalid transform length argument",
+};
+
+const FFT2_ERROR_INVALID_SIZE_VECTOR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FFT2.INVALID_SIZE_VECTOR",
+    identifier: Some("RunMat:fft2:InvalidSizeVector"),
+    when: "Single SIZE argument is invalid.",
+    message: "fft2: invalid size vector argument",
+};
+
+const FFT2_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FFT2.INVALID_INPUT",
+    identifier: Some("RunMat:fft2:InvalidInput"),
+    when: "Input cannot be converted to supported numeric/complex domain.",
+    message: "fft2: invalid input",
+};
+
+const FFT2_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FFT2.INTERNAL",
+    identifier: Some("RunMat:fft2:Internal"),
+    when: "FFT2 execution or tensor shaping fails.",
+    message: "fft2: internal error",
+};
+
+const FFT2_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    FFT2_ERROR_ARG_COUNT,
+    FFT2_ERROR_INVALID_LENGTH,
+    FFT2_ERROR_INVALID_SIZE_VECTOR,
+    FFT2_ERROR_INVALID_INPUT,
+    FFT2_ERROR_INTERNAL,
+];
+
+pub const FFT2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FFT2_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FFT2_ERRORS,
+};
+
+fn fft2_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    fft2_error_with_message(error.message, error)
+}
+
+fn fft2_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    fft2_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn fft2_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
         .with_builtin(BUILTIN_NAME)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn fft2_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "fft2",
     category = "math/fft",
-    summary = "Compute the two-dimensional discrete Fourier transform (DFT) of numeric or complex data.",
+    summary = "Compute two-dimensional discrete Fourier transforms.",
     keywords = "fft2,2d fft,two-dimensional fourier transform,gpu",
     type_resolver(fft2_type),
+    descriptor(crate::builtins::math::fft::fft2::FFT2_DESCRIPTOR),
     builtin_path = "crate::builtins::math::fft::fft2"
 )]
 async fn fft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -67,7 +230,9 @@ async fn fft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
 }
 
 fn fft2_host(value: Value, lengths: (Option<usize>, Option<usize>)) -> BuiltinResult<Value> {
-    let tensor = value_to_complex_tensor(value, BUILTIN_NAME)?;
+    let tensor = value_to_complex_tensor(value, BUILTIN_NAME).map_err(|source| {
+        fft2_error_with_source(&FFT2_ERROR_INVALID_INPUT, "input conversion failed", source)
+    })?;
     let transformed = fft2_complex_tensor(tensor, lengths)?;
     Ok(complex_tensor_into_value(transformed))
 }
@@ -88,11 +253,19 @@ async fn fft2_gpu(
                         provider.free(&first).ok();
                         runmat_accelerate_api::clear_residency(&first);
                     }
-                    let complex = fft2_download_gpu_result(provider, &second).await?;
-                    return Ok(complex_tensor_into_value(complex));
+                    return Ok(Value::GpuTensor(second));
                 }
                 Err(_) => {
-                    let partial = fft2_download_gpu_result(provider, &first).await?;
+                    let partial =
+                        download_provider_complex_tensor(provider, &first, BUILTIN_NAME, true)
+                            .await
+                            .map_err(|source| {
+                                fft2_error_with_source(
+                                    &FFT2_ERROR_INVALID_INPUT,
+                                    "provider download failed",
+                                    source,
+                                )
+                            })?;
                     let completed = fft_complex_tensor(partial, lengths.1, Some(2))?;
                     return Ok(complex_tensor_into_value(completed));
                 }
@@ -103,19 +276,15 @@ async fn fft2_gpu(
     fft2_gpu_fallback(handle, lengths).await
 }
 
-async fn fft2_download_gpu_result(
-    provider: &dyn AccelProvider,
-    handle: &GpuTensorHandle,
-) -> BuiltinResult<ComplexTensor> {
-    fft_download_gpu_result(provider, handle, BUILTIN_NAME).await
-}
-
 async fn fft2_gpu_fallback(
     handle: GpuTensorHandle,
     lengths: (Option<usize>, Option<usize>),
 ) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let complex = tensor_to_complex_tensor(tensor, BUILTIN_NAME)?;
+    let complex = gather_gpu_complex_tensor(&handle, BUILTIN_NAME)
+        .await
+        .map_err(|source| {
+            fft2_error_with_source(&FFT2_ERROR_INVALID_INPUT, "gpu gather failed", source)
+        })?;
     let transformed = fft2_complex_tensor(complex, lengths)?;
     Ok(complex_tensor_into_value(transformed))
 }
@@ -125,8 +294,13 @@ fn fft2_complex_tensor(
     lengths: (Option<usize>, Option<usize>),
 ) -> BuiltinResult<ComplexTensor> {
     let (len_rows, len_cols) = lengths;
-    let first = fft_complex_tensor(tensor, len_rows, Some(1))?;
-    fft_complex_tensor(first, len_cols, Some(2))
+    transform_axes_complex_tensor(
+        tensor,
+        &[len_rows, len_cols],
+        TransformDirection::Forward,
+        BUILTIN_NAME,
+    )
+    .map_err(|source| fft2_error_with_source(&FFT2_ERROR_INTERNAL, "transform failed", source))
 }
 
 fn parse_fft2_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize>)> {
@@ -134,75 +308,85 @@ fn parse_fft2_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<
         0 => Ok((None, None)),
         1 => parse_fft2_single(&args[0]),
         2 => {
-            let rows = parse_length(&args[0], BUILTIN_NAME)?;
-            let cols = parse_length(&args[1], BUILTIN_NAME)?;
+            let rows = parse_length(&args[0], BUILTIN_NAME).map_err(|source| {
+                fft2_error_with_source(
+                    &FFT2_ERROR_INVALID_LENGTH,
+                    "row-length parse failed",
+                    source,
+                )
+            })?;
+            let cols = parse_length(&args[1], BUILTIN_NAME).map_err(|source| {
+                fft2_error_with_source(
+                    &FFT2_ERROR_INVALID_LENGTH,
+                    "column-length parse failed",
+                    source,
+                )
+            })?;
             Ok((rows, cols))
         }
-        _ => Err(fft2_error(
-            "fft2: expected fft2(X), fft2(X, M, N), or fft2(X, SIZE)",
-        )),
+        _ => Err(fft2_error(&FFT2_ERROR_ARG_COUNT)),
     }
 }
 
 fn parse_fft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match value {
-        Value::Tensor(tensor) => parse_length_pair(&tensor.data, BUILTIN_NAME),
+        Value::Tensor(tensor) => {
+            parse_2d_lengths_from_data(&tensor.data, BUILTIN_NAME).map_err(|source| {
+                fft2_error_with_detail(
+                    &FFT2_ERROR_INVALID_SIZE_VECTOR,
+                    format!("size vector parse failed: {source}"),
+                )
+            })
+        }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical)
-                .map_err(|e| fft2_error(format!("{BUILTIN_NAME}: {e}")))?;
-            parse_length_pair(&tensor.data, BUILTIN_NAME)
+            let tensor = tensor::logical_to_tensor(logical).map_err(|source| {
+                fft2_error_with_detail(
+                    &FFT2_ERROR_INVALID_SIZE_VECTOR,
+                    format!("logical size-vector conversion failed: {source}"),
+                )
+            })?;
+            parse_2d_lengths_from_data(&tensor.data, BUILTIN_NAME).map_err(|source| {
+                fft2_error_with_detail(
+                    &FFT2_ERROR_INVALID_SIZE_VECTOR,
+                    format!("size vector parse failed: {source}"),
+                )
+            })
         }
         Value::Num(_) | Value::Int(_) => {
-            let len = parse_length(value, BUILTIN_NAME)?;
+            let len = parse_length(value, BUILTIN_NAME).map_err(|source| {
+                fft2_error_with_source(&FFT2_ERROR_INVALID_LENGTH, "length parse failed", source)
+            })?;
             Ok((len, len))
         }
         Value::Complex(re, im) => {
             if im.abs() > f64::EPSILON {
-                return Err(fft2_error("fft2: transform lengths must be real-valued"));
+                return Err(fft2_error(&FFT2_ERROR_INVALID_LENGTH));
             }
             let scalar = Value::Num(*re);
-            let len = parse_length(&scalar, BUILTIN_NAME)?;
+            let len = parse_length(&scalar, BUILTIN_NAME).map_err(|source| {
+                fft2_error_with_source(&FFT2_ERROR_INVALID_LENGTH, "length parse failed", source)
+            })?;
             Ok((len, len))
         }
-        Value::ComplexTensor(_) => Err(fft2_error("fft2: size vector must contain real values")),
-        Value::GpuTensor(_) => Err(fft2_error(
-            "fft2: size vector must be numeric and host-resident",
-        )),
-        Value::Bool(_) => Err(fft2_error("fft2: transform lengths must be numeric")),
+        Value::ComplexTensor(_) => Err(fft2_error(&FFT2_ERROR_INVALID_SIZE_VECTOR)),
+        Value::GpuTensor(_) => Err(fft2_error(&FFT2_ERROR_INVALID_SIZE_VECTOR)),
+        Value::Bool(_) => Err(fft2_error(&FFT2_ERROR_INVALID_LENGTH)),
         Value::String(_)
         | Value::StringArray(_)
         | Value::CharArray(_)
         | Value::Cell(_)
         | Value::Struct(_)
         | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::Object(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(fft2_error("fft2: transform lengths must be numeric")),
-    }
-}
-
-fn parse_length_pair(data: &[f64], builtin: &str) -> BuiltinResult<(Option<usize>, Option<usize>)> {
-    match data.len() {
-        0 => Ok((None, None)),
-        1 => {
-            let scalar = Value::Num(data[0]);
-            let len = parse_length(&scalar, builtin)?;
-            Ok((len, len))
-        }
-        2 => {
-            let first = Value::Num(data[0]);
-            let second = Value::Num(data[1]);
-            let len_rows = parse_length(&first, builtin)?;
-            let len_cols = parse_length(&second, builtin)?;
-            Ok((len_rows, len_cols))
-        }
-        _ => Err(fft2_error(format!(
-            "{builtin}: size vector must contain at most two elements"
-        ))),
+        | Value::OutputList(_) => Err(fft2_error(&FFT2_ERROR_INVALID_LENGTH)),
     }
 }
 
@@ -210,9 +394,12 @@ fn parse_length_pair(data: &[f64], builtin: &str) -> BuiltinResult<(Option<usize
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::builtins::math::fft::common;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
+    use runmat_builtins::{builtin_function_by_name, IntValue, ResolveContext, Tensor, Type};
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
         (a.0 - b.0).abs() <= tol && (a.1 - b.1).abs() <= tol
@@ -220,6 +407,24 @@ pub(crate) mod tests {
 
     fn error_message(error: crate::RuntimeError) -> String {
         error.message().to_string()
+    }
+
+    fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
+        error.identifier()
+    }
+
+    fn value_to_host_complex(value: Value) -> ComplexTensor {
+        match value {
+            Value::ComplexTensor(ct) => ct,
+            Value::GpuTensor(handle) => {
+                let provider = runmat_accelerate_api::provider_for_handle(&handle)
+                    .or_else(runmat_accelerate_api::provider)
+                    .expect("provider for gpu handle");
+                let host = block_on(provider.download(&handle)).expect("download gpu fft2 output");
+                common::host_to_complex_tensor(host, BUILTIN_NAME).expect("decode gpu complex")
+            }
+            other => panic!("expected complex value, got {other:?}"),
+        }
     }
 
     #[test]
@@ -236,6 +441,20 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(4), Some(1)])
             }
         );
+    }
+
+    #[test]
+    fn fft2_descriptor_signatures_and_errors() {
+        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("fft2 builtin");
+        let descriptor = builtin.descriptor.expect("fft2 descriptor");
+        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
+        assert!(labels.contains(&"Y = fft2(X)"));
+        assert!(labels.contains(&"Y = fft2(X, SIZE)"));
+        assert!(labels.contains(&"Y = fft2(X, M, N)"));
+        assert!(descriptor
+            .errors
+            .iter()
+            .any(|err| err.code == "RM.FFT2.INVALID_LENGTH"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -333,15 +552,12 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let gpu = fft2_builtin(Value::GpuTensor(handle), Vec::new()).expect("fft2 gpu");
             let cpu = fft2_builtin(Value::Tensor(tensor), Vec::new()).expect("fft2 cpu");
-            match (gpu, cpu) {
-                (Value::ComplexTensor(g), Value::ComplexTensor(c)) => {
-                    assert_eq!(g.shape, c.shape);
-                    let tol = 1e-10;
-                    for (lhs, rhs) in g.data.iter().zip(c.data.iter()) {
-                        assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
-                    }
-                }
-                other => panic!("unexpected results {other:?}"),
+            let g = value_to_host_complex(gpu);
+            let c = value_to_host_complex(cpu);
+            assert_eq!(g.shape, c.shape);
+            let tol = 1e-10;
+            for (lhs, rhs) in g.data.iter().zip(c.data.iter()) {
+                assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
             }
         });
     }
@@ -362,10 +578,9 @@ pub(crate) mod tests {
     #[test]
     fn fft2_rejects_boolean_length_argument() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let err = error_message(
-            fft2_builtin(Value::Tensor(tensor), vec![Value::Bool(true)]).unwrap_err(),
-        );
-        assert!(err.contains("numeric"));
+        let err = fft2_builtin(Value::Tensor(tensor), vec![Value::Bool(true)]).unwrap_err();
+        assert_eq!(error_identifier(&err), FFT2_ERROR_INVALID_LENGTH.identifier);
+        assert!(error_message(err).contains(FFT2_ERROR_INVALID_LENGTH.message));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -388,18 +603,17 @@ pub(crate) mod tests {
     #[test]
     fn fft2_rejects_excess_arguments() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let err = error_message(
-            fft2_builtin(
-                Value::Tensor(tensor),
-                vec![
-                    Value::Int(IntValue::I32(2)),
-                    Value::Int(IntValue::I32(2)),
-                    Value::Int(IntValue::I32(2)),
-                ],
-            )
-            .unwrap_err(),
-        );
-        assert!(err.contains("fft2"));
+        let err = fft2_builtin(
+            Value::Tensor(tensor),
+            vec![
+                Value::Int(IntValue::I32(2)),
+                Value::Int(IntValue::I32(2)),
+                Value::Int(IntValue::I32(2)),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(error_identifier(&err), FFT2_ERROR_ARG_COUNT.identifier);
+        assert!(error_message(err).contains(FFT2_ERROR_ARG_COUNT.message));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -423,8 +637,8 @@ pub(crate) mod tests {
         let gpu_value =
             fft2_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("fft2 gpu");
         let cpu_value = fft2_builtin(Value::Tensor(tensor_cpu), Vec::new()).expect("fft2 cpu");
-        let gpu_ct = value_to_complex_tensor(gpu_value, "fft2").expect("gpu complex tensor");
-        let cpu_ct = value_to_complex_tensor(cpu_value, "fft2").expect("cpu complex tensor");
+        let gpu_ct = value_to_host_complex(gpu_value);
+        let cpu_ct = value_to_host_complex(cpu_value);
         assert_eq!(gpu_ct.shape, cpu_ct.shape);
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,

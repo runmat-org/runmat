@@ -233,7 +233,7 @@ pub fn runtime_error(message: impl Into<String>) -> RuntimeErrorBuilder {
 
 fn infer_identifier(message: &str) -> Option<&'static str> {
     if message.starts_with("Undefined function:") {
-        Some("MATLAB:UndefinedFunction")
+        Some("RunMat:UndefinedFunction")
     } else {
         None
     }

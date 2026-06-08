@@ -8,7 +8,11 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use glob::glob;
-use runmat_builtins::{CharArray, StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{
@@ -18,7 +22,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::console::{record_console_output, ConsoleStream};
+use crate::console::{record_console_line, ConsoleStream};
 use crate::output_context::requested_output_count;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -52,6 +56,61 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "ls";
 
+const LS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "listing",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Character array containing one listed entry per row.",
+}];
+const LS_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const LS_INPUTS_NAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "name",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Folder, file path, or wildcard pattern to list.",
+}];
+const LS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "listing = ls()",
+        inputs: &LS_INPUTS_NONE,
+        outputs: &LS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "listing = ls(name)",
+        inputs: &LS_INPUTS_NAME,
+        outputs: &LS_OUTPUT,
+    },
+];
+const LS_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LS.TOO_MANY_INPUTS",
+    identifier: None,
+    when: "More than one input argument is provided.",
+    message: "ls: too many input arguments",
+};
+const LS_ERROR_NAME_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LS.NAME_ARG",
+    identifier: None,
+    when: "Name argument is not a character vector or string scalar.",
+    message: "ls: name must be a character vector or string scalar",
+};
+const LS_ERRORS: [BuiltinErrorDescriptor; 2] = [LS_ERROR_TOO_MANY_INPUTS, LS_ERROR_NAME_ARG];
+pub const LS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LS_ERRORS,
+};
+
+fn ls_error_row(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn ls_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -72,23 +131,24 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "ls",
     category = "io/repl_fs",
-    summary = "List files and folders in the current directory or matching a wildcard pattern.",
+    summary = "List files and folders in directories or wildcard paths.",
     keywords = "ls,list files,folder contents,wildcard listing,dir",
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::ls_type),
+    descriptor(crate::builtins::io::repl_fs::ls::LS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::ls"
 )]
 async fn ls_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(&args).await?;
     if gathered.len() > 1 {
-        return Err(ls_error("ls: too many input arguments"));
+        return Err(ls_error_row(&LS_ERROR_TOO_MANY_INPUTS));
     }
 
     let entries = if let Some(value) = gathered.first() {
-        list_from_value(value)?
+        list_from_value(value).await?
     } else {
-        list_current_directory()?
+        list_current_directory().await?
     };
 
     if should_emit_stdout() {
@@ -97,17 +157,17 @@ async fn ls_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     rows_to_char_array(&entries)
 }
 
-fn list_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
+async fn list_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
     let names = patterns_from_value(value)?;
     if names.is_empty() {
-        return list_current_directory();
+        return list_current_directory().await;
     }
 
     let mut seen = HashSet::new();
     let mut combined = Vec::new();
 
     for pattern in names {
-        let matches = list_for_pattern(&pattern)?;
+        let matches = list_for_pattern(&pattern).await?;
         for entry in matches {
             if seen.insert(entry.clone()) {
                 combined.push(entry);
@@ -119,31 +179,32 @@ fn list_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
     Ok(combined)
 }
 
-fn list_current_directory() -> BuiltinResult<Vec<String>> {
+async fn list_current_directory() -> BuiltinResult<Vec<String>> {
     let cwd = vfs::current_dir()
         .map_err(|err| ls_error(format!("ls: unable to determine current directory ({err})")))?;
-    list_directory(&cwd)
+    list_directory(&cwd).await
 }
 
-fn list_for_pattern(raw: &str) -> BuiltinResult<Vec<String>> {
+async fn list_for_pattern(raw: &str) -> BuiltinResult<Vec<String>> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return list_current_directory();
+        return list_current_directory().await;
     }
 
     let expanded = expand_user_path(trimmed, "ls").map_err(ls_error)?;
 
     if contains_wildcards(&expanded) {
-        list_glob_pattern(&expanded, trimmed)
+        list_glob_pattern(&expanded, trimmed).await
     } else {
-        list_path(&expanded, trimmed)
+        list_path(&expanded, trimmed).await
     }
 }
 
-fn list_directory(dir: &Path) -> BuiltinResult<Vec<String>> {
+async fn list_directory(dir: &Path) -> BuiltinResult<Vec<String>> {
     let mut entries = Vec::new();
     let dir_str = path_to_string(dir);
-    let read_dir = vfs::read_dir(dir)
+    let read_dir = vfs::read_dir_async(dir)
+        .await
         .map_err(|err| ls_error(format!("ls: unable to access '{dir_str}' ({err})")))?;
 
     for entry in read_dir {
@@ -160,12 +221,12 @@ fn list_directory(dir: &Path) -> BuiltinResult<Vec<String>> {
     Ok(entries)
 }
 
-fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<String>> {
+async fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<String>> {
     let path = PathBuf::from(expanded);
-    match vfs::metadata(&path) {
+    match vfs::metadata_async(&path).await {
         Ok(metadata) => {
             if metadata.is_dir() {
-                list_directory(&path)
+                list_directory(&path).await
             } else {
                 let mut text = path_to_string(&path);
                 append_directory_suffix(&mut text, false);
@@ -179,7 +240,7 @@ fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<String>> {
     }
 }
 
-fn list_glob_pattern(expanded: &str, original: &str) -> BuiltinResult<Vec<String>> {
+async fn list_glob_pattern(expanded: &str, original: &str) -> BuiltinResult<Vec<String>> {
     let mut entries = Vec::new();
 
     let matcher = glob(expanded)
@@ -187,7 +248,8 @@ fn list_glob_pattern(expanded: &str, original: &str) -> BuiltinResult<Vec<String
     for item in matcher {
         match item {
             Ok(path) => {
-                let is_dir = vfs::symlink_metadata(&path)
+                let is_dir = vfs::symlink_metadata_async(&path)
+                    .await
                     .map(|meta| meta.is_dir())
                     .unwrap_or(false);
                 let mut name = path_to_string(&path);
@@ -236,7 +298,7 @@ fn emit_listing_stdout(rows: &[String]) {
         return;
     }
     let text = rows.join("\n");
-    record_console_output(ConsoleStream::Stdout, text);
+    record_console_line(ConsoleStream::Stdout, text);
 }
 
 fn should_emit_stdout() -> bool {
@@ -254,16 +316,12 @@ fn patterns_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
             if data.len() == 1 {
                 Ok(vec![data[0].clone()])
             } else {
-                Err(ls_error(
-                    "ls: name must be a character vector or string scalar",
-                ))
+                Err(ls_error_row(&LS_ERROR_NAME_ARG))
             }
         }
         Value::CharArray(chars) => {
             if chars.rows != 1 {
-                return Err(ls_error(
-                    "ls: name must be a character vector or string scalar",
-                ));
+                return Err(ls_error_row(&LS_ERROR_NAME_ARG));
             }
             let mut row = String::with_capacity(chars.cols);
             for c in 0..chars.cols {
@@ -271,9 +329,7 @@ fn patterns_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
             }
             Ok(vec![row.trim_end().to_string()])
         }
-        _ => Err(ls_error(
-            "ls: name must be a character vector or string scalar",
-        )),
+        _ => Err(ls_error_row(&LS_ERROR_NAME_ARG)),
     }
 }
 
@@ -303,7 +359,7 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use runmat_builtins::CharArray;
-    use runmat_filesystem::{self as fs, File};
+    use runmat_filesystem::File;
     use tempfile::tempdir;
 
     fn ls_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -346,6 +402,18 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn ls_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = LS_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"listing = ls()"));
+        assert!(labels.contains(&"listing = ls(name)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn ls_lists_current_directory_when_no_arguments() {
         let _lock = REPL_FS_TEST_LOCK
             .lock()
@@ -355,7 +423,8 @@ pub(crate) mod tests {
         let dir = tempdir().expect("tempdir");
         env::set_current_dir(dir.path()).expect("switch temp dir");
         File::create(dir.path().join("alpha.txt")).expect("create file");
-        fs::create_dir(dir.path().join("beta")).expect("create dir");
+        futures::executor::block_on(vfs::create_dir_async(dir.path().join("beta")))
+            .expect("create dir");
 
         let value = ls_builtin(Vec::new()).expect("ls");
         let mut rows = rows_from_value(value);
@@ -374,7 +443,8 @@ pub(crate) mod tests {
     fn ls_lists_specific_directory_contents() {
         let dir = tempdir().expect("tempdir");
         File::create(dir.path().join("data.csv")).expect("create file");
-        fs::create_dir(dir.path().join("nested")).expect("create dir");
+        futures::executor::block_on(vfs::create_dir_async(dir.path().join("nested")))
+            .expect("create dir");
 
         let path = dir.path().to_string_lossy().to_string();
         let value = ls_builtin(vec![Value::from(path)]).expect("ls");
@@ -456,9 +526,6 @@ pub(crate) mod tests {
     #[test]
     fn ls_rejects_numeric_argument() {
         let err = ls_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
-        assert_eq!(
-            err.message(),
-            "ls: name must be a character vector or string scalar"
-        );
+        assert_eq!(err.message(), LS_ERROR_NAME_ARG.message);
     }
 }

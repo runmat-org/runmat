@@ -1,7 +1,11 @@
 //! MATLAB-compatible `fix` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -57,19 +61,65 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "fix";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const FIX_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Rounded values toward zero.",
+}];
+const FIX_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric, logical, or complex input array.",
+}];
+const FIX_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = fix(X)",
+    inputs: &FIX_INPUTS,
+    outputs: &FIX_OUTPUT,
+}];
+const FIX_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FIX.INVALID_INPUT",
+    identifier: Some("RunMat:fix:InvalidInput"),
+    when: "Input cannot be interpreted as numeric, logical, or complex data.",
+    message: "fix: invalid input",
+};
+const FIX_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FIX.INTERNAL",
+    identifier: Some("RunMat:fix:Internal"),
+    when: "Internal tensor conversion or allocation failed.",
+    message: "fix: internal error",
+};
+const FIX_ERRORS: [BuiltinErrorDescriptor; 2] = [FIX_ERROR_INVALID_INPUT, FIX_ERROR_INTERNAL];
+pub const FIX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FIX_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FIX_ERRORS,
+};
+
+fn builtin_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "fix",
     category = "math/rounding",
-    summary = "Round scalars, vectors, matrices, or N-D tensors toward zero.",
+    summary = "Round values toward zero.",
     keywords = "fix,truncate,rounding,toward zero,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::rounding::fix::FIX_DESCRIPTOR),
     builtin_path = "crate::builtins::math::rounding::fix"
 )]
 async fn fix_builtin(value: Value) -> BuiltinResult<Value> {
@@ -79,12 +129,14 @@ async fn fix_builtin(value: Value) -> BuiltinResult<Value> {
         Value::ComplexTensor(ct) => fix_complex_tensor(ct),
         Value::CharArray(ca) => fix_char_array(ca),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(|err| builtin_error(err))?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|err| builtin_error_with_detail(&FIX_ERROR_INVALID_INPUT, err))?;
             fix_tensor(tensor).map(tensor::tensor_into_value)
         }
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("fix: expected numeric or logical input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(builtin_error_with_detail(
+            &FIX_ERROR_INVALID_INPUT,
+            "expected numeric or logical input",
+        )),
         other => fix_numeric(other),
     }
 }
@@ -92,7 +144,7 @@ async fn fix_builtin(value: Value) -> BuiltinResult<Value> {
 async fn fix_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_fix(&handle).await {
-            return Ok(Value::GpuTensor(out));
+            return Ok(gpu_helpers::resident_gpu_value(out));
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
@@ -106,8 +158,8 @@ fn fix_numeric(value: Value) -> BuiltinResult<Value> {
         Value::Bool(b) => Ok(Value::Num(fix_scalar(if b { 1.0 } else { 0.0 }))),
         Value::Tensor(t) => fix_tensor(t).map(tensor::tensor_into_value),
         other => {
-            let tensor =
-                tensor::value_into_tensor_for("fix", other).map_err(|err| builtin_error(err))?;
+            let tensor = tensor::value_into_tensor_for("fix", other)
+                .map_err(|err| builtin_error_with_detail(&FIX_ERROR_INVALID_INPUT, err))?;
             Ok(fix_tensor(tensor).map(tensor::tensor_into_value)?)
         }
     }
@@ -127,7 +179,7 @@ fn fix_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         .map(|&(re, im)| (fix_scalar(re), fix_scalar(im)))
         .collect::<Vec<_>>();
     let tensor = ComplexTensor::new(data, ct.shape.clone())
-        .map_err(|e| builtin_error(format!("fix: {e}")))?;
+        .map_err(|e| builtin_error_with_detail(&FIX_ERROR_INTERNAL, e))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -138,7 +190,7 @@ fn fix_char_array(ca: CharArray) -> BuiltinResult<Value> {
         .map(|&ch| fix_scalar(ch as u32 as f64))
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-        .map_err(|e| builtin_error(format!("fix: {e}")))?;
+        .map_err(|e| builtin_error_with_detail(&FIX_ERROR_INTERNAL, e))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -166,12 +218,22 @@ pub(crate) mod tests {
         block_on(super::fix_builtin(value))
     }
 
-    fn assert_error_contains(error: RuntimeError, needle: &str) {
+    fn assert_error_contains(error: &RuntimeError, needle: &str) {
         assert!(
             error.message().contains(needle),
             "unexpected error: {}",
             error.message()
         );
+    }
+
+    #[test]
+    fn fix_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = FIX_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = fix(X)"));
     }
 
     #[test]
@@ -293,7 +355,8 @@ pub(crate) mod tests {
     #[test]
     fn fix_string_errors() {
         let err = fix_builtin(Value::from("abc")).unwrap_err();
-        assert_error_contains(err, "expected numeric");
+        assert_error_contains(&err, "expected numeric");
+        assert_eq!(err.identifier(), FIX_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

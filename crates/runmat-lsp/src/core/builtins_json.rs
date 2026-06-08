@@ -44,6 +44,7 @@ pub struct BuiltinDocJsonEncodeOption {
 pub struct BuiltinDocJson {
     pub title: Option<String>,
     pub category: Option<String>,
+    #[allow(dead_code)]
     pub keywords: Option<Vec<String>>,
     pub summary: Option<String>,
     pub description: Option<String>,

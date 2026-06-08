@@ -1,6 +1,5 @@
 //! Plotting performance knobs and level-of-detail helpers.
 
-use once_cell::sync::OnceCell;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 const DEFAULT_SCATTER_TARGET_POINTS: u32 = 250_000;
@@ -12,15 +11,11 @@ const SURFACE_EXTENT_REFERENCE: f32 = 500.0;
 
 static SCATTER_TARGET_POINTS: AtomicU32 = AtomicU32::new(DEFAULT_SCATTER_TARGET_POINTS);
 static SURFACE_VERTEX_BUDGET: AtomicU64 = AtomicU64::new(DEFAULT_SURFACE_VERTEX_BUDGET);
-static SCATTER_ENV_INIT: OnceCell<()> = OnceCell::new();
-static SURFACE_ENV_INIT: OnceCell<()> = OnceCell::new();
 
 /// Returns the target number of scatter points we aim to draw per dispatch
-/// before enabling compute-side decimation. The value can be overridden via
-/// the `RUNMAT_PLOT_SCATTER_TARGET` environment variable or by calling
-/// [`set_scatter_target_points`].
+/// before enabling compute-side decimation. The value can be overridden by
+/// host configuration (CLI/wasm bindings) via [`set_scatter_target_points`].
 pub(crate) fn scatter_target_points() -> u32 {
-    ensure_scatter_env();
     SCATTER_TARGET_POINTS.load(Ordering::Relaxed)
 }
 
@@ -32,10 +27,9 @@ pub fn set_scatter_target_points(value: u32) {
 }
 
 /// Returns the maximum number of surface vertices we attempt to pack on the GPU
-/// before enabling LOD. Override via `RUNMAT_PLOT_SURFACE_VERTEX_BUDGET` or
+/// before enabling LOD. Override via host configuration with
 /// [`set_surface_vertex_budget`].
 pub(crate) fn surface_vertex_budget() -> u64 {
-    ensure_surface_env();
     SURFACE_VERTEX_BUDGET.load(Ordering::Relaxed)
 }
 
@@ -43,30 +37,6 @@ pub(crate) fn surface_vertex_budget() -> u64 {
 pub fn set_surface_vertex_budget(value: u64) {
     let clamped = value.max(MIN_SURFACE_VERTEX_BUDGET);
     SURFACE_VERTEX_BUDGET.store(clamped, Ordering::Relaxed);
-}
-
-fn ensure_scatter_env() {
-    SCATTER_ENV_INIT.get_or_init(|| {
-        if let Some(value) = read_env_u32("RUNMAT_PLOT_SCATTER_TARGET") {
-            set_scatter_target_points(value);
-        }
-    });
-}
-
-fn ensure_surface_env() {
-    SURFACE_ENV_INIT.get_or_init(|| {
-        if let Some(value) = read_env_u64("RUNMAT_PLOT_SURFACE_VERTEX_BUDGET") {
-            set_surface_vertex_budget(value);
-        }
-    });
-}
-
-fn read_env_u32(key: &str) -> Option<u32> {
-    std::env::var(key).ok().and_then(|value| value.parse().ok())
-}
-
-fn read_env_u64(key: &str) -> Option<u64> {
-    std::env::var(key).ok().and_then(|value| value.parse().ok())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -179,11 +149,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_target_env_override() {
-        std::env::set_var("RUNMAT_PLOT_SCATTER_TARGET", "300000");
-        // Clear cached cell by recreating process-local OnceCell via CHAIN?
-        // We cannot reset OnceCell, so just assert helper respects defaults via
-        // direct read function.
-        assert_eq!(read_env_u64("RUNMAT_PLOT_SCATTER_TARGET").unwrap(), 300_000);
+        set_scatter_target_points(300_000);
+        assert_eq!(scatter_target_points(), 300_000);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

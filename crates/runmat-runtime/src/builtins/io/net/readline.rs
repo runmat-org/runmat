@@ -1,6 +1,10 @@
 //! MATLAB-compatible `readline` builtin for TCP/IP clients in RunMat.
 
-use runmat_builtins::{IntValue, StructValue, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, StructValue, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use std::io::{self, Read};
 use std::net::TcpStream;
@@ -14,10 +18,64 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
 
-const MESSAGE_ID_INVALID_CLIENT: &str = "MATLAB:readline:InvalidTcpClient";
-const MESSAGE_ID_NOT_CONNECTED: &str = "MATLAB:readline:NotConnected";
-const MESSAGE_ID_INVALID_ARGUMENTS: &str = "MATLAB:readline:InvalidArguments";
-const MESSAGE_ID_INTERNAL: &str = "MATLAB:readline:InternalError";
+const BUILTIN_NAME: &str = "readline";
+
+const READLINE_OUTPUT_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "line",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Line text without terminator, empty string, or 0x0 double on timeout.",
+}];
+const READLINE_INPUTS_CLIENT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "client",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "tcpclient handle struct.",
+}];
+const READLINE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "line = readline(client)",
+    inputs: &READLINE_INPUTS_CLIENT,
+    outputs: &READLINE_OUTPUT_TEXT,
+}];
+
+const READLINE_ERROR_INVALID_CLIENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.READLINE.INVALID_CLIENT",
+    identifier: Some("RunMat:readline:InvalidTcpClient"),
+    when: "Client handle is missing, malformed, invalid, or stale.",
+    message: "readline: invalid tcpclient handle",
+};
+const READLINE_ERROR_NOT_CONNECTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.READLINE.NOT_CONNECTED",
+    identifier: Some("RunMat:readline:NotConnected"),
+    when: "Client has no active socket connection.",
+    message: "readline: tcpclient is disconnected",
+};
+const READLINE_ERROR_INVALID_ARGUMENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.READLINE.INVALID_ARGUMENTS",
+    identifier: Some("RunMat:readline:InvalidArguments"),
+    when: "Unexpected additional positional arguments are provided.",
+    message: "readline: invalid argument list",
+};
+const READLINE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.READLINE.INTERNAL",
+    identifier: Some("RunMat:readline:InternalError"),
+    when: "Internal socket/control-flow conversion fails.",
+    message: "readline: internal socket error",
+};
+const READLINE_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    READLINE_ERROR_INVALID_CLIENT,
+    READLINE_ERROR_NOT_CONNECTED,
+    READLINE_ERROR_INVALID_ARGUMENTS,
+    READLINE_ERROR_INTERNAL,
+];
+pub const READLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &READLINE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &READLINE_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::readline")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -35,15 +93,42 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Networking occurs on the host CPU; GPU providers are not involved.",
 };
 
-fn readline_error(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier(message_id)
-        .with_builtin("readline")
-        .build()
+fn readline_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-fn readline_flow(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
-    readline_error(message_id, message)
+fn readline_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    readline_error_with_message(error.message, error)
+}
+
+fn readline_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let detail = detail.strip_prefix("readline: ").unwrap_or(detail);
+    readline_error_with_message(format!("{}: {}", error.message, detail), error)
+}
+
+fn readline_flow(error: &'static BuiltinErrorDescriptor, message: impl AsRef<str>) -> RuntimeError {
+    readline_error_with_detail(error, message)
+}
+
+fn map_readline_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::readline")]
@@ -63,22 +148,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Read ASCII text until the terminator from a TCP/IP client.",
     keywords = "readline,tcpclient,networking",
     type_resolver(crate::builtins::io::type_resolvers::readline_type),
+    descriptor(crate::builtins::io::net::readline::READLINE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::net::readline"
 )]
 async fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err(readline_flow(
-            MESSAGE_ID_INVALID_ARGUMENTS,
-            "readline: expected only the tcpclient argument",
-        ));
+        return Err(readline_error(&READLINE_ERROR_INVALID_ARGUMENTS));
     }
 
-    let client = gather_if_needed_async(&client).await?;
+    let client = gather_if_needed_async(&client)
+        .await
+        .map_err(|err| map_readline_flow(err, &READLINE_ERROR_INVALID_CLIENT))?;
     let client_struct = match &client {
         Value::Struct(st) => st,
         _ => {
             return Err(readline_flow(
-                MESSAGE_ID_INVALID_CLIENT,
+                &READLINE_ERROR_INVALID_CLIENT,
                 "readline: expected tcpclient struct as first argument",
             ))
         }
@@ -87,7 +172,7 @@ async fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResu
     let client_id = extract_client_id(client_struct)?;
     let handle = client_handle(client_id).ok_or_else(|| {
         readline_flow(
-            MESSAGE_ID_INVALID_CLIENT,
+            &READLINE_ERROR_INVALID_CLIENT,
             "readline: tcpclient handle is no longer valid",
         )
     })?;
@@ -95,14 +180,11 @@ async fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResu
     let (mut stream, timeout, mut buffer) = {
         let mut guard = handle.lock().unwrap_or_else(|poison| poison.into_inner());
         if !guard.connected {
-            return Err(readline_flow(
-                MESSAGE_ID_NOT_CONNECTED,
-                "readline: tcpclient is disconnected",
-            ));
+            return Err(readline_error(&READLINE_ERROR_NOT_CONNECTED));
         }
         let stream = guard.stream.try_clone().map_err(|err| {
             readline_flow(
-                MESSAGE_ID_INTERNAL,
+                &READLINE_ERROR_INTERNAL,
                 format!("readline: unable to clone socket ({err})"),
             )
         })?;
@@ -116,7 +198,7 @@ async fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResu
             guard.readline_buffer = buffer;
         }
         return Err(readline_flow(
-            MESSAGE_ID_INTERNAL,
+            &READLINE_ERROR_INTERNAL,
             format!("readline: unable to configure socket timeout ({err})"),
         ));
     }
@@ -133,7 +215,7 @@ async fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResu
                 guard.readline_buffer = buffer;
             }
             return Err(readline_flow(
-                MESSAGE_ID_INTERNAL,
+                &READLINE_ERROR_INTERNAL,
                 format!("readline: socket error ({err})"),
             ));
         }
@@ -249,7 +331,7 @@ fn empty_double_matrix() -> Value {
 fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
     let id_value = struct_field(struct_value, CLIENT_HANDLE_FIELD).ok_or_else(|| {
         readline_flow(
-            MESSAGE_ID_INVALID_CLIENT,
+            &READLINE_ERROR_INVALID_CLIENT,
             "readline: tcpclient struct is missing internal handle",
         )
     })?;
@@ -257,7 +339,7 @@ fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
         Value::Int(IntValue::U64(id)) => Ok(*id),
         Value::Int(iv) => Ok(iv.to_i64() as u64),
         _ => Err(readline_flow(
-            MESSAGE_ID_INVALID_CLIENT,
+            &READLINE_ERROR_INVALID_CLIENT,
             "readline: tcpclient struct has invalid handle field",
         )),
     }
@@ -312,6 +394,17 @@ pub(crate) mod tests {
 
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {
         crate::builtins::io::net::accept::test_guard()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn readline_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = READLINE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"line = readline(client)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -480,7 +573,7 @@ pub(crate) mod tests {
         let _guard = net_guard();
         let err = run_readline(Value::Num(42.0), vec![Value::Num(1.0)])
             .expect_err("expected invalid argument error");
-        assert_error_identifier(err, MESSAGE_ID_INVALID_ARGUMENTS);
+        assert_error_identifier(err, READLINE_ERROR_INVALID_ARGUMENTS.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -489,7 +582,7 @@ pub(crate) mod tests {
         let _guard = net_guard();
         let err =
             run_readline(Value::Num(5.0), Vec::new()).expect_err("expected invalid client error");
-        assert_error_identifier(err, MESSAGE_ID_INVALID_CLIENT);
+        assert_error_identifier(err, READLINE_ERROR_INVALID_CLIENT.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -517,7 +610,7 @@ pub(crate) mod tests {
 
         let err =
             run_readline(client.clone(), Vec::new()).expect_err("expected not-connected error");
-        assert_error_identifier(err, MESSAGE_ID_NOT_CONNECTED);
+        assert_error_identifier(err, READLINE_ERROR_NOT_CONNECTED.identifier.unwrap());
 
         handle.join().expect("server");
         remove_client_for_test(id);
