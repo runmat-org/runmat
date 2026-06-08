@@ -6,6 +6,7 @@ pub mod fminbnd;
 pub mod fsolve;
 pub mod fzero;
 pub mod integral;
+pub mod linprog;
 pub mod optimoptions;
 pub mod optimset;
 pub(crate) mod type_resolvers;

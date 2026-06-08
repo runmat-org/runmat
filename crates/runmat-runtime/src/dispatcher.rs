@@ -438,6 +438,7 @@ async fn call_registered_class_constructor(
     else {
         return Ok(default_object);
     };
+    let owner_qualified = format!("{owner}.{constructor_method_name}");
     let caller_class = current_class_access_context();
     let ctor_access_allowed = match ctor.access {
         runmat_builtins::Access::Public => true,
@@ -461,7 +462,6 @@ async fn call_registered_class_constructor(
     )
     .await
     else {
-        let owner_qualified = format!("{owner}.{constructor_method_name}");
         let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
             &owner_qualified,
             args,
