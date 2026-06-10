@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::io::ErrorKind;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 #[cfg(test)]
@@ -228,7 +228,7 @@ pub(crate) fn require_latest_prep_revision() -> bool {
         })
 }
 
-fn prep_artifact_path(root: &PathBuf, prep_artifact_id: &str) -> PathBuf {
+fn prep_artifact_path(root: &Path, prep_artifact_id: &str) -> PathBuf {
     root.join("prep").join(format!("{prep_artifact_id}.json"))
 }
 

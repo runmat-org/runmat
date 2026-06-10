@@ -27,14 +27,14 @@ const FEA_DOCUMENT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FeaResolvedDocument {
-    Study(AnalysisStudySpec),
+    Study(Box<AnalysisStudySpec>),
     Sweep(AnalysisStudySweepSpec),
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum RawFeaDocument {
-    Study(FeaStudyDocument),
+    Study(Box<FeaStudyDocument>),
     Sweep(FeaSweepDocument),
 }
 
@@ -243,8 +243,8 @@ pub async fn parse_and_resolve_fea_document(
         .map_err(|err| format!("failed to parse FEA YAML: {err}"))?;
     match raw {
         RawFeaDocument::Study(study) => {
-            let resolved = resolve_study(study, base_dir).await?;
-            Ok(FeaResolvedDocument::Study(resolved.spec))
+            let resolved = resolve_study(*study, base_dir).await?;
+            Ok(FeaResolvedDocument::Study(Box::new(resolved.spec)))
         }
         RawFeaDocument::Sweep(sweep) => resolve_sweep(sweep, base_dir).await,
     }

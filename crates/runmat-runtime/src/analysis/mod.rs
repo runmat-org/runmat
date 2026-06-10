@@ -31,14 +31,15 @@ use policy::{
     breach_rate_greater_than, breach_rate_less_than, electromagnetic_sweep_thresholds_for_policy,
     electromagnetic_thresholds_for_policy, thermo_field_quality_thresholds_for_policy,
     thermo_gradient_thresholds_for_policy, thermo_thresholds_for_policy,
-    EM_ASSIGNMENT_COVERAGE_MIN_BALANCED, EM_BOUNDARY_ANCHOR_MIN_BALANCED,
-    EM_BOUNDARY_ENERGY_MIN_BALANCED, EM_BOUNDARY_LOCALIZATION_MIN_BALANCED,
-    EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED, EM_CONDITIONING_MAX_BALANCED,
-    EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED, EM_ENERGY_IMBALANCE_MAX_BALANCED,
-    EM_FALLBACK_COEFFICIENT_MAX_BALANCED, EM_FLUX_DIVERGENCE_MAX_BALANCED,
-    EM_GROUND_EFFECTIVENESS_MIN_BALANCED, EM_HETEROGENEITY_THRESHOLD_BALANCED,
-    EM_IMAG_RESIDUAL_MAX_BALANCED, EM_INSULATION_LEAKAGE_MAX_BALANCED,
-    EM_REAL_RESIDUAL_MAX_BALANCED, EM_REGION_CONTRAST_MAX_BALANCED, EM_RESONANCE_Q_MIN_BALANCED,
+    ElectromagneticQualityThresholds, EM_ASSIGNMENT_COVERAGE_MIN_BALANCED,
+    EM_BOUNDARY_ANCHOR_MIN_BALANCED, EM_BOUNDARY_ENERGY_MIN_BALANCED,
+    EM_BOUNDARY_LOCALIZATION_MIN_BALANCED, EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED,
+    EM_CONDITIONING_MAX_BALANCED, EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED,
+    EM_ENERGY_IMBALANCE_MAX_BALANCED, EM_FALLBACK_COEFFICIENT_MAX_BALANCED,
+    EM_FLUX_DIVERGENCE_MAX_BALANCED, EM_GROUND_EFFECTIVENESS_MIN_BALANCED,
+    EM_HETEROGENEITY_THRESHOLD_BALANCED, EM_IMAG_RESIDUAL_MAX_BALANCED,
+    EM_INSULATION_LEAKAGE_MAX_BALANCED, EM_REAL_RESIDUAL_MAX_BALANCED,
+    EM_REGION_CONTRAST_MAX_BALANCED, EM_RESONANCE_Q_MIN_BALANCED,
     EM_SOURCE_INTERFERENCE_MAX_BALANCED, EM_SOURCE_MATERIAL_ALIGNMENT_MIN_BALANCED,
     EM_SOURCE_OVERLAP_MAX_BALANCED, EM_SOURCE_REALIZATION_MIN_BALANCED,
     EM_SOURCE_REGION_COVERAGE_MIN_BALANCED, EM_SOURCE_REGION_ENERGY_CONSISTENCY_MIN_BALANCED,
@@ -5680,7 +5681,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
     let em_sweep_count = diagnostic_metric(&run.diagnostics, "FEA_EM_SWEEP", "sweep_count");
     let em_resonance_q_proxy =
         diagnostic_metric(&run.diagnostics, "FEA_EM_SWEEP", "resonance_q_proxy");
-    let (
+    let ElectromagneticQualityThresholds {
         em_spread_threshold,
         em_heterogeneity_threshold,
         em_coverage_min_threshold,
@@ -5703,7 +5704,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
         em_source_region_energy_consistency_min_threshold,
         em_real_residual_max_threshold,
         em_imag_residual_max_threshold,
-    ) = electromagnetic_thresholds_for_policy(options.quality_policy);
+    } = electromagnetic_thresholds_for_policy(options.quality_policy);
     let (em_sweep_count_min_threshold, em_resonance_q_min_threshold) =
         electromagnetic_sweep_thresholds_for_policy(options.quality_policy);
     let em_spread_breach = em_conductivity_spread_ratio
@@ -6932,8 +6933,8 @@ pub fn analysis_results_op(
                     eigenvalues_hz,
                     mode_shapes,
                     residual_norms,
-                    mode_units: modal.mode_units.clone(),
-                    frequency_basis: modal.frequency_basis.clone(),
+                    mode_units: modal.mode_units,
+                    frequency_basis: modal.frequency_basis,
                 })
             }
         } else {
@@ -8480,14 +8481,15 @@ fn model_contact_interface_options(model: &AnalysisModel) -> Option<ContactInter
     model
         .interfaces
         .iter()
-        .find_map(|interface| match &interface.kind {
-            AnalysisInterfaceKind::Contact(contact) => Some(ContactInterfaceOptions {
+        .map(|interface| match &interface.kind {
+            AnalysisInterfaceKind::Contact(contact) => ContactInterfaceOptions {
                 enabled: true,
                 penalty_stiffness_scale: contact.penalty_stiffness_scale,
                 max_penetration_ratio: contact.max_penetration_ratio,
                 friction_coefficient: contact.friction_coefficient,
-            }),
+            },
         })
+        .next()
 }
 
 fn to_fea_thermo_mechanical_context(
@@ -9551,8 +9553,7 @@ fn resolve_run_prep_context(
         .iter()
         .map(|mesh| mesh.region_span_hint)
         .sum::<u32>()
-        .max(1)
-        .min(128);
+        .clamp(1, 128);
     let mapped_region_participation_ratio = if artifact.prep.region_mappings.is_empty() {
         0.0
     } else {

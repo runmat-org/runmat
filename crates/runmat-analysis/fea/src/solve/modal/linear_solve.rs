@@ -17,18 +17,22 @@ pub(super) struct LinearSolveAttempt {
     pub(super) runtime_tensor: Option<crate::solve::linear::LinearSolveResult>,
 }
 
+pub(super) struct CgSolveOptions<'a> {
+    pub(super) max_iters: usize,
+    pub(super) tol: f64,
+    pub(super) use_runtime_tensor: bool,
+    pub(super) prepared_runtime_system: Option<&'a RuntimeTensorPreparedLinearSystem>,
+    pub(super) initial_guess: Option<&'a [f64]>,
+}
+
 pub(super) fn solve_k_system_cg(
     summary: &AssemblySummary,
     system: &OperatorSystem,
     rhs: &[f64],
-    max_iters: usize,
-    tol: f64,
-    use_runtime_tensor: bool,
-    prepared_runtime_system: Option<&RuntimeTensorPreparedLinearSystem>,
-    initial_guess: Option<&[f64]>,
+    options: CgSolveOptions<'_>,
 ) -> LinearSolveAttempt {
-    if use_runtime_tensor {
-        if let Some(prepared) = prepared_runtime_system {
+    if options.use_runtime_tensor {
+        if let Some(prepared) = options.prepared_runtime_system {
             if let Some(result) = solve_prepared_linear_system_runtime_tensor(
                 summary,
                 prepared,
@@ -57,7 +61,7 @@ pub(super) fn solve_k_system_cg(
         }
     }
 
-    let mut x = match initial_guess {
+    let mut x = match options.initial_guess {
         Some(values) if values.len() == rhs.len() => values.to_vec(),
         _ => vec![0.0; rhs.len()],
     };
@@ -70,14 +74,14 @@ pub(super) fn solve_k_system_cg(
     };
     let mut p = r.clone();
     let mut rr_old = dot(&r, &r);
-    if rr_old.sqrt() <= tol {
+    if rr_old.sqrt() <= options.tol {
         return LinearSolveAttempt {
             vector: x,
             runtime_tensor: None,
         };
     }
 
-    for _ in 0..max_iters {
+    for _ in 0..options.max_iters {
         let ap = apply_k(system, &p);
         let denom = dot(&p, &ap).abs().max(1.0e-12);
         let alpha = rr_old / denom;
@@ -86,7 +90,7 @@ pub(super) fn solve_k_system_cg(
             r[i] -= alpha * ap[i];
         }
         let rr_new = dot(&r, &r);
-        if rr_new.sqrt() <= tol {
+        if rr_new.sqrt() <= options.tol {
             break;
         }
         let beta = rr_new / rr_old.max(1.0e-12);

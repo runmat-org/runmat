@@ -3,7 +3,7 @@ use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 use crate::{
     assembly::assemble_linear_system,
     contracts::{ComputeBackend, FeaRunError, FeaRunResult, FeaTransientRunResult},
-    diagnostics::builders::extend_common_run_diagnostics,
+    diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     solve::transient::{solve_transient_system, TransientSolveOptions},
 };
 
@@ -29,17 +29,19 @@ pub fn run_transient_with_options(
     let mut diagnostics = transient.diagnostics.clone();
     extend_common_run_diagnostics(
         &mut diagnostics,
-        model,
-        &summary,
-        prep_context,
-        transient.converged_steps as f64,
-        transient
-            .residual_norms
-            .iter()
-            .copied()
-            .fold(0.0_f64, f64::max),
-        "auto",
-        &transient.preconditioner,
+        CommonRunDiagnosticInputs {
+            model,
+            summary: &summary,
+            prep_context,
+            iteration_metric: transient.converged_steps as f64,
+            residual_metric: transient
+                .residual_norms
+                .iter()
+                .copied()
+                .fold(0.0_f64, f64::max),
+            requested_preconditioner: "auto",
+            effective_preconditioner: &transient.preconditioner,
+        },
     );
 
     let displacement = transient

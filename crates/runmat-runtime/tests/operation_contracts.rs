@@ -1049,7 +1049,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
         .modal_results
         .as_ref()
         .expect("modal payload should exist");
-    assert!(modal.eigenvalues_hz.len() > 0);
+    assert!(!modal.eigenvalues_hz.is_empty());
     assert!(modal.eigenvalues_hz.len() <= 2);
     assert!(envelope.data.provenance.deterministic_mode);
 

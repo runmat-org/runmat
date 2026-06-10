@@ -599,7 +599,7 @@ async fn resolve_document_input(
         Value::Object(object) if object.class_name == FEA_STUDY_CLASS => {
             let spec: AnalysisStudySpec =
                 object_json_property(builtin, &object, FEA_STUDY_SPEC_JSON_PROPERTY, &ERROR_INPUT)?;
-            Ok(FeaResolvedDocument::Study(spec))
+            Ok(FeaResolvedDocument::Study(Box::new(spec)))
         }
         Value::Object(object) if object.class_name == FEA_SWEEP_CLASS => {
             let spec: AnalysisStudySweepSpec =
@@ -739,7 +739,7 @@ fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
 
 impl StudyConstructorOptions {
     fn parse(args: &[Value]) -> BuiltinResult<Self> {
-        if args.len() % 2 != 0 {
+        if !args.len().is_multiple_of(2) {
             return Err(builtin_error(
                 STUDY_NAME,
                 &ERROR_INPUT,
@@ -2132,7 +2132,7 @@ fn expect_name_value_tail<'a>(
     builtin: &'static str,
     args: &'a [Value],
 ) -> BuiltinResult<Vec<NameValuePair<'a>>> {
-    if args.len() % 2 != 0 {
+    if !args.len().is_multiple_of(2) {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -2528,7 +2528,7 @@ fn parse_model_defaults_mode(text: &str) -> BuiltinResult<ModelDefaultsMode> {
 
 fn resolved_document_to_object(document: FeaResolvedDocument) -> BuiltinResult<Value> {
     match document {
-        FeaResolvedDocument::Study(spec) => study_to_object(spec),
+        FeaResolvedDocument::Study(spec) => study_to_object(*spec),
         FeaResolvedDocument::Sweep(spec) => sweep_to_object(spec),
     }
 }

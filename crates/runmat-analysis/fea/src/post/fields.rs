@@ -24,8 +24,7 @@ pub fn recover_result_fields(
     let dof_count = summary.dof_count.max(3);
     let mut displacement_field = solve_result.solution.clone();
     if displacement_field.len() < dof_count {
-        displacement_field
-            .extend(std::iter::repeat(0.0).take(dof_count - displacement_field.len()));
+        displacement_field.resize(dof_count, 0.0);
     }
     if displacement_field.is_empty() {
         displacement_field = vec![0.0; dof_count];

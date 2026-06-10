@@ -10,7 +10,10 @@ use crate::{
 mod operator_impl;
 mod preconditioner_impl;
 
-use operator_impl::{apply_k_device, apply_k_host_from_prepared, dot_handle, linear_shift_indices};
+use operator_impl::{
+    apply_k_device, apply_k_host_from_prepared, dot_handle, linear_shift_indices,
+    DeviceOperatorContext,
+};
 use preconditioner_impl::{
     apply_preconditioner_device, build_ilu0_factors, PreconditionerDeviceContext,
 };
@@ -324,20 +327,20 @@ fn solve_runtime_tensor_linear_system_internal(
             shape,
         })
         .ok()?;
+    let device_operator = DeviceOperatorContext {
+        provider,
+        diag: &diag_h,
+        upper_left: &upper_left_h,
+        upper_right: &upper_right_h,
+        constrained_mask: &constrained_mask_h,
+        unconstrained_mask: &unconstrained_mask_h,
+        prev_indices: &prev_indices,
+        next_indices: &next_indices,
+        shape,
+    };
 
     let mut r = if initial_guess.is_some() {
-        let ax = apply_k_device(
-            provider,
-            &x,
-            &diag_h,
-            &upper_left_h,
-            &upper_right_h,
-            &constrained_mask_h,
-            &unconstrained_mask_h,
-            &prev_indices,
-            &next_indices,
-            shape,
-        )?;
+        let ax = apply_k_device(&device_operator, &x)?;
         let residual = block_on(provider.elem_sub(&rhs_h, &ax)).ok()?;
         let _ = provider.free(&ax);
         residual
@@ -376,18 +379,7 @@ fn solve_runtime_tensor_linear_system_internal(
 
     for _ in 0..max_iters {
         device_apply_k_attempt_count = device_apply_k_attempt_count.saturating_add(1);
-        let ap = match apply_k_device(
-            provider,
-            &p,
-            &diag_h,
-            &upper_left_h,
-            &upper_right_h,
-            &constrained_mask_h,
-            &unconstrained_mask_h,
-            &prev_indices,
-            &next_indices,
-            shape,
-        ) {
+        let ap = match apply_k_device(&device_operator, &p) {
             Some(value) => {
                 device_apply_k_count = device_apply_k_count.saturating_add(1);
                 value

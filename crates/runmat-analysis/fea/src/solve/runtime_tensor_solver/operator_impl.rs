@@ -1,41 +1,58 @@
 use futures::executor::block_on;
 use runmat_accelerate_api::GpuTensorHandle;
 
+pub(super) struct DeviceOperatorContext<'a> {
+    pub(super) provider: &'a dyn runmat_accelerate_api::AccelProvider,
+    pub(super) diag: &'a GpuTensorHandle,
+    pub(super) upper_left: &'a GpuTensorHandle,
+    pub(super) upper_right: &'a GpuTensorHandle,
+    pub(super) constrained_mask: &'a GpuTensorHandle,
+    pub(super) unconstrained_mask: &'a GpuTensorHandle,
+    pub(super) prev_indices: &'a [u32],
+    pub(super) next_indices: &'a [u32],
+    pub(super) shape: &'a [usize],
+}
+
 pub(super) fn apply_k_device(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
+    ctx: &DeviceOperatorContext<'_>,
     x: &GpuTensorHandle,
-    diag: &GpuTensorHandle,
-    upper_left: &GpuTensorHandle,
-    upper_right: &GpuTensorHandle,
-    constrained_mask: &GpuTensorHandle,
-    unconstrained_mask: &GpuTensorHandle,
-    prev_indices: &[u32],
-    next_indices: &[u32],
-    shape: &[usize],
 ) -> Option<GpuTensorHandle> {
-    let x_prev = provider.gather_linear(x, prev_indices, shape).ok()?;
-    let x_next = provider.gather_linear(x, next_indices, shape).ok()?;
+    let x_prev = ctx
+        .provider
+        .gather_linear(x, ctx.prev_indices, ctx.shape)
+        .ok()?;
+    let x_next = ctx
+        .provider
+        .gather_linear(x, ctx.next_indices, ctx.shape)
+        .ok()?;
 
-    let diag_term = block_on(provider.elem_mul(diag, x)).ok()?;
-    let left_term = block_on(provider.elem_mul(upper_left, &x_prev)).ok()?;
-    let right_term = block_on(provider.elem_mul(upper_right, &x_next)).ok()?;
-    let tmp = block_on(provider.elem_sub(&diag_term, &left_term)).ok()?;
-    let unconstrained_value = block_on(provider.elem_sub(&tmp, &right_term)).ok()?;
+    let diag_term = block_on(ctx.provider.elem_mul(ctx.diag, x)).ok()?;
+    let left_term = block_on(ctx.provider.elem_mul(ctx.upper_left, &x_prev)).ok()?;
+    let right_term = block_on(ctx.provider.elem_mul(ctx.upper_right, &x_next)).ok()?;
+    let tmp = block_on(ctx.provider.elem_sub(&diag_term, &left_term)).ok()?;
+    let unconstrained_value = block_on(ctx.provider.elem_sub(&tmp, &right_term)).ok()?;
 
-    let unconstrained_part =
-        block_on(provider.elem_mul(unconstrained_mask, &unconstrained_value)).ok()?;
-    let constrained_part = block_on(provider.elem_mul(constrained_mask, x)).ok()?;
-    let y = block_on(provider.elem_add(&unconstrained_part, &constrained_part)).ok()?;
+    let unconstrained_part = block_on(
+        ctx.provider
+            .elem_mul(ctx.unconstrained_mask, &unconstrained_value),
+    )
+    .ok()?;
+    let constrained_part = block_on(ctx.provider.elem_mul(ctx.constrained_mask, x)).ok()?;
+    let y = block_on(
+        ctx.provider
+            .elem_add(&unconstrained_part, &constrained_part),
+    )
+    .ok()?;
 
-    let _ = provider.free(&constrained_part);
-    let _ = provider.free(&unconstrained_part);
-    let _ = provider.free(&unconstrained_value);
-    let _ = provider.free(&tmp);
-    let _ = provider.free(&right_term);
-    let _ = provider.free(&left_term);
-    let _ = provider.free(&diag_term);
-    let _ = provider.free(&x_next);
-    let _ = provider.free(&x_prev);
+    let _ = ctx.provider.free(&constrained_part);
+    let _ = ctx.provider.free(&unconstrained_part);
+    let _ = ctx.provider.free(&unconstrained_value);
+    let _ = ctx.provider.free(&tmp);
+    let _ = ctx.provider.free(&right_term);
+    let _ = ctx.provider.free(&left_term);
+    let _ = ctx.provider.free(&diag_term);
+    let _ = ctx.provider.free(&x_next);
+    let _ = ctx.provider.free(&x_prev);
     Some(y)
 }
 

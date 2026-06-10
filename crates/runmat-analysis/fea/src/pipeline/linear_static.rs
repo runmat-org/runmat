@@ -3,7 +3,10 @@ use runmat_analysis_core::{validate_model, AnalysisModel};
 use crate::{
     assembly::assemble_linear_system,
     contracts::{ComputeBackend, FeaRunError, FeaRunResult, LinearStaticSolveOptions},
-    diagnostics::{builders::extend_common_run_diagnostics, FeaDiagnostic, FeaDiagnosticSeverity},
+    diagnostics::{
+        builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
+        FeaDiagnostic, FeaDiagnosticSeverity,
+    },
     post::fields::recover_result_fields,
     solve::{backend::build_backend, linear::solve_linear_system},
 };
@@ -60,13 +63,15 @@ pub fn run_linear_static_with_options(
     }];
     extend_common_run_diagnostics(
         &mut diagnostics,
-        model,
-        &summary,
-        options.prep_context,
-        solve_result.iterations as f64,
-        solve_result.residual_norm,
-        options.preconditioner_kind.as_str(),
-        &solve_result.preconditioner,
+        CommonRunDiagnosticInputs {
+            model,
+            summary: &summary,
+            prep_context: options.prep_context,
+            iteration_metric: solve_result.iterations as f64,
+            residual_metric: solve_result.residual_norm,
+            requested_preconditioner: options.preconditioner_kind.as_str(),
+            effective_preconditioner: &solve_result.preconditioner,
+        },
     );
     diagnostics.extend(solve_result.diagnostics);
 

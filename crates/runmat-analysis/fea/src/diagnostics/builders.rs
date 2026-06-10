@@ -6,58 +6,65 @@ use crate::{
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
 };
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CommonRunDiagnosticInputs<'a> {
+    pub(crate) model: &'a AnalysisModel,
+    pub(crate) summary: &'a assembly::AssemblySummary,
+    pub(crate) prep_context: Option<FeaPrepContext>,
+    pub(crate) iteration_metric: f64,
+    pub(crate) residual_metric: f64,
+    pub(crate) requested_preconditioner: &'a str,
+    pub(crate) effective_preconditioner: &'a str,
+}
+
 pub(crate) fn extend_common_run_diagnostics(
     diagnostics: &mut Vec<FeaDiagnostic>,
-    model: &AnalysisModel,
-    summary: &assembly::AssemblySummary,
-    prep_context: Option<FeaPrepContext>,
-    iteration_metric: f64,
-    residual_metric: f64,
-    requested_preconditioner: &str,
-    effective_preconditioner: &str,
+    inputs: CommonRunDiagnosticInputs<'_>,
 ) {
-    diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
-    if let Some(prep) = prep_context {
+    diagnostics.extend(material_assignment_diagnostics(
+        &inputs.model.material_assignments,
+    ));
+    if let Some(prep) = inputs.prep_context {
         diagnostics.push(prep_diagnostic(prep));
     }
-    if let Some(prep_summary) = summary.prep_assembly.as_ref() {
+    if let Some(prep_summary) = inputs.summary.prep_assembly.as_ref() {
         diagnostics.push(prep_assembly_diagnostic(prep_summary));
-        if let Some(prep) = prep_context {
-            diagnostics.push(prep_topology_diagnostic(prep, summary.dof_count));
+        if let Some(prep) = inputs.prep_context {
+            diagnostics.push(prep_topology_diagnostic(prep, inputs.summary.dof_count));
         }
     }
-    if let Some(operator_topology) = summary.prep_operator_topology.as_ref() {
+    if let Some(operator_topology) = inputs.summary.prep_operator_topology.as_ref() {
         diagnostics.push(prep_operator_topology_diagnostic(operator_topology));
     }
-    if let Some(region_topology) = summary.prep_region_topology.as_ref() {
+    if let Some(region_topology) = inputs.summary.prep_region_topology.as_ref() {
         diagnostics.push(prep_region_topology_diagnostic(region_topology));
     }
-    if let Some(element_assembly) = summary.prep_element_assembly.as_ref() {
+    if let Some(element_assembly) = inputs.summary.prep_element_assembly.as_ref() {
         diagnostics.push(prep_element_assembly_diagnostic(element_assembly));
     }
-    if let Some(element_connectivity) = summary.prep_element_connectivity.as_ref() {
+    if let Some(element_connectivity) = inputs.summary.prep_element_connectivity.as_ref() {
         diagnostics.push(prep_element_connectivity_diagnostic(element_connectivity));
     }
-    if let Some(graph_assembly) = summary.prep_graph_assembly.as_ref() {
+    if let Some(graph_assembly) = inputs.summary.prep_graph_assembly.as_ref() {
         diagnostics.push(prep_graph_assembly_diagnostic(graph_assembly));
         diagnostics.push(prep_graph_solver_diagnostic(
             graph_assembly,
-            iteration_metric,
-            residual_metric,
-            requested_preconditioner,
-            effective_preconditioner,
+            inputs.iteration_metric,
+            inputs.residual_metric,
+            inputs.requested_preconditioner,
+            inputs.effective_preconditioner,
         ));
     }
-    if let Some(calibration) = summary.prep_calibration.as_ref() {
+    if let Some(calibration) = inputs.summary.prep_calibration.as_ref() {
         diagnostics.push(prep_calibration_diagnostic(calibration));
     }
-    if let Some(acceptance) = summary.prep_acceptance.as_ref() {
+    if let Some(acceptance) = inputs.summary.prep_acceptance.as_ref() {
         diagnostics.push(prep_acceptance_diagnostic(acceptance));
     }
-    if let Some(thermo_mechanical) = summary.thermo_mechanical.as_ref() {
+    if let Some(thermo_mechanical) = inputs.summary.thermo_mechanical.as_ref() {
         diagnostics.push(thermo_mechanical_diagnostic(thermo_mechanical));
     }
-    if let Some(electro_thermal) = summary.electro_thermal.as_ref() {
+    if let Some(electro_thermal) = inputs.summary.electro_thermal.as_ref() {
         diagnostics.push(electro_thermal_diagnostic(electro_thermal));
     }
 }

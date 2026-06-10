@@ -57,8 +57,7 @@ pub(super) fn import_ply(
             let face_index_type = validate_binary_layout_support(&header.header_text)?;
             parse_binary_little_endian_body(
                 body,
-                header.vertex_count,
-                header.face_count,
+                &header,
                 face_index_type,
                 &mut vertices,
                 &mut triangle_count,
@@ -303,8 +302,7 @@ fn parse_ascii_body(
 
 fn parse_binary_little_endian_body(
     body: &[u8],
-    vertex_count: usize,
-    face_count: usize,
+    header: &PlyHeader,
     face_index_type: BinaryFaceIndexType,
     vertices: &mut Vec<[f64; 3]>,
     triangle_count: &mut u64,
@@ -312,7 +310,7 @@ fn parse_binary_little_endian_body(
     options: &GeometryImportOptions,
 ) -> Result<(), GeometryImportError> {
     let mut cursor = 0usize;
-    for _ in 0..vertex_count {
+    for _ in 0..header.vertex_count {
         let x = read_f32_le(body, cursor, "PLY binary vertex x")?;
         let y = read_f32_le(body, cursor + 4, "PLY binary vertex y")?;
         let z = read_f32_le(body, cursor + 8, "PLY binary vertex z")?;
@@ -320,7 +318,7 @@ fn parse_binary_little_endian_body(
         cursor = cursor.saturating_add(12);
     }
 
-    for _ in 0..face_count {
+    for _ in 0..header.face_count {
         let face_vertex_count = *body.get(cursor).ok_or_else(|| {
             GeometryImportError::ParseFailed(
                 "PLY binary face data is truncated at list count".to_string(),

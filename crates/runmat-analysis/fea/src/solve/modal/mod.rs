@@ -15,7 +15,7 @@ mod linear_solve;
 mod math;
 
 use diagnostics::push_modal_quality_diagnostics;
-use linear_solve::solve_k_system_cg;
+use linear_solve::{solve_k_system_cg, CgSolveOptions};
 use math::{dot, normalize_mass, orthonormalize_mass, relative_l2_update};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -107,11 +107,13 @@ pub fn solve_modal_system(
                 summary,
                 &summary.operator,
                 &mq,
-                64,
-                1.0e-10,
-                use_runtime_tensor,
-                prepared_runtime_system.as_ref(),
-                linear_guess.as_deref(),
+                CgSolveOptions {
+                    max_iters: 64,
+                    tol: 1.0e-10,
+                    use_runtime_tensor,
+                    prepared_runtime_system: prepared_runtime_system.as_ref(),
+                    initial_guess: linear_guess.as_deref(),
+                },
             );
             solve_ms += solve_start.elapsed().as_secs_f64() * 1_000.0;
             if let Some(solve) = z.runtime_tensor {

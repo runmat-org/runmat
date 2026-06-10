@@ -14,6 +14,20 @@ const EM_MAX_READINESS_RELATIVE_DRIFT: f64 = 0.25;
 const EM_MAX_READINESS_ABSOLUTE_DRIFT: f64 = 0.05;
 const EM_MAX_CONDITIONING_RELATIVE_DRIFT: f64 = 0.5;
 const EM_MAX_CONDITIONING_ABSOLUTE_DRIFT: f64 = 2.0e3;
+const EM_READINESS_DRIFT_BOUNDS: MetricDriftBounds = MetricDriftBounds {
+    max_relative: EM_MAX_READINESS_RELATIVE_DRIFT,
+    max_absolute: EM_MAX_READINESS_ABSOLUTE_DRIFT,
+};
+const EM_CONDITIONING_DRIFT_BOUNDS: MetricDriftBounds = MetricDriftBounds {
+    max_relative: EM_MAX_CONDITIONING_RELATIVE_DRIFT,
+    max_absolute: EM_MAX_CONDITIONING_ABSOLUTE_DRIFT,
+};
+
+#[derive(Debug, Clone, Copy)]
+struct MetricDriftBounds {
+    max_relative: f64,
+    max_absolute: f64,
+}
 
 pub(super) fn artifact_path() -> PathBuf {
     if let Some(path) = env_var("RUNMAT_FEA_ARTIFACT_PATH", "RUNMAT_ANALYSIS_ARTIFACT_PATH") {
@@ -285,8 +299,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_assignment_coverage_ratio,
                 |record| record.electromagnetic_assignment_coverage_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -295,8 +308,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_fallback_coefficient_ratio,
                 |record| record.electromagnetic_fallback_coefficient_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -305,8 +317,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_region_coefficient_contrast_index,
                 |record| record.electromagnetic_region_coefficient_contrast_index,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -315,8 +326,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_solver_conditioning_proxy,
                 |record| record.electromagnetic_solver_conditioning_proxy,
-                EM_MAX_CONDITIONING_RELATIVE_DRIFT,
-                EM_MAX_CONDITIONING_ABSOLUTE_DRIFT,
+                EM_CONDITIONING_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -325,8 +335,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_source_realization_ratio,
                 |record| record.electromagnetic_source_realization_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -335,8 +344,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_source_region_coverage_ratio,
                 |record| record.electromagnetic_source_region_coverage_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -345,8 +353,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_source_material_alignment_ratio,
                 |record| record.electromagnetic_source_material_alignment_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -355,8 +362,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_source_localization_ratio,
                 |record| record.electromagnetic_source_localization_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -365,8 +371,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_source_overlap_ratio,
                 |record| record.electromagnetic_source_overlap_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -375,8 +380,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_source_interference_index,
                 |record| record.electromagnetic_source_interference_index,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -385,8 +389,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_boundary_anchor_ratio,
                 |record| record.electromagnetic_boundary_anchor_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -395,8 +398,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_boundary_condition_localization_ratio,
                 |record| record.electromagnetic_boundary_condition_localization_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -405,8 +407,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_ground_anchor_effectiveness_ratio,
                 |record| record.electromagnetic_ground_anchor_effectiveness_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -415,8 +416,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_insulation_leakage_proxy,
                 |record| record.electromagnetic_insulation_leakage_proxy,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -425,8 +425,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_flux_divergence_proxy,
                 |record| record.electromagnetic_flux_divergence_proxy,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -435,8 +434,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_energy_imbalance_ratio,
                 |record| record.electromagnetic_energy_imbalance_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -445,8 +443,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_boundary_energy_ratio,
                 |record| record.electromagnetic_boundary_energy_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -455,8 +452,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_boundary_penalty_conditioning_contribution,
                 |record| record.electromagnetic_boundary_penalty_conditioning_contribution,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -465,8 +461,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_source_region_energy_consistency_ratio,
                 |record| record.electromagnetic_source_region_energy_consistency_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -475,8 +470,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_real_residual_norm,
                 |record| record.electromagnetic_real_residual_norm,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
@@ -485,8 +479,7 @@ pub(super) fn check_rolling_baseline_drift(
                 history,
                 current_record.electromagnetic_imag_residual_norm,
                 |record| record.electromagnetic_imag_residual_norm,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
         }
@@ -530,8 +523,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_assignment_coverage_ratio",
                 baseline_record.electromagnetic_assignment_coverage_ratio,
                 current_record.electromagnetic_assignment_coverage_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -539,8 +531,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_fallback_coefficient_ratio",
                 baseline_record.electromagnetic_fallback_coefficient_ratio,
                 current_record.electromagnetic_fallback_coefficient_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -548,8 +539,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_region_coefficient_contrast_index",
                 baseline_record.electromagnetic_region_coefficient_contrast_index,
                 current_record.electromagnetic_region_coefficient_contrast_index,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -557,8 +547,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_solver_conditioning_proxy",
                 baseline_record.electromagnetic_solver_conditioning_proxy,
                 current_record.electromagnetic_solver_conditioning_proxy,
-                EM_MAX_CONDITIONING_RELATIVE_DRIFT,
-                EM_MAX_CONDITIONING_ABSOLUTE_DRIFT,
+                EM_CONDITIONING_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -566,8 +555,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_source_realization_ratio",
                 baseline_record.electromagnetic_source_realization_ratio,
                 current_record.electromagnetic_source_realization_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -575,8 +563,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_source_region_coverage_ratio",
                 baseline_record.electromagnetic_source_region_coverage_ratio,
                 current_record.electromagnetic_source_region_coverage_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -584,8 +571,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_source_material_alignment_ratio",
                 baseline_record.electromagnetic_source_material_alignment_ratio,
                 current_record.electromagnetic_source_material_alignment_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -593,8 +579,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_source_localization_ratio",
                 baseline_record.electromagnetic_source_localization_ratio,
                 current_record.electromagnetic_source_localization_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -602,8 +587,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_source_overlap_ratio",
                 baseline_record.electromagnetic_source_overlap_ratio,
                 current_record.electromagnetic_source_overlap_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -611,8 +595,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_source_interference_index",
                 baseline_record.electromagnetic_source_interference_index,
                 current_record.electromagnetic_source_interference_index,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -620,8 +603,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_boundary_anchor_ratio",
                 baseline_record.electromagnetic_boundary_anchor_ratio,
                 current_record.electromagnetic_boundary_anchor_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -629,8 +611,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_boundary_condition_localization_ratio",
                 baseline_record.electromagnetic_boundary_condition_localization_ratio,
                 current_record.electromagnetic_boundary_condition_localization_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -638,8 +619,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_ground_anchor_effectiveness_ratio",
                 baseline_record.electromagnetic_ground_anchor_effectiveness_ratio,
                 current_record.electromagnetic_ground_anchor_effectiveness_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -647,8 +627,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_insulation_leakage_proxy",
                 baseline_record.electromagnetic_insulation_leakage_proxy,
                 current_record.electromagnetic_insulation_leakage_proxy,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -656,8 +635,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_flux_divergence_proxy",
                 baseline_record.electromagnetic_flux_divergence_proxy,
                 current_record.electromagnetic_flux_divergence_proxy,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -665,8 +643,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_energy_imbalance_ratio",
                 baseline_record.electromagnetic_energy_imbalance_ratio,
                 current_record.electromagnetic_energy_imbalance_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -674,8 +651,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_boundary_energy_ratio",
                 baseline_record.electromagnetic_boundary_energy_ratio,
                 current_record.electromagnetic_boundary_energy_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -683,8 +659,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_boundary_penalty_conditioning_contribution",
                 baseline_record.electromagnetic_boundary_penalty_conditioning_contribution,
                 current_record.electromagnetic_boundary_penalty_conditioning_contribution,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -692,8 +667,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_source_region_energy_consistency_ratio",
                 baseline_record.electromagnetic_source_region_energy_consistency_ratio,
                 current_record.electromagnetic_source_region_energy_consistency_ratio,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -701,8 +675,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_real_residual_norm",
                 baseline_record.electromagnetic_real_residual_norm,
                 current_record.electromagnetic_real_residual_norm,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
@@ -710,8 +683,7 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_imag_residual_norm",
                 baseline_record.electromagnetic_imag_residual_norm,
                 current_record.electromagnetic_imag_residual_norm,
-                EM_MAX_READINESS_RELATIVE_DRIFT,
-                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
         }
@@ -748,8 +720,7 @@ fn check_rolling_metric_drift(
     history: &[BenchmarkConformanceReport],
     current: Option<f64>,
     accessor: fn(&FixtureRunRecord) -> Option<f64>,
-    max_relative_drift: f64,
-    max_absolute_drift: f64,
+    bounds: MetricDriftBounds,
     failures: &mut Vec<String>,
 ) {
     let mut values = Vec::new();
@@ -776,8 +747,7 @@ fn check_rolling_metric_drift(
             "rolling baseline",
             Some(base_median),
             current,
-            max_relative_drift,
-            max_absolute_drift,
+            bounds,
             failures,
         );
     }
@@ -788,8 +758,7 @@ fn check_metric_drift(
     metric_name: &str,
     baseline: Option<f64>,
     current: Option<f64>,
-    max_relative_drift: f64,
-    max_absolute_drift: f64,
+    bounds: MetricDriftBounds,
     failures: &mut Vec<String>,
 ) {
     check_metric_drift_against_reference(
@@ -798,8 +767,7 @@ fn check_metric_drift(
         "baseline",
         baseline,
         current,
-        max_relative_drift,
-        max_absolute_drift,
+        bounds,
         failures,
     );
 }
@@ -810,8 +778,7 @@ fn check_metric_drift_against_reference(
     context: &str,
     reference: Option<f64>,
     current: Option<f64>,
-    max_relative_drift: f64,
-    max_absolute_drift: f64,
+    bounds: MetricDriftBounds,
     failures: &mut Vec<String>,
 ) {
     let (Some(base), Some(now)) = (reference, current) else {
@@ -826,13 +793,13 @@ fn check_metric_drift_against_reference(
     } else {
         abs_drift / base.abs()
     };
-    if abs_drift > max_absolute_drift && rel_drift > max_relative_drift {
+    if abs_drift > bounds.max_absolute && rel_drift > bounds.max_relative {
         failures.push(format!(
             "{context} EM readiness drift exceeded for fixture={} metric={} abs_drift={abs_drift:.6} rel_drift={rel_drift:.3} limits=({}, {}) (reference={base:.6}, current={now:.6})",
             fixture_id,
             metric_name,
-            max_absolute_drift,
-            max_relative_drift
+            bounds.max_absolute,
+            bounds.max_relative
         ));
     }
 }

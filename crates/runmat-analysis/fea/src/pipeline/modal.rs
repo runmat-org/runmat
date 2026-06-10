@@ -3,7 +3,7 @@ use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 use crate::{
     assembly::assemble_linear_system,
     contracts::{ComputeBackend, FeaModalRunResult, FeaRunError, FeaRunResult, ModalSolveOptions},
-    diagnostics::builders::extend_common_run_diagnostics,
+    diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     solve::modal::solve_modal_system,
 };
 
@@ -31,16 +31,18 @@ pub fn run_modal_with_options(
     let mut diagnostics = modal.diagnostics.clone();
     extend_common_run_diagnostics(
         &mut diagnostics,
-        model,
-        &summary,
-        options.prep_context,
-        mode_shapes_iteration_proxy(&modal.residual_norms),
-        modal.residual_norms.iter().copied().fold(0.0_f64, f64::max),
-        "auto",
-        if backend == ComputeBackend::Gpu {
-            "jacobi"
-        } else {
-            "none"
+        CommonRunDiagnosticInputs {
+            model,
+            summary: &summary,
+            prep_context: options.prep_context,
+            iteration_metric: mode_shapes_iteration_proxy(&modal.residual_norms),
+            residual_metric: modal.residual_norms.iter().copied().fold(0.0_f64, f64::max),
+            requested_preconditioner: "auto",
+            effective_preconditioner: if backend == ComputeBackend::Gpu {
+                "jacobi"
+            } else {
+                "none"
+            },
         },
     );
 

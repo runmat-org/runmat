@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::ErrorKind;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
@@ -224,7 +224,7 @@ fn run_operation_version(run: &AnalysisRunResult) -> String {
     }
 }
 
-fn prune_filesystem_runs(root: &PathBuf) -> Result<(), String> {
+fn prune_filesystem_runs(root: &Path) -> Result<(), String> {
     let retention = current_retention_config();
     let max_runs = retention.max_runs.unwrap_or_else(|| {
         std::env::var("RUNMAT_FEA_ARTIFACT_MAX_RUNS")

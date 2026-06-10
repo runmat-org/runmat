@@ -16,8 +16,11 @@ use crate::{
 mod diagnostics;
 mod linear_step;
 
-use diagnostics::push_transient_quality_diagnostics;
-use linear_step::{build_step_rhs, solve_implicit_step_system, strain_energy, LinearStepStats};
+use diagnostics::{push_transient_quality_diagnostics, TransientQualityDiagnosticInputs};
+use linear_step::{
+    build_step_rhs, solve_implicit_step_system, strain_energy, LinearStepStats,
+    RuntimeTensorStepCache,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransientSolveOptions {
@@ -207,12 +210,14 @@ pub fn solve_transient_system(
                 step_dt,
                 &options,
                 use_runtime_tensor,
-                &mut prepared_runtime_systems_by_dt,
-                &mut prepared_runtime_system_lru,
-                &mut prepared_runtime_cache_hits,
-                &mut prepared_runtime_cache_misses,
-                &mut prepared_build_ms,
-                dt_bucket_rel_tolerance,
+                RuntimeTensorStepCache {
+                    prepared_systems_by_dt: &mut prepared_runtime_systems_by_dt,
+                    prepared_lru: &mut prepared_runtime_system_lru,
+                    cache_hits: &mut prepared_runtime_cache_hits,
+                    cache_misses: &mut prepared_runtime_cache_misses,
+                    prepared_build_ms: &mut prepared_build_ms,
+                    dt_bucket_rel_tolerance,
+                },
             );
             solve_ms += solve_start.elapsed().as_secs_f64() * 1_000.0;
             if !options.adaptive_time_step {
@@ -331,58 +336,60 @@ pub fn solve_transient_system(
     }];
     push_transient_quality_diagnostics(
         &mut diagnostics,
-        &options,
-        dt,
-        converged_steps,
-        retry_budget_hits,
-        &accepted_time_steps_s,
-        &residual_norms,
-        &energies,
-        use_runtime_tensor,
-        prepared_runtime_systems_by_dt.len(),
-        prepared_runtime_cache_hits,
-        prepared_runtime_cache_misses,
-        prepared_build_ms,
-        solve_ms,
-        fallback_apply_count,
-        adapt_increase_steps,
-        adapt_decrease_steps,
-        adapt_hold_steps,
-        if accepted_time_steps_s.is_empty() {
-            1.0
-        } else {
-            adapt_scale_sum / accepted_time_steps_s.len() as f64
+        TransientQualityDiagnosticInputs {
+            options: &options,
+            dt_final: dt,
+            converged_steps,
+            retry_budget_hits,
+            accepted_time_steps_s: &accepted_time_steps_s,
+            residual_norms: &residual_norms,
+            energies: &energies,
+            use_runtime_tensor,
+            prepared_cache_entries: prepared_runtime_systems_by_dt.len(),
+            prepared_cache_hits: prepared_runtime_cache_hits,
+            prepared_cache_misses: prepared_runtime_cache_misses,
+            prepared_build_ms,
+            solve_ms,
+            fallback_apply_count,
+            adapt_increase_steps,
+            adapt_decrease_steps,
+            adapt_hold_steps,
+            adapt_scale_mean: if accepted_time_steps_s.is_empty() {
+                1.0
+            } else {
+                adapt_scale_sum / accepted_time_steps_s.len() as f64
+            },
+            adapt_scale_min: if adapt_scale_min.is_finite() {
+                adapt_scale_min
+            } else {
+                1.0
+            },
+            adapt_scale_max: if adapt_scale_max > 0.0 {
+                adapt_scale_max
+            } else {
+                1.0
+            },
+            dt_bucket_rel_tolerance,
+            max_step_l2_jump_ratio,
+            nonfinite_displacement_count,
+            thermo_severity_mean: if options.step_count == 0 {
+                0.0
+            } else {
+                thermo_severity_sum / options.step_count as f64
+            },
+            thermo_time_scale_mean: if options.step_count == 0 {
+                1.0
+            } else {
+                thermo_time_scale_sum / options.step_count as f64
+            },
+            thermo_severity_peak,
+            thermo_temporal_variation,
+            thermo_time_extrapolated,
+            thermo_time_clamped,
+            effective_residual_target_peak,
+            thermo_growth_limit_min,
+            thermo_nonconverged_shrink_min,
         },
-        if adapt_scale_min.is_finite() {
-            adapt_scale_min
-        } else {
-            1.0
-        },
-        if adapt_scale_max > 0.0 {
-            adapt_scale_max
-        } else {
-            1.0
-        },
-        dt_bucket_rel_tolerance,
-        max_step_l2_jump_ratio,
-        nonfinite_displacement_count,
-        if options.step_count == 0 {
-            0.0
-        } else {
-            thermo_severity_sum / options.step_count as f64
-        },
-        if options.step_count == 0 {
-            1.0
-        } else {
-            thermo_time_scale_sum / options.step_count as f64
-        },
-        thermo_severity_peak,
-        thermo_temporal_variation,
-        thermo_time_extrapolated,
-        thermo_time_clamped,
-        effective_residual_target_peak,
-        thermo_growth_limit_min,
-        thermo_nonconverged_shrink_min,
     );
     if electro_severity_peak > 0.0 {
         diagnostics.push(FeaDiagnostic {

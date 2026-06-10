@@ -24,6 +24,15 @@ pub(super) struct LinearStepStats {
     pub(super) preconditioner: String,
 }
 
+pub(super) struct RuntimeTensorStepCache<'a> {
+    pub(super) prepared_systems_by_dt: &'a mut HashMap<u64, RuntimeTensorPreparedLinearSystem>,
+    pub(super) prepared_lru: &'a mut VecDeque<u64>,
+    pub(super) cache_hits: &'a mut usize,
+    pub(super) cache_misses: &'a mut usize,
+    pub(super) prepared_build_ms: &'a mut f64,
+    pub(super) dt_bucket_rel_tolerance: f64,
+}
+
 pub(super) fn build_step_rhs(summary: &AssemblySummary, x_prev: &[f64], dt: f64) -> Vec<f64> {
     let mut rhs = vec![0.0; summary.dof_count];
     for i in 0..summary.dof_count {
@@ -38,40 +47,41 @@ pub(super) fn solve_implicit_step_system(
     dt: f64,
     options: &TransientSolveOptions,
     use_runtime_tensor: bool,
-    prepared_runtime_systems_by_dt: &mut HashMap<u64, RuntimeTensorPreparedLinearSystem>,
-    prepared_runtime_system_lru: &mut VecDeque<u64>,
-    prepared_runtime_cache_hits: &mut usize,
-    prepared_runtime_cache_misses: &mut usize,
-    prepared_build_ms: &mut f64,
-    dt_bucket_rel_tolerance: f64,
+    runtime_cache: RuntimeTensorStepCache<'_>,
 ) -> (Vec<f64>, f64, bool, Option<LinearStepStats>) {
     const PREPARED_RUNTIME_CACHE_CAPACITY: usize = 12;
     let tuned_preconditioner_kind = graph_tuned_preconditioner_kind(summary);
     if use_runtime_tensor {
-        let dt_key = dt_cache_key(dt, options.time_step_s, dt_bucket_rel_tolerance);
-        if prepared_runtime_systems_by_dt.contains_key(&dt_key) {
-            *prepared_runtime_cache_hits += 1;
-            prepared_runtime_system_lru.retain(|value| *value != dt_key);
-            prepared_runtime_system_lru.push_back(dt_key);
+        let dt_key = dt_cache_key(
+            dt,
+            options.time_step_s,
+            runtime_cache.dt_bucket_rel_tolerance,
+        );
+        if runtime_cache.prepared_systems_by_dt.contains_key(&dt_key) {
+            *runtime_cache.cache_hits += 1;
+            runtime_cache.prepared_lru.retain(|value| *value != dt_key);
+            runtime_cache.prepared_lru.push_back(dt_key);
         } else {
-            *prepared_runtime_cache_misses += 1;
+            *runtime_cache.cache_misses += 1;
             let prepare_start = Instant::now();
             let implicit_summary = build_implicit_summary(summary, rhs, dt);
             if let Some(prepared) = prepare_runtime_tensor_linear_system(&implicit_summary) {
-                *prepared_build_ms += prepare_start.elapsed().as_secs_f64() * 1_000.0;
-                if prepared_runtime_systems_by_dt.len() >= PREPARED_RUNTIME_CACHE_CAPACITY {
-                    if let Some(evicted_key) = prepared_runtime_system_lru.pop_front() {
-                        prepared_runtime_systems_by_dt.remove(&evicted_key);
+                *runtime_cache.prepared_build_ms += prepare_start.elapsed().as_secs_f64() * 1_000.0;
+                if runtime_cache.prepared_systems_by_dt.len() >= PREPARED_RUNTIME_CACHE_CAPACITY {
+                    if let Some(evicted_key) = runtime_cache.prepared_lru.pop_front() {
+                        runtime_cache.prepared_systems_by_dt.remove(&evicted_key);
                     }
                 }
-                prepared_runtime_systems_by_dt.insert(dt_key, prepared);
-                prepared_runtime_system_lru.push_back(dt_key);
+                runtime_cache
+                    .prepared_systems_by_dt
+                    .insert(dt_key, prepared);
+                runtime_cache.prepared_lru.push_back(dt_key);
             } else {
-                *prepared_build_ms += prepare_start.elapsed().as_secs_f64() * 1_000.0;
+                *runtime_cache.prepared_build_ms += prepare_start.elapsed().as_secs_f64() * 1_000.0;
             }
         }
 
-        if let Some(prepared) = prepared_runtime_systems_by_dt.get(&dt_key) {
+        if let Some(prepared) = runtime_cache.prepared_systems_by_dt.get(&dt_key) {
             if let Some(result) = solve_prepared_linear_system_runtime_tensor(
                 summary,
                 prepared,

@@ -155,7 +155,8 @@ pub fn prepare_geometry_for_analysis(
                 }
             }
         };
-        let region_span_hint = ((geometry.regions.len().max(1) as u32).min(64).max(1))
+        let region_span_hint = (geometry.regions.len().max(1) as u32)
+            .clamp(1, 64)
             .saturating_sub((prepared_meshes.len() as u32) % 2);
         prepared_meshes.push(PreparedMeshDescriptor {
             prepared_mesh_id: format!("prep_{}_{}", geometry.revision, mesh.mesh_id),

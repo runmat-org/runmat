@@ -1947,14 +1947,19 @@ fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisMode
     }
 }
 
-fn run_fixture_cpu(
-    spec: &FixtureSpec,
-    model: &AnalysisModel,
-) -> Result<
-    runmat_runtime::operations::OperationEnvelope<runmat_runtime::analysis::AnalysisRunResult>,
-    runmat_runtime::operations::OperationErrorEnvelope,
-> {
-    match spec.run_kind {
+type FixtureRunEnvelope =
+    runmat_runtime::operations::OperationEnvelope<runmat_runtime::analysis::AnalysisRunResult>;
+type FixtureRunResult =
+    Result<FixtureRunEnvelope, Box<runmat_runtime::operations::OperationErrorEnvelope>>;
+
+fn boxed_fixture_run_result(
+    result: Result<FixtureRunEnvelope, runmat_runtime::operations::OperationErrorEnvelope>,
+) -> FixtureRunResult {
+    result.map_err(Box::new)
+}
+
+fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResult {
+    boxed_fixture_run_result(match spec.run_kind {
         AnalysisRunKind::LinearStatic => analysis_run_linear_static_with_options(
             model,
             ComputeBackend::Cpu,
@@ -2098,17 +2103,10 @@ fn run_fixture_cpu(
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-    }
+    })
 }
 
-fn run_fixture_gpu(
-    spec: &FixtureSpec,
-    model: &AnalysisModel,
-    mode: GpuMode,
-) -> Result<
-    runmat_runtime::operations::OperationEnvelope<runmat_runtime::analysis::AnalysisRunResult>,
-    runmat_runtime::operations::OperationErrorEnvelope,
-> {
+fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> FixtureRunResult {
     let run = || match spec.run_kind {
         AnalysisRunKind::LinearStatic => analysis_run_linear_static_with_options(
             model,
@@ -2254,13 +2252,13 @@ fn run_fixture_gpu(
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
     };
-    match mode {
+    boxed_fixture_run_result(match mode {
         GpuMode::WithProvider => with_harness_provider(run),
         GpuMode::WithoutProvider => {
             let _guard = ThreadProviderGuard::set(None);
             run()
         }
-    }
+    })
 }
 
 fn parse_metric_value(message: &str, key: &str) -> Option<f64> {
@@ -2282,6 +2280,7 @@ fn diagnostic_metric(
         .and_then(|diag| parse_metric_value(&diag.message, key))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_threshold_assertion(
     fixture_id: &str,
     assertions: &mut Vec<ThresholdAssertionRecord>,

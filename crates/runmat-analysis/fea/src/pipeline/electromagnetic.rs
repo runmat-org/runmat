@@ -420,9 +420,7 @@ pub fn run_electromagnetic_with_options(
     }
     anchor_count = anchor_count.min(node_count);
     if anchor_count >= node_count {
-        for value in &mut constrained {
-            *value = true;
-        }
+        constrained.fill(true);
     } else {
         let step =
             ((node_count - 1) as f64 / (anchor_count.saturating_sub(1).max(1)) as f64).max(1.0);

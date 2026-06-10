@@ -86,6 +86,6 @@ mod tests {
             ],
         };
         let scale = time_scale(Some(&context), 0.5);
-        assert!(scale >= 0.5 && scale <= 1.5);
+        assert!((0.5..=1.5).contains(&scale));
     }
 }

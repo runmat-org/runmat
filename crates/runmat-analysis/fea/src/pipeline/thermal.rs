@@ -226,8 +226,7 @@ pub fn run_thermal_with_options(
     diagnostics.push(FeaDiagnostic {
         code: "FEA_THERMAL_OUTCOME".to_string(),
         severity: if monotonic_response_fraction >= 0.75
-            && thermal_response_realization_ratio >= 0.5
-            && thermal_response_realization_ratio <= 1.6
+            && (0.5..=1.6).contains(&thermal_response_realization_ratio)
         {
             FeaDiagnosticSeverity::Info
         } else {

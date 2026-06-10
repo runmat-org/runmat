@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FeaConfig {
     #[serde(default)]
@@ -34,22 +34,4 @@ pub enum FeaArtifactStoreMode {
     #[default]
     InMemory,
     Filesystem,
-}
-
-impl Default for FeaConfig {
-    fn default() -> Self {
-        Self {
-            artifact_store: None,
-            artifact_root: None,
-            artifact_max_runs: None,
-            artifact_max_runs_per_kind: None,
-            study_artifact_root: None,
-            geometry_prep_artifact_root: None,
-            geometry_prep_max_artifacts: None,
-            geometry_prep_max_artifacts_per_geometry: None,
-            geometry_prep_max_age_seconds: None,
-            geometry_prep_require_latest_revision: None,
-            thermo_field_artifact_root: None,
-        }
-    }
 }

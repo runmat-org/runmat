@@ -311,7 +311,7 @@ pub fn assemble_linear_system(
             prep.prepared_element_count as f64 / prep.prepared_node_count as f64
         };
         let quality_scale = (prep.min_scaled_jacobian.clamp(0.5, 1.0)
-            / prep.mean_aspect_ratio.max(1.0).min(4.0))
+            / prep.mean_aspect_ratio.clamp(1.0, 4.0))
         .clamp(0.25, 1.0);
         let stiffness_scale =
             (mesh_scale * (1.0 + 0.05 * density.min(2.0)) * quality_scale).clamp(0.5, 1.5);
@@ -633,14 +633,16 @@ pub fn assemble_linear_system(
                 region_delta_count: context.region_temperature_deltas.len(),
                 coupling_fingerprint: thermo_mechanical_fingerprint(
                     &context,
-                    dof_count,
-                    constitutive_temperature_factor,
-                    constitutive_poisson_coupling,
-                    effective_modulus_scale,
-                    constitutive_material_spread_ratio,
-                    assignment_heterogeneity_index,
-                    spatial_field.gradient_index,
-                    temporal_profile_variation,
+                    ThermoMechanicalFingerprintInputs {
+                        dof_count,
+                        constitutive_temperature_factor,
+                        constitutive_poisson_coupling,
+                        effective_modulus_scale,
+                        constitutive_material_spread_ratio,
+                        assignment_heterogeneity_index,
+                        spatial_gradient_index: spatial_field.gradient_index,
+                        temporal_profile_variation,
+                    },
                 ),
             });
         }
@@ -879,13 +881,15 @@ fn apply_prep_native_element_assembly(
         scatter_nnz_count,
         assembly_fingerprint: element_assembly_fingerprint(
             prep,
-            element_count,
-            triangle_count,
-            quad_count,
-            tet_count,
-            hex_count,
-            mixed_count,
-            scatter_nnz_count,
+            ElementAssemblyFingerprintInputs {
+                element_count,
+                triangle_count,
+                quad_count,
+                tet_count,
+                hex_count,
+                mixed_count,
+                scatter_nnz_count,
+            },
         ),
     }
 }
@@ -912,13 +916,15 @@ fn apply_prep_element_connectivity_scatter(
             mean_connectivity_hop: 0.0,
             connectivity_fingerprint: element_connectivity_fingerprint(
                 prep,
-                element_summary,
-                0,
-                0,
-                0,
-                0.0,
-                [0.0; 5],
-                0,
+                ElementConnectivityFingerprintInputs {
+                    element_summary,
+                    stiffness_offdiag_nnz_count: 0,
+                    mass_offdiag_proxy_nnz_count: 0,
+                    damping_offdiag_proxy_nnz_count: 0,
+                    mean_connectivity_hop: 0.0,
+                    shares: [0.0; 5],
+                    graph_fingerprint: 0,
+                },
             ),
         };
         let graph_summary = PrepGraphAssemblySummary {
@@ -1060,13 +1066,15 @@ fn apply_prep_element_connectivity_scatter(
         mean_connectivity_hop,
         connectivity_fingerprint: element_connectivity_fingerprint(
             prep,
-            element_summary,
-            stiffness_offdiag_nnz_count,
-            mass_offdiag_proxy_nnz_count,
-            damping_offdiag_proxy_nnz_count,
-            mean_connectivity_hop,
-            shares,
-            graph_fingerprint_value,
+            ElementConnectivityFingerprintInputs {
+                element_summary,
+                stiffness_offdiag_nnz_count,
+                mass_offdiag_proxy_nnz_count,
+                damping_offdiag_proxy_nnz_count,
+                mean_connectivity_hop,
+                shares,
+                graph_fingerprint: graph_fingerprint_value,
+            },
         ),
     };
 
@@ -1451,8 +1459,8 @@ fn region_topology_fingerprint(
     hash
 }
 
-fn element_assembly_fingerprint(
-    prep: FeaPrepContext,
+#[derive(Debug, Clone, Copy)]
+struct ElementAssemblyFingerprintInputs {
     element_count: usize,
     triangle_count: usize,
     quad_count: usize,
@@ -1460,18 +1468,23 @@ fn element_assembly_fingerprint(
     hex_count: usize,
     mixed_count: usize,
     scatter_nnz_count: usize,
+}
+
+fn element_assembly_fingerprint(
+    prep: FeaPrepContext,
+    inputs: ElementAssemblyFingerprintInputs,
 ) -> u64 {
     let mut hash = 1469598103934665603_u64;
     for value in [
         prep.layout_seed,
         prep.prepared_element_count as u64,
-        element_count as u64,
-        triangle_count as u64,
-        quad_count as u64,
-        tet_count as u64,
-        hex_count as u64,
-        mixed_count as u64,
-        scatter_nnz_count as u64,
+        inputs.element_count as u64,
+        inputs.triangle_count as u64,
+        inputs.quad_count as u64,
+        inputs.tet_count as u64,
+        inputs.hex_count as u64,
+        inputs.mixed_count as u64,
+        inputs.scatter_nnz_count as u64,
         prep.topology_triangle_family_ratio.to_bits(),
         prep.topology_quad_family_ratio.to_bits(),
         prep.topology_tet_family_ratio.to_bits(),
@@ -1484,32 +1497,37 @@ fn element_assembly_fingerprint(
     hash
 }
 
-fn element_connectivity_fingerprint(
-    prep: FeaPrepContext,
-    element_summary: &PrepElementAssemblySummary,
+#[derive(Debug, Clone, Copy)]
+struct ElementConnectivityFingerprintInputs<'a> {
+    element_summary: &'a PrepElementAssemblySummary,
     stiffness_offdiag_nnz_count: usize,
     mass_offdiag_proxy_nnz_count: usize,
     damping_offdiag_proxy_nnz_count: usize,
     mean_connectivity_hop: f64,
     shares: [f64; 5],
     graph_fingerprint: u64,
+}
+
+fn element_connectivity_fingerprint(
+    prep: FeaPrepContext,
+    inputs: ElementConnectivityFingerprintInputs<'_>,
 ) -> u64 {
     let mut hash = 1469598103934665603_u64;
     for value in [
         prep.layout_seed,
-        element_summary.assembly_fingerprint,
-        element_summary.assembled_element_count as u64,
-        stiffness_offdiag_nnz_count as u64,
-        mass_offdiag_proxy_nnz_count as u64,
-        damping_offdiag_proxy_nnz_count as u64,
-        mean_connectivity_hop.to_bits(),
-        shares[0].to_bits(),
-        shares[1].to_bits(),
-        shares[2].to_bits(),
-        shares[3].to_bits(),
-        shares[4].to_bits(),
+        inputs.element_summary.assembly_fingerprint,
+        inputs.element_summary.assembled_element_count as u64,
+        inputs.stiffness_offdiag_nnz_count as u64,
+        inputs.mass_offdiag_proxy_nnz_count as u64,
+        inputs.damping_offdiag_proxy_nnz_count as u64,
+        inputs.mean_connectivity_hop.to_bits(),
+        inputs.shares[0].to_bits(),
+        inputs.shares[1].to_bits(),
+        inputs.shares[2].to_bits(),
+        inputs.shares[3].to_bits(),
+        inputs.shares[4].to_bits(),
         prep.topology_bandwidth_proxy as u64,
-        graph_fingerprint,
+        inputs.graph_fingerprint,
     ] {
         hash ^= value;
         hash = hash.wrapping_mul(1099511628211_u64);
@@ -1590,8 +1608,8 @@ fn acceptance_fingerprint(
     hash
 }
 
-fn thermo_mechanical_fingerprint(
-    context: &FeaThermoMechanicalContext,
+#[derive(Debug, Clone, Copy)]
+struct ThermoMechanicalFingerprintInputs {
     dof_count: usize,
     constitutive_temperature_factor: f64,
     constitutive_poisson_coupling: f64,
@@ -1600,20 +1618,25 @@ fn thermo_mechanical_fingerprint(
     assignment_heterogeneity_index: f64,
     spatial_gradient_index: f64,
     temporal_profile_variation: f64,
+}
+
+fn thermo_mechanical_fingerprint(
+    context: &FeaThermoMechanicalContext,
+    inputs: ThermoMechanicalFingerprintInputs,
 ) -> u64 {
     let mut hash = 1469598103934665603_u64;
     for value in [
-        dof_count as u64,
+        inputs.dof_count as u64,
         context.reference_temperature_k.to_bits(),
         context.applied_temperature_delta_k.to_bits(),
         context.thermal_expansion_coefficient.to_bits(),
-        constitutive_temperature_factor.to_bits(),
-        constitutive_poisson_coupling.to_bits(),
-        effective_modulus_scale.to_bits(),
-        constitutive_material_spread_ratio.to_bits(),
-        assignment_heterogeneity_index.to_bits(),
-        spatial_gradient_index.to_bits(),
-        temporal_profile_variation.to_bits(),
+        inputs.constitutive_temperature_factor.to_bits(),
+        inputs.constitutive_poisson_coupling.to_bits(),
+        inputs.effective_modulus_scale.to_bits(),
+        inputs.constitutive_material_spread_ratio.to_bits(),
+        inputs.assignment_heterogeneity_index.to_bits(),
+        inputs.spatial_gradient_index.to_bits(),
+        inputs.temporal_profile_variation.to_bits(),
     ] {
         hash ^= value;
         hash = hash.wrapping_mul(1099511628211_u64);

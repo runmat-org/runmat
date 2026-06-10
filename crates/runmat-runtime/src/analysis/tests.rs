@@ -1,6 +1,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use chrono::Utc;
 use runmat_accelerate_api::{
@@ -2426,7 +2429,7 @@ impl Drop for EnvVarRestoreGuard {
     }
 }
 
-fn scoped_thermo_field_artifact_root(root: &PathBuf) -> EnvVarRestoreGuard {
+fn scoped_thermo_field_artifact_root(root: &Path) -> EnvVarRestoreGuard {
     const KEY: &str = "RUNMAT_THERMO_FIELD_ARTIFACT_ROOT";
     let previous = std::env::var(KEY).ok();
     std::env::set_var(KEY, root.display().to_string());
@@ -4237,7 +4240,7 @@ fn analysis_run_transient_with_options_controls_timeline() {
     assert_eq!(transient.time_points_s.len(), 4);
     assert_eq!(transient.time_points_s[0], 0.0);
     assert!((transient.time_points_s[3] - 6.0e-3).abs() < 1.0e-12);
-    assert_eq!(envelope.data.provenance.deterministic_mode, true);
+    assert!(envelope.data.provenance.deterministic_mode);
 }
 
 #[test]
@@ -4963,7 +4966,7 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
         .modal_results
         .as_ref()
         .expect("modal payload should exist");
-    assert!(modal.eigenvalues_hz.len() > 0);
+    assert!(!modal.eigenvalues_hz.is_empty());
     assert!(modal.eigenvalues_hz.len() <= 2);
     assert!(envelope.data.provenance.deterministic_mode);
 }

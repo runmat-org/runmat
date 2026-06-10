@@ -3,7 +3,7 @@ use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 use crate::{
     assembly::assemble_linear_system,
     contracts::{ComputeBackend, FeaNonlinearRunResult, FeaRunError, FeaRunResult},
-    diagnostics::builders::extend_common_run_diagnostics,
+    diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     solve::nonlinear::{solve_nonlinear_system, NonlinearSolveOptions},
 };
 
@@ -29,22 +29,24 @@ pub fn run_nonlinear_with_options(
     let mut diagnostics = nonlinear.diagnostics.clone();
     extend_common_run_diagnostics(
         &mut diagnostics,
-        model,
-        &summary,
-        prep_context,
-        nonlinear
-            .iteration_counts
-            .iter()
-            .copied()
-            .max()
-            .unwrap_or(0) as f64,
-        nonlinear
-            .residual_norms
-            .iter()
-            .copied()
-            .fold(0.0_f64, f64::max),
-        "auto",
-        &nonlinear.preconditioner,
+        CommonRunDiagnosticInputs {
+            model,
+            summary: &summary,
+            prep_context,
+            iteration_metric: nonlinear
+                .iteration_counts
+                .iter()
+                .copied()
+                .max()
+                .unwrap_or(0) as f64,
+            residual_metric: nonlinear
+                .residual_norms
+                .iter()
+                .copied()
+                .fold(0.0_f64, f64::max),
+            requested_preconditioner: "auto",
+            effective_preconditioner: &nonlinear.preconditioner,
+        },
     );
 
     let displacement = nonlinear
