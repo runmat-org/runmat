@@ -99,4 +99,4 @@ Validation checks the model and study shape before a run starts. It catches prob
 
 Profile scaffolds are useful for tests, examples, early integration, and simple exploratory runs. Engineering runs should explicitly review or provide the materials, assignments, loads, constraints, domains, and assumptions that matter for the result.
 
-Validation proves the model is shaped correctly enough to run. Verification and validation evidence is still required before treating a result as production-grade physics. See [Verification & Validation](/docs/runtime/fea/validation).
+Validation proves the model is shaped correctly enough to run. Verification and validation evidence is still required before treating a result as production-grade physics. See [Verification & Validation](/docs/fea/validation).

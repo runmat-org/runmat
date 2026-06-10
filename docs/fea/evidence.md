@@ -144,4 +144,4 @@ Governance checks answer questions such as:
 | Did calibration drift? | Prep and promotion calibration artifacts. |
 | Can the run be explained later? | Study plan, run artifact, provenance, diagnostics, geometry/prep artifacts. |
 
-For the correctness standard behind those records, see [Verification & Validation](/docs/runtime/fea/validation).
+For the correctness standard behind those records, see [Verification & Validation](/docs/fea/validation).

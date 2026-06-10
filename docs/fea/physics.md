@@ -72,4 +72,4 @@ A family can be implemented and tested without being production-grade for every 
 - acoustic, CFD, CHT, and FSI currently have baseline paths with typed diagnostics and payloads,
 - V&V maturity depends on known-answer tests, convergence checks, independent references, and governed thresholds.
 
-Use [Current Status](/docs/runtime/fea/status) before relying on a family for a workflow, and use [Verification & Validation](/docs/runtime/fea/validation) for the evidence standard.
+Use [Current Status](/docs/fea/status) before relying on a family for a workflow, and use [Verification & Validation](/docs/fea/validation) for the evidence standard.

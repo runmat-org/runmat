@@ -19,7 +19,7 @@ This page states what the FEA system supports today, where support is limited, a
 | Dedicated path | The operation has a family-specific execution path. |
 | Limited | The path is usable within stated boundaries, but fidelity, scale, or validation depth is not production-grade for every use. |
 
-V&V levels are defined in [Verification & Validation](/docs/runtime/fea/validation).
+V&V levels are defined in [Verification & Validation](/docs/fea/validation).
 
 ## Workflow Status
 

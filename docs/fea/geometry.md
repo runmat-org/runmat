@@ -128,4 +128,4 @@ Use `geometry.prep_artifact_health/v1` to inspect retained artifact counts, ages
 - Mesh-only formats usually need additional region or boundary data from the workflow.
 - Prep artifacts improve reproducibility; they do not prove that a physics model is well posed.
 
-See [Current Status](/docs/runtime/fea/status) for current support by workflow stage.
+See [Current Status](/docs/fea/status) for current support by workflow stage.

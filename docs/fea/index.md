@@ -52,15 +52,15 @@ flowchart TD
 
 | Task | Read |
 | --- | --- |
-| Run studies from the CLI, `.m` code, or Rust host code | [Using FEA](/docs/runtime/fea/using-fea) |
-| Load, inspect, and prepare CAD or mesh geometry | [Geometry](/docs/runtime/fea/geometry) |
-| Define solver-ready model data | [Models](/docs/runtime/fea/models) |
-| Choose the physics family and understand family limits | [Physics Families](/docs/runtime/fea/physics) |
-| Run direct solves, studies, and sweeps | [Solves, Studies, and Sweeps](/docs/runtime/fea/solves) |
-| Understand saved artifacts, diagnostics, and provenance | [Evidence & Artifacts](/docs/runtime/fea/evidence) |
-| Understand how correctness is tested and validated | [Verification & Validation](/docs/runtime/fea/validation) |
-| Interpret result quality and trust signals | [Results & Trust](/docs/runtime/fea/trust) |
-| Check current support and known boundaries | [Current Status](/docs/runtime/fea/status) |
-| Integrate with runtime operation contracts | [Operation Reference](/docs/runtime/fea/operation-reference) |
+| Run studies from the CLI, `.m` code, or Rust host code | [Using FEA](/docs/fea/using-fea) |
+| Load, inspect, and prepare CAD or mesh geometry | [Geometry](/docs/fea/geometry) |
+| Define solver-ready model data | [Models](/docs/fea/models) |
+| Choose the physics family and understand family limits | [Physics Families](/docs/fea/physics) |
+| Run direct solves, studies, and sweeps | [Solves, Studies, and Sweeps](/docs/fea/solves) |
+| Understand saved artifacts, diagnostics, and provenance | [Evidence & Artifacts](/docs/fea/evidence) |
+| Understand how correctness is tested and validated | [Verification & Validation](/docs/fea/validation) |
+| Interpret result quality and trust signals | [Results & Trust](/docs/fea/trust) |
+| Check current support and known boundaries | [Current Status](/docs/fea/status) |
+| Integrate with runtime operation contracts | [Operation Reference](/docs/fea/operation-reference) |
 
 For general runtime execution, see [Execution](/docs/runtime/execution). For host session behavior, see [Session Engine](/docs/runtime/session). For GPU behavior, see [GPU Acceleration & Fusion Engine](/docs/runtime/gpu).

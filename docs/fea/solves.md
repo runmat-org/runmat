@@ -154,4 +154,4 @@ comparison = fea.compare("run_baseline", "run_candidate");
 trend = fea.trends("WindowSize", 16);
 ```
 
-For interpretation, see [Results & Trust](/docs/runtime/fea/trust). For saved records, see [Evidence & Artifacts](/docs/runtime/fea/evidence).
+For interpretation, see [Results & Trust](/docs/fea/trust). For saved records, see [Evidence & Artifacts](/docs/fea/evidence).

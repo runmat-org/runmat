@@ -26,7 +26,7 @@ No single test makes a FEA family production-grade. Readiness is earned per fami
 
 ## Maturity Levels
 
-Use these labels in [Current Status](/docs/runtime/fea/status):
+Use these labels in [Current Status](/docs/fea/status):
 
 | Level | Meaning | Minimum bar |
 | --- | --- | --- |
@@ -94,7 +94,7 @@ When adding a new validation case:
 6. Add convergence checks when the case depends on mesh density, time step, mode count, or nonlinear increments.
 7. Emit governed metrics into benchmark reports when the result should be tracked over time.
 8. Add or update governance checks if promotion depends on the metric.
-9. Update [Current Status](/docs/runtime/fea/status) with the new level and remaining boundary.
+9. Update [Current Status](/docs/fea/status) with the new level and remaining boundary.
 
 ## Naming Rule
 
