@@ -129,10 +129,16 @@ impl WgpuProvider {
             data: &result.reduced.data,
             shape: &result.reduced.shape,
         })?;
-        let pivots = self.upload_exec(&HostTensorView {
+        let pivots = match self.upload_exec(&HostTensorView {
             data: &result.pivots.data,
             shape: &result.pivots.shape,
-        })?;
+        }) {
+            Ok(handle) => handle,
+            Err(err) => {
+                let _ = self.free_exec(&reduced);
+                return Err(err);
+            }
+        };
         Ok(ProviderRrefResult { reduced, pivots })
     }
 
