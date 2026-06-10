@@ -40,6 +40,7 @@ fn normalize_shape(shape: &[usize]) -> Vec<usize> {
 pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError> {
     let dims = match value {
         Value::Tensor(t) => normalize_shape(&t.shape),
+        Value::SparseTensor(t) => normalize_shape(&[t.rows, t.cols]),
         Value::ComplexTensor(t) => normalize_shape(&t.shape),
         Value::LogicalArray(la) => normalize_shape(&la.shape),
         Value::StringArray(sa) => normalize_shape(&sa.shape),
@@ -62,6 +63,7 @@ pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError>
 pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
     let numel = match value {
         Value::Tensor(t) => t.data.len(),
+        Value::SparseTensor(t) => t.rows.saturating_mul(t.cols),
         Value::ComplexTensor(t) => t.data.len(),
         Value::LogicalArray(la) => la.data.len(),
         Value::StringArray(sa) => sa.data.len(),
