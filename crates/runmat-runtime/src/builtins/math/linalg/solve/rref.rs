@@ -288,9 +288,9 @@ async fn evaluate_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResul
                 shape: &pivots.shape,
             }) {
                 Ok(handle) => handle,
-                Err(err) => {
+                Err(_err) => {
                     let _ = provider.free(&reduced_handle);
-                    return Err(internal_error(format!("{NAME}: {err}")));
+                    return Ok(eval);
                 }
             };
             return Ok(RrefEval::from_provider(ProviderRrefResult {
@@ -807,6 +807,7 @@ pub(crate) mod tests {
             register_wgpu_provider, WgpuProviderOptions,
         };
 
+        let _accel_guard = test_support::accel_test_lock();
         let _ = register_wgpu_provider(WgpuProviderOptions::default());
         let provider = runmat_accelerate_api::provider().expect("provider");
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
