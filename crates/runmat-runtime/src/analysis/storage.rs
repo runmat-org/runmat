@@ -31,6 +31,12 @@ pub enum AnalysisArtifactStoreConfig {
     Filesystem { root: PathBuf },
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AnalysisArtifactRetentionConfig {
+    pub max_runs: Option<usize>,
+    pub max_runs_per_kind: Option<usize>,
+}
+
 pub struct InMemoryAnalysisArtifactStore {
     runs: RwLock<HashMap<String, AnalysisRunResult>>,
 }
@@ -219,14 +225,19 @@ fn run_operation_version(run: &AnalysisRunResult) -> String {
 }
 
 fn prune_filesystem_runs(root: &PathBuf) -> Result<(), String> {
-    let max_runs = std::env::var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let max_runs_per_kind = std::env::var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
+    let retention = current_retention_config();
+    let max_runs = retention.max_runs.unwrap_or_else(|| {
+        std::env::var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0)
+    });
+    let max_runs_per_kind = retention.max_runs_per_kind.unwrap_or_else(|| {
+        std::env::var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0)
+    });
     if max_runs == 0 && max_runs_per_kind == 0 {
         return Ok(());
     }
@@ -292,6 +303,18 @@ fn global_store() -> &'static RwLock<Arc<dyn AnalysisArtifactStore>> {
     })
 }
 
+fn retention_config() -> &'static RwLock<AnalysisArtifactRetentionConfig> {
+    static CONFIG: OnceLock<RwLock<AnalysisArtifactRetentionConfig>> = OnceLock::new();
+    CONFIG.get_or_init(|| RwLock::new(AnalysisArtifactRetentionConfig::default()))
+}
+
+fn current_retention_config() -> AnalysisArtifactRetentionConfig {
+    retention_config()
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
+}
+
 static NEXT_RUN_ID: AtomicU64 = AtomicU64::new(1);
 
 pub fn next_run_id() -> String {
@@ -328,6 +351,14 @@ pub fn configure_artifact_store(config: AnalysisArtifactStoreConfig) -> Result<(
     Ok(())
 }
 
+pub fn configure_artifact_retention(config: AnalysisArtifactRetentionConfig) -> Result<(), String> {
+    let mut guard = retention_config()
+        .write()
+        .map_err(|_| "analysis artifact retention config lock poisoned".to_string())?;
+    *guard = config;
+    Ok(())
+}
+
 pub fn configure_artifact_store_from_env() -> Result<(), String> {
     configure_artifact_store(config_from_env())
 }
@@ -348,13 +379,15 @@ fn config_from_env() -> AnalysisArtifactStoreConfig {
     if mode == "filesystem" {
         let root = std::env::var("RUNMAT_ANALYSIS_ARTIFACT_ROOT")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/runmat-analysis-store")
-            });
+            .unwrap_or_else(|_| default_filesystem_artifact_root());
         AnalysisArtifactStoreConfig::Filesystem { root }
     } else {
         AnalysisArtifactStoreConfig::InMemory
     }
+}
+
+pub fn default_filesystem_artifact_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/runmat-analysis-store")
 }
 
 fn atomic_write(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
@@ -384,4 +417,8 @@ pub fn reset_artifact_store_for_tests() {
         .write()
         .expect("analysis artifact store lock poisoned");
     *guard = Arc::new(InMemoryAnalysisArtifactStore::new());
+    *retention_config()
+        .write()
+        .expect("analysis artifact retention config lock poisoned") =
+        AnalysisArtifactRetentionConfig::default();
 }

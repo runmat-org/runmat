@@ -111,6 +111,8 @@ If you want to understand how the runtime works internally, start with the [Comp
 - [Models](./analysis/models.md)
 - [Physics Models](./analysis/physics.md)
 - [Solves, Studies, and Sweeps](./analysis/solves.md)
+- [Evidence & Artifacts](./analysis/evidence.md)
+- [FEA Verification & Validation](./analysis/validation.md)
 - [Results & Trust](./analysis/trust.md)
 - [Current Status](./analysis/status.md)
 - [Operation Reference](./analysis/operation-reference.md)

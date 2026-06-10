@@ -487,7 +487,7 @@ fn analysis_create_model_maps_invalid_intent_error() {
     )
     .expect_err("create model should fail");
 
-    assert_eq!(err.error_code, "ANALYSIS_CREATE_MODEL_INVALID_INTENT");
+    assert_eq!(err.error_code, "RM.ANALYSIS.CREATE_MODEL.INVALID_INTENT");
     assert_eq!(err.operation, "analysis.create_model");
     assert_eq!(err.op_version, "analysis.create_model/v1");
 }
@@ -518,6 +518,7 @@ fn analysis_create_model_supports_nonlinear_profile_template() {
 #[test]
 fn analysis_create_model_accepts_prep_context_and_validates_model() {
     let _guard = analysis_test_guard();
+    let _prep_guard = crate::geometry::prep_artifact_test_guard();
     let geometry = sample_step_like_geometry_asset();
     let prep = crate::geometry::geometry_prep_for_analysis_op(
         &geometry,
@@ -576,7 +577,7 @@ fn analysis_create_model_rejects_mismatched_prep_context() {
         OperationContext::new(None, None),
     )
     .expect_err("mismatched prep context should fail");
-    assert_eq!(error.error_code, "ANALYSIS_CREATE_MODEL_PREP_MISMATCH");
+    assert_eq!(error.error_code, "RM.ANALYSIS.CREATE_MODEL.PREP_MISMATCH");
 }
 
 #[test]
@@ -804,6 +805,36 @@ fn analysis_create_model_supports_fsi_coupled_profile_template() {
     assert_eq!(cfd.solve_family, CfdSolveFamily::Transient);
     assert_eq!(cfd.time_profile.len(), 2);
     assert!(envelope.data.thermo_mechanical.is_none());
+}
+
+#[test]
+fn analysis_study_document_parser_accepts_json_and_yaml_files() {
+    let _guard = analysis_test_guard();
+    let spec = sample_linear_static_study_spec();
+
+    let json = serde_json::to_string(&spec).unwrap();
+    let parsed_json = parse_analysis_study_document(&json, AnalysisStudyFileFormat::Json)
+        .expect("json study should parse");
+    match parsed_json {
+        AnalysisStudyDocument::Study(parsed) => assert_eq!(parsed.study_id, spec.study_id),
+        AnalysisStudyDocument::Sweep(_) => panic!("expected study document"),
+    }
+
+    let yaml = serde_yaml::to_string(&spec).unwrap();
+    let parsed_yaml = parse_analysis_study_document(&yaml, AnalysisStudyFileFormat::Yaml)
+        .expect("yaml study should parse");
+    match parsed_yaml {
+        AnalysisStudyDocument::Study(parsed) => assert_eq!(parsed.study_id, spec.study_id),
+        AnalysisStudyDocument::Sweep(_) => panic!("expected study document"),
+    }
+
+    assert_eq!(
+        analysis_study_file_format_from_path(std::path::Path::new("model.study.yaml")),
+        Some(AnalysisStudyFileFormat::Yaml)
+    );
+    assert!(is_analysis_study_file_path(std::path::Path::new(
+        "model.study.json"
+    )));
 }
 
 #[test]
@@ -1046,7 +1077,7 @@ fn analysis_plan_study_sweep_rejects_empty_study_set() {
         .expect_err("empty sweep plan should be rejected");
     assert_eq!(err.operation, "analysis.plan_study_sweep");
     assert_eq!(err.op_version, "analysis.plan_study_sweep/v1");
-    assert_eq!(err.error_code, "ANALYSIS_PLAN_STUDY_SWEEP_INVALID_SPEC");
+    assert_eq!(err.error_code, "RM.ANALYSIS.PLAN_STUDY_SWEEP.INVALID_SPEC");
 }
 
 #[test]
@@ -1071,7 +1102,7 @@ fn analysis_plan_study_sweep_can_continue_on_study_failure() {
     assert_eq!(envelope.data.failure_entries[0].study_index, 1);
     assert_eq!(
         envelope.data.failure_entries[0].error_code,
-        "ANALYSIS_PLAN_STUDY_INVALID_SPEC"
+        "RM.ANALYSIS.PLAN_STUDY.INVALID_SPEC"
     );
 }
 
@@ -1280,7 +1311,7 @@ fn analysis_run_study_sweep_rejects_empty_study_set() {
         .expect_err("empty sweep should be rejected");
     assert_eq!(err.operation, "analysis.run_study_sweep");
     assert_eq!(err.op_version, "analysis.run_study_sweep/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_STUDY_SWEEP_INVALID_SPEC");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_STUDY_SWEEP.INVALID_SPEC");
 }
 
 #[test]
@@ -1298,7 +1329,7 @@ fn analysis_run_study_sweep_fail_fast_returns_error_on_invalid_study() {
         .expect_err("fail-fast sweep should return error");
     assert_eq!(err.operation, "analysis.run_study_sweep");
     assert_eq!(err.op_version, "analysis.run_study_sweep/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_STUDY_SWEEP_STUDY_FAILED");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_STUDY_SWEEP.STUDY_FAILED");
 }
 
 #[test]
@@ -1324,7 +1355,7 @@ fn analysis_run_study_sweep_can_continue_on_study_failure() {
     assert_eq!(envelope.data.failure_entries[0].study_index, 1);
     assert_eq!(
         envelope.data.failure_entries[0].error_code,
-        "ANALYSIS_RUN_STUDY_INVALID_SPEC"
+        "RM.ANALYSIS.RUN_STUDY.INVALID_SPEC"
     );
     assert!(envelope.data.failure_entries[0].study_id.trim().is_empty());
 }
@@ -1467,7 +1498,7 @@ fn analysis_validate_maps_typed_error_code() {
     let error = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
         .expect_err("validation should fail");
 
-    assert_eq!(error.error_code, "ANALYSIS_VALIDATION_MISSING_MATERIALS");
+    assert_eq!(error.error_code, "RM.ANALYSIS.VALIDATE.MISSING_MATERIALS");
     assert_eq!(error.operation, "analysis.validate");
     assert_eq!(error.op_version, "analysis.validate/v1");
 }
@@ -1710,7 +1741,7 @@ fn analysis_results_unknown_field_maps_typed_error() {
 
     assert_eq!(err.operation, "analysis.results");
     assert_eq!(err.op_version, "analysis.results/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RESULTS_FIELD_NOT_FOUND");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RESULTS.FIELD_NOT_FOUND");
 }
 
 #[test]
@@ -1761,7 +1792,7 @@ fn analysis_results_by_run_id_missing_maps_typed_error() {
     )
     .expect_err("missing run id should fail");
 
-    assert_eq!(err.error_code, "ANALYSIS_RESULTS_RUN_NOT_FOUND");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RESULTS.RUN_NOT_FOUND");
     storage::reset_artifact_store_for_tests();
 }
 
@@ -2832,7 +2863,7 @@ fn analysis_run_modal_rejects_models_without_modal_step() {
 
     assert_eq!(err.operation, "analysis.run_modal");
     assert_eq!(err.op_version, "analysis.run_modal/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_MODAL_INVALID_MODEL");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_MODAL.INVALID_MODEL");
 }
 
 #[test]
@@ -2848,7 +2879,7 @@ fn analysis_run_acoustic_rejects_models_without_modal_step() {
 
     assert_eq!(err.operation, "analysis.run_acoustic");
     assert_eq!(err.op_version, "analysis.run_acoustic/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_ACOUSTIC_INVALID_MODEL");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_ACOUSTIC.INVALID_MODEL");
 }
 
 #[test]
@@ -2864,7 +2895,7 @@ fn analysis_run_transient_rejects_models_without_transient_step() {
 
     assert_eq!(err.operation, "analysis.run_transient");
     assert_eq!(err.op_version, "analysis.run_transient/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_TRANSIENT_INVALID_MODEL");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_TRANSIENT.INVALID_MODEL");
 }
 
 #[test]
@@ -2880,7 +2911,7 @@ fn analysis_run_cfd_rejects_models_without_cfd_step() {
 
     assert_eq!(err.operation, "analysis.run_cfd");
     assert_eq!(err.op_version, "analysis.run_cfd/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_CFD_INVALID_MODEL");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_CFD.INVALID_MODEL");
 }
 
 #[test]
@@ -2897,7 +2928,7 @@ fn analysis_run_cfd_rejects_model_without_cfd_domain() {
 
     assert_eq!(err.operation, "analysis.run_cfd");
     assert_eq!(err.op_version, "analysis.run_cfd/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_CFD_INVALID_MODEL");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_CFD.INVALID_MODEL");
 }
 
 #[test]
@@ -2915,7 +2946,7 @@ fn analysis_run_cfd_rejects_disabled_cfd_domain() {
 
     assert_eq!(err.operation, "analysis.run_cfd");
     assert_eq!(err.op_version, "analysis.run_cfd/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_CFD_INVALID_OPTIONS");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS");
 }
 
 #[test]
@@ -2931,7 +2962,7 @@ fn analysis_run_thermal_rejects_models_without_thermal_step() {
 
     assert_eq!(err.operation, "analysis.run_thermal");
     assert_eq!(err.op_version, "analysis.run_thermal/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_THERMAL_INVALID_MODEL");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_THERMAL.INVALID_MODEL");
 }
 
 #[test]
@@ -2964,7 +2995,7 @@ fn analysis_run_cht_rejects_models_without_cfd_step() {
 
     assert_eq!(err.operation, "analysis.run_cht");
     assert_eq!(err.op_version, "analysis.run_cht/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_CHT_INVALID_MODEL");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_CHT.INVALID_MODEL");
 }
 
 #[test]
@@ -2985,7 +3016,7 @@ fn analysis_run_cht_rejects_models_without_thermal_step() {
 
     assert_eq!(err.operation, "analysis.run_cht");
     assert_eq!(err.op_version, "analysis.run_cht/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_CHT_INVALID_MODEL");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_CHT.INVALID_MODEL");
 }
 
 #[test]
@@ -3006,7 +3037,7 @@ fn analysis_run_cht_rejects_invalid_cfd_domain_parameters() {
 
     assert_eq!(err.operation, "analysis.run_cht");
     assert_eq!(err.op_version, "analysis.run_cht/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_CHT_INVALID_OPTIONS");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS");
 }
 
 #[test]
@@ -3027,7 +3058,7 @@ fn analysis_run_fsi_rejects_models_without_transient_step() {
 
     assert_eq!(err.operation, "analysis.run_fsi");
     assert_eq!(err.op_version, "analysis.run_fsi/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_FSI_INVALID_MODEL");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_FSI.INVALID_MODEL");
 }
 
 #[test]
@@ -3048,7 +3079,7 @@ fn analysis_run_fsi_rejects_invalid_cfd_domain_parameters() {
 
     assert_eq!(err.operation, "analysis.run_fsi");
     assert_eq!(err.op_version, "analysis.run_fsi/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_FSI_INVALID_OPTIONS");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS");
 }
 
 #[test]
@@ -3062,7 +3093,10 @@ fn analysis_run_electromagnetic_rejects_models_without_em_step() {
     .expect_err("electromagnetic run should fail without electromagnetic step");
     assert_eq!(err.operation, "analysis.run_electromagnetic");
     assert_eq!(err.op_version, "analysis.run_electromagnetic/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_ELECTROMAGNETIC_REQUIRES_STEP");
+    assert_eq!(
+        err.error_code,
+        "RM.ANALYSIS.RUN_ELECTROMAGNETIC.REQUIRES_STEP"
+    );
 }
 
 #[test]
@@ -3289,7 +3323,7 @@ fn analysis_run_electromagnetic_rejects_invalid_harmonic_controls() {
     assert_eq!(err.op_version, "analysis.run_electromagnetic/v1");
     assert_eq!(
         err.error_code,
-        "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS"
+        "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS"
     );
 }
 
@@ -3446,7 +3480,7 @@ fn analysis_run_nonlinear_rejects_models_without_nonlinear_step() {
     .expect_err("nonlinear run should reject models without nonlinear step");
     assert_eq!(err.operation, "analysis.run_nonlinear");
     assert_eq!(err.op_version, "analysis.run_nonlinear/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_NONLINEAR_INVALID_MODEL");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_NONLINEAR.INVALID_MODEL");
 }
 
 #[test]
@@ -3547,12 +3581,13 @@ fn analysis_run_nonlinear_rejects_missing_prep_artifact_reference() {
         OperationContext::new(None, None),
     )
     .expect_err("missing prep artifact reference should fail");
-    assert_eq!(error.error_code, "ANALYSIS_RUN_PREP_NOT_FOUND");
+    assert_eq!(error.error_code, "RM.ANALYSIS.RUN_PREP.NOT_FOUND");
 }
 
 #[test]
 fn analysis_run_nonlinear_rejects_mismatched_prep_artifact_reference() {
     let _guard = analysis_test_guard();
+    let _prep_guard = crate::geometry::prep_artifact_test_guard();
     let geometry = sample_step_like_geometry_asset();
     let prep = crate::geometry::geometry_prep_for_analysis_op(
         &geometry,
@@ -3577,14 +3612,19 @@ fn analysis_run_nonlinear_rejects_mismatched_prep_artifact_reference() {
         OperationContext::new(None, None),
     )
     .expect_err("mismatched prep artifact reference should fail");
-    assert_eq!(error.error_code, "ANALYSIS_RUN_PREP_MISMATCH");
+    assert_eq!(error.error_code, "RM.ANALYSIS.RUN_PREP.MISMATCH");
 }
 
 #[test]
 fn analysis_run_nonlinear_rejects_stale_prep_artifact_when_newer_revision_exists() {
     let _guard = analysis_test_guard();
+    let _prep_guard = crate::geometry::prep_artifact_test_guard();
     crate::geometry::reset_prep_artifact_store_for_tests();
-    std::env::set_var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION", "true");
+    crate::geometry::configure_prep_artifacts(crate::geometry::GeometryPrepArtifactConfig {
+        require_latest_revision: Some(true),
+        ..crate::geometry::GeometryPrepArtifactConfig::default()
+    })
+    .expect("prep artifact config should be configurable");
 
     let mut geometry_v1 = sample_step_like_geometry_asset();
     geometry_v1.revision = 1;
@@ -3625,7 +3665,7 @@ fn analysis_run_nonlinear_rejects_stale_prep_artifact_when_newer_revision_exists
         OperationContext::new(None, None),
     )
     .expect_err("stale prep artifact should fail");
-    assert_eq!(error.error_code, "ANALYSIS_RUN_PREP_STALE");
+    assert_eq!(error.error_code, "RM.ANALYSIS.RUN_PREP.STALE");
 
     let health = crate::geometry::geometry_prep_artifact_health_op(
         crate::geometry::GeometryPrepArtifactHealthQuery::default(),
@@ -3634,7 +3674,6 @@ fn analysis_run_nonlinear_rejects_stale_prep_artifact_when_newer_revision_exists
     .expect("prep health should be queryable");
     assert!(health.data.metrics.stale_reject_count >= 1);
 
-    std::env::remove_var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION");
     crate::geometry::reset_prep_artifact_store_for_tests();
 }
 
@@ -4170,7 +4209,7 @@ fn analysis_run_transient_rejects_non_monotonic_thermo_time_profile() {
     )
     .expect_err("non-monotonic thermo time profile should be rejected");
 
-    assert_eq!(err.error_code, "ANALYSIS_RUN_TRANSIENT_INVALID_OPTIONS");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_TRANSIENT.INVALID_OPTIONS");
 }
 
 #[test]
@@ -4208,7 +4247,7 @@ fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
     )
     .expect_err("unknown thermo expected region should be rejected");
 
-    assert_eq!(err.error_code, "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS");
 }
 
 #[test]
@@ -4237,7 +4276,7 @@ fn analysis_run_nonlinear_rejects_invalid_plasticity_constitutive_options() {
     )
     .expect_err("nonlinear run should reject invalid plasticity options");
 
-    assert_eq!(err.error_code, "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS");
 }
 
 #[test]
@@ -4266,7 +4305,7 @@ fn analysis_run_nonlinear_rejects_invalid_contact_interface_options() {
     )
     .expect_err("nonlinear run should reject invalid contact options");
 
-    assert_eq!(err.error_code, "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS");
 }
 
 #[test]
@@ -4386,7 +4425,7 @@ fn analysis_run_transient_rejects_missing_thermo_field_artifact() {
     .expect_err("missing thermo field artifact should be rejected");
     let _ = fs::remove_dir_all(&root);
 
-    assert_eq!(err.error_code, "ANALYSIS_RUN_THERMO_FIELD_NOT_FOUND");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_THERMO_FIELD.NOT_FOUND");
 }
 
 #[test]
@@ -4981,7 +5020,7 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
     )
     .expect_err("results should fail for unknown mode index");
 
-    assert_eq!(err.error_code, "ANALYSIS_RESULTS_MODE_NOT_FOUND");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RESULTS.MODE_NOT_FOUND");
     assert_eq!(err.operation, "analysis.results");
     assert_eq!(err.op_version, "analysis.results/v1");
 }
@@ -5098,7 +5137,7 @@ fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
 
     assert_eq!(
         err.error_code,
-        "ANALYSIS_RESULTS_TRANSIENT_SNAPSHOT_NOT_FOUND"
+        "RM.ANALYSIS.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND"
     );
     assert_eq!(err.operation, "analysis.results");
     assert_eq!(err.op_version, "analysis.results/v1");

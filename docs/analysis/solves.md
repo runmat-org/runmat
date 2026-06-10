@@ -1,7 +1,7 @@
 ---
 title: "Solves, Studies, and Sweeps"
 category: "Analysis & Simulation"
-section: "13.4"
+section: "13.5"
 last_updated: "June 9, 2026"
 ---
 
@@ -34,7 +34,7 @@ flowchart TD
   Run --> Trends
 ```
 
-Baseline exploratory runs can skip prep. Runs that need reproducible geometry evidence should pass a prep artifact into model creation or run options.
+Exploratory runs can skip prep. Runs that need reproducible geometry setup should pass a prep artifact into model creation or run options.
 
 ## Run Options
 
@@ -54,15 +54,32 @@ Quality policy affects whether a run with warnings is publishable, degraded, or 
 
 Use studies when one run should be repeatable as a named unit of work.
 
-Study operations wrap the direct flow:
+From the CLI:
+
+```sh
+runmat run studies/bracket.study.yaml
+runmat run bracket_static
+```
+
+The second form uses a named entrypoint whose `path` points at the study file. Study files can be JSON or YAML and can hold either one study or a sweep.
+
+From RunMat code:
+
+```matlab
+validation = analysis_validate_study("studies/bracket.study.yaml");
+plan = analysis_plan_study("studies/bracket.study.yaml");
+run = analysis_run_study("studies/bracket.study.yaml");
+```
+
+Study operations package the direct flow:
 
 | Operation | Use |
 | --- | --- |
 | `analysis.validate_study/v1` | Check the study spec and emit structured issues. |
-| `analysis.plan_study/v1` | Produce the operation sequence, run operation, fingerprint, and evidence path. |
-| `analysis.run_study/v1` | Execute the planned study and return run identity, quality, provenance, and evidence path. |
+| `analysis.plan_study/v1` | Produce the operation sequence, run operation, fingerprint, and plan artifact path. |
+| `analysis.run_study/v1` | Execute the planned study and return run identity, quality, provenance, and run artifact path. |
 
-Study fingerprints are deterministic for the normalized study payload. Evidence files are persisted under the study artifact root.
+Study fingerprints are deterministic for the normalized study payload. Study artifacts are saved under the study artifact root.
 
 ## Sweeps
 
@@ -86,4 +103,4 @@ All run operations persist an `AnalysisRunResult`. Use:
 | `analysis.results_compare/v1` | Compare selected quality, domain, and timing fields between two persisted runs. |
 | `analysis.trends/v1` | Summarize persisted runs by run kind over a bounded window. |
 
-For how to interpret quality, diagnostics, and governance evidence, see [Results & Trust](/docs/runtime/analysis/trust).
+For how to interpret quality, diagnostics, and provenance, see [Results & Trust](/docs/runtime/analysis/trust).

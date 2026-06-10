@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use env_logger::Env;
 use log::{debug, error, info, warn};
 use runmat_accelerate::AccelerateInitOptions;
-use runmat_config::runtime::{self as config, ConfigLoader, PlotMode, RunMatRuntimeConfig};
+use runmat_config::runtime::{
+    self as config, AnalysisArtifactStoreMode, ConfigLoader, PlotMode, RunMatRuntimeConfig,
+};
 
 use crate::app::dispatch;
 use crate::cli::{Cli, CliOverrideSources, GcPreset, LogLevel, OptLevel};
@@ -49,6 +51,7 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
 
     configure_gc_from_config(&config)?;
     configure_plotting_from_config(&config);
+    configure_analysis_from_config(&config)?;
     report_plot_context_status(&config);
 
     let wants_gui = match config.plotting.mode {
@@ -274,6 +277,49 @@ fn configure_plotting_from_config(config: &RunMatRuntimeConfig) {
     if let Some(budget) = config.plotting.surface_vertex_budget {
         set_surface_vertex_budget(budget);
     }
+}
+
+fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
+    use runmat_runtime::analysis::{self, storage};
+    use runmat_runtime::geometry;
+
+    if let Some(mode) = config.analysis.artifact_store {
+        let artifact_store = match mode {
+            AnalysisArtifactStoreMode::InMemory => storage::AnalysisArtifactStoreConfig::InMemory,
+            AnalysisArtifactStoreMode::Filesystem => {
+                storage::AnalysisArtifactStoreConfig::Filesystem {
+                    root: config
+                        .analysis
+                        .artifact_root
+                        .clone()
+                        .unwrap_or_else(storage::default_filesystem_artifact_root),
+                }
+            }
+        };
+        storage::configure_artifact_store(artifact_store)
+    } else {
+        storage::configure_artifact_store_from_env()
+    }
+    .map_err(|err| anyhow::anyhow!("Failed to configure analysis artifact store: {err}"))?;
+    storage::configure_artifact_retention(storage::AnalysisArtifactRetentionConfig {
+        max_runs: config.analysis.artifact_max_runs,
+        max_runs_per_kind: config.analysis.artifact_max_runs_per_kind,
+    })
+    .map_err(|err| anyhow::anyhow!("Failed to configure analysis artifact retention: {err}"))?;
+    analysis::configure_analysis_runtime(analysis::AnalysisRuntimeConfig {
+        study_artifact_root: config.analysis.study_artifact_root.clone(),
+        thermo_field_artifact_root: config.analysis.thermo_field_artifact_root.clone(),
+    })
+    .map_err(|err| anyhow::anyhow!("Failed to configure analysis runtime: {err}"))?;
+    geometry::configure_prep_artifacts(geometry::GeometryPrepArtifactConfig {
+        artifact_root: config.analysis.geometry_prep_artifact_root.clone(),
+        max_artifacts: config.analysis.geometry_prep_max_artifacts,
+        max_artifacts_per_geometry: config.analysis.geometry_prep_max_artifacts_per_geometry,
+        max_age_seconds: config.analysis.geometry_prep_max_age_seconds,
+        require_latest_revision: config.analysis.geometry_prep_require_latest_revision,
+    })
+    .map_err(|err| anyhow::anyhow!("Failed to configure geometry prep artifacts: {err}"))?;
+    Ok(())
 }
 
 fn report_plot_context_status(config: &RunMatRuntimeConfig) {

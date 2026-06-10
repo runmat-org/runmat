@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::{OnceLock, RwLock};
 
 use chrono::Utc;
 use runmat_analysis_core::{
@@ -49,6 +50,32 @@ mod contracts;
 mod policy;
 mod promotion;
 pub mod storage;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AnalysisRuntimeConfig {
+    pub study_artifact_root: Option<PathBuf>,
+    pub thermo_field_artifact_root: Option<PathBuf>,
+}
+
+fn analysis_runtime_config() -> &'static RwLock<AnalysisRuntimeConfig> {
+    static CONFIG: OnceLock<RwLock<AnalysisRuntimeConfig>> = OnceLock::new();
+    CONFIG.get_or_init(|| RwLock::new(AnalysisRuntimeConfig::default()))
+}
+
+fn current_analysis_runtime_config() -> AnalysisRuntimeConfig {
+    analysis_runtime_config()
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
+}
+
+pub fn configure_analysis_runtime(config: AnalysisRuntimeConfig) -> Result<(), String> {
+    let mut guard = analysis_runtime_config()
+        .write()
+        .map_err(|_| "analysis runtime config lock poisoned".to_string())?;
+    *guard = config;
+    Ok(())
+}
 
 pub use contracts::{
     AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
@@ -127,7 +154,7 @@ pub fn analysis_create_model_op(
             ANALYSIS_CREATE_MODEL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_CREATE_MODEL_INVALID_INTENT",
+                error_code: "RM.ANALYSIS.CREATE_MODEL.INVALID_INTENT",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -143,7 +170,7 @@ pub fn analysis_create_model_op(
             ANALYSIS_CREATE_MODEL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_CREATE_MODEL_GEOMETRY_EMPTY",
+                error_code: "RM.ANALYSIS.CREATE_MODEL.GEOMETRY_EMPTY",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -159,7 +186,7 @@ pub fn analysis_create_model_op(
             ANALYSIS_CREATE_MODEL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_CREATE_MODEL_UNIT_UNSPECIFIED",
+                error_code: "RM.ANALYSIS.CREATE_MODEL.UNIT_UNSPECIFIED",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -178,7 +205,7 @@ pub fn analysis_create_model_op(
                 ANALYSIS_CREATE_MODEL_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_CREATE_MODEL_PREP_MISMATCH",
+                    error_code: "RM.ANALYSIS.CREATE_MODEL.PREP_MISMATCH",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -219,7 +246,7 @@ pub fn analysis_create_model_op(
                     ANALYSIS_CREATE_MODEL_OP_VERSION,
                     &context,
                     OperationErrorSpec {
-                        error_code: "ANALYSIS_CREATE_MODEL_PREP_REGION_NOT_FOUND",
+                        error_code: "RM.ANALYSIS.CREATE_MODEL.PREP_REGION_NOT_FOUND",
                         error_type: OperationErrorType::Validation,
                         retryable: false,
                         severity: OperationErrorSeverity::Error,
@@ -237,7 +264,7 @@ pub fn analysis_create_model_op(
                     ANALYSIS_CREATE_MODEL_OP_VERSION,
                     &context,
                     OperationErrorSpec {
-                        error_code: "ANALYSIS_CREATE_MODEL_PREP_INVALID_MAPPING",
+                        error_code: "RM.ANALYSIS.CREATE_MODEL.PREP_INVALID_MAPPING",
                         error_type: OperationErrorType::Input,
                         retryable: false,
                         severity: OperationErrorSeverity::Error,
@@ -253,7 +280,7 @@ pub fn analysis_create_model_op(
                         ANALYSIS_CREATE_MODEL_OP_VERSION,
                         &context,
                         OperationErrorSpec {
-                            error_code: "ANALYSIS_CREATE_MODEL_PREP_MESH_NOT_FOUND",
+                            error_code: "RM.ANALYSIS.CREATE_MODEL.PREP_MESH_NOT_FOUND",
                             error_type: OperationErrorType::Validation,
                             retryable: false,
                             severity: OperationErrorSeverity::Error,
@@ -682,7 +709,7 @@ pub fn analysis_create_model_op(
                 ANALYSIS_CREATE_MODEL_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_CREATE_MODEL_INVALID",
+                    error_code: "RM.ANALYSIS.CREATE_MODEL.INVALID",
                     error_type: OperationErrorType::Validation,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -736,7 +763,7 @@ pub fn analysis_validate_study_op(
             ANALYSIS_VALIDATE_STUDY_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.VALIDATE_STUDY.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -769,7 +796,7 @@ pub fn analysis_plan_study_op(
             ANALYSIS_PLAN_STUDY_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_PLAN_STUDY_INVALID_SPEC",
+                error_code: "RM.ANALYSIS.PLAN_STUDY.INVALID_SPEC",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -809,7 +836,7 @@ pub fn analysis_plan_study_op(
             ANALYSIS_PLAN_STUDY_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.PLAN_STUDY.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -848,7 +875,7 @@ pub fn analysis_run_study_op(
             ANALYSIS_RUN_STUDY_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_STUDY_INVALID_SPEC",
+                error_code: "RM.ANALYSIS.RUN_STUDY.INVALID_SPEC",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -947,7 +974,7 @@ pub fn analysis_run_study_op(
             ANALYSIS_RUN_STUDY_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_STUDY.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1003,7 +1030,7 @@ pub fn analysis_plan_study_sweep_op(
             ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_PLAN_STUDY_SWEEP_INVALID_SPEC",
+                error_code: "RM.ANALYSIS.PLAN_STUDY_SWEEP.INVALID_SPEC",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -1025,7 +1052,7 @@ pub fn analysis_plan_study_sweep_op(
                         ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
                         &context,
                         OperationErrorSpec {
-                            error_code: "ANALYSIS_PLAN_STUDY_SWEEP_STUDY_FAILED",
+                            error_code: "RM.ANALYSIS.PLAN_STUDY_SWEEP.STUDY_FAILED",
                             error_type: OperationErrorType::Validation,
                             retryable: false,
                             severity: OperationErrorSeverity::Error,
@@ -1076,7 +1103,7 @@ pub fn analysis_plan_study_sweep_op(
                 ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                    error_code: "RM.ANALYSIS.PLAN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                     error_type: OperationErrorType::Internal,
                     retryable: true,
                     severity: OperationErrorSeverity::Error,
@@ -1101,7 +1128,7 @@ pub fn analysis_plan_study_sweep_op(
             ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.PLAN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1116,7 +1143,7 @@ pub fn analysis_plan_study_sweep_op(
             ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.PLAN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1188,7 +1215,7 @@ pub fn analysis_validate_study_sweep_op(
                 ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                    error_code: "RM.ANALYSIS.VALIDATE_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                     error_type: OperationErrorType::Internal,
                     retryable: true,
                     severity: OperationErrorSeverity::Error,
@@ -1211,7 +1238,7 @@ pub fn analysis_validate_study_sweep_op(
             ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.VALIDATE_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1226,7 +1253,7 @@ pub fn analysis_validate_study_sweep_op(
             ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.VALIDATE_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1267,7 +1294,7 @@ pub fn analysis_run_study_sweep_op(
             ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_STUDY_SWEEP_INVALID_SPEC",
+                error_code: "RM.ANALYSIS.RUN_STUDY_SWEEP.INVALID_SPEC",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -1289,7 +1316,7 @@ pub fn analysis_run_study_sweep_op(
                         ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
                         &context,
                         OperationErrorSpec {
-                            error_code: "ANALYSIS_RUN_STUDY_SWEEP_STUDY_FAILED",
+                            error_code: "RM.ANALYSIS.RUN_STUDY_SWEEP.STUDY_FAILED",
                             error_type: OperationErrorType::Validation,
                             retryable: false,
                             severity: OperationErrorSeverity::Error,
@@ -1338,7 +1365,7 @@ pub fn analysis_run_study_sweep_op(
                 ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                    error_code: "RM.ANALYSIS.RUN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                     error_type: OperationErrorType::Internal,
                     retryable: true,
                     severity: OperationErrorSeverity::Error,
@@ -1364,7 +1391,7 @@ pub fn analysis_run_study_sweep_op(
             ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1379,7 +1406,7 @@ pub fn analysis_run_study_sweep_op(
             ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1468,7 +1495,7 @@ pub fn analysis_run_modal_with_options_op(
             ANALYSIS_RUN_MODAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_MODAL_INVALID_MODEL",
+                error_code: "RM.ANALYSIS.RUN_MODAL.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -1487,7 +1514,7 @@ pub fn analysis_run_modal_with_options_op(
             ANALYSIS_RUN_MODAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_MODAL_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_MODAL.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -1511,7 +1538,7 @@ pub fn analysis_run_modal_with_options_op(
                 ANALYSIS_RUN_MODAL_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_MODAL_INVALID_OPTIONS",
+                    error_code: "RM.ANALYSIS.RUN_MODAL.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -1529,7 +1556,7 @@ pub fn analysis_run_modal_with_options_op(
                 ANALYSIS_RUN_MODAL_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_MODAL_INVALID_OPTIONS",
+                    error_code: "RM.ANALYSIS.RUN_MODAL.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -1565,7 +1592,7 @@ pub fn analysis_run_modal_with_options_op(
             ANALYSIS_RUN_MODAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "SOLVER_MODEL_INVALID",
+                error_code: "RM.ANALYSIS.RUN_MODAL.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -1786,7 +1813,7 @@ pub fn analysis_run_modal_with_options_op(
             ANALYSIS_RUN_MODAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_MODAL.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1820,7 +1847,7 @@ pub fn analysis_run_acoustic_with_options_op(
             ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_ACOUSTIC_INVALID_MODEL",
+                error_code: "RM.ANALYSIS.RUN_ACOUSTIC.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -1839,7 +1866,7 @@ pub fn analysis_run_acoustic_with_options_op(
             ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_ACOUSTIC_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_ACOUSTIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -1863,7 +1890,7 @@ pub fn analysis_run_acoustic_with_options_op(
                 ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_ACOUSTIC_INVALID_OPTIONS",
+                    error_code: "RM.ANALYSIS.RUN_ACOUSTIC.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -1881,7 +1908,7 @@ pub fn analysis_run_acoustic_with_options_op(
                 ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_ACOUSTIC_INVALID_OPTIONS",
+                    error_code: "RM.ANALYSIS.RUN_ACOUSTIC.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -1917,7 +1944,7 @@ pub fn analysis_run_acoustic_with_options_op(
             ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "SOLVER_MODEL_INVALID",
+                error_code: "RM.ANALYSIS.RUN_ACOUSTIC.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2109,7 +2136,7 @@ pub fn analysis_run_acoustic_with_options_op(
             ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_ACOUSTIC.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -2164,7 +2191,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CFD_INVALID_MODEL",
+                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2183,7 +2210,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CFD_INVALID_MODEL",
+                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2199,7 +2226,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2216,7 +2243,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2234,7 +2261,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2252,7 +2279,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2273,7 +2300,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2292,7 +2319,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2307,7 +2334,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2322,7 +2349,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2340,7 +2367,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2355,7 +2382,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2407,7 +2434,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "SOLVER_MODEL_INVALID",
+                error_code: "RM.ANALYSIS.RUN_CFD.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2578,7 +2605,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_CFD.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -2633,7 +2660,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CHT_INVALID_MODEL",
+                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2655,7 +2682,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CHT_INVALID_MODEL",
+                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2673,7 +2700,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CHT_INVALID_MODEL",
+                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2688,7 +2715,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CHT_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2705,7 +2732,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CHT_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2723,7 +2750,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CHT_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2741,7 +2768,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CHT_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2762,7 +2789,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CHT_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2780,7 +2807,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CHT_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2795,7 +2822,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CHT_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2810,7 +2837,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CHT_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2825,7 +2852,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CHT_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2851,7 +2878,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CHT_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2866,7 +2893,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_CHT_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2905,7 +2932,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "SOLVER_MODEL_INVALID",
+                error_code: "RM.ANALYSIS.RUN_CHT.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2948,7 +2975,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "SOLVER_MODEL_INVALID",
+                error_code: "RM.ANALYSIS.RUN_CHT.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3153,7 +3180,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_CHT.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -3195,7 +3222,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_FSI_INVALID_MODEL",
+                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3217,7 +3244,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_FSI_INVALID_MODEL",
+                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3235,7 +3262,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_FSI_INVALID_MODEL",
+                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3250,7 +3277,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_FSI_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3267,7 +3294,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_FSI_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3285,7 +3312,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_FSI_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3303,7 +3330,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_FSI_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3324,7 +3351,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_FSI_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3342,7 +3369,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_FSI_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3357,7 +3384,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_FSI_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3372,7 +3399,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_FSI_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3387,7 +3414,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_FSI_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3439,7 +3466,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "SOLVER_MODEL_INVALID",
+                error_code: "RM.ANALYSIS.RUN_FSI.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3624,7 +3651,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_FSI.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -3658,7 +3685,7 @@ pub fn analysis_run_thermal_with_options_op(
             ANALYSIS_RUN_THERMAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_THERMAL_INVALID_MODEL",
+                error_code: "RM.ANALYSIS.RUN_THERMAL.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3684,7 +3711,7 @@ pub fn analysis_run_thermal_with_options_op(
             ANALYSIS_RUN_THERMAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_THERMAL_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_THERMAL.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3699,7 +3726,7 @@ pub fn analysis_run_thermal_with_options_op(
             ANALYSIS_RUN_THERMAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_THERMAL_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_THERMAL.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3735,7 +3762,7 @@ pub fn analysis_run_thermal_with_options_op(
             ANALYSIS_RUN_THERMAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "SOLVER_MODEL_INVALID",
+                error_code: "RM.ANALYSIS.RUN_THERMAL.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3869,7 +3896,7 @@ pub fn analysis_run_thermal_with_options_op(
             ANALYSIS_RUN_THERMAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_THERMAL.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -3903,7 +3930,7 @@ pub fn analysis_run_transient_with_options_op(
             ANALYSIS_RUN_TRANSIENT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_TRANSIENT_INVALID_MODEL",
+                error_code: "RM.ANALYSIS.RUN_TRANSIENT.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3930,7 +3957,7 @@ pub fn analysis_run_transient_with_options_op(
                 ANALYSIS_RUN_TRANSIENT_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_TRANSIENT_INVALID_OPTIONS",
+                    error_code: "RM.ANALYSIS.RUN_TRANSIENT.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -3948,7 +3975,7 @@ pub fn analysis_run_transient_with_options_op(
                 ANALYSIS_RUN_TRANSIENT_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_TRANSIENT_INVALID_OPTIONS",
+                    error_code: "RM.ANALYSIS.RUN_TRANSIENT.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -3995,7 +4022,7 @@ pub fn analysis_run_transient_with_options_op(
             ANALYSIS_RUN_TRANSIENT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "SOLVER_MODEL_INVALID",
+                error_code: "RM.ANALYSIS.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -4316,7 +4343,7 @@ pub fn analysis_run_transient_with_options_op(
             ANALYSIS_RUN_TRANSIENT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_TRANSIENT.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -4363,7 +4390,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_MODEL",
+                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -4382,7 +4409,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -4400,7 +4427,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -4418,7 +4445,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -4433,7 +4460,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -4452,7 +4479,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -4473,7 +4500,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -4491,7 +4518,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -4518,7 +4545,7 @@ pub fn analysis_run_nonlinear_with_options_op(
                 ANALYSIS_RUN_NONLINEAR_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                    error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -4536,7 +4563,7 @@ pub fn analysis_run_nonlinear_with_options_op(
                 ANALYSIS_RUN_NONLINEAR_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                    error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -4556,7 +4583,7 @@ pub fn analysis_run_nonlinear_with_options_op(
                 ANALYSIS_RUN_NONLINEAR_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                    error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -4574,7 +4601,7 @@ pub fn analysis_run_nonlinear_with_options_op(
                 ANALYSIS_RUN_NONLINEAR_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                    error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -4617,7 +4644,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "SOLVER_MODEL_INVALID",
+                error_code: "RM.ANALYSIS.RUN_NONLINEAR.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -4974,7 +5001,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_NONLINEAR.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -5012,7 +5039,7 @@ pub fn analysis_run_linear_static_with_options(
                 ANALYSIS_RUN_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_INVALID_OPTIONS",
+                    error_code: "RM.ANALYSIS.RUN_LINEAR_STATIC.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -5030,7 +5057,7 @@ pub fn analysis_run_linear_static_with_options(
                 ANALYSIS_RUN_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_INVALID_OPTIONS",
+                    error_code: "RM.ANALYSIS.RUN_LINEAR_STATIC.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -5080,7 +5107,7 @@ pub fn analysis_run_linear_static_with_options(
             ANALYSIS_RUN_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "SOLVER_MODEL_INVALID",
+                error_code: "RM.ANALYSIS.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -5222,7 +5249,7 @@ pub fn analysis_run_linear_static_with_options(
             ANALYSIS_RUN_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_LINEAR_STATIC.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -5269,7 +5296,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_REQUIRES_STEP",
+                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.REQUIRES_STEP",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -5285,7 +5312,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_MODEL",
+                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -5300,7 +5327,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -5315,7 +5342,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -5333,7 +5360,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -5351,7 +5378,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -5369,7 +5396,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -5387,7 +5414,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -5420,7 +5447,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS",
+                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -5451,7 +5478,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
                         ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
                         &context,
                         OperationErrorSpec {
-                            error_code: "SOLVER_MODEL_INVALID",
+                            error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.SOLVER_MODEL_INVALID",
                             error_type: OperationErrorType::Validation,
                             retryable: false,
                             severity: OperationErrorSeverity::Error,
@@ -6054,7 +6081,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -6091,7 +6118,7 @@ pub fn analysis_results_op(
                     ANALYSIS_RESULTS_OP_VERSION,
                     &context,
                     OperationErrorSpec {
-                        error_code: "ANALYSIS_RESULTS_FIELD_NOT_FOUND",
+                        error_code: "RM.ANALYSIS.RESULTS.FIELD_NOT_FOUND",
                         error_type: OperationErrorType::Input,
                         retryable: false,
                         severity: OperationErrorSeverity::Error,
@@ -6778,7 +6805,7 @@ pub fn analysis_results_op(
                             ANALYSIS_RESULTS_OP_VERSION,
                             &context,
                             OperationErrorSpec {
-                                error_code: "ANALYSIS_RESULTS_MODE_NOT_FOUND",
+                                error_code: "RM.ANALYSIS.RESULTS.MODE_NOT_FOUND",
                                 error_type: OperationErrorType::Input,
                                 retryable: false,
                                 severity: OperationErrorSeverity::Error,
@@ -6799,7 +6826,7 @@ pub fn analysis_results_op(
                             ANALYSIS_RESULTS_OP_VERSION,
                             &context,
                             OperationErrorSpec {
-                                error_code: "ANALYSIS_RESULTS_MODE_NOT_FOUND",
+                                error_code: "RM.ANALYSIS.RESULTS.MODE_NOT_FOUND",
                                 error_type: OperationErrorType::Input,
                                 retryable: false,
                                 severity: OperationErrorSeverity::Error,
@@ -6823,7 +6850,7 @@ pub fn analysis_results_op(
                                 ANALYSIS_RESULTS_OP_VERSION,
                                 &context,
                                 OperationErrorSpec {
-                                    error_code: "ANALYSIS_RESULTS_MODE_NOT_FOUND",
+                                    error_code: "RM.ANALYSIS.RESULTS.MODE_NOT_FOUND",
                                     error_type: OperationErrorType::Input,
                                     retryable: false,
                                     severity: OperationErrorSeverity::Error,
@@ -6877,7 +6904,7 @@ pub fn analysis_results_op(
                             ANALYSIS_RESULTS_OP_VERSION,
                             &context,
                             OperationErrorSpec {
-                                error_code: "ANALYSIS_RESULTS_TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                error_code: "RM.ANALYSIS.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
                                 error_type: OperationErrorType::Input,
                                 retryable: false,
                                 severity: OperationErrorSeverity::Error,
@@ -6904,7 +6931,7 @@ pub fn analysis_results_op(
                                 ANALYSIS_RESULTS_OP_VERSION,
                                 &context,
                                 OperationErrorSpec {
-                                    error_code: "ANALYSIS_RESULTS_TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                    error_code: "RM.ANALYSIS.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
                                     error_type: OperationErrorType::Input,
                                     retryable: false,
                                     severity: OperationErrorSeverity::Error,
@@ -6929,7 +6956,7 @@ pub fn analysis_results_op(
                                 ANALYSIS_RESULTS_OP_VERSION,
                                 &context,
                                 OperationErrorSpec {
-                                    error_code: "ANALYSIS_RESULTS_TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                    error_code: "RM.ANALYSIS.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
                                     error_type: OperationErrorType::Input,
                                     retryable: false,
                                     severity: OperationErrorSeverity::Error,
@@ -7031,7 +7058,7 @@ pub fn analysis_results_by_run_id_op(
             ANALYSIS_RESULTS_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RESULTS.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -7047,7 +7074,7 @@ pub fn analysis_results_by_run_id_op(
             ANALYSIS_RESULTS_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RESULTS_RUN_NOT_FOUND",
+                error_code: "RM.ANALYSIS.RESULTS.RUN_NOT_FOUND",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -7070,7 +7097,7 @@ pub fn analysis_results_compare_op(
             ANALYSIS_RESULTS_COMPARE_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RESULTS_COMPARE.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -7085,7 +7112,7 @@ pub fn analysis_results_compare_op(
             ANALYSIS_RESULTS_COMPARE_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RESULTS_RUN_NOT_FOUND",
+                error_code: "RM.ANALYSIS.RESULTS_COMPARE.RUN_NOT_FOUND",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -7104,7 +7131,7 @@ pub fn analysis_results_compare_op(
             ANALYSIS_RESULTS_COMPARE_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RESULTS_COMPARE.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -7119,7 +7146,7 @@ pub fn analysis_results_compare_op(
             ANALYSIS_RESULTS_COMPARE_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RESULTS_RUN_NOT_FOUND",
+                error_code: "RM.ANALYSIS.RESULTS_COMPARE.RUN_NOT_FOUND",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -7203,7 +7230,7 @@ pub fn analysis_trends_op(
             ANALYSIS_TRENDS_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_code: "RM.ANALYSIS.TRENDS.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -8075,12 +8102,116 @@ fn study_fingerprint(spec: &AnalysisStudySpec) -> String {
 }
 
 fn study_evidence_root() -> PathBuf {
-    std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
+    current_analysis_runtime_config()
+        .study_artifact_root
+        .or_else(|| {
+            std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT")
+                .ok()
+                .map(PathBuf::from)
+        })
+        .unwrap_or_else(|| {
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../target/runmat-analysis-artifacts/studies")
         })
+}
+
+fn thermo_field_artifact_root() -> PathBuf {
+    current_analysis_runtime_config()
+        .thermo_field_artifact_root
+        .or_else(|| {
+            std::env::var("RUNMAT_THERMO_FIELD_ARTIFACT_ROOT")
+                .ok()
+                .map(PathBuf::from)
+        })
+        .unwrap_or_else(|| PathBuf::from("target/runmat-analysis-artifacts/thermo-fields"))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalysisStudyFileFormat {
+    Json,
+    Yaml,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnalysisStudyDocument {
+    Study(AnalysisStudySpec),
+    Sweep(AnalysisStudySweepSpec),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum RawAnalysisStudyDocument {
+    Sweep(AnalysisStudySweepSpec),
+    Study(AnalysisStudySpec),
+}
+
+pub fn analysis_study_file_format_from_path(path: &Path) -> Option<AnalysisStudyFileFormat> {
+    let file_name = path.file_name().and_then(|name| name.to_str())?;
+    if file_name.ends_with(".study.json") || file_name.ends_with(".study") {
+        return Some(AnalysisStudyFileFormat::Json);
+    }
+    if file_name.ends_with(".study.yaml") || file_name.ends_with(".study.yml") {
+        return Some(AnalysisStudyFileFormat::Yaml);
+    }
+    None
+}
+
+pub fn is_analysis_study_file_path(path: &Path) -> bool {
+    analysis_study_file_format_from_path(path).is_some()
+}
+
+pub fn parse_analysis_study_document(
+    input: &str,
+    format: AnalysisStudyFileFormat,
+) -> Result<AnalysisStudyDocument, String> {
+    let raw = match format {
+        AnalysisStudyFileFormat::Json => serde_json::from_str::<RawAnalysisStudyDocument>(input)
+            .map_err(|err| format!("failed to parse analysis study JSON: {err}"))?,
+        AnalysisStudyFileFormat::Yaml => serde_yaml::from_str::<RawAnalysisStudyDocument>(input)
+            .map_err(|err| format!("failed to parse analysis study YAML: {err}"))?,
+    };
+    Ok(match raw {
+        RawAnalysisStudyDocument::Study(spec) => AnalysisStudyDocument::Study(spec),
+        RawAnalysisStudyDocument::Sweep(spec) => AnalysisStudyDocument::Sweep(spec),
+    })
+}
+
+pub fn load_analysis_study_document_from_path(
+    path: &Path,
+) -> Result<AnalysisStudyDocument, String> {
+    let format = analysis_study_file_format_from_path(path).ok_or_else(|| {
+        format!(
+            "unsupported analysis study file extension: {}",
+            path.display()
+        )
+    })?;
+    let input = fs::read_to_string(path).map_err(|err| {
+        format!(
+            "failed to read analysis study file {}: {err}",
+            path.display()
+        )
+    })?;
+    parse_analysis_study_document(&input, format)
+}
+
+pub async fn load_analysis_study_document_from_path_async(
+    path: &Path,
+) -> Result<AnalysisStudyDocument, String> {
+    let format = analysis_study_file_format_from_path(path).ok_or_else(|| {
+        format!(
+            "unsupported analysis study file extension: {}",
+            path.display()
+        )
+    })?;
+    let input = runmat_filesystem::read_to_string_async(path)
+        .await
+        .map_err(|err| {
+            format!(
+                "failed to read analysis study file {}: {err}",
+                path.display()
+            )
+        })?;
+    parse_analysis_study_document(&input, format)
 }
 
 fn persist_study_evidence(
@@ -8817,10 +8948,7 @@ fn resolve_thermo_coupling_options(
         return Ok(Some(options));
     };
 
-    let root = PathBuf::from(
-        std::env::var("RUNMAT_THERMO_FIELD_ARTIFACT_ROOT")
-            .unwrap_or_else(|_| "target/runmat-analysis-artifacts/thermo-fields".to_string()),
-    );
+    let root = thermo_field_artifact_root();
     let path = root.join(format!("{field_artifact_id}.json"));
     if !path.exists() {
         return Err(operation_error(
@@ -8828,7 +8956,7 @@ fn resolve_thermo_coupling_options(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_THERMO_FIELD_NOT_FOUND",
+                error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.NOT_FOUND",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -8856,7 +8984,7 @@ fn resolve_thermo_coupling_options(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_THERMO_FIELD_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -8874,7 +9002,7 @@ fn resolve_thermo_coupling_options(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_THERMO_FIELD_INVALID",
+                error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -8893,7 +9021,7 @@ fn resolve_thermo_coupling_options(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_THERMO_FIELD_SCHEMA_UNSUPPORTED",
+                error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.SCHEMA_UNSUPPORTED",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -8923,7 +9051,7 @@ fn resolve_thermo_coupling_options(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_THERMO_FIELD_MISMATCH",
+                error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.MISMATCH",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -8958,7 +9086,7 @@ fn resolve_thermo_coupling_options(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_THERMO_FIELD_DIGEST_MISMATCH",
+                error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.DIGEST_MISMATCH",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -8985,7 +9113,7 @@ fn resolve_thermo_coupling_options(
                 op_version,
                 context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_THERMO_FIELD_APPROVER_MISSING",
+                    error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.APPROVER_MISSING",
                     error_type: OperationErrorType::Validation,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -9014,7 +9142,7 @@ fn resolve_thermo_coupling_options(
                 op_version,
                 context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_THERMO_FIELD_APPROVER_UNAUTHORIZED",
+                    error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.APPROVER_UNAUTHORIZED",
                     error_type: OperationErrorType::Validation,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -9039,7 +9167,7 @@ fn resolve_thermo_coupling_options(
                 op_version,
                 context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_THERMO_FIELD_SIGNATURE_INVALID",
+                    error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.SIGNATURE_INVALID",
                     error_type: OperationErrorType::Validation,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -9082,7 +9210,7 @@ fn resolve_run_prep_context(
                 op_version,
                 context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_PREP_UNTRUSTED_CONTEXT",
+                    error_code: "RM.ANALYSIS.RUN_PREP.UNTRUSTED_CONTEXT",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -9101,7 +9229,7 @@ fn resolve_run_prep_context(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_PREP_STORE_FAILED",
+                error_code: "RM.ANALYSIS.RUN_PREP.STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -9116,7 +9244,7 @@ fn resolve_run_prep_context(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_PREP_NOT_FOUND",
+                error_code: "RM.ANALYSIS.RUN_PREP.NOT_FOUND",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -9132,7 +9260,7 @@ fn resolve_run_prep_context(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_PREP_SCHEMA_UNSUPPORTED",
+                error_code: "RM.ANALYSIS.RUN_PREP.SCHEMA_UNSUPPORTED",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -9154,7 +9282,7 @@ fn resolve_run_prep_context(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "ANALYSIS_RUN_PREP_MISMATCH",
+                error_code: "RM.ANALYSIS.RUN_PREP.MISMATCH",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -9179,16 +9307,7 @@ fn resolve_run_prep_context(
         ));
     }
 
-    let require_latest_revision = std::env::var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION")
-        .ok()
-        .map(|value| {
-            matches!(
-                value.to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or(true);
-    if require_latest_revision {
+    if crate::geometry::require_latest_prep_revision() {
         if let Some(latest_revision) = crate::geometry::latest_prep_revision_for_geometry(
             &model.geometry_id,
         )
@@ -9198,7 +9317,7 @@ fn resolve_run_prep_context(
                 op_version,
                 context,
                 OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_PREP_STORE_FAILED",
+                    error_code: "RM.ANALYSIS.RUN_PREP.STORE_FAILED",
                     error_type: OperationErrorType::Internal,
                     retryable: true,
                     severity: OperationErrorSeverity::Error,
@@ -9214,7 +9333,7 @@ fn resolve_run_prep_context(
                     op_version,
                     context,
                     OperationErrorSpec {
-                        error_code: "ANALYSIS_RUN_PREP_STALE",
+                        error_code: "RM.ANALYSIS.RUN_PREP.STALE",
                         error_type: OperationErrorType::Validation,
                         retryable: false,
                         severity: OperationErrorSeverity::Error,
@@ -9854,22 +9973,22 @@ fn map_validate_error(
 ) -> OperationErrorEnvelope {
     let (error_code, message, mut error_context) = match error {
         AnalysisValidationError::MissingMaterials => (
-            "ANALYSIS_VALIDATION_MISSING_MATERIALS",
+            "RM.ANALYSIS.VALIDATE.MISSING_MATERIALS",
             "analysis model must include at least one material".to_string(),
             BTreeMap::new(),
         ),
         AnalysisValidationError::MissingBoundaryConditions => (
-            "ANALYSIS_VALIDATION_MISSING_BCS",
+            "RM.ANALYSIS.VALIDATE.MISSING_BCS",
             "analysis model must include at least one boundary condition".to_string(),
             BTreeMap::new(),
         ),
         AnalysisValidationError::MissingLoads => (
-            "ANALYSIS_VALIDATION_MISSING_LOADS",
+            "RM.ANALYSIS.VALIDATE.MISSING_LOADS",
             "analysis model must include at least one load".to_string(),
             BTreeMap::new(),
         ),
         AnalysisValidationError::UnitMismatch { model, geometry } => (
-            "ANALYSIS_VALIDATION_UNIT_MISMATCH",
+            "RM.ANALYSIS.VALIDATE.UNIT_MISMATCH",
             format!("model units {model:?} do not match geometry units {geometry:?}"),
             BTreeMap::from([
                 ("model_units".to_string(), format!("{model:?}")),
@@ -9877,7 +9996,7 @@ fn map_validate_error(
             ]),
         ),
         AnalysisValidationError::FrameMismatch { model, geometry } => (
-            "ANALYSIS_VALIDATION_FRAME_MISMATCH",
+            "RM.ANALYSIS.VALIDATE.FRAME_MISMATCH",
             format!("model frame {model:?} does not match geometry frame {geometry:?}"),
             BTreeMap::from([
                 ("model_frame".to_string(), format!("{model:?}")),

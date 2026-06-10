@@ -1,15 +1,15 @@
 ---
 title: "Physics Models"
 category: "Analysis & Simulation"
-section: "13.3"
+section: "13.4"
 last_updated: "June 9, 2026"
 ---
 
 # Physics Models
 
-Physics models answer the question: what math should RunMat run on this geometry?
+Choose a physics family based on the engineering question you want to answer.
 
-Each supported family has:
+For each supported family, RunMat defines:
 
 - model schema in `runmat-analysis-core`,
 - a runtime operation contract,
@@ -23,13 +23,13 @@ Each supported family has:
 | --- | --- | --- |
 | Linear static structural | How does the structure respond to static loads? | `analysis.run_linear_static/v1` |
 | Modal structural | What are the natural modes and frequencies? | `analysis.run_modal/v1` |
-| Acoustic harmonic | What harmonic acoustic response is implied by the model? | `analysis.run_acoustic/v1` |
+| Acoustic harmonic | What acoustic response is expected at a driving frequency? | `analysis.run_acoustic/v1` |
 | Thermal standalone | How does heat move through the model? | `analysis.run_thermal/v1` |
 | Structural transient | How does the structure evolve over time? | `analysis.run_transient/v1` |
 | Nonlinear structural | How do nonlinear material, load-path, plastic, or contact effects behave? | `analysis.run_nonlinear/v1` |
 | Thermo-mechanical | How does temperature affect structural behavior? | Structural run families with thermo-mechanical domain state. |
 | Electro-thermal | How does electrical behavior drive heating? | Coupled thermal/nonlinear paths with electro-thermal domain state. |
-| Electromagnetic | How do electromagnetic source, material, frequency, and boundary signals behave? | `analysis.run_electromagnetic/v1` |
+| Electromagnetic | How do sources, materials, frequencies, and boundaries affect electromagnetic fields? | `analysis.run_electromagnetic/v1` |
 | CFD | How does the fluid state evolve? | `analysis.run_cfd/v1` |
 | CHT | How do fluid and thermal fields interact? | `analysis.run_cht/v1` |
 | FSI | How do fluid and structural states interact? | `analysis.run_fsi/v1` |
@@ -78,6 +78,6 @@ GPU requests can fall back. That fallback is expected to be visible in provenanc
 ## Current Boundaries
 
 - Structural, thermal, nonlinear, coupled, electromagnetic, acoustic, CFD, CHT, and FSI paths are represented in the operation surface.
-- Fidelity is not uniform across domains. Some families are deeper governed paths; others are governed baseline paths.
-- Release-ready status is evaluated per domain and fixture family. A run operation is only one part of that readiness signal.
-- Larger industrial workloads, richer CAD semantics, and deeper domain-specific solver fidelity are tracked as bounded areas in [Current Status](/docs/runtime/analysis/status).
+- Fidelity is not uniform across domains. Some families have deeper solver coverage; others are baseline paths.
+- Production readiness is evaluated per domain and fixture family. A run operation is only one part of that decision.
+- Larger industrial workloads, richer CAD semantics, and deeper domain-specific solver fidelity are tracked in [Current Status](/docs/runtime/analysis/status).

@@ -29,6 +29,7 @@ use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Base_Mount','',(#1));\n#11=PRODUCT('Tip_Load','',(#1));\n#20=MATERIAL_DESIGNATION('Aluminum 6061');\nENDSEC;\nEND-ISO-10303-21;\n";
@@ -46,6 +47,13 @@ impl Drop for EnvVarRestoreGuard {
             std::env::remove_var(self.key);
         }
     }
+}
+
+fn study_artifact_env_guard() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn sorted_object_keys(value: &Value) -> Vec<String> {
@@ -134,7 +142,10 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
     .expect_err("capture view is not wired yet");
     assert_eq!(capture_view.operation, "geometry.capture_view");
     assert_eq!(capture_view.op_version, "geometry.capture_view/v1");
-    assert_eq!(capture_view.error_code, "GEOMETRY_CAPTURE_UNSUPPORTED");
+    assert_eq!(
+        capture_view.error_code,
+        "RM.GEOMETRY.CAPTURE_VIEW.UNSUPPORTED"
+    );
 
     let svg_capture = geometry_capture_view_op(
         &load.data,
@@ -202,7 +213,7 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
     assert_eq!(invalid_capture_view.op_version, "geometry.capture_view/v1");
     assert_eq!(
         invalid_capture_view.error_code,
-        "GEOMETRY_CAPTURE_INVALID_SPEC"
+        "RM.GEOMETRY.CAPTURE_VIEW.INVALID_SPEC"
     );
 }
 
@@ -226,7 +237,7 @@ fn analysis_validate_contract_is_v1_and_maps_codes() {
     .expect_err("validate should fail");
     assert_eq!(err.operation, "analysis.validate");
     assert_eq!(err.op_version, "analysis.validate/v1");
-    assert_eq!(err.error_code, "ANALYSIS_VALIDATION_MISSING_MATERIALS");
+    assert_eq!(err.error_code, "RM.ANALYSIS.VALIDATE.MISSING_MATERIALS");
 }
 
 #[test]
@@ -264,7 +275,7 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
     .expect_err("create model should fail for empty model id");
     assert_eq!(err.operation, "analysis.create_model");
     assert_eq!(err.op_version, "analysis.create_model/v1");
-    assert_eq!(err.error_code, "ANALYSIS_CREATE_MODEL_INVALID_INTENT");
+    assert_eq!(err.error_code, "RM.ANALYSIS.CREATE_MODEL.INVALID_INTENT");
 
     let modal = analysis_create_model_op(
         &geometry.data,
@@ -365,6 +376,7 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
 
 #[test]
 fn analysis_study_workflow_contract_persists_evidence_artifacts() {
+    let _study_artifact_env_guard = study_artifact_env_guard();
     static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
     let evidence_root = std::env::temp_dir().join(format!(
         "runmat-study-contract-artifacts-{}-{}",
@@ -447,6 +459,7 @@ fn analysis_study_workflow_contract_persists_evidence_artifacts() {
 
 #[test]
 fn analysis_study_sweep_contract_executes_multiple_studies() {
+    let _study_artifact_env_guard = study_artifact_env_guard();
     static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
     let evidence_root = std::env::temp_dir().join(format!(
         "runmat-study-sweep-contract-artifacts-{}-{}",
@@ -527,6 +540,7 @@ fn analysis_study_sweep_contract_executes_multiple_studies() {
 
 #[test]
 fn analysis_study_sweep_contract_can_continue_on_failure() {
+    let _study_artifact_env_guard = study_artifact_env_guard();
     static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
     let evidence_root = std::env::temp_dir().join(format!(
         "runmat-study-sweep-continue-contract-artifacts-{}-{}",
@@ -603,7 +617,7 @@ fn analysis_study_sweep_contract_can_continue_on_failure() {
     assert_eq!(envelope.data.failure_entries[0].study_index, 1);
     assert_eq!(
         envelope.data.failure_entries[0].error_code,
-        "ANALYSIS_RUN_STUDY_INVALID_SPEC"
+        "RM.ANALYSIS.RUN_STUDY.INVALID_SPEC"
     );
     assert!(PathBuf::from(&envelope.data.evidence_artifact_path).exists());
 
@@ -613,6 +627,7 @@ fn analysis_study_sweep_contract_can_continue_on_failure() {
 
 #[test]
 fn analysis_study_sweep_validate_contract_is_v1_and_typed() {
+    let _study_artifact_env_guard = study_artifact_env_guard();
     static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
     let evidence_root = std::env::temp_dir().join(format!(
         "runmat-study-sweep-validate-contract-artifacts-{}-{}",
@@ -702,6 +717,7 @@ fn analysis_study_sweep_validate_contract_is_v1_and_typed() {
 
 #[test]
 fn analysis_study_sweep_plan_contract_is_v1_and_typed() {
+    let _study_artifact_env_guard = study_artifact_env_guard();
     static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
     let evidence_root = std::env::temp_dir().join(format!(
         "runmat-study-sweep-plan-contract-artifacts-{}-{}",
@@ -871,7 +887,7 @@ fn analysis_validate_maps_unit_and_frame_mismatch_codes() {
         OperationContext::new(Some("trace-contract-2b".to_string()), None),
     )
     .expect_err("validate should fail for units");
-    assert_eq!(unit_err.error_code, "ANALYSIS_VALIDATION_UNIT_MISMATCH");
+    assert_eq!(unit_err.error_code, "RM.ANALYSIS.VALIDATE.UNIT_MISMATCH");
     assert_eq!(
         unit_err.context.get("model_units").map(|s| s.as_str()),
         Some("Inch")
@@ -890,7 +906,7 @@ fn analysis_validate_maps_unit_and_frame_mismatch_codes() {
         OperationContext::new(Some("trace-contract-2c".to_string()), None),
     )
     .expect_err("validate should fail for frame");
-    assert_eq!(frame_err.error_code, "ANALYSIS_VALIDATION_FRAME_MISMATCH");
+    assert_eq!(frame_err.error_code, "RM.ANALYSIS.VALIDATE.FRAME_MISMATCH");
     assert_eq!(
         frame_err.context.get("model_frame").map(|s| s.as_str()),
         Some("Local(\"fixture_frame\")")
@@ -1001,7 +1017,7 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
     .expect_err("modal run should reject models without modal step");
     assert_eq!(invalid.operation, "analysis.run_modal");
     assert_eq!(invalid.op_version, "analysis.run_modal/v1");
-    assert_eq!(invalid.error_code, "ANALYSIS_RUN_MODAL_INVALID_MODEL");
+    assert_eq!(invalid.error_code, "RM.ANALYSIS.RUN_MODAL.INVALID_MODEL");
 }
 
 #[test]
@@ -1068,7 +1084,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
         OperationContext::new(Some("trace-contract-modal-opts-4".to_string()), None),
     )
     .expect_err("mode_count=0 should fail");
-    assert_eq!(invalid.error_code, "ANALYSIS_RUN_MODAL_INVALID_OPTIONS");
+    assert_eq!(invalid.error_code, "RM.ANALYSIS.RUN_MODAL.INVALID_OPTIONS");
     assert_eq!(invalid.operation, "analysis.run_modal");
     assert_eq!(invalid.op_version, "analysis.run_modal/v1");
 }
@@ -1117,7 +1133,7 @@ fn analysis_run_acoustic_contract_is_v1_and_typed() {
     .expect_err("acoustic run should reject models without modal step");
     assert_eq!(invalid.operation, "analysis.run_acoustic");
     assert_eq!(invalid.op_version, "analysis.run_acoustic/v1");
-    assert_eq!(invalid.error_code, "ANALYSIS_RUN_ACOUSTIC_INVALID_MODEL");
+    assert_eq!(invalid.error_code, "RM.ANALYSIS.RUN_ACOUSTIC.INVALID_MODEL");
 }
 
 #[test]
@@ -1166,7 +1182,10 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
     .expect_err("transient run should reject models without transient step");
     assert_eq!(invalid.operation, "analysis.run_transient");
     assert_eq!(invalid.op_version, "analysis.run_transient/v1");
-    assert_eq!(invalid.error_code, "ANALYSIS_RUN_TRANSIENT_INVALID_MODEL");
+    assert_eq!(
+        invalid.error_code,
+        "RM.ANALYSIS.RUN_TRANSIENT.INVALID_MODEL"
+    );
 }
 
 #[test]
@@ -1237,7 +1256,7 @@ fn analysis_run_fsi_contract_is_v1_and_typed() {
     .expect_err("fsi run should reject missing transient step");
     assert_eq!(invalid.operation, "analysis.run_fsi");
     assert_eq!(invalid.op_version, "analysis.run_fsi/v1");
-    assert_eq!(invalid.error_code, "ANALYSIS_RUN_FSI_INVALID_MODEL");
+    assert_eq!(invalid.error_code, "RM.ANALYSIS.RUN_FSI.INVALID_MODEL");
 }
 
 #[test]
@@ -1269,7 +1288,7 @@ fn analysis_run_transient_thermo_field_reference_errors_are_typed() {
     .expect_err("missing thermo field artifact should fail");
     assert_eq!(invalid.operation, "analysis.run_transient");
     assert_eq!(invalid.op_version, "analysis.run_transient/v1");
-    assert_eq!(invalid.error_code, "ANALYSIS_RUN_THERMO_FIELD_NOT_FOUND");
+    assert_eq!(invalid.error_code, "RM.ANALYSIS.RUN_THERMO_FIELD.NOT_FOUND");
 }
 
 #[test]
@@ -1364,7 +1383,10 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
     .expect_err("nonlinear run should reject models without nonlinear step");
     assert_eq!(invalid.operation, "analysis.run_nonlinear");
     assert_eq!(invalid.op_version, "analysis.run_nonlinear/v1");
-    assert_eq!(invalid.error_code, "ANALYSIS_RUN_NONLINEAR_INVALID_MODEL");
+    assert_eq!(
+        invalid.error_code,
+        "RM.ANALYSIS.RUN_NONLINEAR.INVALID_MODEL"
+    );
 }
 
 #[test]
@@ -1678,7 +1700,7 @@ fn analysis_run_nonlinear_prep_reference_errors_are_typed() {
     .expect_err("missing prep artifact should fail");
     assert_eq!(missing.operation, "analysis.run_nonlinear");
     assert_eq!(missing.op_version, "analysis.run_nonlinear/v1");
-    assert_eq!(missing.error_code, "ANALYSIS_RUN_PREP_NOT_FOUND");
+    assert_eq!(missing.error_code, "RM.ANALYSIS.RUN_PREP.NOT_FOUND");
 }
 
 #[test]
@@ -1734,7 +1756,7 @@ fn analysis_run_nonlinear_stale_prep_reference_is_typed() {
     .expect_err("stale prep artifact should fail");
     assert_eq!(stale.operation, "analysis.run_nonlinear");
     assert_eq!(stale.op_version, "analysis.run_nonlinear/v1");
-    assert_eq!(stale.error_code, "ANALYSIS_RUN_PREP_STALE");
+    assert_eq!(stale.error_code, "RM.ANALYSIS.RUN_PREP.STALE");
 
     std::env::remove_var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION");
     runmat_runtime::geometry::reset_prep_artifact_store_for_tests();
@@ -1778,7 +1800,10 @@ fn analysis_results_compare_contract_is_v1_and_handles_missing_run_ids() {
     .expect_err("missing baseline run should fail");
     assert_eq!(missing.operation, "analysis.results_compare");
     assert_eq!(missing.op_version, "analysis.results_compare/v1");
-    assert_eq!(missing.error_code, "ANALYSIS_RESULTS_RUN_NOT_FOUND");
+    assert_eq!(
+        missing.error_code,
+        "RM.ANALYSIS.RESULTS_COMPARE.RUN_NOT_FOUND"
+    );
 }
 
 #[test]
@@ -2076,7 +2101,7 @@ fn analysis_results_unknown_field_maps_typed_error_contract() {
 
     assert_eq!(err.operation, "analysis.results");
     assert_eq!(err.op_version, "analysis.results/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RESULTS_FIELD_NOT_FOUND");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RESULTS.FIELD_NOT_FOUND");
 }
 
 #[test]
@@ -2152,7 +2177,10 @@ fn analysis_results_modal_query_controls_are_typed() {
         OperationContext::new(Some("trace-contract-modal-results-5".to_string()), None),
     )
     .expect_err("unknown mode index should fail");
-    assert_eq!(invalid_mode.error_code, "ANALYSIS_RESULTS_MODE_NOT_FOUND");
+    assert_eq!(
+        invalid_mode.error_code,
+        "RM.ANALYSIS.RESULTS.MODE_NOT_FOUND"
+    );
     assert_eq!(invalid_mode.operation, "analysis.results");
     assert_eq!(invalid_mode.op_version, "analysis.results/v1");
 }
@@ -2212,7 +2240,7 @@ fn analysis_results_transient_query_controls_are_typed() {
     .expect_err("unknown transient snapshot index should fail");
     assert_eq!(
         invalid_snapshot.error_code,
-        "ANALYSIS_RESULTS_TRANSIENT_SNAPSHOT_NOT_FOUND"
+        "RM.ANALYSIS.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND"
     );
     assert_eq!(invalid_snapshot.operation, "analysis.results");
     assert_eq!(invalid_snapshot.op_version, "analysis.results/v1");
@@ -2282,7 +2310,7 @@ fn analysis_results_by_run_id_missing_maps_typed_error_contract() {
 
     assert_eq!(err.operation, "analysis.results");
     assert_eq!(err.op_version, "analysis.results/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RESULTS_RUN_NOT_FOUND");
+    assert_eq!(err.error_code, "RM.ANALYSIS.RESULTS.RUN_NOT_FOUND");
 }
 
 #[test]
@@ -2296,7 +2324,10 @@ fn analysis_run_contract_maps_fixture_validation_failures() {
     .expect_err("run should fail");
     assert_eq!(err.operation, "analysis.run_linear_static");
     assert_eq!(err.op_version, "analysis.run_linear_static/v1");
-    assert_eq!(err.error_code, "SOLVER_MODEL_INVALID");
+    assert_eq!(
+        err.error_code,
+        "RM.ANALYSIS.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID"
+    );
     assert_eq!(
         err.context.get("analysis_model_id").map(|s| s.as_str()),
         Some("missing_materials")
@@ -2309,7 +2340,10 @@ fn analysis_run_contract_maps_fixture_validation_failures() {
         OperationContext::new(Some("trace-contract-5".to_string()), None),
     )
     .expect_err("run should fail");
-    assert_eq!(err.error_code, "SOLVER_MODEL_INVALID");
+    assert_eq!(
+        err.error_code,
+        "RM.ANALYSIS.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID"
+    );
     assert_eq!(
         err.context.get("analysis_model_id").map(|s| s.as_str()),
         Some("missing_loads")

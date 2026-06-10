@@ -8,4 +8,5 @@ pub mod script;
 pub mod session;
 pub mod snapshot;
 pub mod streams;
+pub mod study;
 pub mod version;

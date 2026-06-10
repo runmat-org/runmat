@@ -1109,6 +1109,8 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
 
     fn assert_close(actual: f64, expected: f64, epsilon: f64) {
         if (actual - expected).abs() > epsilon {
@@ -1122,17 +1124,47 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
+    struct FspecialDeviceEnvRestore {
+        previous: Option<OsString>,
+    }
+
+    impl Drop for FspecialDeviceEnvRestore {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.as_ref() {
+                std::env::set_var("RUNMAT_ACCEL_FSPECIAL_DEVICE", previous);
+            } else {
+                std::env::remove_var("RUNMAT_ACCEL_FSPECIAL_DEVICE");
+            }
+        }
+    }
+
+    fn fspecial_env_guard() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn fspecial_device_env_restore() -> FspecialDeviceEnvRestore {
+        FspecialDeviceEnvRestore {
+            previous: std::env::var_os("RUNMAT_ACCEL_FSPECIAL_DEVICE"),
+        }
+    }
+
+    fn fspecial_host_tensor(kind: &str, args: Vec<Value>) -> Tensor {
+        let _env_guard = fspecial_env_guard();
+        let _restore = fspecial_device_env_restore();
+        std::env::remove_var("RUNMAT_ACCEL_FSPECIAL_DEVICE");
+        match block_on(fspecial_builtin(Value::from(kind), args)).unwrap() {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_average_default() {
-        let result = block_on(fspecial_builtin(Value::from("average"), Vec::new())).unwrap();
-        let tensor = match result {
-            Value::Tensor(t) => t,
-            Value::GpuTensor(h) => {
-                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather")
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        };
+        let tensor = fspecial_host_tensor("average", Vec::new());
         assert_eq!(tensor.shape, vec![3, 3]);
         for value in tensor.data {
             assert_close(value, 1.0 / 9.0, 1e-12);
@@ -1143,14 +1175,7 @@ pub(crate) mod tests {
     #[test]
     fn fspecial_average_scalar_size() {
         let args = vec![Value::from(5)];
-        let result = block_on(fspecial_builtin(Value::from("average"), args)).unwrap();
-        let tensor = match result {
-            Value::Tensor(t) => t,
-            Value::GpuTensor(h) => {
-                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather")
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        };
+        let tensor = fspecial_host_tensor("average", args);
         assert_eq!(tensor.shape, vec![5, 5]);
         let sum: f64 = tensor.data.iter().sum();
         assert_close(sum, 1.0, 1e-12);
@@ -1162,14 +1187,7 @@ pub(crate) mod tests {
         let args = vec![Value::from(
             Tensor::new(vec![4.0, 6.0], vec![1, 2]).unwrap(),
         )];
-        let result = block_on(fspecial_builtin(Value::from("average"), args)).unwrap();
-        let tensor = match result {
-            Value::Tensor(t) => t,
-            Value::GpuTensor(h) => {
-                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather")
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        };
+        let tensor = fspecial_host_tensor("average", args);
         assert_eq!(tensor.shape, vec![4, 6]);
         let expected = 1.0 / (4.0 * 6.0);
         for value in tensor.data {
@@ -1189,15 +1207,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_gaussian_default_matches_reference() {
-        let result = block_on(fspecial_builtin(Value::from("gaussian"), Vec::new())).unwrap();
-        let (tensor, tol) = match result {
-            Value::Tensor(t) => (t, 1e-12),
-            Value::GpuTensor(h) => (
-                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather"),
-                1e-5,
-            ),
-            other => panic!("expected tensor, got {other:?}"),
-        };
+        let tensor = fspecial_host_tensor("gaussian", Vec::new());
         assert_eq!(tensor.shape, vec![3, 3]);
         const EXPECTED: [f64; 9] = [
             0.011_343_736_558_495,
@@ -1211,7 +1221,7 @@ pub(crate) mod tests {
             0.011_343_736_558_495,
         ];
         for (idx, value) in tensor.data.iter().enumerate() {
-            assert_close(*value, EXPECTED[idx], tol);
+            assert_close(*value, EXPECTED[idx], 1e-12);
         }
     }
 
@@ -1219,14 +1229,7 @@ pub(crate) mod tests {
     #[test]
     fn fspecial_gaussian_size_sigma() {
         let args = vec![Value::from(7), Value::from(2.0)];
-        let result = block_on(fspecial_builtin(Value::from("gaussian"), args)).unwrap();
-        let tensor = match result {
-            Value::Tensor(t) => t,
-            Value::GpuTensor(h) => {
-                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather")
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        };
+        let tensor = fspecial_host_tensor("gaussian", args);
         assert_eq!(tensor.shape, vec![7, 7]);
         let center = tensor.rows / 2;
         let col = center;
@@ -1240,14 +1243,7 @@ pub(crate) mod tests {
     #[test]
     fn fspecial_laplacian_alpha() {
         let args = vec![Value::from(0.2)];
-        let result = block_on(fspecial_builtin(Value::from("laplacian"), args)).unwrap();
-        let t = match result {
-            Value::Tensor(t) => t,
-            Value::GpuTensor(h) => {
-                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather")
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        };
+        let t = fspecial_host_tensor("laplacian", args);
         assert_eq!(t.shape, vec![3, 3]);
         let expected = [
             0.16666666666666669,
@@ -1268,14 +1264,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_unsharp_default() {
-        let result = block_on(fspecial_builtin(Value::from("unsharp"), Vec::new())).unwrap();
-        let t = match result {
-            Value::Tensor(t) => t,
-            Value::GpuTensor(h) => {
-                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather")
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        };
+        let t = fspecial_host_tensor("unsharp", Vec::new());
         assert_eq!(t.shape, vec![3, 3]);
         let sum: f64 = t.data.iter().sum();
         assert_close(sum, 1.0, 1e-6);
@@ -1284,38 +1273,24 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_log_basic_properties() {
-        let result = block_on(fspecial_builtin(
-            Value::from("log"),
-            vec![Value::from(5), Value::from(0.5)],
-        ))
-        .unwrap();
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![5, 5]);
-                let sum: f64 = t.data.iter().sum();
-                assert_close(sum, 0.0, 1e-12);
-                let center = t.rows / 2;
-                let idx = center * t.rows + center;
-                assert!(t.data[idx] < 0.0);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let t = fspecial_host_tensor("log", vec![Value::from(5), Value::from(0.5)]);
+        assert_eq!(t.shape, vec![5, 5]);
+        let sum: f64 = t.data.iter().sum();
+        assert_close(sum, 0.0, 1e-12);
+        let center = t.rows / 2;
+        let idx = center * t.rows + center;
+        assert!(t.data[idx] < 0.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_disk_sum_is_one() {
-        let result = block_on(fspecial_builtin(Value::from("disk"), vec![Value::from(5)])).unwrap();
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![11, 11]);
-                let sum: f64 = t.data.iter().sum();
-                assert_close(sum, 1.0, 1e-10);
-                let idx = t.rows * (t.cols / 2) + t.rows / 2;
-                assert!(t.data[idx] > 0.0);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let t = fspecial_host_tensor("disk", vec![Value::from(5)]);
+        assert_eq!(t.shape, vec![11, 11]);
+        let sum: f64 = t.data.iter().sum();
+        assert_close(sum, 1.0, 1e-10);
+        let idx = t.rows * (t.cols / 2) + t.rows / 2;
+        assert!(t.data[idx] > 0.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1334,19 +1309,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_motion_sum_is_one() {
-        let result = block_on(fspecial_builtin(
-            Value::from("motion"),
-            vec![Value::from(15), Value::from(45.0)],
-        ))
-        .unwrap();
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![15, 15]);
-                let sum: f64 = t.data.iter().sum();
-                assert_close(sum, 1.0, 1e-10);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let t = fspecial_host_tensor("motion", vec![Value::from(15), Value::from(45.0)]);
+        assert_eq!(t.shape, vec![15, 15]);
+        let sum: f64 = t.data.iter().sum();
+        assert_close(sum, 1.0, 1e-10);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1397,6 +1363,8 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn fspecial_gaussian_gpu_matches_cpu() {
+        let _env_guard = fspecial_env_guard();
+        let _restore = fspecial_device_env_restore();
         std::env::set_var("RUNMAT_ACCEL_FSPECIAL_DEVICE", "1");
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),

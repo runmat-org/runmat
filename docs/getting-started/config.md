@@ -31,6 +31,9 @@ runmat-version = ">=0.4.0"
 [dependencies]
 utils = { path = "../utils", version = "0.1.0" }
 
+[sources]
+roots = ["src"]
+
 [entrypoints.hello]
 path = "hello.m"
 
@@ -100,7 +103,7 @@ path = "scripts/run_batch.m"
 
 | Field      | Type   | Default | Notes                                             |
 | ---------- | ------ | ------- | ------------------------------------------------- |
-| `path`     | string | unset   | File target (`.m` extension inferred if omitted). |
+| `path`     | string | unset   | File target. `.m` is inferred when omitted; study files should include `.study.json`, `.study.yaml`, `.study.yml`, or `.study`. |
 | `module`   | string | unset   | Module path under source roots.                   |
 | `function` | string | unset   | Function name for module target.                  |
 
@@ -111,6 +114,7 @@ Entrypoint CLI examples:
 
 ```bash
 runmat run main
+runmat run studies/bracket.study.yaml
 runmat benchmark main --iterations 25 --jit
 ```
 
@@ -216,6 +220,42 @@ See [MATLAB Language Compatability](/docs/runtime/getting-started/compatability)
 | `output_dir` | string  | unset   | Default export output directory. |
 
 
+### `[runtime.analysis]`
+
+Analysis settings configure study execution, run artifact storage, geometry prep artifacts, and coupled-field artifact roots.
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `artifact_store` | string | unset | `in_memory` or `filesystem` analysis run store. If unset, `RUNMAT_ANALYSIS_ARTIFACT_STORE` is used. |
+| `artifact_root` | string | unset | Filesystem root used when `artifact_store = "filesystem"`. |
+| `artifact_max_runs` | integer | unset | Optional global retained run limit. |
+| `artifact_max_runs_per_kind` | integer | unset | Optional retained run limit per physics family. |
+| `study_artifact_root` | string | unset | Study validate, plan, run, and sweep evidence root. |
+| `geometry_prep_artifact_root` | string | unset | Geometry prep artifact root. |
+| `geometry_prep_max_artifacts` | integer | unset | Optional global retained prep artifact limit. |
+| `geometry_prep_max_artifacts_per_geometry` | integer | unset | Optional retained prep artifact limit per geometry id. |
+| `geometry_prep_max_age_seconds` | integer | unset | Optional prep artifact age limit. |
+| `geometry_prep_require_latest_revision` | boolean | unset | When true, prep-aware runs reject stale geometry revisions. |
+| `thermo_field_artifact_root` | string | unset | Thermo-field artifact root for coupled thermal paths. |
+
+Example:
+
+```toml
+[runtime.analysis]
+artifact_store = "filesystem"
+artifact_root = "target/runmat-analysis-store"
+artifact_max_runs = 1000
+artifact_max_runs_per_kind = 100
+study_artifact_root = "target/runmat-analysis-artifacts/studies"
+geometry_prep_artifact_root = "target/runmat-analysis-artifacts/geometry-prep"
+geometry_prep_max_artifacts = 500
+geometry_prep_max_artifacts_per_geometry = 20
+geometry_prep_max_age_seconds = 2592000
+geometry_prep_require_latest_revision = true
+thermo_field_artifact_root = "target/runmat-analysis-artifacts/thermo-fields"
+```
+
+
 ### `[runtime.telemetry]`
 
 
@@ -258,6 +298,22 @@ See [MATLAB Language Compatability](/docs/runtime/getting-started/compatability)
 ### Telemetry
 
 - `RUNMAT_TELEMETRY_KEY` (ingestion key override)
+
+### Analysis
+
+Analysis runtime config is preferred. These environment variables are supported as fallbacks:
+
+- `RUNMAT_ANALYSIS_ARTIFACT_STORE`
+- `RUNMAT_ANALYSIS_ARTIFACT_ROOT`
+- `RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS`
+- `RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND`
+- `RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT`
+- `RUNMAT_GEOMETRY_PREP_ARTIFACT_ROOT`
+- `RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS`
+- `RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY`
+- `RUNMAT_GEOMETRY_PREP_MAX_AGE_SECONDS`
+- `RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION`
+- `RUNMAT_THERMO_FIELD_ARTIFACT_ROOT`
 
 ## Full Reference Example
 
@@ -329,6 +385,19 @@ maximized = false
 format = "png"
 dpi = 300
 output_dir = "artifacts/figures"
+
+[runtime.analysis]
+artifact_store = "filesystem"
+artifact_root = "target/runmat-analysis-store"
+artifact_max_runs = 1000
+artifact_max_runs_per_kind = 100
+study_artifact_root = "target/runmat-analysis-artifacts/studies"
+geometry_prep_artifact_root = "target/runmat-analysis-artifacts/geometry-prep"
+geometry_prep_max_artifacts = 500
+geometry_prep_max_artifacts_per_geometry = 20
+geometry_prep_max_age_seconds = 2592000
+geometry_prep_require_latest_revision = true
+thermo_field_artifact_root = "target/runmat-analysis-artifacts/thermo-fields"
 
 [runtime.telemetry]
 enabled = true

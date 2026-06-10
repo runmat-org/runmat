@@ -1,13 +1,13 @@
 ---
 title: "Analysis Models"
 category: "Analysis & Simulation"
-section: "13.2"
+section: "13.3"
 last_updated: "June 9, 2026"
 ---
 
 # Models
 
-An analysis model is where geometry becomes something a solver can reason about.
+An analysis model turns geometry into solver-ready input.
 
 The model connects:
 
@@ -19,7 +19,7 @@ The model connects:
 - physics domains,
 - ordered analysis steps.
 
-Geometry tells RunMat where things are. The analysis model tells RunMat what math or physics to run there.
+Geometry identifies where things are. The analysis model defines the materials, loads, constraints, domains, and steps to run there.
 
 ## Create A Model
 
@@ -43,7 +43,7 @@ The generated model is a starting point. Hosts can refine materials, assignments
 
 ## Attach Physics To Geometry
 
-Most failed or low-quality analysis runs come from missing or weak model attachment:
+Most failed or low-quality runs come from incomplete model setup:
 
 | Model concern | Why it matters |
 | --- | --- |
@@ -54,7 +54,7 @@ Most failed or low-quality analysis runs come from missing or weak model attachm
 | Domains | Coupled or specialized physics need domain state. |
 | Steps | The run operation must match a step the model actually contains. |
 
-Geometry inspection and prep make these attachments more reliable by exposing region and topology evidence before the model is built.
+Geometry inspection and prep make setup more reliable by exposing region and topology data before the model is built.
 
 ## Validate Before Solving
 
@@ -76,14 +76,14 @@ Run operations also perform operation-specific validation. For example, a domain
 Use prep-aware modeling when:
 
 - region mappings matter,
-- model setup needs deterministic topology evidence,
+- model setup needs deterministic topology data,
 - run acceptance should depend on prep freshness,
-- later reviewers need to reproduce the geometry evidence used by a run.
+- later reviewers need to reproduce the geometry data used by a run.
 
 For prep lifecycle details, see [Geometry](/docs/runtime/analysis/geometry).
 
 ## Current Boundaries
 
 - Model profiles are scaffolds. They do not replace domain-specific material, load, and constraint choices.
-- Generated defaults are useful for workflow plumbing and fixtures, but meaningful engineering runs need intentional model data.
+- Generated defaults are useful for tests and early integration, but meaningful engineering runs need intentional model data.
 - Validation catches schema and compatibility problems. The engineering fit of the physics model still depends on the materials, loads, constraints, domains, and assumptions chosen by the caller.

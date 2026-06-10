@@ -19,6 +19,7 @@ use crate::commands::accel::dump_provider_telemetry_if_requested;
 use crate::commands::bytecode::{emit_bytecode, write_bytecode_output};
 use crate::commands::session::create_session;
 use crate::commands::streams::emit_execution_streams;
+use crate::commands::study::execute_study_path;
 use crate::diagnostics::format_frontend_error;
 use crate::telemetry::{capture_provider_snapshot, TelemetryRunKind};
 use crate::AlreadyReportedCliError;
@@ -34,13 +35,23 @@ pub async fn execute_script(
 
 pub async fn execute_script_with_args(
     script: PathBuf,
-    _args: Vec<String>,
+    args: Vec<String>,
     emit_bytecode_path: Option<PathBuf>,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     let script = resolve_script_input(script)?;
     info!("Executing script: {script:?}");
+
+    if runmat_runtime::analysis::is_analysis_study_file_path(&script) {
+        if emit_bytecode_path.is_some() {
+            anyhow::bail!("--emit-bytecode is only supported for .m script files");
+        }
+        if !args.is_empty() {
+            anyhow::bail!("analysis study files do not accept positional script arguments");
+        }
+        return execute_study_path(script, cli, config).await;
+    }
 
     if let Some(path) = &emit_bytecode_path {
         let content = fs::read_to_string(&script)
@@ -448,6 +459,43 @@ path = "src/main"
         assert_eq!(
             resolved.canonicalize().unwrap(),
             tmp.path().join("src/main.m").canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn resolves_named_entrypoint_to_study_file_target() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::create_dir_all(tmp.path().join("studies")).unwrap();
+        fs::write(
+            tmp.path().join("studies/bracket.study.yaml"),
+            "study_id: bracket",
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[entrypoints.bracket]
+path = "studies/bracket.study.yaml"
+"#,
+        )
+        .unwrap();
+
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
+        let resolved = resolve_script_input(PathBuf::from("bracket")).expect("resolve entrypoint");
+
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            tmp.path()
+                .join("studies/bracket.study.yaml")
+                .canonicalize()
+                .unwrap()
         );
     }
 

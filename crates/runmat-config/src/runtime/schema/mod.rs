@@ -1,4 +1,5 @@
 mod accelerate;
+mod analysis;
 mod defaults;
 mod execution;
 mod language;
@@ -11,6 +12,7 @@ pub use accelerate::{
     AccelPowerPreference, AccelerateConfig, AccelerateProviderPreference, AutoOffloadConfig,
     AutoOffloadLogLevel,
 };
+pub use analysis::{AnalysisArtifactStoreMode, AnalysisConfig};
 pub use execution::{GcConfig, GcPreset, JitConfig, JitOptLevel, RuntimeConfig};
 pub use language::{error_namespace_for_language_compat, LanguageCompatMode, LanguageConfig};
 pub use logging::{LogLevel, LoggingConfig};

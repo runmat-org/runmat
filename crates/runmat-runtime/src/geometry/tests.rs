@@ -509,7 +509,7 @@ fn load_op_maps_unsupported_format_error_code() {
     )
     .expect_err("load should fail");
 
-    assert_eq!(error.error_code, "GEOMETRY_FORMAT_UNSUPPORTED");
+    assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.FORMAT_UNSUPPORTED");
     assert_eq!(error.operation, "geometry.load");
     assert_eq!(error.op_version, "geometry.load/v1");
 }
@@ -522,7 +522,7 @@ fn load_op_maps_parse_error_for_glb_payload() {
         OperationContext::new(None, None),
     )
     .expect_err("GLB payload should fail parse");
-    assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
+    assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.PARSE_FAILED");
     assert!(error.message.contains("GLB payloads are not supported"));
 }
 
@@ -534,7 +534,7 @@ fn load_op_maps_parse_error_for_non_triangle_gltf_mode() {
         OperationContext::new(None, None),
     )
     .expect_err("non-triangle GLTF mode should fail parse");
-    assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
+    assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.PARSE_FAILED");
     assert!(error.message.contains("mode 1 is not supported"));
 }
 
@@ -546,7 +546,7 @@ fn load_op_maps_parse_error_for_bad_implicit_gltf_indices() {
         OperationContext::new(None, None),
     )
     .expect_err("bad implicit GLTF indices should fail parse");
-    assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
+    assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.PARSE_FAILED");
     assert!(error.message.contains("multiple of 3"));
 }
 
@@ -555,7 +555,7 @@ fn load_op_maps_parse_error_for_unsupported_binary_ply_layout() {
     let payload = binary_ply_extra_vertex_property_payload();
     let error = geometry_load_op("/mesh.ply", &payload, OperationContext::new(None, None))
         .expect_err("unsupported binary PLY layout should fail parse");
-    assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
+    assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.PARSE_FAILED");
     assert!(error.message.contains("requires vertex properties exactly"));
 }
 
@@ -564,7 +564,7 @@ fn load_op_maps_parse_error_for_gltf_accessor_buffer_view_bounds_violation() {
     let payload = gltf_accessor_data_uri_buffer_view_too_small_payload();
     let error = geometry_load_op("/mesh.gltf", &payload, OperationContext::new(None, None))
         .expect_err("gltf accessor bufferView bounds violation should fail parse");
-    assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
+    assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.PARSE_FAILED");
     assert!(error
         .message
         .contains("declared count/stride exceeds bufferView byte range"));
@@ -575,7 +575,7 @@ fn load_op_maps_parse_error_for_gltf_accessor_missing_buffer_byte_length() {
     let payload = gltf_accessor_data_uri_missing_buffer_byte_length_payload();
     let error = geometry_load_op("/mesh.gltf", &payload, OperationContext::new(None, None))
         .expect_err("gltf accessor payload missing buffer.byteLength should fail parse");
-    assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
+    assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.PARSE_FAILED");
     assert!(error.message.contains("requires buffer.byteLength"));
 }
 
@@ -584,7 +584,7 @@ fn load_op_maps_parse_error_for_gltf_accessor_normalized() {
     let payload = gltf_accessor_data_uri_normalized_payload();
     let error = geometry_load_op("/mesh.gltf", &payload, OperationContext::new(None, None))
         .expect_err("normalized accessor payload should fail parse");
-    assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
+    assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.PARSE_FAILED");
     assert!(error
         .message
         .contains("normalized accessors are not supported"));
@@ -595,7 +595,7 @@ fn load_op_maps_parse_error_for_gltf_accessor_sparse() {
     let payload = gltf_accessor_data_uri_sparse_payload();
     let error = geometry_load_op("/mesh.gltf", &payload, OperationContext::new(None, None))
         .expect_err("sparse accessor payload should fail parse");
-    assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
+    assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.PARSE_FAILED");
     assert!(error.message.contains("sparse accessors are not supported"));
 }
 
@@ -604,7 +604,7 @@ fn load_op_maps_parse_error_for_gltf_accessor_stride_alignment() {
     let payload = gltf_accessor_data_uri_stride_misaligned_payload();
     let error = geometry_load_op("/mesh.gltf", &payload, OperationContext::new(None, None))
         .expect_err("misaligned accessor stride payload should fail parse");
-    assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
+    assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.PARSE_FAILED");
     assert!(error.message.contains("not aligned to component size"));
 }
 
@@ -613,7 +613,7 @@ fn load_op_maps_parse_error_for_gltf_accessor_count_span_overflow() {
     let payload = gltf_accessor_data_uri_count_span_overflow_payload();
     let error = geometry_load_op("/mesh.gltf", &payload, OperationContext::new(None, None))
         .expect_err("count/stride overflow payload should fail parse");
-    assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
+    assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.PARSE_FAILED");
     assert!(error
         .message
         .contains("declared count/stride exceeds bufferView byte range"));
@@ -672,7 +672,10 @@ fn query_entities_region_not_found_maps_typed_error() {
     )
     .expect_err("query should fail");
 
-    assert_eq!(error.error_code, "GEOMETRY_REGION_NOT_FOUND");
+    assert_eq!(
+        error.error_code,
+        "RM.GEOMETRY.QUERY_ENTITIES.REGION_NOT_FOUND"
+    );
     assert_eq!(error.operation, "geometry.query_entities");
     assert_eq!(error.op_version, "geometry.query_entities/v1");
 }
@@ -693,7 +696,7 @@ fn capture_view_op_returns_typed_unsupported_error() {
 
     assert_eq!(error.operation, "geometry.capture_view");
     assert_eq!(error.op_version, "geometry.capture_view/v1");
-    assert_eq!(error.error_code, "GEOMETRY_CAPTURE_UNSUPPORTED");
+    assert_eq!(error.error_code, "RM.GEOMETRY.CAPTURE_VIEW.UNSUPPORTED");
     assert_eq!(error.trace_id.as_deref(), Some("trace-g4"));
 }
 
@@ -735,7 +738,7 @@ fn capture_view_op_validates_non_zero_dimensions() {
     )
     .expect_err("zero width should be rejected");
 
-    assert_eq!(error.error_code, "GEOMETRY_CAPTURE_INVALID_SPEC");
+    assert_eq!(error.error_code, "RM.GEOMETRY.CAPTURE_VIEW.INVALID_SPEC");
     assert_eq!(error.operation, "geometry.capture_view");
     assert_eq!(error.op_version, "geometry.capture_view/v1");
 }
@@ -789,6 +792,7 @@ fn capture_view_op_uses_installed_adapter() {
 
 #[test]
 fn prep_for_analysis_op_returns_versioned_deterministic_result() {
+    let _prep_guard = prep_artifact_test_guard();
     reset_prep_artifact_store_for_tests();
     let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
     let first = geometry_prep_for_analysis_op(
@@ -819,6 +823,7 @@ fn prep_for_analysis_op_returns_versioned_deterministic_result() {
 
 #[test]
 fn prep_for_analysis_op_maps_invalid_spec_error() {
+    let _prep_guard = prep_artifact_test_guard();
     reset_prep_artifact_store_for_tests();
     let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
     let error = geometry_prep_for_analysis_op(
@@ -833,11 +838,15 @@ fn prep_for_analysis_op_maps_invalid_spec_error() {
 
     assert_eq!(error.operation, "geometry.prep_for_analysis");
     assert_eq!(error.op_version, "geometry.prep_for_analysis/v1");
-    assert_eq!(error.error_code, "GEOMETRY_PREP_INVALID_SPEC");
+    assert_eq!(
+        error.error_code,
+        "RM.GEOMETRY.PREP_FOR_ANALYSIS.INVALID_SPEC"
+    );
 }
 
 #[test]
 fn prep_for_analysis_op_supports_adaptive_refine_profile() {
+    let _prep_guard = prep_artifact_test_guard();
     reset_prep_artifact_store_for_tests();
     let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
     let analysis_ready = geometry_prep_for_analysis_op(
@@ -873,10 +882,13 @@ fn prep_for_analysis_op_supports_adaptive_refine_profile() {
 
 #[test]
 fn prep_artifact_retention_prunes_old_entries() {
+    let _prep_guard = prep_artifact_test_guard();
     reset_prep_artifact_store_for_tests();
-    std::env::set_var("RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY", "2");
-    std::env::remove_var("RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS");
-    std::env::remove_var("RUNMAT_GEOMETRY_PREP_MAX_AGE_SECONDS");
+    configure_prep_artifacts(GeometryPrepArtifactConfig {
+        max_artifacts_per_geometry: Some(2),
+        ..GeometryPrepArtifactConfig::default()
+    })
+    .expect("prep artifact config should be configurable");
 
     let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
     let mut ids = Vec::new();
@@ -897,12 +909,12 @@ fn prep_artifact_retention_prunes_old_entries() {
         .expect("load latest prep should succeed")
         .is_some());
 
-    std::env::remove_var("RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY");
     reset_prep_artifact_store_for_tests();
 }
 
 #[test]
 fn prep_artifact_health_reports_metrics_and_distribution() {
+    let _prep_guard = prep_artifact_test_guard();
     reset_prep_artifact_store_for_tests();
     let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
     for _ in 0..3 {

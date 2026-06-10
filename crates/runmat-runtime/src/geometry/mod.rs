@@ -4,6 +4,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
+#[cfg(test)]
+use std::sync::{Mutex, MutexGuard};
 
 use self::capture::DEFAULT_SVG_CAPTURE_ADAPTER;
 use chrono::Utc;
@@ -41,7 +43,7 @@ const GEOMETRY_PREP_ARTIFACT_HEALTH_OPERATION: &str = "geometry.prep_artifact_he
 const GEOMETRY_PREP_ARTIFACT_HEALTH_OP_VERSION: &str = "geometry.prep_artifact_health/v1";
 const DEFAULT_QUERY_LIMIT: usize = 2048;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GeometryInspectResult {
     pub format: String,
     pub byte_count: usize,
@@ -150,6 +152,15 @@ pub struct GeometryPrepArtifactHealthResult {
     pub per_geometry: Vec<GeometryPrepArtifactHealthEntry>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GeometryPrepArtifactConfig {
+    pub artifact_root: Option<PathBuf>,
+    pub max_artifacts: Option<usize>,
+    pub max_artifacts_per_geometry: Option<usize>,
+    pub max_age_seconds: Option<u64>,
+    pub require_latest_revision: Option<bool>,
+}
+
 type PrepStore = Arc<RwLock<HashMap<String, StoredGeometryPrepArtifact>>>;
 
 fn prep_store() -> &'static PrepStore {
@@ -167,6 +178,26 @@ fn prep_metrics() -> &'static Arc<RwLock<PrepArtifactMetrics>> {
     METRICS.get_or_init(|| Arc::new(RwLock::new(PrepArtifactMetrics::default())))
 }
 
+fn prep_config() -> &'static RwLock<GeometryPrepArtifactConfig> {
+    static CONFIG: OnceLock<RwLock<GeometryPrepArtifactConfig>> = OnceLock::new();
+    CONFIG.get_or_init(|| RwLock::new(GeometryPrepArtifactConfig::default()))
+}
+
+fn current_prep_config() -> GeometryPrepArtifactConfig {
+    prep_config()
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
+}
+
+pub fn configure_prep_artifacts(config: GeometryPrepArtifactConfig) -> Result<(), String> {
+    let mut guard = prep_config()
+        .write()
+        .map_err(|_| "geometry prep artifact config lock poisoned".to_string())?;
+    *guard = config;
+    Ok(())
+}
+
 fn increment_metric(f: impl FnOnce(&mut PrepArtifactMetrics)) {
     if let Ok(mut metrics) = prep_metrics().write() {
         f(&mut metrics);
@@ -174,9 +205,27 @@ fn increment_metric(f: impl FnOnce(&mut PrepArtifactMetrics)) {
 }
 
 fn prep_artifact_root() -> Option<PathBuf> {
-    std::env::var("RUNMAT_GEOMETRY_PREP_ARTIFACT_ROOT")
-        .ok()
-        .map(PathBuf::from)
+    current_prep_config().artifact_root.or_else(|| {
+        std::env::var("RUNMAT_GEOMETRY_PREP_ARTIFACT_ROOT")
+            .ok()
+            .map(PathBuf::from)
+    })
+}
+
+pub(crate) fn require_latest_prep_revision() -> bool {
+    current_prep_config()
+        .require_latest_revision
+        .unwrap_or_else(|| {
+            std::env::var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION")
+                .ok()
+                .map(|value| {
+                    matches!(
+                        value.to_ascii_lowercase().as_str(),
+                        "1" | "true" | "yes" | "on"
+                    )
+                })
+                .unwrap_or(true)
+        })
 }
 
 fn prep_artifact_path(root: &PathBuf, prep_artifact_id: &str) -> PathBuf {
@@ -191,22 +240,27 @@ struct PrepArtifactRetentionPolicy {
 }
 
 impl PrepArtifactRetentionPolicy {
-    fn from_env() -> Self {
+    fn current() -> Self {
+        let config = current_prep_config();
         Self {
-            max_artifacts: std::env::var("RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS")
-                .ok()
-                .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(0),
-            max_artifacts_per_geometry: std::env::var(
-                "RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY",
-            )
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0),
-            max_age_seconds: std::env::var("RUNMAT_GEOMETRY_PREP_MAX_AGE_SECONDS")
-                .ok()
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(0),
+            max_artifacts: config.max_artifacts.unwrap_or_else(|| {
+                std::env::var("RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS")
+                    .ok()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(0)
+            }),
+            max_artifacts_per_geometry: config.max_artifacts_per_geometry.unwrap_or_else(|| {
+                std::env::var("RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY")
+                    .ok()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(0)
+            }),
+            max_age_seconds: config.max_age_seconds.unwrap_or_else(|| {
+                std::env::var("RUNMAT_GEOMETRY_PREP_MAX_AGE_SECONDS")
+                    .ok()
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or(0)
+            }),
         }
     }
 }
@@ -254,7 +308,7 @@ fn persist_prep_artifact(
         fs::write(&path, bytes).map_err(|err| format!("failed to write prep artifact: {err}"))?;
     }
 
-    prune_prep_artifacts(PrepArtifactRetentionPolicy::from_env())?;
+    prune_prep_artifacts(PrepArtifactRetentionPolicy::current())?;
 
     Ok(artifact)
 }
@@ -293,7 +347,7 @@ pub(crate) fn load_prep_artifact(
         artifact.source_geometry_id,
         artifact.source_geometry_revision
     );
-    prune_prep_artifacts(PrepArtifactRetentionPolicy::from_env())?;
+    prune_prep_artifacts(PrepArtifactRetentionPolicy::current())?;
     Ok(Some(artifact))
 }
 
@@ -324,7 +378,7 @@ pub fn geometry_prep_artifact_health_op(
             GEOMETRY_PREP_ARTIFACT_HEALTH_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "GEOMETRY_PREP_ARTIFACT_STORE_FAILED",
+                error_code: "RM.GEOMETRY.PREP_ARTIFACT_HEALTH.STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -377,7 +431,7 @@ pub fn geometry_prep_artifact_health_op(
                 GEOMETRY_PREP_ARTIFACT_HEALTH_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "GEOMETRY_PREP_ARTIFACT_STORE_FAILED",
+                    error_code: "RM.GEOMETRY.PREP_ARTIFACT_HEALTH.STORE_FAILED",
                     error_type: OperationErrorType::Internal,
                     retryable: true,
                     severity: OperationErrorSeverity::Error,
@@ -543,6 +597,17 @@ pub fn reset_prep_artifact_store_for_tests() {
     if let Ok(mut metrics) = prep_metrics().write() {
         *metrics = PrepArtifactMetrics::default();
     }
+    if let Ok(mut config) = prep_config().write() {
+        *config = GeometryPrepArtifactConfig::default();
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn prep_artifact_test_guard() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 impl Default for GeometryPrepForAnalysisSpec {
@@ -704,7 +769,7 @@ pub fn geometry_query_entities_op(
             GEOMETRY_QUERY_ENTITIES_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "GEOMETRY_QUERY_INVALID_LIMIT",
+                error_code: "RM.GEOMETRY.QUERY_ENTITIES.INVALID_LIMIT",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -792,7 +857,7 @@ pub fn geometry_capture_view_op(
             GEOMETRY_CAPTURE_VIEW_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "GEOMETRY_CAPTURE_INVALID_SPEC",
+                error_code: "RM.GEOMETRY.CAPTURE_VIEW.INVALID_SPEC",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -813,7 +878,7 @@ pub fn geometry_capture_view_op(
                 GEOMETRY_CAPTURE_VIEW_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "GEOMETRY_CAPTURE_BACKEND_FAILED",
+                    error_code: "RM.GEOMETRY.CAPTURE_VIEW.BACKEND_FAILED",
                     error_type: OperationErrorType::Backend,
                     retryable: true,
                     severity: OperationErrorSeverity::Error,
@@ -842,7 +907,7 @@ pub fn geometry_capture_view_op(
                     GEOMETRY_CAPTURE_VIEW_OP_VERSION,
                     &context,
                     OperationErrorSpec {
-                        error_code: "GEOMETRY_CAPTURE_BACKEND_FAILED",
+                        error_code: "RM.GEOMETRY.CAPTURE_VIEW.BACKEND_FAILED",
                         error_type: OperationErrorType::Backend,
                         retryable: true,
                         severity: OperationErrorSeverity::Error,
@@ -870,7 +935,7 @@ pub fn geometry_capture_view_op(
         GEOMETRY_CAPTURE_VIEW_OP_VERSION,
         &context,
         OperationErrorSpec {
-            error_code: "GEOMETRY_CAPTURE_UNSUPPORTED",
+            error_code: "RM.GEOMETRY.CAPTURE_VIEW.UNSUPPORTED",
             error_type: OperationErrorType::Backend,
             retryable: false,
             severity: OperationErrorSeverity::Error,
@@ -905,7 +970,7 @@ pub fn geometry_prep_for_analysis_op(
             GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "GEOMETRY_PREP_INVALID_SPEC",
+                error_code: "RM.GEOMETRY.PREP_FOR_ANALYSIS.INVALID_SPEC",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -936,7 +1001,7 @@ pub fn geometry_prep_for_analysis_op(
             GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "GEOMETRY_PREP_FAILED",
+                error_code: "RM.GEOMETRY.PREP_FOR_ANALYSIS.FAILED",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -952,7 +1017,7 @@ pub fn geometry_prep_for_analysis_op(
             GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "GEOMETRY_PREP_ARTIFACT_STORE_FAILED",
+                error_code: "RM.GEOMETRY.PREP_FOR_ANALYSIS.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1005,17 +1070,17 @@ fn map_geometry_load_error(
 ) -> OperationErrorEnvelope {
     let (error_code, error_type, retryable) = match &error {
         GeometryImportError::UnsupportedFormat => (
-            "GEOMETRY_FORMAT_UNSUPPORTED",
+            "RM.GEOMETRY.LOAD.FORMAT_UNSUPPORTED",
             OperationErrorType::Input,
             false,
         ),
         GeometryImportError::ParseFailed(_) => (
-            "GEOMETRY_PARSE_FAILED",
+            "RM.GEOMETRY.LOAD.PARSE_FAILED",
             OperationErrorType::Validation,
             false,
         ),
         GeometryImportError::CapacityExceeded { .. } => (
-            "CAPACITY_LIMIT_EXCEEDED",
+            "RM.GEOMETRY.LOAD.CAPACITY_LIMIT_EXCEEDED",
             OperationErrorType::Capacity,
             false,
         ),
@@ -1046,7 +1111,7 @@ fn map_geometry_query_error(
             GEOMETRY_QUERY_ENTITIES_OP_VERSION,
             context,
             OperationErrorSpec {
-                error_code: "GEOMETRY_REGION_NOT_FOUND",
+                error_code: "RM.GEOMETRY.QUERY_ENTITIES.REGION_NOT_FOUND",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
