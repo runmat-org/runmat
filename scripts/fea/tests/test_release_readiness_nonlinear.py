@@ -3,16 +3,16 @@ import unittest
 import os
 import inspect
 
-from scripts.analysis.governance.release_readiness_nonlinear import (
+from scripts.fea.governance.release_readiness_nonlinear import (
     KEY_PERFORMANCE_FIXTURES,
     evaluate_release_readiness,
     markdown_summary,
 )
-from scripts.analysis.governance.validate_analysis_report_nonlinear import (
+from scripts.fea.governance.validate_analysis_report_nonlinear import (
     PERFORMANCE_REQUIRED_FIELDS,
     REQUIRED_FIXTURES,
 )
-from scripts.analysis.governance.validate_external_reference_benchmark import (
+from scripts.fea.governance.validate_external_reference_benchmark import (
     REQUIRED_METRICS_BY_FIXTURE,
 )
 

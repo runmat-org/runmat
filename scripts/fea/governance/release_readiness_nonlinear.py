@@ -12,7 +12,7 @@ from typing import Dict, List
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from scripts.analysis.prep_calibration.evaluate_prep_calibration_drift import (
+from scripts.fea.prep_calibration.evaluate_prep_calibration_drift import (
     load_evidence,
     evaluate_report_drift,
     recommend_profile_shifts,
@@ -16365,7 +16365,7 @@ def main() -> int:
     calibration_evidence_path = Path(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_EVIDENCE",
-            "scripts/analysis/prep_calibration/evidence/prep_calibration_evidence.json",
+            "scripts/fea/prep_calibration/evidence/prep_calibration_evidence.json",
         )
     )
     recommendation_artifact_path = Path(

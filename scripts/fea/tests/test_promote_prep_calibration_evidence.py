@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.analysis.prep_calibration.promote_prep_calibration_evidence import (
+from scripts.fea.prep_calibration.promote_prep_calibration_evidence import (
     main as promote_main,
 )
 

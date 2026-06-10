@@ -2,14 +2,14 @@ import json
 import unittest
 from pathlib import Path
 
-from scripts.analysis.governance.validate_external_reference_benchmark import (
+from scripts.fea.governance.validate_external_reference_benchmark import (
     REQUIRED_METRICS_BY_FIXTURE,
 )
 
 
 class ExternalReferenceBaselineTests(unittest.TestCase):
     def test_external_reference_baseline_covers_validator_required_metrics(self):
-        baseline_path = Path("scripts/analysis/reference_data/m6_external_reference_baseline.json")
+        baseline_path = Path("scripts/fea/reference_data/m6_external_reference_baseline.json")
         payload = json.loads(baseline_path.read_text())
         metrics = payload.get("metrics")
         self.assertIsInstance(metrics, list)

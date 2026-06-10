@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CHROME_WRAPPER="${REPO_ROOT}/scripts/chrome-headless.sh"
-CHROMEDRIVER_RESOLVER="${REPO_ROOT}/scripts/resolve-chromedriver.sh"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CHROME_WRAPPER="${REPO_ROOT}/scripts/runtime/chrome-headless.sh"
+CHROMEDRIVER_RESOLVER="${REPO_ROOT}/scripts/runtime/resolve-chromedriver.sh"
 
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/test-wasm-regression-suite.sh <suite>
+  scripts/runtime/test-wasm-regression-suite.sh <suite>
 
 Suites:
   symptom-closure   Run RM-295/RM-302 closure proofs (node + browser)
   replay-smoke      Run replay smoke browser tests
+  runtime           Run runtime browser tests behind RUNMAT_WASM_INCLUDE_RUNTIME
 USAGE
 }
 
@@ -42,6 +43,13 @@ run_replay_smoke_suite() {
   wasm-pack test --chrome --headless "${WASM_PACK_CHROMEDRIVER_ARGS[@]}" --test replay_smoke
 }
 
+run_runtime_suite() {
+  echo "==> wasm-pack test runmat-runtime --no-default-features --features plot-web"
+  pushd "${REPO_ROOT}/crates/runmat-runtime" >/dev/null
+  wasm-pack test --chrome --headless "${WASM_PACK_CHROMEDRIVER_ARGS[@]}" -- --no-default-features --features plot-web
+  popd >/dev/null
+}
+
 main() {
   local suite="${1:-}"
   if [[ -z "${suite}" ]]; then
@@ -62,6 +70,9 @@ main() {
       ;;
     replay-smoke)
       run_replay_smoke_suite
+      ;;
+    runtime)
+      run_runtime_suite
       ;;
     *)
       usage

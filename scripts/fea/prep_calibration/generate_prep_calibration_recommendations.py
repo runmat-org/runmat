@@ -7,11 +7,11 @@ from pathlib import Path
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from scripts.analysis.prep_calibration.evaluate_prep_calibration_drift import (
+from scripts.fea.prep_calibration.evaluate_prep_calibration_drift import (
     build_recommendation_artifact,
     load_evidence,
 )
-from scripts.analysis.governance.release_readiness_nonlinear import (
+from scripts.fea.governance.release_readiness_nonlinear import (
     load_json,
     rolling_reports,
 )
@@ -30,7 +30,7 @@ def main() -> int:
     evidence_path = Path(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_EVIDENCE",
-            "scripts/analysis/prep_calibration/evidence/prep_calibration_evidence.json",
+            "scripts/fea/prep_calibration/evidence/prep_calibration_evidence.json",
         )
     )
     output_path = Path(

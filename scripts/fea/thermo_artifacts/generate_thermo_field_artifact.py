@@ -10,7 +10,7 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 try:
-    from scripts.analysis.thermo_artifacts.validate_thermo_field_artifact import (
+    from scripts.fea.thermo_artifacts.validate_thermo_field_artifact import (
         compute_payload_hash,
         compute_signature,
     )

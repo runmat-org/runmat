@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.analysis.governance.validate_threshold_ratchet_report import (
+from scripts.fea.governance.validate_threshold_ratchet_report import (
     REQUIRED_THRESHOLD_KEYS,
     main,
 )

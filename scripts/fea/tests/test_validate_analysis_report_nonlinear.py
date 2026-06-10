@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.analysis.governance.validate_analysis_report_nonlinear import main
+from scripts.fea.governance.validate_analysis_report_nonlinear import main
 
 
 def _record(fixture_id: str, assertion_names: set[str]) -> dict:

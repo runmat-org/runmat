@@ -3,12 +3,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.analysis.governance.generate_threshold_ratchet_report import (
+from scripts.fea.governance.generate_threshold_ratchet_report import (
     OBSERVED_FIELDS,
     RATCHET_HISTORY,
     main,
 )
-from scripts.analysis.governance.validate_threshold_ratchet_report import (
+from scripts.fea.governance.validate_threshold_ratchet_report import (
     REQUIRED_THRESHOLD_KEYS,
 )
 

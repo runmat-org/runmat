@@ -3153,6 +3153,10 @@ mod tests {
             .expect("data test serial lock poisoned")
     }
 
+    fn native_provider_guard() -> runmat_filesystem::ProviderGuard {
+        runmat_filesystem::replace_provider(Arc::new(NativeFsProvider))
+    }
+
     #[test]
     fn io_data_descriptors_cover_constructor_and_transaction_surface() {
         let data_labels: Vec<&str> = DATA_CREATE_DESCRIPTOR
@@ -3510,6 +3514,7 @@ mod tests {
     #[test]
     fn create_open_write_read_dataset() {
         let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("sample.data").to_string_lossy().to_string();
 
@@ -3563,6 +3568,7 @@ mod tests {
     #[test]
     fn write_and_read_slice_payload() {
         let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("slice.data").to_string_lossy().to_string();
 
@@ -3625,6 +3631,7 @@ mod tests {
     #[test]
     fn slice_write_updates_only_touched_chunks() {
         let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir
             .path()
@@ -4006,6 +4013,7 @@ mod tests {
     #[test]
     fn tx_create_resize_fill_and_delete_array() {
         let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("tx-ops.data").to_string_lossy().to_string();
 

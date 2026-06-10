@@ -7,7 +7,7 @@ last_updated: "June 10, 2026"
 
 # Using FEA
 
-Most workflows start with a geometry file and end with a run result you can inspect or store.
+FEA workflows in RunMat start with a geometry file and end with a run result you can inspect or store.
 
 Use one of these entry points:
 
@@ -21,7 +21,7 @@ Use one of these entry points:
 
 ## Run A `.fea` File
 
-A `.fea` file is a YAML study or sweep document.
+A `.fea` file is a YAML file that defines a study or parametric sweep.
 
 ```sh
 runmat check studies/bracket_static.fea

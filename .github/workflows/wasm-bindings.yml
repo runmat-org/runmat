@@ -10,6 +10,7 @@ on:
       - "crates/runmat-runtime/**"
       - "crates/runmat-lsp/**"
       - "scripts/test-wasm-headless.sh"
+      - "scripts/runtime/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/wasm-bindings.yml"

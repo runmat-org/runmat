@@ -9,7 +9,7 @@ last_updated: "June 10, 2026"
 
 RunMat uses validation, tests, solver diagnostics, benchmark fixtures, and governance records to decide how much trust a FEA workflow has earned.
 
-Input validation answers whether a study or model is shaped correctly. FEA verification and validation answer a harder question: whether the implementation, numerical method, and physics model produce defensible results for a documented use.
+The purpose of validation is to determine whether the implementation, numerical method, and physics model produce defensible results for a documented use.
 
 ## Correctness Layers
 
@@ -47,8 +47,8 @@ Use these labels in [Current Status](/docs/runtime/fea/status):
 | `crates/runmat-runtime/tests/analysis` | Conformance manifest and benchmark report harness across the supported families. |
 | `crates/runmat-runtime/tests/geometry_prep_conformance.rs` | Geometry prep determinism and region mapping expectations. |
 | `crates/runmat-runtime/tests/prep_solve_conformance.rs` | Prep-aware solve behavior and documented quality limits. |
-| `scripts/analysis/governance` | Benchmark report validation, external references, readiness, thresholds, and promotion calibration. |
-| `scripts/analysis/prep_calibration` and `scripts/analysis/thermo_artifacts` | Prep and thermo-field artifact drift, promotion, and validation workflows. |
+| `scripts/fea/governance` | Benchmark report validation, external references, readiness, thresholds, and promotion calibration. |
+| `scripts/fea/prep_calibration` and `scripts/fea/thermo_artifacts` | Prep and thermo-field artifact drift, promotion, and validation workflows. |
 
 These checks provide strong L0-L2 coverage across many paths. L3-L5 require family-specific known-answer, convergence, external-reference, and governance evidence.
 

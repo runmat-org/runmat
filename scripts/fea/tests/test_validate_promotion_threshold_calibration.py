@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from scripts.analysis.governance.validate_promotion_threshold_calibration import main
+from scripts.fea.governance.validate_promotion_threshold_calibration import main
 
 
 def _payload(generated_at: str, source_report_count: int = 4):

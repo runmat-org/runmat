@@ -1,8 +1,20 @@
 #![cfg(target_arch = "wasm32")]
 
 use runmat_wasm::init_runmat;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsValue;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecuteRequest<'a> {
+    source: ExecuteSource<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum ExecuteSource<'a> {
+    Text { name: &'a str, text: &'a str },
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,13 +51,12 @@ async fn execute_script(script: &str) -> ExecPayload {
     let runtime = init_runmat(init_options(false))
         .await
         .expect("initialize wasm runtime");
-    let request = serde_wasm_bindgen::to_value(&serde_json::json!({
-        "source": {
-            "kind": "text",
-            "name": "symptom_regression.m",
-            "text": script,
-        }
-    }))
+    let request = serde_wasm_bindgen::to_value(&ExecuteRequest {
+        source: ExecuteSource::Text {
+            name: "symptom_regression.m",
+            text: script,
+        },
+    })
     .expect("serialize executeRequest payload");
     serde_wasm_bindgen::from_value(
         runtime

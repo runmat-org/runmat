@@ -16,8 +16,8 @@ import { basename, dirname, extname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
 /**
- * @typedef {import("./BuiltinMetadataSpecification").BuiltinMetadata} BuiltinMetadata
- * @typedef {import("./BuiltinMetadataSpecification").Example} BuiltinExample
+ * @typedef {import("../metadata/BuiltinMetadataSpecification").BuiltinMetadata} BuiltinMetadata
+ * @typedef {import("../metadata/BuiltinMetadataSpecification").Example} BuiltinExample
  */
 
 /**
@@ -51,7 +51,7 @@ const outputDir = join(repoRoot, "scripts", "example-output-reports");
 const imageOutputDir = join(outputDir, "plot-example-images");
 const reportPath = join(outputDir, "example-output-report.html");
 const markdownReportPath = join(outputDir, "example-output-report.md");
-const chromeWrapper = join(repoRoot, "scripts", "chrome-headless.sh");
+const chromeWrapper = join(repoRoot, "scripts", "runtime", "chrome-headless.sh");
 const wasmModule = join(repoRoot, "bindings", "ts", "dist", "pkg-web", "runmat_wasm_web.js");
 const wasmBinary = join(repoRoot, "bindings", "ts", "dist", "pkg-web", "runmat_wasm_web_bg.wasm");
 

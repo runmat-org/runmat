@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.analysis.governance.generate_promotion_threshold_calibration import main
-from scripts.analysis.governance.validate_promotion_threshold_calibration import (
+from scripts.fea.governance.generate_promotion_threshold_calibration import main
+from scripts.fea.governance.validate_promotion_threshold_calibration import (
     EXPECTED_PROFILES,
     EXPECTED_RATIONALE,
 )

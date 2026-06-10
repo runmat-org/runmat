@@ -1,11 +1,23 @@
 #![cfg(target_arch = "wasm32")]
 
 use runmat_wasm::init_runmat;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::wasm_bindgen_test;
 
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecuteRequest<'a> {
+    source: ExecuteSource<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum ExecuteSource<'a> {
+    Text { name: &'a str, text: &'a str },
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,13 +52,12 @@ fn init_options(enable_gpu: bool) -> JsValue {
 }
 
 fn execute_request(script: &str) -> JsValue {
-    serde_wasm_bindgen::to_value(&serde_json::json!({
-        "source": {
-            "kind": "text",
-            "name": "gradient_gpu_test.m",
-            "text": script,
-        }
-    }))
+    serde_wasm_bindgen::to_value(&ExecuteRequest {
+        source: ExecuteSource::Text {
+            name: "gradient_gpu_test.m",
+            text: script,
+        },
+    })
     .expect("serialize executeRequest payload")
 }
 
