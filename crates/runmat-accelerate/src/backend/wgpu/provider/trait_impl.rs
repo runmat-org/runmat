@@ -1028,6 +1028,14 @@ impl AccelProvider for WgpuProvider {
         Box::pin(async move { self.rank_exec(matrix, tolerance).await })
     }
 
+    fn rref<'a>(
+        &'a self,
+        matrix: &'a GpuTensorHandle,
+        options: ProviderRrefOptions,
+    ) -> AccelProviderFuture<'a, ProviderRrefResult> {
+        Box::pin(async move { self.rref_exec(matrix, options).await })
+    }
+
     fn rcond<'a>(
         &'a self,
         matrix: &'a GpuTensorHandle,
