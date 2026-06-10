@@ -283,12 +283,16 @@ async fn evaluate_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResul
                     shape: &reduced.shape,
                 })
                 .map_err(|err| internal_error(format!("{NAME}: {err}")))?;
-            let pivots_handle = provider
-                .upload(&HostTensorView {
-                    data: &pivots.data,
-                    shape: &pivots.shape,
-                })
-                .map_err(|err| internal_error(format!("{NAME}: {err}")))?;
+            let pivots_handle = match provider.upload(&HostTensorView {
+                data: &pivots.data,
+                shape: &pivots.shape,
+            }) {
+                Ok(handle) => handle,
+                Err(err) => {
+                    let _ = provider.free(&reduced_handle);
+                    return Err(internal_error(format!("{NAME}: {err}")));
+                }
+            };
             return Ok(RrefEval::from_provider(ProviderRrefResult {
                 reduced: reduced_handle,
                 pivots: pivots_handle,
