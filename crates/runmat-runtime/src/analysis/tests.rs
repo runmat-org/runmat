@@ -22,6 +22,9 @@ use runmat_geometry_core::{
 
 use super::*;
 
+const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
+const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
+
 fn analysis_test_guard() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -362,8 +365,18 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
             prep_context: None,
         },
+        model: None,
         run_kind: AnalysisRunKind::LinearStatic,
         backend: ComputeBackend::Cpu,
+        linear_static_run_options: None,
+        modal_run_options: None,
+        acoustic_run_options: None,
+        thermal_run_options: None,
+        transient_run_options: None,
+        cfd_run_options: None,
+        cht_run_options: None,
+        fsi_run_options: None,
+        nonlinear_run_options: None,
         electromagnetic_run_options: None,
     }
 }
@@ -377,10 +390,146 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
             profile: AnalysisCreateModelProfile::ElectromagneticStatic,
             prep_context: None,
         },
+        model: None,
         run_kind: AnalysisRunKind::Electromagnetic,
         backend: ComputeBackend::Cpu,
+        linear_static_run_options: None,
+        modal_run_options: None,
+        acoustic_run_options: None,
+        thermal_run_options: None,
+        transient_run_options: None,
+        cfd_run_options: None,
+        cht_run_options: None,
+        fsi_run_options: None,
+        nonlinear_run_options: None,
         electromagnetic_run_options: None,
     }
+}
+
+#[test]
+fn fea_document_resolves_study_geometry_and_run_options() {
+    let _guard = analysis_test_guard();
+    let tmp = tempfile::tempdir().expect("tempdir should be created");
+    fs::write(tmp.path().join("part.stl"), TRIANGLE_STL).expect("fixture geometry should write");
+    let input = r#"
+version: 1
+kind: study
+id: bracket_static
+geometry:
+  path: part.stl
+  units: meter
+model:
+  profile: linear_static_structural
+run:
+  kind: linear_static
+  backend: cpu
+  options:
+    deterministic_mode: true
+    precision_mode: fp64
+    preconditioner_mode: jacobi
+    quality_policy: strict
+"#;
+
+    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
+        .expect("FEA study document should resolve");
+
+    let FeaResolvedDocument::Study(spec) = resolved else {
+        panic!("expected resolved study");
+    };
+    assert_eq!(spec.study_id, "bracket_static");
+    assert_eq!(spec.geometry.units, UnitSystem::Meter);
+    assert!(spec.geometry.source.path.ends_with("part.stl"));
+    assert_eq!(
+        spec.create_model_intent.profile,
+        AnalysisCreateModelProfile::LinearStaticStructural
+    );
+    assert_eq!(spec.create_model_intent.model_id, "bracket_static_model");
+    assert_eq!(spec.run_kind, AnalysisRunKind::LinearStatic);
+    assert_eq!(spec.backend, ComputeBackend::Cpu);
+    assert!(spec.model.is_none());
+
+    let options = spec
+        .linear_static_run_options
+        .expect("linear static options should parse");
+    assert!(options.deterministic_mode);
+    assert_eq!(options.precision_mode, PrecisionMode::Fp64);
+    assert_eq!(options.preconditioner_mode, PreconditionerMode::Jacobi);
+    assert_eq!(options.quality_policy, QualityPolicy::Strict);
+}
+
+#[test]
+fn fea_document_resolves_explicit_model_and_sweep() {
+    let _guard = analysis_test_guard();
+    let tmp = tempfile::tempdir().expect("tempdir should be created");
+    fs::write(tmp.path().join("assembly.step"), SIMPLE_STEP)
+        .expect("fixture geometry should write");
+    let input = r#"
+version: 1
+kind: sweep
+id: bracket_sweep
+fail_fast: false
+studies:
+  - version: 1
+    id: bracket_static_a
+    geometry:
+      path: assembly.step
+      units: millimeter
+    model:
+      id: bracket_model
+      profile: linear_static_structural
+      defaults: none
+      frame: global
+    regions:
+      bracket:
+        selector: "name:Bracket_A"
+    materials:
+      aluminum:
+        name: Aluminum 6061
+        mechanical:
+          youngs_modulus_pa: 69000000000.0
+          poisson_ratio: 0.33
+    material_assignments:
+      - region: bracket
+        material: aluminum
+    boundary_conditions:
+      - id: fixed_bracket
+        region: bracket
+        kind: fixed
+    loads:
+      - id: pressure_load
+        region: bracket
+        type: pressure
+        magnitude_pa: 1200.0
+    steps:
+      - id: static_step
+        kind: static
+    run:
+      kind: linear_static
+      backend: cpu
+"#;
+
+    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
+        .expect("FEA sweep document should resolve");
+
+    let FeaResolvedDocument::Sweep(sweep) = resolved else {
+        panic!("expected resolved sweep");
+    };
+    assert_eq!(sweep.sweep_id, "bracket_sweep");
+    assert!(!sweep.fail_fast);
+    assert_eq!(sweep.studies.len(), 1);
+
+    let study = &sweep.studies[0];
+    assert_eq!(study.study_id, "bracket_static_a");
+    assert_eq!(study.create_model_intent.model_id, "bracket_model");
+    assert_eq!(study.geometry.units, UnitSystem::Millimeter);
+    let model = study.model.as_ref().expect("explicit model should resolve");
+    assert_eq!(model.model_id.0, "bracket_model");
+    assert_eq!(model.materials.len(), 1);
+    assert_eq!(model.material_assignments.len(), 1);
+    assert_eq!(model.material_assignments[0].region_id, "region_1");
+    assert_eq!(model.boundary_conditions.len(), 1);
+    assert_eq!(model.loads.len(), 1);
+    assert_eq!(model.steps.len(), 1);
 }
 
 #[test]
@@ -398,8 +547,8 @@ fn analysis_create_model_returns_v1_envelope() {
     )
     .expect("create model should pass");
 
-    assert_eq!(envelope.operation, "analysis.create_model");
-    assert_eq!(envelope.op_version, "analysis.create_model/v1");
+    assert_eq!(envelope.operation, "fea.create_model");
+    assert_eq!(envelope.op_version, "fea.create_model/v1");
     assert_eq!(envelope.data.model_id.0, "model_from_geo");
     assert_eq!(envelope.data.geometry_id, "geo:beam");
     assert_eq!(envelope.data.geometry_revision, 2);
@@ -487,9 +636,9 @@ fn analysis_create_model_maps_invalid_intent_error() {
     )
     .expect_err("create model should fail");
 
-    assert_eq!(err.error_code, "RM.ANALYSIS.CREATE_MODEL.INVALID_INTENT");
-    assert_eq!(err.operation, "analysis.create_model");
-    assert_eq!(err.op_version, "analysis.create_model/v1");
+    assert_eq!(err.error_code, "RM.FEA.CREATE_MODEL.INVALID_INTENT");
+    assert_eq!(err.operation, "fea.create_model");
+    assert_eq!(err.op_version, "fea.create_model/v1");
 }
 
 #[test]
@@ -577,7 +726,7 @@ fn analysis_create_model_rejects_mismatched_prep_context() {
         OperationContext::new(None, None),
     )
     .expect_err("mismatched prep context should fail");
-    assert_eq!(error.error_code, "RM.ANALYSIS.CREATE_MODEL.PREP_MISMATCH");
+    assert_eq!(error.error_code, "RM.FEA.CREATE_MODEL.PREP_MISMATCH");
 }
 
 #[test]
@@ -808,64 +957,31 @@ fn analysis_create_model_supports_fsi_coupled_profile_template() {
 }
 
 #[test]
-fn analysis_study_document_parser_accepts_json_and_yaml_files() {
-    let _guard = analysis_test_guard();
-    let spec = sample_linear_static_study_spec();
-
-    let json = serde_json::to_string(&spec).unwrap();
-    let parsed_json = parse_analysis_study_document(&json, AnalysisStudyFileFormat::Json)
-        .expect("json study should parse");
-    match parsed_json {
-        AnalysisStudyDocument::Study(parsed) => assert_eq!(parsed.study_id, spec.study_id),
-        AnalysisStudyDocument::Sweep(_) => panic!("expected study document"),
-    }
-
-    let yaml = serde_yaml::to_string(&spec).unwrap();
-    let parsed_yaml = parse_analysis_study_document(&yaml, AnalysisStudyFileFormat::Yaml)
-        .expect("yaml study should parse");
-    match parsed_yaml {
-        AnalysisStudyDocument::Study(parsed) => assert_eq!(parsed.study_id, spec.study_id),
-        AnalysisStudyDocument::Sweep(_) => panic!("expected study document"),
-    }
-
-    assert_eq!(
-        analysis_study_file_format_from_path(std::path::Path::new("model.study.yaml")),
-        Some(AnalysisStudyFileFormat::Yaml)
-    );
-    assert!(is_analysis_study_file_path(std::path::Path::new(
-        "model.study.json"
-    )));
-}
-
-#[test]
 fn analysis_validate_study_reports_invalid_study_id() {
     let _guard = analysis_test_guard();
     let root = temp_artifact_root("validate-study-evidence");
     let _ = fs::remove_dir_all(&root);
     let env_guard = EnvVarRestoreGuard {
-        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
-        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+        key: "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT").ok(),
     };
-    std::env::set_var(
-        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
-        root.display().to_string(),
-    );
+    std::env::set_var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", root.display().to_string());
     let mut spec = sample_linear_static_study_spec();
     spec.study_id = "   ".to_string();
 
     let envelope = analysis_validate_study_op(&spec, OperationContext::new(None, None))
         .expect("study validation should return typed output");
 
-    assert_eq!(envelope.operation, "analysis.validate_study");
-    assert_eq!(envelope.op_version, "analysis.validate_study/v1");
+    assert_eq!(envelope.operation, "fea.validate_study");
+    assert_eq!(envelope.op_version, "fea.validate_study/v1");
     assert!(!envelope.data.valid);
     assert!(envelope
         .data
         .issue_codes
         .iter()
-        .any(|code| code == "ANALYSIS_STUDY_ID_EMPTY"));
+        .any(|code| code == "RM.FEA.STUDY.ID_EMPTY"));
     assert!(envelope.data.issues.iter().any(|issue| {
-        issue.code == "ANALYSIS_STUDY_ID_EMPTY"
+        issue.code == "RM.FEA.STUDY.ID_EMPTY"
             && issue.message.contains("study_id must be non-empty")
     }));
     assert!(envelope
@@ -890,12 +1006,10 @@ fn analysis_validate_study_rejects_unused_electromagnetic_options() {
         .data
         .issue_codes
         .iter()
-        .any(|code| code == "ANALYSIS_STUDY_ELECTROMAGNETIC_OPTIONS_UNUSED"));
+        .any(|code| code == "RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH"));
     assert!(envelope.data.issues.iter().any(|issue| {
-        issue.code == "ANALYSIS_STUDY_ELECTROMAGNETIC_OPTIONS_UNUSED"
-            && issue
-                .message
-                .contains("only valid when run_kind is electromagnetic")
+        issue.code == "RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH"
+            && issue.message.contains("matching run_kind")
     }));
 }
 
@@ -920,24 +1034,24 @@ fn analysis_validate_study_rejects_invalid_electromagnetic_options() {
         .data
         .issue_codes
         .iter()
-        .any(|code| code == "ANALYSIS_STUDY_ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID"));
+        .any(|code| code == "RM.FEA.STUDY.ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID"));
     assert!(envelope
         .data
         .issue_codes
         .iter()
-        .any(|code| code == "ANALYSIS_STUDY_ELECTROMAGNETIC_HARMONIC_TOLERANCE_INVALID"));
+        .any(|code| code == "RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_TOLERANCE_INVALID"));
     assert!(envelope
         .data
         .issue_codes
         .iter()
-        .any(|code| code == "ANALYSIS_STUDY_ELECTROMAGNETIC_HARMONIC_MAX_ITERATIONS_INVALID"));
+        .any(|code| code == "RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_MAX_ITERATIONS_INVALID"));
     assert!(envelope
         .data
         .issue_codes
         .iter()
-        .any(|code| code == "ANALYSIS_STUDY_ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID"));
+        .any(|code| code == "RM.FEA.STUDY.ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID"));
     assert!(envelope.data.issues.iter().any(|issue| {
-        issue.code == "ANALYSIS_STUDY_ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID"
+        issue.code == "RM.FEA.STUDY.ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID"
             && issue
                 .message
                 .contains("must contain finite positive values")
@@ -950,34 +1064,28 @@ fn analysis_plan_study_returns_canonical_linear_static_sequence() {
     let root = temp_artifact_root("plan-study-evidence");
     let _ = fs::remove_dir_all(&root);
     let env_guard = EnvVarRestoreGuard {
-        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
-        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+        key: "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT").ok(),
     };
-    std::env::set_var(
-        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
-        root.display().to_string(),
-    );
+    std::env::set_var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", root.display().to_string());
     let spec = sample_linear_static_study_spec();
 
     let envelope = analysis_plan_study_op(&spec, OperationContext::new(None, None))
         .expect("study plan should succeed");
 
-    assert_eq!(envelope.operation, "analysis.plan_study");
-    assert_eq!(envelope.op_version, "analysis.plan_study/v1");
+    assert_eq!(envelope.operation, "fea.plan_study");
+    assert_eq!(envelope.op_version, "fea.plan_study/v1");
     assert_eq!(envelope.data.study_id, spec.study_id);
     assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
-    assert_eq!(envelope.data.run_operation, "analysis.run_linear_static");
-    assert_eq!(
-        envelope.data.run_op_version,
-        "analysis.run_linear_static/v1"
-    );
+    assert_eq!(envelope.data.run_operation, "fea.run_linear_static");
+    assert_eq!(envelope.data.run_op_version, "fea.run_linear_static/v1");
     assert!(envelope.data.electromagnetic_run_options.is_none());
     assert_eq!(
         envelope.data.operation_sequence,
         vec![
-            "analysis.create_model/v1".to_string(),
-            "analysis.validate/v1".to_string(),
-            "analysis.run_linear_static/v1".to_string(),
+            "fea.create_model/v1".to_string(),
+            "fea.validate/v1".to_string(),
+            "fea.run_linear_static/v1".to_string(),
         ]
     );
     assert!(envelope.data.study_fingerprint.starts_with("sha256:"));
@@ -999,11 +1107,8 @@ fn analysis_plan_study_surfaces_electromagnetic_run_operation_and_options() {
     let envelope = analysis_plan_study_op(&spec, OperationContext::new(None, None))
         .expect("electromagnetic study plan should succeed");
 
-    assert_eq!(envelope.data.run_operation, "analysis.run_electromagnetic");
-    assert_eq!(
-        envelope.data.run_op_version,
-        "analysis.run_electromagnetic/v1"
-    );
+    assert_eq!(envelope.data.run_operation, "fea.run_electromagnetic");
+    assert_eq!(envelope.data.run_op_version, "fea.run_electromagnetic/v1");
     assert_eq!(
         envelope.data.electromagnetic_run_options,
         spec.electromagnetic_run_options
@@ -1016,13 +1121,10 @@ fn analysis_plan_study_sweep_returns_typed_plan_entries() {
     let root = temp_artifact_root("plan-study-sweep-evidence");
     let _ = fs::remove_dir_all(&root);
     let env_guard = EnvVarRestoreGuard {
-        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
-        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+        key: "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT").ok(),
     };
-    std::env::set_var(
-        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
-        root.display().to_string(),
-    );
+    std::env::set_var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", root.display().to_string());
     let sweep_spec = AnalysisStudySweepSpec {
         sweep_id: "study_sweep_plan_001".to_string(),
         studies: vec![
@@ -1035,8 +1137,8 @@ fn analysis_plan_study_sweep_returns_typed_plan_entries() {
     let envelope = analysis_plan_study_sweep_op(&sweep_spec, OperationContext::new(None, None))
         .expect("study sweep plan should succeed");
 
-    assert_eq!(envelope.operation, "analysis.plan_study_sweep");
-    assert_eq!(envelope.op_version, "analysis.plan_study_sweep/v1");
+    assert_eq!(envelope.operation, "fea.plan_study_sweep");
+    assert_eq!(envelope.op_version, "fea.plan_study_sweep/v1");
     assert_eq!(envelope.data.sweep_id, "study_sweep_plan_001");
     assert_eq!(envelope.data.study_count, 2);
     assert_eq!(envelope.data.planned_count, 2);
@@ -1075,9 +1177,9 @@ fn analysis_plan_study_sweep_rejects_empty_study_set() {
 
     let err = analysis_plan_study_sweep_op(&spec, OperationContext::new(None, None))
         .expect_err("empty sweep plan should be rejected");
-    assert_eq!(err.operation, "analysis.plan_study_sweep");
-    assert_eq!(err.op_version, "analysis.plan_study_sweep/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.PLAN_STUDY_SWEEP.INVALID_SPEC");
+    assert_eq!(err.operation, "fea.plan_study_sweep");
+    assert_eq!(err.op_version, "fea.plan_study_sweep/v1");
+    assert_eq!(err.error_code, "RM.FEA.PLAN_STUDY_SWEEP.INVALID_SPEC");
 }
 
 #[test]
@@ -1102,7 +1204,7 @@ fn analysis_plan_study_sweep_can_continue_on_study_failure() {
     assert_eq!(envelope.data.failure_entries[0].study_index, 1);
     assert_eq!(
         envelope.data.failure_entries[0].error_code,
-        "RM.ANALYSIS.PLAN_STUDY.INVALID_SPEC"
+        "RM.FEA.PLAN_STUDY.INVALID_SPEC"
     );
 }
 
@@ -1113,36 +1215,30 @@ fn analysis_run_study_executes_linear_static_path() {
     let root = temp_artifact_root("run-study-evidence");
     let _ = fs::remove_dir_all(&root);
     let env_guard = EnvVarRestoreGuard {
-        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
-        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+        key: "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT").ok(),
     };
-    std::env::set_var(
-        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
-        root.display().to_string(),
-    );
+    std::env::set_var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", root.display().to_string());
     let spec = sample_linear_static_study_spec();
 
     let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
         .expect("study run should succeed");
 
-    assert_eq!(envelope.operation, "analysis.run_study");
-    assert_eq!(envelope.op_version, "analysis.run_study/v1");
+    assert_eq!(envelope.operation, "fea.run_study");
+    assert_eq!(envelope.op_version, "fea.run_study/v1");
     assert_eq!(envelope.data.study_id, spec.study_id);
     assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
     assert_eq!(envelope.data.run_kind, AnalysisRunKind::LinearStatic);
     assert_eq!(envelope.data.backend, ComputeBackend::Cpu);
     assert!(envelope.data.electromagnetic_run_options.is_none());
-    assert_eq!(envelope.data.run_operation, "analysis.run_linear_static");
-    assert_eq!(
-        envelope.data.run_op_version,
-        "analysis.run_linear_static/v1"
-    );
+    assert_eq!(envelope.data.run_operation, "fea.run_linear_static");
+    assert_eq!(envelope.data.run_op_version, "fea.run_linear_static/v1");
     assert_eq!(
         envelope.data.operation_sequence,
         vec![
-            "analysis.create_model/v1".to_string(),
-            "analysis.validate/v1".to_string(),
-            "analysis.run_linear_static/v1".to_string(),
+            "fea.create_model/v1".to_string(),
+            "fea.validate/v1".to_string(),
+            "fea.run_linear_static/v1".to_string(),
         ]
     );
     assert!(envelope.data.study_fingerprint.starts_with("sha256:"));
@@ -1183,19 +1279,16 @@ fn analysis_run_study_honors_electromagnetic_run_options() {
     let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
         .expect("electromagnetic study run should succeed");
 
-    assert_eq!(envelope.operation, "analysis.run_study");
-    assert_eq!(envelope.op_version, "analysis.run_study/v1");
+    assert_eq!(envelope.operation, "fea.run_study");
+    assert_eq!(envelope.op_version, "fea.run_study/v1");
     assert_eq!(envelope.data.run_kind, AnalysisRunKind::Electromagnetic);
     assert_eq!(envelope.data.backend, ComputeBackend::Cpu);
     assert_eq!(
         envelope.data.electromagnetic_run_options,
         spec.electromagnetic_run_options
     );
-    assert_eq!(envelope.data.run_operation, "analysis.run_electromagnetic");
-    assert_eq!(
-        envelope.data.run_op_version,
-        "analysis.run_electromagnetic/v1"
-    );
+    assert_eq!(envelope.data.run_operation, "fea.run_electromagnetic");
+    assert_eq!(envelope.data.run_op_version, "fea.run_electromagnetic/v1");
 
     let persisted = storage::load_run_result(&envelope.data.run_id)
         .expect("run load should succeed")
@@ -1238,11 +1331,8 @@ fn analysis_run_study_emits_default_electromagnetic_options_when_unspecified() {
         envelope.data.electromagnetic_run_options,
         Some(AnalysisElectromagneticRunOptions::default())
     );
-    assert_eq!(envelope.data.run_operation, "analysis.run_electromagnetic");
-    assert_eq!(
-        envelope.data.run_op_version,
-        "analysis.run_electromagnetic/v1"
-    );
+    assert_eq!(envelope.data.run_operation, "fea.run_electromagnetic");
+    assert_eq!(envelope.data.run_op_version, "fea.run_electromagnetic/v1");
 }
 
 #[test]
@@ -1252,13 +1342,10 @@ fn analysis_run_study_sweep_executes_multiple_studies() {
     let root = temp_artifact_root("run-study-sweep-evidence");
     let _ = fs::remove_dir_all(&root);
     let env_guard = EnvVarRestoreGuard {
-        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
-        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+        key: "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT").ok(),
     };
-    std::env::set_var(
-        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
-        root.display().to_string(),
-    );
+    std::env::set_var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", root.display().to_string());
     let linear = sample_linear_static_study_spec();
     let electromagnetic = sample_electromagnetic_study_spec();
     let sweep_spec = AnalysisStudySweepSpec {
@@ -1270,8 +1357,8 @@ fn analysis_run_study_sweep_executes_multiple_studies() {
     let envelope = analysis_run_study_sweep_op(&sweep_spec, OperationContext::new(None, None))
         .expect("study sweep should succeed");
 
-    assert_eq!(envelope.operation, "analysis.run_study_sweep");
-    assert_eq!(envelope.op_version, "analysis.run_study_sweep/v1");
+    assert_eq!(envelope.operation, "fea.run_study_sweep");
+    assert_eq!(envelope.op_version, "fea.run_study_sweep/v1");
     assert_eq!(envelope.data.sweep_id, "study_sweep_001");
     assert_eq!(envelope.data.study_count, 2);
     assert_eq!(envelope.data.success_count, 2);
@@ -1309,9 +1396,9 @@ fn analysis_run_study_sweep_rejects_empty_study_set() {
 
     let err = analysis_run_study_sweep_op(&spec, OperationContext::new(None, None))
         .expect_err("empty sweep should be rejected");
-    assert_eq!(err.operation, "analysis.run_study_sweep");
-    assert_eq!(err.op_version, "analysis.run_study_sweep/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_STUDY_SWEEP.INVALID_SPEC");
+    assert_eq!(err.operation, "fea.run_study_sweep");
+    assert_eq!(err.op_version, "fea.run_study_sweep/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_STUDY_SWEEP.INVALID_SPEC");
 }
 
 #[test]
@@ -1327,9 +1414,9 @@ fn analysis_run_study_sweep_fail_fast_returns_error_on_invalid_study() {
 
     let err = analysis_run_study_sweep_op(&spec, OperationContext::new(None, None))
         .expect_err("fail-fast sweep should return error");
-    assert_eq!(err.operation, "analysis.run_study_sweep");
-    assert_eq!(err.op_version, "analysis.run_study_sweep/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_STUDY_SWEEP.STUDY_FAILED");
+    assert_eq!(err.operation, "fea.run_study_sweep");
+    assert_eq!(err.op_version, "fea.run_study_sweep/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_STUDY_SWEEP.STUDY_FAILED");
 }
 
 #[test]
@@ -1355,7 +1442,7 @@ fn analysis_run_study_sweep_can_continue_on_study_failure() {
     assert_eq!(envelope.data.failure_entries[0].study_index, 1);
     assert_eq!(
         envelope.data.failure_entries[0].error_code,
-        "RM.ANALYSIS.RUN_STUDY.INVALID_SPEC"
+        "RM.FEA.RUN_STUDY.INVALID_SPEC"
     );
     assert!(envelope.data.failure_entries[0].study_id.trim().is_empty());
 }
@@ -1367,13 +1454,10 @@ fn analysis_validate_study_sweep_reports_valid_entries_and_persists_artifact() {
     let root = temp_artifact_root("validate-study-sweep-evidence");
     let _ = fs::remove_dir_all(&root);
     let env_guard = EnvVarRestoreGuard {
-        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
-        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+        key: "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT").ok(),
     };
-    std::env::set_var(
-        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
-        root.display().to_string(),
-    );
+    std::env::set_var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", root.display().to_string());
     let spec = AnalysisStudySweepSpec {
         sweep_id: "study_sweep_validate_001".to_string(),
         studies: vec![
@@ -1386,8 +1470,8 @@ fn analysis_validate_study_sweep_reports_valid_entries_and_persists_artifact() {
     let envelope = analysis_validate_study_sweep_op(&spec, OperationContext::new(None, None))
         .expect("study sweep validation should succeed");
 
-    assert_eq!(envelope.operation, "analysis.validate_study_sweep");
-    assert_eq!(envelope.op_version, "analysis.validate_study_sweep/v1");
+    assert_eq!(envelope.operation, "fea.validate_study_sweep");
+    assert_eq!(envelope.op_version, "fea.validate_study_sweep/v1");
     assert_eq!(envelope.data.sweep_id, "study_sweep_validate_001");
     assert!(envelope.data.valid);
     assert!(envelope.data.issue_codes.is_empty());
@@ -1422,23 +1506,23 @@ fn analysis_validate_study_sweep_reports_sweep_and_study_issue_details() {
     let envelope = analysis_validate_study_sweep_op(&spec, OperationContext::new(None, None))
         .expect("study sweep validation should return a typed payload");
 
-    assert_eq!(envelope.operation, "analysis.validate_study_sweep");
-    assert_eq!(envelope.op_version, "analysis.validate_study_sweep/v1");
+    assert_eq!(envelope.operation, "fea.validate_study_sweep");
+    assert_eq!(envelope.op_version, "fea.validate_study_sweep/v1");
     assert!(!envelope.data.valid);
     assert_eq!(
         envelope.data.issue_codes,
-        vec!["ANALYSIS_STUDY_SWEEP_ID_EMPTY".to_string()]
+        vec!["RM.FEA.STUDY_SWEEP.ID_EMPTY".to_string()]
     );
     assert_eq!(envelope.data.study_entries.len(), 1);
     assert!(!envelope.data.study_entries[0].valid);
     assert!(envelope.data.study_entries[0]
         .issue_codes
         .iter()
-        .any(|code| code == "ANALYSIS_STUDY_ID_EMPTY"));
+        .any(|code| code == "RM.FEA.STUDY.ID_EMPTY"));
     assert!(envelope.data.study_entries[0]
         .issues
         .iter()
-        .any(|issue| issue.code == "ANALYSIS_STUDY_ID_EMPTY" && !issue.message.is_empty()));
+        .any(|issue| issue.code == "RM.FEA.STUDY.ID_EMPTY" && !issue.message.is_empty()));
 }
 
 #[test]
@@ -1483,8 +1567,8 @@ fn analysis_validate_returns_typed_envelope() {
     let envelope = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
         .expect("validation should pass");
 
-    assert_eq!(envelope.operation, "analysis.validate");
-    assert_eq!(envelope.op_version, "analysis.validate/v1");
+    assert_eq!(envelope.operation, "fea.validate");
+    assert_eq!(envelope.op_version, "fea.validate/v1");
     assert!(envelope.data.valid);
     assert_eq!(envelope.trace_id.as_deref(), Some("trace-a1"));
 }
@@ -1498,9 +1582,9 @@ fn analysis_validate_maps_typed_error_code() {
     let error = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
         .expect_err("validation should fail");
 
-    assert_eq!(error.error_code, "RM.ANALYSIS.VALIDATE.MISSING_MATERIALS");
-    assert_eq!(error.operation, "analysis.validate");
-    assert_eq!(error.op_version, "analysis.validate/v1");
+    assert_eq!(error.error_code, "RM.FEA.VALIDATE.MISSING_MATERIALS");
+    assert_eq!(error.operation, "fea.validate");
+    assert_eq!(error.op_version, "fea.validate/v1");
 }
 
 #[test]
@@ -1525,8 +1609,8 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     )
     .expect("run should pass");
 
-    assert_eq!(envelope.operation, "analysis.run_linear_static");
-    assert_eq!(envelope.op_version, "analysis.run_linear_static/v1");
+    assert_eq!(envelope.operation, "fea.run_linear_static");
+    assert_eq!(envelope.op_version, "fea.run_linear_static/v1");
     assert_eq!(envelope.data.run.backend, ComputeBackend::Cpu);
     assert!(!envelope.data.run.displacement_field.is_empty());
     assert_eq!(envelope.data.run_status, RunStatus::Publishable);
@@ -1692,8 +1776,8 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
     )
     .expect("results should pass");
 
-    assert_eq!(results.operation, "analysis.results");
-    assert_eq!(results.op_version, "analysis.results/v1");
+    assert_eq!(results.operation, "fea.results");
+    assert_eq!(results.op_version, "fea.results/v1");
     assert_eq!(results.data.fields.len(), 1);
     assert_eq!(results.data.fields[0].field_id, "displacement");
     assert!(results.data.diagnostics.is_none());
@@ -1739,9 +1823,9 @@ fn analysis_results_unknown_field_maps_typed_error() {
     )
     .expect_err("results should fail");
 
-    assert_eq!(err.operation, "analysis.results");
-    assert_eq!(err.op_version, "analysis.results/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RESULTS.FIELD_NOT_FOUND");
+    assert_eq!(err.operation, "fea.results");
+    assert_eq!(err.op_version, "fea.results/v1");
+    assert_eq!(err.error_code, "RM.FEA.RESULTS.FIELD_NOT_FOUND");
 }
 
 #[test]
@@ -1763,8 +1847,8 @@ fn analysis_results_by_run_id_roundtrip_works() {
     )
     .expect("results by id should pass");
 
-    assert_eq!(fetched.operation, "analysis.results");
-    assert_eq!(fetched.op_version, "analysis.results/v1");
+    assert_eq!(fetched.operation, "fea.results");
+    assert_eq!(fetched.op_version, "fea.results/v1");
     assert_eq!(fetched.data.summary.field_count, 2);
     assert_eq!(fetched.data.summary.mode_count, 0);
     assert!(fetched.data.summary.available_mode_indices.is_empty());
@@ -1792,7 +1876,7 @@ fn analysis_results_by_run_id_missing_maps_typed_error() {
     )
     .expect_err("missing run id should fail");
 
-    assert_eq!(err.error_code, "RM.ANALYSIS.RESULTS.RUN_NOT_FOUND");
+    assert_eq!(err.error_code, "RM.FEA.RESULTS.RUN_NOT_FOUND");
     storage::reset_artifact_store_for_tests();
 }
 
@@ -1834,8 +1918,8 @@ fn analysis_results_compare_reports_typed_deltas() {
     )
     .expect("compare operation should succeed");
 
-    assert_eq!(compare.operation, "analysis.results_compare");
-    assert_eq!(compare.op_version, "analysis.results_compare/v1");
+    assert_eq!(compare.operation, "fea.results_compare");
+    assert_eq!(compare.op_version, "fea.results_compare/v1");
     assert!(compare.data.failed_increment_delta.is_some());
     assert!(compare.data.max_iteration_delta.is_some());
     assert!(compare.data.solve_ms_delta.is_some());
@@ -1868,8 +1952,8 @@ fn analysis_trends_summarizes_recent_nonlinear_runs() {
     )
     .expect("trends should succeed");
 
-    assert_eq!(trends.operation, "analysis.trends");
-    assert_eq!(trends.op_version, "analysis.trends/v1");
+    assert_eq!(trends.operation, "fea.trends");
+    assert_eq!(trends.op_version, "fea.trends/v1");
     let nonlinear = trends
         .data
         .summaries
@@ -2438,7 +2522,7 @@ fn analysis_results_by_run_id_future_artifact_extra_fields_are_ignored() {
     let mut wrapped = serde_json::json!({
         "schema_version": "analysis_run_artifact/v1",
         "created_at": Utc::now().to_rfc3339(),
-        "op_version": "analysis.run_nonlinear/v1",
+        "op_version": "fea.run_nonlinear/v1",
         "run": run.data,
         "future_metadata": {
             "schema_hint": "analysis_run_artifact/v2",
@@ -2529,12 +2613,12 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
             .to_string()
     };
 
-    assert_eq!(read_op_version(&cfd.data.run_id), "analysis.run_cfd/v1");
-    assert_eq!(read_op_version(&cht.data.run_id), "analysis.run_cht/v1");
-    assert_eq!(read_op_version(&fsi.data.run_id), "analysis.run_fsi/v1");
+    assert_eq!(read_op_version(&cfd.data.run_id), "fea.run_cfd/v1");
+    assert_eq!(read_op_version(&cht.data.run_id), "fea.run_cht/v1");
+    assert_eq!(read_op_version(&fsi.data.run_id), "fea.run_fsi/v1");
     assert_eq!(
         read_op_version(&acoustic.data.run_id),
-        "analysis.run_acoustic/v1"
+        "fea.run_acoustic/v1"
     );
 
     storage::reset_artifact_store_for_tests();
@@ -2551,8 +2635,8 @@ fn analysis_artifact_retention_prunes_old_runs_per_kind() {
         root: root.clone(),
     })
     .expect("configure filesystem artifact store");
-    std::env::set_var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND", "2");
-    std::env::remove_var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS");
+    std::env::set_var("RUNMAT_FEA_ARTIFACT_MAX_RUNS_PER_KIND", "2");
+    std::env::remove_var("RUNMAT_FEA_ARTIFACT_MAX_RUNS");
 
     let mut model = sample_model();
     model.steps = vec![AnalysisStep {
@@ -2586,7 +2670,7 @@ fn analysis_artifact_retention_prunes_old_runs_per_kind() {
             .is_some()
     );
 
-    std::env::remove_var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND");
+    std::env::remove_var("RUNMAT_FEA_ARTIFACT_MAX_RUNS_PER_KIND");
     storage::reset_artifact_store_for_tests();
     let _ = fs::remove_dir_all(&root);
 }
@@ -2861,9 +2945,9 @@ fn analysis_run_modal_rejects_models_without_modal_step() {
     )
     .expect_err("modal run should fail for missing modal step");
 
-    assert_eq!(err.operation, "analysis.run_modal");
-    assert_eq!(err.op_version, "analysis.run_modal/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_MODAL.INVALID_MODEL");
+    assert_eq!(err.operation, "fea.run_modal");
+    assert_eq!(err.op_version, "fea.run_modal/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_MODAL.INVALID_MODEL");
 }
 
 #[test]
@@ -2877,9 +2961,9 @@ fn analysis_run_acoustic_rejects_models_without_modal_step() {
     )
     .expect_err("acoustic run should fail for missing modal step");
 
-    assert_eq!(err.operation, "analysis.run_acoustic");
-    assert_eq!(err.op_version, "analysis.run_acoustic/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_ACOUSTIC.INVALID_MODEL");
+    assert_eq!(err.operation, "fea.run_acoustic");
+    assert_eq!(err.op_version, "fea.run_acoustic/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_ACOUSTIC.INVALID_MODEL");
 }
 
 #[test]
@@ -2893,9 +2977,9 @@ fn analysis_run_transient_rejects_models_without_transient_step() {
     )
     .expect_err("transient run should fail for missing transient step");
 
-    assert_eq!(err.operation, "analysis.run_transient");
-    assert_eq!(err.op_version, "analysis.run_transient/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_TRANSIENT.INVALID_MODEL");
+    assert_eq!(err.operation, "fea.run_transient");
+    assert_eq!(err.op_version, "fea.run_transient/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_TRANSIENT.INVALID_MODEL");
 }
 
 #[test]
@@ -2909,9 +2993,9 @@ fn analysis_run_cfd_rejects_models_without_cfd_step() {
     )
     .expect_err("cfd run should fail for missing cfd step");
 
-    assert_eq!(err.operation, "analysis.run_cfd");
-    assert_eq!(err.op_version, "analysis.run_cfd/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_CFD.INVALID_MODEL");
+    assert_eq!(err.operation, "fea.run_cfd");
+    assert_eq!(err.op_version, "fea.run_cfd/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_MODEL");
 }
 
 #[test]
@@ -2926,9 +3010,9 @@ fn analysis_run_cfd_rejects_model_without_cfd_domain() {
     )
     .expect_err("cfd run should fail when cfd domain is missing");
 
-    assert_eq!(err.operation, "analysis.run_cfd");
-    assert_eq!(err.op_version, "analysis.run_cfd/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_CFD.INVALID_MODEL");
+    assert_eq!(err.operation, "fea.run_cfd");
+    assert_eq!(err.op_version, "fea.run_cfd/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_MODEL");
 }
 
 #[test]
@@ -2944,9 +3028,9 @@ fn analysis_run_cfd_rejects_disabled_cfd_domain() {
     )
     .expect_err("cfd run should fail for disabled cfd domain");
 
-    assert_eq!(err.operation, "analysis.run_cfd");
-    assert_eq!(err.op_version, "analysis.run_cfd/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS");
+    assert_eq!(err.operation, "fea.run_cfd");
+    assert_eq!(err.op_version, "fea.run_cfd/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_OPTIONS");
 }
 
 #[test]
@@ -2960,9 +3044,9 @@ fn analysis_run_thermal_rejects_models_without_thermal_step() {
     )
     .expect_err("thermal run should fail for missing thermal step");
 
-    assert_eq!(err.operation, "analysis.run_thermal");
-    assert_eq!(err.op_version, "analysis.run_thermal/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_THERMAL.INVALID_MODEL");
+    assert_eq!(err.operation, "fea.run_thermal");
+    assert_eq!(err.op_version, "fea.run_thermal/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_THERMAL.INVALID_MODEL");
 }
 
 #[test]
@@ -2993,9 +3077,9 @@ fn analysis_run_cht_rejects_models_without_cfd_step() {
     )
     .expect_err("cht run should fail for missing cfd step");
 
-    assert_eq!(err.operation, "analysis.run_cht");
-    assert_eq!(err.op_version, "analysis.run_cht/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_CHT.INVALID_MODEL");
+    assert_eq!(err.operation, "fea.run_cht");
+    assert_eq!(err.op_version, "fea.run_cht/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_MODEL");
 }
 
 #[test]
@@ -3014,9 +3098,9 @@ fn analysis_run_cht_rejects_models_without_thermal_step() {
     )
     .expect_err("cht run should fail for missing thermal step");
 
-    assert_eq!(err.operation, "analysis.run_cht");
-    assert_eq!(err.op_version, "analysis.run_cht/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_CHT.INVALID_MODEL");
+    assert_eq!(err.operation, "fea.run_cht");
+    assert_eq!(err.op_version, "fea.run_cht/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_MODEL");
 }
 
 #[test]
@@ -3035,9 +3119,9 @@ fn analysis_run_cht_rejects_invalid_cfd_domain_parameters() {
     )
     .expect_err("cht run should fail for invalid cfd domain values");
 
-    assert_eq!(err.operation, "analysis.run_cht");
-    assert_eq!(err.op_version, "analysis.run_cht/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS");
+    assert_eq!(err.operation, "fea.run_cht");
+    assert_eq!(err.op_version, "fea.run_cht/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_OPTIONS");
 }
 
 #[test]
@@ -3056,9 +3140,9 @@ fn analysis_run_fsi_rejects_models_without_transient_step() {
     )
     .expect_err("fsi run should fail for missing transient step");
 
-    assert_eq!(err.operation, "analysis.run_fsi");
-    assert_eq!(err.op_version, "analysis.run_fsi/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_FSI.INVALID_MODEL");
+    assert_eq!(err.operation, "fea.run_fsi");
+    assert_eq!(err.op_version, "fea.run_fsi/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_FSI.INVALID_MODEL");
 }
 
 #[test]
@@ -3077,9 +3161,9 @@ fn analysis_run_fsi_rejects_invalid_cfd_domain_parameters() {
     )
     .expect_err("fsi run should fail for invalid cfd domain values");
 
-    assert_eq!(err.operation, "analysis.run_fsi");
-    assert_eq!(err.op_version, "analysis.run_fsi/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS");
+    assert_eq!(err.operation, "fea.run_fsi");
+    assert_eq!(err.op_version, "fea.run_fsi/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_FSI.INVALID_OPTIONS");
 }
 
 #[test]
@@ -3091,12 +3175,9 @@ fn analysis_run_electromagnetic_rejects_models_without_em_step() {
         OperationContext::new(Some("trace-em-run-missing-step".to_string()), None),
     )
     .expect_err("electromagnetic run should fail without electromagnetic step");
-    assert_eq!(err.operation, "analysis.run_electromagnetic");
-    assert_eq!(err.op_version, "analysis.run_electromagnetic/v1");
-    assert_eq!(
-        err.error_code,
-        "RM.ANALYSIS.RUN_ELECTROMAGNETIC.REQUIRES_STEP"
-    );
+    assert_eq!(err.operation, "fea.run_electromagnetic");
+    assert_eq!(err.op_version, "fea.run_electromagnetic/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_ELECTROMAGNETIC.REQUIRES_STEP");
 }
 
 #[test]
@@ -3144,8 +3225,8 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         OperationContext::new(Some("trace-em-run-placeholder".to_string()), None),
     )
     .expect("electromagnetic run should return static EM payload");
-    assert_eq!(envelope.operation, "analysis.run_electromagnetic");
-    assert_eq!(envelope.op_version, "analysis.run_electromagnetic/v1");
+    assert_eq!(envelope.operation, "fea.run_electromagnetic");
+    assert_eq!(envelope.op_version, "fea.run_electromagnetic/v1");
     assert_ne!(envelope.data.run_status, RunStatus::Rejected);
     assert!(envelope.data.electromagnetic_results.is_some());
     assert!(envelope
@@ -3319,12 +3400,9 @@ fn analysis_run_electromagnetic_rejects_invalid_harmonic_controls() {
         ),
     )
     .expect_err("electromagnetic run should reject zero harmonic_max_iterations");
-    assert_eq!(err.operation, "analysis.run_electromagnetic");
-    assert_eq!(err.op_version, "analysis.run_electromagnetic/v1");
-    assert_eq!(
-        err.error_code,
-        "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS"
-    );
+    assert_eq!(err.operation, "fea.run_electromagnetic");
+    assert_eq!(err.op_version, "fea.run_electromagnetic/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS");
 }
 
 #[test]
@@ -3371,8 +3449,8 @@ fn analysis_run_thermal_returns_temperature_payload() {
     )
     .expect("thermal run should succeed");
 
-    assert_eq!(run.operation, "analysis.run_thermal");
-    assert_eq!(run.op_version, "analysis.run_thermal/v1");
+    assert_eq!(run.operation, "fea.run_thermal");
+    assert_eq!(run.op_version, "fea.run_thermal/v1");
     assert!(run.data.thermal_results.is_some());
     assert!(run.data.transient_results.is_none());
     let results = analysis_results_op(
@@ -3380,7 +3458,7 @@ fn analysis_run_thermal_returns_temperature_payload() {
         AnalysisResultsQuery::default(),
         OperationContext::new(None, None),
     )
-    .expect("analysis.results should return thermal payload");
+    .expect("fea.results should return thermal payload");
     let thermal = results
         .data
         .thermal_results
@@ -3478,9 +3556,9 @@ fn analysis_run_nonlinear_rejects_models_without_nonlinear_step() {
         OperationContext::new(None, None),
     )
     .expect_err("nonlinear run should reject models without nonlinear step");
-    assert_eq!(err.operation, "analysis.run_nonlinear");
-    assert_eq!(err.op_version, "analysis.run_nonlinear/v1");
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_NONLINEAR.INVALID_MODEL");
+    assert_eq!(err.operation, "fea.run_nonlinear");
+    assert_eq!(err.op_version, "fea.run_nonlinear/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_NONLINEAR.INVALID_MODEL");
 }
 
 #[test]
@@ -3502,8 +3580,8 @@ fn analysis_run_nonlinear_returns_native_nonlinear_result() {
     )
     .expect("nonlinear run should succeed");
 
-    assert_eq!(envelope.operation, "analysis.run_nonlinear");
-    assert_eq!(envelope.op_version, "analysis.run_nonlinear/v1");
+    assert_eq!(envelope.operation, "fea.run_nonlinear");
+    assert_eq!(envelope.op_version, "fea.run_nonlinear/v1");
     let nonlinear = envelope
         .data
         .nonlinear_results
@@ -3581,7 +3659,7 @@ fn analysis_run_nonlinear_rejects_missing_prep_artifact_reference() {
         OperationContext::new(None, None),
     )
     .expect_err("missing prep artifact reference should fail");
-    assert_eq!(error.error_code, "RM.ANALYSIS.RUN_PREP.NOT_FOUND");
+    assert_eq!(error.error_code, "RM.FEA.RUN_PREP.NOT_FOUND");
 }
 
 #[test]
@@ -3612,7 +3690,7 @@ fn analysis_run_nonlinear_rejects_mismatched_prep_artifact_reference() {
         OperationContext::new(None, None),
     )
     .expect_err("mismatched prep artifact reference should fail");
-    assert_eq!(error.error_code, "RM.ANALYSIS.RUN_PREP.MISMATCH");
+    assert_eq!(error.error_code, "RM.FEA.RUN_PREP.MISMATCH");
 }
 
 #[test]
@@ -3665,7 +3743,7 @@ fn analysis_run_nonlinear_rejects_stale_prep_artifact_when_newer_revision_exists
         OperationContext::new(None, None),
     )
     .expect_err("stale prep artifact should fail");
-    assert_eq!(error.error_code, "RM.ANALYSIS.RUN_PREP.STALE");
+    assert_eq!(error.error_code, "RM.FEA.RUN_PREP.STALE");
 
     let health = crate::geometry::geometry_prep_artifact_health_op(
         crate::geometry::GeometryPrepArtifactHealthQuery::default(),
@@ -3921,8 +3999,8 @@ fn analysis_run_transient_returns_native_transient_result() {
     )
     .expect("transient run should return envelope");
 
-    assert_eq!(envelope.operation, "analysis.run_transient");
-    assert_eq!(envelope.op_version, "analysis.run_transient/v1");
+    assert_eq!(envelope.operation, "fea.run_transient");
+    assert_eq!(envelope.op_version, "fea.run_transient/v1");
     assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
     assert_eq!(envelope.data.provenance.solver_method, "implicit_euler_pcg");
     assert_eq!(envelope.data.run_status, RunStatus::Publishable);
@@ -3981,8 +4059,8 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
     )
     .expect("cfd run should return envelope");
 
-    assert_eq!(envelope.operation, "analysis.run_cfd");
-    assert_eq!(envelope.op_version, "analysis.run_cfd/v1");
+    assert_eq!(envelope.operation, "fea.run_cfd");
+    assert_eq!(envelope.op_version, "fea.run_cfd/v1");
     assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
     assert_eq!(envelope.data.provenance.solver_method, "implicit_euler_pcg");
     assert!(envelope.data.transient_results.is_some());
@@ -4021,8 +4099,8 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
     )
     .expect("cht run should return envelope");
 
-    assert_eq!(envelope.operation, "analysis.run_cht");
-    assert_eq!(envelope.op_version, "analysis.run_cht/v1");
+    assert_eq!(envelope.operation, "fea.run_cht");
+    assert_eq!(envelope.op_version, "fea.run_cht/v1");
     assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
     assert!(envelope.data.transient_results.is_some());
     assert!(envelope.data.thermal_results.is_some());
@@ -4082,8 +4160,8 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
     )
     .expect("fsi run should return envelope");
 
-    assert_eq!(envelope.operation, "analysis.run_fsi");
-    assert_eq!(envelope.op_version, "analysis.run_fsi/v1");
+    assert_eq!(envelope.operation, "fea.run_fsi");
+    assert_eq!(envelope.op_version, "fea.run_fsi/v1");
     assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
     assert!(envelope.data.transient_results.is_some());
     assert!(envelope.data.thermal_results.is_none());
@@ -4209,7 +4287,7 @@ fn analysis_run_transient_rejects_non_monotonic_thermo_time_profile() {
     )
     .expect_err("non-monotonic thermo time profile should be rejected");
 
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_TRANSIENT.INVALID_OPTIONS");
+    assert_eq!(err.error_code, "RM.FEA.RUN_TRANSIENT.INVALID_OPTIONS");
 }
 
 #[test]
@@ -4247,7 +4325,7 @@ fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
     )
     .expect_err("unknown thermo expected region should be rejected");
 
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS");
+    assert_eq!(err.error_code, "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS");
 }
 
 #[test]
@@ -4276,7 +4354,7 @@ fn analysis_run_nonlinear_rejects_invalid_plasticity_constitutive_options() {
     )
     .expect_err("nonlinear run should reject invalid plasticity options");
 
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS");
+    assert_eq!(err.error_code, "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS");
 }
 
 #[test]
@@ -4305,7 +4383,7 @@ fn analysis_run_nonlinear_rejects_invalid_contact_interface_options() {
     )
     .expect_err("nonlinear run should reject invalid contact options");
 
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS");
+    assert_eq!(err.error_code, "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS");
 }
 
 #[test]
@@ -4322,7 +4400,7 @@ fn analysis_run_transient_can_resolve_thermo_field_artifact() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("create thermo field artifact root");
     let mut field_artifact = serde_json::json!({
-        "schema_version": "analysis_thermo_field_artifact/v1",
+        "schema_version": "fea_thermo_field_artifact/v1",
         "source_geometry_id": model.geometry_id,
         "source_geometry_revision": model.geometry_revision,
         "artifact_status": "approved",
@@ -4425,7 +4503,7 @@ fn analysis_run_transient_rejects_missing_thermo_field_artifact() {
     .expect_err("missing thermo field artifact should be rejected");
     let _ = fs::remove_dir_all(&root);
 
-    assert_eq!(err.error_code, "RM.ANALYSIS.RUN_THERMO_FIELD.NOT_FOUND");
+    assert_eq!(err.error_code, "RM.FEA.RUN_THERMO_FIELD.NOT_FOUND");
 }
 
 #[test]
@@ -4442,7 +4520,7 @@ fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("create thermo field artifact root");
     let mut inline_equivalent_artifact = serde_json::json!({
-        "schema_version": "analysis_thermo_field_artifact/v1",
+        "schema_version": "fea_thermo_field_artifact/v1",
         "source_geometry_id": model.geometry_id,
         "source_geometry_revision": model.geometry_revision,
         "artifact_status": "approved",
@@ -4762,8 +4840,8 @@ fn analysis_run_modal_returns_native_modal_result() {
     )
     .expect("modal run should produce modal result");
 
-    assert_eq!(envelope.operation, "analysis.run_modal");
-    assert_eq!(envelope.op_version, "analysis.run_modal/v1");
+    assert_eq!(envelope.operation, "fea.run_modal");
+    assert_eq!(envelope.op_version, "fea.run_modal/v1");
     assert_eq!(
         envelope.data.run.solver_method,
         "matrix_free_subspace_iteration"
@@ -4827,8 +4905,8 @@ fn analysis_run_acoustic_returns_modal_payload_and_acoustic_diagnostics() {
     )
     .expect("acoustic run should produce modal payload");
 
-    assert_eq!(envelope.operation, "analysis.run_acoustic");
-    assert_eq!(envelope.op_version, "analysis.run_acoustic/v1");
+    assert_eq!(envelope.operation, "fea.run_acoustic");
+    assert_eq!(envelope.op_version, "fea.run_acoustic/v1");
     assert_eq!(
         envelope.data.run.solver_method,
         "matrix_free_subspace_iteration"
@@ -5020,9 +5098,9 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
     )
     .expect_err("results should fail for unknown mode index");
 
-    assert_eq!(err.error_code, "RM.ANALYSIS.RESULTS.MODE_NOT_FOUND");
-    assert_eq!(err.operation, "analysis.results");
-    assert_eq!(err.op_version, "analysis.results/v1");
+    assert_eq!(err.error_code, "RM.FEA.RESULTS.MODE_NOT_FOUND");
+    assert_eq!(err.operation, "fea.results");
+    assert_eq!(err.op_version, "fea.results/v1");
 }
 
 #[test]
@@ -5137,8 +5215,8 @@ fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
 
     assert_eq!(
         err.error_code,
-        "RM.ANALYSIS.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND"
+        "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND"
     );
-    assert_eq!(err.operation, "analysis.results");
-    assert_eq!(err.op_version, "analysis.results/v1");
+    assert_eq!(err.operation, "fea.results");
+    assert_eq!(err.op_version, "fea.results/v1");
 }

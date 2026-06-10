@@ -1875,7 +1875,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
 }
 
 fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisModel) {
-    let root = PathBuf::from("target/runmat-analysis-artifacts/thermo-fields");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/runmat-fea-artifacts/thermo-fields");
     let _ = fs::create_dir_all(&root);
     let write_artifact = |artifact_id: &str,
                           source_id: &str,
@@ -1883,7 +1884,7 @@ fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisMode
                           region_temperature_deltas: serde_json::Value,
                           time_profile: serde_json::Value| {
         let mut payload = serde_json::json!({
-            "schema_version": "analysis_thermo_field_artifact/v1",
+            "schema_version": "fea_thermo_field_artifact/v1",
             "source_geometry_id": model.geometry_id,
             "source_geometry_revision": model.geometry_revision,
             "artifact_status": "approved",
@@ -6047,7 +6048,7 @@ pub(super) fn run_fixture(
                         Ok(value) => value,
                         Err(err) => {
                             failures.push(format!(
-                                "analysis.results failed for gpu fixture {}: {}",
+                                "fea.results failed for gpu fixture {}: {}",
                                 spec.id, err.error_code
                             ));
                             return FixtureRunRecord {
@@ -6157,10 +6158,10 @@ pub(super) fn run_fixture(
                             };
                         }
                     };
-                    if gpu_results.operation != "analysis.results"
-                        || gpu_results.op_version != "analysis.results/v1"
+                    if gpu_results.operation != "fea.results"
+                        || gpu_results.op_version != "fea.results/v1"
                     {
-                        failures.push("analysis.results contract version mismatch".to_string());
+                        failures.push("fea.results contract version mismatch".to_string());
                     }
 
                     prep_calibration_profile =
@@ -6395,16 +6396,16 @@ pub(super) fn run_fixture(
                         );
                         match persisted {
                             Ok(by_id) => {
-                                if by_id.operation != "analysis.results"
-                                    || by_id.op_version != "analysis.results/v1"
+                                if by_id.operation != "fea.results"
+                                    || by_id.op_version != "fea.results/v1"
                                 {
                                     failures.push(
-                                        "analysis.results by-run-id contract mismatch".to_string(),
+                                        "fea.results by-run-id contract mismatch".to_string(),
                                     );
                                 }
                             }
                             Err(err) => failures.push(format!(
-                                "analysis.results by-run-id failed for fixture {}: {}",
+                                "fea.results by-run-id failed for fixture {}: {}",
                                 spec.id, err.error_code
                             )),
                         }
@@ -6483,7 +6484,7 @@ pub(super) fn run_fixture(
                             Ok(value) => value,
                             Err(err) => {
                                 failures.push(format!(
-                                    "analysis.results failed for cpu fixture {}: {}",
+                                    "fea.results failed for cpu fixture {}: {}",
                                     spec.id, err.error_code
                                 ));
                                 return FixtureRunRecord {

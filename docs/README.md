@@ -103,19 +103,19 @@ If you want to understand how the runtime works internally, start with the [Comp
 - [Async Execution](./execution/async.md)
 - [Errors & Diagnostics](./execution/errors.md)
 
-## Analysis & Simulation
+## FEA on Geometry
 
-- [FEA and Math on Geometry](./analysis/index.md)
-- [Using Analysis](./analysis/using-analysis.md)
-- [Geometry](./analysis/geometry.md)
-- [Models](./analysis/models.md)
-- [Physics Models](./analysis/physics.md)
-- [Solves, Studies, and Sweeps](./analysis/solves.md)
-- [Evidence & Artifacts](./analysis/evidence.md)
-- [FEA Verification & Validation](./analysis/validation.md)
-- [Results & Trust](./analysis/trust.md)
-- [Current Status](./analysis/status.md)
-- [Operation Reference](./analysis/operation-reference.md)
+- [FEA on Geometry](./fea/index.md)
+- [Using FEA](./fea/using-fea.md)
+- [Geometry](./fea/geometry.md)
+- [Models](./fea/models.md)
+- [Physics Families](./fea/physics.md)
+- [Solves, Studies, and Sweeps](./fea/solves.md)
+- [Evidence & Artifacts](./fea/evidence.md)
+- [Verification & Validation](./fea/validation.md)
+- [Results & Trust](./fea/trust.md)
+- [Current Status](./fea/status.md)
+- [Operation Reference](./fea/operation-reference.md)
 
 ## Filesystem
 

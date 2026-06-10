@@ -1,4 +1,4 @@
-use runmat_config::runtime::{AnalysisArtifactStoreMode, ConfigLoader, RunMatRuntimeConfig};
+use runmat_config::runtime::{ConfigLoader, FeaArtifactStoreMode, RunMatRuntimeConfig};
 use tempfile::TempDir;
 
 #[test]
@@ -58,15 +58,15 @@ callstack_limit = 64
 }
 
 #[test]
-fn runtime_analysis_section_loads_artifact_and_prep_config() {
+fn runtime_fea_section_loads_artifact_and_prep_config() {
     let temp_dir = TempDir::new().unwrap();
     let config_path = temp_dir.path().join("runmat.toml");
     std::fs::write(
         &config_path,
         r#"
-[runtime.analysis]
+[runtime.fea]
 artifact_store = "filesystem"
-artifact_root = ".runmat/analysis"
+artifact_root = ".runmat/fea"
 artifact_max_runs = 12
 artifact_max_runs_per_kind = 3
 study_artifact_root = ".runmat/studies"
@@ -82,35 +82,35 @@ thermo_field_artifact_root = ".runmat/thermo-fields"
 
     let runtime = ConfigLoader::load_from_file(&config_path).unwrap();
     assert_eq!(
-        runtime.analysis.artifact_store,
-        Some(AnalysisArtifactStoreMode::Filesystem)
+        runtime.fea.artifact_store,
+        Some(FeaArtifactStoreMode::Filesystem)
     );
     assert_eq!(
-        runtime.analysis.artifact_root.as_deref(),
-        Some(std::path::Path::new(".runmat/analysis"))
+        runtime.fea.artifact_root.as_deref(),
+        Some(std::path::Path::new(".runmat/fea"))
     );
-    assert_eq!(runtime.analysis.artifact_max_runs, Some(12));
-    assert_eq!(runtime.analysis.artifact_max_runs_per_kind, Some(3));
+    assert_eq!(runtime.fea.artifact_max_runs, Some(12));
+    assert_eq!(runtime.fea.artifact_max_runs_per_kind, Some(3));
     assert_eq!(
-        runtime.analysis.study_artifact_root.as_deref(),
+        runtime.fea.study_artifact_root.as_deref(),
         Some(std::path::Path::new(".runmat/studies"))
     );
     assert_eq!(
-        runtime.analysis.geometry_prep_artifact_root.as_deref(),
+        runtime.fea.geometry_prep_artifact_root.as_deref(),
         Some(std::path::Path::new(".runmat/geometry-prep"))
     );
-    assert_eq!(runtime.analysis.geometry_prep_max_artifacts, Some(8));
+    assert_eq!(runtime.fea.geometry_prep_max_artifacts, Some(8));
     assert_eq!(
-        runtime.analysis.geometry_prep_max_artifacts_per_geometry,
+        runtime.fea.geometry_prep_max_artifacts_per_geometry,
         Some(2)
     );
-    assert_eq!(runtime.analysis.geometry_prep_max_age_seconds, Some(3600));
+    assert_eq!(runtime.fea.geometry_prep_max_age_seconds, Some(3600));
     assert_eq!(
-        runtime.analysis.geometry_prep_require_latest_revision,
+        runtime.fea.geometry_prep_require_latest_revision,
         Some(false)
     );
     assert_eq!(
-        runtime.analysis.thermo_field_artifact_root.as_deref(),
+        runtime.fea.thermo_field_artifact_root.as_deref(),
         Some(std::path::Path::new(".runmat/thermo-fields"))
     );
 }

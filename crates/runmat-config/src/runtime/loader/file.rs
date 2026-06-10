@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::runtime::{
-    AccelerateConfig, AnalysisConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig,
+    AccelerateConfig, FeaConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig,
     PlottingConfig, RunMatRuntimeConfig, TelemetryConfig,
 };
 
@@ -35,7 +35,7 @@ struct RuntimeFileSection {
     gc: Option<GcConfig>,
     accelerate: Option<AccelerateConfig>,
     plotting: Option<PlottingConfig>,
-    analysis: Option<AnalysisConfig>,
+    fea: Option<FeaConfig>,
 }
 
 impl RuntimeFileSection {
@@ -73,8 +73,8 @@ impl RuntimeFileSection {
         if let Some(plotting) = self.plotting {
             config.plotting = plotting;
         }
-        if let Some(analysis) = self.analysis {
-            config.analysis = analysis;
+        if let Some(fea) = self.fea {
+            config.fea = fea;
         }
     }
 }
@@ -94,7 +94,7 @@ impl From<&RunMatRuntimeConfig> for RuntimeFileDocument {
                 gc: Some(value.gc.clone()),
                 accelerate: Some(value.accelerate.clone()),
                 plotting: Some(value.plotting.clone()),
-                analysis: Some(value.analysis.clone()),
+                fea: Some(value.fea.clone()),
             },
         }
     }
@@ -155,13 +155,12 @@ gc = { preset = "low-latency", young_size_mb = 128, threads = 8, collect_stats =
 accelerate = { enabled = true, provider = "wgpu", allow_inprocess_fallback = true, wgpu_power_preference = "auto", wgpu_force_fallback_adapter = false, auto_offload = { enabled = true, calibrate = true, profile_path = ".runmat/auto_offload.json", log_level = "trace" } }
 plotting = { mode = "auto", force_headless = false, backend = "auto", scatter_target_points = 250000, surface_vertex_budget = 400000 }
 
-[runtime.analysis]
-# artifact_store = "in_memory"
-# artifact_store = "filesystem"
-# artifact_root = "target/runmat-analysis-store"
-# study_artifact_root = "target/runmat-analysis-artifacts/studies"
-# geometry_prep_artifact_root = "target/runmat-analysis-artifacts/geometry-prep"
-# thermo_field_artifact_root = "target/runmat-analysis-artifacts/thermo-fields"
+[runtime.fea]
+# artifact_store = "filesystem" # default; use "in_memory" for ephemeral/test runs
+# artifact_root = "artifacts"
+# study_artifact_root = "artifacts/studies"
+# geometry_prep_artifact_root = "artifacts/geometry-prep"
+# thermo_field_artifact_root = "artifacts/thermo-fields"
 # artifact_max_runs = 0
 # artifact_max_runs_per_kind = 0
 # geometry_prep_max_artifacts = 0

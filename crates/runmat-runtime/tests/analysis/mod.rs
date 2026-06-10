@@ -322,7 +322,7 @@ fn synthesized_nonlinear_model() -> AnalysisModel {
         },
         OperationContext::new(Some("trace-create-model-nonlinear".to_string()), None),
     )
-    .expect("synthesize nonlinear model via analysis.create_model");
+    .expect("synthesize nonlinear model via fea.create_model");
     created.data
 }
 
@@ -339,9 +339,11 @@ use manifest::{fixture_manifest, manifest_specs};
 use runner::run_fixture;
 
 #[test]
-fn analysis_benchmark_conformance_manifest_gates() {
+fn fea_benchmark_conformance_manifest_gates() {
+    let artifact_root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/runmat-fea-artifacts");
     let store_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/runmat-analysis-artifacts/store")
+        .join("../../target/runmat-fea-artifacts/store")
         .join(format!("harness-{}", std::process::id()));
     let _ = fs::remove_dir_all(&store_root);
     runmat_runtime::analysis::storage::configure_artifact_store(
@@ -350,11 +352,17 @@ fn analysis_benchmark_conformance_manifest_gates() {
         },
     )
     .expect("configure filesystem artifact store for harness");
+    runmat_runtime::analysis::configure_fea_runtime(runmat_runtime::analysis::FeaRuntimeConfig {
+        artifact_root: Some(artifact_root.clone()),
+        study_artifact_root: Some(artifact_root.join("studies")),
+        thermo_field_artifact_root: Some(artifact_root.join("thermo-fields")),
+    })
+    .expect("configure FEA runtime artifact roots for harness");
 
     let specs = manifest_specs();
     let manifest = fixture_manifest(&specs);
 
-    assert_eq!(manifest.version, "analysis-conformance/v1");
+    assert_eq!(manifest.version, "fea-conformance/v1");
 
     let records: Vec<FixtureRunRecord> = specs
         .iter()
@@ -372,7 +380,7 @@ fn analysis_benchmark_conformance_manifest_gates() {
     }
 
     let report = BenchmarkConformanceReport {
-        schema_version: "analysis-benchmark-report/v1".to_string(),
+        schema_version: "fea-benchmark-report/v1".to_string(),
         manifest,
         records,
         passed: failures.is_empty(),
@@ -385,14 +393,17 @@ fn analysis_benchmark_conformance_manifest_gates() {
     }
     fs::write(&path, &report_json).expect("write benchmark report artifact");
 
-    if let Ok(dir) = std::env::var("RUNMAT_ANALYSIS_BASELINE_DIR") {
+    if let Some(dir) = std::env::var("RUNMAT_FEA_BASELINE_DIR")
+        .ok()
+        .or_else(|| std::env::var("RUNMAT_ANALYSIS_BASELINE_DIR").ok())
+    {
         let dir_path = PathBuf::from(dir);
         if fs::create_dir_all(&dir_path).is_ok() {
             let stamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|value| value.as_secs())
                 .unwrap_or(0);
-            let snapshot_path = dir_path.join(format!("analysis_benchmark_report_{stamp}.json"));
+            let snapshot_path = dir_path.join(format!("fea_benchmark_report_{stamp}.json"));
             let _ = fs::write(snapshot_path, &report_json);
         }
     }
@@ -451,7 +462,7 @@ fn analysis_benchmark_conformance_manifest_gates() {
     };
     assert!(
         core_passed && baseline_passed,
-        "analysis benchmark/conformance gates failed: {}",
+        "FEA benchmark/conformance gates failed: {}",
         failures.join(" | ")
     );
 }

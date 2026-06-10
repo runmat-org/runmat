@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::io::ErrorKind;
+use std::path::PathBuf;
 use std::sync::{OnceLock, RwLock};
 
 use chrono::Utc;
@@ -47,32 +47,38 @@ use policy::{
 };
 
 mod contracts;
+mod fea_document;
 mod policy;
 mod promotion;
 pub mod storage;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AnalysisRuntimeConfig {
+pub struct FeaRuntimeConfig {
+    pub artifact_root: Option<PathBuf>,
     pub study_artifact_root: Option<PathBuf>,
     pub thermo_field_artifact_root: Option<PathBuf>,
 }
 
-fn analysis_runtime_config() -> &'static RwLock<AnalysisRuntimeConfig> {
-    static CONFIG: OnceLock<RwLock<AnalysisRuntimeConfig>> = OnceLock::new();
-    CONFIG.get_or_init(|| RwLock::new(AnalysisRuntimeConfig::default()))
+fn fea_runtime_config() -> &'static RwLock<FeaRuntimeConfig> {
+    static CONFIG: OnceLock<RwLock<FeaRuntimeConfig>> = OnceLock::new();
+    CONFIG.get_or_init(|| RwLock::new(FeaRuntimeConfig::default()))
 }
 
-fn current_analysis_runtime_config() -> AnalysisRuntimeConfig {
-    analysis_runtime_config()
+fn current_fea_runtime_config() -> FeaRuntimeConfig {
+    fea_runtime_config()
         .read()
         .map(|guard| guard.clone())
         .unwrap_or_default()
 }
 
-pub fn configure_analysis_runtime(config: AnalysisRuntimeConfig) -> Result<(), String> {
-    let mut guard = analysis_runtime_config()
+pub fn default_fea_artifact_root() -> PathBuf {
+    PathBuf::from("artifacts")
+}
+
+pub fn configure_fea_runtime(config: FeaRuntimeConfig) -> Result<(), String> {
+    let mut guard = fea_runtime_config()
         .write()
-        .map_err(|_| "analysis runtime config lock poisoned".to_string())?;
+        .map_err(|_| "FEA runtime config lock poisoned".to_string())?;
     *guard = config;
     Ok(())
 }
@@ -98,49 +104,53 @@ pub use contracts::{
     ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
     TransientIntegrationMethod, TransientResultsData,
 };
+pub use fea_document::{
+    is_fea_file_path, load_fea_document_from_path_async, parse_and_resolve_fea_document,
+    FeaResolvedDocument,
+};
 
-const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
-const ANALYSIS_CREATE_MODEL_OP_VERSION: &str = "analysis.create_model/v1";
-const ANALYSIS_VALIDATE_STUDY_OPERATION: &str = "analysis.validate_study";
-const ANALYSIS_VALIDATE_STUDY_OP_VERSION: &str = "analysis.validate_study/v1";
-const ANALYSIS_PLAN_STUDY_OPERATION: &str = "analysis.plan_study";
-const ANALYSIS_PLAN_STUDY_OP_VERSION: &str = "analysis.plan_study/v1";
-const ANALYSIS_PLAN_STUDY_SWEEP_OPERATION: &str = "analysis.plan_study_sweep";
-const ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION: &str = "analysis.plan_study_sweep/v1";
-const ANALYSIS_RUN_STUDY_OPERATION: &str = "analysis.run_study";
-const ANALYSIS_RUN_STUDY_OP_VERSION: &str = "analysis.run_study/v1";
-const ANALYSIS_VALIDATE_STUDY_SWEEP_OPERATION: &str = "analysis.validate_study_sweep";
-const ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION: &str = "analysis.validate_study_sweep/v1";
-const ANALYSIS_RUN_STUDY_SWEEP_OPERATION: &str = "analysis.run_study_sweep";
-const ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION: &str = "analysis.run_study_sweep/v1";
-const ANALYSIS_VALIDATE_OPERATION: &str = "analysis.validate";
-const ANALYSIS_VALIDATE_OP_VERSION: &str = "analysis.validate/v1";
-const ANALYSIS_RUN_OPERATION: &str = "analysis.run_linear_static";
-const ANALYSIS_RUN_OP_VERSION: &str = "analysis.run_linear_static/v1";
-const ANALYSIS_RUN_MODAL_OPERATION: &str = "analysis.run_modal";
-const ANALYSIS_RUN_MODAL_OP_VERSION: &str = "analysis.run_modal/v1";
-const ANALYSIS_RUN_ACOUSTIC_OPERATION: &str = "analysis.run_acoustic";
-const ANALYSIS_RUN_ACOUSTIC_OP_VERSION: &str = "analysis.run_acoustic/v1";
-const ANALYSIS_RUN_TRANSIENT_OPERATION: &str = "analysis.run_transient";
-const ANALYSIS_RUN_TRANSIENT_OP_VERSION: &str = "analysis.run_transient/v1";
-const ANALYSIS_RUN_THERMAL_OPERATION: &str = "analysis.run_thermal";
-const ANALYSIS_RUN_THERMAL_OP_VERSION: &str = "analysis.run_thermal/v1";
-const ANALYSIS_RUN_NONLINEAR_OPERATION: &str = "analysis.run_nonlinear";
-const ANALYSIS_RUN_NONLINEAR_OP_VERSION: &str = "analysis.run_nonlinear/v1";
-const ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION: &str = "analysis.run_electromagnetic";
-const ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION: &str = "analysis.run_electromagnetic/v1";
-const ANALYSIS_RUN_CFD_OPERATION: &str = "analysis.run_cfd";
-const ANALYSIS_RUN_CFD_OP_VERSION: &str = "analysis.run_cfd/v1";
-const ANALYSIS_RUN_CHT_OPERATION: &str = "analysis.run_cht";
-const ANALYSIS_RUN_CHT_OP_VERSION: &str = "analysis.run_cht/v1";
-const ANALYSIS_RUN_FSI_OPERATION: &str = "analysis.run_fsi";
-const ANALYSIS_RUN_FSI_OP_VERSION: &str = "analysis.run_fsi/v1";
-const ANALYSIS_RESULTS_OPERATION: &str = "analysis.results";
-const ANALYSIS_RESULTS_OP_VERSION: &str = "analysis.results/v1";
-const ANALYSIS_RESULTS_COMPARE_OPERATION: &str = "analysis.results_compare";
-const ANALYSIS_RESULTS_COMPARE_OP_VERSION: &str = "analysis.results_compare/v1";
-const ANALYSIS_TRENDS_OPERATION: &str = "analysis.trends";
-const ANALYSIS_TRENDS_OP_VERSION: &str = "analysis.trends/v1";
+const ANALYSIS_CREATE_MODEL_OPERATION: &str = "fea.create_model";
+const ANALYSIS_CREATE_MODEL_OP_VERSION: &str = "fea.create_model/v1";
+const ANALYSIS_VALIDATE_STUDY_OPERATION: &str = "fea.validate_study";
+const ANALYSIS_VALIDATE_STUDY_OP_VERSION: &str = "fea.validate_study/v1";
+const ANALYSIS_PLAN_STUDY_OPERATION: &str = "fea.plan_study";
+const ANALYSIS_PLAN_STUDY_OP_VERSION: &str = "fea.plan_study/v1";
+const ANALYSIS_PLAN_STUDY_SWEEP_OPERATION: &str = "fea.plan_study_sweep";
+const ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION: &str = "fea.plan_study_sweep/v1";
+const ANALYSIS_RUN_STUDY_OPERATION: &str = "fea.run_study";
+const ANALYSIS_RUN_STUDY_OP_VERSION: &str = "fea.run_study/v1";
+const ANALYSIS_VALIDATE_STUDY_SWEEP_OPERATION: &str = "fea.validate_study_sweep";
+const ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION: &str = "fea.validate_study_sweep/v1";
+const ANALYSIS_RUN_STUDY_SWEEP_OPERATION: &str = "fea.run_study_sweep";
+const ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION: &str = "fea.run_study_sweep/v1";
+const ANALYSIS_VALIDATE_OPERATION: &str = "fea.validate";
+const ANALYSIS_VALIDATE_OP_VERSION: &str = "fea.validate/v1";
+const ANALYSIS_RUN_OPERATION: &str = "fea.run_linear_static";
+const ANALYSIS_RUN_OP_VERSION: &str = "fea.run_linear_static/v1";
+const ANALYSIS_RUN_MODAL_OPERATION: &str = "fea.run_modal";
+const ANALYSIS_RUN_MODAL_OP_VERSION: &str = "fea.run_modal/v1";
+const ANALYSIS_RUN_ACOUSTIC_OPERATION: &str = "fea.run_acoustic";
+const ANALYSIS_RUN_ACOUSTIC_OP_VERSION: &str = "fea.run_acoustic/v1";
+const ANALYSIS_RUN_TRANSIENT_OPERATION: &str = "fea.run_transient";
+const ANALYSIS_RUN_TRANSIENT_OP_VERSION: &str = "fea.run_transient/v1";
+const ANALYSIS_RUN_THERMAL_OPERATION: &str = "fea.run_thermal";
+const ANALYSIS_RUN_THERMAL_OP_VERSION: &str = "fea.run_thermal/v1";
+const ANALYSIS_RUN_NONLINEAR_OPERATION: &str = "fea.run_nonlinear";
+const ANALYSIS_RUN_NONLINEAR_OP_VERSION: &str = "fea.run_nonlinear/v1";
+const ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION: &str = "fea.run_electromagnetic";
+const ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION: &str = "fea.run_electromagnetic/v1";
+const ANALYSIS_RUN_CFD_OPERATION: &str = "fea.run_cfd";
+const ANALYSIS_RUN_CFD_OP_VERSION: &str = "fea.run_cfd/v1";
+const ANALYSIS_RUN_CHT_OPERATION: &str = "fea.run_cht";
+const ANALYSIS_RUN_CHT_OP_VERSION: &str = "fea.run_cht/v1";
+const ANALYSIS_RUN_FSI_OPERATION: &str = "fea.run_fsi";
+const ANALYSIS_RUN_FSI_OP_VERSION: &str = "fea.run_fsi/v1";
+const ANALYSIS_RESULTS_OPERATION: &str = "fea.results";
+const ANALYSIS_RESULTS_OP_VERSION: &str = "fea.results/v1";
+const ANALYSIS_RESULTS_COMPARE_OPERATION: &str = "fea.results_compare";
+const ANALYSIS_RESULTS_COMPARE_OP_VERSION: &str = "fea.results_compare/v1";
+const ANALYSIS_TRENDS_OPERATION: &str = "fea.trends";
+const ANALYSIS_TRENDS_OP_VERSION: &str = "fea.trends/v1";
 const TRANSIENT_RESIDUAL_WARN_THRESHOLD: f64 = 1.0e-4;
 
 pub fn analysis_create_model_op(
@@ -154,12 +164,12 @@ pub fn analysis_create_model_op(
             ANALYSIS_CREATE_MODEL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.CREATE_MODEL.INVALID_INTENT",
+                error_code: "RM.FEA.CREATE_MODEL.INVALID_INTENT",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis model intent requires a non-empty model_id",
+            "FEA model intent requires a non-empty model_id",
             BTreeMap::from([("geometry_id".to_string(), geometry.geometry_id.clone())]),
         ));
     }
@@ -170,12 +180,12 @@ pub fn analysis_create_model_op(
             ANALYSIS_CREATE_MODEL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.CREATE_MODEL.GEOMETRY_EMPTY",
+                error_code: "RM.FEA.CREATE_MODEL.GEOMETRY_EMPTY",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "geometry must contain at least one mesh to create an analysis model",
+            "geometry must contain at least one mesh to create an FEA model",
             BTreeMap::from([("geometry_id".to_string(), geometry.geometry_id.clone())]),
         ));
     }
@@ -186,12 +196,12 @@ pub fn analysis_create_model_op(
             ANALYSIS_CREATE_MODEL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.CREATE_MODEL.UNIT_UNSPECIFIED",
+                error_code: "RM.FEA.CREATE_MODEL.UNIT_UNSPECIFIED",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "geometry units must be specified before creating an analysis model",
+            "geometry units must be specified before creating an FEA model",
             BTreeMap::from([("geometry_id".to_string(), geometry.geometry_id.clone())]),
         ));
     }
@@ -205,12 +215,12 @@ pub fn analysis_create_model_op(
                 ANALYSIS_CREATE_MODEL_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.CREATE_MODEL.PREP_MISMATCH",
+                    error_code: "RM.FEA.CREATE_MODEL.PREP_MISMATCH",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
                 },
-                "analysis model prep context does not match geometry id/revision",
+                "FEA model prep context does not match geometry id/revision",
                 BTreeMap::from([
                     ("geometry_id".to_string(), geometry.geometry_id.clone()),
                     (
@@ -246,7 +256,7 @@ pub fn analysis_create_model_op(
                     ANALYSIS_CREATE_MODEL_OP_VERSION,
                     &context,
                     OperationErrorSpec {
-                        error_code: "RM.ANALYSIS.CREATE_MODEL.PREP_REGION_NOT_FOUND",
+                        error_code: "RM.FEA.CREATE_MODEL.PREP_REGION_NOT_FOUND",
                         error_type: OperationErrorType::Validation,
                         retryable: false,
                         severity: OperationErrorSeverity::Error,
@@ -264,7 +274,7 @@ pub fn analysis_create_model_op(
                     ANALYSIS_CREATE_MODEL_OP_VERSION,
                     &context,
                     OperationErrorSpec {
-                        error_code: "RM.ANALYSIS.CREATE_MODEL.PREP_INVALID_MAPPING",
+                        error_code: "RM.FEA.CREATE_MODEL.PREP_INVALID_MAPPING",
                         error_type: OperationErrorType::Input,
                         retryable: false,
                         severity: OperationErrorSeverity::Error,
@@ -280,7 +290,7 @@ pub fn analysis_create_model_op(
                         ANALYSIS_CREATE_MODEL_OP_VERSION,
                         &context,
                         OperationErrorSpec {
-                            error_code: "RM.ANALYSIS.CREATE_MODEL.PREP_MESH_NOT_FOUND",
+                            error_code: "RM.FEA.CREATE_MODEL.PREP_MESH_NOT_FOUND",
                             error_type: OperationErrorType::Validation,
                             retryable: false,
                             severity: OperationErrorSeverity::Error,
@@ -709,12 +719,12 @@ pub fn analysis_create_model_op(
                 ANALYSIS_CREATE_MODEL_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.CREATE_MODEL.INVALID",
+                    error_code: "RM.FEA.CREATE_MODEL.INVALID",
                     error_type: OperationErrorType::Validation,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
                 },
-                format!("created analysis model failed validation: {error:?}"),
+                format!("created FEA model failed validation: {error:?}"),
                 BTreeMap::from([
                     ("analysis_model_id".to_string(), model.model_id.0.clone()),
                     ("geometry_id".to_string(), geometry.geometry_id.clone()),
@@ -748,7 +758,7 @@ pub fn analysis_validate_study_op(
         &study_fingerprint,
         "validate",
         serde_json::json!({
-            "schema_version": "analysis_study_validate_artifact/v1",
+            "schema_version": "fea_study_validate_artifact/v1",
             "study_id": spec.study_id.clone(),
             "study_fingerprint": study_fingerprint.clone(),
             "valid": issue_codes.is_empty(),
@@ -763,7 +773,7 @@ pub fn analysis_validate_study_op(
             ANALYSIS_VALIDATE_STUDY_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.VALIDATE_STUDY.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.VALIDATE_STUDY.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -796,12 +806,12 @@ pub fn analysis_plan_study_op(
             ANALYSIS_PLAN_STUDY_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.PLAN_STUDY.INVALID_SPEC",
+                error_code: "RM.FEA.PLAN_STUDY.INVALID_SPEC",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "study spec is invalid; run analysis.validate_study for issue details",
+            "study spec is invalid; run fea.validate for issue details",
             BTreeMap::from([("issue_codes".to_string(), issue_codes.join(","))]),
         ));
     }
@@ -809,21 +819,17 @@ pub fn analysis_plan_study_op(
     let study_fingerprint = study_fingerprint(spec);
     let run_operation = run_operation_for_kind(spec.run_kind).to_string();
     let run_op_version = run_operation_version_for_kind(spec.run_kind).to_string();
-    let operation_sequence = vec![
-        ANALYSIS_CREATE_MODEL_OP_VERSION.to_string(),
-        ANALYSIS_VALIDATE_OP_VERSION.to_string(),
-        run_op_version.clone(),
-    ];
+    let operation_sequence = study_operation_sequence(spec, &run_op_version);
     let evidence_artifact_path = persist_study_evidence(
         &study_fingerprint,
         "plan",
         serde_json::json!({
-            "schema_version": "analysis_study_plan_artifact/v1",
+            "schema_version": "fea_study_plan_artifact/v1",
             "study_id": spec.study_id.clone(),
             "model_id": spec.create_model_intent.model_id.clone(),
             "run_kind": spec.run_kind,
             "backend": spec.backend,
-            "electromagnetic_run_options": spec.electromagnetic_run_options.clone(),
+            "run_options": study_run_options_json(spec),
             "study_fingerprint": study_fingerprint.clone(),
             "operation_sequence": operation_sequence.clone(),
             "run_operation": run_operation.clone(),
@@ -836,7 +842,7 @@ pub fn analysis_plan_study_op(
             ANALYSIS_PLAN_STUDY_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.PLAN_STUDY.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.PLAN_STUDY.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -855,6 +861,7 @@ pub fn analysis_plan_study_op(
             run_kind: spec.run_kind,
             backend: spec.backend,
             electromagnetic_run_options: spec.electromagnetic_run_options.clone(),
+            run_options: study_run_options_json(spec),
             operation_sequence,
             run_operation,
             run_op_version,
@@ -875,12 +882,12 @@ pub fn analysis_run_study_op(
             ANALYSIS_RUN_STUDY_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_STUDY.INVALID_SPEC",
+                error_code: "RM.FEA.RUN_STUDY.INVALID_SPEC",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "study spec is invalid; run analysis.validate_study for issue details",
+            "study spec is invalid; run fea.validate for issue details",
             BTreeMap::from([("issue_codes".to_string(), issue_codes.join(","))]),
         ));
     }
@@ -888,19 +895,21 @@ pub fn analysis_run_study_op(
     let study_fingerprint = study_fingerprint(spec);
     let run_operation = run_operation_for_kind(spec.run_kind).to_string();
     let run_op_version = run_operation_version_for_kind(spec.run_kind).to_string();
-    let operation_sequence = vec![
-        ANALYSIS_CREATE_MODEL_OP_VERSION.to_string(),
-        ANALYSIS_VALIDATE_OP_VERSION.to_string(),
-        run_op_version.clone(),
-    ];
+    let operation_sequence = study_operation_sequence(spec, &run_op_version);
 
-    let created = analysis_create_model_op(
-        &spec.geometry,
-        spec.create_model_intent.clone(),
-        context.clone(),
-    )?;
+    let model = match &spec.model {
+        Some(model) => model.clone(),
+        None => {
+            analysis_create_model_op(
+                &spec.geometry,
+                spec.create_model_intent.clone(),
+                context.clone(),
+            )?
+            .data
+        }
+    };
     analysis_validate(
-        &created.data,
+        &model,
         spec.geometry.units,
         &ReferenceFrame::Global,
         context.clone(),
@@ -913,29 +922,74 @@ pub fn analysis_run_study_op(
     };
 
     let run_envelope = match spec.run_kind {
-        AnalysisRunKind::LinearStatic => {
-            analysis_run_linear_static_op(&created.data, spec.backend, context.clone())
-        }
-        AnalysisRunKind::Modal => {
-            analysis_run_modal_op(&created.data, spec.backend, context.clone())
-        }
-        AnalysisRunKind::Acoustic => {
-            analysis_run_acoustic_op(&created.data, spec.backend, context.clone())
-        }
-        AnalysisRunKind::Thermal => {
-            analysis_run_thermal_op(&created.data, spec.backend, context.clone())
-        }
-        AnalysisRunKind::Transient => {
-            analysis_run_transient_op(&created.data, spec.backend, context.clone())
-        }
-        AnalysisRunKind::Cfd => analysis_run_cfd_op(&created.data, spec.backend, context.clone()),
-        AnalysisRunKind::Cht => analysis_run_cht_op(&created.data, spec.backend, context.clone()),
-        AnalysisRunKind::Fsi => analysis_run_fsi_op(&created.data, spec.backend, context.clone()),
-        AnalysisRunKind::Nonlinear => {
-            analysis_run_nonlinear_op(&created.data, spec.backend, context.clone())
-        }
+        AnalysisRunKind::LinearStatic => match spec.linear_static_run_options.clone() {
+            Some(options) => analysis_run_linear_static_with_options(
+                &model,
+                spec.backend,
+                options,
+                context.clone(),
+            ),
+            None => analysis_run_linear_static_op(&model, spec.backend, context.clone()),
+        },
+        AnalysisRunKind::Modal => match spec.modal_run_options.clone() {
+            Some(options) => {
+                analysis_run_modal_with_options_op(&model, spec.backend, options, context.clone())
+            }
+            None => analysis_run_modal_op(&model, spec.backend, context.clone()),
+        },
+        AnalysisRunKind::Acoustic => match spec.acoustic_run_options.clone() {
+            Some(options) => analysis_run_acoustic_with_options_op(
+                &model,
+                spec.backend,
+                options,
+                context.clone(),
+            ),
+            None => analysis_run_acoustic_op(&model, spec.backend, context.clone()),
+        },
+        AnalysisRunKind::Thermal => match spec.thermal_run_options.clone() {
+            Some(options) => {
+                analysis_run_thermal_with_options_op(&model, spec.backend, options, context.clone())
+            }
+            None => analysis_run_thermal_op(&model, spec.backend, context.clone()),
+        },
+        AnalysisRunKind::Transient => match spec.transient_run_options.clone() {
+            Some(options) => analysis_run_transient_with_options_op(
+                &model,
+                spec.backend,
+                options,
+                context.clone(),
+            ),
+            None => analysis_run_transient_op(&model, spec.backend, context.clone()),
+        },
+        AnalysisRunKind::Cfd => match spec.cfd_run_options.clone() {
+            Some(options) => {
+                analysis_run_cfd_with_options_op(&model, spec.backend, options, context.clone())
+            }
+            None => analysis_run_cfd_op(&model, spec.backend, context.clone()),
+        },
+        AnalysisRunKind::Cht => match spec.cht_run_options.clone() {
+            Some(options) => {
+                analysis_run_cht_with_options_op(&model, spec.backend, options, context.clone())
+            }
+            None => analysis_run_cht_op(&model, spec.backend, context.clone()),
+        },
+        AnalysisRunKind::Fsi => match spec.fsi_run_options.clone() {
+            Some(options) => {
+                analysis_run_fsi_with_options_op(&model, spec.backend, options, context.clone())
+            }
+            None => analysis_run_fsi_op(&model, spec.backend, context.clone()),
+        },
+        AnalysisRunKind::Nonlinear => match spec.nonlinear_run_options.clone() {
+            Some(options) => analysis_run_nonlinear_with_options_op(
+                &model,
+                spec.backend,
+                options,
+                context.clone(),
+            ),
+            None => analysis_run_nonlinear_op(&model, spec.backend, context.clone()),
+        },
         AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
-            &created.data,
+            &model,
             spec.backend,
             resolved_electromagnetic_run_options
                 .clone()
@@ -948,12 +1002,12 @@ pub fn analysis_run_study_op(
         &study_fingerprint,
         "run",
         serde_json::json!({
-            "schema_version": "analysis_study_run_artifact/v1",
+            "schema_version": "fea_study_run_artifact/v1",
             "study_id": spec.study_id.clone(),
-            "model_id": created.data.model_id.0.clone(),
+            "model_id": model.model_id.0.clone(),
             "run_kind": spec.run_kind,
             "backend": spec.backend,
-            "electromagnetic_run_options": spec.electromagnetic_run_options.clone(),
+            "run_options": study_run_options_json(spec),
             "resolved_electromagnetic_run_options": resolved_electromagnetic_run_options.clone(),
             "study_fingerprint": study_fingerprint.clone(),
             "operation_sequence": operation_sequence.clone(),
@@ -974,7 +1028,7 @@ pub fn analysis_run_study_op(
             ANALYSIS_RUN_STUDY_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_STUDY.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -993,10 +1047,11 @@ pub fn analysis_run_study_op(
         &context,
         AnalysisStudyRunData {
             study_id: spec.study_id.clone(),
-            model_id: created.data.model_id.0.clone(),
+            model_id: model.model_id.0.clone(),
             run_kind: spec.run_kind,
             backend: spec.backend,
             electromagnetic_run_options: resolved_electromagnetic_run_options,
+            run_options: study_run_options_json(spec),
             study_fingerprint,
             operation_sequence,
             run_operation,
@@ -1019,10 +1074,10 @@ pub fn analysis_plan_study_sweep_op(
 ) -> Result<OperationEnvelope<AnalysisStudySweepPlanData>, OperationErrorEnvelope> {
     let mut issue_codes = Vec::new();
     if spec.sweep_id.trim().is_empty() {
-        issue_codes.push("ANALYSIS_STUDY_SWEEP_ID_EMPTY".to_string());
+        issue_codes.push("RM.FEA.STUDY_SWEEP.ID_EMPTY".to_string());
     }
     if spec.studies.is_empty() {
-        issue_codes.push("ANALYSIS_STUDY_SWEEP_STUDIES_EMPTY".to_string());
+        issue_codes.push("RM.FEA.STUDY_SWEEP.STUDIES_EMPTY".to_string());
     }
     if !issue_codes.is_empty() {
         return Err(operation_error(
@@ -1030,7 +1085,7 @@ pub fn analysis_plan_study_sweep_op(
             ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.PLAN_STUDY_SWEEP.INVALID_SPEC",
+                error_code: "RM.FEA.PLAN_STUDY_SWEEP.INVALID_SPEC",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -1052,7 +1107,7 @@ pub fn analysis_plan_study_sweep_op(
                         ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
                         &context,
                         OperationErrorSpec {
-                            error_code: "RM.ANALYSIS.PLAN_STUDY_SWEEP.STUDY_FAILED",
+                            error_code: "RM.FEA.PLAN_STUDY_SWEEP.STUDY_FAILED",
                             error_type: OperationErrorType::Validation,
                             retryable: false,
                             severity: OperationErrorSeverity::Error,
@@ -1084,6 +1139,7 @@ pub fn analysis_plan_study_sweep_op(
             run_kind: planned.data.run_kind,
             backend: planned.data.backend,
             electromagnetic_run_options: planned.data.electromagnetic_run_options,
+            run_options: planned.data.run_options,
             operation_sequence: planned.data.operation_sequence,
             run_operation: planned.data.run_operation,
             run_op_version: planned.data.run_op_version,
@@ -1097,13 +1153,13 @@ pub fn analysis_plan_study_sweep_op(
         .join(sanitized_sweep_id)
         .join("plan.json");
     if let Some(parent) = evidence_path.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
+        fs_create_dir_all(parent).map_err(|err| {
             operation_error(
                 ANALYSIS_PLAN_STUDY_SWEEP_OPERATION,
                 ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.PLAN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
+                    error_code: "RM.FEA.PLAN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                     error_type: OperationErrorType::Internal,
                     retryable: true,
                     severity: OperationErrorSeverity::Error,
@@ -1114,7 +1170,7 @@ pub fn analysis_plan_study_sweep_op(
         })?;
     }
     let payload = serde_json::json!({
-        "schema_version": "analysis_study_sweep_plan_artifact/v1",
+        "schema_version": "fea_study_sweep_plan_artifact/v1",
         "sweep_id": spec.sweep_id.clone(),
         "study_count": spec.studies.len(),
         "planned_count": plan_entries.len(),
@@ -1128,7 +1184,7 @@ pub fn analysis_plan_study_sweep_op(
             ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.PLAN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.PLAN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1143,7 +1199,7 @@ pub fn analysis_plan_study_sweep_op(
             ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.PLAN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.PLAN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1175,10 +1231,10 @@ pub fn analysis_validate_study_sweep_op(
 ) -> Result<OperationEnvelope<AnalysisStudySweepValidateData>, OperationErrorEnvelope> {
     let mut issue_codes = Vec::new();
     if spec.sweep_id.trim().is_empty() {
-        issue_codes.push("ANALYSIS_STUDY_SWEEP_ID_EMPTY".to_string());
+        issue_codes.push("RM.FEA.STUDY_SWEEP.ID_EMPTY".to_string());
     }
     if spec.studies.is_empty() {
-        issue_codes.push("ANALYSIS_STUDY_SWEEP_STUDIES_EMPTY".to_string());
+        issue_codes.push("RM.FEA.STUDY_SWEEP.STUDIES_EMPTY".to_string());
     }
 
     let study_entries: Vec<AnalysisStudySweepValidateEntry> = spec
@@ -1209,13 +1265,13 @@ pub fn analysis_validate_study_sweep_op(
         .join(sanitized_sweep_id)
         .join("validate.json");
     if let Some(parent) = evidence_path.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
+        fs_create_dir_all(parent).map_err(|err| {
             operation_error(
                 ANALYSIS_VALIDATE_STUDY_SWEEP_OPERATION,
                 ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.VALIDATE_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
+                    error_code: "RM.FEA.VALIDATE_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                     error_type: OperationErrorType::Internal,
                     retryable: true,
                     severity: OperationErrorSeverity::Error,
@@ -1226,7 +1282,7 @@ pub fn analysis_validate_study_sweep_op(
         })?;
     }
     let payload = serde_json::json!({
-        "schema_version": "analysis_study_sweep_validate_artifact/v1",
+        "schema_version": "fea_study_sweep_validate_artifact/v1",
         "sweep_id": spec.sweep_id.clone(),
         "valid": valid,
         "issue_codes": issue_codes.clone(),
@@ -1238,7 +1294,7 @@ pub fn analysis_validate_study_sweep_op(
             ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.VALIDATE_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.VALIDATE_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1253,7 +1309,7 @@ pub fn analysis_validate_study_sweep_op(
             ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.VALIDATE_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.VALIDATE_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1283,10 +1339,10 @@ pub fn analysis_run_study_sweep_op(
 ) -> Result<OperationEnvelope<AnalysisStudySweepData>, OperationErrorEnvelope> {
     let mut issue_codes = Vec::new();
     if spec.sweep_id.trim().is_empty() {
-        issue_codes.push("ANALYSIS_STUDY_SWEEP_ID_EMPTY".to_string());
+        issue_codes.push("RM.FEA.STUDY_SWEEP.ID_EMPTY".to_string());
     }
     if spec.studies.is_empty() {
-        issue_codes.push("ANALYSIS_STUDY_SWEEP_STUDIES_EMPTY".to_string());
+        issue_codes.push("RM.FEA.STUDY_SWEEP.STUDIES_EMPTY".to_string());
     }
     if !issue_codes.is_empty() {
         return Err(operation_error(
@@ -1294,7 +1350,7 @@ pub fn analysis_run_study_sweep_op(
             ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_STUDY_SWEEP.INVALID_SPEC",
+                error_code: "RM.FEA.RUN_STUDY_SWEEP.INVALID_SPEC",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -1316,7 +1372,7 @@ pub fn analysis_run_study_sweep_op(
                         ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
                         &context,
                         OperationErrorSpec {
-                            error_code: "RM.ANALYSIS.RUN_STUDY_SWEEP.STUDY_FAILED",
+                            error_code: "RM.FEA.RUN_STUDY_SWEEP.STUDY_FAILED",
                             error_type: OperationErrorType::Validation,
                             retryable: false,
                             severity: OperationErrorSeverity::Error,
@@ -1359,13 +1415,13 @@ pub fn analysis_run_study_sweep_op(
         .join(sanitized_sweep_id)
         .join("run.json");
     if let Some(parent) = evidence_root.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
+        fs_create_dir_all(parent).map_err(|err| {
             operation_error(
                 ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
                 ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
+                    error_code: "RM.FEA.RUN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                     error_type: OperationErrorType::Internal,
                     retryable: true,
                     severity: OperationErrorSeverity::Error,
@@ -1376,7 +1432,7 @@ pub fn analysis_run_study_sweep_op(
         })?;
     }
     let payload = serde_json::json!({
-        "schema_version": "analysis_study_sweep_run_artifact/v1",
+        "schema_version": "fea_study_sweep_run_artifact/v1",
         "sweep_id": spec.sweep_id.clone(),
         "fail_fast": spec.fail_fast,
         "study_count": spec.studies.len(),
@@ -1391,7 +1447,7 @@ pub fn analysis_run_study_sweep_op(
             ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RUN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1406,7 +1462,7 @@ pub fn analysis_run_study_sweep_op(
             ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RUN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -1495,12 +1551,12 @@ pub fn analysis_run_modal_with_options_op(
             ANALYSIS_RUN_MODAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_MODAL.INVALID_MODEL",
+                error_code: "RM.FEA.RUN_MODAL.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis model must include at least one modal step for analysis.run_modal",
+            "FEA model must include at least one modal step for fea.run_modal",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -1514,12 +1570,12 @@ pub fn analysis_run_modal_with_options_op(
             ANALYSIS_RUN_MODAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_MODAL.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_MODAL.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_modal options require mode_count greater than zero",
+            "fea.run_modal options require mode_count greater than zero",
             BTreeMap::from([("mode_count".to_string(), options.mode_count.to_string())]),
         ));
     }
@@ -1538,7 +1594,7 @@ pub fn analysis_run_modal_with_options_op(
                 ANALYSIS_RUN_MODAL_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_MODAL.INVALID_OPTIONS",
+                    error_code: "RM.FEA.RUN_MODAL.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -1556,7 +1612,7 @@ pub fn analysis_run_modal_with_options_op(
                 ANALYSIS_RUN_MODAL_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_MODAL.INVALID_OPTIONS",
+                    error_code: "RM.FEA.RUN_MODAL.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -1592,7 +1648,7 @@ pub fn analysis_run_modal_with_options_op(
             ANALYSIS_RUN_MODAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_MODAL.SOLVER_MODEL_INVALID",
+                error_code: "RM.FEA.RUN_MODAL.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -1775,7 +1831,7 @@ pub fn analysis_run_modal_with_options_op(
 
     if let Some(nonlinear) = result.nonlinear_results.as_ref() {
         let event = format!(
-            "analysis.run_nonlinear outcome run_id={} model_id={} backend={:?} run_status={:?} publishable={} failed_increments={} max_iteration_count={} line_search_backtracks={} tangent_rebuild_count={} max_residual_norm={} max_increment_norm={} max_backtracks_per_increment={} quality_reason_count={}",
+            "fea.run_nonlinear outcome run_id={} model_id={} backend={:?} run_status={:?} publishable={} failed_increments={} max_iteration_count={} line_search_backtracks={} tangent_rebuild_count={} max_residual_norm={} max_increment_norm={} max_backtracks_per_increment={} quality_reason_count={}",
             result.run_id,
             model.model_id.0,
             backend,
@@ -1813,12 +1869,12 @@ pub fn analysis_run_modal_with_options_op(
             ANALYSIS_RUN_MODAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_MODAL.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RUN_MODAL.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("failed to persist analysis run artifact: {err}"),
+            format!("failed to persist FEA run artifact: {err}"),
             BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
         )
     })?;
@@ -1847,12 +1903,12 @@ pub fn analysis_run_acoustic_with_options_op(
             ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_ACOUSTIC.INVALID_MODEL",
+                error_code: "RM.FEA.RUN_ACOUSTIC.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis model must include at least one modal step for analysis.run_acoustic",
+            "FEA model must include at least one modal step for fea.run_acoustic",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -1866,12 +1922,12 @@ pub fn analysis_run_acoustic_with_options_op(
             ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_ACOUSTIC.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_ACOUSTIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_acoustic options require mode_count greater than zero",
+            "fea.run_acoustic options require mode_count greater than zero",
             BTreeMap::from([("mode_count".to_string(), options.mode_count.to_string())]),
         ));
     }
@@ -1890,7 +1946,7 @@ pub fn analysis_run_acoustic_with_options_op(
                 ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_ACOUSTIC.INVALID_OPTIONS",
+                    error_code: "RM.FEA.RUN_ACOUSTIC.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -1908,7 +1964,7 @@ pub fn analysis_run_acoustic_with_options_op(
                 ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_ACOUSTIC.INVALID_OPTIONS",
+                    error_code: "RM.FEA.RUN_ACOUSTIC.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -1944,7 +2000,7 @@ pub fn analysis_run_acoustic_with_options_op(
             ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_ACOUSTIC.SOLVER_MODEL_INVALID",
+                error_code: "RM.FEA.RUN_ACOUSTIC.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2136,12 +2192,12 @@ pub fn analysis_run_acoustic_with_options_op(
             ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_ACOUSTIC.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RUN_ACOUSTIC.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("failed to persist analysis run artifact: {err}"),
+            format!("failed to persist FEA run artifact: {err}"),
             BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
         )
     })?;
@@ -2191,12 +2247,12 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_MODEL",
+                error_code: "RM.FEA.RUN_CFD.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis model must include at least one cfd step for analysis.run_cfd",
+            "FEA model must include at least one cfd step for fea.run_cfd",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -2210,12 +2266,12 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_MODEL",
+                error_code: "RM.FEA.RUN_CFD.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cfd requires model.cfd to be configured",
+            "fea.run_cfd requires model.cfd to be configured",
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     };
@@ -2226,12 +2282,12 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cfd requires cfd domain enabled=true",
+            "fea.run_cfd requires cfd domain enabled=true",
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     }
@@ -2243,12 +2299,12 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cfd requires finite positive reference_density_kg_per_m3",
+            "fea.run_cfd requires finite positive reference_density_kg_per_m3",
             BTreeMap::from([(
                 "reference_density_kg_per_m3".to_string(),
                 cfd_domain.reference_density_kg_per_m3.to_string(),
@@ -2261,12 +2317,12 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cfd requires finite positive dynamic_viscosity_pa_s",
+            "fea.run_cfd requires finite positive dynamic_viscosity_pa_s",
             BTreeMap::from([(
                 "dynamic_viscosity_pa_s".to_string(),
                 cfd_domain.dynamic_viscosity_pa_s.to_string(),
@@ -2279,12 +2335,12 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cfd requires finite non-negative inlet_velocity_m_per_s",
+            "fea.run_cfd requires finite non-negative inlet_velocity_m_per_s",
             BTreeMap::from([(
                 "inlet_velocity_m_per_s".to_string(),
                 cfd_domain.inlet_velocity_m_per_s.to_string(),
@@ -2300,12 +2356,12 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cfd requires turbulence_intensity in [0, 1]",
+            "fea.run_cfd requires turbulence_intensity in [0, 1]",
             BTreeMap::from([(
                 "turbulence_intensity".to_string(),
                 cfd_domain.turbulence_intensity.to_string(),
@@ -2319,12 +2375,12 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cfd options require finite positive time_step_s",
+            "fea.run_cfd options require finite positive time_step_s",
             BTreeMap::from([("time_step_s".to_string(), options.time_step_s.to_string())]),
         ));
     }
@@ -2334,12 +2390,12 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cfd options require step_count greater than zero",
+            "fea.run_cfd options require step_count greater than zero",
             BTreeMap::from([("step_count".to_string(), options.step_count.to_string())]),
         ));
     }
@@ -2349,12 +2405,12 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cfd options require max_linear_iters greater than zero",
+            "fea.run_cfd options require max_linear_iters greater than zero",
             BTreeMap::from([(
                 "max_linear_iters".to_string(),
                 options.max_linear_iters.to_string(),
@@ -2367,12 +2423,12 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cfd options require finite positive tolerance",
+            "fea.run_cfd options require finite positive tolerance",
             BTreeMap::from([("tolerance".to_string(), options.tolerance.to_string())]),
         ));
     }
@@ -2382,12 +2438,12 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CFD.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cfd options require finite positive residual_warn_threshold",
+            "fea.run_cfd options require finite positive residual_warn_threshold",
             BTreeMap::from([(
                 "residual_warn_threshold".to_string(),
                 options.residual_warn_threshold.to_string(),
@@ -2434,7 +2490,7 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CFD.SOLVER_MODEL_INVALID",
+                error_code: "RM.FEA.RUN_CFD.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2605,12 +2661,12 @@ pub fn analysis_run_cfd_with_options_op(
             ANALYSIS_RUN_CFD_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CFD.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RUN_CFD.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("failed to persist analysis run artifact: {err}"),
+            format!("failed to persist FEA run artifact: {err}"),
             BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
         )
     })?;
@@ -2660,12 +2716,12 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_MODEL",
+                error_code: "RM.FEA.RUN_CHT.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis model must include at least one cfd step for analysis.run_cht",
+            "FEA model must include at least one cfd step for fea.run_cht",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -2682,12 +2738,12 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_MODEL",
+                error_code: "RM.FEA.RUN_CHT.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis model must include at least one thermal step for analysis.run_cht",
+            "FEA model must include at least one thermal step for fea.run_cht",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -2700,12 +2756,12 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_MODEL",
+                error_code: "RM.FEA.RUN_CHT.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cht requires model.cfd to be configured",
+            "fea.run_cht requires model.cfd to be configured",
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     };
@@ -2715,12 +2771,12 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cht requires cfd domain enabled=true",
+            "fea.run_cht requires cfd domain enabled=true",
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     }
@@ -2732,12 +2788,12 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cht requires finite positive reference_density_kg_per_m3",
+            "fea.run_cht requires finite positive reference_density_kg_per_m3",
             BTreeMap::from([(
                 "reference_density_kg_per_m3".to_string(),
                 cfd_domain.reference_density_kg_per_m3.to_string(),
@@ -2750,12 +2806,12 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cht requires finite positive dynamic_viscosity_pa_s",
+            "fea.run_cht requires finite positive dynamic_viscosity_pa_s",
             BTreeMap::from([(
                 "dynamic_viscosity_pa_s".to_string(),
                 cfd_domain.dynamic_viscosity_pa_s.to_string(),
@@ -2768,12 +2824,12 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cht requires finite non-negative inlet_velocity_m_per_s",
+            "fea.run_cht requires finite non-negative inlet_velocity_m_per_s",
             BTreeMap::from([(
                 "inlet_velocity_m_per_s".to_string(),
                 cfd_domain.inlet_velocity_m_per_s.to_string(),
@@ -2789,12 +2845,12 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cht requires turbulence_intensity in [0, 1]",
+            "fea.run_cht requires turbulence_intensity in [0, 1]",
             BTreeMap::from([(
                 "turbulence_intensity".to_string(),
                 cfd_domain.turbulence_intensity.to_string(),
@@ -2807,12 +2863,12 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cht options require finite positive time_step_s",
+            "fea.run_cht options require finite positive time_step_s",
             BTreeMap::from([("time_step_s".to_string(), options.time_step_s.to_string())]),
         ));
     }
@@ -2822,12 +2878,12 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cht options require step_count/max_linear_iters greater than zero",
+            "fea.run_cht options require step_count/max_linear_iters greater than zero",
             BTreeMap::new(),
         ));
     }
@@ -2837,12 +2893,12 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cht options require finite positive tolerance",
+            "fea.run_cht options require finite positive tolerance",
             BTreeMap::from([("tolerance".to_string(), options.tolerance.to_string())]),
         ));
     }
@@ -2852,12 +2908,12 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cht options require finite positive residual_warn_threshold",
+            "fea.run_cht options require finite positive residual_warn_threshold",
             BTreeMap::from([(
                 "residual_warn_threshold".to_string(),
                 options.residual_warn_threshold.to_string(),
@@ -2878,12 +2934,12 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_cht requires model.thermo_mechanical to be configured",
+            "fea.run_cht requires model.thermo_mechanical to be configured",
             BTreeMap::new(),
         ));
     };
@@ -2893,7 +2949,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2932,7 +2988,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.SOLVER_MODEL_INVALID",
+                error_code: "RM.FEA.RUN_CHT.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -2975,7 +3031,7 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.SOLVER_MODEL_INVALID",
+                error_code: "RM.FEA.RUN_CHT.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3180,12 +3236,12 @@ pub fn analysis_run_cht_with_options_op(
             ANALYSIS_RUN_CHT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_CHT.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RUN_CHT.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("failed to persist analysis run artifact: {err}"),
+            format!("failed to persist FEA run artifact: {err}"),
             BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
         )
     })?;
@@ -3222,12 +3278,12 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_MODEL",
+                error_code: "RM.FEA.RUN_FSI.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis model must include at least one cfd step for analysis.run_fsi",
+            "FEA model must include at least one cfd step for fea.run_fsi",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -3244,12 +3300,12 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_MODEL",
+                error_code: "RM.FEA.RUN_FSI.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis model must include at least one transient step for analysis.run_fsi",
+            "FEA model must include at least one transient step for fea.run_fsi",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -3262,12 +3318,12 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_MODEL",
+                error_code: "RM.FEA.RUN_FSI.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_fsi requires model.cfd to be configured",
+            "fea.run_fsi requires model.cfd to be configured",
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     };
@@ -3277,12 +3333,12 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_fsi requires cfd domain enabled=true",
+            "fea.run_fsi requires cfd domain enabled=true",
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     }
@@ -3294,12 +3350,12 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_fsi requires finite positive reference_density_kg_per_m3",
+            "fea.run_fsi requires finite positive reference_density_kg_per_m3",
             BTreeMap::from([(
                 "reference_density_kg_per_m3".to_string(),
                 cfd_domain.reference_density_kg_per_m3.to_string(),
@@ -3312,12 +3368,12 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_fsi requires finite positive dynamic_viscosity_pa_s",
+            "fea.run_fsi requires finite positive dynamic_viscosity_pa_s",
             BTreeMap::from([(
                 "dynamic_viscosity_pa_s".to_string(),
                 cfd_domain.dynamic_viscosity_pa_s.to_string(),
@@ -3330,12 +3386,12 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_fsi requires finite non-negative inlet_velocity_m_per_s",
+            "fea.run_fsi requires finite non-negative inlet_velocity_m_per_s",
             BTreeMap::from([(
                 "inlet_velocity_m_per_s".to_string(),
                 cfd_domain.inlet_velocity_m_per_s.to_string(),
@@ -3351,12 +3407,12 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_fsi requires turbulence_intensity in [0, 1]",
+            "fea.run_fsi requires turbulence_intensity in [0, 1]",
             BTreeMap::from([(
                 "turbulence_intensity".to_string(),
                 cfd_domain.turbulence_intensity.to_string(),
@@ -3369,12 +3425,12 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_fsi options require finite positive time_step_s",
+            "fea.run_fsi options require finite positive time_step_s",
             BTreeMap::from([("time_step_s".to_string(), options.time_step_s.to_string())]),
         ));
     }
@@ -3384,12 +3440,12 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_fsi options require step_count/max_linear_iters greater than zero",
+            "fea.run_fsi options require step_count/max_linear_iters greater than zero",
             BTreeMap::new(),
         ));
     }
@@ -3399,12 +3455,12 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_fsi options require finite positive tolerance",
+            "fea.run_fsi options require finite positive tolerance",
             BTreeMap::from([("tolerance".to_string(), options.tolerance.to_string())]),
         ));
     }
@@ -3414,12 +3470,12 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_FSI.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_fsi options require finite positive residual_warn_threshold",
+            "fea.run_fsi options require finite positive residual_warn_threshold",
             BTreeMap::from([(
                 "residual_warn_threshold".to_string(),
                 options.residual_warn_threshold.to_string(),
@@ -3466,7 +3522,7 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_FSI.SOLVER_MODEL_INVALID",
+                error_code: "RM.FEA.RUN_FSI.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3651,12 +3707,12 @@ pub fn analysis_run_fsi_with_options_op(
             ANALYSIS_RUN_FSI_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_FSI.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RUN_FSI.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("failed to persist analysis run artifact: {err}"),
+            format!("failed to persist FEA run artifact: {err}"),
             BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
         )
     })?;
@@ -3685,12 +3741,12 @@ pub fn analysis_run_thermal_with_options_op(
             ANALYSIS_RUN_THERMAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_THERMAL.INVALID_MODEL",
+                error_code: "RM.FEA.RUN_THERMAL.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis model must include at least one thermal step for analysis.run_thermal",
+            "FEA model must include at least one thermal step for fea.run_thermal",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -3711,12 +3767,12 @@ pub fn analysis_run_thermal_with_options_op(
             ANALYSIS_RUN_THERMAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_THERMAL.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_THERMAL.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_thermal requires model.thermo_mechanical to be configured",
+            "fea.run_thermal requires model.thermo_mechanical to be configured",
             BTreeMap::new(),
         ));
     };
@@ -3726,7 +3782,7 @@ pub fn analysis_run_thermal_with_options_op(
             ANALYSIS_RUN_THERMAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_THERMAL.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_THERMAL.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3762,7 +3818,7 @@ pub fn analysis_run_thermal_with_options_op(
             ANALYSIS_RUN_THERMAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_THERMAL.SOLVER_MODEL_INVALID",
+                error_code: "RM.FEA.RUN_THERMAL.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -3896,12 +3952,12 @@ pub fn analysis_run_thermal_with_options_op(
             ANALYSIS_RUN_THERMAL_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_THERMAL.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RUN_THERMAL.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("failed to persist analysis run artifact: {err}"),
+            format!("failed to persist FEA run artifact: {err}"),
             BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
         )
     })?;
@@ -3930,12 +3986,12 @@ pub fn analysis_run_transient_with_options_op(
             ANALYSIS_RUN_TRANSIENT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_TRANSIENT.INVALID_MODEL",
+                error_code: "RM.FEA.RUN_TRANSIENT.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis model must include at least one transient step for analysis.run_transient",
+            "FEA model must include at least one transient step for fea.run_transient",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -3957,7 +4013,7 @@ pub fn analysis_run_transient_with_options_op(
                 ANALYSIS_RUN_TRANSIENT_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_TRANSIENT.INVALID_OPTIONS",
+                    error_code: "RM.FEA.RUN_TRANSIENT.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -3975,7 +4031,7 @@ pub fn analysis_run_transient_with_options_op(
                 ANALYSIS_RUN_TRANSIENT_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_TRANSIENT.INVALID_OPTIONS",
+                    error_code: "RM.FEA.RUN_TRANSIENT.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -4022,7 +4078,7 @@ pub fn analysis_run_transient_with_options_op(
             ANALYSIS_RUN_TRANSIENT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
+                error_code: "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -4343,12 +4399,12 @@ pub fn analysis_run_transient_with_options_op(
             ANALYSIS_RUN_TRANSIENT_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_TRANSIENT.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RUN_TRANSIENT.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("failed to persist analysis run artifact: {err}"),
+            format!("failed to persist FEA run artifact: {err}"),
             BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
         )
     })?;
@@ -4390,12 +4446,12 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_MODEL",
+                error_code: "RM.FEA.RUN_NONLINEAR.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis model must include at least one nonlinear step for analysis.run_nonlinear",
+            "FEA model must include at least one nonlinear step for fea.run_nonlinear",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -4409,12 +4465,12 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_nonlinear options require increment_count greater than zero",
+            "fea.run_nonlinear options require increment_count greater than zero",
             BTreeMap::from([(
                 "increment_count".to_string(),
                 options.increment_count.to_string(),
@@ -4427,12 +4483,12 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_nonlinear options require max_newton_iters greater than zero",
+            "fea.run_nonlinear options require max_newton_iters greater than zero",
             BTreeMap::from([(
                 "max_newton_iters".to_string(),
                 options.max_newton_iters.to_string(),
@@ -4445,12 +4501,12 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_nonlinear options require finite positive tolerance",
+            "fea.run_nonlinear options require finite positive tolerance",
             BTreeMap::from([("tolerance".to_string(), options.tolerance.to_string())]),
         ));
     }
@@ -4460,12 +4516,12 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_nonlinear options require finite positive increment_norm_tolerance",
+            "fea.run_nonlinear options require finite positive increment_norm_tolerance",
             BTreeMap::from([(
                 "increment_norm_tolerance".to_string(),
                 options.increment_norm_tolerance.to_string(),
@@ -4479,12 +4535,12 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_nonlinear options require residual_convergence_factor >= 1.0",
+            "fea.run_nonlinear options require residual_convergence_factor >= 1.0",
             BTreeMap::from([(
                 "residual_convergence_factor".to_string(),
                 options.residual_convergence_factor.to_string(),
@@ -4500,12 +4556,12 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_nonlinear options require line_search_reduction in (0, 1)",
+            "fea.run_nonlinear options require line_search_reduction in (0, 1)",
             BTreeMap::from([(
                 "line_search_reduction".to_string(),
                 options.line_search_reduction.to_string(),
@@ -4518,12 +4574,12 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_nonlinear options require tangent_refresh_interval greater than zero",
+            "fea.run_nonlinear options require tangent_refresh_interval greater than zero",
             BTreeMap::from([(
                 "tangent_refresh_interval".to_string(),
                 options.tangent_refresh_interval.to_string(),
@@ -4545,7 +4601,7 @@ pub fn analysis_run_nonlinear_with_options_op(
                 ANALYSIS_RUN_NONLINEAR_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
+                    error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -4563,7 +4619,7 @@ pub fn analysis_run_nonlinear_with_options_op(
                 ANALYSIS_RUN_NONLINEAR_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
+                    error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -4583,7 +4639,7 @@ pub fn analysis_run_nonlinear_with_options_op(
                 ANALYSIS_RUN_NONLINEAR_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
+                    error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -4601,7 +4657,7 @@ pub fn analysis_run_nonlinear_with_options_op(
                 ANALYSIS_RUN_NONLINEAR_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_NONLINEAR.INVALID_OPTIONS",
+                    error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -4644,7 +4700,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_NONLINEAR.SOLVER_MODEL_INVALID",
+                error_code: "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -5001,12 +5057,12 @@ pub fn analysis_run_nonlinear_with_options_op(
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_NONLINEAR.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RUN_NONLINEAR.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("failed to persist analysis run artifact: {err}"),
+            format!("failed to persist FEA run artifact: {err}"),
             BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
         )
     })?;
@@ -5039,7 +5095,7 @@ pub fn analysis_run_linear_static_with_options(
                 ANALYSIS_RUN_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_LINEAR_STATIC.INVALID_OPTIONS",
+                    error_code: "RM.FEA.RUN_LINEAR_STATIC.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -5057,7 +5113,7 @@ pub fn analysis_run_linear_static_with_options(
                 ANALYSIS_RUN_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_LINEAR_STATIC.INVALID_OPTIONS",
+                    error_code: "RM.FEA.RUN_LINEAR_STATIC.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -5107,7 +5163,7 @@ pub fn analysis_run_linear_static_with_options(
             ANALYSIS_RUN_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID",
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -5249,12 +5305,12 @@ pub fn analysis_run_linear_static_with_options(
             ANALYSIS_RUN_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_LINEAR_STATIC.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("failed to persist analysis run artifact: {err}"),
+            format!("failed to persist FEA run artifact: {err}"),
             BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
         )
     })?;
@@ -5296,12 +5352,12 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.REQUIRES_STEP",
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.REQUIRES_STEP",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis model must include at least one electromagnetic step for analysis.run_electromagnetic",
+            "FEA model must include at least one electromagnetic step for fea.run_electromagnetic",
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     }
@@ -5312,12 +5368,12 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_MODEL",
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_MODEL",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_electromagnetic requires model.electromagnetic to be configured",
+            "fea.run_electromagnetic requires model.electromagnetic to be configured",
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     };
@@ -5327,12 +5383,12 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_electromagnetic requires electromagnetic domain enabled=true",
+            "fea.run_electromagnetic requires electromagnetic domain enabled=true",
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     }
@@ -5342,12 +5398,12 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_electromagnetic requires finite positive reference_frequency_hz",
+            "fea.run_electromagnetic requires finite positive reference_frequency_hz",
             BTreeMap::from([(
                 "reference_frequency_hz".to_string(),
                 em_domain.reference_frequency_hz.to_string(),
@@ -5360,12 +5416,12 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_electromagnetic requires finite positive applied_current_a",
+            "fea.run_electromagnetic requires finite positive applied_current_a",
             BTreeMap::from([(
                 "applied_current_a".to_string(),
                 em_domain.applied_current_a.to_string(),
@@ -5378,12 +5434,12 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_electromagnetic requires residual_target to be finite and positive",
+            "fea.run_electromagnetic requires residual_target to be finite and positive",
             BTreeMap::from([(
                 "residual_target".to_string(),
                 options.residual_target.to_string(),
@@ -5396,12 +5452,12 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_electromagnetic requires harmonic_tolerance to be finite and positive",
+            "fea.run_electromagnetic requires harmonic_tolerance to be finite and positive",
             BTreeMap::from([(
                 "harmonic_tolerance".to_string(),
                 options.harmonic_tolerance.to_string(),
@@ -5414,12 +5470,12 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_electromagnetic requires harmonic_max_iterations greater than zero",
+            "fea.run_electromagnetic requires harmonic_max_iterations greater than zero",
             BTreeMap::from([(
                 "harmonic_max_iterations".to_string(),
                 options.harmonic_max_iterations.to_string(),
@@ -5447,12 +5503,12 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "analysis.run_electromagnetic sweep_frequency_hz must contain finite positive values",
+            "fea.run_electromagnetic sweep_frequency_hz must contain finite positive values",
             BTreeMap::new(),
         )
     })?;
@@ -5478,7 +5534,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
                         ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
                         &context,
                         OperationErrorSpec {
-                            error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.SOLVER_MODEL_INVALID",
+                            error_code: "RM.FEA.RUN_ELECTROMAGNETIC.SOLVER_MODEL_INVALID",
                             error_type: OperationErrorType::Validation,
                             retryable: false,
                             severity: OperationErrorSeverity::Error,
@@ -6081,12 +6137,12 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_ELECTROMAGNETIC.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("failed to persist analysis run artifact: {err}"),
+            format!("failed to persist FEA run artifact: {err}"),
             BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
         )
     })?;
@@ -6118,12 +6174,12 @@ pub fn analysis_results_op(
                     ANALYSIS_RESULTS_OP_VERSION,
                     &context,
                     OperationErrorSpec {
-                        error_code: "RM.ANALYSIS.RESULTS.FIELD_NOT_FOUND",
+                        error_code: "RM.FEA.RESULTS.FIELD_NOT_FOUND",
                         error_type: OperationErrorType::Input,
                         retryable: false,
                         severity: OperationErrorSeverity::Error,
                     },
-                    format!("requested analysis field '{requested}' was not produced by run"),
+                    format!("requested FEA field '{requested}' was not produced by run"),
                     BTreeMap::from([
                         ("requested_field".to_string(), requested.clone()),
                         (
@@ -6805,7 +6861,7 @@ pub fn analysis_results_op(
                             ANALYSIS_RESULTS_OP_VERSION,
                             &context,
                             OperationErrorSpec {
-                                error_code: "RM.ANALYSIS.RESULTS.MODE_NOT_FOUND",
+                                error_code: "RM.FEA.RESULTS.MODE_NOT_FOUND",
                                 error_type: OperationErrorType::Input,
                                 retryable: false,
                                 severity: OperationErrorSeverity::Error,
@@ -6826,7 +6882,7 @@ pub fn analysis_results_op(
                             ANALYSIS_RESULTS_OP_VERSION,
                             &context,
                             OperationErrorSpec {
-                                error_code: "RM.ANALYSIS.RESULTS.MODE_NOT_FOUND",
+                                error_code: "RM.FEA.RESULTS.MODE_NOT_FOUND",
                                 error_type: OperationErrorType::Input,
                                 retryable: false,
                                 severity: OperationErrorSeverity::Error,
@@ -6850,7 +6906,7 @@ pub fn analysis_results_op(
                                 ANALYSIS_RESULTS_OP_VERSION,
                                 &context,
                                 OperationErrorSpec {
-                                    error_code: "RM.ANALYSIS.RESULTS.MODE_NOT_FOUND",
+                                    error_code: "RM.FEA.RESULTS.MODE_NOT_FOUND",
                                     error_type: OperationErrorType::Input,
                                     retryable: false,
                                     severity: OperationErrorSeverity::Error,
@@ -6904,7 +6960,7 @@ pub fn analysis_results_op(
                             ANALYSIS_RESULTS_OP_VERSION,
                             &context,
                             OperationErrorSpec {
-                                error_code: "RM.ANALYSIS.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                error_code: "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
                                 error_type: OperationErrorType::Input,
                                 retryable: false,
                                 severity: OperationErrorSeverity::Error,
@@ -6931,7 +6987,7 @@ pub fn analysis_results_op(
                                 ANALYSIS_RESULTS_OP_VERSION,
                                 &context,
                                 OperationErrorSpec {
-                                    error_code: "RM.ANALYSIS.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                    error_code: "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
                                     error_type: OperationErrorType::Input,
                                     retryable: false,
                                     severity: OperationErrorSeverity::Error,
@@ -6956,7 +7012,7 @@ pub fn analysis_results_op(
                                 ANALYSIS_RESULTS_OP_VERSION,
                                 &context,
                                 OperationErrorSpec {
-                                    error_code: "RM.ANALYSIS.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                    error_code: "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
                                     error_type: OperationErrorType::Input,
                                     retryable: false,
                                     severity: OperationErrorSeverity::Error,
@@ -7058,12 +7114,12 @@ pub fn analysis_results_by_run_id_op(
             ANALYSIS_RESULTS_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RESULTS.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RESULTS.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("failed to load analysis run artifact: {err}"),
+            format!("failed to load FEA run artifact: {err}"),
             BTreeMap::from([("run_id".to_string(), run_id.to_string())]),
         )
     })?;
@@ -7074,12 +7130,12 @@ pub fn analysis_results_by_run_id_op(
             ANALYSIS_RESULTS_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RESULTS.RUN_NOT_FOUND",
+                error_code: "RM.FEA.RESULTS.RUN_NOT_FOUND",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("analysis run_id '{run_id}' was not found"),
+            format!("FEA run_id '{run_id}' was not found"),
             BTreeMap::from([("run_id".to_string(), run_id.to_string())]),
         ));
     };
@@ -7097,12 +7153,12 @@ pub fn analysis_results_compare_op(
             ANALYSIS_RESULTS_COMPARE_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RESULTS_COMPARE.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RESULTS_COMPARE.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("failed to load baseline analysis run artifact: {err}"),
+            format!("failed to load baseline FEA run artifact: {err}"),
             BTreeMap::from([("run_id".to_string(), query.baseline_run_id.clone())]),
         )
     })?;
@@ -7112,13 +7168,13 @@ pub fn analysis_results_compare_op(
             ANALYSIS_RESULTS_COMPARE_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RESULTS_COMPARE.RUN_NOT_FOUND",
+                error_code: "RM.FEA.RESULTS_COMPARE.RUN_NOT_FOUND",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
             format!(
-                "analysis baseline run_id '{}' was not found",
+                "FEA baseline run_id '{}' was not found",
                 query.baseline_run_id
             ),
             BTreeMap::from([("run_id".to_string(), query.baseline_run_id.clone())]),
@@ -7131,12 +7187,12 @@ pub fn analysis_results_compare_op(
             ANALYSIS_RESULTS_COMPARE_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RESULTS_COMPARE.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.RESULTS_COMPARE.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("failed to load candidate analysis run artifact: {err}"),
+            format!("failed to load candidate FEA run artifact: {err}"),
             BTreeMap::from([("run_id".to_string(), query.candidate_run_id.clone())]),
         )
     })?;
@@ -7146,13 +7202,13 @@ pub fn analysis_results_compare_op(
             ANALYSIS_RESULTS_COMPARE_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RESULTS_COMPARE.RUN_NOT_FOUND",
+                error_code: "RM.FEA.RESULTS_COMPARE.RUN_NOT_FOUND",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
             format!(
-                "analysis candidate run_id '{}' was not found",
+                "FEA candidate run_id '{}' was not found",
                 query.candidate_run_id
             ),
             BTreeMap::from([("run_id".to_string(), query.candidate_run_id.clone())]),
@@ -7230,12 +7286,12 @@ pub fn analysis_trends_op(
             ANALYSIS_TRENDS_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.TRENDS.ARTIFACT_STORE_FAILED",
+                error_code: "RM.FEA.TRENDS.ARTIFACT_STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("failed to list analysis run artifacts: {err}"),
+            format!("failed to list FEA run artifacts: {err}"),
             BTreeMap::new(),
         )
     })?;
@@ -7968,38 +8024,62 @@ fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
     let mut issue_codes = Vec::new();
 
     if spec.study_id.trim().is_empty() {
-        issue_codes.push("ANALYSIS_STUDY_ID_EMPTY".to_string());
+        issue_codes.push("RM.FEA.STUDY.ID_EMPTY".to_string());
     }
     if spec.create_model_intent.model_id.trim().is_empty() {
-        issue_codes.push("ANALYSIS_STUDY_MODEL_ID_EMPTY".to_string());
+        issue_codes.push("RM.FEA.STUDY.MODEL_ID_EMPTY".to_string());
     }
     if spec.geometry.meshes.is_empty() {
-        issue_codes.push("ANALYSIS_STUDY_GEOMETRY_MESHES_EMPTY".to_string());
+        issue_codes.push("RM.FEA.STUDY.GEOMETRY_MESHES_EMPTY".to_string());
     }
     if spec.geometry.units == UnitSystem::Unspecified {
-        issue_codes.push("ANALYSIS_STUDY_GEOMETRY_UNITS_UNSPECIFIED".to_string());
+        issue_codes.push("RM.FEA.STUDY.GEOMETRY_UNITS_UNSPECIFIED".to_string());
     }
     if !profile_supports_run_kind(spec.create_model_intent.profile, spec.run_kind) {
-        issue_codes.push("ANALYSIS_STUDY_RUN_KIND_PROFILE_MISMATCH".to_string());
+        issue_codes.push("RM.FEA.STUDY.RUN_KIND_PROFILE_MISMATCH".to_string());
+    }
+    if let Some(model) = &spec.model {
+        if model.geometry_id != spec.geometry.geometry_id
+            || model.geometry_revision != spec.geometry.revision
+        {
+            issue_codes.push("RM.FEA.STUDY.MODEL_GEOMETRY_MISMATCH".to_string());
+        }
+        if validate_model_against_geometry(model, spec.geometry.units, &ReferenceFrame::Global)
+            .is_err()
+        {
+            issue_codes.push("RM.FEA.STUDY.MODEL_INVALID".to_string());
+        }
     }
     if spec.electromagnetic_run_options.is_some()
         && spec.run_kind != AnalysisRunKind::Electromagnetic
     {
-        issue_codes.push("ANALYSIS_STUDY_ELECTROMAGNETIC_OPTIONS_UNUSED".to_string());
+        issue_codes.push("RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH".to_string());
+    }
+    if spec.linear_static_run_options.is_some() && spec.run_kind != AnalysisRunKind::LinearStatic
+        || spec.modal_run_options.is_some() && spec.run_kind != AnalysisRunKind::Modal
+        || spec.acoustic_run_options.is_some() && spec.run_kind != AnalysisRunKind::Acoustic
+        || spec.thermal_run_options.is_some() && spec.run_kind != AnalysisRunKind::Thermal
+        || spec.transient_run_options.is_some() && spec.run_kind != AnalysisRunKind::Transient
+        || spec.cfd_run_options.is_some() && spec.run_kind != AnalysisRunKind::Cfd
+        || spec.cht_run_options.is_some() && spec.run_kind != AnalysisRunKind::Cht
+        || spec.fsi_run_options.is_some() && spec.run_kind != AnalysisRunKind::Fsi
+        || spec.nonlinear_run_options.is_some() && spec.run_kind != AnalysisRunKind::Nonlinear
+    {
+        issue_codes.push("RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH".to_string());
     }
     if spec.run_kind == AnalysisRunKind::Electromagnetic {
         if let Some(options) = spec.electromagnetic_run_options.as_ref() {
             if !options.residual_target.is_finite() || options.residual_target <= 0.0 {
                 issue_codes
-                    .push("ANALYSIS_STUDY_ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID".to_string());
+                    .push("RM.FEA.STUDY.ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID".to_string());
             }
             if !options.harmonic_tolerance.is_finite() || options.harmonic_tolerance <= 0.0 {
                 issue_codes
-                    .push("ANALYSIS_STUDY_ELECTROMAGNETIC_HARMONIC_TOLERANCE_INVALID".to_string());
+                    .push("RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_TOLERANCE_INVALID".to_string());
             }
             if options.harmonic_max_iterations == 0 {
                 issue_codes.push(
-                    "ANALYSIS_STUDY_ELECTROMAGNETIC_HARMONIC_MAX_ITERATIONS_INVALID".to_string(),
+                    "RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_MAX_ITERATIONS_INVALID".to_string(),
                 );
             }
             if options.sweep_enabled
@@ -8009,7 +8089,7 @@ fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
                     .all(|frequency_hz| frequency_hz.is_finite() && *frequency_hz > 0.0)
             {
                 issue_codes
-                    .push("ANALYSIS_STUDY_ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID".to_string());
+                    .push("RM.FEA.STUDY.ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID".to_string());
             }
         }
     }
@@ -8019,28 +8099,32 @@ fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
 
 fn study_issue_message(code: &str) -> &'static str {
     match code {
-        "ANALYSIS_STUDY_ID_EMPTY" => "study_id must be non-empty",
-        "ANALYSIS_STUDY_MODEL_ID_EMPTY" => "create_model_intent.model_id must be non-empty",
-        "ANALYSIS_STUDY_GEOMETRY_MESHES_EMPTY" => "geometry.meshes must contain at least one mesh",
-        "ANALYSIS_STUDY_GEOMETRY_UNITS_UNSPECIFIED" => {
+        "RM.FEA.STUDY.ID_EMPTY" => "study_id must be non-empty",
+        "RM.FEA.STUDY.MODEL_ID_EMPTY" => "create_model_intent.model_id must be non-empty",
+        "RM.FEA.STUDY.GEOMETRY_MESHES_EMPTY" => "geometry must contain at least one mesh",
+        "RM.FEA.STUDY.GEOMETRY_UNITS_UNSPECIFIED" => {
             "geometry.units must be specified (not unspecified)"
         }
-        "ANALYSIS_STUDY_RUN_KIND_PROFILE_MISMATCH" => {
-            "create_model_intent.profile does not support the requested run_kind"
+        "RM.FEA.STUDY.RUN_KIND_PROFILE_MISMATCH" => {
+            "model profile does not support the requested run kind"
         }
-        "ANALYSIS_STUDY_ELECTROMAGNETIC_OPTIONS_UNUSED" => {
-            "electromagnetic_run_options are only valid when run_kind is electromagnetic"
+        "RM.FEA.STUDY.MODEL_GEOMETRY_MISMATCH" => {
+            "resolved model geometry id or revision does not match the study geometry"
         }
-        "ANALYSIS_STUDY_ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID" => {
+        "RM.FEA.STUDY.MODEL_INVALID" => "resolved model failed FEA validation",
+        "RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH" => {
+            "run options are only valid for their matching run_kind"
+        }
+        "RM.FEA.STUDY.ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID" => {
             "electromagnetic_run_options.residual_target must be finite and positive"
         }
-        "ANALYSIS_STUDY_ELECTROMAGNETIC_HARMONIC_TOLERANCE_INVALID" => {
+        "RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_TOLERANCE_INVALID" => {
             "electromagnetic_run_options.harmonic_tolerance must be finite and positive"
         }
-        "ANALYSIS_STUDY_ELECTROMAGNETIC_HARMONIC_MAX_ITERATIONS_INVALID" => {
+        "RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_MAX_ITERATIONS_INVALID" => {
             "electromagnetic_run_options.harmonic_max_iterations must be greater than zero"
         }
-        "ANALYSIS_STUDY_ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID" => {
+        "RM.FEA.STUDY.ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID" => {
             "electromagnetic_run_options.sweep_frequency_hz must contain finite positive values when sweep_enabled is true"
         }
         _ => "unrecognized study validation issue",
@@ -8101,117 +8185,65 @@ fn study_fingerprint(spec: &AnalysisStudySpec) -> String {
     format!("sha256:{:x}", hasher.finalize())
 }
 
+fn study_operation_sequence(spec: &AnalysisStudySpec, run_op_version: &str) -> Vec<String> {
+    let mut operation_sequence = Vec::with_capacity(3);
+    if spec.model.is_none() {
+        operation_sequence.push(ANALYSIS_CREATE_MODEL_OP_VERSION.to_string());
+    }
+    operation_sequence.push(ANALYSIS_VALIDATE_OP_VERSION.to_string());
+    operation_sequence.push(run_op_version.to_string());
+    operation_sequence
+}
+
+fn study_run_options_json(spec: &AnalysisStudySpec) -> serde_json::Value {
+    match spec.run_kind {
+        AnalysisRunKind::LinearStatic => serde_json::to_value(&spec.linear_static_run_options),
+        AnalysisRunKind::Modal => serde_json::to_value(&spec.modal_run_options),
+        AnalysisRunKind::Acoustic => serde_json::to_value(&spec.acoustic_run_options),
+        AnalysisRunKind::Thermal => serde_json::to_value(&spec.thermal_run_options),
+        AnalysisRunKind::Transient => serde_json::to_value(&spec.transient_run_options),
+        AnalysisRunKind::Cfd => serde_json::to_value(&spec.cfd_run_options),
+        AnalysisRunKind::Cht => serde_json::to_value(&spec.cht_run_options),
+        AnalysisRunKind::Fsi => serde_json::to_value(&spec.fsi_run_options),
+        AnalysisRunKind::Nonlinear => serde_json::to_value(&spec.nonlinear_run_options),
+        AnalysisRunKind::Electromagnetic => serde_json::to_value(&spec.electromagnetic_run_options),
+    }
+    .unwrap_or(serde_json::Value::Null)
+}
+
 fn study_evidence_root() -> PathBuf {
-    current_analysis_runtime_config()
+    let config = current_fea_runtime_config();
+    config
         .study_artifact_root
         .or_else(|| {
-            std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT")
+            std::env::var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT")
+                .or_else(|_| std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT"))
                 .ok()
                 .map(PathBuf::from)
         })
         .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target/runmat-analysis-artifacts/studies")
+            config
+                .artifact_root
+                .unwrap_or_else(default_fea_artifact_root)
+                .join("studies")
         })
 }
 
 fn thermo_field_artifact_root() -> PathBuf {
-    current_analysis_runtime_config()
+    let config = current_fea_runtime_config();
+    config
         .thermo_field_artifact_root
         .or_else(|| {
             std::env::var("RUNMAT_THERMO_FIELD_ARTIFACT_ROOT")
                 .ok()
                 .map(PathBuf::from)
         })
-        .unwrap_or_else(|| PathBuf::from("target/runmat-analysis-artifacts/thermo-fields"))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AnalysisStudyFileFormat {
-    Json,
-    Yaml,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum AnalysisStudyDocument {
-    Study(AnalysisStudySpec),
-    Sweep(AnalysisStudySweepSpec),
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum RawAnalysisStudyDocument {
-    Sweep(AnalysisStudySweepSpec),
-    Study(AnalysisStudySpec),
-}
-
-pub fn analysis_study_file_format_from_path(path: &Path) -> Option<AnalysisStudyFileFormat> {
-    let file_name = path.file_name().and_then(|name| name.to_str())?;
-    if file_name.ends_with(".study.json") || file_name.ends_with(".study") {
-        return Some(AnalysisStudyFileFormat::Json);
-    }
-    if file_name.ends_with(".study.yaml") || file_name.ends_with(".study.yml") {
-        return Some(AnalysisStudyFileFormat::Yaml);
-    }
-    None
-}
-
-pub fn is_analysis_study_file_path(path: &Path) -> bool {
-    analysis_study_file_format_from_path(path).is_some()
-}
-
-pub fn parse_analysis_study_document(
-    input: &str,
-    format: AnalysisStudyFileFormat,
-) -> Result<AnalysisStudyDocument, String> {
-    let raw = match format {
-        AnalysisStudyFileFormat::Json => serde_json::from_str::<RawAnalysisStudyDocument>(input)
-            .map_err(|err| format!("failed to parse analysis study JSON: {err}"))?,
-        AnalysisStudyFileFormat::Yaml => serde_yaml::from_str::<RawAnalysisStudyDocument>(input)
-            .map_err(|err| format!("failed to parse analysis study YAML: {err}"))?,
-    };
-    Ok(match raw {
-        RawAnalysisStudyDocument::Study(spec) => AnalysisStudyDocument::Study(spec),
-        RawAnalysisStudyDocument::Sweep(spec) => AnalysisStudyDocument::Sweep(spec),
-    })
-}
-
-pub fn load_analysis_study_document_from_path(
-    path: &Path,
-) -> Result<AnalysisStudyDocument, String> {
-    let format = analysis_study_file_format_from_path(path).ok_or_else(|| {
-        format!(
-            "unsupported analysis study file extension: {}",
-            path.display()
-        )
-    })?;
-    let input = fs::read_to_string(path).map_err(|err| {
-        format!(
-            "failed to read analysis study file {}: {err}",
-            path.display()
-        )
-    })?;
-    parse_analysis_study_document(&input, format)
-}
-
-pub async fn load_analysis_study_document_from_path_async(
-    path: &Path,
-) -> Result<AnalysisStudyDocument, String> {
-    let format = analysis_study_file_format_from_path(path).ok_or_else(|| {
-        format!(
-            "unsupported analysis study file extension: {}",
-            path.display()
-        )
-    })?;
-    let input = runmat_filesystem::read_to_string_async(path)
-        .await
-        .map_err(|err| {
-            format!(
-                "failed to read analysis study file {}: {err}",
-                path.display()
-            )
-        })?;
-    parse_analysis_study_document(&input, format)
+        .unwrap_or_else(|| {
+            config
+                .artifact_root
+                .unwrap_or_else(default_fea_artifact_root)
+                .join("thermo-fields")
+        })
 }
 
 fn persist_study_evidence(
@@ -8221,7 +8253,7 @@ fn persist_study_evidence(
 ) -> Result<String, String> {
     let study_key = study_fingerprint.replace(':', "_");
     let root = study_evidence_root().join(study_key);
-    fs::create_dir_all(&root)
+    fs_create_dir_all(&root)
         .map_err(|err| format!("failed to create study evidence directory: {err}"))?;
     let path = root.join(format!("{stage}.json"));
     let bytes = serde_json::to_vec_pretty(&payload)
@@ -8236,12 +8268,44 @@ fn atomic_write_bytes(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
         std::process::id(),
         Utc::now().timestamp_nanos_opt().unwrap_or_default()
     ));
-    fs::write(&tmp, bytes)
+    fs_write(&tmp, bytes)
         .map_err(|err| format!("failed to write temporary study evidence file: {err}"))?;
-    fs::rename(&tmp, path).map_err(|err| {
-        let _ = fs::remove_file(&tmp);
+    fs_rename(&tmp, path).map_err(|err| {
+        let _ = fs_remove_file(&tmp);
         format!("failed to atomically persist study evidence file: {err}")
     })
+}
+
+fn fs_create_dir_all(path: impl Into<PathBuf>) -> std::io::Result<()> {
+    runmat_filesystem::create_dir_all(path.into())
+}
+
+fn fs_write(path: impl Into<PathBuf>, bytes: &[u8]) -> std::io::Result<()> {
+    runmat_filesystem::write(path.into(), bytes)
+}
+
+fn fs_rename(from: impl Into<PathBuf>, to: impl Into<PathBuf>) -> std::io::Result<()> {
+    runmat_filesystem::rename(from.into(), to.into())
+}
+
+fn fs_remove_file(path: impl Into<PathBuf>) -> std::io::Result<()> {
+    match runmat_filesystem::remove_file(path.into()) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
+fn fs_exists(path: impl Into<PathBuf>) -> std::io::Result<bool> {
+    match runmat_filesystem::metadata(path.into()) {
+        Ok(_) => Ok(true),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
+fn fs_read_to_string(path: impl Into<PathBuf>) -> std::io::Result<String> {
+    runmat_filesystem::read_to_string(path.into())
 }
 
 fn to_fea_prep_context(
@@ -8950,13 +9014,36 @@ fn resolve_thermo_coupling_options(
 
     let root = thermo_field_artifact_root();
     let path = root.join(format!("{field_artifact_id}.json"));
-    if !path.exists() {
+    if !fs_exists(&path).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_THERMO_FIELD.STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to inspect thermo field artifact: {err}"),
+            BTreeMap::from([
+                (
+                    "thermo_field_artifact_id".to_string(),
+                    field_artifact_id.to_string(),
+                ),
+                (
+                    "thermo_field_artifact_path".to_string(),
+                    path.display().to_string(),
+                ),
+            ]),
+        )
+    })? {
         return Err(operation_error(
             operation,
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.NOT_FOUND",
+                error_code: "RM.FEA.RUN_THERMO_FIELD.NOT_FOUND",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -8978,13 +9065,13 @@ fn resolve_thermo_coupling_options(
         ));
     }
 
-    let raw = fs::read_to_string(&path).map_err(|err| {
+    let raw = fs_read_to_string(&path).map_err(|err| {
         operation_error(
             operation,
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.STORE_FAILED",
+                error_code: "RM.FEA.RUN_THERMO_FIELD.STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -9002,7 +9089,7 @@ fn resolve_thermo_coupling_options(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.INVALID",
+                error_code: "RM.FEA.RUN_THERMO_FIELD.INVALID",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -9015,13 +9102,15 @@ fn resolve_thermo_coupling_options(
         )
     })?;
 
-    if artifact.schema_version != "analysis_thermo_field_artifact/v1" {
+    if artifact.schema_version != "fea_thermo_field_artifact/v1"
+        && artifact.schema_version != "analysis_thermo_field_artifact/v1"
+    {
         return Err(operation_error(
             operation,
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.SCHEMA_UNSUPPORTED",
+                error_code: "RM.FEA.RUN_THERMO_FIELD.SCHEMA_UNSUPPORTED",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -9051,12 +9140,12 @@ fn resolve_thermo_coupling_options(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.MISMATCH",
+                error_code: "RM.FEA.RUN_THERMO_FIELD.MISMATCH",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "thermo field artifact geometry lineage does not match analysis model",
+            "thermo field artifact geometry lineage does not match FEA model",
             BTreeMap::from([
                 (
                     "thermo_field_artifact_id".to_string(),
@@ -9086,7 +9175,7 @@ fn resolve_thermo_coupling_options(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.DIGEST_MISMATCH",
+                error_code: "RM.FEA.RUN_THERMO_FIELD.DIGEST_MISMATCH",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -9113,7 +9202,7 @@ fn resolve_thermo_coupling_options(
                 op_version,
                 context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.APPROVER_MISSING",
+                    error_code: "RM.FEA.RUN_THERMO_FIELD.APPROVER_MISSING",
                     error_type: OperationErrorType::Validation,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -9142,7 +9231,7 @@ fn resolve_thermo_coupling_options(
                 op_version,
                 context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.APPROVER_UNAUTHORIZED",
+                    error_code: "RM.FEA.RUN_THERMO_FIELD.APPROVER_UNAUTHORIZED",
                     error_type: OperationErrorType::Validation,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -9167,7 +9256,7 @@ fn resolve_thermo_coupling_options(
                 op_version,
                 context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_THERMO_FIELD.SIGNATURE_INVALID",
+                    error_code: "RM.FEA.RUN_THERMO_FIELD.SIGNATURE_INVALID",
                     error_type: OperationErrorType::Validation,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -9210,12 +9299,12 @@ fn resolve_run_prep_context(
                 op_version,
                 context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_PREP.UNTRUSTED_CONTEXT",
+                    error_code: "RM.FEA.RUN_PREP.UNTRUSTED_CONTEXT",
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
                 },
-                "analysis run prep_context must be referenced by prep_artifact_id",
+                "FEA run prep_context must be referenced by prep_artifact_id",
                 BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
             ));
         }
@@ -9229,7 +9318,7 @@ fn resolve_run_prep_context(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_PREP.STORE_FAILED",
+                error_code: "RM.FEA.RUN_PREP.STORE_FAILED",
                 error_type: OperationErrorType::Internal,
                 retryable: true,
                 severity: OperationErrorSeverity::Error,
@@ -9244,7 +9333,7 @@ fn resolve_run_prep_context(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_PREP.NOT_FOUND",
+                error_code: "RM.FEA.RUN_PREP.NOT_FOUND",
                 error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -9260,7 +9349,7 @@ fn resolve_run_prep_context(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_PREP.SCHEMA_UNSUPPORTED",
+                error_code: "RM.FEA.RUN_PREP.SCHEMA_UNSUPPORTED",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -9282,12 +9371,12 @@ fn resolve_run_prep_context(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "RM.ANALYSIS.RUN_PREP.MISMATCH",
+                error_code: "RM.FEA.RUN_PREP.MISMATCH",
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "prep artifact geometry lineage does not match analysis model",
+            "prep artifact geometry lineage does not match FEA model",
             BTreeMap::from([
                 ("prep_artifact_id".to_string(), prep_artifact_id.to_string()),
                 ("model_geometry_id".to_string(), model.geometry_id.clone()),
@@ -9317,7 +9406,7 @@ fn resolve_run_prep_context(
                 op_version,
                 context,
                 OperationErrorSpec {
-                    error_code: "RM.ANALYSIS.RUN_PREP.STORE_FAILED",
+                    error_code: "RM.FEA.RUN_PREP.STORE_FAILED",
                     error_type: OperationErrorType::Internal,
                     retryable: true,
                     severity: OperationErrorSeverity::Error,
@@ -9333,7 +9422,7 @@ fn resolve_run_prep_context(
                     op_version,
                     context,
                     OperationErrorSpec {
-                        error_code: "RM.ANALYSIS.RUN_PREP.STALE",
+                        error_code: "RM.FEA.RUN_PREP.STALE",
                         error_type: OperationErrorType::Validation,
                         retryable: false,
                         severity: OperationErrorSeverity::Error,
@@ -9973,22 +10062,22 @@ fn map_validate_error(
 ) -> OperationErrorEnvelope {
     let (error_code, message, mut error_context) = match error {
         AnalysisValidationError::MissingMaterials => (
-            "RM.ANALYSIS.VALIDATE.MISSING_MATERIALS",
-            "analysis model must include at least one material".to_string(),
+            "RM.FEA.VALIDATE.MISSING_MATERIALS",
+            "FEA model must include at least one material".to_string(),
             BTreeMap::new(),
         ),
         AnalysisValidationError::MissingBoundaryConditions => (
-            "RM.ANALYSIS.VALIDATE.MISSING_BCS",
-            "analysis model must include at least one boundary condition".to_string(),
+            "RM.FEA.VALIDATE.MISSING_BCS",
+            "FEA model must include at least one boundary condition".to_string(),
             BTreeMap::new(),
         ),
         AnalysisValidationError::MissingLoads => (
-            "RM.ANALYSIS.VALIDATE.MISSING_LOADS",
-            "analysis model must include at least one load".to_string(),
+            "RM.FEA.VALIDATE.MISSING_LOADS",
+            "FEA model must include at least one load".to_string(),
             BTreeMap::new(),
         ),
         AnalysisValidationError::UnitMismatch { model, geometry } => (
-            "RM.ANALYSIS.VALIDATE.UNIT_MISMATCH",
+            "RM.FEA.VALIDATE.UNIT_MISMATCH",
             format!("model units {model:?} do not match geometry units {geometry:?}"),
             BTreeMap::from([
                 ("model_units".to_string(), format!("{model:?}")),
@@ -9996,7 +10085,7 @@ fn map_validate_error(
             ]),
         ),
         AnalysisValidationError::FrameMismatch { model, geometry } => (
-            "RM.ANALYSIS.VALIDATE.FRAME_MISMATCH",
+            "RM.FEA.VALIDATE.FRAME_MISMATCH",
             format!("model frame {model:?} does not match geometry frame {geometry:?}"),
             BTreeMap::from([
                 ("model_frame".to_string(), format!("{model:?}")),

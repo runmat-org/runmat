@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::fs;
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
@@ -232,6 +232,38 @@ fn prep_artifact_path(root: &PathBuf, prep_artifact_id: &str) -> PathBuf {
     root.join("prep").join(format!("{prep_artifact_id}.json"))
 }
 
+fn fs_create_dir_all(path: impl Into<PathBuf>) -> std::io::Result<()> {
+    runmat_filesystem::create_dir_all(path.into())
+}
+
+fn fs_read(path: impl Into<PathBuf>) -> std::io::Result<Vec<u8>> {
+    runmat_filesystem::read(path.into())
+}
+
+fn fs_write(path: impl Into<PathBuf>, bytes: &[u8]) -> std::io::Result<()> {
+    runmat_filesystem::write(path.into(), bytes)
+}
+
+fn fs_remove_file(path: impl Into<PathBuf>) -> std::io::Result<()> {
+    match runmat_filesystem::remove_file(path.into()) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
+fn fs_read_dir(path: impl Into<PathBuf>) -> std::io::Result<Vec<runmat_filesystem::DirEntry>> {
+    runmat_filesystem::read_dir(path.into())
+}
+
+fn fs_exists(path: impl Into<PathBuf>) -> std::io::Result<bool> {
+    match runmat_filesystem::metadata(path.into()) {
+        Ok(_) => Ok(true),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct PrepArtifactRetentionPolicy {
     max_artifacts: usize,
@@ -300,12 +332,12 @@ fn persist_prep_artifact(
     if let Some(root) = prep_artifact_root() {
         let path = prep_artifact_path(&root, &prep_artifact_id);
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
+            fs_create_dir_all(parent)
                 .map_err(|err| format!("failed to create prep artifact directory: {err}"))?;
         }
         let bytes = serde_json::to_vec_pretty(&artifact)
             .map_err(|err| format!("failed to encode prep artifact: {err}"))?;
-        fs::write(&path, bytes).map_err(|err| format!("failed to write prep artifact: {err}"))?;
+        fs_write(&path, &bytes).map_err(|err| format!("failed to write prep artifact: {err}"))?;
     }
 
     prune_prep_artifacts(PrepArtifactRetentionPolicy::current())?;
@@ -329,10 +361,10 @@ pub(crate) fn load_prep_artifact(
         return Ok(None);
     };
     let path = prep_artifact_path(&root, prep_artifact_id);
-    if !path.exists() {
+    if !fs_exists(&path).map_err(|err| format!("failed to inspect prep artifact: {err}"))? {
         return Ok(None);
     }
-    let bytes = fs::read(&path).map_err(|err| format!("failed to read prep artifact: {err}"))?;
+    let bytes = fs_read(&path).map_err(|err| format!("failed to read prep artifact: {err}"))?;
     let artifact = serde_json::from_slice::<StoredGeometryPrepArtifact>(&bytes)
         .map_err(|err| format!("failed to decode prep artifact: {err}"))?;
     prep_store()
@@ -485,17 +517,17 @@ fn list_prep_artifacts() -> Result<Vec<StoredGeometryPrepArtifact>, String> {
     if artifacts.is_empty() {
         if let Some(root) = prep_artifact_root() {
             let prep_dir = root.join("prep");
-            if prep_dir.exists() {
-                for entry in fs::read_dir(&prep_dir)
+            if fs_exists(&prep_dir)
+                .map_err(|err| format!("failed to inspect prep artifacts: {err}"))?
+            {
+                for entry in fs_read_dir(&prep_dir)
                     .map_err(|err| format!("failed to scan prep artifacts: {err}"))?
                 {
-                    let entry = entry
-                        .map_err(|err| format!("failed to read prep artifact entry: {err}"))?;
-                    let path = entry.path();
+                    let path = entry.path().to_path_buf();
                     if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
                         continue;
                     }
-                    let bytes = fs::read(&path)
+                    let bytes = fs_read(&path)
                         .map_err(|err| format!("failed to read prep artifact: {err}"))?;
                     if let Ok(artifact) =
                         serde_json::from_slice::<StoredGeometryPrepArtifact>(&bytes)
@@ -572,7 +604,7 @@ fn prune_prep_artifacts(policy: PrepArtifactRetentionPolicy) -> Result<(), Strin
     if let Some(root) = prep_artifact_root() {
         for id in &remove_ids {
             let path = prep_artifact_path(&root, id);
-            let _ = fs::remove_file(path);
+            let _ = fs_remove_file(path);
         }
     }
 
@@ -688,7 +720,16 @@ pub fn geometry_load_op(
     bytes: &[u8],
     context: OperationContext,
 ) -> Result<OperationEnvelope<GeometryAsset>, OperationErrorEnvelope> {
-    let imported = import_geometry(path, bytes, GeometryImportOptions::default())
+    geometry_load_with_options_op(path, bytes, GeometryImportOptions::default(), context)
+}
+
+pub fn geometry_load_with_options_op(
+    path: &str,
+    bytes: &[u8],
+    options: GeometryImportOptions,
+    context: OperationContext,
+) -> Result<OperationEnvelope<GeometryAsset>, OperationErrorEnvelope> {
+    let imported = import_geometry(path, bytes, options)
         .map_err(|error| map_geometry_load_error(path, error, &context))?;
     Ok(OperationEnvelope::new(
         GEOMETRY_LOAD_OPERATION,

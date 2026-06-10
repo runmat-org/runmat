@@ -3,7 +3,7 @@ use env_logger::Env;
 use log::{debug, error, info, warn};
 use runmat_accelerate::AccelerateInitOptions;
 use runmat_config::runtime::{
-    self as config, AnalysisArtifactStoreMode, ConfigLoader, PlotMode, RunMatRuntimeConfig,
+    self as config, ConfigLoader, FeaArtifactStoreMode, PlotMode, RunMatRuntimeConfig,
 };
 
 use crate::app::dispatch;
@@ -283,40 +283,50 @@ fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
     use runmat_runtime::analysis::{self, storage};
     use runmat_runtime::geometry;
 
-    if let Some(mode) = config.analysis.artifact_store {
-        let artifact_store = match mode {
-            AnalysisArtifactStoreMode::InMemory => storage::AnalysisArtifactStoreConfig::InMemory,
-            AnalysisArtifactStoreMode::Filesystem => {
-                storage::AnalysisArtifactStoreConfig::Filesystem {
-                    root: config
-                        .analysis
-                        .artifact_root
-                        .clone()
-                        .unwrap_or_else(storage::default_filesystem_artifact_root),
-                }
+    let artifact_root = config
+        .fea
+        .artifact_root
+        .clone()
+        .unwrap_or_else(analysis::default_fea_artifact_root);
+    let artifact_store = match config.fea.artifact_store {
+        Some(FeaArtifactStoreMode::InMemory) => storage::AnalysisArtifactStoreConfig::InMemory,
+        Some(FeaArtifactStoreMode::Filesystem) | None => {
+            storage::AnalysisArtifactStoreConfig::Filesystem {
+                root: artifact_root.clone(),
             }
-        };
-        storage::configure_artifact_store(artifact_store)
-    } else {
-        storage::configure_artifact_store_from_env()
-    }
-    .map_err(|err| anyhow::anyhow!("Failed to configure analysis artifact store: {err}"))?;
+        }
+    };
+    storage::configure_artifact_store(artifact_store)
+        .map_err(|err| anyhow::anyhow!("Failed to configure FEA artifact store: {err}"))?;
     storage::configure_artifact_retention(storage::AnalysisArtifactRetentionConfig {
-        max_runs: config.analysis.artifact_max_runs,
-        max_runs_per_kind: config.analysis.artifact_max_runs_per_kind,
+        max_runs: config.fea.artifact_max_runs,
+        max_runs_per_kind: config.fea.artifact_max_runs_per_kind,
     })
-    .map_err(|err| anyhow::anyhow!("Failed to configure analysis artifact retention: {err}"))?;
-    analysis::configure_analysis_runtime(analysis::AnalysisRuntimeConfig {
-        study_artifact_root: config.analysis.study_artifact_root.clone(),
-        thermo_field_artifact_root: config.analysis.thermo_field_artifact_root.clone(),
+    .map_err(|err| anyhow::anyhow!("Failed to configure FEA artifact retention: {err}"))?;
+    analysis::configure_fea_runtime(analysis::FeaRuntimeConfig {
+        artifact_root: Some(artifact_root.clone()),
+        study_artifact_root: config
+            .fea
+            .study_artifact_root
+            .clone()
+            .or_else(|| Some(artifact_root.join("studies"))),
+        thermo_field_artifact_root: config
+            .fea
+            .thermo_field_artifact_root
+            .clone()
+            .or_else(|| Some(artifact_root.join("thermo-fields"))),
     })
-    .map_err(|err| anyhow::anyhow!("Failed to configure analysis runtime: {err}"))?;
+    .map_err(|err| anyhow::anyhow!("Failed to configure FEA runtime: {err}"))?;
     geometry::configure_prep_artifacts(geometry::GeometryPrepArtifactConfig {
-        artifact_root: config.analysis.geometry_prep_artifact_root.clone(),
-        max_artifacts: config.analysis.geometry_prep_max_artifacts,
-        max_artifacts_per_geometry: config.analysis.geometry_prep_max_artifacts_per_geometry,
-        max_age_seconds: config.analysis.geometry_prep_max_age_seconds,
-        require_latest_revision: config.analysis.geometry_prep_require_latest_revision,
+        artifact_root: config
+            .fea
+            .geometry_prep_artifact_root
+            .clone()
+            .or_else(|| Some(artifact_root.join("geometry-prep"))),
+        max_artifacts: config.fea.geometry_prep_max_artifacts,
+        max_artifacts_per_geometry: config.fea.geometry_prep_max_artifacts_per_geometry,
+        max_age_seconds: config.fea.geometry_prep_max_age_seconds,
+        require_latest_revision: config.fea.geometry_prep_require_latest_revision,
     })
     .map_err(|err| anyhow::anyhow!("Failed to configure geometry prep artifacts: {err}"))?;
     Ok(())

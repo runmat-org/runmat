@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AccelerateConfig, AnalysisConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig,
+    AccelerateConfig, FeaConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig,
     PlottingConfig, RuntimeConfig, TelemetryConfig,
 };
 
@@ -30,9 +30,9 @@ pub struct RunMatRuntimeConfig {
     /// Plotting configuration
     #[serde(default)]
     pub plotting: PlottingConfig,
-    /// Analysis and geometry artifact configuration
+    /// FEA and geometry artifact configuration
     #[serde(default)]
-    pub analysis: AnalysisConfig,
+    pub fea: FeaConfig,
     /// Logging configuration
     #[serde(default)]
     pub logging: LoggingConfig,

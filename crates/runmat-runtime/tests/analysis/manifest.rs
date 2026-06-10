@@ -1109,7 +1109,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "nonlinear_create_model_cpu",
-            description: "nonlinear fixture synthesized via analysis.create_model",
+            description: "nonlinear fixture synthesized via fea.create_model",
             model: synthesized_nonlinear_model,
             run_kind: AnalysisRunKind::Nonlinear,
             expect_validate_error: None,
@@ -1409,8 +1409,8 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             description: "invalid fixture must fail validation and run with typed errors",
             model: || fixture_model(FixtureId::MissingMaterials),
             run_kind: AnalysisRunKind::LinearStatic,
-            expect_validate_error: Some("RM.ANALYSIS.VALIDATE.MISSING_MATERIALS"),
-            expect_run_error: Some("RM.ANALYSIS.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID"),
+            expect_validate_error: Some("RM.FEA.VALIDATE.MISSING_MATERIALS"),
+            expect_run_error: Some("RM.FEA.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID"),
             expected_publishable: None,
             parity_tolerance: None,
             gpu_mode: None,
@@ -1437,7 +1437,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
                 model
             },
             run_kind: AnalysisRunKind::LinearStatic,
-            expect_validate_error: Some("RM.ANALYSIS.VALIDATE.UNIT_MISMATCH"),
+            expect_validate_error: Some("RM.FEA.VALIDATE.UNIT_MISMATCH"),
             expect_run_error: None,
             expected_publishable: None,
             parity_tolerance: None,
@@ -1461,7 +1461,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
 
 pub(super) fn fixture_manifest(specs: &[FixtureSpec]) -> FixtureManifest {
     FixtureManifest {
-        version: "analysis-conformance/v1".to_string(),
+        version: "fea-conformance/v1".to_string(),
         fixtures: specs
             .iter()
             .map(|spec| FixtureManifestEntry {

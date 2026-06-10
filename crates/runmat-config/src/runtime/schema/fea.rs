@@ -3,9 +3,9 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AnalysisConfig {
+pub struct FeaConfig {
     #[serde(default)]
-    pub artifact_store: Option<AnalysisArtifactStoreMode>,
+    pub artifact_store: Option<FeaArtifactStoreMode>,
     #[serde(default)]
     pub artifact_root: Option<PathBuf>,
     #[serde(default)]
@@ -30,13 +30,13 @@ pub struct AnalysisConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum AnalysisArtifactStoreMode {
+pub enum FeaArtifactStoreMode {
     #[default]
     InMemory,
     Filesystem,
 }
 
-impl Default for AnalysisConfig {
+impl Default for FeaConfig {
     fn default() -> Self {
         Self {
             artifact_store: None,

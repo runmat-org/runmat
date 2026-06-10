@@ -1,7 +1,7 @@
 mod accelerate;
-mod analysis;
 mod defaults;
 mod execution;
+mod fea;
 mod language;
 mod logging;
 mod plotting;
@@ -12,8 +12,8 @@ pub use accelerate::{
     AccelPowerPreference, AccelerateConfig, AccelerateProviderPreference, AutoOffloadConfig,
     AutoOffloadLogLevel,
 };
-pub use analysis::{AnalysisArtifactStoreMode, AnalysisConfig};
 pub use execution::{GcConfig, GcPreset, JitConfig, JitOptLevel, RuntimeConfig};
+pub use fea::{FeaArtifactStoreMode, FeaConfig};
 pub use language::{error_namespace_for_language_compat, LanguageCompatMode, LanguageConfig};
 pub use logging::{LogLevel, LoggingConfig};
 pub use plotting::{ExportConfig, ExportFormat, GuiConfig, PlotBackend, PlotMode, PlottingConfig};

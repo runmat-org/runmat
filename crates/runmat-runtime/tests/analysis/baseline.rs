@@ -16,42 +16,50 @@ const EM_MAX_CONDITIONING_RELATIVE_DRIFT: f64 = 0.5;
 const EM_MAX_CONDITIONING_ABSOLUTE_DRIFT: f64 = 2.0e3;
 
 pub(super) fn artifact_path() -> PathBuf {
-    if let Ok(path) = std::env::var("RUNMAT_ANALYSIS_ARTIFACT_PATH") {
+    if let Some(path) = env_var("RUNMAT_FEA_ARTIFACT_PATH", "RUNMAT_ANALYSIS_ARTIFACT_PATH") {
         return PathBuf::from(path);
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/runmat-analysis-artifacts/analysis_benchmark_report.json")
+        .join("../../target/runmat-fea-artifacts/fea_benchmark_report.json")
 }
 
 pub(super) fn baseline_config() -> BaselineConfig {
-    let path = std::env::var("RUNMAT_ANALYSIS_BASELINE_PATH")
-        .ok()
-        .map(PathBuf::from);
-    let rolling_dir = std::env::var("RUNMAT_ANALYSIS_BASELINE_DIR")
-        .ok()
-        .map(PathBuf::from);
-    let rolling_window = std::env::var("RUNMAT_ANALYSIS_BASELINE_WINDOW")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(5)
-        .max(1);
-    let enforce_explicit = std::env::var("RUNMAT_ANALYSIS_ENFORCE_BASELINE")
-        .ok()
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
+    let path =
+        env_var("RUNMAT_FEA_BASELINE_PATH", "RUNMAT_ANALYSIS_BASELINE_PATH").map(PathBuf::from);
+    let rolling_dir =
+        env_var("RUNMAT_FEA_BASELINE_DIR", "RUNMAT_ANALYSIS_BASELINE_DIR").map(PathBuf::from);
+    let rolling_window = env_var(
+        "RUNMAT_FEA_BASELINE_WINDOW",
+        "RUNMAT_ANALYSIS_BASELINE_WINDOW",
+    )
+    .and_then(|value| value.parse::<usize>().ok())
+    .unwrap_or(5)
+    .max(1);
+    let enforce_explicit = env_var(
+        "RUNMAT_FEA_ENFORCE_BASELINE",
+        "RUNMAT_ANALYSIS_ENFORCE_BASELINE",
+    )
+    .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+    .unwrap_or(false);
     let enforce = enforce_explicit || enforce_on_protected_branch();
-    let max_slowdown_ratio = std::env::var("RUNMAT_ANALYSIS_MAX_SLOWDOWN_RATIO")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
-        .unwrap_or(1.5);
-    let max_cost_slowdown_ratio = std::env::var("RUNMAT_ANALYSIS_MAX_COST_SLOWDOWN_RATIO")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
-        .unwrap_or(1.75);
-    let min_speedup_retention = std::env::var("RUNMAT_ANALYSIS_MIN_SPEEDUP_RETENTION")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
-        .unwrap_or(0.75);
+    let max_slowdown_ratio = env_var(
+        "RUNMAT_FEA_MAX_SLOWDOWN_RATIO",
+        "RUNMAT_ANALYSIS_MAX_SLOWDOWN_RATIO",
+    )
+    .and_then(|value| value.parse::<f64>().ok())
+    .unwrap_or(1.5);
+    let max_cost_slowdown_ratio = env_var(
+        "RUNMAT_FEA_MAX_COST_SLOWDOWN_RATIO",
+        "RUNMAT_ANALYSIS_MAX_COST_SLOWDOWN_RATIO",
+    )
+    .and_then(|value| value.parse::<f64>().ok())
+    .unwrap_or(1.75);
+    let min_speedup_retention = env_var(
+        "RUNMAT_FEA_MIN_SPEEDUP_RETENTION",
+        "RUNMAT_ANALYSIS_MIN_SPEEDUP_RETENTION",
+    )
+    .and_then(|value| value.parse::<f64>().ok())
+    .unwrap_or(0.75);
     BaselineConfig {
         path,
         rolling_dir,
@@ -64,10 +72,12 @@ pub(super) fn baseline_config() -> BaselineConfig {
 }
 
 fn enforce_on_protected_branch() -> bool {
-    let opt_in = std::env::var("RUNMAT_ANALYSIS_ENFORCE_BASELINE_ON_PROTECTED")
-        .ok()
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
+    let opt_in = env_var(
+        "RUNMAT_FEA_ENFORCE_BASELINE_ON_PROTECTED",
+        "RUNMAT_ANALYSIS_ENFORCE_BASELINE_ON_PROTECTED",
+    )
+    .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+    .unwrap_or(false);
     if !opt_in {
         return false;
     }
@@ -84,12 +94,21 @@ fn enforce_on_protected_branch() -> bool {
     if branch.is_empty() {
         return false;
     }
-    let protected = std::env::var("RUNMAT_ANALYSIS_PROTECTED_BRANCHES")
-        .unwrap_or_else(|_| "main,master".to_string());
+    let protected = env_var(
+        "RUNMAT_FEA_PROTECTED_BRANCHES",
+        "RUNMAT_ANALYSIS_PROTECTED_BRANCHES",
+    )
+    .unwrap_or_else(|| "main,master".to_string());
     protected
         .split(',')
         .map(|value| value.trim())
         .any(|value| !value.is_empty() && value == branch)
+}
+
+fn env_var(primary: &str, legacy: &str) -> Option<String> {
+    std::env::var(primary)
+        .ok()
+        .or_else(|| std::env::var(legacy).ok())
 }
 
 pub(super) fn load_baseline_report(path: &PathBuf) -> Result<BenchmarkConformanceReport, String> {

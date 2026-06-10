@@ -1,4 +1,4 @@
-use runmat_analysis_core::AnalysisField;
+use runmat_analysis_core::{AnalysisField, AnalysisModel};
 use runmat_analysis_fea::diagnostics::FeaDiagnostic;
 use runmat_analysis_fea::{ComputeBackend, FeaRunResult};
 use runmat_geometry_core::GeometryAsset;
@@ -1031,8 +1031,28 @@ pub struct AnalysisStudySpec {
     pub study_id: String,
     pub geometry: GeometryAsset,
     pub create_model_intent: AnalysisCreateModelIntentSpec,
+    #[serde(default)]
+    pub model: Option<AnalysisModel>,
     pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
+    #[serde(default)]
+    pub linear_static_run_options: Option<AnalysisRunOptions>,
+    #[serde(default)]
+    pub modal_run_options: Option<AnalysisModalRunOptions>,
+    #[serde(default)]
+    pub acoustic_run_options: Option<AnalysisAcousticRunOptions>,
+    #[serde(default)]
+    pub thermal_run_options: Option<AnalysisThermalRunOptions>,
+    #[serde(default)]
+    pub transient_run_options: Option<AnalysisTransientRunOptions>,
+    #[serde(default)]
+    pub cfd_run_options: Option<AnalysisCfdRunOptions>,
+    #[serde(default)]
+    pub cht_run_options: Option<AnalysisChtRunOptions>,
+    #[serde(default)]
+    pub fsi_run_options: Option<AnalysisFsiRunOptions>,
+    #[serde(default)]
+    pub nonlinear_run_options: Option<AnalysisNonlinearRunOptions>,
     #[serde(default)]
     pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
 }
@@ -1060,6 +1080,8 @@ pub struct AnalysisStudyPlanData {
     pub backend: ComputeBackend,
     #[serde(default)]
     pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
+    #[serde(default)]
+    pub run_options: serde_json::Value,
     pub operation_sequence: Vec<String>,
     pub run_operation: String,
     pub run_op_version: String,
@@ -1075,6 +1097,8 @@ pub struct AnalysisStudyRunData {
     pub backend: ComputeBackend,
     #[serde(default)]
     pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
+    #[serde(default)]
+    pub run_options: serde_json::Value,
     pub study_fingerprint: String,
     pub operation_sequence: Vec<String>,
     pub run_operation: String,
@@ -1124,6 +1148,8 @@ pub struct AnalysisStudySweepPlanEntry {
     pub backend: ComputeBackend,
     #[serde(default)]
     pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
+    #[serde(default)]
+    pub run_options: serde_json::Value,
     pub operation_sequence: Vec<String>,
     pub run_operation: String,
     pub run_op_version: String,

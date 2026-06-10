@@ -2,7 +2,6 @@
 #[macro_use]
 pub mod common;
 pub mod acceleration;
-pub mod analysis;
 pub mod array;
 pub mod cells;
 pub mod close;
@@ -13,6 +12,7 @@ pub mod control;
 pub mod datetime;
 pub mod diagnostics;
 pub mod duration;
+pub mod fea;
 pub mod geometry;
 pub mod image;
 pub mod introspection;

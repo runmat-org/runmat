@@ -21,7 +21,7 @@
         "data": []
       },
       "provenance": {
-        "source_operation": "analysis.run_electromagnetic"
+        "source_operation": "fea.run_electromagnetic"
       }
     },
     "flux_density_proxy": {
@@ -42,7 +42,7 @@
         "data": []
       },
       "provenance": {
-        "source_operation": "analysis.run_electromagnetic"
+        "source_operation": "fea.run_electromagnetic"
       }
     },
     "placeholder_mode": null,

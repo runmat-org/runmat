@@ -1,10 +1,11 @@
 use std::collections::HashMap;
-use std::fs;
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use chrono::Utc;
+use runmat_filesystem::{DirEntry, FsFileType};
 use serde::{Deserialize, Serialize};
 
 use super::contracts::{AnalysisArtifactRecord, AnalysisRunResult};
@@ -108,7 +109,7 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
     fn persist_run(&self, run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String> {
         let path = self.run_path(&run.run_id);
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
+            fs_create_dir_all(parent)
                 .map_err(|err| format!("failed to create artifact directory: {err}"))?;
         }
         let op_version = run_operation_version(run);
@@ -136,10 +137,10 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
 
     fn load_run(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
         let path = self.run_path(run_id);
-        if !path.exists() {
+        if !fs_exists(&path).map_err(|err| format!("failed to inspect run artifact: {err}"))? {
             return Ok(None);
         }
-        let bytes = fs::read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
+        let bytes = fs_read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
         let run = match serde_json::from_slice::<PersistedRunArtifact>(&bytes) {
             Ok(persisted) => persisted.run,
             Err(_) => serde_json::from_slice::<AnalysisRunResult>(&bytes)
@@ -150,20 +151,19 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
 
     fn list_runs(&self) -> Result<Vec<AnalysisRunResult>, String> {
         let runs_dir = self.root.join("runs");
-        if !runs_dir.exists() {
+        if !fs_exists(&runs_dir).map_err(|err| format!("failed to inspect artifacts: {err}"))? {
             return Ok(Vec::new());
         }
         let mut runs = Vec::new();
         for entry in
-            fs::read_dir(&runs_dir).map_err(|err| format!("failed to scan artifacts: {err}"))?
+            fs_read_dir(&runs_dir).map_err(|err| format!("failed to scan artifacts: {err}"))?
         {
-            let entry = entry.map_err(|err| format!("failed to read artifact entry: {err}"))?;
-            let path = entry.path();
+            let path = entry.path().to_path_buf();
             if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
                 continue;
             }
             let bytes =
-                fs::read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
+                fs_read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
             let parsed = match serde_json::from_slice::<PersistedRunArtifact>(&bytes) {
                 Ok(persisted) => Some(persisted.run),
                 Err(_) => serde_json::from_slice::<AnalysisRunResult>(&bytes).ok(),
@@ -183,7 +183,7 @@ fn run_operation_version(run: &AnalysisRunResult) -> String {
         .iter()
         .any(|diag| diag.code == "FEA_ACOUSTIC_PLACEHOLDER")
     {
-        "analysis.run_acoustic/v1".to_string()
+        "fea.run_acoustic/v1".to_string()
     } else if run.electromagnetic_results.is_some()
         || run
             .run
@@ -191,49 +191,51 @@ fn run_operation_version(run: &AnalysisRunResult) -> String {
             .iter()
             .any(|diag| diag.code == "FEA_EM_PLACEHOLDER")
     {
-        "analysis.run_electromagnetic/v1".to_string()
+        "fea.run_electromagnetic/v1".to_string()
     } else if run
         .run
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_CHT_COUPLING")
     {
-        "analysis.run_cht/v1".to_string()
+        "fea.run_cht/v1".to_string()
     } else if run
         .run
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_FSI_COUPLING")
     {
-        "analysis.run_fsi/v1".to_string()
+        "fea.run_fsi/v1".to_string()
     } else if run
         .run
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_CFD_FLOW")
     {
-        "analysis.run_cfd/v1".to_string()
+        "fea.run_cfd/v1".to_string()
     } else if run.nonlinear_results.is_some() {
-        "analysis.run_nonlinear/v1".to_string()
+        "fea.run_nonlinear/v1".to_string()
     } else if run.transient_results.is_some() {
-        "analysis.run_transient/v1".to_string()
+        "fea.run_transient/v1".to_string()
     } else if run.modal_results.is_some() {
-        "analysis.run_modal/v1".to_string()
+        "fea.run_modal/v1".to_string()
     } else {
-        "analysis.run_linear_static/v1".to_string()
+        "fea.run_linear_static/v1".to_string()
     }
 }
 
 fn prune_filesystem_runs(root: &PathBuf) -> Result<(), String> {
     let retention = current_retention_config();
     let max_runs = retention.max_runs.unwrap_or_else(|| {
-        std::env::var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS")
+        std::env::var("RUNMAT_FEA_ARTIFACT_MAX_RUNS")
+            .or_else(|_| std::env::var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS"))
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(0)
     });
     let max_runs_per_kind = retention.max_runs_per_kind.unwrap_or_else(|| {
-        std::env::var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND")
+        std::env::var("RUNMAT_FEA_ARTIFACT_MAX_RUNS_PER_KIND")
+            .or_else(|_| std::env::var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND"))
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(0)
@@ -243,20 +245,16 @@ fn prune_filesystem_runs(root: &PathBuf) -> Result<(), String> {
     }
 
     let runs_dir = root.join("runs");
-    if !runs_dir.exists() {
+    if !fs_exists(&runs_dir).map_err(|err| format!("failed to inspect artifacts: {err}"))? {
         return Ok(());
     }
     let mut artifacts = Vec::new();
-    for entry in
-        fs::read_dir(&runs_dir).map_err(|err| format!("failed to scan artifacts: {err}"))?
-    {
-        let entry = entry.map_err(|err| format!("failed to read artifact entry: {err}"))?;
-        let path = entry.path();
+    for entry in fs_read_dir(&runs_dir).map_err(|err| format!("failed to scan artifacts: {err}"))? {
+        let path = entry.path().to_path_buf();
         if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
             continue;
         }
-        let bytes =
-            fs::read(&path).map_err(|err| format!("failed to read artifact file: {err}"))?;
+        let bytes = fs_read(&path).map_err(|err| format!("failed to read artifact file: {err}"))?;
         let (op_version, run_id) = match serde_json::from_slice::<PersistedRunArtifact>(&bytes) {
             Ok(persisted) => (persisted.op_version, persisted.run.run_id),
             Err(_) => match serde_json::from_slice::<AnalysisRunResult>(&bytes) {
@@ -264,7 +262,7 @@ fn prune_filesystem_runs(root: &PathBuf) -> Result<(), String> {
                 Err(_) => continue,
             },
         };
-        let modified = entry.metadata().and_then(|meta| meta.modified()).ok();
+        let modified = fs_modified(&path).ok().flatten();
         artifacts.push((path, op_version, run_id, modified));
     }
     artifacts.sort_by(|a, b| b.3.cmp(&a.3));
@@ -290,7 +288,7 @@ fn prune_filesystem_runs(root: &PathBuf) -> Result<(), String> {
     to_remove.sort();
     to_remove.dedup();
     for path in to_remove {
-        let _ = fs::remove_file(path);
+        let _ = fs_remove_file(path);
     }
     Ok(())
 }
@@ -373,11 +371,13 @@ fn store_from_config(config: AnalysisArtifactStoreConfig) -> Arc<dyn AnalysisArt
 }
 
 fn config_from_env() -> AnalysisArtifactStoreConfig {
-    let mode = std::env::var("RUNMAT_ANALYSIS_ARTIFACT_STORE")
-        .unwrap_or_else(|_| "in_memory".to_string())
+    let mode = std::env::var("RUNMAT_FEA_ARTIFACT_STORE")
+        .or_else(|_| std::env::var("RUNMAT_ANALYSIS_ARTIFACT_STORE"))
+        .unwrap_or_else(|_| "filesystem".to_string())
         .to_lowercase();
     if mode == "filesystem" {
-        let root = std::env::var("RUNMAT_ANALYSIS_ARTIFACT_ROOT")
+        let root = std::env::var("RUNMAT_FEA_ARTIFACT_ROOT")
+            .or_else(|_| std::env::var("RUNMAT_ANALYSIS_ARTIFACT_ROOT"))
             .map(PathBuf::from)
             .unwrap_or_else(|_| default_filesystem_artifact_root());
         AnalysisArtifactStoreConfig::Filesystem { root }
@@ -387,7 +387,7 @@ fn config_from_env() -> AnalysisArtifactStoreConfig {
 }
 
 pub fn default_filesystem_artifact_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/runmat-analysis-store")
+    PathBuf::from("artifacts")
 }
 
 fn atomic_write(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
@@ -396,11 +396,54 @@ fn atomic_write(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
         std::process::id(),
         Utc::now().timestamp_nanos_opt().unwrap_or_default()
     ));
-    fs::write(&tmp, bytes).map_err(|err| format!("failed to write temp artifact file: {err}"))?;
-    fs::rename(&tmp, path).map_err(|err| {
-        let _ = fs::remove_file(&tmp);
+    fs_write(&tmp, bytes).map_err(|err| format!("failed to write temp artifact file: {err}"))?;
+    fs_rename(&tmp, path).map_err(|err| {
+        let _ = fs_remove_file(&tmp);
         format!("failed to atomically replace run artifact: {err}")
     })
+}
+
+fn fs_create_dir_all(path: impl Into<PathBuf>) -> std::io::Result<()> {
+    runmat_filesystem::create_dir_all(path.into())
+}
+
+fn fs_read(path: impl Into<PathBuf>) -> std::io::Result<Vec<u8>> {
+    runmat_filesystem::read(path.into())
+}
+
+fn fs_write(path: impl Into<PathBuf>, bytes: &[u8]) -> std::io::Result<()> {
+    runmat_filesystem::write(path.into(), bytes)
+}
+
+fn fs_remove_file(path: impl Into<PathBuf>) -> std::io::Result<()> {
+    match runmat_filesystem::remove_file(path.into()) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
+fn fs_rename(from: impl Into<PathBuf>, to: impl Into<PathBuf>) -> std::io::Result<()> {
+    runmat_filesystem::rename(from.into(), to.into())
+}
+
+fn fs_read_dir(path: impl Into<PathBuf>) -> std::io::Result<Vec<DirEntry>> {
+    runmat_filesystem::read_dir(path.into())
+}
+
+fn fs_exists(path: impl Into<PathBuf>) -> std::io::Result<bool> {
+    match runmat_filesystem::metadata(path.into()) {
+        Ok(metadata) => Ok(matches!(
+            metadata.file_type(),
+            FsFileType::Directory | FsFileType::File | FsFileType::Symlink | FsFileType::Other
+        )),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
+fn fs_modified(path: impl Into<PathBuf>) -> std::io::Result<Option<std::time::SystemTime>> {
+    runmat_filesystem::metadata(path.into()).map(|metadata| metadata.modified())
 }
 
 #[cfg(test)]
