@@ -67,10 +67,7 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
             run_id: run.run_id.clone(),
             created_at: Utc::now().to_rfc3339(),
             op_version: run_operation_version(run),
-            field_ids: vec![
-                run.run.displacement_field.field_id.clone(),
-                run.run.von_mises_field.field_id.clone(),
-            ],
+            field_ids: super::analysis_run_field_ids(run),
         })
     }
 
@@ -128,10 +125,7 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
             run_id: run.run_id.clone(),
             created_at: Utc::now().to_rfc3339(),
             op_version,
-            field_ids: vec![
-                run.run.displacement_field.field_id.clone(),
-                run.run.von_mises_field.field_id.clone(),
-            ],
+            field_ids: super::analysis_run_field_ids(run),
         })
     }
 

@@ -1,5 +1,7 @@
 use runmat_analysis_core::AnalysisStepKind;
-use runmat_analysis_fea::ComputeBackend;
+use runmat_analysis_fea::{
+    ComputeBackend, FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
+};
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_run_nonlinear_with_options_op,
     AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisNonlinearRunOptions,
@@ -391,7 +393,8 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
     let base_peak_displacement = baseline
         .data
         .run
-        .displacement_field
+        .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .expect("baseline displacement field should be present")
         .as_host_f64()
         .expect("baseline displacement should be host-backed")
         .iter()
@@ -400,7 +403,8 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
     let prep_peak_displacement = prep_enhanced
         .data
         .run
-        .displacement_field
+        .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .expect("prep displacement field should be present")
         .as_host_f64()
         .expect("prep displacement should be host-backed")
         .iter()
@@ -416,7 +420,8 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
     let base_peak_stress = baseline
         .data
         .run
-        .von_mises_field
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .expect("baseline von Mises field should be present")
         .as_host_f64()
         .expect("baseline stress should be host-backed")
         .iter()
@@ -425,7 +430,8 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
     let prep_peak_stress = prep_enhanced
         .data
         .run
-        .von_mises_field
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .expect("prep von Mises field should be present")
         .as_host_f64()
         .expect("prep stress should be host-backed")
         .iter()

@@ -2,7 +2,11 @@ use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 
 use crate::{
     assembly::assemble_linear_system,
-    contracts::{ComputeBackend, FeaModalRunResult, FeaRunError, FeaRunResult, ModalSolveOptions},
+    contracts::{
+        fea_modal_mode_shape_field_id, ComputeBackend, FeaModalRunResult, FeaRunError,
+        FeaRunResult, ModalSolveOptions, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        FEA_FIELD_STRUCTURAL_VON_MISES,
+    },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     solve::modal::solve_modal_system,
 };
@@ -73,12 +77,14 @@ pub fn run_modal_with_options(
         },
         solver_host_sync_count: modal.solver_host_sync_count,
         diagnostics,
-        displacement_field: AnalysisField::host_f64(
-            "displacement",
-            vec![displacement.len()],
-            displacement,
-        ),
-        von_mises_field: AnalysisField::host_f64("von_mises", vec![1], vec![von_mises]),
+        fields: vec![
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+                vec![displacement.len()],
+                displacement,
+            ),
+            AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![1], vec![von_mises]),
+        ],
     };
 
     let mode_shapes = modal
@@ -87,7 +93,7 @@ pub fn run_modal_with_options(
         .enumerate()
         .map(|(index, shape)| {
             AnalysisField::host_f64(
-                format!("mode_shape_{}", index + 1),
+                fea_modal_mode_shape_field_id(index + 1),
                 vec![shape.len()],
                 shape,
             )

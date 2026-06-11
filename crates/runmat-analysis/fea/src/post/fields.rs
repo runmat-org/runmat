@@ -1,47 +1,40 @@
-use serde::{Deserialize, Serialize};
-
 use runmat_analysis_core::AnalysisField;
 
+use crate::contracts::{FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES};
 use crate::{assembly::AssemblySummary, solve::linear::LinearSolveResult};
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PostFieldResult {
-    pub displacement_field: AnalysisField,
-    pub von_mises_field: AnalysisField,
-}
 
 pub fn recover_result_fields(
     summary: &AssemblySummary,
     solve_result: &LinearSolveResult,
-) -> PostFieldResult {
+) -> Vec<AnalysisField> {
     if !solve_result.converged {
-        return PostFieldResult {
-            displacement_field: AnalysisField::host_f64("displacement", vec![0], Vec::new()),
-            von_mises_field: AnalysisField::host_f64("von_mises", vec![0], Vec::new()),
-        };
+        return vec![
+            AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_DISPLACEMENT, vec![0], Vec::new()),
+            AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![0], Vec::new()),
+        ];
     }
 
     let dof_count = summary.dof_count.max(3);
-    let mut displacement_field = solve_result.solution.clone();
-    if displacement_field.len() < dof_count {
-        displacement_field.resize(dof_count, 0.0);
+    let mut displacement_values = solve_result.solution.clone();
+    if displacement_values.len() < dof_count {
+        displacement_values.resize(dof_count, 0.0);
     }
-    if displacement_field.is_empty() {
-        displacement_field = vec![0.0; dof_count];
+    if displacement_values.is_empty() {
+        displacement_values = vec![0.0; dof_count];
     }
 
-    let max_abs_displacement = displacement_field
+    let max_abs_displacement = displacement_values
         .iter()
         .map(|value| value.abs())
         .fold(0.0_f64, f64::max);
     let von_mises = (max_abs_displacement * 1.0e11).max(0.0);
 
-    PostFieldResult {
-        displacement_field: AnalysisField::host_f64(
-            "displacement",
+    vec![
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
             vec![dof_count],
-            displacement_field,
+            displacement_values,
         ),
-        von_mises_field: AnalysisField::host_f64("von_mises", vec![1], vec![von_mises]),
-    }
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![1], vec![von_mises]),
+    ]
 }

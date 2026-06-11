@@ -1,6 +1,9 @@
 use runmat_analysis_core::{AnalysisFieldValues, ElectromagneticDomain, ReferenceFrame};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
-use runmat_analysis_fea::ComputeBackend;
+use runmat_analysis_fea::{
+    fea_modal_mode_shape_field_id, ComputeBackend, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
+};
 use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_plan_study_op, analysis_plan_study_sweep_op,
@@ -86,7 +89,8 @@ fn assert_fallback_event_schema(event: &str) {
         );
     } else {
         assert!(
-            matches!(parts[1], "displacement" | "von_mises"),
+            parts[1] == FEA_FIELD_STRUCTURAL_DISPLACEMENT
+                || parts[1] == FEA_FIELD_STRUCTURAL_VON_MISES,
             "unexpected fallback stage: {}",
             parts[1]
         );
@@ -917,13 +921,23 @@ fn analysis_run_contract_is_v1_and_publishable_for_fixture() {
     assert_eq!(envelope.data.run_status, RunStatus::Publishable);
     assert!(envelope.data.publishable);
 
-    assert_eq!(
-        envelope.data.run.displacement_field.field_id,
-        "displacement"
-    );
-    assert_eq!(envelope.data.run.von_mises_field.field_id, "von_mises");
+    assert!(envelope
+        .data
+        .run
+        .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .is_some());
+    assert!(envelope
+        .data
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .is_some());
     assert!(matches!(
-        envelope.data.run.displacement_field.values,
+        envelope
+            .data
+            .run
+            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .expect("structural displacement field should be present")
+            .values,
         AnalysisFieldValues::HostF64(_)
     ));
 }
@@ -970,7 +984,10 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
         modal_results.eigenvalues_hz.len(),
         modal_results.mode_shapes.len()
     );
-    assert_eq!(modal_results.mode_shapes[0].field_id, "mode_shape_1");
+    assert_eq!(
+        modal_results.mode_shapes[0].field_id,
+        fea_modal_mode_shape_field_id(1)
+    );
     assert_eq!(modal_results.modal_payload_version, "modal_results/v1");
     assert_eq!(
         modal_results.eigenvalues_hz.len(),
@@ -1429,6 +1446,8 @@ fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
         &envelope.data,
         AnalysisResultsQuery {
             include_fields: Vec::new(),
+            include_field_values: true,
+
             include_diagnostics: true,
             diagnostic_codes: vec![
                 "FEA_NONLINEAR_CONVERGENCE".to_string(),
@@ -2027,7 +2046,9 @@ fn analysis_results_contract_is_v1_and_filterable() {
     let results = analysis_results_op(
         &run.data,
         AnalysisResultsQuery {
-            include_fields: vec!["von_mises".to_string()],
+            include_fields: vec![FEA_FIELD_STRUCTURAL_VON_MISES.to_string()],
+            include_field_values: true,
+
             include_diagnostics: false,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
@@ -2044,7 +2065,10 @@ fn analysis_results_contract_is_v1_and_filterable() {
     assert_eq!(results.operation, "fea.results");
     assert_eq!(results.op_version, "fea.results/v1");
     assert_eq!(results.data.fields.len(), 1);
-    assert_eq!(results.data.fields[0].field_id, "von_mises");
+    assert_eq!(
+        results.data.fields[0].field_id,
+        FEA_FIELD_STRUCTURAL_VON_MISES
+    );
     assert!(results.data.diagnostics.is_none());
 }
 
@@ -2062,6 +2086,8 @@ fn analysis_results_unknown_field_maps_typed_error_contract() {
         &run.data,
         AnalysisResultsQuery {
             include_fields: vec!["nonexistent".to_string()],
+            include_field_values: true,
+
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
@@ -2109,6 +2135,8 @@ fn analysis_results_modal_query_controls_are_typed() {
         &modal_run.data,
         AnalysisResultsQuery {
             include_fields: Vec::new(),
+            include_field_values: true,
+
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: false,
@@ -2141,6 +2169,8 @@ fn analysis_results_modal_query_controls_are_typed() {
         &modal_run.data,
         AnalysisResultsQuery {
             include_fields: Vec::new(),
+            include_field_values: true,
+
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
@@ -2176,6 +2206,8 @@ fn analysis_results_transient_query_controls_are_typed() {
         &transient_run.data,
         AnalysisResultsQuery {
             include_fields: Vec::new(),
+            include_field_values: true,
+
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
@@ -2199,6 +2231,8 @@ fn analysis_results_transient_query_controls_are_typed() {
         &transient_run.data,
         AnalysisResultsQuery {
             include_fields: Vec::new(),
+            include_field_values: true,
+
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
@@ -2379,14 +2413,7 @@ fn analysis_run_deterministic_contract_is_stable_across_replays() {
     assert_eq!(second.data.provenance.precision_mode, "fp64");
     assert!(first.data.provenance.deterministic_mode);
     assert!(second.data.provenance.deterministic_mode);
-    assert_eq!(
-        first.data.run.displacement_field,
-        second.data.run.displacement_field
-    );
-    assert_eq!(
-        first.data.run.von_mises_field,
-        second.data.run.von_mises_field
-    );
+    assert_eq!(first.data.run.fields, second.data.run.fields);
     assert_eq!(first.data.run.diagnostics, second.data.run.diagnostics);
 }
 
@@ -2455,7 +2482,12 @@ fn analysis_run_gpu_without_provider_records_fallback_contract() {
         assert_fallback_event_schema(event);
     }
     assert!(matches!(
-        envelope.data.run.displacement_field.values,
+        envelope
+            .data
+            .run
+            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .expect("structural displacement field should be present")
+            .values,
         AnalysisFieldValues::HostF64(_)
     ));
 }
@@ -2541,11 +2573,21 @@ fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
             .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
     }
     assert!(matches!(
-        envelope.data.run.displacement_field.values,
+        envelope
+            .data
+            .run
+            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .expect("structural displacement field should be present")
+            .values,
         AnalysisFieldValues::DeviceRef(_)
     ));
     assert!(matches!(
-        envelope.data.run.von_mises_field.values,
+        envelope
+            .data
+            .run
+            .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+            .expect("structural von Mises field should be present")
+            .values,
         AnalysisFieldValues::DeviceRef(_)
     ));
 }
@@ -2601,12 +2643,17 @@ fn analysis_run_gpu_upload_failure_records_fallback_contract() {
         .provenance
         .fallback_events
         .iter()
-        .any(|event| event.starts_with("BACKEND_UPLOAD_FAILED:displacement")));
+        .any(|event| event.starts_with("BACKEND_UPLOAD_FAILED:structural.displacement")));
     for event in &envelope.data.provenance.fallback_events {
         assert_fallback_event_schema(event);
     }
     assert!(matches!(
-        envelope.data.run.displacement_field.values,
+        envelope
+            .data
+            .run
+            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .expect("structural displacement field should be present")
+            .values,
         AnalysisFieldValues::HostF64(_)
     ));
 }

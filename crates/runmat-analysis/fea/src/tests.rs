@@ -2,8 +2,19 @@ use crate::{
     fixtures::{fixture_model, FixtureId},
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
-    ComputeBackend, FeaThermoMechanicalContext, ModalSolveOptions,
+    ComputeBackend, FeaRunResult, FeaThermoMechanicalContext, ModalSolveOptions,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
+
+fn field<'a>(result: &'a FeaRunResult, field_id: &str) -> &'a runmat_analysis_core::AnalysisField {
+    result.field(field_id).expect("field should be present")
+}
+
+fn host_field<'a>(result: &'a FeaRunResult, field_id: &str) -> &'a [f64] {
+    field(result, field_id)
+        .as_host_f64()
+        .expect("field should be host-backed")
+}
 
 #[test]
 fn canonical_cantilever_benchmark_runs() {
@@ -11,19 +22,19 @@ fn canonical_cantilever_benchmark_runs() {
     let result =
         crate::run_linear_static(&model, ComputeBackend::Cpu).expect("solve should succeed");
 
-    assert_eq!(result.displacement_field.element_count(), 3);
-    assert_eq!(result.von_mises_field.element_count(), 1);
-    let displacement = result
-        .displacement_field
-        .as_host_f64()
-        .expect("scaffold emits host displacement field");
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).element_count(),
+        3
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_VON_MISES).element_count(),
+        1
+    );
+    let displacement = host_field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT);
     assert!(displacement[1] < 0.0);
     assert!(displacement[1] < -8.0e-6 && displacement[1] > -1.2e-5);
 
-    let stress = result
-        .von_mises_field
-        .as_host_f64()
-        .expect("stress field should be host-backed");
+    let stress = host_field(&result, FEA_FIELD_STRUCTURAL_VON_MISES);
     assert!(stress[0] > 8.0e5 && stress[0] < 1.2e6);
 }
 
@@ -46,8 +57,7 @@ fn deterministic_replay_for_fixture_is_stable() {
     let second =
         crate::run_linear_static(&model, ComputeBackend::Cpu).expect("second run should succeed");
 
-    assert_eq!(first.displacement_field, second.displacement_field);
-    assert_eq!(first.von_mises_field, second.von_mises_field);
+    assert_eq!(first.fields, second.fields);
     assert_eq!(first.diagnostics, second.diagnostics);
 }
 
@@ -60,24 +70,12 @@ fn cpu_gpu_parity_respects_tolerance_policy() {
         crate::run_linear_static(&model, ComputeBackend::Gpu).expect("gpu run should succeed");
 
     let tol = ParityTolerance::strict();
-    let cpu_displacement = cpu
-        .displacement_field
-        .as_host_f64()
-        .expect("cpu displacement should be host-backed in scaffold");
-    let gpu_displacement = gpu
-        .displacement_field
-        .as_host_f64()
-        .expect("gpu displacement should be host-backed in scaffold");
+    let cpu_displacement = host_field(&cpu, FEA_FIELD_STRUCTURAL_DISPLACEMENT);
+    let gpu_displacement = host_field(&gpu, FEA_FIELD_STRUCTURAL_DISPLACEMENT);
     assert_vectors_within_tolerance(cpu_displacement, gpu_displacement, tol);
 
-    let cpu_stress = cpu
-        .von_mises_field
-        .as_host_f64()
-        .expect("cpu stress should be host-backed in scaffold");
-    let gpu_stress = gpu
-        .von_mises_field
-        .as_host_f64()
-        .expect("gpu stress should be host-backed in scaffold");
+    let cpu_stress = host_field(&cpu, FEA_FIELD_STRUCTURAL_VON_MISES);
+    let gpu_stress = host_field(&gpu, FEA_FIELD_STRUCTURAL_VON_MISES);
     assert_vectors_within_tolerance(cpu_stress, gpu_stress, tol);
 }
 
@@ -383,17 +381,19 @@ fn load_sweep_fixture_uses_operator_solver_path() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_SOLVER_METHOD"));
-    assert!(result.displacement_field.element_count() >= 384);
+    assert!(field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).element_count() >= 384);
 
     let baseline_max = baseline
-        .displacement_field
+        .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .expect("baseline displacement field should be present")
         .as_host_f64()
         .expect("baseline displacement should be host-backed")
         .iter()
         .map(|value| value.abs())
         .fold(0.0_f64, f64::max);
     let sweep_max = result
-        .displacement_field
+        .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .expect("sweep displacement field should be present")
         .as_host_f64()
         .expect("sweep displacement should be host-backed")
         .iter()
@@ -408,7 +408,7 @@ fn large_load_sweep_fixture_scales_dof_count() {
     let result =
         crate::run_linear_static(&model, ComputeBackend::Cpu).expect("solve should succeed");
 
-    assert!(result.displacement_field.element_count() >= 1536);
+    assert!(field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).element_count() >= 1536);
     assert!(result
         .diagnostics
         .iter()
@@ -428,21 +428,23 @@ fn multi_material_fixture_has_distinct_response_profile() {
     )
     .expect("multi-material solve should succeed");
 
-    assert!(multi_material.displacement_field.element_count() >= 9);
+    assert!(field(&multi_material, FEA_FIELD_STRUCTURAL_DISPLACEMENT).element_count() >= 9);
     assert!(multi_material
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_SOLVER_METHOD"));
 
     let baseline_peak = baseline
-        .displacement_field
+        .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .expect("baseline displacement field should be present")
         .as_host_f64()
         .expect("baseline displacement should be host-backed")
         .iter()
         .map(|v| v.abs())
         .fold(0.0_f64, f64::max);
     let multi_peak = multi_material
-        .displacement_field
+        .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .expect("multi displacement field should be present")
         .as_host_f64()
         .expect("multi displacement should be host-backed")
         .iter()

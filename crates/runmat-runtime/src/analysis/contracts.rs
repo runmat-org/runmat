@@ -1,4 +1,4 @@
-use runmat_analysis_core::{AnalysisField, AnalysisModel};
+use runmat_analysis_core::{AnalysisField, AnalysisFieldValues, AnalysisModel};
 use runmat_analysis_fea::diagnostics::FeaDiagnostic;
 use runmat_analysis_fea::{ComputeBackend, FeaRunResult};
 use runmat_geometry_core::GeometryAsset;
@@ -846,6 +846,7 @@ pub struct AnalysisArtifactRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnalysisResultsQuery {
     pub include_fields: Vec<String>,
+    pub include_field_values: bool,
     pub include_diagnostics: bool,
     pub diagnostic_codes: Vec<String>,
     pub include_modal_results: bool,
@@ -860,6 +861,7 @@ impl Default for AnalysisResultsQuery {
     fn default() -> Self {
         Self {
             include_fields: Vec::new(),
+            include_field_values: true,
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
@@ -869,6 +871,148 @@ impl Default for AnalysisResultsQuery {
             include_nonlinear_results: true,
             include_electromagnetic_results: true,
         }
+    }
+}
+
+impl AnalysisResultsQuery {
+    pub fn metadata_only() -> Self {
+        Self {
+            include_field_values: false,
+            include_modal_results: false,
+            include_transient_results: false,
+            include_nonlinear_results: false,
+            include_electromagnetic_results: false,
+            ..Self::default()
+        }
+    }
+
+    pub fn field_values(field_id: impl Into<String>) -> Self {
+        Self {
+            include_fields: vec![field_id.into()],
+            include_field_values: true,
+            include_diagnostics: false,
+            include_modal_results: false,
+            include_transient_results: false,
+            include_nonlinear_results: false,
+            include_electromagnetic_results: false,
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisFieldKind {
+    Scalar,
+    Vector,
+    Tensor,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisFieldStorage {
+    HostF64,
+    DeviceRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisFieldDescriptor {
+    pub field_id: String,
+    pub class_name: String,
+    pub kind: AnalysisFieldKind,
+    pub dtype: String,
+    pub shape: Vec<usize>,
+    pub element_count: usize,
+    pub component_count: Option<usize>,
+    pub residency: String,
+    pub storage: AnalysisFieldStorage,
+    pub size_bytes: Option<u64>,
+}
+
+impl AnalysisFieldDescriptor {
+    pub fn from_field(field: &AnalysisField) -> Self {
+        let storage = match &field.values {
+            AnalysisFieldValues::HostF64(_) => AnalysisFieldStorage::HostF64,
+            AnalysisFieldValues::DeviceRef(_) => AnalysisFieldStorage::DeviceRef,
+        };
+        let kind = infer_field_kind(&field.field_id, &field.shape);
+        let class_name = match kind {
+            AnalysisFieldKind::Scalar => "fea.ScalarField",
+            AnalysisFieldKind::Vector => "fea.VectorField",
+            AnalysisFieldKind::Tensor => "fea.TensorField",
+            AnalysisFieldKind::Unknown => "fea.Field",
+        }
+        .to_string();
+        let residency = match storage {
+            AnalysisFieldStorage::HostF64 => "cpu",
+            AnalysisFieldStorage::DeviceRef => "gpu",
+        }
+        .to_string();
+        let element_count = field.element_count();
+        Self {
+            field_id: field.field_id.clone(),
+            class_name,
+            kind,
+            dtype: "double".to_string(),
+            shape: field.shape.clone(),
+            element_count,
+            component_count: infer_component_count(&field.field_id, &field.shape),
+            residency,
+            storage,
+            size_bytes: element_count
+                .checked_mul(std::mem::size_of::<f64>())
+                .map(|bytes| bytes as u64),
+        }
+    }
+}
+
+fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
+    let normalized = field_id.to_ascii_lowercase();
+    if normalized.contains("von_mises")
+        || normalized.contains("temperature")
+        || normalized.contains("energy")
+        || normalized.contains("residual")
+        || normalized.contains("_proxy")
+    {
+        return AnalysisFieldKind::Scalar;
+    }
+    if normalized.contains("displacement")
+        || normalized.contains("mode_shape")
+        || normalized.contains("vector")
+        || normalized.contains("flux")
+    {
+        return AnalysisFieldKind::Vector;
+    }
+    match shape {
+        [] | [_] => AnalysisFieldKind::Scalar,
+        [_, 1] => AnalysisFieldKind::Scalar,
+        [_, 2] | [_, 3] => AnalysisFieldKind::Vector,
+        [_, _, ..] => AnalysisFieldKind::Tensor,
+    }
+}
+
+fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
+    let normalized = field_id.to_ascii_lowercase();
+    if normalized.contains("_proxy") {
+        return None;
+    }
+    if normalized.contains("displacement")
+        || normalized.contains("mode_shape")
+        || normalized.contains("vector")
+        || normalized.contains("flux")
+    {
+        return Some(
+            shape
+                .last()
+                .copied()
+                .filter(|value| (2..=6).contains(value))
+                .unwrap_or(3),
+        );
+    }
+    match shape {
+        [_, count] if (1..=6).contains(count) => Some(*count),
+        _ => None,
     }
 }
 
@@ -979,6 +1123,8 @@ pub struct AnalysisResultsSummary {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisResultsData {
+    #[serde(default)]
+    pub field_descriptors: Vec<AnalysisFieldDescriptor>,
     pub fields: Vec<AnalysisField>,
     pub modal_results: Option<ModalResultsData>,
     #[serde(default)]

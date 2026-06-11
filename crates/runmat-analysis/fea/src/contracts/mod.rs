@@ -6,6 +6,27 @@ use crate::solve::{
     backend::kind::LinearAlgebraBackendKind, preconditioner::SpdPreconditionerKind,
 };
 
+pub const FEA_FIELD_STRUCTURAL_DISPLACEMENT: &str = "structural.displacement";
+pub const FEA_FIELD_STRUCTURAL_VON_MISES: &str = "structural.von_mises";
+pub const FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY: &str = "em.vector_potential_proxy";
+pub const FEA_FIELD_EM_FLUX_DENSITY_PROXY: &str = "em.flux_density_proxy";
+
+pub fn fea_modal_mode_shape_field_id(mode_number: usize) -> String {
+    format!("modal.mode_shape.{mode_number}")
+}
+
+pub fn fea_thermal_temperature_field_id(snapshot_index: usize) -> String {
+    format!("thermal.temperature.{snapshot_index}")
+}
+
+pub fn fea_transient_displacement_field_id(snapshot_index: usize) -> String {
+    format!("transient.displacement.{snapshot_index}")
+}
+
+pub fn fea_nonlinear_displacement_field_id(increment_index: usize) -> String {
+    format!("nonlinear.displacement.{increment_index}")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ComputeBackend {
@@ -22,8 +43,24 @@ pub struct FeaRunResult {
     pub preconditioner: String,
     pub solver_host_sync_count: u32,
     pub diagnostics: Vec<crate::diagnostics::FeaDiagnostic>,
-    pub displacement_field: AnalysisField,
-    pub von_mises_field: AnalysisField,
+    pub fields: Vec<AnalysisField>,
+}
+
+impl FeaRunResult {
+    pub fn field(&self, field_id: &str) -> Option<&AnalysisField> {
+        self.fields.iter().find(|field| field.field_id == field_id)
+    }
+
+    pub fn fields_are_empty(&self) -> bool {
+        self.fields.is_empty() || self.fields.iter().any(AnalysisField::is_empty)
+    }
+
+    pub fn field_ids(&self) -> Vec<String> {
+        self.fields
+            .iter()
+            .map(|field| field.field_id.clone())
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

@@ -17,7 +17,10 @@ use runmat_analysis_core::{
     MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
     ReferenceFrame,
 };
-use runmat_analysis_fea::ComputeBackend;
+use runmat_analysis_fea::{
+    fea_modal_mode_shape_field_id, ComputeBackend, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
+};
 use runmat_geometry_core::{
     GeometryAsset, GeometrySource, MaterialEvidence, MaterialEvidenceConfidence, MeshDescriptor,
     MeshKind, Region, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
@@ -1621,7 +1624,12 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     assert_eq!(envelope.operation, "fea.run_linear_static");
     assert_eq!(envelope.op_version, "fea.run_linear_static/v1");
     assert_eq!(envelope.data.run.backend, ComputeBackend::Cpu);
-    assert!(!envelope.data.run.displacement_field.is_empty());
+    assert!(!envelope
+        .data
+        .run
+        .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .expect("structural displacement field should be present")
+        .is_empty());
     assert_eq!(envelope.data.run_status, RunStatus::Publishable);
     assert!(envelope.data.publishable);
     assert!(envelope.data.modal_results.is_none());
@@ -1656,7 +1664,12 @@ fn gpu_run_without_provider_records_fallback_event() {
             .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
         assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
         assert!(matches!(
-            envelope.data.run.displacement_field.values,
+            envelope
+                .data
+                .run
+                .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+                .expect("structural displacement field should be present")
+                .values,
             AnalysisFieldValues::HostF64(_)
         ));
     } else {
@@ -1748,11 +1761,21 @@ fn gpu_run_with_provider_emits_device_refs() {
         "ratio must be in [0,1]"
     );
     assert!(matches!(
-        envelope.data.run.displacement_field.values,
+        envelope
+            .data
+            .run
+            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .expect("structural displacement field should be present")
+            .values,
         AnalysisFieldValues::DeviceRef(_)
     ));
     assert!(matches!(
-        envelope.data.run.von_mises_field.values,
+        envelope
+            .data
+            .run
+            .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+            .expect("structural von Mises field should be present")
+            .values,
         AnalysisFieldValues::DeviceRef(_)
     ));
 }
@@ -1771,7 +1794,9 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
     let results = analysis_results_op(
         &run.data,
         AnalysisResultsQuery {
-            include_fields: vec!["displacement".to_string()],
+            include_fields: vec![FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string()],
+            include_field_values: true,
+
             include_diagnostics: false,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
@@ -1788,7 +1813,10 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
     assert_eq!(results.operation, "fea.results");
     assert_eq!(results.op_version, "fea.results/v1");
     assert_eq!(results.data.fields.len(), 1);
-    assert_eq!(results.data.fields[0].field_id, "displacement");
+    assert_eq!(
+        results.data.fields[0].field_id,
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT
+    );
     assert!(results.data.diagnostics.is_none());
     assert_eq!(results.data.summary.field_count, 1);
     assert_eq!(results.data.summary.mode_count, 0);
@@ -1819,6 +1847,8 @@ fn analysis_results_unknown_field_maps_typed_error() {
         &run.data,
         AnalysisResultsQuery {
             include_fields: vec!["strain_energy".to_string()],
+            include_field_values: true,
+
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
@@ -3917,6 +3947,8 @@ fn analysis_results_query_can_exclude_nonlinear_payload() {
         &run.data,
         AnalysisResultsQuery {
             include_fields: Vec::new(),
+            include_field_values: true,
+
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
@@ -4868,7 +4900,10 @@ fn analysis_run_modal_returns_native_modal_result() {
         .expect("modal payload should exist");
     assert!(!modal.eigenvalues_hz.is_empty());
     assert_eq!(modal.eigenvalues_hz.len(), modal.mode_shapes.len());
-    assert_eq!(modal.mode_shapes[0].field_id, "mode_shape_1");
+    assert_eq!(
+        modal.mode_shapes[0].field_id,
+        fea_modal_mode_shape_field_id(1)
+    );
     assert_eq!(modal.eigenvalues_hz.len(), modal.residual_norms.len());
     assert!(modal.residual_norms.iter().all(|value| value.is_finite()));
     assert_eq!(modal.modal_payload_version, "modal_results/v1");
@@ -5053,6 +5088,8 @@ fn analysis_results_query_can_exclude_modal_payload() {
         &run.data,
         AnalysisResultsQuery {
             include_fields: Vec::new(),
+            include_field_values: true,
+
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: false,
@@ -5094,6 +5131,8 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
         &run.data,
         AnalysisResultsQuery {
             include_fields: Vec::new(),
+            include_field_values: true,
+
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
@@ -5169,6 +5208,8 @@ fn analysis_results_query_can_exclude_transient_payload() {
         &run.data,
         AnalysisResultsQuery {
             include_fields: Vec::new(),
+            include_field_values: true,
+
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
@@ -5209,6 +5250,8 @@ fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
         &run.data,
         AnalysisResultsQuery {
             include_fields: Vec::new(),
+            include_field_values: true,
+
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,

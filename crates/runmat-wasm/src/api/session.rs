@@ -344,11 +344,21 @@ async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
             .data;
             let results = runmat_runtime::analysis::analysis_results_by_run_id_op(
                 &run.run_id,
-                runmat_runtime::analysis::AnalysisResultsQuery::default(),
+                runmat_runtime::analysis::AnalysisResultsQuery::metadata_only(),
                 runmat_runtime::operations::OperationContext::new(None, None),
             )
             .ok()
             .map(|envelope| envelope.data);
+            let field_descriptors = results
+                .as_ref()
+                .map(serialize_field_descriptors)
+                .transpose()?
+                .unwrap_or_default();
+            let result_summary = results
+                .as_ref()
+                .map(|data| serde_json::to_value(&data.summary))
+                .transpose()
+                .map_err(|err| err.to_string())?;
             Ok(FeaRunPayload {
                 path,
                 document_kind: "study".to_string(),
@@ -357,6 +367,8 @@ async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
                     .map(serde_json::to_value)
                     .transpose()
                     .map_err(|err| err.to_string())?,
+                field_descriptors,
+                result_summary,
                 figure_handles: Vec::new(),
                 artifact_manifest: None,
                 diagnostics: Vec::new(),
@@ -374,6 +386,8 @@ async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
                 document_kind: "sweep".to_string(),
                 run: serde_json::to_value(run).map_err(|err| err.to_string())?,
                 results: None,
+                field_descriptors: Vec::new(),
+                result_summary: None,
                 figure_handles: Vec::new(),
                 artifact_manifest: None,
                 diagnostics: Vec::new(),
@@ -385,15 +399,75 @@ async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
 fn load_fea_results(run_id: String) -> Result<FeaResultsPayload, String> {
     let results = runmat_runtime::analysis::analysis_results_by_run_id_op(
         &run_id,
-        runmat_runtime::analysis::AnalysisResultsQuery::default(),
+        runmat_runtime::analysis::AnalysisResultsQuery::metadata_only(),
         runmat_runtime::operations::OperationContext::new(None, None),
     )
     .map_err(|err| err.message)?
     .data;
+    let field_descriptors = serialize_field_descriptors(&results)?;
+    let result_summary =
+        Some(serde_json::to_value(&results.summary).map_err(|err| err.to_string())?);
     Ok(FeaResultsPayload {
         run_id,
         results: serde_json::to_value(results).map_err(|err| err.to_string())?,
+        field_descriptors,
+        result_summary,
     })
+}
+
+fn load_fea_field(
+    run_id: String,
+    field_id: String,
+    options: FeaFieldRequestPayload,
+) -> Result<FeaFieldPayload, String> {
+    let results = runmat_runtime::analysis::analysis_results_by_run_id_op(
+        &run_id,
+        runmat_runtime::analysis::AnalysisResultsQuery::field_values(field_id.clone()),
+        runmat_runtime::operations::OperationContext::new(None, None),
+    )
+    .map_err(|err| err.message)?
+    .data;
+    let descriptor = results
+        .field_descriptors
+        .iter()
+        .find(|descriptor| descriptor.field_id == field_id)
+        .ok_or_else(|| format!("FEA field descriptor not found for '{field_id}'"))?;
+    let field = results
+        .fields
+        .iter()
+        .find(|field| field.field_id == field_id)
+        .ok_or_else(|| format!("FEA field values not found for '{field_id}'"))?;
+    let total_count = descriptor.element_count;
+    let offset = options.offset.unwrap_or(0).min(total_count);
+    let limit = options.limit.unwrap_or(total_count.saturating_sub(offset));
+    let values = field.as_host_f64().unwrap_or(&[]);
+    let end = offset.saturating_add(limit).min(values.len());
+    let sliced_values = if offset < end {
+        values[offset..end].to_vec()
+    } else {
+        Vec::new()
+    };
+    let count = sliced_values.len();
+    Ok(FeaFieldPayload {
+        run_id,
+        field_id,
+        descriptor: serde_json::to_value(descriptor).map_err(|err| err.to_string())?,
+        values: sliced_values,
+        offset,
+        count,
+        total_count,
+        truncated: offset > 0 || count < total_count,
+    })
+}
+
+fn serialize_field_descriptors(
+    results: &runmat_runtime::analysis::AnalysisResultsData,
+) -> Result<Vec<serde_json::Value>, String> {
+    results
+        .field_descriptors
+        .iter()
+        .map(|descriptor| serde_json::to_value(descriptor).map_err(|err| err.to_string()))
+        .collect()
 }
 
 fn filename_for_display(path: &str) -> &str {
@@ -518,6 +592,9 @@ struct FeaRunPayload {
     run: JsonValue,
     #[serde(skip_serializing_if = "Option::is_none")]
     results: Option<JsonValue>,
+    field_descriptors: Vec<JsonValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result_summary: Option<JsonValue>,
     figure_handles: Vec<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     artifact_manifest: Option<JsonValue>,
@@ -529,6 +606,29 @@ struct FeaRunPayload {
 struct FeaResultsPayload {
     run_id: String,
     results: JsonValue,
+    field_descriptors: Vec<JsonValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result_summary: Option<JsonValue>,
+}
+
+#[derive(Debug, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct FeaFieldRequestPayload {
+    offset: Option<usize>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FeaFieldPayload {
+    run_id: String,
+    field_id: String,
+    descriptor: JsonValue,
+    values: Vec<f64>,
+    offset: usize,
+    count: usize,
+    total_count: usize,
+    truncated: bool,
 }
 
 #[wasm_bindgen]
@@ -785,7 +885,7 @@ impl RunMatWasm {
             supports_check: true,
             supports_run: true,
             supports_results: true,
-            supports_live_progress: false,
+            supports_live_progress: true,
             visualization_backend: "runmat-plot",
         };
         serde_wasm_bindgen::to_value(&payload)
@@ -837,6 +937,25 @@ impl RunMatWasm {
         let payload = load_fea_results(run_id).map_err(|err| js_error(&err))?;
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize FEA results: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = feaField)]
+    pub fn fea_field_js(
+        &self,
+        run_id: String,
+        field_id: String,
+        options_value: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let options = if options_value.is_null() || options_value.is_undefined() {
+            FeaFieldRequestPayload::default()
+        } else {
+            serde_wasm_bindgen::from_value::<FeaFieldRequestPayload>(options_value)
+                .map_err(|err| js_error(&format!("FEA field options parse failed: {err}")))?
+        };
+        let payload = load_fea_field(run_id, field_id, options).map_err(|err| js_error(&err))?;
+        serde_wasm_bindgen::to_value(&payload)
+            .map_err(|err| js_error(&format!("Failed to serialize FEA field: {err}")))
     }
 
     #[wasm_bindgen(js_name = resetSession)]

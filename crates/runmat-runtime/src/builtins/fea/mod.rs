@@ -2041,6 +2041,9 @@ fn results_query_from_args(args: &[Value]) -> BuiltinResult<AnalysisResultsQuery
             "includefields" | "fields" => {
                 query.include_fields = string_vec_from_value(RESULTS_NAME, pair.value)?;
             }
+            "includefieldvalues" | "fieldvalues" => {
+                query.include_field_values = bool_from_value(RESULTS_NAME, pair.value)?;
+            }
             "includediagnostics" => {
                 query.include_diagnostics = bool_from_value(RESULTS_NAME, pair.value)?;
             }

@@ -2,7 +2,10 @@ use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 
 use crate::{
     assembly::assemble_linear_system,
-    contracts::{ComputeBackend, FeaRunError, FeaRunResult, FeaTransientRunResult},
+    contracts::{
+        fea_transient_displacement_field_id, ComputeBackend, FeaRunError, FeaRunResult,
+        FeaTransientRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
+    },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     solve::transient::{solve_transient_system, TransientSolveOptions},
 };
@@ -67,12 +70,14 @@ pub fn run_transient_with_options(
         preconditioner: transient.preconditioner,
         solver_host_sync_count: transient.solver_host_sync_count,
         diagnostics,
-        displacement_field: AnalysisField::host_f64(
-            "displacement",
-            vec![displacement.len()],
-            displacement,
-        ),
-        von_mises_field: AnalysisField::host_f64("von_mises", vec![1], vec![von_mises]),
+        fields: vec![
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+                vec![displacement.len()],
+                displacement,
+            ),
+            AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![1], vec![von_mises]),
+        ],
     };
 
     let displacement_snapshots = transient
@@ -81,7 +86,7 @@ pub fn run_transient_with_options(
         .enumerate()
         .map(|(index, snapshot)| {
             AnalysisField::host_f64(
-                format!("displacement_t{}", index),
+                fea_transient_displacement_field_id(index),
                 vec![snapshot.len()],
                 snapshot,
             )

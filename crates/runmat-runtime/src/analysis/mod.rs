@@ -5,8 +5,8 @@ use std::sync::{OnceLock, RwLock};
 
 use chrono::Utc;
 use runmat_analysis_core::{
-    validate_model_against_geometry, AnalysisInterfaceKind, AnalysisModel, AnalysisModelId,
-    AnalysisStep, AnalysisStepKind, AnalysisValidationError, BoundaryCondition,
+    validate_model_against_geometry, AnalysisField, AnalysisInterfaceKind, AnalysisModel,
+    AnalysisModelId, AnalysisStep, AnalysisStepKind, AnalysisValidationError, BoundaryCondition,
     BoundaryConditionKind, EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment,
     MaterialMechanicalModel, MaterialModel, MaterialThermalModel, ReferenceFrame,
 };
@@ -87,7 +87,8 @@ pub fn configure_fea_runtime(config: FeaRuntimeConfig) -> Result<(), String> {
 pub use contracts::{
     AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
     AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext, AnalysisCreateModelProfile,
-    AnalysisElectromagneticRunOptions, AnalysisFsiRunOptions, AnalysisModalRunOptions,
+    AnalysisElectromagneticRunOptions, AnalysisFieldDescriptor, AnalysisFieldKind,
+    AnalysisFieldStorage, AnalysisFsiRunOptions, AnalysisModalRunOptions,
     AnalysisNonlinearRunOptions, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
     AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunKind,
     AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult, AnalysisStudyIssue,
@@ -5208,7 +5209,7 @@ pub fn analysis_run_linear_static_with_options(
         diag.code
             .starts_with("ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_")
     });
-    let result_quality = if run.displacement_field.is_empty() || run.von_mises_field.is_empty() {
+    let result_quality = if run.fields_are_empty() {
         QualityGate::Fail
     } else if has_material_assignment_conflict {
         QualityGate::Warn
@@ -6156,20 +6157,73 @@ pub fn analysis_run_electromagnetic_with_options_op(
     ))
 }
 
+fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<AnalysisField> {
+    let mut fields = Vec::new();
+    let mut seen = HashSet::new();
+
+    for field in &run_result.run.fields {
+        push_analysis_result_field(&mut fields, &mut seen, field);
+    }
+
+    if let Some(modal) = run_result.modal_results.as_ref() {
+        for field in &modal.mode_shapes {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+    }
+
+    if let Some(thermal) = run_result.thermal_results.as_ref() {
+        for field in &thermal.temperature_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+    }
+
+    if let Some(transient) = run_result.transient_results.as_ref() {
+        for field in &transient.displacement_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+    }
+
+    if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
+        for field in &nonlinear.displacement_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+    }
+
+    fields
+}
+
+fn push_analysis_result_field(
+    fields: &mut Vec<AnalysisField>,
+    seen: &mut HashSet<String>,
+    field: &AnalysisField,
+) {
+    if !seen.insert(field.field_id.clone()) {
+        return;
+    }
+    fields.push(field.clone());
+}
+
+pub(crate) fn analysis_run_field_ids(run_result: &AnalysisRunResult) -> Vec<String> {
+    collect_analysis_result_fields(run_result)
+        .into_iter()
+        .map(|field| field.field_id)
+        .collect()
+}
+
 pub fn analysis_results_op(
     run_result: &AnalysisRunResult,
     query: AnalysisResultsQuery,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
-    let mut fields = vec![
-        run_result.run.displacement_field.clone(),
-        run_result.run.von_mises_field.clone(),
-    ];
+    let mut collected_fields = collect_analysis_result_fields(run_result);
 
     if !query.include_fields.is_empty() {
         let mut filtered = Vec::new();
         for requested in &query.include_fields {
-            let Some(field) = fields.iter().find(|field| &field.field_id == requested) else {
+            let Some(field) = collected_fields
+                .iter()
+                .find(|field| &field.field_id == requested)
+            else {
                 return Err(operation_error(
                     ANALYSIS_RESULTS_OPERATION,
                     ANALYSIS_RESULTS_OP_VERSION,
@@ -6185,7 +6239,7 @@ pub fn analysis_results_op(
                         ("requested_field".to_string(), requested.clone()),
                         (
                             "available_fields".to_string(),
-                            fields
+                            collected_fields
                                 .iter()
                                 .map(|field| field.field_id.clone())
                                 .collect::<Vec<_>>()
@@ -6196,8 +6250,12 @@ pub fn analysis_results_op(
             };
             filtered.push(field.clone());
         }
-        fields = filtered;
+        collected_fields = filtered;
     }
+    let field_descriptors = collected_fields
+        .iter()
+        .map(AnalysisFieldDescriptor::from_field)
+        .collect::<Vec<_>>();
 
     let (
         mode_count,
@@ -6744,8 +6802,11 @@ pub fn analysis_results_op(
     );
 
     let summary = AnalysisResultsSummary {
-        field_count: fields.len(),
-        total_elements: fields.iter().map(|field| field.element_count()).sum(),
+        field_count: field_descriptors.len(),
+        total_elements: field_descriptors
+            .iter()
+            .map(|field| field.element_count)
+            .sum(),
         mode_count,
         available_mode_indices,
         min_frequency_hz,
@@ -6847,7 +6908,7 @@ pub fn analysis_results_op(
         electromagnetic_resonance_flux_gain,
     };
 
-    let modal_results = if query.include_modal_results {
+    let modal_results = if query.include_modal_results && query.include_field_values {
         if let Some(modal) = run_result.modal_results.as_ref() {
             if query.mode_indices.is_empty() {
                 Some(modal.clone())
@@ -6944,7 +7005,7 @@ pub fn analysis_results_op(
         None
     };
 
-    let transient_results = if query.include_transient_results {
+    let transient_results = if query.include_transient_results && query.include_field_values {
         if let Some(transient) = run_result.transient_results.as_ref() {
             if query.transient_snapshot_indices.is_empty() {
                 Some(transient.clone())
@@ -7052,20 +7113,31 @@ pub fn analysis_results_op(
         None
     };
 
-    let thermal_results = run_result.thermal_results.clone();
+    let thermal_results = if query.include_field_values {
+        run_result.thermal_results.clone()
+    } else {
+        None
+    };
 
-    let nonlinear_results = if query.include_nonlinear_results {
+    let nonlinear_results = if query.include_nonlinear_results && query.include_field_values {
         run_result.nonlinear_results.clone()
     } else {
         None
     };
-    let electromagnetic_results = if query.include_electromagnetic_results {
-        run_result.electromagnetic_results.clone()
+    let electromagnetic_results =
+        if query.include_electromagnetic_results && query.include_field_values {
+            run_result.electromagnetic_results.clone()
+        } else {
+            None
+        };
+    let fields = if query.include_field_values {
+        collected_fields
     } else {
-        None
+        Vec::new()
     };
 
     let data = AnalysisResultsData {
+        field_descriptors,
         fields,
         modal_results,
         thermal_results,

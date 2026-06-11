@@ -9,7 +9,7 @@ use crate::{
     assembly::assemble_linear_system,
     contracts::{
         ComputeBackend, ElectromagneticSolveOptions, FeaElectromagneticRunResult, FeaRunError,
-        FeaRunResult,
+        FeaRunResult, FEA_FIELD_EM_FLUX_DENSITY_PROXY, FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY,
     },
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     operator::{apply_k, OperatorSystem},
@@ -821,16 +821,18 @@ pub fn run_electromagnetic_with_options(
         preconditioner: "block_jacobi".to_string(),
         solver_host_sync_count: if backend == ComputeBackend::Gpu { 0 } else { 1 },
         diagnostics,
-        displacement_field: AnalysisField::host_f64(
-            "field_em_vector_potential",
-            vec![node_count],
-            vector_potential.clone(),
-        ),
-        von_mises_field: AnalysisField::host_f64(
-            "field_em_flux_density",
-            vec![node_count],
-            flux_density.clone(),
-        ),
+        fields: vec![
+            AnalysisField::host_f64(
+                FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY,
+                vec![node_count],
+                vector_potential.clone(),
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_EM_FLUX_DENSITY_PROXY,
+                vec![node_count],
+                flux_density.clone(),
+            ),
+        ],
     };
 
     Ok(FeaElectromagneticRunResult {
@@ -838,12 +840,12 @@ pub fn run_electromagnetic_with_options(
         reference_frequency_hz: domain.reference_frequency_hz,
         applied_current_a: domain.applied_current_a,
         vector_potential_field: AnalysisField::host_f64(
-            "field_em_vector_potential",
+            FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY,
             vec![node_count],
             vector_potential,
         ),
         flux_density_field: AnalysisField::host_f64(
-            "field_em_flux_density",
+            FEA_FIELD_EM_FLUX_DENSITY_PROXY,
             vec![node_count],
             flux_density,
         ),

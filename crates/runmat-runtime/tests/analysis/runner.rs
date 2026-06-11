@@ -1,6 +1,7 @@
 use super::harness::with_harness_provider;
 use super::manifest::default_options;
 use super::*;
+use runmat_analysis_fea::{FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES};
 use runmat_runtime::analysis::{
     ContactInterfaceOptions, ElectroRegionConductivityScale, ElectroThermalCouplingOptions,
     ElectroTimeProfilePoint, PlasticityConstitutiveOptions, ThermoMechanicalCouplingOptions,
@@ -2325,7 +2326,7 @@ fn validate_fallback_event_schema(event: &str) -> bool {
     let stage_ok = if parts[0] == "SOLVER_BACKEND_FALLBACK" {
         parts[1].starts_with("requested=")
     } else {
-        matches!(parts[1], "displacement" | "von_mises")
+        parts[1] == FEA_FIELD_STRUCTURAL_DISPLACEMENT || parts[1] == FEA_FIELD_STRUCTURAL_VON_MISES
     };
     let reason_ok = !parts[2].is_empty();
     category_ok && stage_ok && reason_ok
@@ -3236,11 +3237,18 @@ pub(super) fn run_fixture(
                         }
                     }
 
-                    gpu_displacement_residency =
-                        Some(match &gpu_envelope.data.run.displacement_field.values {
+                    gpu_displacement_residency = Some(
+                        match &gpu_envelope
+                            .data
+                            .run
+                            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+                            .expect("structural displacement field should be present")
+                            .values
+                        {
                             AnalysisFieldValues::DeviceRef(_) => "device_ref".to_string(),
                             AnalysisFieldValues::HostF64(_) => "host_f64".to_string(),
-                        });
+                        },
+                    );
 
                     if let Some(expected_publishable) = spec.expected_publishable {
                         if gpu_envelope.data.publishable != expected_publishable {
@@ -6026,12 +6034,13 @@ pub(super) fn run_fixture(
                         );
                     }
 
-                    let gpu_primary_field_id =
-                        gpu_envelope.data.run.displacement_field.field_id.clone();
+                    let gpu_primary_field_id = FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string();
                     let gpu_results = analysis_results_op(
                         &gpu_envelope.data,
                         AnalysisResultsQuery {
                             include_fields: vec![gpu_primary_field_id.clone()],
+                            include_field_values: true,
+
                             include_diagnostics: false,
                             diagnostic_codes: Vec::new(),
                             include_modal_results: false,
@@ -6379,6 +6388,8 @@ pub(super) fn run_fixture(
                             &gpu_envelope.data.run_id,
                             AnalysisResultsQuery {
                                 include_fields: vec![gpu_primary_field_id],
+                                include_field_values: true,
+
                                 include_diagnostics: false,
                                 diagnostic_codes: Vec::new(),
                                 include_modal_results: false,
@@ -6459,12 +6470,8 @@ pub(super) fn run_fixture(
                         let cpu_results = analysis_results_op(
                             &cpu_envelope.data,
                             AnalysisResultsQuery {
-                                include_fields: vec![cpu_envelope
-                                    .data
-                                    .run
-                                    .displacement_field
-                                    .field_id
-                                    .clone()],
+                                include_fields: vec![FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string()],
+                                include_field_values: true,
                                 include_diagnostics: false,
                                 diagnostic_codes: Vec::new(),
                                 include_modal_results: false,

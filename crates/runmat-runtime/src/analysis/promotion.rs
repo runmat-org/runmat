@@ -9,8 +9,10 @@ pub(crate) fn promote_run_fields_to_device_refs(
         return;
     }
 
-    promote_field_to_device_ref("displacement", &mut run.displacement_field, fallback_events);
-    promote_field_to_device_ref("von_mises", &mut run.von_mises_field, fallback_events);
+    for field in &mut run.fields {
+        let field_label = field.field_id.clone();
+        promote_field_to_device_ref(&field_label, field, fallback_events);
+    }
 }
 
 fn promote_field_to_device_ref(

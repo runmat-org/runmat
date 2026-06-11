@@ -83,7 +83,6 @@ pub fn run_linear_static_with_options(
         preconditioner: solve_result.preconditioner,
         solver_host_sync_count: solve_result.host_sync_count,
         diagnostics,
-        displacement_field: fields.displacement_field,
-        von_mises_field: fields.von_mises_field,
+        fields,
     })
 }

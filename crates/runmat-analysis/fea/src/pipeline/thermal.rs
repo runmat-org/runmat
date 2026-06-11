@@ -3,7 +3,8 @@ use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 use crate::{
     assembly::assemble_linear_system,
     contracts::{
-        ComputeBackend, FeaRunError, FeaRunResult, FeaThermalRunResult, ThermalSolveOptions,
+        fea_thermal_temperature_field_id, ComputeBackend, FeaRunError, FeaRunResult,
+        FeaThermalRunResult, ThermalSolveOptions,
     },
     diagnostics::{
         builders::{material_assignment_diagnostics, thermo_mechanical_diagnostic},
@@ -131,7 +132,7 @@ pub fn run_thermal_with_options(
         .enumerate()
         .map(|(step, temperatures)| {
             AnalysisField::host_f64(
-                format!("temperature_t{step}"),
+                fea_thermal_temperature_field_id(step),
                 vec![node_count],
                 temperatures.clone(),
             )
@@ -247,7 +248,6 @@ pub fn run_thermal_with_options(
         diagnostics.push(thermo_mechanical_diagnostic(thermo_mechanical));
     }
 
-    let displacement_zeros = vec![0.0; summary.dof_count.max(3)];
     let run = FeaRunResult {
         backend,
         solver_backend: if backend == ComputeBackend::Gpu {
@@ -260,12 +260,7 @@ pub fn run_thermal_with_options(
         preconditioner: "none".to_string(),
         solver_host_sync_count: 0,
         diagnostics,
-        displacement_field: AnalysisField::host_f64(
-            "displacement",
-            vec![displacement_zeros.len()],
-            displacement_zeros,
-        ),
-        von_mises_field: AnalysisField::host_f64("von_mises", vec![1], vec![0.0]),
+        fields: Vec::new(),
     };
 
     Ok(FeaThermalRunResult {
