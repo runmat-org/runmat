@@ -1,5 +1,6 @@
 use runmat_geometry_core::{GeometryAsset, MeshKind};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -170,24 +171,52 @@ pub fn prepare_geometry_for_analysis(
         });
     }
 
-    let source_mesh_ids = prepared_meshes
-        .iter()
-        .map(|mesh| mesh.source_mesh_id.clone())
-        .collect::<Vec<_>>();
-    let prepared_mesh_ids = prepared_meshes
-        .iter()
-        .map(|mesh| mesh.prepared_mesh_id.clone())
-        .collect::<Vec<_>>();
-    let mut region_mappings = geometry
-        .regions
-        .iter()
-        .map(|region| RegionMeshMapping {
+    let mut prepared_by_source = BTreeMap::<String, String>::new();
+    for prepared in &prepared_meshes {
+        prepared_by_source.insert(
+            prepared.source_mesh_id.clone(),
+            prepared.prepared_mesh_id.clone(),
+        );
+    }
+
+    let mut source_mesh_ids_by_region = BTreeMap::<String, Vec<String>>::new();
+    for mapping in &geometry.region_entity_mappings {
+        let entry = source_mesh_ids_by_region
+            .entry(mapping.region_id.clone())
+            .or_default();
+        if !entry.iter().any(|mesh_id| mesh_id == &mapping.mesh_id) {
+            entry.push(mapping.mesh_id.clone());
+        }
+    }
+    for mesh_ids in source_mesh_ids_by_region.values_mut() {
+        mesh_ids.sort();
+    }
+
+    let mut region_mappings = Vec::<RegionMeshMapping>::new();
+    for region in &geometry.regions {
+        let source_mesh_ids = source_mesh_ids_by_region
+            .get(&region.region_id)
+            .cloned()
+            .unwrap_or_default();
+        let prepared_mesh_ids = source_mesh_ids
+            .iter()
+            .filter_map(|mesh_id| prepared_by_source.get(mesh_id).cloned())
+            .collect::<Vec<_>>();
+        region_mappings.push(RegionMeshMapping {
             region_id: region.region_id.clone(),
-            source_mesh_ids: source_mesh_ids.clone(),
-            prepared_mesh_ids: prepared_mesh_ids.clone(),
-        })
-        .collect::<Vec<_>>();
+            source_mesh_ids,
+            prepared_mesh_ids,
+        });
+    }
     if region_mappings.is_empty() {
+        let source_mesh_ids = prepared_meshes
+            .iter()
+            .map(|mesh| mesh.source_mesh_id.clone())
+            .collect::<Vec<_>>();
+        let prepared_mesh_ids = prepared_meshes
+            .iter()
+            .map(|mesh| mesh.prepared_mesh_id.clone())
+            .collect::<Vec<_>>();
         region_mappings.push(RegionMeshMapping {
             region_id: "region_default".to_string(),
             source_mesh_ids: source_mesh_ids.clone(),
@@ -245,8 +274,8 @@ pub fn prepare_geometry_for_analysis(
 mod tests {
     use super::*;
     use runmat_geometry_core::{
-        GeometrySource, MaterialEvidence, MeshDescriptor, Region, SourceGeometry,
-        SourceGeometryKind, TessellationProfile, UnitSystem,
+        GeometrySource, MaterialEvidence, MeshDescriptor, Region, RegionEntityMapping,
+        SourceGeometry, SourceGeometryKind, TessellationProfile, UnitSystem,
     };
 
     fn sample_geometry() -> GeometryAsset {
@@ -278,11 +307,17 @@ mod tests {
                 vertex_count: 120,
                 element_count: 200,
             }],
+            surface_meshes: Vec::new(),
             regions: vec![Region {
                 region_id: "region_main".to_string(),
                 name: "main".to_string(),
                 tag: None,
             }],
+            region_entity_mappings: vec![RegionEntityMapping::all_faces(
+                "region_main",
+                "mesh_a",
+                200,
+            )],
             diagnostics: Vec::new(),
         }
     }

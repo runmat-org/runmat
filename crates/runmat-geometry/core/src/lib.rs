@@ -6,9 +6,9 @@ pub mod selection;
 
 pub use diagnostics::{Diagnostic, DiagnosticSeverity};
 pub use model::{
-    AssemblyNode, GeometryAsset, GeometrySource, MaterialEvidence, MaterialEvidenceConfidence,
-    MeshDescriptor, MeshKind, Region, SourceGeometry, SourceGeometryKind, SurfaceMesh,
-    TessellationProfile, UnitSystem,
+    AssemblyNode, EntityIdRange, GeometryAsset, GeometrySource, MaterialEvidence,
+    MaterialEvidenceConfidence, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
+    SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
 pub use selection::{EntityKind, EntityRef};
 
@@ -48,6 +48,7 @@ mod tests {
                 name: "body".to_string(),
                 tag: None,
             }],
+            region_entity_mappings: vec![RegionEntityMapping::all_faces("region_a", "mesh_1", 1)],
             diagnostics: vec![],
         }
     }

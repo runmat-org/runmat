@@ -47,6 +47,7 @@ mod tests {
                 vec![[0, 1, 2]],
             )],
             regions: vec![],
+            region_entity_mappings: vec![],
             diagnostics: vec![],
         }
     }

@@ -1,10 +1,10 @@
 use crate::core::{BoundingBox, Vertex};
 use crate::plots::{
     AreaPlot, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar, Figure,
-    LegendEntry, LegendStyle, Line3Plot, LinePlot, MarkerStyle, MeshPlot, PatchEdgeColorMode,
-    PatchFaceColorMode, PatchPlot, PlotElement, PlotType, QuiverPlot, ReferenceLine,
-    ReferenceLineOrientation, Scatter3Plot, ScatterPlot, ShadingMode, StairsPlot, StemPlot,
-    SurfacePlot, TextStyle,
+    LegendEntry, LegendStyle, Line3Plot, LinePlot, MarkerStyle, MeshPlot, MeshRegion,
+    MeshTriangleRange, PatchEdgeColorMode, PatchFaceColorMode, PatchPlot, PlotElement, PlotType,
+    QuiverPlot, ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot, ShadingMode,
+    StairsPlot, StemPlot, SurfacePlot, TextStyle,
 };
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
@@ -249,6 +249,12 @@ pub enum ScenePlot {
         edge_width: f32,
         axes_index: u32,
         label: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        regions: Vec<SerializedMeshRegion>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        highlighted_region_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        highlight_color_rgba: Option<[f32; 4]>,
         visible: bool,
     },
     Line3 {
@@ -691,6 +697,25 @@ pub struct SerializedTextAnnotation {
     pub style: SerializedTextStyle,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedMeshRegion {
+    pub region_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triangle_ranges: Vec<SerializedMeshTriangleRange>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedMeshTriangleRange {
+    pub start: u32,
+    pub count: u32,
+}
+
 impl From<AxesMetadata> for SerializedAxesMetadata {
     fn from(value: AxesMetadata) -> Self {
         Self {
@@ -783,6 +808,48 @@ impl From<SerializedTextAnnotation> for crate::plots::figure::TextAnnotation {
             text: value.text,
             style: value.style.into(),
         }
+    }
+}
+
+impl From<&MeshRegion> for SerializedMeshRegion {
+    fn from(value: &MeshRegion) -> Self {
+        Self {
+            region_id: value.region_id.clone(),
+            label: value.label.clone(),
+            tag: value.tag.clone(),
+            triangle_ranges: value
+                .triangle_ranges
+                .iter()
+                .copied()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
+
+impl From<SerializedMeshRegion> for MeshRegion {
+    fn from(value: SerializedMeshRegion) -> Self {
+        MeshRegion {
+            region_id: value.region_id,
+            label: value.label,
+            tag: value.tag,
+            triangle_ranges: value.triangle_ranges.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<MeshTriangleRange> for SerializedMeshTriangleRange {
+    fn from(value: MeshTriangleRange) -> Self {
+        Self {
+            start: value.start,
+            count: value.count,
+        }
+    }
+}
+
+impl From<SerializedMeshTriangleRange> for MeshTriangleRange {
+    fn from(value: SerializedMeshTriangleRange) -> Self {
+        Self::new(value.start, value.count)
     }
 }
 
@@ -997,6 +1064,9 @@ impl ScenePlot {
                 edge_width: mesh.edge_width(),
                 axes_index,
                 label: mesh.label().map(str::to_string),
+                regions: mesh.regions().iter().map(Into::into).collect(),
+                highlighted_region_id: mesh.highlighted_region_id().map(str::to_string),
+                highlight_color_rgba: Some(vec4_to_rgba(mesh.highlight_color())),
                 visible: mesh.is_visible(),
             },
             PlotElement::Line3(line) => Self::Line3 {
@@ -1385,6 +1455,9 @@ impl ScenePlot {
                 edge_width,
                 axes_index,
                 label,
+                regions,
+                highlighted_region_id,
+                highlight_color_rgba,
                 visible,
             } => {
                 let vertices: Vec<Vec3> = vertices.into_iter().map(xyz_to_vec3).collect();
@@ -1396,6 +1469,11 @@ impl ScenePlot {
                 mesh.set_edge_alpha(edge_alpha);
                 mesh.set_edge_width(edge_width);
                 mesh.set_label(label);
+                mesh.set_regions(regions.into_iter().map(Into::into).collect());
+                mesh.set_highlighted_region_id(highlighted_region_id);
+                if let Some(color) = highlight_color_rgba {
+                    mesh.set_highlight_color(rgba_to_vec4(color));
+                }
                 mesh.set_visible(visible);
                 figure.add_mesh_plot_on_axes(mesh, axes_index as usize);
             }
@@ -1996,6 +2074,13 @@ mod tests {
         mesh.set_label(Some("mesh tri".to_string()));
         mesh.set_face_alpha(0.7);
         mesh.set_edge_width(0.25);
+        mesh.set_regions(vec![MeshRegion::new(
+            "region_default",
+            Some("Default Region".to_string()),
+            Some("mesh_default".to_string()),
+            vec![MeshTriangleRange::new(0, 1)],
+        )]);
+        mesh.set_highlighted_region_id(Some("region_default".to_string()));
         figure.add_mesh_plot(mesh);
 
         let scene = FigureScene::capture(&figure);
@@ -2010,6 +2095,9 @@ mod tests {
         assert_eq!(mesh.label(), Some("mesh tri"));
         assert!((mesh.face_alpha() - 0.7).abs() < f32::EPSILON);
         assert!((mesh.edge_width() - 0.25).abs() < f32::EPSILON);
+        assert_eq!(mesh.regions().len(), 1);
+        assert_eq!(mesh.regions()[0].region_id, "region_default");
+        assert_eq!(mesh.highlighted_region_id(), Some("region_default"));
     }
 
     #[test]

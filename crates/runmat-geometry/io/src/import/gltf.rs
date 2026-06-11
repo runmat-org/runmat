@@ -1,14 +1,15 @@
 use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
 use base64::Engine;
-use runmat_geometry_core::SurfaceMesh;
+use runmat_geometry_core::{EntityIdRange, EntityKind, Region, RegionEntityMapping, SurfaceMesh};
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
 
 use super::{
-    build_asset, build_result, capacity_guard, is_degenerate_triangle, push_mesh_count_diagnostics,
-    push_utf8_bom_stripped_diagnostic, strip_utf8_bom_bytes, GeometryImportError,
-    GeometryImportOptions,
+    build_asset, build_result, capacity_guard, is_degenerate_triangle, push_entity_range,
+    push_mesh_count_diagnostics, push_utf8_bom_stripped_diagnostic, strip_utf8_bom_bytes,
+    GeometryImportError, GeometryImportOptions,
 };
 
 pub(super) fn import_gltf(
@@ -58,8 +59,10 @@ pub(super) fn import_gltf(
     let mut all_positions = Vec::<[f64; 3]>::new();
     let mut triangles = Vec::<[u32; 3]>::new();
     let mut triangle_count = 0u64;
+    let mut region_tracker = GltfRegionTracker::default();
 
-    for mesh in meshes {
+    for (mesh_index, mesh) in meshes.iter().enumerate() {
+        let region_id = region_tracker.ensure_mesh_region(mesh_index, mesh);
         let primitives = mesh
             .get("primitives")
             .and_then(Value::as_array)
@@ -139,6 +142,7 @@ pub(super) fn import_gltf(
                             )
                         })?,
                     ]);
+                    region_tracker.record_face(&region_id, triangles.len() as u64 - 1);
                     triangle_count += 1;
                 }
             }
@@ -151,7 +155,7 @@ pub(super) fn import_gltf(
         all_positions.len() as u64,
         triangle_count,
     );
-    let asset = build_asset(
+    let mut asset = build_asset(
         path,
         "gltf/v1",
         options.units,
@@ -160,7 +164,109 @@ pub(super) fn import_gltf(
         vec![SurfaceMesh::new("mesh_1", all_positions, triangles)],
         diagnostics.clone(),
     );
+    if let Some((regions, mappings)) = region_tracker.into_geometry_regions("mesh_1") {
+        asset.regions = regions;
+        asset.region_entity_mappings = mappings;
+    }
     Ok(build_result(asset, diagnostics))
+}
+
+#[derive(Debug, Default)]
+struct GltfRegionTracker {
+    regions: Vec<Region>,
+    ranges_by_region_id: BTreeMap<String, Vec<EntityIdRange>>,
+}
+
+impl GltfRegionTracker {
+    fn ensure_mesh_region(&mut self, mesh_index: usize, mesh: &Value) -> String {
+        let name = mesh
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::trim)
+            .unwrap_or("GLTF Mesh");
+        let base = stable_region_slug(name);
+        let mut region_id = format!("region_{base}");
+        if self
+            .regions
+            .iter()
+            .any(|region| region.region_id == region_id)
+        {
+            region_id = format!("{}_{}", region_id, mesh_index + 1);
+        }
+        self.regions.push(Region {
+            region_id: region_id.clone(),
+            name: if name == "GLTF Mesh" {
+                format!("GLTF Mesh {}", mesh_index + 1)
+            } else {
+                name.to_string()
+            },
+            tag: Some("gltf_mesh".to_string()),
+        });
+        region_id
+    }
+
+    fn record_face(&mut self, region_id: &str, entity_id: u64) {
+        push_entity_range(
+            self.ranges_by_region_id
+                .entry(region_id.to_string())
+                .or_default(),
+            entity_id,
+        );
+    }
+
+    fn into_geometry_regions(
+        self,
+        mesh_id: &str,
+    ) -> Option<(Vec<Region>, Vec<RegionEntityMapping>)> {
+        if self.regions.is_empty() {
+            return None;
+        }
+        let mappings = self
+            .regions
+            .iter()
+            .filter_map(|region| {
+                let ranges = self
+                    .ranges_by_region_id
+                    .get(&region.region_id)
+                    .cloned()
+                    .unwrap_or_default();
+                if ranges.is_empty() {
+                    None
+                } else {
+                    Some(RegionEntityMapping::new(
+                        region.region_id.clone(),
+                        mesh_id.to_string(),
+                        EntityKind::Face,
+                        ranges,
+                    ))
+                }
+            })
+            .collect();
+        Some((self.regions, mappings))
+    }
+}
+
+fn stable_region_slug(value: &str) -> String {
+    let mut slug = String::new();
+    let mut previous_separator = false;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            previous_separator = false;
+        } else if !previous_separator && !slug.is_empty() {
+            slug.push('_');
+            previous_separator = true;
+        }
+    }
+    while slug.ends_with('_') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        "mesh".to_string()
+    } else {
+        slug
+    }
 }
 
 fn parse_positions(

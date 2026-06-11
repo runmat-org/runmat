@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -838,6 +838,12 @@ pub fn geometry_query_entities_op(
     if let Some(region_id) = query.region_id.as_ref() {
         find_region(asset, region_id)
             .map_err(|error| map_geometry_query_error(region_id, error, &context))?;
+        return Ok(OperationEnvelope::new(
+            GEOMETRY_QUERY_ENTITIES_OPERATION,
+            GEOMETRY_QUERY_ENTITIES_OP_VERSION,
+            &context,
+            query_region_entities(asset, &query, region_id, requested_limit),
+        ));
     }
 
     let mut entities = Vec::new();
@@ -886,6 +892,134 @@ pub fn geometry_query_entities_op(
             truncated: produced_total > requested_limit,
         },
     ))
+}
+
+fn query_region_entities(
+    asset: &GeometryAsset,
+    query: &GeometryEntityQuery,
+    region_id: &str,
+    requested_limit: usize,
+) -> GeometryEntityQueryResult {
+    if query.entity_kind == EntityKind::Node {
+        return query_region_nodes(asset, query, region_id, requested_limit);
+    }
+
+    let mut entities = Vec::new();
+    let mut produced_total = 0usize;
+    for mapping in asset.region_entity_mappings.iter().filter(|mapping| {
+        mapping.region_id == region_id
+            && query
+                .mesh_id
+                .as_ref()
+                .is_none_or(|mesh_id| mesh_id == &mapping.mesh_id)
+            && mapping_matches_query_kind(mapping.entity_kind, query.entity_kind)
+    }) {
+        let mapped_total = mapping.entity_count() as usize;
+        produced_total = produced_total.saturating_add(mapped_total);
+        if entities.len() >= requested_limit {
+            continue;
+        }
+        for range in &mapping.ranges {
+            let Some(end) = range.end_exclusive() else {
+                continue;
+            };
+            for entity_id in range.start..end {
+                if entities.len() >= requested_limit {
+                    break;
+                }
+                entities.push(EntityRef {
+                    geometry_id: asset.geometry_id.clone(),
+                    geometry_revision: asset.revision,
+                    mesh_id: mapping.mesh_id.clone(),
+                    entity_kind: query.entity_kind,
+                    entity_id,
+                });
+            }
+        }
+    }
+
+    GeometryEntityQueryResult {
+        entities,
+        truncated: produced_total > requested_limit,
+    }
+}
+
+fn query_region_nodes(
+    asset: &GeometryAsset,
+    query: &GeometryEntityQuery,
+    region_id: &str,
+    requested_limit: usize,
+) -> GeometryEntityQueryResult {
+    let mut node_refs = BTreeSet::<(String, u64)>::new();
+    let mut truncated = false;
+
+    for mapping in asset.region_entity_mappings.iter().filter(|mapping| {
+        mapping.region_id == region_id
+            && query
+                .mesh_id
+                .as_ref()
+                .is_none_or(|mesh_id| mesh_id == &mapping.mesh_id)
+            && mapping_matches_query_kind(mapping.entity_kind, EntityKind::Face)
+    }) {
+        let Some(surface_mesh) = asset
+            .surface_meshes
+            .iter()
+            .find(|mesh| mesh.mesh_id == mapping.mesh_id)
+        else {
+            continue;
+        };
+        for range in &mapping.ranges {
+            let Some(end) = range.end_exclusive() else {
+                continue;
+            };
+            for face_id in range.start..end {
+                let Some(triangle) = surface_mesh.triangles.get(face_id as usize) else {
+                    continue;
+                };
+                for vertex_id in triangle {
+                    node_refs.insert((mapping.mesh_id.clone(), *vertex_id as u64));
+                    if node_refs.len() > requested_limit {
+                        truncated = true;
+                        break;
+                    }
+                }
+                if truncated {
+                    break;
+                }
+            }
+            if truncated {
+                break;
+            }
+        }
+        if truncated {
+            break;
+        }
+    }
+
+    let entities = node_refs
+        .into_iter()
+        .take(requested_limit)
+        .map(|(mesh_id, entity_id)| EntityRef {
+            geometry_id: asset.geometry_id.clone(),
+            geometry_revision: asset.revision,
+            mesh_id,
+            entity_kind: EntityKind::Node,
+            entity_id,
+        })
+        .collect();
+
+    GeometryEntityQueryResult {
+        entities,
+        truncated,
+    }
+}
+
+fn mapping_matches_query_kind(mapping_kind: EntityKind, query_kind: EntityKind) -> bool {
+    mapping_kind == query_kind
+        || matches!(
+            (mapping_kind, query_kind),
+            (EntityKind::Face, EntityKind::Element) | (EntityKind::Element, EntityKind::Face)
+        )
 }
 
 pub fn geometry_query_entities(
@@ -1046,6 +1180,7 @@ pub fn geometry_preview_figure(
             .collect::<Result<Vec<_>, String>>()?;
         let mut mesh = runmat_plot::plots::MeshPlot::new(vertices, surface_mesh.triangles.clone())?;
         mesh.set_mesh_id(Some(surface_mesh.mesh_id.clone()));
+        mesh.set_regions(mesh_regions_for_surface(asset, &surface_mesh.mesh_id));
         mesh.set_label(Some(format!(
             "{}: {} triangles",
             surface_mesh.mesh_id,
@@ -1064,6 +1199,49 @@ pub fn geometry_preview_figure(
     }
 
     Ok(figure)
+}
+
+#[cfg(feature = "plot-core")]
+fn mesh_regions_for_surface(
+    asset: &GeometryAsset,
+    mesh_id: &str,
+) -> Vec<runmat_plot::plots::MeshRegion> {
+    asset
+        .region_entity_mappings
+        .iter()
+        .filter(|mapping| {
+            mapping.mesh_id == mesh_id
+                && matches!(mapping.entity_kind, EntityKind::Face | EntityKind::Element)
+        })
+        .filter_map(|mapping| {
+            let triangle_ranges = mapping
+                .ranges
+                .iter()
+                .filter_map(|range| {
+                    let start = u32::try_from(range.start).ok()?;
+                    let count = u32::try_from(range.count).ok()?;
+                    if count == 0 {
+                        None
+                    } else {
+                        Some(runmat_plot::plots::MeshTriangleRange::new(start, count))
+                    }
+                })
+                .collect::<Vec<_>>();
+            if triangle_ranges.is_empty() {
+                return None;
+            }
+            let region = asset
+                .regions
+                .iter()
+                .find(|region| region.region_id == mapping.region_id);
+            Some(runmat_plot::plots::MeshRegion::new(
+                mapping.region_id.clone(),
+                region.map(|region| region.name.clone()),
+                region.and_then(|region| region.tag.clone()),
+                triangle_ranges,
+            ))
+        })
+        .collect()
 }
 
 #[cfg(feature = "plot-core")]

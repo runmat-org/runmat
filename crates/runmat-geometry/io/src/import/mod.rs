@@ -5,8 +5,8 @@ mod step;
 mod stl;
 
 use runmat_geometry_core::{
-    GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, SourceGeometry, SourceGeometryKind,
-    SurfaceMesh, TessellationProfile, UnitSystem,
+    GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
+    SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
 };
 use thiserror::Error;
 
@@ -64,6 +64,8 @@ pub(crate) fn build_asset(
     surface_meshes: Vec<SurfaceMesh>,
     diagnostics: Vec<ImportDiagnostic>,
 ) -> GeometryAsset {
+    let (regions, region_entity_mappings) = default_surface_regions(&surface_meshes);
+
     GeometryAsset {
         geometry_id: format!("geo:{}", path),
         source: GeometrySource {
@@ -86,7 +88,8 @@ pub(crate) fn build_asset(
             element_count,
         }],
         surface_meshes,
-        regions: Vec::new(),
+        regions,
+        region_entity_mappings,
         diagnostics: diagnostics
             .iter()
             .map(|item| runmat_geometry_core::Diagnostic {
@@ -106,6 +109,42 @@ pub(crate) fn build_asset(
             })
             .collect(),
     }
+}
+
+pub(crate) fn default_surface_regions(
+    surface_meshes: &[SurfaceMesh],
+) -> (Vec<Region>, Vec<RegionEntityMapping>) {
+    if surface_meshes.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+
+    let region_id = "region_default".to_string();
+    let regions = vec![Region {
+        region_id: region_id.clone(),
+        name: "Default Region".to_string(),
+        tag: Some("mesh_default".to_string()),
+    }];
+    let mappings = surface_meshes
+        .iter()
+        .map(|mesh| {
+            RegionEntityMapping::all_faces(
+                region_id.clone(),
+                mesh.mesh_id.clone(),
+                mesh.triangles.len() as u64,
+            )
+        })
+        .collect();
+    (regions, mappings)
+}
+
+pub(crate) fn push_entity_range(ranges: &mut Vec<runmat_geometry_core::EntityIdRange>, id: u64) {
+    if let Some(last) = ranges.last_mut() {
+        if last.end_exclusive() == Some(id) {
+            last.count += 1;
+            return;
+        }
+    }
+    ranges.push(runmat_geometry_core::EntityIdRange::new(id, 1));
 }
 
 pub(crate) fn build_result(

@@ -408,6 +408,41 @@ mod tests {
     }
 
     #[test]
+    fn mesh_imports_include_default_face_region_mapping() {
+        let result = import(
+            "/model.stl",
+            TRIANGLE_STL.as_bytes(),
+            GeometryImportOptions::default(),
+        );
+
+        assert_eq!(result.asset.regions.len(), 1);
+        assert_eq!(result.asset.regions[0].region_id, "region_default");
+        assert_eq!(result.asset.region_entity_mappings.len(), 1);
+        let mapping = &result.asset.region_entity_mappings[0];
+        assert_eq!(mapping.region_id, "region_default");
+        assert_eq!(mapping.mesh_id, "mesh_1");
+        assert_eq!(mapping.ranges.len(), 1);
+        assert_eq!(mapping.ranges[0].start, 0);
+        assert_eq!(mapping.ranges[0].count, 1);
+    }
+
+    #[test]
+    fn obj_import_maps_grouped_faces_to_regions() {
+        let payload =
+            "g Fixed Face\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3\ng Load Face\nf 1 3 4\n";
+        let result = import(
+            "/regions.obj",
+            payload.as_bytes(),
+            GeometryImportOptions::default(),
+        );
+
+        assert_eq!(result.asset.regions.len(), 2);
+        assert_eq!(result.asset.region_entity_mappings.len(), 2);
+        assert_eq!(result.asset.region_entity_mappings[0].ranges[0].start, 0);
+        assert_eq!(result.asset.region_entity_mappings[1].ranges[0].start, 1);
+    }
+
+    #[test]
     fn obj_fingerprint_is_deterministic() {
         let first = import(
             "/deterministic.obj",
@@ -541,6 +576,20 @@ mod tests {
         assert_eq!(surface_mesh.triangles, vec![[0, 1, 2], [0, 2, 3]]);
         assert!(has_diag(&result, "GEOMETRY_IMPORT_VERTEX_COUNT"));
         assert!(has_diag(&result, "GEOMETRY_IMPORT_TRIANGLE_COUNT"));
+    }
+
+    #[test]
+    fn gltf_import_maps_named_meshes_to_regions() {
+        let payload = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\"name\":\"Bracket Body\",\"primitives\":[{\"attributes\":{\"POSITION\":[[0,0,0],[1,0,0],[0,1,0]]},\"indices\":[0,1,2]}]}\n  ]\n}\n";
+        let result = import(
+            "/named.gltf",
+            payload.as_bytes(),
+            GeometryImportOptions::default(),
+        );
+
+        assert_eq!(result.asset.regions[0].region_id, "region_bracket_body");
+        assert_eq!(result.asset.regions[0].name, "Bracket Body");
+        assert_eq!(result.asset.region_entity_mappings[0].ranges[0].count, 1);
     }
 
     #[test]

@@ -23,8 +23,8 @@ use runmat_analysis_fea::{
 };
 use runmat_geometry_core::{
     GeometryAsset, GeometrySource, MaterialEvidence, MaterialEvidenceConfidence, MeshDescriptor,
-    MeshKind, Region, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
-    UnitSystem,
+    MeshKind, Region, RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh,
+    TessellationProfile, UnitSystem,
 };
 
 use super::*;
@@ -337,7 +337,16 @@ fn sample_geometry_asset() -> GeometryAsset {
             vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
             vec![[0, 1, 2]],
         )],
-        regions: Vec::new(),
+        regions: vec![Region {
+            region_id: "region_default".to_string(),
+            name: "Default Region".to_string(),
+            tag: Some("mesh_default".to_string()),
+        }],
+        region_entity_mappings: vec![RegionEntityMapping::all_faces(
+            "region_default",
+            "mesh_1",
+            1,
+        )],
         diagnostics: Vec::new(),
     }
 }
@@ -364,6 +373,10 @@ fn sample_step_like_geometry_asset() -> GeometryAsset {
             name: "Tip_Load".to_string(),
             tag: Some("load".to_string()),
         },
+    ];
+    asset.region_entity_mappings = vec![
+        RegionEntityMapping::all_faces("region_root", "mesh_1", 1),
+        RegionEntityMapping::all_faces("region_tip", "mesh_1", 1),
     ];
     asset
 }

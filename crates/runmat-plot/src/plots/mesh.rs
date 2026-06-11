@@ -4,6 +4,57 @@ use crate::core::{AlphaMode, BoundingBox, DrawCall, Material, PipelineType, Rend
 use glam::{Vec3, Vec4};
 use std::collections::HashSet;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MeshTriangleRange {
+    pub start: u32,
+    pub count: u32,
+}
+
+impl MeshTriangleRange {
+    pub fn new(start: u32, count: u32) -> Self {
+        Self { start, count }
+    }
+
+    pub fn end_exclusive(&self) -> Option<u32> {
+        self.start.checked_add(self.count)
+    }
+
+    pub fn contains(&self, triangle_index: u32) -> bool {
+        self.end_exclusive()
+            .is_some_and(|end| triangle_index >= self.start && triangle_index < end)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeshRegion {
+    pub region_id: String,
+    pub label: Option<String>,
+    pub tag: Option<String>,
+    pub triangle_ranges: Vec<MeshTriangleRange>,
+}
+
+impl MeshRegion {
+    pub fn new(
+        region_id: impl Into<String>,
+        label: Option<String>,
+        tag: Option<String>,
+        triangle_ranges: Vec<MeshTriangleRange>,
+    ) -> Self {
+        Self {
+            region_id: region_id.into(),
+            label,
+            tag,
+            triangle_ranges,
+        }
+    }
+
+    pub fn contains_triangle(&self, triangle_index: u32) -> bool {
+        self.triangle_ranges
+            .iter()
+            .any(|range| range.contains(triangle_index))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MeshPlot {
     mesh_id: Option<String>,
@@ -15,6 +66,9 @@ pub struct MeshPlot {
     edge_alpha: f32,
     edge_width: f32,
     label: Option<String>,
+    regions: Vec<MeshRegion>,
+    highlighted_region_id: Option<String>,
+    highlight_color: Vec4,
     visible: bool,
     bounds: Option<BoundingBox>,
     face_vertices: Option<Vec<Vertex>>,
@@ -36,6 +90,9 @@ impl MeshPlot {
             edge_alpha: 0.65,
             edge_width: 0.5,
             label: None,
+            regions: Vec::new(),
+            highlighted_region_id: None,
+            highlight_color: Vec4::new(0.98, 0.78, 0.22, 1.0),
             visible: true,
             bounds: None,
             face_vertices: None,
@@ -79,6 +136,18 @@ impl MeshPlot {
 
     pub fn label(&self) -> Option<&str> {
         self.label.as_deref()
+    }
+
+    pub fn regions(&self) -> &[MeshRegion] {
+        &self.regions
+    }
+
+    pub fn highlighted_region_id(&self) -> Option<&str> {
+        self.highlighted_region_id.as_deref()
+    }
+
+    pub fn highlight_color(&self) -> Vec4 {
+        self.highlight_color
     }
 
     pub fn is_visible(&self) -> bool {
@@ -134,6 +203,27 @@ impl MeshPlot {
 
     pub fn set_label(&mut self, label: Option<String>) {
         self.label = label;
+    }
+
+    pub fn set_regions(&mut self, regions: Vec<MeshRegion>) {
+        self.regions = regions;
+        self.mark_dirty();
+    }
+
+    pub fn set_highlighted_region_id(&mut self, region_id: Option<String>) {
+        self.highlighted_region_id = region_id;
+        self.mark_dirty();
+    }
+
+    pub fn set_highlight_color(&mut self, color: Vec4) {
+        self.highlight_color = sanitize_color(color);
+        self.mark_dirty();
+    }
+
+    pub fn region_for_triangle(&self, triangle_index: u32) -> Option<&MeshRegion> {
+        self.regions
+            .iter()
+            .find(|region| region.contains_triangle(triangle_index))
     }
 
     pub fn set_visible(&mut self, visible: bool) {
@@ -276,22 +366,55 @@ impl MeshPlot {
         if self.dirty || self.face_vertices.is_none() || self.face_indices.is_none() {
             let color = self.effective_face_color();
             let normals = vertex_normals(&self.vertices, &self.triangles);
-            let vertices = self
-                .vertices
-                .iter()
-                .zip(normals.iter())
-                .map(|(&position, &normal)| Vertex {
-                    position: position.to_array(),
-                    color: color.to_array(),
-                    normal: normal.to_array(),
-                    tex_coords: [0.0, 0.0],
-                })
-                .collect();
-            let indices = self
-                .triangles
-                .iter()
-                .flat_map(|triangle| triangle.iter().copied())
-                .collect();
+            let (vertices, indices) =
+                if let Some(highlighted_region_id) = self.highlighted_region_id.as_deref() {
+                    let highlight_color = self.highlight_color;
+                    let highlighted_region = self
+                        .regions
+                        .iter()
+                        .find(|region| region.region_id == highlighted_region_id);
+                    let mut vertices = Vec::with_capacity(self.triangles.len() * 3);
+                    let mut indices = Vec::with_capacity(self.triangles.len() * 3);
+                    for (triangle_index, triangle) in self.triangles.iter().enumerate() {
+                        let triangle_color = if highlighted_region
+                            .is_some_and(|region| region.contains_triangle(triangle_index as u32))
+                        {
+                            highlight_color
+                        } else {
+                            color
+                        };
+                        for vertex_id in triangle {
+                            let source_index = *vertex_id as usize;
+                            let target_index = vertices.len() as u32;
+                            vertices.push(Vertex {
+                                position: self.vertices[source_index].to_array(),
+                                color: triangle_color.to_array(),
+                                normal: normals[source_index].to_array(),
+                                tex_coords: [0.0, 0.0],
+                            });
+                            indices.push(target_index);
+                        }
+                    }
+                    (vertices, indices)
+                } else {
+                    let vertices = self
+                        .vertices
+                        .iter()
+                        .zip(normals.iter())
+                        .map(|(&position, &normal)| Vertex {
+                            position: position.to_array(),
+                            color: color.to_array(),
+                            normal: normal.to_array(),
+                            tex_coords: [0.0, 0.0],
+                        })
+                        .collect();
+                    let indices = self
+                        .triangles
+                        .iter()
+                        .flat_map(|triangle| triangle.iter().copied())
+                        .collect();
+                    (vertices, indices)
+                };
             self.face_vertices = Some(vertices);
             self.face_indices = Some(indices);
             self.dirty = false;

@@ -14,7 +14,7 @@ pub use field::{FieldLocation, FieldValueKind};
 pub use geometry::{GeometryAsset, GeometrySource};
 pub use material_evidence::{MaterialEvidence, MaterialEvidenceConfidence};
 pub use mesh::{MeshDescriptor, MeshKind, SurfaceMesh};
-pub use regions::Region;
+pub use regions::{EntityIdRange, Region, RegionEntityMapping};
 pub use source_geometry::{SourceGeometry, SourceGeometryKind};
 pub use tessellation_profile::{HealingMode, TessellationProfile};
 pub use topology::ElementKind;

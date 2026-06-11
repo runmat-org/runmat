@@ -681,6 +681,28 @@ fn query_entities_region_not_found_maps_typed_error() {
 }
 
 #[test]
+fn query_entities_filters_by_region_mapping() {
+    let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
+    let envelope = geometry_query_entities_op(
+        &asset,
+        GeometryEntityQuery {
+            region_id: Some("region_default".to_string()),
+            mesh_id: None,
+            entity_kind: EntityKind::Face,
+            limit: Some(8),
+        },
+        OperationContext::new(Some("trace-region".to_string()), None),
+    )
+    .expect("query should work");
+
+    assert_eq!(envelope.data.entities.len(), 1);
+    assert!(!envelope.data.truncated);
+    assert_eq!(envelope.data.entities[0].mesh_id, "mesh_1");
+    assert_eq!(envelope.data.entities[0].entity_kind, EntityKind::Face);
+    assert_eq!(envelope.data.entities[0].entity_id, 0);
+}
+
+#[test]
 fn capture_view_op_returns_typed_unsupported_error() {
     let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
     let error = geometry_capture_view_op(
