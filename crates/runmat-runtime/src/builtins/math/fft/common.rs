@@ -7,10 +7,50 @@ use runmat_builtins::{ComplexTensor, Tensor, Value};
 use rustfft::FftPlanner;
 use std::borrow::Cow;
 use std::collections::HashSet;
+use std::mem::size_of;
 use std::sync::Arc;
 
 fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
+}
+
+fn checked_product(dims: &[usize], builtin: &str, context: &str) -> BuiltinResult<usize> {
+    dims.iter().copied().try_fold(1usize, |acc, dim| {
+        acc.checked_mul(dim).ok_or_else(|| {
+            builtin_error(
+                builtin,
+                format!("{builtin}: {context} dimension product overflow"),
+            )
+        })
+    })
+}
+
+fn checked_mul(a: usize, b: usize, builtin: &str, context: &str) -> BuiltinResult<usize> {
+    a.checked_mul(b)
+        .ok_or_else(|| builtin_error(builtin, format!("{builtin}: {context} overflow")))
+}
+
+fn zeroed_complex_vec(
+    len: usize,
+    builtin: &str,
+    context: &str,
+) -> BuiltinResult<Vec<Complex<f64>>> {
+    let max_len = isize::MAX as usize / size_of::<Complex<f64>>();
+    if len > max_len {
+        return Err(builtin_error(
+            builtin,
+            format!("{builtin}: {context} allocation is too large"),
+        ));
+    }
+    let mut values = Vec::new();
+    values.try_reserve_exact(len).map_err(|err| {
+        builtin_error(
+            builtin,
+            format!("{builtin}: {context} allocation failed: {err}"),
+        )
+    })?;
+    values.resize(len, Complex::new(0.0, 0.0));
+    Ok(values)
 }
 
 /// Parse the optional FFT length argument, returning `None` for `[]`.
@@ -300,15 +340,9 @@ pub fn transform_complex_tensor(
             .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")));
     }
 
-    let inner_stride = shape[..dim_index]
-        .iter()
-        .copied()
-        .fold(1usize, |acc, dim| acc.saturating_mul(dim));
-    let outer_stride = shape[dim_index + 1..]
-        .iter()
-        .copied()
-        .fold(1usize, |acc, dim| acc.saturating_mul(dim));
-    let num_slices = inner_stride.saturating_mul(outer_stride);
+    let inner_stride = checked_product(&shape[..dim_index], builtin, "inner stride")?;
+    let outer_stride = checked_product(&shape[dim_index + 1..], builtin, "outer stride")?;
+    let num_slices = checked_mul(inner_stride, outer_stride, builtin, "slice count")?;
 
     let input = tensor
         .data
@@ -324,8 +358,8 @@ pub fn transform_complex_tensor(
             .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")));
     }
 
-    let output_len = target_len.saturating_mul(num_slices);
-    let mut output = vec![Complex::new(0.0, 0.0); output_len];
+    let output_len = checked_mul(target_len, num_slices, builtin, "output length")?;
+    let mut output = zeroed_complex_vec(output_len, builtin, "output")?;
 
     let mut planner = FftPlanner::<f64>::new();
     let plan: Option<Arc<dyn rustfft::Fft<f64>>> = if target_len > 1 {
@@ -338,15 +372,25 @@ pub fn transform_complex_tensor(
     };
 
     let copy_len = current_len.min(target_len);
-    let mut buffer = vec![Complex::new(0.0, 0.0); target_len];
+    let mut buffer = zeroed_complex_vec(target_len, builtin, "workspace")?;
     let scale = match direction {
         TransformDirection::Forward => 1.0,
         TransformDirection::Inverse => 1.0 / (target_len as f64),
     };
 
     for outer in 0..outer_stride {
-        let base_in = outer.saturating_mul(current_len.saturating_mul(inner_stride));
-        let base_out = outer.saturating_mul(target_len.saturating_mul(inner_stride));
+        let base_in = checked_mul(
+            outer,
+            checked_mul(current_len, inner_stride, builtin, "input slice span")?,
+            builtin,
+            "input slice offset",
+        )?;
+        let base_out = checked_mul(
+            outer,
+            checked_mul(target_len, inner_stride, builtin, "output slice span")?,
+            builtin,
+            "output slice offset",
+        )?;
         for inner in 0..inner_stride {
             buffer.fill(Complex::new(0.0, 0.0));
             for (k, slot) in buffer.iter_mut().enumerate().take(copy_len) {
