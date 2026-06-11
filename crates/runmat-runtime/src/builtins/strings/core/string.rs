@@ -528,6 +528,10 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                 shape: array.shape,
             })
         }
+        Value::Symbolic(expr) => Ok(ArgumentData {
+            values: vec![Value::String(expr.to_string())],
+            shape: vec![1, 1],
+        }),
         Value::Num(n) => Ok(ArgumentData {
             values: vec![Value::Num(n)],
             shape: vec![1, 1],
@@ -611,6 +615,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                             Value::Num(if la.data[0] != 0 { 1.0 } else { 0.0 })
                         }
                         Value::Complex(re, im) => Value::String(complex_to_string(re, im)),
+                        Value::Symbolic(expr) => Value::String(expr.to_string()),
                         Value::ComplexTensor(t) => {
                             if t.data.len() != 1 {
                                 return Err(string_flow(
@@ -674,6 +679,7 @@ async fn convert_to_string_array(
         Value::String(s) => string_scalar(s),
         Value::StringArray(sa) => Ok(sa),
         Value::CharArray(ca) => char_array_to_string_array(ca, encoding),
+        Value::Symbolic(expr) => string_scalar(expr.to_string()),
         Value::Tensor(tensor) => tensor_to_string_array(tensor),
         Value::ComplexTensor(tensor) => complex_tensor_to_string_array(tensor),
         Value::LogicalArray(logical) => logical_array_to_string_array(logical),

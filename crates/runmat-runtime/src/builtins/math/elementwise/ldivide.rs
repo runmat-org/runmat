@@ -18,6 +18,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -358,12 +359,14 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             &LDIVIDE_ERROR_INVALID_ARGUMENT,
             "GPU prototypes for 'like' only support real numeric outputs",
         )),
-        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => {
-            Err(ldivide_error_with_detail(
-                &LDIVIDE_ERROR_INVALID_ARGUMENT,
-                "unsupported prototype conversion to GPU output",
-            ))
-        }
+        Value::String(_)
+        | Value::StringArray(_)
+        | Value::Cell(_)
+        | Value::Struct(_)
+        | Value::Symbolic(_) => Err(ldivide_error_with_detail(
+            &LDIVIDE_ERROR_INVALID_ARGUMENT,
+            "unsupported prototype conversion to GPU output",
+        )),
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -632,6 +635,9 @@ fn scalar_ldivide_value(divisor: &Value, numerator: &Value) -> Option<Value> {
 }
 
 fn ldivide_host(divisor: Value, numerator: Value) -> BuiltinResult<Value> {
+    if let Some(result) = symbolic_binary(&numerator, &divisor, SymbolicBinaryOp::Div) {
+        return Ok(result);
+    }
     if let Some(result) = scalar_ldivide_value(&divisor, &numerator) {
         return Ok(result);
     }
@@ -812,7 +818,8 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
+        CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, SymbolicExpr, Tensor,
+        Type,
     };
 
     const EPS: f64 = 1e-12;
@@ -876,6 +883,18 @@ pub(crate) mod tests {
             Value::Num(v) => assert!((v - (2.0 / 7.0)).abs() < EPS),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn ldivide_symbolic_scalar_returns_symbolic_quotient() {
+        let result = ldivide_builtin(
+            Value::Num(2.0),
+            Value::Symbolic(SymbolicExpr::variable("x")),
+            Vec::new(),
+        )
+        .expect("ldivide");
+
+        assert_eq!(result.to_string(), "x/2");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -9,6 +9,7 @@ pub fn matlab_class_name(value: &Value) -> String {
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
         Value::String(_) | Value::StringArray(_) => "string".to_string(),
         Value::CharArray(_) => "char".to_string(),
+        Value::Symbolic(_) => "sym".to_string(),
         Value::Cell(_) => "cell".to_string(),
         Value::Struct(_) => "struct".to_string(),
         Value::GpuTensor(_) => "gpuArray".to_string(),
@@ -37,7 +38,11 @@ pub fn matlab_class_name(value: &Value) -> String {
 /// Returns the MATLAB-style shape for the provided value when applicable.
 pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
     match value {
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Some(vec![1, 1]),
+        Value::Num(_)
+        | Value::Int(_)
+        | Value::Bool(_)
+        | Value::Complex(_, _)
+        | Value::Symbolic(_) => Some(vec![1, 1]),
         Value::LogicalArray(arr) => Some(arr.shape.clone()),
         Value::StringArray(sa) => Some(sa.shape.clone()),
         Value::String(s) => Some(vec![1, s.chars().count()]),
@@ -92,6 +97,7 @@ pub fn preview_numeric_values(value: &Value, limit: usize) -> Option<(Vec<f64>, 
         Value::StringArray(_) | Value::String(_) | Value::CharArray(_) => None,
         Value::ComplexTensor(_) | Value::Complex(_, _) => None,
         Value::Cell(_)
+        | Value::Symbolic(_)
         | Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)

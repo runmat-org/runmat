@@ -3745,6 +3745,47 @@ summary = [rankA; double(err < 1e-12); numel(p); double(pivot_ok)];\n",
     }
 
     #[test]
+    fn compile_interprets_symbolic_limit_workflow() {
+        let ast = runmat_parser::parse(
+            "\
+syms x h\n\
+syms('z')\n\
+f1 = limit(sin(x)/x, x, 0);\n\
+f2 = limit((cos(x+h) - cos(x))/h, h, 0);\n\
+f3 = limit(sin(z)/z + 1, z, 0);\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let entry_layout = &layout.entrypoints[&entrypoint];
+        let f1_export = entry_layout
+            .exports
+            .iter()
+            .find(|export| export.name == "f1")
+            .expect("f1 export");
+        let f2_export = entry_layout
+            .exports
+            .iter()
+            .find(|export| export.name == "f2")
+            .expect("f2 export");
+        let f3_export = entry_layout
+            .exports
+            .iter()
+            .find(|export| export.name == "f3")
+            .expect("f3 export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert!(matches!(&vars[f1_export.slot.0], Value::Symbolic(_)));
+        assert_eq!(vars[f1_export.slot.0].to_string(), "1");
+        assert_eq!(vars[f2_export.slot.0].to_string(), "-sin(x)");
+        assert_eq!(vars[f3_export.slot.0].to_string(), "2");
+    }
+
+    #[test]
     fn compile_rejects_dynamic_member_store_back_paren_index_with_read_context_identifier() {
         let ast =
             runmat_parser::parse("s = struct('x', {1, 2}); f = 'x'; s(1).(f) = 3;").expect("parse");

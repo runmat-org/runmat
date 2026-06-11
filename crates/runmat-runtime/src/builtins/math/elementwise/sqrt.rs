@@ -19,9 +19,11 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::symbolic::symbolic_function;
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_builtins::SymbolicFunction;
 
 const ZERO_EPS: f64 = 1e-12;
 
@@ -132,6 +134,9 @@ fn sqrt_error_with_detail(
     builtin_path = "crate::builtins::math::elementwise::sqrt"
 )]
 async fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
+    if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Sqrt) {
+        return Ok(symbolic);
+    }
     match value {
         Value::GpuTensor(handle) => sqrt_gpu(handle).await,
         Value::Complex(re, im) => Ok(sqrt_complex_value(re, im)),

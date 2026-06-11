@@ -18,8 +18,10 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::symbolic::symbolic_function;
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_builtins::SymbolicFunction;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::exp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -128,6 +130,9 @@ fn exp_error_with_detail(
     builtin_path = "crate::builtins::math::elementwise::exp"
 )]
 async fn exp_builtin(value: Value) -> BuiltinResult<Value> {
+    if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Exp) {
+        return Ok(symbolic);
+    }
     match value {
         Value::GpuTensor(handle) => exp_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Complex(

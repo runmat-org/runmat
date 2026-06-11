@@ -102,6 +102,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: CommandArgKind::Any,
     },
     CommandVerb {
+        name: "syms",
+        arg_kind: CommandArgKind::StringifyWords,
+    },
+    CommandVerb {
         name: "close",
         arg_kind: CommandArgKind::StringifyWords,
     },

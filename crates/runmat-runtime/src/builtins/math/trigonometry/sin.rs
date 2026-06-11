@@ -15,8 +15,10 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::symbolic::symbolic_function;
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_builtins::SymbolicFunction;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::sin")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -197,6 +199,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let output = parse_output_template(&rest)?;
+    if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Sin) {
+        return apply_output_template(symbolic, &output).await;
+    }
     let base = match value {
         Value::GpuTensor(handle) => sin_gpu(handle).await?,
         Value::Complex(re, im) => Value::Complex(sin_complex_re(re, im), sin_complex_im(re, im)),

@@ -1494,10 +1494,37 @@ impl LoweringCtx {
         self.lower_stmt_refs(&refs)
     }
 
+    fn declare_syms_bindings(&mut self, args: &[AstExpr], allow_word_args: bool) {
+        let mut saw_declared_symbol = false;
+        for arg in args {
+            let Some((text, span)) = syms_argument_text(arg, allow_word_args) else {
+                continue;
+            };
+            for name in text.split_whitespace() {
+                if saw_declared_symbol && is_syms_assumption_keyword(name) {
+                    continue;
+                }
+                if is_matlab_identifier(name) {
+                    self.binding_for_write(name, span);
+                    saw_declared_symbol = true;
+                }
+            }
+        }
+    }
+
     fn lower_stmt_hir(&mut self, stmt: &AstStmt) -> Result<Option<HirStmtNode>, HirError> {
         let span = stmt.span();
         let kind = match stmt {
             AstStmt::ExprStmt(expr, suppressed, _) => {
+                match expr {
+                    AstExpr::CommandCall(name, args, _) if name.eq_ignore_ascii_case("syms") => {
+                        self.declare_syms_bindings(args, true);
+                    }
+                    AstExpr::FuncCall(name, args, _) if name.eq_ignore_ascii_case("syms") => {
+                        self.declare_syms_bindings(args, false);
+                    }
+                    _ => {}
+                }
                 let loads_external_bindings = self.stmt_expr_call_loads_external_bindings(expr)?;
                 let requested_outputs = if *suppressed || loads_external_bindings {
                     RequestedOutputCount::Zero
@@ -2936,6 +2963,49 @@ fn command_argument(expr: &AstExpr) -> CommandArgument {
         AstExpr::EndKeyword(_) => CommandArgument::Word(SymbolName("end".to_string())),
         _ => CommandArgument::StringLiteral(StringLiteral(format!("{expr:?}"))),
     }
+}
+
+fn syms_argument_text(expr: &AstExpr, allow_word_args: bool) -> Option<(String, Span)> {
+    match expr {
+        AstExpr::Ident(word, span) if allow_word_args => Some((word.clone(), *span)),
+        AstExpr::String(value, span) => Some((unquote_string_literal(value), *span)),
+        _ => None,
+    }
+}
+
+fn unquote_string_literal(value: &str) -> String {
+    if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+        value[1..value.len() - 1].replace("\"\"", "\"")
+    } else if value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2 {
+        value[1..value.len() - 1].replace("''", "'")
+    } else {
+        value.to_string()
+    }
+}
+
+fn is_matlab_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    first.is_ascii_alphabetic() && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn is_syms_assumption_keyword(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "real"
+            | "positive"
+            | "negative"
+            | "integer"
+            | "rational"
+            | "clear"
+            | "finite"
+            | "nonzero"
+            | "nonnegative"
+            | "nonpositive"
+            | "complex"
+    )
 }
 
 fn is_empty_array_expr(expr: &AstExpr) -> bool {

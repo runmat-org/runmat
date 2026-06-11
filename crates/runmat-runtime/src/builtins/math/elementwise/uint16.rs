@@ -163,6 +163,10 @@ async fn uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::GpuTensor(handle) => uint16_from_gpu(handle).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(conversion_error("complex")),
         Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
+        Value::Symbolic(expr) => expr
+            .numeric_constant_value()
+            .map(|value| Value::Int(IntValue::U16(cast_scalar_to_uint16(value))))
+            .ok_or_else(|| conversion_error("sym")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),
@@ -248,7 +252,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, SymbolicExpr, Type};
 
     fn uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::uint16_builtin(value, rest))
@@ -299,6 +303,25 @@ pub(crate) mod tests {
             uint16_builtin(Value::Num(f64::NAN), Vec::new()).expect("uint16"),
             Value::Int(IntValue::U16(0))
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn uint16_converts_symbolic_constants() {
+        let result = uint16_builtin(Value::Symbolic(SymbolicExpr::constant(3.5)), Vec::new())
+            .expect("uint16");
+
+        assert_eq!(result, Value::Int(IntValue::U16(4)));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn uint16_rejects_symbolic_variables() {
+        let err = uint16_builtin(Value::Symbolic(SymbolicExpr::variable("x")), Vec::new())
+            .expect_err("symbolic variable should not convert");
+
+        assert_eq!(err.identifier(), UINT16_ERROR_INVALID_INPUT.identifier);
+        assert!(err.message().contains("conversion to uint16 from sym"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

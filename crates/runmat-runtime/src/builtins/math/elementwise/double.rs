@@ -202,6 +202,10 @@ async fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::CharArray(chars) => double_from_char_array(chars),
         Value::GpuTensor(handle) => double_from_gpu(handle).await,
         Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
+        Value::Symbolic(expr) => expr
+            .numeric_constant_value()
+            .map(Value::Num)
+            .ok_or_else(|| conversion_error("sym")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),
@@ -404,7 +408,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{IntValue, ResolveContext, SymbolicExpr, Type};
 
     fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::double_builtin(value, rest))
@@ -468,6 +472,25 @@ pub(crate) mod tests {
             Value::Num(n) => assert_eq!(n, 42.0),
             other => panic!("expected scalar Num, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn double_converts_symbolic_constants() {
+        let result = double_builtin(Value::Symbolic(SymbolicExpr::constant(42.5)), Vec::new())
+            .expect("double");
+
+        assert_eq!(result, Value::Num(42.5));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn double_rejects_symbolic_variables() {
+        let err = double_builtin(Value::Symbolic(SymbolicExpr::variable("x")), Vec::new())
+            .expect_err("symbolic variable should not convert");
+
+        assert_eq!(err.identifier(), DOUBLE_ERROR_INVALID_INPUT.identifier);
+        assert!(err.message().contains("conversion to double from sym"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

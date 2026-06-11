@@ -222,3 +222,28 @@ disp(elapsedHandle);
         "tic/toc loop produced negative elapsed values: {elapsed_values:?}"
     );
 }
+
+pub(crate) async fn assert_symbolic_limit_workflow_executes_without_runtime_error() {
+    let script = r#"
+syms x h
+f1 = limit(sin(x)/x, x, 0);
+f2 = limit((cos(x+h) - cos(x))/h, h, 0);
+
+disp(f1);
+disp(f2);
+"#;
+
+    let payload = execute_script(script).await;
+    if let Some(err) = payload.error {
+        panic!("symbolic limit wasm execution failed: {}", err.message);
+    }
+    let stdout_text = stdout_text(&payload);
+    assert!(
+        stdout_text.split_whitespace().any(|token| token == "1"),
+        "symbolic limit workflow did not print sinc limit: {stdout_text:?}"
+    );
+    assert!(
+        stdout_text.contains("-sin(x)"),
+        "symbolic limit workflow did not print derivative limit: {stdout_text:?}"
+    );
+}

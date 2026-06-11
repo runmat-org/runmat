@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{linalg, tensor};
 use crate::builtins::math::linalg::type_resolvers::matmul_type;
+use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "mtimes";
@@ -278,6 +279,10 @@ async fn mtimes_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     let rhs = crate::dispatcher::gather_if_needed_async(&rhs)
         .await
         .map_err(map_control_flow)?;
+
+    if let Some(result) = symbolic_binary(&lhs, &rhs, SymbolicBinaryOp::Mul) {
+        return Ok(result);
+    }
 
     match (lhs, rhs) {
         (LogicalArray(la), other) => {

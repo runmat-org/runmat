@@ -1,0 +1,67 @@
+{
+  "title": "syms",
+  "category": "math/symbolic",
+  "keywords": [
+    "syms",
+    "symbolic",
+    "variable",
+    "workspace"
+  ],
+  "summary": "Declare scalar symbolic variables in the active workspace.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`syms` mutates the caller workspace and produces host-only symbolic values."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::symbolic::syms::tests",
+    "integration": "runmat_vm::bytecode::compile::tests::compile_interprets_symbolic_limit_workflow"
+  },
+  "description": "`syms` supports MATLAB command syntax such as `syms x h` and string function syntax such as `syms('x')` by declaring each named symbol in the caller workspace before later expressions are resolved.",
+  "behaviors": [
+    "Command syntax is supported for identifiers, for example `syms x h`; function syntax supports literal text names, for example `syms('x')`.",
+    "Declared identifiers are assigned scalar symbolic variables of the same name in the active workspace.",
+    "Common assumption tokens after the first declaration, such as `real`, `positive`, and `integer`, are accepted and ignored by the current scalar symbolic core.",
+    "`syms` is a sink builtin: it does not print or return a useful value when called as a statement."
+  ],
+  "examples": [
+    {
+      "description": "Declare two symbolic variables",
+      "input": "syms x h"
+    },
+    {
+      "description": "Use declared variables in a symbolic expression",
+      "input": "syms x\nf = sin(x)/x"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Are symbolic assumptions enforced?",
+      "answer": "Assumption tokens are parsed for MATLAB command compatibility, but the current scalar symbolic evaluator treats expressions as real-valued and does not maintain an assumption database."
+    }
+  ],
+  "links": [
+    {
+      "label": "sym",
+      "url": "./sym"
+    },
+    {
+      "label": "limit",
+      "url": "./limit"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/symbolic/syms.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/symbolic/syms.rs"
+  }
+}
