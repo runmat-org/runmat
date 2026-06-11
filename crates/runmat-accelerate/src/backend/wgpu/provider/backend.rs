@@ -16,11 +16,11 @@ use runmat_accelerate_api::{
     ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderMeshgridResult,
     ProviderNanMode, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
     ProviderPolyfitResult, ProviderPolyvalOptions, ProviderPrecision, ProviderQrOptions,
-    ProviderQrPivot, ProviderQrPowerIterResult, ProviderQrResult, ProviderRrefOptions,
-    ProviderRrefResult, ProviderScanDirection, ProviderStdNormalization, ProviderSymmetryKind,
-    ReduceDimResult, ReductionFlavor, ReductionTwoPassMode, SetdiffOptions, SetdiffResult,
-    SortComparison, SortOrder, SortResult, SortRowsColumnSpec, SpawnHandleConcurrency,
-    UnionOptions, UnionResult, UniqueOptions, UniqueResult, WgpuBufferRef,
+    ProviderQrPivot, ProviderQrPowerIterResult, ProviderQrResult, ProviderScanDirection,
+    ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult, ReductionFlavor,
+    ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison, SortOrder, SortResult,
+    SortRowsColumnSpec, SpawnHandleConcurrency, UnionOptions, UnionResult, UniqueOptions,
+    UniqueResult, WgpuBufferRef,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
@@ -38,7 +38,6 @@ use runmat_runtime::builtins::math::linalg::solve::norm::norm_host_real_for_prov
 use runmat_runtime::builtins::math::linalg::solve::pinv::pinv_host_real_for_provider;
 use runmat_runtime::builtins::math::linalg::solve::rank::rank_host_real_for_provider;
 use runmat_runtime::builtins::math::linalg::solve::rcond::rcond_host_real_for_provider;
-use runmat_runtime::builtins::math::linalg::solve::rref::rref_host_real_for_provider;
 use runmat_runtime::builtins::math::linalg::structure::bandwidth::ensure_matrix_shape as ensure_bandwidth_shape;
 use runmat_runtime::builtins::math::linalg::structure::ishermitian::ishermitian_host_real_data;
 use runmat_runtime::builtins::math::linalg::structure::issymmetric::ensure_matrix_shape as ensure_symmetry_shape;

@@ -6,7 +6,6 @@ pub mod norm;
 pub mod pinv;
 pub mod rank;
 pub mod rcond;
-pub mod rref;
 
 pub use cond::cond_host_real_for_provider;
 pub use inv::inv_host_real_for_provider;
@@ -14,4 +13,3 @@ pub use norm::norm_host_real_for_provider;
 pub use pinv::pinv_host_real_for_provider;
 pub use rank::rank_host_real_for_provider;
 pub use rcond::rcond_host_real_for_provider;
-pub use rref::rref_host_real_for_provider;

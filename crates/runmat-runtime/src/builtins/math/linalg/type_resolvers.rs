@@ -182,21 +182,6 @@ pub fn pinv_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
-pub fn rref_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let Some(input) = args.first() else {
-        return Type::Unknown;
-    };
-    match input {
-        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-            numeric_tensor_from_shape(shape.clone())
-        }
-        Type::Tensor { shape: None } | Type::Logical { shape: None } => Type::tensor(),
-        Type::Num | Type::Int | Type::Bool => Type::Num,
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
 pub fn eig_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;

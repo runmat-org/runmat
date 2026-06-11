@@ -116,32 +116,6 @@ impl WgpuProvider {
         })
     }
 
-    pub(crate) async fn rref_exec(
-        &self,
-        matrix: &GpuTensorHandle,
-        options: ProviderRrefOptions,
-    ) -> Result<ProviderRrefResult> {
-        let HostTensorOwned { data, shape, .. } = self.download_exec(matrix).await?;
-        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rref: {e}"))?;
-        let result =
-            rref_host_real_for_provider(&tensor, options.tolerance).map_err(|e| anyhow!("{e}"))?;
-        let reduced = self.upload_exec(&HostTensorView {
-            data: &result.reduced.data,
-            shape: &result.reduced.shape,
-        })?;
-        let pivots = match self.upload_exec(&HostTensorView {
-            data: &result.pivots.data,
-            shape: &result.pivots.shape,
-        }) {
-            Ok(handle) => handle,
-            Err(err) => {
-                let _ = self.free_exec(&reduced);
-                return Err(err);
-            }
-        };
-        Ok(ProviderRrefResult { reduced, pivots })
-    }
-
     pub(crate) async fn rcond_exec(&self, matrix: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let HostTensorOwned { data, shape, .. } = self.download_exec(matrix).await?;
         let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rcond: {e}"))?;
