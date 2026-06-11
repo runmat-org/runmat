@@ -81,8 +81,8 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 
 | Status | Path | Names | GPU | Fusion | Backend | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| done | `control` | `tf` | host | - | - | Transfer-function model construction. |
-| done | `control` | `step`, `impulse`, `nyquist` | host | - | - | Time and frequency response evaluation. |
+| done | `control` | `tf`, `feedback` | host | - | - | Transfer-function construction, variable shorthand, arithmetic, and closed-loop interconnection. |
+| done | `control` | `step`, `impulse`, `nyquist`, `stepinfo`, `dcgain`, `pole`, `isstable` | host | - | - | Time response, frequency response, and SISO model analysis. |
 
 ## Statistics
 

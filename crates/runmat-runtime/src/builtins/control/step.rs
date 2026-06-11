@@ -214,6 +214,11 @@ fn step_error_with_message(
     builtin_path = "crate::builtins::control::step"
 )]
 async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if is_statement_form_call() {
+        plot_multiple_step_responses(sys, rest).await?;
+        return Ok(Value::OutputList(Vec::new()));
+    }
+
     if rest.len() > 1 {
         return Err(step_error_with_detail(
             &STEP_ERROR_INVALID_ARGUMENT,
@@ -252,6 +257,83 @@ async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 
     eval.y_value()
+}
+
+fn is_statement_form_call() -> bool {
+    matches!(crate::output_count::current_output_count(), Some(0))
+        || (crate::output_context::requested_output_count() == Some(0)
+            && crate::output_count::current_output_count().is_none())
+}
+
+async fn plot_multiple_step_responses(first_sys: Value, rest: Vec<Value>) -> BuiltinResult<()> {
+    let mut systems = vec![(first_sys, None)];
+    let mut time_arg = None;
+    for arg in rest {
+        let gathered = crate::gather_if_needed_async(&arg).await?;
+        if is_plot_style_arg(&gathered) {
+            if let Some((_, style)) = systems.last_mut() {
+                if style.is_some() {
+                    return Err(step_error_with_detail(
+                        &STEP_ERROR_INVALID_ARGUMENT,
+                        "only one style argument is supported per system",
+                    ));
+                }
+                *style = Some(gathered);
+                continue;
+            }
+            continue;
+        }
+        if is_tf_object(&gathered) {
+            if time_arg.is_some() {
+                return Err(step_error_with_detail(
+                    &STEP_ERROR_INVALID_ARGUMENT,
+                    "time argument must follow all systems in statement-form step plots",
+                ));
+            }
+            systems.push((gathered, None));
+            continue;
+        }
+        if time_arg.is_none() {
+            time_arg = Some(gathered);
+            continue;
+        }
+        return Err(step_error_with_detail(
+            &STEP_ERROR_INVALID_ARGUMENT,
+            "unsupported statement-form step plot argument",
+        ));
+    }
+
+    if systems.is_empty() {
+        return Err(step_error_with_detail(
+            &STEP_ERROR_INVALID_ARGUMENT,
+            "at least one system is required",
+        ));
+    }
+
+    let mut first = true;
+    for (system, style) in systems {
+        let model = TransferFunction::from_value(system)?;
+        let time = TimeSpec::parse(time_arg.as_ref(), model.sample_time)?;
+        let eval = evaluate_step(&model, time)?;
+        plot_response_with_style(&eval, style.as_ref()).await?;
+        if first {
+            first = false;
+            let _ = crate::call_builtin_async("hold", &[Value::from("on")]).await;
+        }
+    }
+    let _ = crate::call_builtin_async("hold", &[Value::from("off")]).await;
+    Ok(())
+}
+
+fn is_plot_style_arg(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    )
+}
+
+fn is_tf_object(value: &Value) -> bool {
+    matches!(value, Value::Object(object) if object.is_class("tf"))
 }
 
 #[derive(Clone, Debug)]
@@ -702,9 +784,18 @@ fn discrete_response(num: &[f64], den: &[f64], count: usize) -> BuiltinResult<Ve
 }
 
 async fn plot_response(eval: &StepEval) -> BuiltinResult<()> {
+    plot_response_with_style(eval, None).await
+}
+
+async fn plot_response_with_style(eval: &StepEval, style: Option<&Value>) -> BuiltinResult<()> {
     let t = eval.t_value()?;
     let y = eval.y_value()?;
-    if let Err(err) = crate::call_builtin_async("plot", &[t, y]).await {
+    let args = if let Some(style) = style {
+        vec![t, y, style.clone()]
+    } else {
+        vec![t, y]
+    };
+    if let Err(err) = crate::call_builtin_async("plot", &args).await {
         if super::is_nonfatal_plot_setup_error(&err) {
             return Ok(());
         }

@@ -1,0 +1,86 @@
+{
+  "title": "isstable",
+  "category": "control",
+  "keywords": [
+    "isstable",
+    "stability",
+    "poles",
+    "control system",
+    "tf"
+  ],
+  "summary": "Test stability of SISO transfer-function models.",
+  "references": [
+    "title: \"MATLAB isstable documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`isstable` analyzes host-side transfer-function metadata."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`isstable` is scalar model analysis and is not fused."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::isstable::tests",
+    "integration": "crates/runmat-vm/tests/control.rs"
+  },
+  "description": "`isstable(sys)` returns true when all continuous-time poles are in the open left-half plane, or all discrete-time poles are inside the unit circle.",
+  "behaviors": [
+    "Supports SISO `tf` objects.",
+    "Continuous-time stability requires `real(pole) < 0`.",
+    "Discrete-time stability requires `abs(pole) < 1`.",
+    "Static-gain models are stable."
+  ],
+  "examples": [
+    {
+      "description": "Stable first-order model",
+      "input": "H = tf(1, [1 1]);\nisstable(H)",
+      "output": "ans = logical\n   1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does marginal stability return true?",
+      "answer": "No. Poles on the imaginary axis or unit circle are not considered stable by this predicate."
+    }
+  ],
+  "links": [
+    {
+      "label": "pole",
+      "url": "./pole"
+    },
+    {
+      "label": "tf",
+      "url": "./tf"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/isstable.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/isstable.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "tf = isstable(sys)",
+      "output": "tf is a logical scalar."
+    },
+    "points": [
+      "`sys` must be a SISO `tf` object."
+    ]
+  },
+  "validation": {
+    "summary": "`isstable` validates the input model, computes poles, and applies continuous or discrete stability rules. Tests cover stable continuous-time models and VM integration.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/control/isstable.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/isstable.rs"
+    }
+  },
+  "gpu_residency": "`isstable` returns a host logical scalar."
+}

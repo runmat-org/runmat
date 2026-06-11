@@ -412,6 +412,21 @@ pub(crate) async fn call_object_operator_method(
     .await
 }
 
+pub(crate) async fn call_rhs_object_operator_method_ordered(
+    lhs: Value,
+    rhs: Value,
+    method: &str,
+) -> Result<Value, RuntimeError> {
+    crate::call::closures::call_rhs_operator_method_ordered_with_outputs(
+        lhs,
+        rhs,
+        method.to_string(),
+        1,
+        None,
+    )
+    .await
+}
+
 pub(crate) async fn call_object_named_method_with_outputs(
     base: Value,
     method: String,

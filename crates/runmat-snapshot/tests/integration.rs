@@ -7,8 +7,13 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 use runmat_gc::gc_test_context;
+use runmat_snapshot::format::CompressionAlgorithm as HeaderCompressionAlgorithm;
 use runmat_snapshot::presets::SnapshotPreset;
-use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader, SnapshotManager};
+use runmat_snapshot::{
+    CompressionAlgorithm as ConfigCompressionAlgorithm, SnapshotBuilder, SnapshotConfig,
+    SnapshotLoader, SnapshotManager,
+};
+use serde::{de::DeserializeOwned, Serialize};
 
 // Import runtime to ensure builtins are registered with inventory
 use runmat_runtime as _;
@@ -60,6 +65,33 @@ fn test_snapshot_creation_and_loading() {
 }
 
 #[test]
+fn test_snapshot_bincode_roundtrip() {
+    gc_test_context(|| {
+        let config = SnapshotConfig {
+            compression_enabled: false,
+            validation_enabled: false,
+            ..SnapshotConfig::default()
+        };
+        let builder = SnapshotBuilder::new(config);
+        let snapshot = builder.build().unwrap();
+        let deserialized = assert_bincode_roundtrip("snapshot", &snapshot);
+        assert_eq!(
+            deserialized.builtins.functions.len(),
+            snapshot.builtins.functions.len()
+        );
+    });
+}
+
+fn assert_bincode_roundtrip<T>(name: &str, value: &T) -> T
+where
+    T: Serialize + DeserializeOwned,
+{
+    let serialized = bincode::serialize(value).unwrap();
+    bincode::deserialize::<T>(&serialized)
+        .unwrap_or_else(|err| panic!("{name} failed bincode roundtrip: {:?}", err))
+}
+
+#[test]
 fn test_snapshot_presets() {
     gc_test_context(|| {
         let temp_dir = tempdir().unwrap();
@@ -91,6 +123,9 @@ fn test_snapshot_presets() {
                 preset.name()
             );
 
+            let header = SnapshotLoader::peek_header(&snapshot_path).unwrap();
+            assert_header_matches_configured_compression(preset.name(), &config, &header);
+
             // Try to load it
             let mut loader = SnapshotLoader::new(config);
             let result = loader.load(&snapshot_path);
@@ -102,6 +137,43 @@ fn test_snapshot_presets() {
             );
         }
     });
+}
+
+fn assert_header_matches_configured_compression(
+    preset_name: &str,
+    config: &SnapshotConfig,
+    header: &runmat_snapshot::SnapshotHeader,
+) {
+    match config.compression_algorithm {
+        ConfigCompressionAlgorithm::None => assert!(
+            matches!(
+                header.data_info.compression.algorithm,
+                HeaderCompressionAlgorithm::None
+            ),
+            "preset {preset_name} should not compress snapshot data"
+        ),
+        ConfigCompressionAlgorithm::Lz4 => assert!(
+            matches!(
+                header.data_info.compression.algorithm,
+                HeaderCompressionAlgorithm::Lz4 { .. } | HeaderCompressionAlgorithm::None
+            ),
+            "preset {preset_name} should use LZ4 or fall back to uncompressed"
+        ),
+        ConfigCompressionAlgorithm::Zstd => assert!(
+            matches!(
+                header.data_info.compression.algorithm,
+                HeaderCompressionAlgorithm::Zstd { .. } | HeaderCompressionAlgorithm::None
+            ),
+            "preset {preset_name} should use ZSTD or fall back to uncompressed"
+        ),
+        ConfigCompressionAlgorithm::Auto => assert!(
+            !matches!(
+                header.data_info.compression.algorithm,
+                HeaderCompressionAlgorithm::None
+            ) || header.data_info.compressed_size == header.data_info.uncompressed_size,
+            "preset {preset_name} should auto-select compression unless it is ineffective"
+        ),
+    }
 }
 
 #[test]

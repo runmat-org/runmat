@@ -326,6 +326,84 @@ async fn call_member_index_on_object_like(
     call_getfield_with_indices(receiver, name, args, requested_outputs).await
 }
 
+pub(crate) async fn call_rhs_operator_method_ordered_with_outputs(
+    lhs: Value,
+    rhs: Value,
+    name: String,
+    requested_outputs: usize,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError> {
+    let class_name = match &rhs {
+        Value::Object(obj) => obj.class_name.clone(),
+        Value::HandleObject(handle) => handle.class_name.clone(),
+        _ => {
+            return Err(mex(
+                "InvalidObjectDispatch",
+                "right-hand operator dispatch requires an object operand",
+            ));
+        }
+    };
+
+    let method_args = vec![lhs.clone(), rhs.clone()];
+    if let Some((m, owner)) = lookup_method(&class_name, &name) {
+        if m.is_static {
+            return Err(mex(
+                "MethodStaticOnInstance",
+                &format!(
+                    "Method '{}' is static; use classref({}).{}",
+                    name, class_name, name
+                ),
+            ));
+        }
+        if !method_access_permitted(&owner, &m.access, caller_function_name) {
+            return Err(mex(
+                "MethodPrivate",
+                &format!("Method '{}' is private", name),
+            ));
+        }
+        let (identity, fallback_policy) = method_function_identity(&owner, &name, &m.function_name);
+        return call_identity_with_policy(
+            identity,
+            method_args,
+            requested_outputs,
+            fallback_policy,
+        )
+        .await;
+    }
+
+    let qualified_identity = external_qualified_identity(&class_name, &name);
+    let ordered_result = call_identity_with_policy(
+        qualified_identity.clone(),
+        method_args.clone(),
+        requested_outputs,
+        CallableFallbackPolicy::ExternalBoundary,
+    )
+    .await;
+    match ordered_result {
+        Ok(v) => Ok(v),
+        Err(ordered_err) => {
+            let receiver_first_args = vec![rhs.clone(), lhs.clone()];
+            match call_identity_with_policy(
+                qualified_identity.clone(),
+                receiver_first_args,
+                requested_outputs,
+                CallableFallbackPolicy::ExternalBoundary,
+            )
+            .await
+            {
+                Ok(v) => Ok(v),
+                Err(receiver_err) => {
+                    if ordered_err.identifier() == Some("RunMat:UndefinedFunction") {
+                        Err(receiver_err)
+                    } else {
+                        Err(ordered_err)
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub fn create_closure(
     stack: &mut Vec<Value>,
     func_name: String,

@@ -423,10 +423,9 @@ impl SnapshotLoader {
     fn deserialize_snapshot(&mut self, data: &[u8]) -> SnapshotResult<Snapshot> {
         let start = Instant::now();
 
-        let snapshot: Snapshot = bincode::deserialize(data)
-            .context("Failed to deserialize snapshot data")
-            .map_err(|e| crate::SnapshotError::Configuration {
-                message: e.to_string(),
+        let snapshot: Snapshot =
+            bincode::deserialize(data).map_err(|err| crate::SnapshotError::Configuration {
+                message: format!("Failed to deserialize snapshot data: {err}"),
             })?;
 
         // Update stats
@@ -692,17 +691,24 @@ impl FormatLoader {
 
     /// Read data section from file
     fn read_data_section(&self) -> SnapshotResult<Vec<u8>> {
+        let data_start = if self.header.data_info.data_offset != 0 {
+            u64_to_usize(self.header.data_info.data_offset, "snapshot data offset")?
+        } else {
+            let header_size = bincode::serialized_size(&self.header)? as usize;
+            4 + header_size
+        };
+        let compressed_size = u64_to_usize(
+            self.header.data_info.compressed_size,
+            "snapshot compressed size",
+        )?;
+        let data_end = data_start.checked_add(compressed_size).ok_or_else(|| {
+            SnapshotError::Configuration {
+                message: "Snapshot data section overflowed file bounds".to_string(),
+            }
+        })?;
+
         if let Some(ref mmap) = self.mmap {
             // Use memory mapping
-            // Account for 4-byte header size prefix + actual header size
-            let header_size = bincode::serialized_size(&self.header)? as usize;
-            let data_start = 4 + header_size; // 4 bytes for size + header
-            let compressed_size = u64_to_usize(
-                self.header.data_info.compressed_size,
-                "snapshot compressed size",
-            )?;
-            let data_end = data_start + compressed_size;
-
             if data_end > mmap.len() {
                 return Err(SnapshotError::Corrupted {
                     reason: "Data section extends beyond file".to_string(),
@@ -713,17 +719,10 @@ impl FormatLoader {
         } else {
             // Use regular file I/O
             let file = &self.file;
-            // Account for 4-byte header size prefix + actual header size
-            let header_size = bincode::serialized_size(&self.header)? as u64;
-            let data_start = 4 + header_size; // 4 bytes for size + header
             let mut reader = BufReader::new(file);
 
-            reader.seek(SeekFrom::Start(data_start))?;
+            reader.seek(SeekFrom::Start(data_start as u64))?;
 
-            let compressed_size = u64_to_usize(
-                self.header.data_info.compressed_size,
-                "snapshot compressed size",
-            )?;
             let mut data = vec![0u8; compressed_size];
             reader.read_exact(&mut data)?;
 

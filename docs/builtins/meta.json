@@ -4987,6 +4987,48 @@
           ]
         },
         {
+          "label": "[b, a] = butter(n, Wn, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            },
+            {
+              "name": "a",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Denominator coefficient vector."
+            }
+          ]
+        },
+        {
           "label": "[b, a] = butter(n, Wn, ftype, 's')",
           "inputs": [
             {
@@ -5014,48 +5056,6 @@
               "name": "s",
               "ty": "StringScalar",
               "arity": "Optional",
-              "default": null,
-              "description": "Analog filter-design flag."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "b",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Numerator coefficient vector."
-            },
-            {
-              "name": "a",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Denominator coefficient vector."
-            }
-          ]
-        },
-        {
-          "label": "[b, a] = butter(n, Wn, 's')",
-          "inputs": [
-            {
-              "name": "n",
-              "ty": "IntegerScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Filter order."
-            },
-            {
-              "name": "Wn",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Analog cutoff frequency."
-            },
-            {
-              "name": "s",
-              "ty": "StringScalar",
-              "arity": "Required",
               "default": null,
               "description": "Analog filter-design flag."
             }
@@ -16019,6 +16019,60 @@
       ]
     },
     {
+      "name": "dcgain",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "gain = dcgain(sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "gain",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Steady-state gain evaluated at s=0 for continuous-time or z=1 for discrete-time."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DCGAIN.INVALID_ARGUMENT",
+          "identifier": "RunMat:dcgain:InvalidArgument",
+          "when": "Input does not match supported invocation forms.",
+          "message": "dcgain: invalid argument"
+        },
+        {
+          "code": "RM.DCGAIN.INVALID_MODEL",
+          "identifier": "RunMat:dcgain:InvalidModel",
+          "when": "Input system is not a valid SISO tf object.",
+          "message": "dcgain: invalid model"
+        },
+        {
+          "code": "RM.DCGAIN.UNSUPPORTED_MODEL",
+          "identifier": "RunMat:dcgain:UnsupportedModel",
+          "when": "Model form is not supported by the current implementation.",
+          "message": "dcgain: unsupported model"
+        },
+        {
+          "code": "RM.DCGAIN.INTERNAL",
+          "identifier": "RunMat:dcgain:Internal",
+          "when": "Gain evaluation failed internally.",
+          "message": "dcgain: internal error"
+        }
+      ]
+    },
+    {
       "name": "deal",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -20019,6 +20073,129 @@
           "identifier": null,
           "when": "Internal runtime control-flow or conversion failed.",
           "message": "fclose: internal error"
+        }
+      ]
+    },
+    {
+      "name": "feedback",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "sys = feedback(sys1)",
+          "inputs": [
+            {
+              "name": "sys1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Forward-path SISO transfer-function model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop SISO transfer-function object."
+            }
+          ]
+        },
+        {
+          "label": "sys = feedback(sys1, sys2)",
+          "inputs": [
+            {
+              "name": "sys1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Forward-path SISO transfer-function model."
+            },
+            {
+              "name": "sys2",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Feedback-path SISO transfer function or scalar gain."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop SISO transfer-function object."
+            }
+          ]
+        },
+        {
+          "label": "sys = feedback(sys1, sys2, sign)",
+          "inputs": [
+            {
+              "name": "sys1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Forward-path SISO transfer-function model."
+            },
+            {
+              "name": "sys2",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Feedback-path SISO transfer function or scalar gain."
+            },
+            {
+              "name": "sign",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "-1",
+              "description": "-1 for negative feedback or +1 for positive feedback."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop SISO transfer-function object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEEDBACK.INVALID_ARGUMENT",
+          "identifier": "RunMat:feedback:InvalidArgument",
+          "when": "Inputs do not match supported feedback invocation forms.",
+          "message": "feedback: invalid argument"
+        },
+        {
+          "code": "RM.FEEDBACK.INVALID_MODEL",
+          "identifier": "RunMat:feedback:InvalidModel",
+          "when": "Input systems are not supported SISO transfer-function models.",
+          "message": "feedback: invalid model"
+        },
+        {
+          "code": "RM.FEEDBACK.INVALID_SIGN",
+          "identifier": "RunMat:feedback:InvalidSign",
+          "when": "Feedback sign is not -1 or +1.",
+          "message": "feedback: sign must be -1 or +1"
+        },
+        {
+          "code": "RM.FEEDBACK.UNSUPPORTED_MODEL",
+          "identifier": "RunMat:feedback:UnsupportedModel",
+          "when": "A supported-looking model uses unsupported delays or incompatible sample times.",
+          "message": "feedback: unsupported model"
+        },
+        {
+          "code": "RM.FEEDBACK.INTERNAL",
+          "identifier": "RunMat:feedback:Internal",
+          "when": "Closed-loop transfer-function assembly failed.",
+          "message": "feedback: internal error"
         }
       ]
     },
@@ -33053,6 +33230,54 @@
       ]
     },
     {
+      "name": "isstable",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isstable(sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when all continuous poles are in the open left-half plane or all discrete poles are inside the unit circle."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ISSTABLE.INVALID_MODEL",
+          "identifier": "RunMat:isstable:InvalidModel",
+          "when": "Input system is not a valid SISO tf object.",
+          "message": "isstable: invalid model"
+        },
+        {
+          "code": "RM.ISSTABLE.UNSUPPORTED_MODEL",
+          "identifier": "RunMat:isstable:UnsupportedModel",
+          "when": "Model form is unsupported.",
+          "message": "isstable: unsupported model"
+        },
+        {
+          "code": "RM.ISSTABLE.INTERNAL",
+          "identifier": "RunMat:isstable:Internal",
+          "when": "Pole calculation failed.",
+          "message": "isstable: internal error"
+        }
+      ]
+    },
+    {
       "name": "isstring",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -44968,6 +45193,54 @@
       ]
     },
     {
+      "name": "pole",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "p = pole(sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Poles of the SISO tf model as a column vector."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.POLE.INVALID_MODEL",
+          "identifier": "RunMat:pole:InvalidModel",
+          "when": "Input system is not a valid SISO tf object.",
+          "message": "pole: invalid model"
+        },
+        {
+          "code": "RM.POLE.UNSUPPORTED_MODEL",
+          "identifier": "RunMat:pole:UnsupportedModel",
+          "when": "Model form is unsupported.",
+          "message": "pole: unsupported model"
+        },
+        {
+          "code": "RM.POLE.INTERNAL",
+          "identifier": "RunMat:pole:Internal",
+          "when": "Root calculation or output construction failed.",
+          "message": "pole: internal error"
+        }
+      ]
+    },
+    {
       "name": "polyder",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -48442,151 +48715,6 @@
       ]
     },
     {
-      "name": "rref",
-      "output_mode": "ByRequestedOutputCount",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "R = rref(A)",
-          "inputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input matrix."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "R",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Reduced row echelon form of A."
-            }
-          ]
-        },
-        {
-          "label": "R = rref(A, tol)",
-          "inputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input matrix."
-            },
-            {
-              "name": "tol",
-              "ty": "NumericScalar",
-              "arity": "Optional",
-              "default": null,
-              "description": "Pivot tolerance."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "R",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Reduced row echelon form of A."
-            }
-          ]
-        },
-        {
-          "label": "[R, pivots] = rref(A)",
-          "inputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input matrix."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "R",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Reduced row echelon form of A."
-            },
-            {
-              "name": "pivots",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "One-based pivot column indices."
-            }
-          ]
-        },
-        {
-          "label": "[R, pivots] = rref(A, tol)",
-          "inputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input matrix."
-            },
-            {
-              "name": "tol",
-              "ty": "NumericScalar",
-              "arity": "Optional",
-              "default": null,
-              "description": "Pivot tolerance."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "R",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Reduced row echelon form of A."
-            },
-            {
-              "name": "pivots",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "One-based pivot column indices."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.RREF.INVALID_ARGUMENT",
-          "identifier": "RunMat:rref:InvalidArgument",
-          "when": "Optional tolerance argument is malformed or outside accepted bounds.",
-          "message": "rref: invalid argument"
-        },
-        {
-          "code": "RM.RREF.INVALID_INPUT",
-          "identifier": "RunMat:rref:InvalidInput",
-          "when": "Input shape/type cannot be processed for row reduction.",
-          "message": "rref: invalid input"
-        },
-        {
-          "code": "RM.RREF.TOO_MANY_OUTPUTS",
-          "identifier": "RunMat:rref:TooManyOutputs",
-          "when": "More than two output arguments are requested.",
-          "message": "rref: too many output arguments"
-        },
-        {
-          "code": "RM.RREF.INTERNAL",
-          "identifier": "RunMat:rref:Internal",
-          "when": "Runtime fails while computing row reduction or executing gather/upload paths.",
-          "message": "rref: internal runtime failure"
-        }
-      ]
-    },
-    {
       "name": "rcond",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -50792,70 +50920,6 @@
       ]
     },
     {
-      "name": "run",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "run(script)",
-          "inputs": [
-            {
-              "name": "script",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Script name or path to execute in the caller workspace."
-            }
-          ],
-          "outputs": []
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.RUN.REQUIRES_VM",
-          "identifier": "RunMat:run:RequiresVm",
-          "when": "`run` is dispatched outside an active VM workspace frame.",
-          "message": "run: requires VM workspace context"
-        },
-        {
-          "code": "RM.RUN.ARG_TYPE",
-          "identifier": "RunMat:run:InvalidScriptArgument",
-          "when": "The script argument is not a character row, string scalar, or scalar string array.",
-          "message": "run: script must be a character vector or string scalar"
-        },
-        {
-          "code": "RM.RUN.EMPTY_SCRIPT",
-          "identifier": "RunMat:run:EmptyScript",
-          "when": "The script argument is an empty path.",
-          "message": "run: script path must not be empty"
-        },
-        {
-          "code": "RM.RUN.PATH_RESOLVE",
-          "identifier": "RunMat:run:PathResolveFailed",
-          "when": "RunMat cannot resolve the current directory, home directory, or search path.",
-          "message": "run: failed to resolve script path"
-        },
-        {
-          "code": "RM.RUN.FILE_NOT_FOUND",
-          "identifier": "RunMat:run:FileNotFound",
-          "when": "No matching script file exists in the current directory or RunMat search path.",
-          "message": "run: script file not found"
-        },
-        {
-          "code": "RM.RUN.FILE_READ",
-          "identifier": "RunMat:run:FileReadFailed",
-          "when": "The matched script file cannot be read as source text.",
-          "message": "run: failed to read script file"
-        },
-        {
-          "code": "RM.RUN.TOO_MANY_OUTPUTS",
-          "identifier": "RunMat:run:TooManyOutputs",
-          "when": "`run` is called with one or more requested output arguments.",
-          "message": "run: too many output arguments"
-        }
-      ]
-    },
-    {
       "name": "rng",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -51270,6 +51334,215 @@
           "identifier": "RunMat:round:Internal",
           "when": "Internal tensor conversion/allocation failed.",
           "message": "round: internal error"
+        }
+      ]
+    },
+    {
+      "name": "rref",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "R = rref(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reduced row echelon form of A."
+            }
+          ]
+        },
+        {
+          "label": "R = rref(A, tol)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Pivot tolerance."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reduced row echelon form of A."
+            }
+          ]
+        },
+        {
+          "label": "[R, pivots] = rref(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reduced row echelon form of A."
+            },
+            {
+              "name": "pivots",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based pivot column indices."
+            }
+          ]
+        },
+        {
+          "label": "[R, pivots] = rref(A, tol)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Pivot tolerance."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reduced row echelon form of A."
+            },
+            {
+              "name": "pivots",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based pivot column indices."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.RREF.INVALID_ARGUMENT",
+          "identifier": "RunMat:rref:InvalidArgument",
+          "when": "Optional tolerance argument is malformed or outside accepted bounds.",
+          "message": "rref: invalid argument"
+        },
+        {
+          "code": "RM.RREF.INVALID_INPUT",
+          "identifier": "RunMat:rref:InvalidInput",
+          "when": "Input shape/type cannot be processed for row reduction.",
+          "message": "rref: invalid input"
+        },
+        {
+          "code": "RM.RREF.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:rref:TooManyOutputs",
+          "when": "More than two output arguments are requested.",
+          "message": "rref: too many output arguments"
+        },
+        {
+          "code": "RM.RREF.INTERNAL",
+          "identifier": "RunMat:rref:Internal",
+          "when": "Runtime fails while computing row reduction or executing gather/upload paths.",
+          "message": "rref: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "run(script)",
+          "inputs": [
+            {
+              "name": "script",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Script name or path to execute in the caller workspace."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.RUN.REQUIRES_VM",
+          "identifier": "RunMat:run:RequiresVm",
+          "when": "`run` is dispatched outside an active VM workspace frame.",
+          "message": "run: requires VM workspace context"
+        },
+        {
+          "code": "RM.RUN.ARG_TYPE",
+          "identifier": "RunMat:run:InvalidScriptArgument",
+          "when": "The script argument is not a character row, string scalar, or scalar string array.",
+          "message": "run: script must be a character vector or string scalar"
+        },
+        {
+          "code": "RM.RUN.EMPTY_SCRIPT",
+          "identifier": "RunMat:run:EmptyScript",
+          "when": "The script argument is an empty path.",
+          "message": "run: script path must not be empty"
+        },
+        {
+          "code": "RM.RUN.PATH_RESOLVE",
+          "identifier": "RunMat:run:PathResolveFailed",
+          "when": "RunMat cannot resolve the current directory, home directory, or search path.",
+          "message": "run: failed to resolve script path"
+        },
+        {
+          "code": "RM.RUN.FILE_NOT_FOUND",
+          "identifier": "RunMat:run:FileNotFound",
+          "when": "No matching script file exists in the current directory or RunMat search path.",
+          "message": "run: script file not found"
+        },
+        {
+          "code": "RM.RUN.FILE_READ",
+          "identifier": "RunMat:run:FileReadFailed",
+          "when": "The matched script file cannot be read as source text.",
+          "message": "run: failed to read script file"
+        },
+        {
+          "code": "RM.RUN.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:run:TooManyOutputs",
+          "when": "`run` is called with one or more requested output arguments.",
+          "message": "run: too many output arguments"
         }
       ]
     },
@@ -57723,6 +57996,129 @@
       ]
     },
     {
+      "name": "stepinfo",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "info = stepinfo(sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "info",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Step-response metrics struct."
+            }
+          ]
+        },
+        {
+          "label": "info = stepinfo(y, t)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response samples."
+            },
+            {
+              "name": "t",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Time samples."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "info",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Step-response metrics struct."
+            }
+          ]
+        },
+        {
+          "label": "info = stepinfo(y, t, yfinal)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response samples."
+            },
+            {
+              "name": "t",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Time samples."
+            },
+            {
+              "name": "yfinal",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Steady-state value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "info",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Step-response metrics struct."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.STEPINFO.INVALID_ARGUMENT",
+          "identifier": "RunMat:stepinfo:InvalidArgument",
+          "when": "Inputs do not match supported stepinfo invocation forms.",
+          "message": "stepinfo: invalid argument"
+        },
+        {
+          "code": "RM.STEPINFO.INVALID_DATA",
+          "identifier": "RunMat:stepinfo:InvalidData",
+          "when": "Response, time, or final-value data is malformed.",
+          "message": "stepinfo: invalid response data"
+        },
+        {
+          "code": "RM.STEPINFO.INVALID_SYSTEM",
+          "identifier": "RunMat:stepinfo:InvalidSystem",
+          "when": "System input is not a supported SISO tf object.",
+          "message": "stepinfo: invalid system"
+        },
+        {
+          "code": "RM.STEPINFO.UNSUPPORTED_MODEL",
+          "identifier": "RunMat:stepinfo:UnsupportedModel",
+          "when": "System model form is unsupported.",
+          "message": "stepinfo: unsupported model"
+        },
+        {
+          "code": "RM.STEPINFO.INTERNAL",
+          "identifier": "RunMat:stepinfo:Internal",
+          "when": "Response simulation or metric assembly failed.",
+          "message": "stepinfo: internal error"
+        }
+      ]
+    },
+    {
       "name": "str2double",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -61405,6 +61801,55 @@
       "output_mode": "Fixed",
       "completion_policy": "Public",
       "signatures": [
+        {
+          "label": "s = tf('s')",
+          "inputs": [
+            {
+              "name": "variable",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Transfer-function indeterminate ('s', 'p', 'z', 'q', 'z^-1', or 'q^-1')."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO transfer-function object."
+            }
+          ]
+        },
+        {
+          "label": "z = tf('z', Ts)",
+          "inputs": [
+            {
+              "name": "variable",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Transfer-function indeterminate ('s', 'p', 'z', 'q', 'z^-1', or 'q^-1')."
+            },
+            {
+              "name": "Ts",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "0.0",
+              "description": "Sample time (0 for continuous-time model)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO transfer-function object."
+            }
+          ]
+        },
         {
           "label": "sys = tf(numerator, denominator)",
           "inputs": [

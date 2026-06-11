@@ -7583,224 +7583,239 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_resolves_package_private_function_for_package_callee_only() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    std::fs::create_dir_all(tmp.path().join("+pkg/private")).expect("create package private dir");
-    std::fs::write(
-        tmp.path().join("runmat.toml"),
-        r#"
+    run_deep_semantic_test(|| {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("+pkg/private"))
+            .expect("create package private dir");
+        std::fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
 [package]
 name = "demo"
 
 [sources]
 roots = ["."]
 "#,
-    )
-    .expect("write manifest");
-    std::fs::write(
-        tmp.path().join("+pkg/entry.m"),
-        "function y = entry(); a = helper(40); h = @helper; b = h(41); c = feval(@helper, 42); y = a + b + c; end",
-    )
-    .expect("write package entry");
-    std::fs::write(
-        tmp.path().join("+pkg/private/helper.m"),
-        "function y = helper(x); y = x + 1; end",
-    )
-    .expect("write package private helper");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "r = pkg.entry(); try; leak = helper(1); leak_eid = 'NOERR'; catch e; leak_eid = e.identifier; end;",
-    )
-    .expect("write root source");
+        )
+        .expect("write manifest");
+        std::fs::write(
+            tmp.path().join("+pkg/entry.m"),
+            "function y = entry(); a = helper(40); h = @helper; b = h(41); c = feval(@helper, 42); y = a + b + c; end",
+        )
+        .expect("write package entry");
+        std::fs::write(
+            tmp.path().join("+pkg/private/helper.m"),
+            "function y = helper(x); y = x + 1; end",
+        )
+        .expect("write package private helper");
+        std::fs::write(
+            tmp.path().join("main.m"),
+            "r = pkg.entry(); try; leak = helper(1); leak_eid = 'NOERR'; catch e; leak_eid = e.identifier; end;",
+        )
+        .expect("write root source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let _cwd = push_cwd(tmp.path());
-    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let _cwd = push_cwd(tmp.path());
+        let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
-    assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(126.0)),
-        "package callee should resolve its private helper through direct, handle, and feval(@handle) routes; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
-    assert!(
-        outcome_has_named_upsert(
-            &outcome,
-            "leak_eid",
-            &runmat_builtins::Value::String("RunMat:UndefinedFunction".to_string())
-        ),
-        "root caller should not resolve package private helper directly; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
+        assert!(
+            outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(126.0)),
+            "package callee should resolve its private helper through direct, handle, and feval(@handle) routes; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+        assert!(
+            outcome_has_named_upsert(
+                &outcome,
+                "leak_eid",
+                &runmat_builtins::Value::String("RunMat:UndefinedFunction".to_string())
+            ),
+            "root caller should not resolve package private helper directly; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+    });
 }
 
 #[test]
 fn execute_path_request_resolves_package_private_string_routes_for_package_callee() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
-    std::fs::create_dir_all(tmp.path().join("+pkg/private")).expect("create package private dir");
-    std::fs::write(
-        tmp.path().join("runmat.toml"),
-        r#"
+    run_deep_semantic_test(|| {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
+        std::fs::create_dir_all(tmp.path().join("+pkg/private"))
+            .expect("create package private dir");
+        std::fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
 [package]
 name = "demo"
 
 [sources]
 roots = ["."]
 "#,
-    )
-    .expect("write manifest");
-    std::fs::write(
-        tmp.path().join("private/helper.m"),
-        "function y = helper(x); y = x + 100; end",
-    )
-    .expect("write root private helper");
-    std::fs::write(
-        tmp.path().join("+pkg/entry.m"),
-        "function y = entry(); a = helper(40); s = str2func('helper'); b = feval(s, 41); c = feval('helper', 42); y = a + b + c; end",
-    )
-    .expect("write package entry");
-    std::fs::write(
-        tmp.path().join("+pkg/private/helper.m"),
-        "function y = helper(x); y = x + 1; end",
-    )
-    .expect("write package private helper");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "root_value = helper(1); pkg_value = pkg.entry();",
-    )
-    .expect("write root source");
+        )
+        .expect("write manifest");
+        std::fs::write(
+            tmp.path().join("private/helper.m"),
+            "function y = helper(x); y = x + 100; end",
+        )
+        .expect("write root private helper");
+        std::fs::write(
+            tmp.path().join("+pkg/entry.m"),
+            "function y = entry(); a = helper(40); s = str2func('helper'); b = feval(s, 41); c = feval('helper', 42); y = a + b + c; end",
+        )
+        .expect("write package entry");
+        std::fs::write(
+            tmp.path().join("+pkg/private/helper.m"),
+            "function y = helper(x); y = x + 1; end",
+        )
+        .expect("write package private helper");
+        std::fs::write(
+            tmp.path().join("main.m"),
+            "root_value = helper(1); pkg_value = pkg.entry();",
+        )
+        .expect("write root source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let _cwd = push_cwd(tmp.path());
-    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let _cwd = push_cwd(tmp.path());
+        let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
-    assert!(
-        outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
-        "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
-    assert!(
-        outcome_has_named_upsert(&outcome, "pkg_value", &runmat_builtins::Value::Num(126.0)),
-        "package callee string routes should prefer package private helper; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
+        assert!(
+            outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
+            "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+        assert!(
+            outcome_has_named_upsert(&outcome, "pkg_value", &runmat_builtins::Value::Num(126.0)),
+            "package callee string routes should prefer package private helper; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+    });
 }
 
 #[test]
 fn execute_path_request_package_private_function_precedes_root_private_for_package_callee() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
-    std::fs::create_dir_all(tmp.path().join("+pkg/private")).expect("create package private dir");
-    std::fs::write(
-        tmp.path().join("runmat.toml"),
-        r#"
+    run_deep_semantic_test(|| {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
+        std::fs::create_dir_all(tmp.path().join("+pkg/private"))
+            .expect("create package private dir");
+        std::fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
 [package]
 name = "demo"
 
 [sources]
 roots = ["."]
 "#,
-    )
-    .expect("write manifest");
-    std::fs::write(
-        tmp.path().join("private/helper.m"),
-        "function y = helper(x); y = x + 100; end",
-    )
-    .expect("write root private helper");
-    std::fs::write(
-        tmp.path().join("+pkg/private/helper.m"),
-        "function y = helper(x); y = x + 1; end",
-    )
-    .expect("write package private helper");
-    std::fs::write(
-        tmp.path().join("+pkg/entry.m"),
-        "function y = entry(); y = helper(41); end",
-    )
-    .expect("write package entry");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "root_value = helper(1); pkg_value = pkg.entry();",
-    )
-    .expect("write root source");
+        )
+        .expect("write manifest");
+        std::fs::write(
+            tmp.path().join("private/helper.m"),
+            "function y = helper(x); y = x + 100; end",
+        )
+        .expect("write root private helper");
+        std::fs::write(
+            tmp.path().join("+pkg/private/helper.m"),
+            "function y = helper(x); y = x + 1; end",
+        )
+        .expect("write package private helper");
+        std::fs::write(
+            tmp.path().join("+pkg/entry.m"),
+            "function y = entry(); y = helper(41); end",
+        )
+        .expect("write package entry");
+        std::fs::write(
+            tmp.path().join("main.m"),
+            "root_value = helper(1); pkg_value = pkg.entry();",
+        )
+        .expect("write root source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let _cwd = push_cwd(tmp.path());
-    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let _cwd = push_cwd(tmp.path());
+        let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
-    assert!(
-        outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
-        "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
-    assert!(
-        outcome_has_named_upsert(&outcome, "pkg_value", &runmat_builtins::Value::Num(42.0)),
-        "package callee should prefer its package private helper over root private helper; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
+        assert!(
+            outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
+            "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+        assert!(
+            outcome_has_named_upsert(&outcome, "pkg_value", &runmat_builtins::Value::Num(42.0)),
+            "package callee should prefer its package private helper over root private helper; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+    });
 }
 
 #[test]
 fn execute_path_request_resolves_class_folder_private_function_for_class_folder_callee() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
-    std::fs::create_dir_all(tmp.path().join("@C/private")).expect("create class private dir");
-    std::fs::write(
-        tmp.path().join("runmat.toml"),
-        r#"
+    run_deep_semantic_test(|| {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
+        std::fs::create_dir_all(tmp.path().join("@C/private")).expect("create class private dir");
+        std::fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
 [package]
 name = "demo"
 
 [sources]
 roots = ["."]
 "#,
-    )
-    .expect("write manifest");
-    std::fs::write(
-        tmp.path().join("private/helper.m"),
-        "function y = helper(x); y = x + 100; end",
-    )
-    .expect("write root private helper");
-    std::fs::write(
-        tmp.path().join("@C/entry.m"),
-        "function y = entry(); a = helper(40); h = @helper; b = h(41); s = str2func('helper'); c = feval(s, 42); d = feval('helper', 43); y = a + b + c + d; end",
-    )
-    .expect("write class-folder entry");
-    std::fs::write(
-        tmp.path().join("@C/private/helper.m"),
-        "function y = helper(x); y = x + 1; end",
-    )
-    .expect("write class private helper");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "root_value = helper(1); class_value = C.entry();",
-    )
-    .expect("write root source");
+        )
+        .expect("write manifest");
+        std::fs::write(
+            tmp.path().join("private/helper.m"),
+            "function y = helper(x); y = x + 100; end",
+        )
+        .expect("write root private helper");
+        std::fs::write(
+            tmp.path().join("@C/entry.m"),
+            "function y = entry(); a = helper(40); h = @helper; b = h(41); s = str2func('helper'); c = feval(s, 42); d = feval('helper', 43); y = a + b + c + d; end",
+        )
+        .expect("write class-folder entry");
+        std::fs::write(
+            tmp.path().join("@C/private/helper.m"),
+            "function y = helper(x); y = x + 1; end",
+        )
+        .expect("write class private helper");
+        std::fs::write(
+            tmp.path().join("main.m"),
+            "root_value = helper(1); class_value = C.entry();",
+        )
+        .expect("write root source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let _cwd = push_cwd(tmp.path());
-    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let _cwd = push_cwd(tmp.path());
+        let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
-    assert!(
-        outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
-        "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
-    assert!(
-        outcome_has_named_upsert(&outcome, "class_value", &runmat_builtins::Value::Num(170.0)),
-        "class-folder callee should resolve its private helper through direct, handle, str2func, and feval string routes; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
+        assert!(
+            outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
+            "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+        assert!(
+            outcome_has_named_upsert(&outcome, "class_value", &runmat_builtins::Value::Num(170.0)),
+            "class-folder callee should resolve its private helper through direct, handle, str2func, and feval string routes; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+    });
 }
 
 #[test]

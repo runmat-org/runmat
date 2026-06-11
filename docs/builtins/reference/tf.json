@@ -5,9 +5,11 @@
     "tf",
     "transfer function",
     "control system",
-    "coefficient vector"
+    "coefficient vector",
+    "feedback",
+    "step response"
   ],
-  "summary": "Create SISO transfer-function model objects from numerator and denominator coefficient vectors.",
+  "summary": "Create and combine SISO transfer-function model objects.",
   "references": [
     "title: \"MATLAB tf documentation\"",
     "title: \"Octave control package tf documentation\""
@@ -31,8 +33,10 @@
     "unit": "builtins::control::tf::tests",
     "integration": "crates/runmat-vm/tests/control.rs"
   },
-  "description": "`tf(num, den)` creates scalar-input scalar-output transfer-function objects from numeric coefficient vectors. Coefficients follow MATLAB-compatible highest-order-to-constant polynomial ordering.",
+  "description": "`tf('s')` creates a continuous-time transfer-function variable, and `tf(num, den)` creates scalar-input scalar-output transfer-function objects from numeric coefficient vectors. Coefficients follow MATLAB-compatible highest-order-to-constant polynomial ordering.",
   "behaviors": [
+    "`tf('s')` and `tf('p')` create continuous-time transfer-function variables with numerator `[1 0]`, denominator `[1]`, and `Ts = 0`.",
+    "`tf('z', Ts)`, `tf('q', Ts)`, `tf('z^-1', Ts)`, and `tf('q^-1', Ts)` create discrete-time variables with a positive sample time.",
     "Accepts numeric scalar, row-vector, or column-vector numerator coefficients.",
     "Accepts numeric scalar, row-vector, or column-vector denominator coefficients.",
     "Normalizes stored numerator and denominator coefficients to row vectors on the returned `tf` object.",
@@ -43,9 +47,17 @@
     "`tf(num, den, 'Variable', variable)` accepts `variable` values `'s'`, `'p'`, `'z'`, `'q'`, `'z^-1'`, and `'q^-1'`.",
     "`tf(num, den, 'Ts', Ts)` or `tf(num, den, 'SampleTime', Ts)` stores a finite non-negative sample time.",
     "Complex coefficients are accepted and stored as complex row vectors.",
-    "Logical and integer coefficients are promoted to double precision."
+    "Logical and integer coefficients are promoted to double precision.",
+    "`tf` objects overload `+`, `-`, unary `+`, unary `-`, `*`, `.*`, `/`, `./`, `\\`, `.\\`, `^`, and `.^` for SISO transfer-function algebra with scalar gains.",
+    "Transfer-function powers require integer scalar exponents.",
+    "Arithmetic requires compatible sample times and does not support nonzero input or output delays."
   ],
   "examples": [
+    {
+      "description": "Using the transfer-function variable shorthand",
+      "input": "s = tf('s');\nG = 2.5/(0.4*s^2 + 1.8*s + 1);\nG.Denominator",
+      "output": "ans = [0.4 1.8 1.0]"
+    },
     {
       "description": "Creating a first-order continuous-time transfer function",
       "input": "H = tf(20, [1 5]);\nclass(H)",
@@ -60,6 +72,11 @@
       "description": "Creating a discrete-time transfer function",
       "input": "H = tf(1, [1 -0.5], 0.1);\nH.Variable\nH.Ts",
       "output": "H.Variable = 'z'\nH.Ts = 0.1"
+    },
+    {
+      "description": "Creating a closed-loop model",
+      "input": "s = tf('s');\nG = 1/(s + 1);\nT = feedback(2*G, 1);\ndcgain(T)",
+      "output": "ans = 0.6667"
     },
     {
       "description": "Selecting the polynomial variable",
@@ -77,8 +94,12 @@
       "answer": "Not yet. This implementation supports scalar-input scalar-output systems created from numeric coefficient vectors."
     },
     {
-      "question": "Does `tf` implement `step`, `impulse`, or `bode`?",
-      "answer": "No. Those functions are not part of this builtin."
+      "question": "Can I build models with `s = tf('s')`?",
+      "answer": "Yes. Continuous-time variable shorthand and integer powers are supported for common polynomial model construction."
+    },
+    {
+      "question": "Does `tf` implement response and stability helpers?",
+      "answer": "`step`, `impulse`, `nyquist`, `stepinfo`, `feedback`, `dcgain`, `pole`, and `isstable` are implemented as separate control builtins."
     },
     {
       "question": "Can I pass matrices of coefficients?",
@@ -97,6 +118,14 @@
     {
       "label": "roots",
       "url": "./roots"
+    },
+    {
+      "label": "feedback",
+      "url": "./feedback"
+    },
+    {
+      "label": "step",
+      "url": "./step"
     }
   ],
   "source": {
@@ -106,17 +135,20 @@
   "syntax": {
     "example": {
       "description": "Supported forms",
-      "input": "H = tf(num, den)\nH = tf(num, den, Ts)\nH = tf(num, den, 'Variable', variable)\nH = tf(num, den, 'Ts', Ts)",
+      "input": "s = tf('s')\nz = tf('z', Ts)\nH = tf(num, den)\nH = tf(num, den, Ts)\nH = tf(num, den, 'Variable', variable)\nH = tf(num, den, 'Ts', Ts)",
       "output": "H is a tf object."
     },
     "points": [
+      "`tf('s')` and `tf('p')` create continuous-time indeterminates.",
+      "`tf('z', Ts)` and related discrete variables require a positive finite sample time; `tf('z')` defaults to `Ts = 1`.",
       "`num` and `den` are numeric scalar, row-vector, or column-vector coefficient inputs. Coefficients are stored using MATLAB's highest-order-term-first polynomial convention.",
       "`Ts` is an optional finite non-negative sample time. Positive sample times default the transfer-function variable to `'z'` unless `Variable` is provided explicitly.",
-      "`Variable` accepts `'s'`, `'p'`, `'z'`, `'q'`, `'z^-1'`, or `'q^-1'`. The denominator vector must contain at least one non-zero coefficient."
+      "`Variable` accepts `'s'`, `'p'`, `'z'`, `'q'`, `'z^-1'`, or `'q^-1'`. The denominator vector must contain at least one non-zero coefficient.",
+      "SISO `tf` arithmetic supports scalar gains and compatible `tf` operands."
     ]
   },
   "validation": {
-    "summary": "`tf` validates coefficient shapes, finite numeric values, supported variable names, and sample-time constraints before constructing the host-side transfer-function object. Unit and integration tests cover continuous and discrete constructors, row normalization, option parsing, and invalid denominator or matrix coefficient inputs.",
+    "summary": "`tf` validates coefficient shapes, finite numeric values, supported variable names, sample-time constraints, and SISO arithmetic compatibility before constructing or combining host-side transfer-function objects. Unit and integration tests cover continuous and discrete constructors, variable shorthand, polynomial arithmetic, scalar division by transfer functions, row normalization, option parsing, and invalid denominator or matrix coefficient inputs.",
     "implementation": {
       "label": "`crates/runmat-runtime/src/builtins/control/tf.rs`",
       "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/tf.rs"

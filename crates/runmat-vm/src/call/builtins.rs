@@ -372,6 +372,7 @@ pub async fn vm_dynamic_workspace_builtin(
                     requested_outputs,
                     source_id,
                     source_context: None,
+                    commit_workspace_on_error: false,
                 },
                 function_registry,
             )
@@ -390,6 +391,7 @@ pub async fn vm_dynamic_workspace_builtin(
                     requested_outputs,
                     source_id,
                     source_context: None,
+                    commit_workspace_on_error: false,
                 },
                 function_registry,
             )
@@ -438,6 +440,7 @@ pub async fn vm_dynamic_workspace_builtin(
                     requested_outputs: 0,
                     source_id: Some(source_context.source_id),
                     source_context: Some(source_context),
+                    commit_workspace_on_error: true,
                 },
                 function_registry,
             )
@@ -487,6 +490,7 @@ struct WorkspaceEvalRequest {
     requested_outputs: usize,
     source_id: Option<runmat_hir::SourceId>,
     source_context: Option<DynamicSourceContext>,
+    commit_workspace_on_error: bool,
 }
 
 async fn eval_workspace_source(
@@ -501,6 +505,7 @@ async fn eval_workspace_source(
         requested_outputs,
         source_id,
         source_context,
+        commit_workspace_on_error,
     } = request;
     if !current_dynamic_eval_options().dynamic_eval_enabled {
         return Err(mex(
@@ -550,19 +555,21 @@ async fn eval_workspace_source(
             }
         }
         Err(err) => {
-            if let Some(snapshot) = updated_workspace {
-                replace_workspace_target_vars_and_state(
-                    target,
-                    snapshot.vars,
-                    snapshot.names,
-                    snapshot.assigned,
-                )
-                .map_err(|replace_err| {
-                    mex(
-                        "DynamicWorkspaceUnavailable",
-                        &format!("{builtin}: {replace_err}"),
+            if commit_workspace_on_error {
+                if let Some(snapshot) = updated_workspace {
+                    replace_workspace_target_vars_and_state(
+                        target,
+                        snapshot.vars,
+                        snapshot.names,
+                        snapshot.assigned,
                     )
-                })?;
+                    .map_err(|replace_err| {
+                        mex(
+                            "DynamicWorkspaceUnavailable",
+                            &format!("{builtin}: {replace_err}"),
+                        )
+                    })?;
+                }
             }
             return Err(err);
         }

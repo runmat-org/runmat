@@ -345,7 +345,7 @@ pub struct HirCall {
     pub args: Vec<HirExpr>,
     pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub workspace_first_name: Option<SymbolName>,
 }
 
