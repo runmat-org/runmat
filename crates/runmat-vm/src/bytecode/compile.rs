@@ -3647,6 +3647,41 @@ summary = [peak; dominant; total];\n",
     }
 
     #[test]
+    fn compile_interprets_butter_filter_workflow() {
+        let ast = runmat_parser::parse(
+            "\
+[b, a] = butter(2, 0.25, 'low');\n\
+x = [1 zeros(1, 5)];\n\
+y = filter(b, a, x);\n\
+expected = [0.0976310729378175 0.2873096041807672 0.3359654745135361];\n\
+err = max(abs(y(1:3) - expected));\n\
+summary = [numel(b); numel(a); all(isfinite(y)); err < 1e-12];\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let summary_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "summary")
+            .expect("summary export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[summary_export.slot.0] else {
+            panic!(
+                "expected numeric summary tensor, got {:?}",
+                vars[summary_export.slot.0]
+            );
+        };
+        assert_eq!(tensor.shape, vec![4, 1]);
+        assert_eq!(tensor.data, vec![3.0, 3.0, 1.0, 1.0]);
+    }
+
+    #[test]
     fn compile_rejects_dynamic_member_store_back_paren_index_with_read_context_identifier() {
         let ast =
             runmat_parser::parse("s = struct('x', {1, 2}); f = 'x'; s(1).(f) = 3;").expect("parse");

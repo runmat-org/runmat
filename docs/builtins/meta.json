@@ -4765,6 +4765,779 @@
       "errors": []
     },
     {
+      "name": "butter",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "b = butter(n, Wn)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "b = butter(n, Wn, ftype)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "b = butter(n, Wn, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "b = butter(n, Wn, ftype, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "[b, a] = butter(n, Wn)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            },
+            {
+              "name": "a",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Denominator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "[b, a] = butter(n, Wn, ftype)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            },
+            {
+              "name": "a",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Denominator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "[b, a] = butter(n, Wn, ftype, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            },
+            {
+              "name": "a",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Denominator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "[b, a] = butter(n, Wn, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            },
+            {
+              "name": "a",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Denominator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "[z, p, k] = butter(n, Wn)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter zeros."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter poles."
+            },
+            {
+              "name": "k",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter gain."
+            }
+          ]
+        },
+        {
+          "label": "[z, p, k] = butter(n, Wn, ftype)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter zeros."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter poles."
+            },
+            {
+              "name": "k",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter gain."
+            }
+          ]
+        },
+        {
+          "label": "[z, p, k] = butter(n, Wn, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter zeros."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter poles."
+            },
+            {
+              "name": "k",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter gain."
+            }
+          ]
+        },
+        {
+          "label": "[z, p, k] = butter(n, Wn, ftype, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter zeros."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter poles."
+            },
+            {
+              "name": "k",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter gain."
+            }
+          ]
+        },
+        {
+          "label": "[A, B, C, D] = butter(n, Wn)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "State matrix."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Output matrix."
+            },
+            {
+              "name": "D",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Feedthrough term."
+            }
+          ]
+        },
+        {
+          "label": "[A, B, C, D] = butter(n, Wn, ftype)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "State matrix."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Output matrix."
+            },
+            {
+              "name": "D",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Feedthrough term."
+            }
+          ]
+        },
+        {
+          "label": "[A, B, C, D] = butter(n, Wn, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "State matrix."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Output matrix."
+            },
+            {
+              "name": "D",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Feedthrough term."
+            }
+          ]
+        },
+        {
+          "label": "[A, B, C, D] = butter(n, Wn, ftype, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "State matrix."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Output matrix."
+            },
+            {
+              "name": "D",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Feedthrough term."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.BUTTER.ARG_COUNT",
+          "identifier": "RunMat:butter:ArgCount",
+          "when": "The argument count is outside butter's supported forms.",
+          "message": "butter: expected two to four input arguments"
+        },
+        {
+          "code": "RM.BUTTER.INVALID_ORDER",
+          "identifier": "RunMat:butter:InvalidOrder",
+          "when": "Filter order is missing, non-finite, non-integer, less than one, or too large.",
+          "message": "butter: order must be a positive integer"
+        },
+        {
+          "code": "RM.BUTTER.INVALID_FREQUENCY",
+          "identifier": "RunMat:butter:InvalidFrequency",
+          "when": "Cutoff frequencies are malformed or outside the valid range.",
+          "message": "butter: invalid cutoff frequency"
+        },
+        {
+          "code": "RM.BUTTER.INVALID_OPTION",
+          "identifier": "RunMat:butter:InvalidOption",
+          "when": "Filter type or analog flag is malformed or unknown.",
+          "message": "butter: invalid option"
+        },
+        {
+          "code": "RM.BUTTER.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:butter:TooManyOutputs",
+          "when": "More than four outputs are requested.",
+          "message": "butter: too many output arguments"
+        },
+        {
+          "code": "RM.BUTTER.INTERNAL",
+          "identifier": "RunMat:butter:Internal",
+          "when": "Filter design or output materialization fails internally.",
+          "message": "butter: internal error"
+        }
+      ]
+    },
+    {
       "name": "cat",
       "output_mode": "Fixed",
       "completion_policy": "Public",
