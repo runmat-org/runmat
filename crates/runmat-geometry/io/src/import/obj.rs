@@ -1,4 +1,5 @@
 use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
+use runmat_geometry_core::SurfaceMesh;
 
 use super::{
     build_asset, build_result, capacity_guard, is_degenerate_triangle, parse_f64,
@@ -20,6 +21,7 @@ pub(super) fn import_obj(
         push_utf8_bom_stripped_diagnostic(&mut diagnostics, "obj");
     }
     let mut vertex_pool = Vec::<[f64; 3]>::new();
+    let mut triangles = Vec::<[u32; 3]>::new();
     let mut triangle_count = 0u64;
 
     for (line_idx, line) in text.lines().enumerate() {
@@ -91,6 +93,23 @@ pub(super) fn import_obj(
                     message: "Removed degenerate OBJ face triangle during import".to_string(),
                 });
             } else {
+                triangles.push([
+                    u32::try_from(tri[0]).map_err(|_| {
+                        GeometryImportError::ParseFailed(
+                            "OBJ vertex index exceeds render mesh index range".to_string(),
+                        )
+                    })?,
+                    u32::try_from(tri[1]).map_err(|_| {
+                        GeometryImportError::ParseFailed(
+                            "OBJ vertex index exceeds render mesh index range".to_string(),
+                        )
+                    })?,
+                    u32::try_from(tri[2]).map_err(|_| {
+                        GeometryImportError::ParseFailed(
+                            "OBJ vertex index exceeds render mesh index range".to_string(),
+                        )
+                    })?,
+                ]);
                 triangle_count += 1;
             }
         }
@@ -108,6 +127,7 @@ pub(super) fn import_obj(
         options.units,
         vertex_pool.len() as u64,
         triangle_count,
+        vec![SurfaceMesh::new("mesh_1", vertex_pool, triangles)],
         diagnostics.clone(),
     );
     Ok(build_result(asset, diagnostics))

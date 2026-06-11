@@ -13,7 +13,7 @@ pub use assembly::AssemblyNode;
 pub use field::{FieldLocation, FieldValueKind};
 pub use geometry::{GeometryAsset, GeometrySource};
 pub use material_evidence::{MaterialEvidence, MaterialEvidenceConfidence};
-pub use mesh::{MeshDescriptor, MeshKind};
+pub use mesh::{MeshDescriptor, MeshKind, SurfaceMesh};
 pub use regions::Region;
 pub use source_geometry::{SourceGeometry, SourceGeometryKind};
 pub use tessellation_profile::{HealingMode, TessellationProfile};

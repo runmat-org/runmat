@@ -1,4 +1,5 @@
 use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
+use runmat_geometry_core::SurfaceMesh;
 
 use super::{
     build_asset, build_result, capacity_guard, is_degenerate_triangle, parse_f64,
@@ -25,6 +26,7 @@ fn import_ascii_stl(
 ) -> Result<crate::report::ImportResult, GeometryImportError> {
     let mut diagnostics = Vec::<ImportDiagnostic>::new();
     let mut vertices: Vec<[f64; 3]> = Vec::new();
+    let mut triangles: Vec<[u32; 3]> = Vec::new();
     let mut triangle_count = 0u64;
     let mut current = Vec::<[f64; 3]>::new();
 
@@ -56,7 +58,13 @@ fn import_ascii_stl(
                     message: "Removed degenerate STL triangle during import".to_string(),
                 });
             } else {
+                let base = u32::try_from(vertices.len()).map_err(|_| {
+                    GeometryImportError::ParseFailed(
+                        "STL vertex count exceeds render mesh index range".to_string(),
+                    )
+                })?;
                 vertices.extend_from_slice(&tri);
+                triangles.push([base, base + 1, base + 2]);
                 triangle_count += 1;
             }
             current.clear();
@@ -75,6 +83,7 @@ fn import_ascii_stl(
         options.units,
         vertices.len() as u64,
         triangle_count,
+        vec![SurfaceMesh::new("mesh_1", vertices, triangles)],
         diagnostics.clone(),
     );
     Ok(build_result(asset, diagnostics))
@@ -103,6 +112,7 @@ fn import_binary_stl(
 
     let mut diagnostics = Vec::<ImportDiagnostic>::new();
     let mut vertices: Vec<[f64; 3]> = Vec::new();
+    let mut triangles: Vec<[u32; 3]> = Vec::new();
     let mut accepted_triangles = 0u64;
 
     for index in 0..triangle_count {
@@ -122,7 +132,13 @@ fn import_binary_stl(
             continue;
         }
 
+        let base = u32::try_from(vertices.len()).map_err(|_| {
+            GeometryImportError::ParseFailed(
+                "binary STL vertex count exceeds render mesh index range".to_string(),
+            )
+        })?;
         vertices.extend_from_slice(&tri);
+        triangles.push([base, base + 1, base + 2]);
         accepted_triangles += 1;
     }
 
@@ -138,6 +154,7 @@ fn import_binary_stl(
         options.units,
         vertices.len() as u64,
         accepted_triangles,
+        vec![SurfaceMesh::new("mesh_1", vertices, triangles)],
         diagnostics.clone(),
     );
     Ok(build_result(asset, diagnostics))

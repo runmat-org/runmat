@@ -20,7 +20,8 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{
     GeometryAsset, GeometrySource, MaterialEvidence, MaterialEvidenceConfidence, MeshDescriptor,
-    MeshKind, Region, SourceGeometry, SourceGeometryKind, TessellationProfile, UnitSystem,
+    MeshKind, Region, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
+    UnitSystem,
 };
 
 use super::*;
@@ -328,6 +329,11 @@ fn sample_geometry_asset() -> GeometryAsset {
             vertex_count: 3,
             element_count: 1,
         }],
+        surface_meshes: vec![SurfaceMesh::new(
+            "mesh_1",
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            vec![[0, 1, 2]],
+        )],
         regions: Vec::new(),
         diagnostics: Vec::new(),
     }

@@ -14,7 +14,7 @@ pub use stats::{compute_stats, GeometryStats};
 mod tests {
     use runmat_geometry_core::{
         GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, SourceGeometry,
-        SourceGeometryKind, TessellationProfile, UnitSystem,
+        SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
     };
 
     use crate::{compute_axis_aligned_bounds, compute_stats, evaluate_quality};
@@ -41,6 +41,11 @@ mod tests {
                 vertex_count: 3,
                 element_count: 1,
             }],
+            surface_meshes: vec![SurfaceMesh::new(
+                "mesh",
+                vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                vec![[0, 1, 2]],
+            )],
             regions: vec![],
             diagnostics: vec![],
         }
@@ -58,7 +63,7 @@ mod tests {
     fn bounds_are_deterministic() {
         let bounds = compute_axis_aligned_bounds(&sample());
         assert_eq!(bounds.min, [0.0, 0.0, 0.0]);
-        assert_eq!(bounds.max, [0.0, 0.0, 0.0]);
+        assert_eq!(bounds.max, [1.0, 1.0, 0.0]);
     }
 
     #[test]

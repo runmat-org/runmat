@@ -1,4 +1,5 @@
 use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
+use runmat_geometry_core::SurfaceMesh;
 
 use super::{
     build_asset, build_result, capacity_guard, is_degenerate_triangle, parse_f64,
@@ -26,6 +27,13 @@ enum BinaryFaceIndexType {
     U32,
 }
 
+struct PlyMeshAccumulator<'a> {
+    vertices: &'a mut Vec<[f64; 3]>,
+    triangles: &'a mut Vec<[u32; 3]>,
+    triangle_count: &'a mut u64,
+    diagnostics: &'a mut Vec<ImportDiagnostic>,
+}
+
 pub(super) fn import_ply(
     path: &str,
     bytes: &[u8],
@@ -39,31 +47,36 @@ pub(super) fn import_ply(
     let (header, body) = parse_ply_header(bytes)?;
 
     let mut vertices = Vec::<[f64; 3]>::with_capacity(header.vertex_count);
+    let mut triangles = Vec::<[u32; 3]>::new();
     let mut triangle_count = 0u64;
 
-    match header.format {
-        PlyFormat::Ascii10 => {
-            parse_ascii_body(
-                body,
-                header.vertex_count,
-                header.face_count,
-                &mut vertices,
-                &mut triangle_count,
-                &mut diagnostics,
-                &options,
-            )?;
-        }
-        PlyFormat::BinaryLittleEndian10 => {
-            let face_index_type = validate_binary_layout_support(&header.header_text)?;
-            parse_binary_little_endian_body(
-                body,
-                &header,
-                face_index_type,
-                &mut vertices,
-                &mut triangle_count,
-                &mut diagnostics,
-                &options,
-            )?;
+    {
+        let mut mesh = PlyMeshAccumulator {
+            vertices: &mut vertices,
+            triangles: &mut triangles,
+            triangle_count: &mut triangle_count,
+            diagnostics: &mut diagnostics,
+        };
+        match header.format {
+            PlyFormat::Ascii10 => {
+                parse_ascii_body(
+                    body,
+                    header.vertex_count,
+                    header.face_count,
+                    &mut mesh,
+                    &options,
+                )?;
+            }
+            PlyFormat::BinaryLittleEndian10 => {
+                let face_index_type = validate_binary_layout_support(&header.header_text)?;
+                parse_binary_little_endian_body(
+                    body,
+                    &header,
+                    face_index_type,
+                    &mut mesh,
+                    &options,
+                )?;
+            }
         }
     }
 
@@ -79,6 +92,7 @@ pub(super) fn import_ply(
         options.units,
         vertices.len() as u64,
         triangle_count,
+        vec![SurfaceMesh::new("mesh_1", vertices, triangles)],
         diagnostics.clone(),
     );
     Ok(build_result(asset, diagnostics))
@@ -232,9 +246,7 @@ fn parse_ascii_body(
     body: &[u8],
     vertex_count: usize,
     face_count: usize,
-    vertices: &mut Vec<[f64; 3]>,
-    triangle_count: &mut u64,
-    diagnostics: &mut Vec<ImportDiagnostic>,
+    mesh: &mut PlyMeshAccumulator<'_>,
     options: &GeometryImportOptions,
 ) -> Result<(), GeometryImportError> {
     let body_text = std::str::from_utf8(body).map_err(|_| {
@@ -246,7 +258,7 @@ fn parse_ascii_body(
             GeometryImportError::ParseFailed(format!(
                 "PLY declared {} vertices but parsed {}",
                 vertex_count,
-                vertices.len()
+                mesh.vertices.len()
             ))
         })?;
         let mut parts = vertex_line.split_whitespace();
@@ -259,7 +271,7 @@ fn parse_ascii_body(
         let z = parse_f64(parts.next().ok_or_else(|| {
             GeometryImportError::ParseFailed("PLY vertex line missing z component".to_string())
         })?)?;
-        vertices.push([x, y, z]);
+        mesh.vertices.push([x, y, z]);
     }
 
     for _ in 0..face_count {
@@ -285,17 +297,17 @@ fn parse_ascii_body(
                 GeometryImportError::ParseFailed("PLY face missing index entry".to_string())
             })?;
             let index = parse_u64(raw, "face index")? as usize;
-            if index >= vertices.len() {
+            if index >= mesh.vertices.len() {
                 return Err(GeometryImportError::ParseFailed(format!(
                     "PLY face index {} out of bounds for {} vertices",
                     index,
-                    vertices.len()
+                    mesh.vertices.len()
                 )));
             }
             indices.push(index);
         }
 
-        emit_face_triangles(vertices, &indices, triangle_count, diagnostics, options)?;
+        emit_face_triangles(&indices, mesh, options)?;
     }
     Ok(())
 }
@@ -304,9 +316,7 @@ fn parse_binary_little_endian_body(
     body: &[u8],
     header: &PlyHeader,
     face_index_type: BinaryFaceIndexType,
-    vertices: &mut Vec<[f64; 3]>,
-    triangle_count: &mut u64,
-    diagnostics: &mut Vec<ImportDiagnostic>,
+    mesh: &mut PlyMeshAccumulator<'_>,
     options: &GeometryImportOptions,
 ) -> Result<(), GeometryImportError> {
     let mut cursor = 0usize;
@@ -314,7 +324,7 @@ fn parse_binary_little_endian_body(
         let x = read_f32_le(body, cursor, "PLY binary vertex x")?;
         let y = read_f32_le(body, cursor + 4, "PLY binary vertex y")?;
         let z = read_f32_le(body, cursor + 8, "PLY binary vertex z")?;
-        vertices.push([x, y, z]);
+        mesh.vertices.push([x, y, z]);
         cursor = cursor.saturating_add(12);
     }
 
@@ -353,44 +363,59 @@ fn parse_binary_little_endian_body(
                     "PLY binary face index exceeds host addressable range".to_string(),
                 )
             })?;
-            if index >= vertices.len() {
+            if index >= mesh.vertices.len() {
                 return Err(GeometryImportError::ParseFailed(format!(
                     "PLY face index {} out of bounds for {} vertices",
                     index,
-                    vertices.len()
+                    mesh.vertices.len()
                 )));
             }
             indices.push(index);
         }
 
-        emit_face_triangles(vertices, &indices, triangle_count, diagnostics, options)?;
+        emit_face_triangles(&indices, mesh, options)?;
     }
     Ok(())
 }
 
 fn emit_face_triangles(
-    vertices: &[[f64; 3]],
     indices: &[usize],
-    triangle_count: &mut u64,
-    diagnostics: &mut Vec<ImportDiagnostic>,
+    mesh: &mut PlyMeshAccumulator<'_>,
     options: &GeometryImportOptions,
 ) -> Result<(), GeometryImportError> {
     let pivot = indices[0];
     for i in 1..(indices.len() - 1) {
-        capacity_guard(*triangle_count + 1, options)?;
+        capacity_guard(*mesh.triangle_count + 1, options)?;
         let tri = [
-            vertices[pivot],
-            vertices[indices[i]],
-            vertices[indices[i + 1]],
+            mesh.vertices[pivot],
+            mesh.vertices[indices[i]],
+            mesh.vertices[indices[i + 1]],
         ];
         if is_degenerate_triangle(&tri) {
-            diagnostics.push(ImportDiagnostic {
+            mesh.diagnostics.push(ImportDiagnostic {
                 code: "GEOMETRY_NORMALIZE_DEGENERATE_REMOVED".to_string(),
                 severity: ImportDiagnosticSeverity::Warning,
                 message: "Removed degenerate PLY face triangle during import".to_string(),
             });
         } else {
-            *triangle_count += 1;
+            mesh.triangles.push([
+                u32::try_from(pivot).map_err(|_| {
+                    GeometryImportError::ParseFailed(
+                        "PLY vertex index exceeds render mesh index range".to_string(),
+                    )
+                })?,
+                u32::try_from(indices[i]).map_err(|_| {
+                    GeometryImportError::ParseFailed(
+                        "PLY vertex index exceeds render mesh index range".to_string(),
+                    )
+                })?,
+                u32::try_from(indices[i + 1]).map_err(|_| {
+                    GeometryImportError::ParseFailed(
+                        "PLY vertex index exceeds render mesh index range".to_string(),
+                    )
+                })?,
+            ]);
+            *mesh.triangle_count += 1;
         }
     }
     Ok(())

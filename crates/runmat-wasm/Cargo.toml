@@ -44,6 +44,8 @@ tracing = "0.1"
 runmat-telemetry = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+runmat-geometry-core = { workspace = true }
+runmat-geometry-io = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-web"] }
 runmat-plot = { workspace = true, features = ["web", "egui-overlay"] }
 

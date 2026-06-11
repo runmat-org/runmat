@@ -7,8 +7,8 @@ pub mod selection;
 pub use diagnostics::{Diagnostic, DiagnosticSeverity};
 pub use model::{
     AssemblyNode, GeometryAsset, GeometrySource, MaterialEvidence, MaterialEvidenceConfidence,
-    MeshDescriptor, MeshKind, Region, SourceGeometry, SourceGeometryKind, TessellationProfile,
-    UnitSystem,
+    MeshDescriptor, MeshKind, Region, SourceGeometry, SourceGeometryKind, SurfaceMesh,
+    TessellationProfile, UnitSystem,
 };
 pub use selection::{EntityKind, EntityRef};
 
@@ -38,6 +38,11 @@ mod tests {
                 vertex_count: 3,
                 element_count: 1,
             }],
+            surface_meshes: vec![SurfaceMesh::new(
+                "mesh_1",
+                vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                vec![[0, 1, 2]],
+            )],
             regions: vec![Region {
                 region_id: "region_a".to_string(),
                 name: "body".to_string(),

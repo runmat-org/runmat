@@ -6,7 +6,7 @@ mod stl;
 
 use runmat_geometry_core::{
     GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, SourceGeometry, SourceGeometryKind,
-    TessellationProfile, UnitSystem,
+    SurfaceMesh, TessellationProfile, UnitSystem,
 };
 use thiserror::Error;
 
@@ -61,6 +61,7 @@ pub(crate) fn build_asset(
     units: UnitSystem,
     vertex_count: u64,
     element_count: u64,
+    surface_meshes: Vec<SurfaceMesh>,
     diagnostics: Vec<ImportDiagnostic>,
 ) -> GeometryAsset {
     GeometryAsset {
@@ -84,6 +85,7 @@ pub(crate) fn build_asset(
             vertex_count,
             element_count,
         }],
+        surface_meshes,
         regions: Vec::new(),
         diagnostics: diagnostics
             .iter()

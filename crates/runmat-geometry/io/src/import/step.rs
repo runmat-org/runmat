@@ -20,6 +20,7 @@ pub(super) fn import_step(
         options.units,
         0,
         0,
+        Vec::new(),
         summary.diagnostics.clone(),
     );
     asset.source_geometry.kind = summary.source_kind;

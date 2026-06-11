@@ -5607,6 +5607,8 @@ dependencies = [
  "runmat-builtins",
  "runmat-core",
  "runmat-filesystem",
+ "runmat-geometry-core",
+ "runmat-geometry-io",
  "runmat-hir",
  "runmat-logging",
  "runmat-plot",

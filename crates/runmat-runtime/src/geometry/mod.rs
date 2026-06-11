@@ -83,6 +83,21 @@ pub struct GeometryCaptureViewResult {
     pub payload: Vec<u8>,
 }
 
+#[cfg(feature = "plot-core")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeometryPreviewFigureOptions {
+    pub edge_overlay_triangle_limit: usize,
+}
+
+#[cfg(feature = "plot-core")]
+impl Default for GeometryPreviewFigureOptions {
+    fn default() -> Self {
+        Self {
+            edge_overlay_triangle_limit: 250_000,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GeometryPrepProfile {
@@ -998,6 +1013,81 @@ pub fn geometry_capture_view(
                 .build()
         })?;
     Ok(envelope.data)
+}
+
+#[cfg(feature = "plot-core")]
+pub fn geometry_preview_figure(
+    asset: &GeometryAsset,
+    title: impl Into<String>,
+    options: GeometryPreviewFigureOptions,
+) -> Result<runmat_plot::plots::Figure, String> {
+    if asset.surface_meshes.is_empty() {
+        return Err("geometry asset does not contain renderable surface mesh data".to_string());
+    }
+
+    let mut figure = runmat_plot::plots::Figure::new()
+        .with_title(title)
+        .with_labels("X", "Y")
+        .with_grid(true)
+        .with_axis_equal(true);
+    figure.z_label = Some("Z".to_string());
+
+    for (index, surface_mesh) in asset.surface_meshes.iter().enumerate() {
+        let vertices = surface_mesh
+            .vertices
+            .iter()
+            .map(|vertex| {
+                Ok(glam::Vec3::new(
+                    f64_to_f32_coordinate(vertex[0])?,
+                    f64_to_f32_coordinate(vertex[1])?,
+                    f64_to_f32_coordinate(vertex[2])?,
+                ))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let mut mesh = runmat_plot::plots::MeshPlot::new(vertices, surface_mesh.triangles.clone())?;
+        mesh.set_mesh_id(Some(surface_mesh.mesh_id.clone()));
+        mesh.set_label(Some(format!(
+            "{}: {} triangles",
+            surface_mesh.mesh_id,
+            surface_mesh.triangles.len()
+        )));
+        let color = preview_mesh_color(index);
+        mesh.set_face_color(color);
+        mesh.set_edge_color(glam::Vec4::new(0.86, 0.91, 1.0, 0.82));
+        mesh.set_face_alpha(0.92);
+        if surface_mesh.triangles.len() > options.edge_overlay_triangle_limit {
+            mesh.set_edge_width(0.0);
+        } else {
+            mesh.set_edge_width(0.35);
+        }
+        figure.add_mesh_plot(mesh);
+    }
+
+    Ok(figure)
+}
+
+#[cfg(feature = "plot-core")]
+fn f64_to_f32_coordinate(value: f64) -> Result<f32, String> {
+    if !value.is_finite() {
+        return Err("geometry preview mesh contains a non-finite coordinate".to_string());
+    }
+    if value < f32::MIN as f64 || value > f32::MAX as f64 {
+        return Err("geometry preview mesh coordinate exceeds f32 render range".to_string());
+    }
+    Ok(value as f32)
+}
+
+#[cfg(feature = "plot-core")]
+fn preview_mesh_color(index: usize) -> glam::Vec4 {
+    const PALETTE: [[f32; 4]; 6] = [
+        [0.18, 0.48, 0.86, 1.0],
+        [0.13, 0.62, 0.44, 1.0],
+        [0.84, 0.43, 0.18, 1.0],
+        [0.57, 0.38, 0.77, 1.0],
+        [0.73, 0.62, 0.18, 1.0],
+        [0.20, 0.62, 0.75, 1.0],
+    ];
+    glam::Vec4::from_array(PALETTE[index % PALETTE.len()])
 }
 
 pub fn geometry_prep_for_analysis_op(

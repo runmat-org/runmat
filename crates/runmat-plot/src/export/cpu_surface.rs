@@ -507,6 +507,7 @@ fn axes_has_3d_content(figure: &Figure, axes_index: usize) -> bool {
             idx == axes_index
                 && match plot {
                     PlotElement::Surface(surface) => !surface.image_mode,
+                    PlotElement::Mesh(_) => true,
                     PlotElement::Patch(patch) => {
                         patch.force_3d() || patch.vertices().iter().any(|p| p.z.abs() > 1e-6)
                     }

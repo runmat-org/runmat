@@ -162,6 +162,7 @@ export type FigurePlotKind =
   | "quiver"
   | "pie"
   | "surface"
+  | "mesh"
   | "scatter3"
   | "contour"
   | "contour_fill";
@@ -575,6 +576,73 @@ export interface MemoryUsage {
   pages: number;
 }
 
+export interface GeometryPreviewBudget {
+  maxBytes?: number;
+  maxTriangles?: number;
+  maxVertices?: number;
+  timeoutMs?: number;
+}
+
+export interface GeometryStats {
+  meshCount: number;
+  totalVertices: number;
+  totalElements: number;
+  regionCount: number;
+}
+
+export interface GeometryInspectResult {
+  path: string;
+  format: string;
+  byteCount: number;
+  supported: boolean;
+  stats?: GeometryStats | null;
+  regions?: unknown[];
+  diagnostics?: unknown[];
+  degradedReason?: string | null;
+}
+
+export interface GeometryPreviewResult extends GeometryInspectResult {
+  sceneKind: "mesh" | "summary" | "unavailable";
+  figureHandle: number | null;
+  truncated: boolean;
+  previewMessage?: string | null;
+}
+
+export interface FeaCapabilities {
+  supportedDocumentExtensions: string[];
+  supportedGeometryExtensions: string[];
+  supportsCheck: boolean;
+  supportsRun: boolean;
+  supportsResults: boolean;
+  supportsLiveProgress: boolean;
+  visualizationBackend: "runmat-plot";
+}
+
+export interface FeaCheckResult {
+  path: string;
+  documentKind: "study" | "sweep";
+  valid: boolean;
+  validation: unknown;
+  plan?: unknown;
+  diagnostics: unknown[];
+  evidenceArtifactPaths: string[];
+}
+
+export interface FeaRunResult {
+  path: string;
+  documentKind: "study" | "sweep";
+  run: unknown;
+  results?: unknown;
+  figureHandles: number[];
+  artifactManifest?: unknown;
+  diagnostics: unknown[];
+}
+
+export interface FeaResultsResult {
+  runId: string;
+  results: unknown;
+}
+
 export interface RunMatSessionHandle {
   executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): Promise<void>;
@@ -584,6 +652,12 @@ export interface RunMatSessionHandle {
   importWorkspaceState(state: Uint8Array): Promise<boolean>;
   workspaceSnapshot(): Promise<WorkspaceSnapshot>;
   inspectDataFile(path: string): Promise<WorkspaceEntry[]>;
+  inspectGeometry(path: string, budget?: GeometryPreviewBudget | null): Promise<GeometryInspectResult>;
+  previewGeometry(path: string, budget?: GeometryPreviewBudget | null): Promise<GeometryPreviewResult>;
+  feaCapabilities(): Promise<FeaCapabilities>;
+  checkFeaStudy(path: string): Promise<FeaCheckResult>;
+  runFeaStudy(path: string, artifactRoot?: string | null): Promise<FeaRunResult>;
+  feaResults(runId: string): Promise<FeaResultsResult>;
   materializeDataFileVariable(
     path: string,
     selector: WorkspaceMaterializeSelector,
@@ -643,6 +717,12 @@ interface RunMatNativeSession {
   importWorkspaceState?: (state: Uint8Array) => boolean;
   workspaceSnapshot?: () => WorkspaceSnapshot;
   inspectDataFile?: (path: string) => WorkspaceEntry[] | Promise<WorkspaceEntry[]>;
+  inspectGeometry?: (path: string, budget?: GeometryPreviewBudget | null) => GeometryInspectResult | Promise<GeometryInspectResult>;
+  previewGeometry?: (path: string, budget?: GeometryPreviewBudget | null) => GeometryPreviewResult | Promise<GeometryPreviewResult>;
+  feaCapabilities?: () => FeaCapabilities | Promise<FeaCapabilities>;
+  checkFeaStudy?: (path: string) => FeaCheckResult | Promise<FeaCheckResult>;
+  runFeaStudy?: (path: string, artifactRoot?: string | null) => FeaRunResult | Promise<FeaRunResult>;
+  feaResults?: (runId: string) => FeaResultsResult | Promise<FeaResultsResult>;
   materializeDataFileVariable?: (
     path: string,
     array: string,
@@ -1271,6 +1351,54 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
     const entries = await this.native.inspectDataFile(path);
     return Array.isArray(entries) ? entries : [];
+  }
+
+  async inspectGeometry(path: string, budget?: GeometryPreviewBudget | null): Promise<GeometryInspectResult> {
+    this.ensureActive();
+    if (typeof this.native.inspectGeometry !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose inspectGeometry yet.");
+    }
+    return this.native.inspectGeometry(path, budget ?? null);
+  }
+
+  async previewGeometry(path: string, budget?: GeometryPreviewBudget | null): Promise<GeometryPreviewResult> {
+    this.ensureActive();
+    if (typeof this.native.previewGeometry !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose previewGeometry yet.");
+    }
+    return this.native.previewGeometry(path, budget ?? null);
+  }
+
+  async feaCapabilities(): Promise<FeaCapabilities> {
+    this.ensureActive();
+    if (typeof this.native.feaCapabilities !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose feaCapabilities yet.");
+    }
+    return this.native.feaCapabilities();
+  }
+
+  async checkFeaStudy(path: string): Promise<FeaCheckResult> {
+    this.ensureActive();
+    if (typeof this.native.checkFeaStudy !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose checkFeaStudy yet.");
+    }
+    return this.native.checkFeaStudy(path);
+  }
+
+  async runFeaStudy(path: string, artifactRoot?: string | null): Promise<FeaRunResult> {
+    this.ensureActive();
+    if (typeof this.native.runFeaStudy !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose runFeaStudy yet.");
+    }
+    return this.native.runFeaStudy(path, artifactRoot ?? null);
+  }
+
+  async feaResults(runId: string): Promise<FeaResultsResult> {
+    this.ensureActive();
+    if (typeof this.native.feaResults !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose feaResults yet.");
+    }
+    return this.native.feaResults(runId);
   }
 
   async materializeDataFileVariable(

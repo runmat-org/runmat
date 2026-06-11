@@ -306,6 +306,7 @@ impl PlotRenderer {
     fn plot_element_is_3d(plot: &crate::plots::figure::PlotElement) -> bool {
         match plot {
             crate::plots::figure::PlotElement::Surface(surface) => !surface.image_mode,
+            crate::plots::figure::PlotElement::Mesh(_) => true,
             crate::plots::figure::PlotElement::Patch(patch) => {
                 if patch.force_3d() {
                     return true;

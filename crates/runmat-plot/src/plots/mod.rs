@@ -11,6 +11,7 @@ pub mod errorbar;
 pub mod figure;
 pub mod line;
 pub mod line3;
+pub mod mesh;
 pub mod patch;
 pub mod pie;
 pub mod quiver;
@@ -32,6 +33,7 @@ pub use figure::{
 };
 pub use line::{LineGpuStyle, LineMarkerAppearance, LinePlot, LineStyle};
 pub use line3::Line3Plot;
+pub use mesh::MeshPlot;
 pub use patch::{PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
 pub use pie::PieChart;
 pub use quiver::QuiverPlot;

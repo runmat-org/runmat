@@ -1,5 +1,6 @@
 use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
 use base64::Engine;
+use runmat_geometry_core::SurfaceMesh;
 use serde_json::Value;
 
 use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
@@ -55,6 +56,7 @@ pub(super) fn import_gltf(
         push_utf8_bom_stripped_diagnostic(&mut diagnostics, "gltf");
     }
     let mut all_positions = Vec::<[f64; 3]>::new();
+    let mut triangles = Vec::<[u32; 3]>::new();
     let mut triangle_count = 0u64;
 
     for mesh in meshes {
@@ -120,6 +122,23 @@ pub(super) fn import_gltf(
                         message: "Removed degenerate GLTF triangle during import".to_string(),
                     });
                 } else {
+                    triangles.push([
+                        u32::try_from(a).map_err(|_| {
+                            GeometryImportError::ParseFailed(
+                                "GLTF vertex index exceeds render mesh index range".to_string(),
+                            )
+                        })?,
+                        u32::try_from(b).map_err(|_| {
+                            GeometryImportError::ParseFailed(
+                                "GLTF vertex index exceeds render mesh index range".to_string(),
+                            )
+                        })?,
+                        u32::try_from(c).map_err(|_| {
+                            GeometryImportError::ParseFailed(
+                                "GLTF vertex index exceeds render mesh index range".to_string(),
+                            )
+                        })?,
+                    ]);
                     triangle_count += 1;
                 }
             }
@@ -138,6 +157,7 @@ pub(super) fn import_gltf(
         options.units,
         all_positions.len() as u64,
         triangle_count,
+        vec![SurfaceMesh::new("mesh_1", all_positions, triangles)],
         diagnostics.clone(),
     );
     Ok(build_result(asset, diagnostics))

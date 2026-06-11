@@ -1,7 +1,7 @@
 use crate::core::{BoundingBox, Vertex};
 use crate::plots::{
     AreaPlot, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar, Figure,
-    LegendEntry, LegendStyle, Line3Plot, LinePlot, MarkerStyle, PatchEdgeColorMode,
+    LegendEntry, LegendStyle, Line3Plot, LinePlot, MarkerStyle, MeshPlot, PatchEdgeColorMode,
     PatchFaceColorMode, PatchPlot, PlotElement, PlotType, QuiverPlot, ReferenceLine,
     ReferenceLineOrientation, Scatter3Plot, ScatterPlot, ShadingMode, StairsPlot, StemPlot,
     SurfacePlot, TextStyle,
@@ -237,6 +237,20 @@ pub enum ScenePlot {
         #[serde(default)]
         force_3d: bool,
     },
+    Mesh {
+        #[serde(deserialize_with = "deserialize_vec_xyz_f32_lossy")]
+        vertices: Vec<[f32; 3]>,
+        triangles: Vec<[u32; 3]>,
+        mesh_id: Option<String>,
+        face_color_rgba: [f32; 4],
+        edge_color_rgba: [f32; 4],
+        face_alpha: f32,
+        edge_alpha: f32,
+        edge_width: f32,
+        axes_index: u32,
+        label: Option<String>,
+        visible: bool,
+    },
     Line3 {
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
@@ -346,7 +360,7 @@ impl FigureSnapshot {
 }
 
 impl FigureScene {
-    pub const SCHEMA_VERSION: u32 = 2;
+    pub const SCHEMA_VERSION: u32 = 3;
 
     pub fn capture(figure: &Figure) -> Self {
         let snapshot = FigureSnapshot::capture(figure);
@@ -409,7 +423,7 @@ impl FigureScene {
                 FigureScene::SCHEMA_VERSION
             ));
         }
-        if self.schema_version < FigureScene::SCHEMA_VERSION
+        if self.schema_version < 2
             && self
                 .plots
                 .iter()
@@ -417,7 +431,18 @@ impl FigureScene {
         {
             return Err(format!(
                 "patch plots require figure scene schema version {}",
-                FigureScene::SCHEMA_VERSION
+                2
+            ));
+        }
+        if self.schema_version < 3
+            && self
+                .plots
+                .iter()
+                .any(|plot| matches!(plot, ScenePlot::Mesh { .. }))
+        {
+            return Err(format!(
+                "mesh plots require figure scene schema version {}",
+                3
             ));
         }
         Ok(())
@@ -957,6 +982,23 @@ impl ScenePlot {
                 visible: patch.is_visible(),
                 force_3d: patch.force_3d(),
             },
+            PlotElement::Mesh(mesh) => Self::Mesh {
+                vertices: mesh
+                    .vertices()
+                    .iter()
+                    .map(|point| vec3_to_xyz(*point))
+                    .collect(),
+                triangles: mesh.triangles().to_vec(),
+                mesh_id: mesh.mesh_id().map(str::to_string),
+                face_color_rgba: vec4_to_rgba(mesh.face_color()),
+                edge_color_rgba: vec4_to_rgba(mesh.edge_color()),
+                face_alpha: mesh.face_alpha(),
+                edge_alpha: mesh.edge_alpha(),
+                edge_width: mesh.edge_width(),
+                axes_index,
+                label: mesh.label().map(str::to_string),
+                visible: mesh.is_visible(),
+            },
             PlotElement::Line3(line) => Self::Line3 {
                 x: line.x_data.clone(),
                 y: line.y_data.clone(),
@@ -1332,6 +1374,31 @@ impl ScenePlot {
                 patch.set_force_3d(force_3d);
                 figure.add_patch_plot_on_axes(patch, axes_index as usize);
             }
+            ScenePlot::Mesh {
+                vertices,
+                triangles,
+                mesh_id,
+                face_color_rgba,
+                edge_color_rgba,
+                face_alpha,
+                edge_alpha,
+                edge_width,
+                axes_index,
+                label,
+                visible,
+            } => {
+                let vertices: Vec<Vec3> = vertices.into_iter().map(xyz_to_vec3).collect();
+                let mut mesh = MeshPlot::new(vertices, triangles)?;
+                mesh.set_mesh_id(mesh_id);
+                mesh.set_face_color(rgba_to_vec4(face_color_rgba));
+                mesh.set_edge_color(rgba_to_vec4(edge_color_rgba));
+                mesh.set_face_alpha(face_alpha);
+                mesh.set_edge_alpha(edge_alpha);
+                mesh.set_edge_width(edge_width);
+                mesh.set_label(label);
+                mesh.set_visible(visible);
+                figure.add_mesh_plot_on_axes(mesh, axes_index as usize);
+            }
             ScenePlot::Line3 {
                 x,
                 y,
@@ -1611,6 +1678,7 @@ pub enum PlotKind {
     Pie,
     Image,
     Surface,
+    Mesh,
     Patch,
     Scatter3,
     Contour,
@@ -1632,6 +1700,7 @@ impl From<PlotType> for PlotKind {
             PlotType::Quiver => Self::Quiver,
             PlotType::Pie => Self::Pie,
             PlotType::Surface => Self::Surface,
+            PlotType::Mesh => Self::Mesh,
             PlotType::Patch => Self::Patch,
             PlotType::Scatter3 => Self::Scatter3,
             PlotType::Contour => Self::Contour,
@@ -1903,15 +1972,69 @@ mod tests {
 
         let mut scene = FigureScene::capture(&figure);
         assert!(matches!(scene.plots.first(), Some(ScenePlot::Patch { .. })));
-        scene.schema_version = FigureScene::SCHEMA_VERSION - 1;
+        scene.schema_version = 1;
 
         let err = scene
             .into_figure()
             .expect_err("older patch schema must fail");
-        assert!(err.contains(&format!(
-            "patch plots require figure scene schema version {}",
-            FigureScene::SCHEMA_VERSION
-        )));
+        assert!(err.contains("patch plots require figure scene schema version 2"));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_mesh_plot() {
+        let mut figure = Figure::new();
+        let mut mesh = MeshPlot::new(
+            vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            vec![[0, 1, 2]],
+        )
+        .unwrap();
+        mesh.set_mesh_id(Some("mesh_1".to_string()));
+        mesh.set_label(Some("mesh tri".to_string()));
+        mesh.set_face_alpha(0.7);
+        mesh.set_edge_width(0.25);
+        figure.add_mesh_plot(mesh);
+
+        let scene = FigureScene::capture(&figure);
+        assert_eq!(scene.schema_version, FigureScene::SCHEMA_VERSION);
+        assert!(matches!(scene.plots.first(), Some(ScenePlot::Mesh { .. })));
+        let rebuilt = scene.into_figure().expect("mesh scene restore");
+        let Some(PlotElement::Mesh(mesh)) = rebuilt.plots().next() else {
+            panic!("expected mesh plot");
+        };
+        assert_eq!(mesh.mesh_id(), Some("mesh_1"));
+        assert_eq!(mesh.triangles(), &[[0, 1, 2]]);
+        assert_eq!(mesh.label(), Some("mesh tri"));
+        assert!((mesh.face_alpha() - 0.7).abs() < f32::EPSILON);
+        assert!((mesh.edge_width() - 0.25).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn figure_scene_rejects_mesh_in_older_schema() {
+        let mut figure = Figure::new();
+        figure.add_mesh_plot(
+            MeshPlot::new(
+                vec![
+                    Vec3::new(0.0, 0.0, 0.0),
+                    Vec3::new(1.0, 0.0, 0.0),
+                    Vec3::new(0.0, 1.0, 0.0),
+                ],
+                vec![[0, 1, 2]],
+            )
+            .unwrap(),
+        );
+
+        let mut scene = FigureScene::capture(&figure);
+        assert!(matches!(scene.plots.first(), Some(ScenePlot::Mesh { .. })));
+        scene.schema_version = 2;
+
+        let err = scene
+            .into_figure()
+            .expect_err("older mesh schema must fail");
+        assert!(err.contains("mesh plots require figure scene schema version 3"));
     }
 
     #[test]

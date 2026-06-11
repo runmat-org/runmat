@@ -9,7 +9,7 @@ use runmat_core::{
 };
 use runmat_runtime::builtins::plotting::{
     close_figure as runtime_close_figure, current_figure_handle as runtime_current_figure_handle,
-    figure_handles as runtime_figure_handles,
+    figure_handles as runtime_figure_handles, import_figure as runtime_import_figure,
     invalidate_surface_revisions as runtime_invalidate_surface_revisions,
     reset_hold_state_for_run as runtime_reset_hold_state_for_run,
     reset_plot_state as runtime_reset_plot_state, FigureHandle,
@@ -90,6 +90,337 @@ impl RunMatWasm {
     }
 }
 
+async fn inspect_geometry_path(
+    path: String,
+    budget: Option<GeometryPreviewBudgetPayload>,
+) -> Result<GeometryInspectPayload, String> {
+    let _preview_timeout_ms = budget.as_ref().and_then(|item| item.timeout_ms);
+    let metadata = runmat_filesystem::metadata_async(std::path::PathBuf::from(&path))
+        .await
+        .map_err(|err| format!("failed to inspect geometry metadata {path}: {err}"))?;
+    let byte_count = metadata.len();
+    if let Some(max_bytes) = budget.as_ref().and_then(|item| item.max_bytes) {
+        if byte_count > max_bytes {
+            return Ok(GeometryInspectPayload {
+                path: path.clone(),
+                format: geometry_format_from_path(&path),
+                byte_count,
+                supported: is_supported_geometry_path(&path),
+                stats: None,
+                regions: Vec::new(),
+                diagnostics: Vec::new(),
+                degraded_reason: Some(format!(
+                    "Geometry file is {byte_count} bytes, above the preview budget of {max_bytes} bytes."
+                )),
+            });
+        }
+    }
+
+    let bytes = runmat_filesystem::read_async(std::path::PathBuf::from(&path))
+        .await
+        .map_err(|err| format!("failed to read geometry file {path}: {err}"))?;
+    let inspect = runmat_runtime::geometry::geometry_inspect_op(
+        &path,
+        &bytes,
+        runmat_runtime::operations::OperationContext::new(None, None),
+    )
+    .map_err(|err| err.message)?;
+    let mut payload = GeometryInspectPayload {
+        path: path.clone(),
+        format: inspect.data.format,
+        byte_count: inspect.data.byte_count as u64,
+        supported: false,
+        stats: None,
+        regions: Vec::new(),
+        diagnostics: Vec::new(),
+        degraded_reason: None,
+    };
+    payload.supported = payload.format != "unknown";
+
+    if !payload.supported {
+        payload.degraded_reason = Some("Unsupported geometry format.".to_string());
+        return Ok(payload);
+    }
+
+    let max_triangles = budget
+        .as_ref()
+        .and_then(|item| item.max_triangles)
+        .or(Some(16_000_000));
+    let asset = match runmat_runtime::geometry::geometry_load_with_options_op(
+        &path,
+        &bytes,
+        runmat_geometry_io::GeometryImportOptions {
+            max_triangles,
+            units: runmat_geometry_core::UnitSystem::Meter,
+        },
+        runmat_runtime::operations::OperationContext::new(None, None),
+    ) {
+        Ok(envelope) => envelope.data,
+        Err(err) => {
+            payload.degraded_reason = Some(err.message);
+            return Ok(payload);
+        }
+    };
+    let stats = runmat_runtime::geometry::geometry_compute_stats_op(
+        &asset,
+        runmat_runtime::operations::OperationContext::new(None, None),
+    )
+    .map_err(|err| err.message)?
+    .data;
+    if let Some(max_vertices) = budget.as_ref().and_then(|item| item.max_vertices) {
+        if stats.total_vertices > max_vertices {
+            payload.degraded_reason = Some(format!(
+                "Geometry has {} vertices, above the preview budget of {max_vertices} vertices.",
+                stats.total_vertices
+            ));
+        }
+    }
+    payload.stats = Some(GeometryStatsPayload {
+        mesh_count: stats.mesh_count,
+        total_vertices: stats.total_vertices,
+        total_elements: stats.total_elements,
+        region_count: stats.region_count,
+    });
+    payload.regions = asset
+        .regions
+        .iter()
+        .filter_map(|region| serde_json::to_value(region).ok())
+        .collect();
+    payload.diagnostics = asset
+        .diagnostics
+        .iter()
+        .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
+        .collect();
+    Ok(payload)
+}
+
+async fn preview_geometry_path(
+    path: String,
+    budget: Option<GeometryPreviewBudgetPayload>,
+) -> Result<GeometryPreviewPayload, String> {
+    let inspect = inspect_geometry_path(path, budget.clone()).await?;
+    if inspect.degraded_reason.is_some() || inspect.stats.is_none() {
+        return Ok(GeometryPreviewPayload {
+            inspect,
+            scene_kind: "unavailable".to_string(),
+            figure_handle: None,
+            truncated: false,
+            preview_message: Some("Geometry preview is unavailable for this file.".to_string()),
+        });
+    }
+    let asset = load_geometry_asset_for_preview(&inspect.path, budget).await?;
+    let figure = runmat_runtime::geometry::geometry_preview_figure(
+        &asset,
+        format!("Geometry Preview: {}", filename_for_display(&inspect.path)),
+        runmat_runtime::geometry::GeometryPreviewFigureOptions::default(),
+    )?;
+    let figure_handle = runtime_import_figure(figure).as_u32();
+    Ok(GeometryPreviewPayload {
+        inspect,
+        scene_kind: "mesh".to_string(),
+        figure_handle: Some(figure_handle),
+        truncated: false,
+        preview_message: None,
+    })
+}
+
+async fn load_geometry_asset_for_preview(
+    path: &str,
+    budget: Option<GeometryPreviewBudgetPayload>,
+) -> Result<runmat_geometry_core::GeometryAsset, String> {
+    let bytes = runmat_filesystem::read_async(std::path::PathBuf::from(path))
+        .await
+        .map_err(|err| format!("failed to read geometry file {path}: {err}"))?;
+    let max_triangles = budget
+        .as_ref()
+        .and_then(|item| item.max_triangles)
+        .or(Some(16_000_000));
+    runmat_runtime::geometry::geometry_load_with_options_op(
+        path,
+        &bytes,
+        runmat_geometry_io::GeometryImportOptions {
+            max_triangles,
+            units: runmat_geometry_core::UnitSystem::Meter,
+        },
+        runmat_runtime::operations::OperationContext::new(None, None),
+    )
+    .map(|envelope| envelope.data)
+    .map_err(|err| err.message)
+}
+
+async fn check_fea_path(path: String) -> Result<FeaCheckPayload, String> {
+    let document = runmat_runtime::analysis::load_fea_document_from_path_async(
+        &std::path::PathBuf::from(&path),
+    )
+    .await?;
+    match document {
+        runmat_runtime::analysis::FeaResolvedDocument::Study(study) => {
+            let validation = runmat_runtime::analysis::analysis_validate_study_op(
+                &study,
+                runmat_runtime::operations::OperationContext::new(None, None),
+            )
+            .map_err(|err| err.message)?
+            .data;
+            let plan = if validation.valid {
+                Some(
+                    runmat_runtime::analysis::analysis_plan_study_op(
+                        &study,
+                        runmat_runtime::operations::OperationContext::new(None, None),
+                    )
+                    .map_err(|err| err.message)?
+                    .data,
+                )
+            } else {
+                None
+            };
+            let mut evidence_paths = vec![validation.evidence_artifact_path.clone()];
+            if let Some(plan) = plan.as_ref() {
+                evidence_paths.push(plan.evidence_artifact_path.clone());
+            }
+            Ok(FeaCheckPayload {
+                path,
+                document_kind: "study".to_string(),
+                valid: validation.valid,
+                validation: serde_json::to_value(validation).map_err(|err| err.to_string())?,
+                plan: plan
+                    .map(serde_json::to_value)
+                    .transpose()
+                    .map_err(|err| err.to_string())?,
+                diagnostics: Vec::new(),
+                evidence_artifact_paths: evidence_paths,
+            })
+        }
+        runmat_runtime::analysis::FeaResolvedDocument::Sweep(sweep) => {
+            let validation = runmat_runtime::analysis::analysis_validate_study_sweep_op(
+                &sweep,
+                runmat_runtime::operations::OperationContext::new(None, None),
+            )
+            .map_err(|err| err.message)?
+            .data;
+            let plan = if validation.valid {
+                Some(
+                    runmat_runtime::analysis::analysis_plan_study_sweep_op(
+                        &sweep,
+                        runmat_runtime::operations::OperationContext::new(None, None),
+                    )
+                    .map_err(|err| err.message)?
+                    .data,
+                )
+            } else {
+                None
+            };
+            let mut evidence_paths = vec![validation.evidence_artifact_path.clone()];
+            if let Some(plan) = plan.as_ref() {
+                evidence_paths.push(plan.evidence_artifact_path.clone());
+            }
+            Ok(FeaCheckPayload {
+                path,
+                document_kind: "sweep".to_string(),
+                valid: validation.valid,
+                validation: serde_json::to_value(validation).map_err(|err| err.to_string())?,
+                plan: plan
+                    .map(serde_json::to_value)
+                    .transpose()
+                    .map_err(|err| err.to_string())?,
+                diagnostics: Vec::new(),
+                evidence_artifact_paths: evidence_paths,
+            })
+        }
+    }
+}
+
+async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
+    let document = runmat_runtime::analysis::load_fea_document_from_path_async(
+        &std::path::PathBuf::from(&path),
+    )
+    .await?;
+    match document {
+        runmat_runtime::analysis::FeaResolvedDocument::Study(study) => {
+            let run = runmat_runtime::analysis::analysis_run_study_op(
+                &study,
+                runmat_runtime::operations::OperationContext::new(None, None),
+            )
+            .map_err(|err| err.message)?
+            .data;
+            let results = runmat_runtime::analysis::analysis_results_by_run_id_op(
+                &run.run_id,
+                runmat_runtime::analysis::AnalysisResultsQuery::default(),
+                runmat_runtime::operations::OperationContext::new(None, None),
+            )
+            .ok()
+            .map(|envelope| envelope.data);
+            Ok(FeaRunPayload {
+                path,
+                document_kind: "study".to_string(),
+                run: serde_json::to_value(run).map_err(|err| err.to_string())?,
+                results: results
+                    .map(serde_json::to_value)
+                    .transpose()
+                    .map_err(|err| err.to_string())?,
+                figure_handles: Vec::new(),
+                artifact_manifest: None,
+                diagnostics: Vec::new(),
+            })
+        }
+        runmat_runtime::analysis::FeaResolvedDocument::Sweep(sweep) => {
+            let run = runmat_runtime::analysis::analysis_run_study_sweep_op(
+                &sweep,
+                runmat_runtime::operations::OperationContext::new(None, None),
+            )
+            .map_err(|err| err.message)?
+            .data;
+            Ok(FeaRunPayload {
+                path,
+                document_kind: "sweep".to_string(),
+                run: serde_json::to_value(run).map_err(|err| err.to_string())?,
+                results: None,
+                figure_handles: Vec::new(),
+                artifact_manifest: None,
+                diagnostics: Vec::new(),
+            })
+        }
+    }
+}
+
+fn load_fea_results(run_id: String) -> Result<FeaResultsPayload, String> {
+    let results = runmat_runtime::analysis::analysis_results_by_run_id_op(
+        &run_id,
+        runmat_runtime::analysis::AnalysisResultsQuery::default(),
+        runmat_runtime::operations::OperationContext::new(None, None),
+    )
+    .map_err(|err| err.message)?
+    .data;
+    Ok(FeaResultsPayload {
+        run_id,
+        results: serde_json::to_value(results).map_err(|err| err.to_string())?,
+    })
+}
+
+fn filename_for_display(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+fn geometry_format_from_path(path: &str) -> String {
+    let ext = std::path::PathBuf::from(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "stl" => "stl",
+        "step" | "stp" => "step",
+        "obj" => "obj",
+        "ply" => "ply",
+        "gltf" | "glb" => "gltf",
+        _ => "unknown",
+    }
+    .to_string()
+}
+
+fn is_supported_geometry_path(path: &str) -> bool {
+    geometry_format_from_path(path) != "unknown"
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum ExecuteRequestSourcePayload {
@@ -110,6 +441,94 @@ struct ExecuteRequestPayload {
     compatibility: Option<String>,
     host_policy: Option<ExecuteHostPolicyPayload>,
     requested_outputs: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct GeometryPreviewBudgetPayload {
+    max_bytes: Option<u64>,
+    max_triangles: Option<u64>,
+    max_vertices: Option<u64>,
+    timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GeometryStatsPayload {
+    mesh_count: usize,
+    total_vertices: u64,
+    total_elements: u64,
+    region_count: usize,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GeometryInspectPayload {
+    path: String,
+    format: String,
+    byte_count: u64,
+    supported: bool,
+    stats: Option<GeometryStatsPayload>,
+    regions: Vec<JsonValue>,
+    diagnostics: Vec<JsonValue>,
+    degraded_reason: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GeometryPreviewPayload {
+    #[serde(flatten)]
+    inspect: GeometryInspectPayload,
+    scene_kind: String,
+    figure_handle: Option<u32>,
+    truncated: bool,
+    preview_message: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FeaCapabilitiesPayload {
+    supported_document_extensions: Vec<&'static str>,
+    supported_geometry_extensions: Vec<&'static str>,
+    supports_check: bool,
+    supports_run: bool,
+    supports_results: bool,
+    supports_live_progress: bool,
+    visualization_backend: &'static str,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FeaCheckPayload {
+    path: String,
+    document_kind: String,
+    valid: bool,
+    validation: JsonValue,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plan: Option<JsonValue>,
+    diagnostics: Vec<JsonValue>,
+    evidence_artifact_paths: Vec<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FeaRunPayload {
+    path: String,
+    document_kind: String,
+    run: JsonValue,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    results: Option<JsonValue>,
+    figure_handles: Vec<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    artifact_manifest: Option<JsonValue>,
+    diagnostics: Vec<JsonValue>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FeaResultsPayload {
+    run_id: String,
+    results: JsonValue,
 }
 
 #[wasm_bindgen]
@@ -305,6 +724,119 @@ impl RunMatWasm {
         }
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize execution result: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = inspectGeometry)]
+    pub async fn inspect_geometry_js(
+        &self,
+        path: String,
+        budget_value: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let budget = if budget_value.is_null() || budget_value.is_undefined() {
+            None
+        } else {
+            Some(
+                serde_wasm_bindgen::from_value::<GeometryPreviewBudgetPayload>(budget_value)
+                    .map_err(|err| {
+                        js_error(&format!("inspectGeometry budget parse failed: {err}"))
+                    })?,
+            )
+        };
+        let payload = inspect_geometry_path(path, budget)
+            .await
+            .map_err(|err| js_error(&err))?;
+        serde_wasm_bindgen::to_value(&payload)
+            .map_err(|err| js_error(&format!("Failed to serialize geometry inspection: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = previewGeometry)]
+    pub async fn preview_geometry_js(
+        &self,
+        path: String,
+        budget_value: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let budget = if budget_value.is_null() || budget_value.is_undefined() {
+            None
+        } else {
+            Some(
+                serde_wasm_bindgen::from_value::<GeometryPreviewBudgetPayload>(budget_value)
+                    .map_err(|err| {
+                        js_error(&format!("previewGeometry budget parse failed: {err}"))
+                    })?,
+            )
+        };
+        let payload = preview_geometry_path(path, budget)
+            .await
+            .map_err(|err| js_error(&err))?;
+        serde_wasm_bindgen::to_value(&payload)
+            .map_err(|err| js_error(&format!("Failed to serialize geometry preview: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = feaCapabilities)]
+    pub fn fea_capabilities_js(&self) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let payload = FeaCapabilitiesPayload {
+            supported_document_extensions: vec![".fea"],
+            supported_geometry_extensions: vec![
+                ".stl", ".step", ".stp", ".obj", ".ply", ".gltf", ".glb",
+            ],
+            supports_check: true,
+            supports_run: true,
+            supports_results: true,
+            supports_live_progress: false,
+            visualization_backend: "runmat-plot",
+        };
+        serde_wasm_bindgen::to_value(&payload)
+            .map_err(|err| js_error(&format!("Failed to serialize FEA capabilities: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = checkFeaStudy)]
+    pub async fn check_fea_study_js(&self, path: String) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let payload = check_fea_path(path).await.map_err(|err| js_error(&err))?;
+        serde_wasm_bindgen::to_value(&payload)
+            .map_err(|err| js_error(&format!("Failed to serialize FEA check result: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = runFeaStudy)]
+    pub async fn run_fea_study_js(
+        &self,
+        path: String,
+        artifact_root: Option<String>,
+    ) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        if let Some(root) = artifact_root
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            let root = std::path::PathBuf::from(root);
+            let _ = runmat_runtime::analysis::configure_fea_runtime(
+                runmat_runtime::analysis::FeaRuntimeConfig {
+                    artifact_root: Some(root.clone()),
+                    study_artifact_root: None,
+                    thermo_field_artifact_root: None,
+                },
+            );
+            let _ = runmat_runtime::geometry::configure_prep_artifacts(
+                runmat_runtime::geometry::GeometryPrepArtifactConfig {
+                    artifact_root: Some(root),
+                    ..Default::default()
+                },
+            );
+        }
+        let payload = run_fea_path(path).await.map_err(|err| js_error(&err))?;
+        serde_wasm_bindgen::to_value(&payload)
+            .map_err(|err| js_error(&format!("Failed to serialize FEA run result: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = feaResults)]
+    pub fn fea_results_js(&self, run_id: String) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let payload = load_fea_results(run_id).map_err(|err| js_error(&err))?;
+        serde_wasm_bindgen::to_value(&payload)
+            .map_err(|err| js_error(&format!("Failed to serialize FEA results: {err}")))
     }
 
     #[wasm_bindgen(js_name = resetSession)]

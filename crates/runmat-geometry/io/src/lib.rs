@@ -44,6 +44,13 @@ mod tests {
         asset.meshes.first().expect("mesh descriptor must exist")
     }
 
+    fn single_surface_mesh(asset: &GeometryAsset) -> &runmat_geometry_core::SurfaceMesh {
+        asset
+            .surface_meshes
+            .first()
+            .expect("surface mesh payload must exist")
+    }
+
     fn has_diag(result: &ImportResult, code: &str) -> bool {
         result
             .report
@@ -270,6 +277,9 @@ mod tests {
         assert_eq!(mesh.kind, MeshKind::Surface);
         assert_eq!(mesh.element_count, 1);
         assert_eq!(mesh.vertex_count, 3);
+        let surface_mesh = single_surface_mesh(&result.asset);
+        assert_eq!(surface_mesh.vertices.len(), 3);
+        assert_eq!(surface_mesh.triangles, vec![[0, 1, 2]]);
         assert!(has_diag(&result, "GEOMETRY_IMPORT_VERTEX_COUNT"));
         assert!(has_diag(&result, "GEOMETRY_IMPORT_TRIANGLE_COUNT"));
     }
@@ -282,6 +292,10 @@ mod tests {
         assert_eq!(mesh.kind, MeshKind::Surface);
         assert_eq!(mesh.element_count, 1);
         assert_eq!(mesh.vertex_count, 3);
+        assert_eq!(
+            single_surface_mesh(&result.asset).triangles,
+            vec![[0, 1, 2]]
+        );
     }
 
     #[test]
@@ -294,6 +308,9 @@ mod tests {
         let mesh = single_mesh(&result.asset);
         assert_eq!(mesh.element_count, 0);
         assert_eq!(mesh.vertex_count, 0);
+        let surface_mesh = single_surface_mesh(&result.asset);
+        assert!(surface_mesh.vertices.is_empty());
+        assert!(surface_mesh.triangles.is_empty());
     }
 
     #[test]
@@ -380,6 +397,12 @@ mod tests {
         assert_eq!(mesh.kind, MeshKind::Surface);
         assert_eq!(mesh.vertex_count, 4);
         assert_eq!(mesh.element_count, 3);
+        let surface_mesh = single_surface_mesh(&result.asset);
+        assert_eq!(surface_mesh.vertices.len(), 4);
+        assert_eq!(
+            surface_mesh.triangles,
+            vec![[0, 1, 2], [0, 2, 3], [0, 1, 2]]
+        );
         assert!(has_diag(&result, "GEOMETRY_IMPORT_VERTEX_COUNT"));
         assert!(has_diag(&result, "GEOMETRY_IMPORT_TRIANGLE_COUNT"));
     }
@@ -425,6 +448,12 @@ mod tests {
         assert_eq!(mesh.kind, MeshKind::Surface);
         assert_eq!(mesh.vertex_count, 4);
         assert_eq!(mesh.element_count, 3);
+        let surface_mesh = single_surface_mesh(&result.asset);
+        assert_eq!(surface_mesh.vertices.len(), 4);
+        assert_eq!(
+            surface_mesh.triangles,
+            vec![[0, 1, 2], [0, 2, 3], [0, 2, 3]]
+        );
         assert!(has_diag(&result, "GEOMETRY_IMPORT_VERTEX_COUNT"));
         assert!(has_diag(&result, "GEOMETRY_IMPORT_TRIANGLE_COUNT"));
     }
@@ -507,6 +536,9 @@ mod tests {
         assert_eq!(mesh.kind, MeshKind::Surface);
         assert_eq!(mesh.vertex_count, 4);
         assert_eq!(mesh.element_count, 2);
+        let surface_mesh = single_surface_mesh(&result.asset);
+        assert_eq!(surface_mesh.vertices.len(), 4);
+        assert_eq!(surface_mesh.triangles, vec![[0, 1, 2], [0, 2, 3]]);
         assert!(has_diag(&result, "GEOMETRY_IMPORT_VERTEX_COUNT"));
         assert!(has_diag(&result, "GEOMETRY_IMPORT_TRIANGLE_COUNT"));
     }
