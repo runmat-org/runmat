@@ -5,7 +5,7 @@ use crate::interpreter::runner::interpret_with_vars;
 use crate::interpreter::stack::pop_args;
 use crate::runtime::workspace::{
     replace_workspace_target_vars_and_state, workspace_assign_target, workspace_target_snapshot,
-    WorkspaceSnapshot, WorkspaceTarget,
+    WorkspaceTarget, WorkspaceValueSnapshot,
 };
 use runmat_builtins::Value;
 use runmat_hir::{QualifiedName, SymbolName};
@@ -38,6 +38,7 @@ enum VmDynamicWorkspaceBuiltin {
     Eval,
     Evalin,
     Assignin,
+    Run,
 }
 
 impl VmDynamicWorkspaceBuiltin {
@@ -46,6 +47,7 @@ impl VmDynamicWorkspaceBuiltin {
             runmat_hir::EVAL_BUILTIN_NAME => Some(Self::Eval),
             runmat_hir::EVALIN_BUILTIN_NAME => Some(Self::Evalin),
             runmat_hir::ASSIGNIN_BUILTIN_NAME => Some(Self::Assignin),
+            runmat_hir::RUN_BUILTIN_NAME => Some(Self::Run),
             _ => None,
         }
     }
@@ -55,6 +57,7 @@ impl VmDynamicWorkspaceBuiltin {
             Self::Eval => runmat_hir::EVAL_BUILTIN_NAME,
             Self::Evalin => runmat_hir::EVALIN_BUILTIN_NAME,
             Self::Assignin => runmat_hir::ASSIGNIN_BUILTIN_NAME,
+            Self::Run => runmat_hir::RUN_BUILTIN_NAME,
         }
     }
 }
@@ -361,11 +364,16 @@ pub async fn vm_dynamic_workspace_builtin(
             validate_intrinsic_arg_count(builtin.name(), args.len(), 1)?;
             let source = workspace_text_arg(builtin.name(), &args[0])?;
             eval_workspace_source(
-                WorkspaceTarget::Current,
-                source,
-                requested_outputs,
+                WorkspaceEvalRequest {
+                    builtin: builtin.name(),
+                    target: WorkspaceTarget::Current,
+                    source,
+                    source_label: "<eval>".to_string(),
+                    requested_outputs,
+                    source_id,
+                    source_context: None,
+                },
                 function_registry,
-                source_id,
             )
             .await
         }
@@ -374,11 +382,16 @@ pub async fn vm_dynamic_workspace_builtin(
             let target = workspace_target_arg(builtin.name(), &args[0])?;
             let source = workspace_text_arg(builtin.name(), &args[1])?;
             eval_workspace_source(
-                target,
-                source,
-                requested_outputs,
+                WorkspaceEvalRequest {
+                    builtin: builtin.name(),
+                    target,
+                    source,
+                    source_label: "<eval>".to_string(),
+                    requested_outputs,
+                    source_id,
+                    source_context: None,
+                },
                 function_registry,
-                source_id,
             )
             .await
         }
@@ -402,6 +415,33 @@ pub async fn vm_dynamic_workspace_builtin(
                 )
             })?;
             Ok(Value::Num(0.0))
+        }
+        VmDynamicWorkspaceBuiltin::Run => {
+            validate_intrinsic_arg_count(builtin.name(), args.len(), 1)?;
+            if requested_outputs > 0 {
+                return Err(runmat_runtime::builtins::io::repl_fs::run::too_many_outputs_error());
+            }
+            let source =
+                runmat_runtime::builtins::io::repl_fs::run::resolve_run_source(&args[0]).await?;
+            let dynamic_source_id = next_dynamic_source_id();
+            let source_context = DynamicSourceContext {
+                source_id: dynamic_source_id,
+                name: source.display_name.clone(),
+                text: source.text.clone(),
+            };
+            eval_workspace_source(
+                WorkspaceEvalRequest {
+                    builtin: builtin.name(),
+                    target: WorkspaceTarget::Current,
+                    source: source.text,
+                    source_label: source.display_name,
+                    requested_outputs: 0,
+                    source_id: Some(source_context.source_id),
+                    source_context: Some(source_context),
+                },
+                function_registry,
+            )
+            .await
         }
     }
 }
@@ -439,22 +479,40 @@ fn is_valid_workspace_identifier(name: &str) -> bool {
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
-async fn eval_workspace_source(
+struct WorkspaceEvalRequest {
+    builtin: &'static str,
     target: WorkspaceTarget,
     source: String,
+    source_label: String,
     requested_outputs: usize,
-    function_registry: &FunctionRegistry,
     source_id: Option<runmat_hir::SourceId>,
+    source_context: Option<DynamicSourceContext>,
+}
+
+async fn eval_workspace_source(
+    request: WorkspaceEvalRequest,
+    function_registry: &FunctionRegistry,
 ) -> Result<Value, RuntimeError> {
+    let WorkspaceEvalRequest {
+        builtin,
+        target,
+        source,
+        source_label,
+        requested_outputs,
+        source_id,
+        source_context,
+    } = request;
     if !current_dynamic_eval_options().dynamic_eval_enabled {
         return Err(mex(
             "DynamicEvalDisabled",
-            "dynamic eval is disabled by host execution policy",
+            &format!("{builtin}: dynamic eval is disabled by host execution policy"),
         ));
     }
     let frame = workspace_target_snapshot(target)
-        .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("eval: {err}")))?;
+        .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
+    let _source_catalog_guard = source_context.as_ref().map(install_dynamic_source_context);
     let Some((bytecode, result_slot)) = compile_dynamic_workspace_eval(
+        builtin,
         &source,
         &frame.names,
         function_registry,
@@ -465,14 +523,50 @@ async fn eval_workspace_source(
         return Ok(Value::OutputList(Vec::new()));
     };
     let target_vars = unsafe { (*frame.vars_ptr).clone() };
-    let (outcome, updated_workspace) = interpret_dynamic_workspace_eval(
+    let (outcome, updated_workspace, effects) = interpret_dynamic_workspace_eval(
         bytecode,
         target_vars,
         frame.names.clone(),
         frame.assigned,
+        builtin,
+        source_label,
     )
     .await?;
-    let crate::interpreter::api::InterpreterOutcome::Completed(vars) = outcome?;
+    effects.replay();
+    let vars = match outcome {
+        Ok(crate::interpreter::api::InterpreterOutcome::Completed(vars)) => {
+            if let Some(snapshot) = updated_workspace {
+                let result_vars = snapshot.vars.clone();
+                replace_workspace_target_vars_and_state(
+                    target,
+                    snapshot.vars,
+                    snapshot.names,
+                    snapshot.assigned,
+                )
+                .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
+                result_vars
+            } else {
+                vars
+            }
+        }
+        Err(err) => {
+            if let Some(snapshot) = updated_workspace {
+                replace_workspace_target_vars_and_state(
+                    target,
+                    snapshot.vars,
+                    snapshot.names,
+                    snapshot.assigned,
+                )
+                .map_err(|replace_err| {
+                    mex(
+                        "DynamicWorkspaceUnavailable",
+                        &format!("{builtin}: {replace_err}"),
+                    )
+                })?;
+            }
+            return Err(err);
+        }
+    };
     let result = if requested_outputs == 0 {
         Value::OutputList(Vec::new())
     } else if let Some(slot) = result_slot {
@@ -480,11 +574,60 @@ async fn eval_workspace_source(
     } else {
         Value::Num(0.0)
     };
-    if let Some((names, assigned)) = updated_workspace {
-        replace_workspace_target_vars_and_state(target, vars, names, assigned)
-            .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("eval: {err}")))?;
-    }
     Ok(result)
+}
+
+#[derive(Clone)]
+struct DynamicSourceContext {
+    source_id: runmat_hir::SourceId,
+    name: String,
+    text: String,
+}
+
+fn install_dynamic_source_context(
+    context: &DynamicSourceContext,
+) -> runmat_runtime::source_context::SourceCatalogGuard {
+    let mut entries = runmat_runtime::source_context::source_catalog_entries();
+    entries.retain(|(source_id, _, _)| *source_id != context.source_id);
+    entries.push((
+        context.source_id,
+        context.name.clone(),
+        context.text.clone(),
+    ));
+    runmat_runtime::source_context::replace_source_catalog(entries)
+}
+
+fn next_dynamic_source_id() -> runmat_hir::SourceId {
+    runmat_runtime::source_context::source_catalog_entries()
+        .into_iter()
+        .map(|(source_id, _, _)| source_id.0)
+        .max()
+        .map(|id| runmat_hir::SourceId(id + 1))
+        .unwrap_or(runmat_hir::SourceId(0))
+}
+
+#[derive(Default)]
+struct DynamicThreadEffects {
+    console: Vec<runmat_runtime::console::ConsoleEntry>,
+    warnings: Vec<runmat_runtime::warning_store::RuntimeWarning>,
+    recent_figures: Vec<u32>,
+}
+
+impl DynamicThreadEffects {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn capture_current_thread() -> Self {
+        Self {
+            console: runmat_runtime::console::take_thread_buffer(),
+            warnings: runmat_runtime::warning_store::take_all(),
+            recent_figures: runmat_runtime::plotting_hooks::take_recent_figures(),
+        }
+    }
+
+    fn replay(self) {
+        runmat_runtime::console::append_thread_buffer(self.console);
+        runmat_runtime::warning_store::extend(self.warnings);
+        runmat_runtime::plotting_hooks::record_recent_figures(self.recent_figures);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -493,18 +636,21 @@ async fn interpret_dynamic_workspace_eval(
     mut target_vars: Vec<Value>,
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
+    _builtin: &'static str,
+    source_label: String,
 ) -> Result<
     (
         Result<InterpreterOutcome, RuntimeError>,
-        Option<WorkspaceSnapshot>,
+        Option<WorkspaceValueSnapshot>,
+        DynamicThreadEffects,
     ),
     RuntimeError,
 > {
     let _pending_workspace = crate::runtime::workspace::push_pending_workspace(names, assigned);
-    let outcome = interpret_with_vars(&bytecode, &mut target_vars, Some("<eval>")).await;
+    let outcome = interpret_with_vars(&bytecode, &mut target_vars, Some(&source_label)).await;
     let updated_workspace = crate::runtime::workspace::take_updated_workspace_state();
     let _ = crate::runtime::workspace::take_updated_workspace_assigned_report();
-    Ok((outcome, updated_workspace))
+    Ok((outcome, updated_workspace, DynamicThreadEffects::default()))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -513,10 +659,13 @@ async fn interpret_dynamic_workspace_eval(
     mut target_vars: Vec<Value>,
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
+    builtin: &'static str,
+    source_label: String,
 ) -> Result<
     (
         Result<InterpreterOutcome, RuntimeError>,
-        Option<WorkspaceSnapshot>,
+        Option<WorkspaceValueSnapshot>,
+        DynamicThreadEffects,
     ),
     RuntimeError,
 > {
@@ -533,27 +682,29 @@ async fn interpret_dynamic_workspace_eval(
             let outcome = futures::executor::block_on(interpret_with_vars(
                 &bytecode,
                 &mut target_vars,
-                Some("<eval>"),
+                Some(&source_label),
             ));
             let updated_workspace = crate::runtime::workspace::take_updated_workspace_state();
             let _ = crate::runtime::workspace::take_updated_workspace_assigned_report();
-            let _ = tx.send((outcome, updated_workspace));
+            let effects = DynamicThreadEffects::capture_current_thread();
+            let _ = tx.send((outcome, updated_workspace, effects));
         });
     spawn_result.map_err(|err| {
         mex(
             "DynamicWorkspaceEvalThreadSpawnFailed",
-            &format!("eval: failed to spawn dynamic eval thread: {err}"),
+            &format!("{builtin}: failed to spawn dynamic eval thread: {err}"),
         )
     })?;
     rx.await.map_err(|_| {
         mex(
             "DynamicWorkspaceEvalThreadPanic",
-            "eval: dynamic eval thread panicked",
+            &format!("{builtin}: dynamic eval thread panicked"),
         )
     })
 }
 
 fn compile_dynamic_workspace_eval(
+    builtin: &str,
     source: &str,
     workspace_bindings: &HashMap<String, usize>,
     function_registry: &FunctionRegistry,
@@ -565,7 +716,7 @@ fn compile_dynamic_workspace_eval(
         parse_with_options(source, ParserOptions::new(options.compat_mode)).map_err(|err| {
             mex(
                 "DynamicWorkspaceParse",
-                &format!("eval: parse error: {err}"),
+                &format!("{builtin}: parse error: {err}"),
             )
         })?;
     let lowering = runmat_hir::lower(
@@ -578,7 +729,7 @@ fn compile_dynamic_workspace_eval(
     .map_err(|err| {
         mex(
             "DynamicWorkspaceLower",
-            &format!("eval: lowering error: {err}"),
+            &format!("{builtin}: lowering error: {err}"),
         )
     })?;
     let Some(entrypoint) = lowering.assembly.entrypoints.first() else {
@@ -587,17 +738,17 @@ fn compile_dynamic_workspace_eval(
     let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly).map_err(|err| {
         mex(
             "DynamicWorkspaceLower",
-            &format!("eval: MIR lowering error: {err}"),
+            &format!("{builtin}: MIR lowering error: {err}"),
         )
     })?;
     let mut bytecode =
         crate::bytecode::compile(&lowering.assembly, &mir, entrypoint.id).map_err(|err| {
             mex(
                 "DynamicWorkspaceCompile",
-                &format!("eval: compile error: {err}"),
+                &format!("{builtin}: compile error: {err}"),
             )
         })?;
-    if bytecode.source_id.is_none() {
+    if source_id.is_some() {
         bytecode.source_id = source_id;
     }
     merge_eval_function_registry(&mut bytecode, function_registry);
@@ -631,6 +782,7 @@ fn remap_dynamic_workspace_slots(
 
     let original_var_count = bytecode.var_count;
     let original_var_names = bytecode.var_names.clone();
+    let original_initially_unassigned_slots = bytecode.initially_unassigned_slots.clone();
     let mut used_slots = workspace_bindings.values().copied().collect::<HashSet<_>>();
     let mut next_slot = used_slots
         .iter()
@@ -660,6 +812,10 @@ fn remap_dynamic_workspace_slots(
         }
     }
     bytecode.var_names = remapped_var_names;
+    bytecode.initially_unassigned_slots = original_initially_unassigned_slots
+        .into_iter()
+        .filter_map(|old_slot| slot_remap.get(&old_slot).copied())
+        .collect();
 
     let new_var_count = slot_remap
         .values()
@@ -804,6 +960,10 @@ fn remap_instr_slots(instr: &mut Instr, slot_remap: &HashMap<usize, usize>) {
             remap_slot(slot, slot_remap);
         }
         Instr::CallFunctionMultiUsingOutputSlot { out_count_slot, .. } => {
+            remap_slot(out_count_slot, slot_remap);
+        }
+        Instr::CallWorkspaceFirstMultiUsingOutputSlot { out_count_slot, .. }
+        | Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { out_count_slot, .. } => {
             remap_slot(out_count_slot, slot_remap);
         }
         Instr::CallSemanticNestedFunctionMultiUsingOutputSlot {

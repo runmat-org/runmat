@@ -79,6 +79,12 @@ pub fn take_thread_buffer() -> Vec<ConsoleEntry> {
     THREAD_BUFFER.with(|buf| buf.borrow_mut().drain(..).collect())
 }
 
+/// Append console entries captured on another execution thread without
+/// forwarding them again to live stream listeners.
+pub fn append_thread_buffer(entries: impl IntoIterator<Item = ConsoleEntry>) {
+    THREAD_BUFFER.with(|buf| buf.borrow_mut().extend(entries));
+}
+
 /// Install (or remove) a global forwarder for console output. Passing `None`
 /// removes the current listener.
 pub fn install_forwarder(forwarder: Option<Arc<StreamForwarder>>) {

@@ -27,7 +27,7 @@ pub use calls::{
     handle_create_semantic_closure, handle_load_method, handle_load_static_property,
     handle_method_or_member_index_expand_multi_call, handle_method_or_member_index_multi_call,
     handle_prepared_user_function_call, handle_register_class, handle_user_function_call,
-    BuiltinHandling, UserCallHandling,
+    handle_workspace_first_prepared_call, BuiltinHandling, UserCallHandling,
 };
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
 pub use exceptions::{redirect_exception_to_catch, ExceptionHandling};
@@ -35,6 +35,13 @@ pub use stack::{
     emit_stack_top, emit_var, load_bool, load_char_row, load_complex, load_const, load_local,
     load_string, load_var, store_local, store_var,
 };
+
+fn builtin_constant_value(name: &str) -> Option<Value> {
+    runmat_builtins::constants()
+        .into_iter()
+        .find(|constant| constant.name == name)
+        .map(|constant| constant.value.clone())
+}
 
 pub enum DispatchHandled {
     Generic(DispatchDecision),
@@ -869,6 +876,13 @@ pub async fn dispatch_instruction(
                 var_names.get(index),
             ) {
                 if slot_name == *var_name {
+                    if let Some(value) = builtin_constant_value(var_name) {
+                        debug::trace_load_var(*pc, *index, &value);
+                        stack.push(value);
+                        return Ok(Some(DispatchHandled::Generic(
+                            DispatchDecision::FallThrough,
+                        )));
+                    }
                     return Err(crate::interpreter::errors::mex(
                         "UndefinedVariable",
                         &format!("Undefined variable: {slot_name}"),
@@ -1715,6 +1729,95 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CallWorkspaceFirstMulti {
+            name,
+            identity,
+            fallback_policy,
+            arg_count,
+            out_count,
+        } => {
+            let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
+            match handle_workspace_first_prepared_call(
+                calls::WorkspaceFirstCallContext {
+                    stack,
+                    workspace_name: name,
+                    identity: identity.clone(),
+                    fallback_policy: *fallback_policy,
+                    out_count: *out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
+                    current_function_name,
+                    imports: imports.as_slice(),
+                    function_registry,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                args,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallWorkspaceFirstMultiUsingOutputSlot {
+            name,
+            identity,
+            fallback_policy,
+            arg_count,
+            out_count_slot,
+        } => {
+            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
+            match handle_workspace_first_prepared_call(
+                calls::WorkspaceFirstCallContext {
+                    stack,
+                    workspace_name: name,
+                    identity: identity.clone(),
+                    fallback_policy: *fallback_policy,
+                    out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
+                    current_function_name,
+                    imports: imports.as_slice(),
+                    function_registry,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                args,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::CallBuiltinExpandMultiOutput(name, specs, out_count) => {
             let args = build_builtin_expand_multi_args(stack, specs).await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
@@ -1782,6 +1885,95 @@ pub async fn dispatch_instruction(
                     call_arg_spans: call_arg_spans.clone(),
                     current_function_name,
                     imports: imports.as_slice(),
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                args,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallWorkspaceFirstExpandMultiOutput {
+            name,
+            identity,
+            fallback_policy,
+            specs,
+            out_count,
+        } => {
+            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            match handle_workspace_first_prepared_call(
+                calls::WorkspaceFirstCallContext {
+                    stack,
+                    workspace_name: name,
+                    identity: identity.clone(),
+                    fallback_policy: *fallback_policy,
+                    out_count: *out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
+                    current_function_name,
+                    imports: imports.as_slice(),
+                    function_registry,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                args,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot {
+            name,
+            identity,
+            fallback_policy,
+            specs,
+            out_count_slot,
+        } => {
+            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            match handle_workspace_first_prepared_call(
+                calls::WorkspaceFirstCallContext {
+                    stack,
+                    workspace_name: name,
+                    identity: identity.clone(),
+                    fallback_policy: *fallback_policy,
+                    out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
+                    current_function_name,
+                    imports: imports.as_slice(),
+                    function_registry,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,

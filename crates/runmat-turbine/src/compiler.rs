@@ -1036,6 +1036,10 @@ impl BytecodeCompiler {
                     | Instr::CallSemanticNestedFunctionMulti { .. }
                     | Instr::CallBuiltinMultiUsingOutputSlot(_, _, _)
                     | Instr::CallFunctionMultiUsingOutputSlot { .. }
+                    | Instr::CallWorkspaceFirstMulti { .. }
+                    | Instr::CallWorkspaceFirstMultiUsingOutputSlot { .. }
+                    | Instr::CallWorkspaceFirstExpandMultiOutput { .. }
+                    | Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { .. }
                     | Instr::CallSemanticFunctionMultiUsingOutputSlot(_, _, _)
                     | Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { .. }
                     | Instr::CallSemanticNestedFunctionExpandMultiOutput { .. }

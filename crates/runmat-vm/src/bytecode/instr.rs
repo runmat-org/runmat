@@ -291,6 +291,20 @@ pub enum Instr {
         arg_count: usize,
         out_count_slot: usize,
     },
+    CallWorkspaceFirstMulti {
+        name: String,
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        arg_count: usize,
+        out_count: usize,
+    },
+    CallWorkspaceFirstMultiUsingOutputSlot {
+        name: String,
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        arg_count: usize,
+        out_count_slot: usize,
+    },
     CallSemanticFunctionMulti(FunctionId, usize, usize),
     CallSemanticFunctionMultiUsingOutputSlot(FunctionId, usize, usize),
     CallSemanticNestedFunctionMulti {
@@ -311,6 +325,20 @@ pub enum Instr {
         fallback_policy: CallableFallbackPolicy,
         specs: Vec<ArgSpec>,
         out_count: usize,
+    },
+    CallWorkspaceFirstExpandMultiOutput {
+        name: String,
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        specs: Vec<ArgSpec>,
+        out_count: usize,
+    },
+    CallWorkspaceFirstExpandMultiOutputUsingOutputSlot {
+        name: String,
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        specs: Vec<ArgSpec>,
+        out_count_slot: usize,
     },
     CallSemanticFunctionExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
     CallSemanticNestedFunctionExpandMultiOutput {
@@ -435,6 +463,14 @@ impl Instr {
                 ..
             } => effect(*arg_count, *out_count),
             Instr::CallFunctionMultiUsingOutputSlot { arg_count, .. } => effect(*arg_count, 1),
+            Instr::CallWorkspaceFirstMulti {
+                arg_count,
+                out_count,
+                ..
+            } => effect(*arg_count, *out_count),
+            Instr::CallWorkspaceFirstMultiUsingOutputSlot { arg_count, .. } => {
+                effect(*arg_count, 1)
+            }
             Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
             Instr::CallSemanticFunctionMultiUsingOutputSlot(_, argc, _) => effect(*argc, 1),
             Instr::CallSemanticNestedFunctionMulti {
@@ -512,6 +548,8 @@ impl Instr {
             | Instr::CallFevalExpandMultiOutputUsingOutputSlot(specs, _)
             | Instr::CreateSemanticFutureExpandMultiOutput(_, specs, _)
             | Instr::CallFunctionExpandMultiOutput { specs, .. }
+            | Instr::CallWorkspaceFirstExpandMultiOutput { specs, .. }
+            | Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { specs, .. }
             | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
             | Instr::CallSemanticNestedFunctionExpandMultiOutput { specs, .. }
             | Instr::CallBuiltinExpandMultiOutput(_, specs, _)

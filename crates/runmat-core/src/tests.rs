@@ -9734,6 +9734,370 @@ fn dynamic_workspace_evalin_invalid_selector_is_catchable() {
 }
 
 #[test]
+fn run_executes_script_file_in_current_workspace() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        temp.path().join("worker.m"),
+        r#"
+        generated = local_double(seed);
+
+        function out = local_double(x)
+            out = x * 2;
+        end
+    "#,
+    )
+    .expect("write worker script");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+        seed = 21;
+        run('worker');
+        after_run = generated + 1;
+    "#,
+    )
+    .expect("run script succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "generated",
+        &runmat_builtins::Value::Num(42.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "after_run",
+        &runmat_builtins::Value::Num(43.0)
+    ));
+}
+
+#[test]
+fn run_exposes_script_variables_to_following_call_syntax() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        temp.path().join("workspace_call_worker.m"),
+        r#"
+        generated = [11 22 33];
+        sin = [5 8 13];
+    "#,
+    )
+    .expect("write worker script");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+        run('workspace_call_worker');
+        second_value = generated(2);
+        shadowed_builtin_value = sin(2);
+        builtin_fallback_value = cos(0);
+        constant_fallback_value = pi;
+        generated(1);
+        after_standalone_call = 7;
+    "#,
+    )
+    .expect("post-run call syntax succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "second_value",
+        &runmat_builtins::Value::Num(22.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "shadowed_builtin_value",
+        &runmat_builtins::Value::Num(8.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "builtin_fallback_value",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "constant_fallback_value",
+        &runmat_builtins::Value::Num(std::f64::consts::PI)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "after_standalone_call",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+}
+
+#[test]
+fn run_script_variables_shadow_builtin_constants() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(temp.path().join("constant_worker.m"), "pi = 4;\n").expect("write worker");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+        run('constant_worker');
+        shadowed_constant_value = pi;
+    "#,
+    )
+    .expect("post-run constant shadowing succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "shadowed_constant_value",
+        &runmat_builtins::Value::Num(4.0)
+    ));
+}
+
+#[test]
+fn run_replays_script_stdout_to_request_streams() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        temp.path().join("display_worker.m"),
+        r#"
+        disp('from run');
+        display_worker_value = 4;
+    "#,
+    )
+    .expect("write display worker");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome =
+        execute_text_request(&mut session, "run('display_worker');").expect("run display worker");
+    let stdout = outcome
+        .streams
+        .iter()
+        .filter(|entry| entry.stream == ExecutionStreamKind::Stdout)
+        .map(|entry| entry.text.as_str())
+        .collect::<String>();
+    assert_eq!(stdout, "from run\n");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "display_worker_value",
+        &runmat_builtins::Value::Num(4.0)
+    ));
+}
+
+#[test]
+fn run_command_syntax_resolves_scripts_on_search_path() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let scripts = temp.path().join("scripts");
+    std::fs::create_dir_all(&scripts).expect("create scripts dir");
+    std::fs::write(scripts.join("path_worker.m"), "path_value = 17;\n").expect("write path worker");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+        addpath('scripts');
+        run path_worker
+        path_after = path_value + 3;
+        run('path_worker.m');
+        path_after_string = path_value + 4;
+    "#,
+    )
+    .expect("run command syntax succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "path_after",
+        &runmat_builtins::Value::Num(20.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "path_after_string",
+        &runmat_builtins::Value::Num(21.0)
+    ));
+}
+
+#[test]
+fn run_preserves_script_source_context() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let source_path = temp.path().join("context_worker.m");
+    std::fs::write(
+        &source_path,
+        r#"
+        run_name = mfilename();
+        run_full = mfilename("fullpath");
+    "#,
+    )
+    .expect("write context worker");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome =
+        execute_text_request(&mut session, "run('context_worker');").expect("run context worker");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "run_name",
+        &runmat_builtins::Value::String("context_worker".into())
+    ));
+
+    let actual = outcome_named_upsert_value(&outcome, "run_full")
+        .and_then(|value| {
+            if let runmat_builtins::Value::String(text) = value {
+                Some(text.as_str())
+            } else {
+                None
+            }
+        })
+        .expect("run_full string upsert");
+    let expected = std::fs::canonicalize(&source_path)
+        .unwrap_or_else(|_| source_path.clone())
+        .with_extension("")
+        .to_string_lossy()
+        .to_string();
+    assert_eq!(
+        comparable_path_text(actual),
+        comparable_path_text(&expected),
+        "run_full should point at the executed script"
+    );
+}
+
+#[test]
+fn run_error_commits_script_mutations_before_the_error() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        temp.path().join("failing_worker.m"),
+        r#"
+        partial_run_value = 99;
+        error("RunMat:run:testBoom", "boom");
+    "#,
+    )
+    .expect("write failing worker");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+        try
+            run('failing_worker');
+            run_err = "NOERR";
+        catch e
+            run_err = e.identifier;
+        end
+        after_failure = 5;
+    "#,
+    )
+    .expect("run failure should be catchable");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "run_err",
+        &runmat_builtins::Value::String("RunMat:run:testBoom".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "after_failure",
+        &runmat_builtins::Value::Num(5.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "partial_run_value",
+        &runmat_builtins::Value::Num(99.0)
+    ));
+}
+
+#[test]
+fn run_missing_file_and_output_errors_are_catchable() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(temp.path().join("ok_worker.m"), "ok_value = 1;\n").expect("write worker");
+    std::fs::write(temp.path().join("empty_worker.m"), "% no assignments\n")
+        .expect("write empty worker");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+        try
+            run('missing_worker');
+            missing_err = "NOERR";
+        catch e
+            missing_err = e.identifier;
+        end
+
+        try
+            output_value = run('ok_worker');
+            output_err = "NOERR";
+        catch e
+            output_err = e.identifier;
+        end
+
+        try
+            run('empty_worker');
+            missing_after_run_value = missing_after_run;
+            missing_after_run_err = "NOERR";
+        catch e
+            missing_after_run_err = e.identifier;
+        end
+    "#,
+    )
+    .expect("run errors should be catchable");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "missing_err",
+        &runmat_builtins::Value::String("RunMat:run:FileNotFound".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "output_err",
+        &runmat_builtins::Value::String("RunMat:run:TooManyOutputs".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "missing_after_run_err",
+        &runmat_builtins::Value::String("RunMat:UndefinedVariable".into())
+    ));
+    assert!(
+        !outcome_has_upsert_name(&outcome, "ok_value"),
+        "run with requested output must fail before executing the target script"
+    );
+}
+
+#[test]
+fn run_respects_dynamic_eval_host_policy() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        temp.path().join("policy_worker.m"),
+        "policy_run_value = 12;\n",
+    )
+    .expect("write worker");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Text {
+            name: "run-policy.m".to_string(),
+            text: "run('policy_worker');".to_string(),
+        },
+        compatibility: CompatMode::Matlab,
+        host_policy: abi::HostExecutionPolicy {
+            top_level_await: true,
+            dynamic_eval: false,
+        },
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: session.workspace_handle(),
+    }))
+    .result
+    .expect("request should return an outcome with a policy diagnostic");
+    assert_eq!(outcome.diagnostics.len(), 1);
+    assert_eq!(outcome.diagnostics[0].code, "RunMat:DynamicEvalDisabled");
+    assert!(
+        !outcome_has_upsert_name(&outcome, "policy_run_value"),
+        "disabled dynamic execution must not run script files"
+    );
+}
+
+#[test]
 fn char_literal_assignment_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let prepared = session

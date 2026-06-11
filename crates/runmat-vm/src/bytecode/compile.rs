@@ -13,9 +13,7 @@ use runmat_builtins::{builtin_functions, AccelTag, BuiltinSemanticKind};
 use runmat_hir::{EntrypointId, FunctionId, HirAssembly};
 use runmat_mir::MirAssembly;
 use runmat_mir::{MirRvalue, MirStmtKind, MirTerminatorKind};
-use std::collections::HashMap;
-#[cfg(feature = "native-accel")]
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub fn compile(
     hir: &HirAssembly,
@@ -29,16 +27,20 @@ pub fn compile(
     let bound_functions =
         compile_semantic_functions(hir, mir, c.layout.as_ref().unwrap(), Some(entrypoint))?;
     let function_registry = FunctionRegistry::new(bound_functions.clone());
-    let var_names = c
+    let (var_names, initially_unassigned_slots) = c
         .layout
         .as_ref()
-        .and_then(|layout| layout.entrypoints.get(&entrypoint))
-        .map(|entrypoint_layout| {
-            entrypoint_layout
-                .exports
-                .iter()
-                .map(|export| (export.slot.0, export.name.clone()))
-                .collect()
+        .and_then(|layout| {
+            let entrypoint_layout = layout.entrypoints.get(&entrypoint)?;
+            let function_layout = layout.functions.get(&entrypoint_layout.target)?;
+            Some((
+                entrypoint_layout
+                    .exports
+                    .iter()
+                    .map(|export| (export.slot.0, export.name.clone()))
+                    .collect(),
+                function_layout_initially_unassigned_slots(hir, function_layout),
+            ))
         })
         .unwrap_or_default();
     let entrypoint_target = hir
@@ -106,6 +108,7 @@ pub fn compile(
         function_registry,
         var_types: c.var_types,
         var_names,
+        initially_unassigned_slots,
         layout: c.layout,
         async_metadata,
         #[cfg(feature = "native-accel")]
@@ -821,6 +824,10 @@ fn compile_semantic_functions(
                     .map(|capture| capture.slot.0)
                     .collect(),
                 var_names: function_layout_var_names(hir, function_layout)?,
+                initially_unassigned_slots: function_layout_initially_unassigned_slots(
+                    hir,
+                    function_layout,
+                ),
                 argument_validations: function
                     .argument_validations
                     .iter()
@@ -942,6 +949,24 @@ fn function_layout_var_names(
         names.insert(slot.0, hir_binding.name.0.clone());
     }
     Ok(names)
+}
+
+fn function_layout_initially_unassigned_slots(
+    hir: &HirAssembly,
+    function_layout: &crate::layout::VmFunctionLayout,
+) -> HashSet<usize> {
+    function_layout
+        .binding_slots
+        .iter()
+        .filter_map(|(binding, slot)| {
+            hir.bindings
+                .get(binding.0)
+                .is_some_and(|hir_binding| {
+                    matches!(hir_binding.role, runmat_hir::BindingRole::ExternalWorkspace)
+                })
+                .then_some(slot.0)
+        })
+        .collect()
 }
 
 #[cfg(test)]

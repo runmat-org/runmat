@@ -40,6 +40,13 @@ struct WorkspaceFrame {
 
 pub type WorkspaceSnapshot = (HashMap<String, usize>, HashSet<String>);
 
+#[derive(Debug, Clone)]
+pub struct WorkspaceValueSnapshot {
+    pub vars: Vec<Value>,
+    pub names: HashMap<String, usize>,
+    pub assigned: HashSet<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceTarget {
     Current,
@@ -65,7 +72,7 @@ pub struct WorkspaceAssignedReport {
 runmat_thread_local! {
     static WORKSPACE_STACK: RefCell<Vec<WorkspaceFrame>> = const { RefCell::new(Vec::new()) };
     static PENDING_WORKSPACE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
-    static LAST_WORKSPACE_STATE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
+    static LAST_WORKSPACE_STATE: RefCell<Option<WorkspaceValueSnapshot>> = const { RefCell::new(None) };
     static LAST_WORKSPACE_ASSIGNED_REPORT: RefCell<Option<WorkspaceAssignedReport>> = const { RefCell::new(None) };
 }
 
@@ -167,8 +174,13 @@ impl Drop for WorkspaceStateGuard {
                         removed_names,
                     });
                 });
+                let vars = unsafe { (*frame.vars_ptr).clone() };
                 LAST_WORKSPACE_STATE.with(|slot| {
-                    *slot.borrow_mut() = Some((ws.names, ws.assigned));
+                    *slot.borrow_mut() = Some(WorkspaceValueSnapshot {
+                        vars,
+                        names: ws.names,
+                        assigned: ws.assigned,
+                    });
                 });
             }
         });
@@ -199,7 +211,7 @@ pub fn take_pending_workspace_state() -> Option<WorkspaceSnapshot> {
     PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take())
 }
 
-pub fn take_updated_workspace_state() -> Option<WorkspaceSnapshot> {
+pub fn take_updated_workspace_state() -> Option<WorkspaceValueSnapshot> {
     LAST_WORKSPACE_STATE.with(|slot| slot.borrow_mut().take())
 }
 
@@ -581,11 +593,11 @@ mod tests {
             assert_eq!(vars[0], Value::Num(42.0));
         }
 
-        let (names, assigned) =
-            take_updated_workspace_state().expect("workspace state should be recorded");
-        assert_eq!(names.get("x"), Some(&0));
-        assert_eq!(names.get("z"), Some(&1));
-        assert!(assigned.contains("x"));
-        assert!(assigned.contains("z"));
+        let snapshot = take_updated_workspace_state().expect("workspace state should be recorded");
+        assert_eq!(snapshot.names.get("x"), Some(&0));
+        assert_eq!(snapshot.names.get("z"), Some(&1));
+        assert!(snapshot.assigned.contains("x"));
+        assert!(snapshot.assigned.contains("z"));
+        assert_eq!(snapshot.vars[0], Value::Num(42.0));
     }
 }

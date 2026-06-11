@@ -207,6 +207,7 @@ pub enum BindingRole {
     Parameter,
     Output,
     Local,
+    ExternalWorkspace,
     ModuleBinding,
     ImplicitAns,
 }
@@ -344,6 +345,8 @@ pub struct HirCall {
     pub args: Vec<HirExpr>,
     pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_first_name: Option<SymbolName>,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -566,6 +569,7 @@ pub const FEVAL_BUILTIN_NAME: &str = "feval";
 pub const EVAL_BUILTIN_NAME: &str = "eval";
 pub const EVALIN_BUILTIN_NAME: &str = "evalin";
 pub const ASSIGNIN_BUILTIN_NAME: &str = "assignin";
+pub const RUN_BUILTIN_NAME: &str = "run";
 pub const NARGIN_BUILTIN_NAME: &str = "nargin";
 pub const NARGOUT_BUILTIN_NAME: &str = "nargout";
 pub const NARGINCHK_BUILTIN_NAME: &str = "narginchk";

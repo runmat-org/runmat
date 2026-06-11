@@ -805,7 +805,9 @@ impl RunMatSession {
 
         // Update variable names mapping and function definitions if execution was successful
         if error.is_none() {
-            if let Some((mutated_names, assigned)) = runmat_vm::take_updated_workspace_state() {
+            if let Some(workspace_state) = runmat_vm::take_updated_workspace_state() {
+                let mutated_names = workspace_state.names;
+                let assigned = workspace_state.assigned;
                 if debug_trace {
                     debug!(
                         ?mutated_names,

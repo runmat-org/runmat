@@ -16,6 +16,8 @@ pub struct MirCall {
     pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
     pub fallback_policy: CallableFallbackPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_first_name: Option<runmat_hir::SymbolName>,
     pub async_behavior: AsyncBehaviorFact,
     pub effects: BuiltinEffects,
     pub workspace_effect: Option<BuiltinWorkspaceEffect>,
