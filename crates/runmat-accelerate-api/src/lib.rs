@@ -416,6 +416,17 @@ pub struct ProviderPinvOptions {
     pub tolerance: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub struct ProviderRrefOptions {
+    pub tolerance: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderRrefResult {
+    pub reduced: GpuTensorHandle,
+    pub pivots: GpuTensorHandle,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ProviderPolyvalMu {
     pub mean: f64,
@@ -1895,6 +1906,13 @@ pub trait AccelProvider: Send + Sync {
         _tolerance: Option<f64>,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { Err(anyhow::anyhow!("rank not supported by provider")) })
+    }
+    fn rref<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
+        _options: ProviderRrefOptions,
+    ) -> AccelProviderFuture<'a, ProviderRrefResult> {
+        Box::pin(async move { Err(anyhow::anyhow!("rref not supported by provider")) })
     }
     fn rcond<'a>(
         &'a self,
