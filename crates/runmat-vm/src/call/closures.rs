@@ -382,6 +382,9 @@ pub(crate) async fn call_rhs_operator_method_ordered_with_outputs(
     match ordered_result {
         Ok(v) => Ok(v),
         Err(ordered_err) => {
+            if ordered_err.identifier() != Some("RunMat:UndefinedFunction") {
+                return Err(ordered_err);
+            }
             let receiver_first_args = vec![rhs.clone(), lhs.clone()];
             match call_identity_with_policy(
                 qualified_identity.clone(),
@@ -392,13 +395,7 @@ pub(crate) async fn call_rhs_operator_method_ordered_with_outputs(
             .await
             {
                 Ok(v) => Ok(v),
-                Err(receiver_err) => {
-                    if ordered_err.identifier() == Some("RunMat:UndefinedFunction") {
-                        Err(receiver_err)
-                    } else {
-                        Err(ordered_err)
-                    }
-                }
+                Err(receiver_err) => Err(receiver_err),
             }
         }
     }

@@ -610,6 +610,9 @@ impl LoweringCtx {
     }
 
     fn stmt_expr_call_loads_external_bindings(&self, expr: &AstExpr) -> Result<bool, HirError> {
+        if self.current_scope().external_bindings_visible {
+            return Ok(false);
+        }
         let (call_name, lexical_bindings_apply, span) = match expr {
             AstExpr::Ident(name, span) | AstExpr::FuncCall(name, _, span) => {
                 (name.as_str(), true, *span)

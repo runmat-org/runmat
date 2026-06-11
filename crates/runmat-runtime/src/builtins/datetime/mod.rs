@@ -1735,7 +1735,7 @@ fn shift_naive_datetime(
     let start = start_of_unit(value, unit, week_start);
     match boundary {
         DateShiftBoundary::Start => start,
-        DateShiftBoundary::End => next_unit_start(start, unit) - Duration::milliseconds(500),
+        DateShiftBoundary::End => next_unit_start(start, unit) - Duration::milliseconds(1),
         DateShiftBoundary::Nearest => {
             let next = next_unit_start(start, unit);
             if value - start <= next - value {

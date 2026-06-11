@@ -459,6 +459,13 @@ impl TfModel {
                 format!("tf.{op}: sample times must match"),
             ));
         }
+        if self.variable != rhs.variable {
+            return Err(control_error(
+                "tf",
+                "RunMat:tf:VariableMismatch",
+                format!("tf.{op}: transfer-function variables must match"),
+            ));
+        }
         if self.input_delay.abs() > EPS
             || self.output_delay.abs() > EPS
             || rhs.input_delay.abs() > EPS
@@ -824,6 +831,9 @@ pub fn trim_leading_real_zeros(coeffs: Vec<f64>) -> Vec<f64> {
         .iter()
         .position(|value| value.abs() > EPS)
         .unwrap_or(coeffs.len());
+    if first_nonzero == coeffs.len() {
+        return vec![0.0];
+    }
     coeffs[first_nonzero..].to_vec()
 }
 
