@@ -3947,6 +3947,48 @@
       ]
     },
     {
+      "name": "assignin",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "assignin(workspace, name, value)",
+          "inputs": [
+            {
+              "name": "workspace",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "`base` or `caller` workspace selector."
+            },
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Workspace variable name."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Value to assign into the selected workspace."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DYNAMIC_WORKSPACE.REQUIRES_VM",
+          "identifier": "RunMat:DynamicWorkspaceRequiresVm",
+          "when": "A dynamic workspace builtin is dispatched outside the VM workspace frame.",
+          "message": "dynamic workspace builtin requires VM workspace context"
+        }
+      ]
+    },
+    {
       "name": "atan",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -4685,6 +4727,42 @@
           "message": "box: invalid argument"
         }
       ]
+    },
+    {
+      "name": "builtin",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[out] = builtin(name, varargin)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Builtin function name."
+            },
+            {
+              "name": "varargin",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Builtin function arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result from the builtin implementation."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "cat",
@@ -14469,6 +14547,159 @@
       ]
     },
     {
+      "name": "dateshift",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "t2 = dateshift(t, boundary, unit)",
+          "inputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime input."
+            },
+            {
+              "name": "boundary",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Shift boundary: 'start', 'end', or 'nearest'."
+            },
+            {
+              "name": "unit",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Calendar/time unit."
+            },
+            {
+              "name": "weekdayOrOption",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional weekday for week-based shifts."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime object result."
+            }
+          ]
+        },
+        {
+          "label": "t2 = dateshift(t, boundary, \"week\", weekday)",
+          "inputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime input."
+            },
+            {
+              "name": "boundary",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Shift boundary: 'start', 'end', or 'nearest'."
+            },
+            {
+              "name": "unit",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Calendar/time unit."
+            },
+            {
+              "name": "weekdayOrOption",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional weekday for week-based shifts."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime object result."
+            }
+          ]
+        },
+        {
+          "label": "t2 = dateshift(t, \"dayofweek\", weekday)",
+          "inputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime input."
+            },
+            {
+              "name": "boundary",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Shift boundary: 'start', 'end', or 'nearest'."
+            },
+            {
+              "name": "unit",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Calendar/time unit."
+            },
+            {
+              "name": "weekdayOrOption",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional weekday for week-based shifts."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime object result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DATETIME.INVALID_ARGUMENT",
+          "identifier": "RunMat:datetime:InvalidArgument",
+          "when": "Arguments or option grammar do not match supported datetime forms.",
+          "message": "datetime: invalid argument"
+        },
+        {
+          "code": "RM.DATETIME.INVALID_INPUT",
+          "identifier": "RunMat:datetime:InvalidInput",
+          "when": "Input values cannot be parsed/converted/broadcast to a valid datetime result.",
+          "message": "datetime: invalid input"
+        },
+        {
+          "code": "RM.DATETIME.INTERNAL",
+          "identifier": "RunMat:datetime:Internal",
+          "when": "Internal datetime state or indexing/evaluation failed unexpectedly.",
+          "message": "datetime: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "datetime",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -14733,6 +14964,27 @@
         },
         {
           "label": "t = datetime(___, \"Format\", format)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Datetime constructor arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime object result."
+            }
+          ]
+        },
+        {
+          "label": "t = datetime(textOrArray, \"InputFormat\", inputFormat)",
           "inputs": [
             {
               "name": "args",
@@ -17901,6 +18153,85 @@
           "identifier": "RunMat:errorbar:Internal",
           "when": "Internal render preparation or GPU vertex generation fails.",
           "message": "errorbar: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "eval",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[varargout] = eval(source)",
+          "inputs": [
+            {
+              "name": "source",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Source text to evaluate in the current workspace."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "varargout",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Value(s) produced by evaluated source text."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DYNAMIC_WORKSPACE.REQUIRES_VM",
+          "identifier": "RunMat:DynamicWorkspaceRequiresVm",
+          "when": "A dynamic workspace builtin is dispatched outside the VM workspace frame.",
+          "message": "dynamic workspace builtin requires VM workspace context"
+        }
+      ]
+    },
+    {
+      "name": "evalin",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[varargout] = evalin(workspace, source)",
+          "inputs": [
+            {
+              "name": "workspace",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "`base` or `caller` workspace selector."
+            },
+            {
+              "name": "source",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Source text to evaluate in the selected workspace."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "varargout",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Value(s) produced by evaluated source text."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DYNAMIC_WORKSPACE.REQUIRES_VM",
+          "identifier": "RunMat:DynamicWorkspaceRequiresVm",
+          "when": "A dynamic workspace builtin is dispatched outside the VM workspace frame.",
+          "message": "dynamic workspace builtin requires VM workspace context"
         }
       ]
     },
@@ -23398,6 +23729,42 @@
       ]
     },
     {
+      "name": "functions",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "info = functions(fh)",
+          "inputs": [
+            {
+              "name": "fh",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "info",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function handle metadata struct."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FUNCTIONS.HANDLE_UNSUPPORTED",
+          "identifier": "RunMat:FunctionsHandleUnsupported",
+          "when": "The input is not a supported function handle value.",
+          "message": "functions: expected a function handle"
+        }
+      ]
+    },
+    {
       "name": "fwrite",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -24474,6 +24841,12 @@
           "identifier": "RunMat:GetMethodReceiverUnsupported",
           "when": "Receiver is neither object nor class reference.",
           "message": "getmethod: unsupported receiver"
+        },
+        {
+          "code": "RM.GETMETHOD.METHOD_PRIVATE",
+          "identifier": "RunMat:MethodPrivate",
+          "when": "Resolved method exists but is inaccessible from the current class scope.",
+          "message": "getmethod: method is not accessible from current scope"
         }
       ]
     },
@@ -25040,6 +25413,87 @@
       ]
     },
     {
+      "name": "groupsummary",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "G = groupsummary(T, groupvars, method, datavars)",
+          "inputs": [
+            {
+              "name": "T",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table."
+            },
+            {
+              "name": "groupvars",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grouping variable name or names."
+            },
+            {
+              "name": "method",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Summary method name or names."
+            },
+            {
+              "name": "datavars",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Data variable name or names."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TABLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:table:InvalidArgument",
+          "when": "Arguments or table metadata are invalid.",
+          "message": "table: invalid argument"
+        },
+        {
+          "code": "RM.TABLE.INVALID_INDEX",
+          "identifier": "RunMat:table:InvalidIndex",
+          "when": "Table indexing is invalid.",
+          "message": "table: invalid index"
+        },
+        {
+          "code": "RM.TABLE.INVALID_VARIABLE",
+          "identifier": "RunMat:table:InvalidVariable",
+          "when": "A table variable name or value is invalid.",
+          "message": "table: invalid variable"
+        },
+        {
+          "code": "RM.READTABLE.IO",
+          "identifier": "RunMat:readtable:IOError",
+          "when": "readtable cannot open or read the requested file.",
+          "message": "readtable: file read failed"
+        },
+        {
+          "code": "RM.READTABLE.UNSUPPORTED_FILE",
+          "identifier": "RunMat:readtable:UnsupportedFileType",
+          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
+          "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
       "name": "gt",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -25437,6 +25891,66 @@
           "identifier": "RunMat:heatmap:Internal",
           "when": "Internal render/surface construction fails.",
           "message": "heatmap: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "height",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "n = height(T)",
+          "inputs": [
+            {
+              "name": "T",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Table input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Count."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TABLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:table:InvalidArgument",
+          "when": "Arguments or table metadata are invalid.",
+          "message": "table: invalid argument"
+        },
+        {
+          "code": "RM.TABLE.INVALID_INDEX",
+          "identifier": "RunMat:table:InvalidIndex",
+          "when": "Table indexing is invalid.",
+          "message": "table: invalid index"
+        },
+        {
+          "code": "RM.TABLE.INVALID_VARIABLE",
+          "identifier": "RunMat:table:InvalidVariable",
+          "when": "A table variable name or value is invalid.",
+          "message": "table: invalid variable"
+        },
+        {
+          "code": "RM.READTABLE.IO",
+          "identifier": "RunMat:readtable:IOError",
+          "when": "readtable cannot open or read the requested file.",
+          "message": "readtable: file read failed"
+        },
+        {
+          "code": "RM.READTABLE.UNSUPPORTED_FILE",
+          "identifier": "RunMat:readtable:UnsupportedFileType",
+          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
+          "message": "readtable: unsupported file type"
         }
       ]
     },
@@ -28114,6 +28628,220 @@
       ]
     },
     {
+      "name": "imhist",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "counts = imhist(I)",
+          "inputs": [
+            {
+              "name": "I",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grayscale intensity image."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "counts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin counts as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "counts = imhist(I, n)",
+          "inputs": [
+            {
+              "name": "I",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grayscale intensity image."
+            },
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "256",
+              "description": "Number of bins."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "counts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin counts as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "[counts, binLocations] = imhist(I)",
+          "inputs": [
+            {
+              "name": "I",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grayscale intensity image."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "counts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin counts as a column vector."
+            },
+            {
+              "name": "binLocations",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Intensity or colormap-index bin locations as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "[counts, binLocations] = imhist(I, n)",
+          "inputs": [
+            {
+              "name": "I",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grayscale intensity image."
+            },
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "256",
+              "description": "Number of bins."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "counts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin counts as a column vector."
+            },
+            {
+              "name": "binLocations",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Intensity or colormap-index bin locations as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "counts = imhist(X, map)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexed image matrix."
+            },
+            {
+              "name": "map",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Colormap with one RGB row per indexed-image bin."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "counts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin counts as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "[counts, binLocations] = imhist(X, map)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexed image matrix."
+            },
+            {
+              "name": "map",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Colormap with one RGB row per indexed-image bin."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "counts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin counts as a column vector."
+            },
+            {
+              "name": "binLocations",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Intensity or colormap-index bin locations as a column vector."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.IMHIST.INVALID_ARGUMENT",
+          "identifier": "RunMat:imhist:InvalidArgument",
+          "when": "Image input, bin count, or colormap arguments are malformed or unsupported.",
+          "message": "imhist: invalid argument"
+        },
+        {
+          "code": "RM.IMHIST.UNSUPPORTED_IMAGE",
+          "identifier": "RunMat:imhist:UnsupportedImage",
+          "when": "Input cannot be interpreted as a grayscale or indexed image.",
+          "message": "imhist: unsupported image input"
+        },
+        {
+          "code": "RM.IMHIST.PLOT_FAILED",
+          "identifier": "RunMat:imhist:PlotFailed",
+          "when": "Statement-form histogram rendering fails.",
+          "message": "imhist: plotting failed"
+        },
+        {
+          "code": "RM.IMHIST.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:imhist:TooManyOutputs",
+          "when": "More than two outputs are requested.",
+          "message": "imhist: too many output arguments"
+        },
+        {
+          "code": "RM.IMHIST.INTERNAL",
+          "identifier": "RunMat:imhist:Internal",
+          "when": "Internal histogram assembly fails.",
+          "message": "imhist: internal error"
+        }
+      ]
+    },
+    {
       "name": "impulse",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -28997,6 +29725,54 @@
           "identifier": "RunMat:input:InvalidNumericExpression",
           "when": "Numeric fallback parser rejects the input expression.",
           "message": "input: invalid numeric expression"
+        }
+      ]
+    },
+    {
+      "name": "inputname",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "name = inputname(argNumber)",
+          "inputs": [
+            {
+              "name": "argNumber",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based caller argument index."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Caller argument variable name, or empty text when unavailable."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.INPUTNAME.NOT_ENOUGH_INPUTS",
+          "identifier": "RunMat:NotEnoughInputs",
+          "when": "No argument index is provided.",
+          "message": "inputname: not enough input arguments"
+        },
+        {
+          "code": "RM.INPUTNAME.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "More than one argument index is provided.",
+          "message": "inputname: too many input arguments"
+        },
+        {
+          "code": "RM.INPUTNAME.ARGUMENT_INVALID",
+          "identifier": "RunMat:InputnameArgumentInvalid",
+          "when": "The argument index is not a positive integer scalar.",
+          "message": "inputname: argument index must be a positive integer scalar"
         }
       ]
     },
@@ -32607,6 +33383,741 @@
       "errors": []
     },
     {
+      "name": "linprog",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "x = linprog(f, A, b)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            }
+          ]
+        },
+        {
+          "label": "x = linprog(f, A, b, Aeq, beq)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            }
+          ]
+        },
+        {
+          "label": "x = linprog(f, A, b, Aeq, beq, lb, ub)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower bounds."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper bounds."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval] = linprog(f, A, b)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval] = linprog(f, A, b, Aeq, beq)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval] = linprog(f, A, b, Aeq, beq, lb, ub)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower bounds."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper bounds."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag] = linprog(f, A, b)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag] = linprog(f, A, b, Aeq, beq)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag] = linprog(f, A, b, Aeq, beq, lb, ub)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower bounds."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper bounds."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag, output] = linprog(f, A, b)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagnostic metadata struct."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag, output] = linprog(f, A, b, Aeq, beq)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagnostic metadata struct."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag, output] = linprog(f, A, b, Aeq, beq, lb, ub)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower bounds."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper bounds."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagnostic metadata struct."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LINPROG.INVALID_ARGUMENT",
+          "identifier": "RunMat:linprog:InvalidArgument",
+          "when": "The argument count or optional argument grammar is invalid.",
+          "message": "linprog: invalid argument"
+        },
+        {
+          "code": "RM.LINPROG.INVALID_INPUT",
+          "identifier": "RunMat:linprog:InvalidInput",
+          "when": "Objective, constraint, or bound dimensions/types are invalid.",
+          "message": "linprog: invalid input"
+        }
+      ]
+    },
+    {
       "name": "linsolve",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -33054,6 +34565,34 @@
           "identifier": "RunMat:load:Workspace",
           "when": "Statement-form load cannot assign values into workspace.",
           "message": "load: workspace assignment failed"
+        }
+      ]
+    },
+    {
+      "name": "localfunctions",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "handles = localfunctions()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "handles",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell array of visible local function handles."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LOCALFUNCTIONS.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "Any input argument is provided.",
+          "message": "localfunctions: too many input arguments"
         }
       ]
     },
@@ -36111,6 +37650,55 @@
       ]
     },
     {
+      "name": "mfilename",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "name = mfilename()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current file name."
+            }
+          ]
+        },
+        {
+          "label": "name = mfilename(option)",
+          "inputs": [
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "`fullpath` for full source path or `class` for current method class."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current file name."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.MFILENAME.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "More than one option argument is provided.",
+          "message": "mfilename: too many input arguments"
+        }
+      ]
+    },
+    {
       "name": "min",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -38119,6 +39707,124 @@
       ]
     },
     {
+      "name": "narginchk",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "narginchk(minArgs, maxArgs)",
+          "inputs": [
+            {
+              "name": "minArgs",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum allowed argument count."
+            },
+            {
+              "name": "maxArgs",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum allowed argument count."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NARGINCHK.NOT_ENOUGH_INPUTS",
+          "identifier": "RunMat:NotEnoughInputs",
+          "when": "The current function was called with fewer inputs than the lower bound.",
+          "message": "narginchk: not enough input arguments"
+        },
+        {
+          "code": "RM.NARGINCHK.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "The current function was called with more inputs than the upper bound.",
+          "message": "narginchk: too many input arguments"
+        },
+        {
+          "code": "RM.NARGINCHK.ARGUMENT_INVALID",
+          "identifier": "RunMat:NarginchkArgumentInvalid",
+          "when": "A bound argument is not a nonnegative integer scalar or valid Inf upper bound.",
+          "message": "narginchk: bounds must be nonnegative integer scalars"
+        },
+        {
+          "code": "RM.NARGINCHK.BOUNDS_INVALID",
+          "identifier": "RunMat:NarginchkBoundsInvalid",
+          "when": "The minimum bound is greater than the maximum bound.",
+          "message": "narginchk: minArgs must be less than or equal to maxArgs"
+        },
+        {
+          "code": "RM.NARGINCHK.CONTEXT_UNAVAILABLE",
+          "identifier": "RunMat:NarginchkContextUnavailable",
+          "when": "The runtime dispatcher is invoked without VM function-call context.",
+          "message": "narginchk: function call context is unavailable"
+        }
+      ]
+    },
+    {
+      "name": "nargoutchk",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "nargoutchk(minArgs, maxArgs)",
+          "inputs": [
+            {
+              "name": "minArgs",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum allowed argument count."
+            },
+            {
+              "name": "maxArgs",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum allowed argument count."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NARGOUTCHK.NOT_ENOUGH_OUTPUTS",
+          "identifier": "RunMat:NotEnoughOutputs",
+          "when": "The current function was called with fewer requested outputs than the lower bound.",
+          "message": "nargoutchk: not enough output arguments"
+        },
+        {
+          "code": "RM.NARGOUTCHK.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:TooManyOutputs",
+          "when": "The current function was called with more requested outputs than the upper bound.",
+          "message": "nargoutchk: too many output arguments"
+        },
+        {
+          "code": "RM.NARGOUTCHK.ARGUMENT_INVALID",
+          "identifier": "RunMat:NargoutchkArgumentInvalid",
+          "when": "A bound argument is not a nonnegative integer scalar or valid Inf upper bound.",
+          "message": "nargoutchk: bounds must be nonnegative integer scalars"
+        },
+        {
+          "code": "RM.NARGOUTCHK.BOUNDS_INVALID",
+          "identifier": "RunMat:NargoutchkBoundsInvalid",
+          "when": "The minimum bound is greater than the maximum bound.",
+          "message": "nargoutchk: minArgs must be less than or equal to maxArgs"
+        },
+        {
+          "code": "RM.NARGOUTCHK.CONTEXT_UNAVAILABLE",
+          "identifier": "RunMat:NargoutchkContextUnavailable",
+          "when": "The runtime dispatcher is invoked without VM function-call context.",
+          "message": "nargoutchk: function call context is unavailable"
+        }
+      ]
+    },
+    {
       "name": "ndims",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -38195,6 +39901,35 @@
           "message": "ne: array sizes are not compatible for broadcasting"
         }
       ]
+    },
+    {
+      "name": "new_object",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "obj = new_object(class_name)",
+          "inputs": [
+            {
+              "name": "class_name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Class name for the object to create."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "obj",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Created class object value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "nextpow2",
@@ -39627,6 +41362,148 @@
           "identifier": null,
           "when": "The 'like' keyword is specified more than once.",
           "message": "ones: multiple 'like' specifications are not supported"
+        }
+      ]
+    },
+    {
+      "name": "optimoptions",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "options = optimoptions(solver)",
+          "inputs": [
+            {
+              "name": "solver",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver name, such as fminbnd, fzero, or fsolve."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Options struct for optimization solvers."
+            }
+          ]
+        },
+        {
+          "label": "options = optimoptions(solver, name, value, ...)",
+          "inputs": [
+            {
+              "name": "solver",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver name, such as fminbnd, fzero, or fsolve."
+            },
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Option field name."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Option value(s) and additional name/value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Options struct for optimization solvers."
+            }
+          ]
+        },
+        {
+          "label": "options = optimoptions(oldopts, name, value, ...)",
+          "inputs": [
+            {
+              "name": "oldopts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing options struct to update."
+            },
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Option field name."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Option value(s), additional name/value pairs, or another options struct."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Options struct for optimization solvers."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.OPTIMOPTIONS.INVALID_ARGUMENT",
+          "identifier": "RunMat:optimoptions:InvalidArgument",
+          "when": "Argument grammar does not match supported optimoptions forms.",
+          "message": "optimoptions: invalid argument"
+        },
+        {
+          "code": "RM.OPTIMOPTIONS.INVALID_SOLVER",
+          "identifier": "RunMat:optimoptions:InvalidSolver",
+          "when": "The solver argument is not one of the supported optimization builtins.",
+          "message": "optimoptions: invalid solver"
+        },
+        {
+          "code": "RM.OPTIMOPTIONS.INVALID_OPTION_NAME",
+          "identifier": "RunMat:optimoptions:InvalidOptionName",
+          "when": "An option name is not a text scalar.",
+          "message": "optimoptions: invalid option name"
+        },
+        {
+          "code": "RM.OPTIMOPTIONS.MISSING_OPTION_VALUE",
+          "identifier": "RunMat:optimoptions:MissingOptionValue",
+          "when": "A name-value option key is not followed by a value.",
+          "message": "optimoptions: missing option value"
+        },
+        {
+          "code": "RM.OPTIMOPTIONS.UNKNOWN_OPTION",
+          "identifier": "RunMat:optimoptions:UnknownOption",
+          "when": "An option name is not supported by the selected solver.",
+          "message": "optimoptions: unknown option"
+        },
+        {
+          "code": "RM.OPTIMOPTIONS.INVALID_OPTION_VALUE",
+          "identifier": "RunMat:optimoptions:InvalidOptionValue",
+          "when": "An option value fails type or domain validation.",
+          "message": "optimoptions: invalid option value"
+        },
+        {
+          "code": "RM.OPTIMOPTIONS.FLOW",
+          "identifier": "RunMat:optimoptions:Flow",
+          "when": "Nested flow fails while gathering input values.",
+          "message": "optimoptions: flow failure"
         }
       ]
     },
@@ -46361,6 +48238,94 @@
       ]
     },
     {
+      "name": "readtable",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "T = readtable(filename)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Text or spreadsheet file path."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        },
+        {
+          "label": "T = readtable(filename, nameValuePairs...)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Text or spreadsheet file path."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value import options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TABLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:table:InvalidArgument",
+          "when": "Arguments or table metadata are invalid.",
+          "message": "table: invalid argument"
+        },
+        {
+          "code": "RM.TABLE.INVALID_INDEX",
+          "identifier": "RunMat:table:InvalidIndex",
+          "when": "Table indexing is invalid.",
+          "message": "table: invalid index"
+        },
+        {
+          "code": "RM.TABLE.INVALID_VARIABLE",
+          "identifier": "RunMat:table:InvalidVariable",
+          "when": "A table variable name or value is invalid.",
+          "message": "table: invalid variable"
+        },
+        {
+          "code": "RM.READTABLE.IO",
+          "identifier": "RunMat:readtable:IOError",
+          "when": "readtable cannot open or read the requested file.",
+          "message": "readtable: file read failed"
+        },
+        {
+          "code": "RM.READTABLE.UNSUPPORTED_FILE",
+          "identifier": "RunMat:readtable:UnsupportedFileType",
+          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
+          "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
       "name": "real",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -50560,6 +52525,12 @@
           "identifier": "RunMat:PropertyPrivateAccess",
           "when": "Property exists but get/set access is private.",
           "message": "setfield: private property access denied"
+        },
+        {
+          "code": "RM.SETFIELD.PROPERTY_STATIC_ACCESS",
+          "identifier": "RunMat:PropertyStaticAccess",
+          "when": "Property exists but is static and cannot be assigned through an instance.",
+          "message": "setfield: static property access denied"
         },
         {
           "code": "RM.SETFIELD.OBJECT_PROPERTY",
@@ -56383,6 +58354,125 @@
       ]
     },
     {
+      "name": "subsasgn",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "obj = subsasgn(obj, kind, payload, rhs)",
+          "inputs": [
+            {
+              "name": "obj",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Object receiver."
+            },
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexing kind token ('()', '{}', '.')."
+            },
+            {
+              "name": "payload",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexing payload."
+            },
+            {
+              "name": "rhs",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Assigned value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "obj",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Updated object value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SUBSASGN.RECEIVER_INVALID",
+          "identifier": "RunMat:InvalidObjectDispatch",
+          "when": "Receiver is not an object or handle object.",
+          "message": "subsasgn: requires object receiver"
+        },
+        {
+          "code": "RM.SUBSASGN.METHOD_MISSING",
+          "identifier": "RunMat:MissingSubsasgn",
+          "when": "Target class does not implement subsasgn.",
+          "message": "subsasgn: class does not define subsasgn for indexed assignment"
+        }
+      ]
+    },
+    {
+      "name": "subsref",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = subsref(obj, kind, payload)",
+          "inputs": [
+            {
+              "name": "obj",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Object receiver."
+            },
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexing kind token ('()', '{}', '.')."
+            },
+            {
+              "name": "payload",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexing payload."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexed value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SUBSREF.RECEIVER_INVALID",
+          "identifier": "RunMat:InvalidObjectDispatch",
+          "when": "Receiver is not an object or handle object.",
+          "message": "subsref: requires object receiver"
+        },
+        {
+          "code": "RM.SUBSREF.METHOD_MISSING",
+          "identifier": "RunMat:MissingSubsref",
+          "when": "Target class does not implement subsref.",
+          "message": "subsref: class does not define subsref for indexing operation"
+        }
+      ]
+    },
+    {
       "name": "sum",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -57483,6 +59573,66 @@
           "identifier": "RunMat:symrcm:Internal",
           "when": "Runtime fails while constructing intermediate tensors or adjacency structures.",
           "message": "symrcm: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "table",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "T = table(variables...)",
+          "inputs": [
+            {
+              "name": "variables",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Variables to assemble as table columns."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TABLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:table:InvalidArgument",
+          "when": "Arguments or table metadata are invalid.",
+          "message": "table: invalid argument"
+        },
+        {
+          "code": "RM.TABLE.INVALID_INDEX",
+          "identifier": "RunMat:table:InvalidIndex",
+          "when": "Table indexing is invalid.",
+          "message": "table: invalid index"
+        },
+        {
+          "code": "RM.TABLE.INVALID_VARIABLE",
+          "identifier": "RunMat:table:InvalidVariable",
+          "when": "A table variable name or value is invalid.",
+          "message": "table: invalid variable"
+        },
+        {
+          "code": "RM.READTABLE.IO",
+          "identifier": "RunMat:readtable:IOError",
+          "when": "readtable cannot open or read the requested file.",
+          "message": "readtable: file read failed"
+        },
+        {
+          "code": "RM.READTABLE.UNSUPPORTED_FILE",
+          "identifier": "RunMat:readtable:UnsupportedFileType",
+          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
+          "message": "readtable: unsupported file type"
         }
       ]
     },
@@ -62453,6 +64603,66 @@
           "identifier": null,
           "when": "Wildcard selector pattern fails to parse.",
           "message": "whos: invalid pattern"
+        }
+      ]
+    },
+    {
+      "name": "width",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "n = width(T)",
+          "inputs": [
+            {
+              "name": "T",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Table input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Count."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TABLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:table:InvalidArgument",
+          "when": "Arguments or table metadata are invalid.",
+          "message": "table: invalid argument"
+        },
+        {
+          "code": "RM.TABLE.INVALID_INDEX",
+          "identifier": "RunMat:table:InvalidIndex",
+          "when": "Table indexing is invalid.",
+          "message": "table: invalid index"
+        },
+        {
+          "code": "RM.TABLE.INVALID_VARIABLE",
+          "identifier": "RunMat:table:InvalidVariable",
+          "when": "A table variable name or value is invalid.",
+          "message": "table: invalid variable"
+        },
+        {
+          "code": "RM.READTABLE.IO",
+          "identifier": "RunMat:readtable:IOError",
+          "when": "readtable cannot open or read the requested file.",
+          "message": "readtable: file read failed"
+        },
+        {
+          "code": "RM.READTABLE.UNSUPPORTED_FILE",
+          "identifier": "RunMat:readtable:UnsupportedFileType",
+          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
+          "message": "readtable: unsupported file type"
         }
       ]
     },

@@ -157,6 +157,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `io/net` | `tcpserver`, `accept`, `tcpclient`, `read`, `readline`, `write`, `close` | host | - | - | TCP client/server operations, TLS, and Unix sockets. |
 | done | `io/http` | `webread`, `webwrite`, `weboptions` | host | - | - | HTTP client operations. |
 | done | `io/image` | `imread`, `imwrite`, `imfinfo` | host | - | - | Image file I/O. |
+| done | `image` | `imhist` | host | - | - | Grayscale and indexed-image intensity histograms, with statement-form plotting. |
 | done | `plot/images` | `image`, `imshow`, `imagesc` | host | - | - | Image display through plotting features. |
 
 ## Plotting and Visualization

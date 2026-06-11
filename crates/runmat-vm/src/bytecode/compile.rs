@@ -3612,6 +3612,41 @@ out = weekly.AvgRevenue;\n",
     }
 
     #[test]
+    fn compile_interprets_imhist_uint8_workflow() {
+        let ast = runmat_parser::parse(
+            "\
+img = uint8([0 1 1; 2 2 2]);\n\
+[counts, bins] = imhist(img);\n\
+[peak, idx] = max(counts);\n\
+dominant = bins(idx);\n\
+total = sum(counts);\n\
+summary = [peak; dominant; total];\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let summary_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "summary")
+            .expect("summary export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[summary_export.slot.0] else {
+            panic!(
+                "expected numeric summary tensor, got {:?}",
+                vars[summary_export.slot.0]
+            );
+        };
+        assert_eq!(tensor.shape, vec![3, 1]);
+        assert_eq!(tensor.data, vec![3.0, 2.0, 6.0]);
+    }
+
+    #[test]
     fn compile_rejects_dynamic_member_store_back_paren_index_with_read_context_identifier() {
         let ast =
             runmat_parser::parse("s = struct('x', {1, 2}); f = 'x'; s(1).(f) = 3;").expect("parse");
