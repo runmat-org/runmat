@@ -997,6 +997,7 @@ fn analyze_assembly_collects_semantic_marker_diagnostics() {
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         fallback_policy: runmat_hir::CallableFallbackPolicy::ExternalBoundary,
         workspace_first_name: None,
+        bare_identifier: false,
         async_behavior: runmat_mir::AsyncBehaviorFact::MaySuspend,
         effects: runmat_builtins::BuiltinEffects::unknown(),
         workspace_effect: None,

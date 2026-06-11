@@ -1392,6 +1392,7 @@ impl Compiler {
                         name: name.0.clone(),
                         identity: identity.clone(),
                         fallback_policy: call.fallback_policy,
+                        bare_identifier: call.bare_identifier,
                         specs,
                         out_count: output_count,
                     },
@@ -1403,6 +1404,7 @@ impl Compiler {
                         name: name.0.clone(),
                         identity: identity.clone(),
                         fallback_policy: call.fallback_policy,
+                        bare_identifier: call.bare_identifier,
                         arg_count: call.args.len(),
                         out_count: output_count,
                     },
@@ -2219,6 +2221,18 @@ impl Compiler {
                 self.emit(Instr::LoadMemberDynamic);
                 Ok(())
             }
+            MirRvalue::WorkspaceFirstStaticProperty {
+                workspace_name,
+                class_name,
+                property,
+            } => {
+                self.emit(Instr::LoadWorkspaceFirstStaticProperty {
+                    name: workspace_name.0.clone(),
+                    class_name: class_name.clone(),
+                    property: property.0.clone(),
+                });
+                Ok(())
+            }
             MirRvalue::MetaClass(name) => {
                 self.emit(Instr::LoadString(
                     name.0
@@ -2361,6 +2375,7 @@ impl Compiler {
                                 name: name.0.clone(),
                                 identity: identity.clone(),
                                 fallback_policy: call.fallback_policy,
+                                bare_identifier: call.bare_identifier,
                                 specs,
                                 out_count,
                             },
@@ -2373,6 +2388,7 @@ impl Compiler {
                                 name: name.0.clone(),
                                 identity: identity.clone(),
                                 fallback_policy: call.fallback_policy,
+                                bare_identifier: call.bare_identifier,
                                 specs,
                                 out_count_slot,
                             },
@@ -2388,6 +2404,7 @@ impl Compiler {
                                 name: name.0.clone(),
                                 identity: identity.clone(),
                                 fallback_policy: call.fallback_policy,
+                                bare_identifier: call.bare_identifier,
                                 arg_count: call.args.len(),
                                 out_count,
                             },
@@ -2400,6 +2417,7 @@ impl Compiler {
                                 name: name.0.clone(),
                                 identity: identity.clone(),
                                 fallback_policy: call.fallback_policy,
+                                bare_identifier: call.bare_identifier,
                                 arg_count: call.args.len(),
                                 out_count_slot,
                             },
@@ -3056,6 +3074,7 @@ impl Compiler {
                 | MirRvalue::Index { .. }
                 | MirRvalue::Member { .. }
                 | MirRvalue::DynamicMember { .. }
+                | MirRvalue::WorkspaceFirstStaticProperty { .. }
         )
     }
 

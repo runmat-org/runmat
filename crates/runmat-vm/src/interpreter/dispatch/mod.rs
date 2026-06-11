@@ -1733,6 +1733,7 @@ pub async fn dispatch_instruction(
             name,
             identity,
             fallback_policy,
+            bare_identifier,
             arg_count,
             out_count,
         } => {
@@ -1743,6 +1744,7 @@ pub async fn dispatch_instruction(
                     workspace_name: name,
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
+                    bare_identifier: *bare_identifier,
                     out_count: *out_count,
                     source_id,
                     call_arg_spans: call_arg_spans.clone(),
@@ -1777,6 +1779,7 @@ pub async fn dispatch_instruction(
             name,
             identity,
             fallback_policy,
+            bare_identifier,
             arg_count,
             out_count_slot,
         } => {
@@ -1788,6 +1791,7 @@ pub async fn dispatch_instruction(
                     workspace_name: name,
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
+                    bare_identifier: *bare_identifier,
                     out_count,
                     source_id,
                     call_arg_spans: call_arg_spans.clone(),
@@ -1913,6 +1917,7 @@ pub async fn dispatch_instruction(
             name,
             identity,
             fallback_policy,
+            bare_identifier,
             specs,
             out_count,
         } => {
@@ -1923,6 +1928,7 @@ pub async fn dispatch_instruction(
                     workspace_name: name,
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
+                    bare_identifier: *bare_identifier,
                     out_count: *out_count,
                     source_id,
                     call_arg_spans: call_arg_spans.clone(),
@@ -1957,6 +1963,7 @@ pub async fn dispatch_instruction(
             name,
             identity,
             fallback_policy,
+            bare_identifier,
             specs,
             out_count_slot,
         } => {
@@ -1968,6 +1975,7 @@ pub async fn dispatch_instruction(
                     workspace_name: name,
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
+                    bare_identifier: *bare_identifier,
                     out_count,
                     source_id,
                     call_arg_spans: call_arg_spans.clone(),
@@ -2150,6 +2158,20 @@ pub async fn dispatch_instruction(
         }
         Instr::LoadStaticProperty(class_name, prop) => {
             handle_load_static_property(stack, class_name, prop)?;
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::LoadWorkspaceFirstStaticProperty {
+            name,
+            class_name,
+            property,
+        } => {
+            if let Some(value) = crate::runtime::workspace::workspace_lookup(name) {
+                stack.push(value);
+            } else {
+                handle_load_static_property(stack, class_name, property)?;
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

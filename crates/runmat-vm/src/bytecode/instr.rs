@@ -222,6 +222,11 @@ pub enum Instr {
     CreateClosure(String, usize),
     CreateSemanticClosure(FunctionId, String, usize),
     LoadStaticProperty(String, String),
+    LoadWorkspaceFirstStaticProperty {
+        name: String,
+        class_name: String,
+        property: String,
+    },
 
     // Registers a runtime class definition produced by `classdef` lowering.
     RegisterClass {
@@ -295,6 +300,7 @@ pub enum Instr {
         name: String,
         identity: CallableIdentity,
         fallback_policy: CallableFallbackPolicy,
+        bare_identifier: bool,
         arg_count: usize,
         out_count: usize,
     },
@@ -302,6 +308,7 @@ pub enum Instr {
         name: String,
         identity: CallableIdentity,
         fallback_policy: CallableFallbackPolicy,
+        bare_identifier: bool,
         arg_count: usize,
         out_count_slot: usize,
     },
@@ -330,6 +337,7 @@ pub enum Instr {
         name: String,
         identity: CallableIdentity,
         fallback_policy: CallableFallbackPolicy,
+        bare_identifier: bool,
         specs: Vec<ArgSpec>,
         out_count: usize,
     },
@@ -337,6 +345,7 @@ pub enum Instr {
         name: String,
         identity: CallableIdentity,
         fallback_policy: CallableFallbackPolicy,
+        bare_identifier: bool,
         specs: Vec<ArgSpec>,
         out_count_slot: usize,
     },
@@ -542,7 +551,9 @@ impl Instr {
             Instr::LoadMemberDynamic | Instr::LoadMemberDynamicOrInit => effect(2, 1),
             Instr::CreateClosure(_, capture_count)
             | Instr::CreateSemanticClosure(_, _, capture_count) => effect(*capture_count, 1),
-            Instr::LoadStaticProperty(_, _) => effect(0, 1),
+            Instr::LoadStaticProperty(_, _) | Instr::LoadWorkspaceFirstStaticProperty { .. } => {
+                effect(0, 1)
+            }
             Instr::RegisterClass { .. } => effect(0, 0),
             Instr::CallFevalExpandMultiOutput(specs, _)
             | Instr::CallFevalExpandMultiOutputUsingOutputSlot(specs, _)

@@ -746,6 +746,7 @@ fn rvalue_has_fusion_signal(value: &MirRvalue) -> bool {
         | MirRvalue::Index { .. }
         | MirRvalue::Member { .. }
         | MirRvalue::DynamicMember { .. }
+        | MirRvalue::WorkspaceFirstStaticProperty { .. }
         | MirRvalue::MetaClass(_)
         | MirRvalue::Colon
         | MirRvalue::End

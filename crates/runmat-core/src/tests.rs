@@ -2390,7 +2390,7 @@ fn execute_request_path_error_returns_resolved_source_context() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let dir = tempfile::tempdir().expect("tempdir");
     let source_path = dir.path().join("source-context-error.m");
-    let source_text = "ss\nx = 1;\n";
+    let source_text = "missing_name_for_source_context\nx = 1;\n";
     std::fs::write(&source_path, source_text).expect("write test source");
     let source_path = source_path.to_string_lossy().to_string();
 
@@ -6149,6 +6149,35 @@ fn execute_path_request_reports_import_ambiguous_for_unqualified_class_construct
 }
 
 #[test]
+fn execute_path_request_bare_non_loader_identifier_does_not_probe_constructor_wildcards() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::create_dir_all(tmp.path().join("+pkg2")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("C.m"),
+        "classdef C; methods; function obj = C(), end; end; end",
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("+pkg2").join("C.m"),
+        "classdef C; methods; function obj = C(), end; end; end",
+    )
+    .expect("write class source");
+    std::fs::write(tmp.path().join("main.m"), "import pkg.*; import pkg2.*; C;")
+        .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let err = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect_err("bare C should fail as an undefined variable, not import ambiguity");
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic undefined-variable error");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
+}
+
+#[test]
 fn execute_path_request_specific_import_precedes_wildcard_for_unqualified_class_name() {
     let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -9796,6 +9825,8 @@ fn run_exposes_script_variables_to_following_call_syntax() {
         r#"
         generated = [11 22 33];
         sin = [5 8 13];
+        rand = 9;
+        f = @rand;
     "#,
     )
     .expect("write worker script");
@@ -9810,6 +9841,9 @@ fn run_exposes_script_variables_to_following_call_syntax() {
         shadowed_builtin_value = sin(2);
         builtin_fallback_value = cos(0);
         constant_fallback_value = pi;
+        shadowed_bare_builtin_value = rand;
+        bare_builtin_fallback_value = randn;
+        loaded_function_handle_call = f();
         generated(1);
         after_standalone_call = 7;
     "#,
@@ -9834,6 +9868,19 @@ fn run_exposes_script_variables_to_following_call_syntax() {
         &outcome,
         "constant_fallback_value",
         &runmat_builtins::Value::Num(std::f64::consts::PI)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "shadowed_bare_builtin_value",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+    assert!(matches!(
+        outcome_named_upsert_value(&outcome, "bare_builtin_fallback_value"),
+        Some(runmat_builtins::Value::Num(value)) if value.is_finite()
+    ));
+    assert!(matches!(
+        outcome_named_upsert_value(&outcome, "loaded_function_handle_call"),
+        Some(runmat_builtins::Value::Num(value)) if value.is_finite()
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -9862,6 +9909,87 @@ fn run_script_variables_shadow_builtin_constants() {
         &outcome,
         "shadowed_constant_value",
         &runmat_builtins::Value::Num(4.0)
+    ));
+}
+
+#[test]
+fn run_script_variables_shadow_imported_static_properties() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        temp.path().join("RunStaticShadowFixture.m"),
+        r#"
+classdef RunStaticShadowFixture
+  properties(Static)
+    runStaticShadowValue = 42
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        temp.path().join("static_worker.m"),
+        "runStaticShadowValue = 9;\n",
+    )
+    .expect("write worker");
+    std::fs::write(
+        temp.path().join("main.m"),
+        r#"
+import RunStaticShadowFixture.*;
+run('static_worker');
+shadowed_static_value = runStaticShadowValue;
+"#,
+    )
+    .expect("write main script");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = temp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("post-run static property shadowing succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "shadowed_static_value",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+}
+
+#[test]
+fn run_keeps_imported_static_property_fallback_after_external_visibility() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        temp.path().join("RunStaticFallbackFixture.m"),
+        r#"
+classdef RunStaticFallbackFixture
+  properties(Static)
+    runStaticFallbackValue = 42
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(temp.path().join("empty_worker.m"), "worker_marker = 1;\n")
+        .expect("write worker");
+    std::fs::write(
+        temp.path().join("main.m"),
+        r#"
+import RunStaticFallbackFixture.*;
+run('empty_worker');
+fallback_static_value = runStaticFallbackValue;
+"#,
+    )
+    .expect("write main script");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = temp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("post-run static property fallback succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "fallback_static_value",
+        &runmat_builtins::Value::Num(42.0)
     ));
 }
 

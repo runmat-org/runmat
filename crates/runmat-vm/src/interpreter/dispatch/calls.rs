@@ -113,6 +113,7 @@ pub struct WorkspaceFirstCallContext<'a> {
     pub workspace_name: &'a str,
     pub identity: CallableIdentity,
     pub fallback_policy: CallableFallbackPolicy,
+    pub bare_identifier: bool,
     pub out_count: usize,
     pub source_id: Option<runmat_hir::SourceId>,
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
@@ -609,6 +610,7 @@ pub async fn handle_workspace_first_prepared_call(
         workspace_name,
         identity,
         fallback_policy,
+        bare_identifier,
         out_count,
         source_id,
         call_arg_spans,
@@ -619,6 +621,10 @@ pub async fn handle_workspace_first_prepared_call(
     } = ctx;
 
     if let Some(base) = crate::runtime::workspace::workspace_lookup(workspace_name) {
+        if bare_identifier && args.is_empty() {
+            stack.push(normalize_requested_outputs(base, out_count));
+            return Ok(UserCallHandling::Completed);
+        }
         let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
         let _output_guard = runmat_runtime::output_context::push_output_count(out_count);
         let result =

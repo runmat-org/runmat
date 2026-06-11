@@ -1221,6 +1221,7 @@ async fn run_interpreter_inner(
             | Instr::CreateClosure(_, _)
             | Instr::CreateSemanticClosure(_, _, _)
             | Instr::LoadStaticProperty(_, _)
+            | Instr::LoadWorkspaceFirstStaticProperty { .. }
             | Instr::RegisterClass { .. }
             | Instr::CallFevalMulti(_, _)
             | Instr::CallFevalMultiUsingOutputSlot(_, _)

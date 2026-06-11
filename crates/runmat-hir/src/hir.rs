@@ -317,6 +317,11 @@ pub enum HirExprKind {
     Index(Box<HirExpr>, IndexingSemantics),
     Member(Box<HirExpr>, MemberName),
     MemberDynamic(Box<HirExpr>, Box<HirExpr>),
+    WorkspaceFirstStaticProperty {
+        workspace_name: SymbolName,
+        class_name: String,
+        property: MemberName,
+    },
     Call(HirCall),
     CommandCall(HirCommandCall),
     FunctionHandle(FunctionHandleTarget),
@@ -347,6 +352,8 @@ pub struct HirCall {
     pub requested_outputs: RequestedOutputCount,
     #[serde(default)]
     pub workspace_first_name: Option<SymbolName>,
+    #[serde(default)]
+    pub bare_identifier: bool,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
