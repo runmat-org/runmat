@@ -5,7 +5,7 @@ use std::ffi::OsString;
 use std::fmt;
 use std::io::{self, ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::SystemTime;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -434,11 +434,21 @@ impl Seek for File {
 }
 
 static PROVIDER: OnceCell<RwLock<Arc<dyn FsProvider>>> = OnceCell::new();
+static PROVIDER_OVERRIDE_LOCK: OnceCell<Mutex<()>> = OnceCell::new();
 #[cfg(target_arch = "wasm32")]
 static CURRENT_DIR: OnceCell<RwLock<PathBuf>> = OnceCell::new();
 
 fn provider_lock() -> &'static RwLock<Arc<dyn FsProvider>> {
     PROVIDER.get_or_init(|| RwLock::new(default_provider()))
+}
+
+/// Serializes tests and embedders that temporarily replace the process-wide
+/// filesystem provider.
+pub fn provider_override_lock() -> MutexGuard<'static, ()> {
+    PROVIDER_OVERRIDE_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(target_arch = "wasm32")]

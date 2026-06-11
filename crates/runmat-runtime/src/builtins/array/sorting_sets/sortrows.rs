@@ -453,6 +453,11 @@ fn sortrows_host(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsE
             sortrows_complex_tensor(tensor, rest)
         }
         Value::CharArray(ca) => sortrows_char_array(ca, rest),
+        Value::Object(obj) if obj.is_class(crate::builtins::table::TABLE_CLASS) => {
+            let (sorted, indices) =
+                crate::builtins::table::sortrows_table(Value::Object(obj), rest)?;
+            Ok(SortRowsEvaluation::from_parts(sorted, indices))
+        }
         other => Err(sortrows_error_with(
             &SORTROWS_ERROR_UNSUPPORTED_INPUT_TYPE,
             format!(
@@ -1199,6 +1204,10 @@ pub struct SortRowsEvaluation {
 }
 
 impl SortRowsEvaluation {
+    pub(crate) fn from_parts(sorted: Value, indices: Tensor) -> Self {
+        Self { sorted, indices }
+    }
+
     pub fn into_sorted_value(self) -> Value {
         self.sorted
     }

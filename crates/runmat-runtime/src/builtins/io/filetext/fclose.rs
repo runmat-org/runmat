@@ -726,6 +726,7 @@ pub(crate) mod tests {
     #[test]
     fn fclose_keeps_file_registered_when_flush_fails() {
         let _guard = registry_guard();
+        let _provider_lock = runmat_filesystem::provider_override_lock();
         registry::reset_for_tests();
         let fail_flush = Arc::new(AtomicBool::new(true));
         let provider = Arc::new(FailingFlushProvider {
@@ -754,6 +755,7 @@ pub(crate) mod tests {
     #[test]
     fn concurrent_fclose_only_one_call_closes_file() {
         let _guard = registry_guard();
+        let _provider_lock = runmat_filesystem::provider_override_lock();
         registry::reset_for_tests();
         let _provider_guard = runmat_filesystem::replace_provider(Arc::new(FailingFlushProvider {
             fail_flush: Arc::new(AtomicBool::new(false)),

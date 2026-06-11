@@ -199,7 +199,9 @@ pub fn build_string_rhs_view(
     if let Value::StringArray(rt) = rhs {
         let dims = selection_lengths.len();
         let mut shape = rt.shape.clone();
-        if shape.len() < dims {
+        if dims == 1 && shape.iter().filter(|&&dim| dim != 1).count() <= 1 {
+            shape = vec![rt.data.len()];
+        } else if shape.len() < dims {
             shape.resize(dims, 1);
         }
         if shape.len() > dims {
@@ -227,9 +229,61 @@ pub fn build_string_rhs_view(
             strides: rstrides,
         });
     }
+    if let Value::Cell(cell) = rhs {
+        let dims = selection_lengths.len();
+        let mut data = Vec::with_capacity(cell.data.len());
+        for handle in &cell.data {
+            let value = unsafe { &*handle.as_raw() };
+            match value {
+                Value::String(text) => data.push(text.clone()),
+                Value::CharArray(chars) => data.push(chars.to_string()),
+                Value::StringArray(strings) if strings.data.len() == 1 => {
+                    data.push(strings.data[0].clone())
+                }
+                other => {
+                    return Err(mex(
+                        "InvalidSliceAssignmentRhs",
+                        &format!(
+                            "rhs cell elements must be string scalars or character vectors, got {other:?}"
+                        ),
+                    ))
+                }
+            }
+        }
+        let mut shape = cell.shape.clone();
+        if dims == 1 && shape.iter().filter(|&&dim| dim != 1).count() <= 1 {
+            shape = vec![cell.data.len()];
+        } else if shape.len() < dims {
+            shape.resize(dims, 1);
+        }
+        if shape.len() > dims {
+            if shape.iter().skip(dims).any(|&s| s != 1) {
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+            }
+            shape.truncate(dims);
+        }
+        for d in 0..dims {
+            let out_len = selection_lengths[d];
+            let rhs_len = shape[d];
+            if !(rhs_len == 1 || rhs_len == out_len) {
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+            }
+        }
+        let mut rstrides = vec![0usize; dims];
+        let mut racc = 1usize;
+        for d in 0..dims {
+            rstrides[d] = racc;
+            racc *= shape[d];
+        }
+        return Ok(StringRhsView::Tensor {
+            data,
+            shape,
+            strides: rstrides,
+        });
+    }
     Err(mex(
         "InvalidSliceAssignmentRhs",
-        "rhs must be string or string array",
+        "rhs must be string, string array, or cellstr",
     ))
 }
 

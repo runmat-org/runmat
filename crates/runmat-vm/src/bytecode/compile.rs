@@ -3563,6 +3563,55 @@ mod tests {
     }
 
     #[test]
+    fn compile_interprets_readtable_weekly_groupsummary_workflow() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "runmat_readtable_weekly_{}_{}.csv",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::write(
+            &path,
+            "Date,Orders,Revenue\n2024-03-11,10,100\n2024-03-12,20,300\n2024-03-18,6,90\n",
+        )
+        .expect("write csv");
+        let source = format!(
+            "\
+T = readtable('{}');\n\
+T.Date = datetime(T.Date, 'InputFormat', 'yyyy-MM-dd');\n\
+T.Week = dateshift(T.Date, 'start', 'week');\n\
+weekly = groupsummary(T, 'Week', 'mean', {{'Orders', 'Revenue'}});\n\
+weekly.Properties.VariableNames(end-1:end) = {{'AvgOrders', 'AvgRevenue'}};\n\
+weekly = sortrows(weekly, 'Week');\n\
+out = weekly.AvgRevenue;\n",
+            path.to_string_lossy()
+        );
+        let ast = runmat_parser::parse(&source).expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let out_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "out")
+            .expect("out export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[out_export.slot.0] else {
+            panic!(
+                "expected numeric AvgRevenue tensor, got {:?}",
+                vars[out_export.slot.0]
+            );
+        };
+        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.data, vec![200.0, 90.0]);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn compile_rejects_dynamic_member_store_back_paren_index_with_read_context_identifier() {
         let ast =
             runmat_parser::parse("s = struct('x', {1, 2}); f = 'x'; s(1).(f) = 3;").expect("parse");

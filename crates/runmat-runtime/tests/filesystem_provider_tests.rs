@@ -14,6 +14,7 @@ use tempfile::tempdir;
 #[test]
 fn sandbox_provider_supports_repl_and_tabular_builtins() {
     let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _provider_lock = vfs::provider_override_lock();
     let temp = tempdir().expect("temp dir");
     let sandbox = Arc::new(
         SandboxFsProvider::new(temp.path().to_path_buf()).expect("sandbox provider must init"),
@@ -50,6 +51,7 @@ fn sandbox_provider_supports_repl_and_tabular_builtins() {
 #[test]
 fn remote_provider_supports_repl_and_tabular_builtins() {
     let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
+    let _provider_lock = vfs::provider_override_lock();
     let server = remote_test_support::RemoteTestServer::spawn();
     let remote = Arc::new(
         RemoteFsProvider::new(RemoteFsConfig {

@@ -92,6 +92,13 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `stats/hist` | `histcounts`, `histcounts2` | yes | P | - | Binning and histogram counts. |
 | done | `stats/random` | `rng` | N/A | - | - | Host and device RNG state. |
 
+## Dates and Times
+
+| Status | Path | Names | GPU | Fusion | Backend | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| done | `datetime` | `datetime`, `dateshift`, `year`, `month`, `day`, `hour`, `minute`, `second` | host | - | - | Date/time construction, formatting, component extraction, arithmetic, and calendar boundary shifting. |
+| done | `duration` | `duration`, `seconds`, `minutes`, `hours`, `days`, `milliseconds` | host | - | - | Duration construction, display, arithmetic, and datetime interop. |
+
 ## Logical and Comparisons
 
 | Status | Path | Names | GPU | Fusion | Backend | Notes |
@@ -120,6 +127,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `cells/core` | `cell`, `cell2mat`, `mat2cell`, `cellfun` | host | P | - | Cell arrays and mapping helpers. |
 | done | `cells/core` | `cellstr` | host | - | - | Cell/string conversion. |
 | done | `containers/map` | `containers.Map` | host | - | - | String-to-value map support. |
+| done | `table` | `table`, `height`, `width`, `groupsummary` | host | - | - | Table containers, properties, dot/paren/brace indexing, grouping summaries, display, and row sorting through `sortrows`. |
 
 ## Introspection, Environment, and Diagnostics
 
@@ -138,7 +146,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `io/filetext` | `fileread`, `filewrite`, `fopen`, `fclose`, `fread`, `fwrite`, `feof`, `fgetl`, `fgets`, `fprintf` | host | - | - | Text and binary file I/O. |
 | done | `io/core` | `disp` | host | - | - | Display output sink. |
 | done | `io/interactive` | `input` | host | - | - | Prompted input, including text mode. |
-| done | `io/tabular` | `readmatrix`, `writematrix`, `csvread`, `csvwrite`, `dlmread`, `dlmwrite` | host | - | - | Simple tabular I/O. |
+| done | `io/tabular` | `readtable`, `readmatrix`, `writematrix`, `csvread`, `csvwrite`, `dlmread`, `dlmwrite` | host | - | - | Tabular I/O; `readtable` imports delimited text and spreadsheet files as table variables with sheet/range/name options. |
 | done | `io/mat` | `save`, `load` | host | - | - | MAT-like persistence. |
 
 ## I/O - JSON, Networking, and Images

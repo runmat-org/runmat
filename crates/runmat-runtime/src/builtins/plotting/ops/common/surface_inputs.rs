@@ -148,6 +148,7 @@ mod tests {
         assert!(rest.is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn image_axis_sources_expand_two_element_extents() {
         let x = Value::Tensor(Tensor {
@@ -180,6 +181,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn surface_axis_sources_enforce_matlab_vector_lengths() {
         let x = Value::Tensor(Tensor {
