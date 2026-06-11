@@ -3682,6 +3682,43 @@ summary = [numel(b); numel(a); all(isfinite(y)); err < 1e-12];\n",
     }
 
     #[test]
+    fn compile_interprets_rref_rank_workflow() {
+        let ast = runmat_parser::parse(
+            "\
+A = [1 2 3; 2 4 6; 1 1 1];\n\
+rankA = rank(A);\n\
+[R, p] = rref(A);\n\
+expected = [1 0 -1; 0 1 2; 0 0 0];\n\
+expected_p = [1 2];\n\
+err = max(max(abs(R - expected)));\n\
+pivot_ok = all(p == expected_p);\n\
+summary = [rankA; double(err < 1e-12); numel(p); double(pivot_ok)];\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let summary_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "summary")
+            .expect("summary export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[summary_export.slot.0] else {
+            panic!(
+                "expected numeric summary tensor, got {:?}",
+                vars[summary_export.slot.0]
+            );
+        };
+        assert_eq!(tensor.shape, vec![4, 1]);
+        assert_eq!(tensor.data, vec![2.0, 1.0, 2.0, 1.0]);
+    }
+
+    #[test]
     fn compile_rejects_dynamic_member_store_back_paren_index_with_read_context_identifier() {
         let ast =
             runmat_parser::parse("s = struct('x', {1, 2}); f = 'x'; s(1).(f) = 3;").expect("parse");

@@ -58,7 +58,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `math/linalg/ops` | `mtimes`, `mrdivide`, `mldivide`, `transpose`, `ctranspose`, `trace` | yes | M/T | BLAS | Core matrix operations. |
 | done | `math/linalg/ops` | `dot`, `mpower` | yes | M | BLAS | Dot product and matrix power. |
 | done | `math/linalg/factor` | `lu`, `qr`, `chol`, `svd`, `eig` | yes | - | LAPACK | Factorizations and eigensolvers. |
-| done | `math/linalg/solve` | `linsolve`, `pinv`, `inv`, `det`, `rank`, `rcond`, `cond`, `norm` | yes | - | LAPACK/BLAS | Solves and matrix metrics. |
+| done | `math/linalg/solve` | `linsolve`, `pinv`, `inv`, `det`, `rank`, `rref`, `rcond`, `cond`, `norm` | yes | - | LAPACK/BLAS/- | Solves, row reduction, and matrix metrics. |
 | done | `math/linalg/structure` | `bandwidth`, `issymmetric`, `ishermitian`, `symrcm` | host | - | - | Structure queries and diagnostics. |
 
 ## FFT, Signal, and Image Processing

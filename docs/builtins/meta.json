@@ -48442,6 +48442,151 @@
       ]
     },
     {
+      "name": "rref",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "R = rref(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reduced row echelon form of A."
+            }
+          ]
+        },
+        {
+          "label": "R = rref(A, tol)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Pivot tolerance."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reduced row echelon form of A."
+            }
+          ]
+        },
+        {
+          "label": "[R, pivots] = rref(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reduced row echelon form of A."
+            },
+            {
+              "name": "pivots",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based pivot column indices."
+            }
+          ]
+        },
+        {
+          "label": "[R, pivots] = rref(A, tol)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Pivot tolerance."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reduced row echelon form of A."
+            },
+            {
+              "name": "pivots",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based pivot column indices."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.RREF.INVALID_ARGUMENT",
+          "identifier": "RunMat:rref:InvalidArgument",
+          "when": "Optional tolerance argument is malformed or outside accepted bounds.",
+          "message": "rref: invalid argument"
+        },
+        {
+          "code": "RM.RREF.INVALID_INPUT",
+          "identifier": "RunMat:rref:InvalidInput",
+          "when": "Input shape/type cannot be processed for row reduction.",
+          "message": "rref: invalid input"
+        },
+        {
+          "code": "RM.RREF.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:rref:TooManyOutputs",
+          "when": "More than two output arguments are requested.",
+          "message": "rref: too many output arguments"
+        },
+        {
+          "code": "RM.RREF.INTERNAL",
+          "identifier": "RunMat:rref:Internal",
+          "when": "Runtime fails while computing row reduction or executing gather/upload paths.",
+          "message": "rref: internal runtime failure"
+        }
+      ]
+    },
+    {
       "name": "rcond",
       "output_mode": "Fixed",
       "completion_policy": "Public",
