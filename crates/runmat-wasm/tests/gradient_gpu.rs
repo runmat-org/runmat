@@ -40,14 +40,30 @@ fn init_options(enable_gpu: bool) -> JsValue {
 }
 
 fn execute_request(script: &str) -> JsValue {
-    serde_wasm_bindgen::to_value(&serde_json::json!({
-        "source": {
-            "kind": "text",
-            "name": "gradient_gpu_test.m",
-            "text": script,
-        }
-    }))
-    .expect("serialize executeRequest payload")
+    let source = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &source,
+        &JsValue::from_str("kind"),
+        &JsValue::from_str("text"),
+    )
+    .expect("set source kind");
+    js_sys::Reflect::set(
+        &source,
+        &JsValue::from_str("name"),
+        &JsValue::from_str("gradient_gpu_test.m"),
+    )
+    .expect("set source name");
+    js_sys::Reflect::set(
+        &source,
+        &JsValue::from_str("text"),
+        &JsValue::from_str(script),
+    )
+    .expect("set source text");
+
+    let request = js_sys::Object::new();
+    js_sys::Reflect::set(&request, &JsValue::from_str("source"), source.as_ref())
+        .expect("set request source");
+    request.into()
 }
 
 #[wasm_bindgen_test(async)]

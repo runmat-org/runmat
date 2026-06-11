@@ -16,3 +16,8 @@ async fn impedance_loop_executes_without_runtime_error() {
 async fn slice_end_arithmetic_executes_without_runtime_error() {
     shared::assert_slice_end_arithmetic_executes_without_runtime_error().await;
 }
+
+#[wasm_bindgen_test(async)]
+async fn tic_toc_loop_executes_without_runtime_error() {
+    shared::assert_tic_toc_loop_executes_without_runtime_error().await;
+}
