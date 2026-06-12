@@ -388,7 +388,7 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::Workspace,
             ..BuiltinSemantics::unknown()
         },
-        "assignin" => BuiltinSemantics {
+        "assignin" | "syms" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_workspace(),
             workspace_effect: Some(BuiltinWorkspaceEffect::CreatesBinding),
             purity: BuiltinPurity::Impure,

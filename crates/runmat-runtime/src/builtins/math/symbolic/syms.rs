@@ -1,6 +1,7 @@
 //! MATLAB-compatible scalar `syms` builtin for declaring symbolic variables.
 
 use runmat_builtins::{
+    symbolic::{parse_symbolic_declaration, symbolic_declaration_tokens, SymbolicDeclaration},
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     SymbolicExpr, Value,
@@ -9,7 +10,7 @@ use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, workspace, BuiltinResult, RuntimeError};
 
-use super::{empty_return_value, is_valid_identifier, text_scalar};
+use super::{empty_return_value, text_scalar};
 
 const BUILTIN_NAME: &str = "syms";
 
@@ -74,42 +75,53 @@ pub const SYMS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::math::symbolic::syms"
 )]
 async fn syms_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let names = declared_symbol_names(&args)?;
-    if names.is_empty() {
+    let declarations = declared_symbols(&args)?;
+    if declarations.is_empty() {
         return Err(syms_error(&SYMS_ERRORS[0]));
     }
-    for name in names {
-        workspace::assign(&name, Value::Symbolic(SymbolicExpr::variable(&name))).map_err(
-            |err| {
-                syms_error_with_message(
-                    &SYMS_ERRORS[2],
-                    format!("{}: {}", SYMS_ERRORS[2].message, err),
-                )
-            },
-        )?;
+    for declaration in declarations {
+        for parameter in &declaration.parameters {
+            assign_symbolic_value(parameter, SymbolicExpr::variable(parameter))?;
+        }
+
+        let value = if declaration.parameters.is_empty() {
+            SymbolicExpr::variable(&declaration.name)
+        } else {
+            SymbolicExpr::function_reference(&declaration.name, declaration.parameters.clone())
+        };
+        assign_symbolic_value(&declaration.name, value)?;
     }
     Ok(empty_return_value())
 }
 
-fn declared_symbol_names(args: &[Value]) -> BuiltinResult<Vec<String>> {
-    let mut names = Vec::new();
+fn declared_symbols(args: &[Value]) -> BuiltinResult<Vec<SymbolicDeclaration>> {
+    let mut declarations = Vec::new();
     for arg in args {
         let Some(text) = text_scalar(arg) else {
             return Err(syms_error(&SYMS_ERRORS[1]));
         };
-        for token in text.split_whitespace() {
-            if names.is_empty() || !is_assumption_keyword(token) {
-                if !is_valid_identifier(token) {
-                    return Err(syms_error_with_message(
+        for token in symbolic_declaration_tokens(&text) {
+            if declarations.is_empty() || !is_assumption_keyword(token) {
+                let declaration = parse_symbolic_declaration(token).map_err(|err| {
+                    syms_error_with_message(
                         &SYMS_ERRORS[1],
-                        format!("{}: '{token}'", SYMS_ERRORS[1].message),
-                    ));
-                }
-                names.push(token.to_string());
+                        format!("{}: '{token}' ({err})", SYMS_ERRORS[1].message),
+                    )
+                })?;
+                declarations.push(declaration);
             }
         }
     }
-    Ok(names)
+    Ok(declarations)
+}
+
+fn assign_symbolic_value(name: &str, expr: SymbolicExpr) -> BuiltinResult<()> {
+    workspace::assign(name, Value::Symbolic(expr)).map_err(|err| {
+        syms_error_with_message(
+            &SYMS_ERRORS[2],
+            format!("{}: {}", SYMS_ERRORS[2].message, err),
+        )
+    })
 }
 
 fn is_assumption_keyword(token: &str) -> bool {
@@ -147,10 +159,50 @@ fn syms_error_with_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
+    use runmat_thread_local::runmat_thread_local;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    runmat_thread_local! {
+        static TEST_WORKSPACE: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
+    }
+
+    fn test_workspace_guard() -> std::sync::MutexGuard<'static, ()> {
+        let guard = crate::workspace::test_guard();
+        crate::workspace::register_workspace_resolver(crate::workspace::WorkspaceResolver {
+            lookup: |name| TEST_WORKSPACE.with(|slot| slot.borrow().get(name).cloned()),
+            snapshot: || {
+                let mut entries: Vec<(String, Value)> =
+                    TEST_WORKSPACE.with(|slot| slot.borrow().clone().into_iter().collect());
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                entries
+            },
+            globals: || Vec::new(),
+            assign: Some(|name, value| {
+                TEST_WORKSPACE.with(|slot| {
+                    slot.borrow_mut().insert(name.to_string(), value);
+                });
+                Ok(())
+            }),
+            clear: Some(|| {
+                TEST_WORKSPACE.with(|slot| slot.borrow_mut().clear());
+                Ok(())
+            }),
+            remove: Some(|name| {
+                TEST_WORKSPACE.with(|slot| {
+                    slot.borrow_mut().remove(name);
+                });
+                Ok(())
+            }),
+        });
+        TEST_WORKSPACE.with(|slot| slot.borrow_mut().clear());
+        guard
+    }
 
     #[test]
     fn parses_names_and_skips_assumptions_after_first_symbol() {
-        let names = declared_symbol_names(&[
+        let declarations = declared_symbols(&[
             Value::from("x"),
             Value::from("real"),
             Value::from("h"),
@@ -158,13 +210,39 @@ mod tests {
         ])
         .expect("names");
 
-        assert_eq!(names, vec!["x".to_string(), "h".to_string()]);
+        assert_eq!(
+            declarations
+                .into_iter()
+                .map(|declaration| declaration.name)
+                .collect::<Vec<_>>(),
+            vec!["x".to_string(), "h".to_string()]
+        );
+    }
+
+    #[test]
+    fn parses_function_declarations_and_parameters() {
+        let declarations = declared_symbols(&[Value::from("Y(X) f(x, y)")]).expect("declarations");
+
+        assert_eq!(declarations[0].name, "Y");
+        assert_eq!(declarations[0].parameters, vec!["X"]);
+        assert_eq!(declarations[1].name, "f");
+        assert_eq!(declarations[1].parameters, vec!["x", "y"]);
+    }
+
+    #[test]
+    fn assigns_symbolic_function_declaration_to_workspace() {
+        let _guard = test_workspace_guard();
+
+        block_on(syms_builtin(vec![Value::from("Y(X)")])).expect("syms");
+
+        assert_eq!(crate::workspace::lookup("X").unwrap().to_string(), "X");
+        assert_eq!(crate::workspace::lookup("Y").unwrap().to_string(), "Y(X)");
     }
 
     #[test]
     fn rejects_identifier_with_leading_underscore() {
-        let err = declared_symbol_names(&[Value::from("_x")])
-            .expect_err("invalid identifier should error");
+        let err =
+            declared_symbols(&[Value::from("_x")]).expect_err("invalid identifier should error");
 
         assert_eq!(err.identifier.as_deref(), Some("RunMat:syms:InvalidName"));
     }

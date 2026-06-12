@@ -228,6 +228,17 @@ fn evaluate_limit(
     }
 
     let point_expr = SymbolicExpr::constant(point);
+    if let SymbolicExpr::Derivative {
+        expr: derivative_expr,
+        variable: derivative_variable,
+        ..
+    } = expr
+    {
+        if derivative_variable == variable && contains_formal_symbolic_function(derivative_expr) {
+            return Ok(expr.clone());
+        }
+    }
+
     let substituted = expr.substitute(variable, &point_expr).simplify();
     if let Some(value) = substituted.constant_value() {
         return Ok(SymbolicExpr::constant(value));
@@ -237,6 +248,57 @@ fn evaluate_limit(
         SymbolicExpr::Constant(_) => Ok(expr.clone()),
         SymbolicExpr::Variable(name) if name == variable => Ok(point_expr),
         SymbolicExpr::Variable(_) => Ok(expr.clone()),
+        SymbolicExpr::FunctionReference(name, parameters) => {
+            let mut substituted = false;
+            let args = parameters
+                .iter()
+                .map(|parameter| {
+                    if parameter == variable {
+                        substituted = true;
+                        Ok(point_expr.clone())
+                    } else {
+                        Ok(SymbolicExpr::variable(parameter))
+                    }
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            if substituted {
+                Ok(SymbolicExpr::function_call(name.clone(), args))
+            } else {
+                Ok(SymbolicExpr::function_reference(
+                    name.clone(),
+                    parameters.clone(),
+                ))
+            }
+        }
+        SymbolicExpr::FunctionCall(name, args) => Ok(SymbolicExpr::function_call(
+            name.clone(),
+            args.iter()
+                .map(|arg| evaluate_limit(arg, variable, point, direction, depth))
+                .collect::<BuiltinResult<Vec<_>>>()?,
+        )),
+        SymbolicExpr::Equation(lhs, rhs) => Ok(SymbolicExpr::equation(
+            evaluate_limit(lhs, variable, point, direction, depth)?,
+            evaluate_limit(rhs, variable, point, direction, depth)?,
+        )),
+        SymbolicExpr::Derivative {
+            expr,
+            variable: derivative_variable,
+            order,
+        } => {
+            if derivative_variable == variable && contains_formal_symbolic_function(expr) {
+                return Ok(SymbolicExpr::Derivative {
+                    expr: expr.clone(),
+                    variable: derivative_variable.clone(),
+                    order: *order,
+                });
+            }
+            Ok(SymbolicExpr::Derivative {
+                expr: Box::new(evaluate_limit(expr, variable, point, direction, depth)?),
+                variable: derivative_variable.clone(),
+                order: *order,
+            }
+            .simplify())
+        }
         SymbolicExpr::Neg(inner) => Ok(SymbolicExpr::neg_expr(evaluate_limit(
             inner, variable, point, direction, depth,
         )?)),
@@ -267,6 +329,25 @@ fn evaluate_limit(
             *function,
             evaluate_limit(inner, variable, point, direction, depth)?,
         )),
+    }
+}
+
+fn contains_formal_symbolic_function(expr: &SymbolicExpr) -> bool {
+    match expr {
+        SymbolicExpr::FunctionReference(_, _) | SymbolicExpr::FunctionCall(_, _) => true,
+        SymbolicExpr::Equation(lhs, rhs)
+        | SymbolicExpr::Add(lhs, rhs)
+        | SymbolicExpr::Sub(lhs, rhs)
+        | SymbolicExpr::Mul(lhs, rhs)
+        | SymbolicExpr::Div(lhs, rhs)
+        | SymbolicExpr::Pow(lhs, rhs) => {
+            contains_formal_symbolic_function(lhs) || contains_formal_symbolic_function(rhs)
+        }
+        SymbolicExpr::Derivative { expr, .. } | SymbolicExpr::Neg(expr) => {
+            contains_formal_symbolic_function(expr)
+        }
+        SymbolicExpr::Function(_, expr) => contains_formal_symbolic_function(expr),
+        SymbolicExpr::Constant(_) | SymbolicExpr::Variable(_) => false,
     }
 }
 
@@ -551,6 +632,16 @@ mod tests {
         let result = evaluate_limit(&expr, "x", 0.0, LimitDirection::TwoSided, 0).expect("limit");
 
         assert_eq!(result, SymbolicExpr::constant(-1.0 / 6.0));
+    }
+
+    #[test]
+    fn preserves_formal_derivative_limit_for_unknown_symbolic_function() {
+        let y = SymbolicExpr::function_reference("Y", vec!["X".to_string()]);
+        let expr = SymbolicExpr::derivative_expr(y, "X", 1);
+
+        let result = evaluate_limit(&expr, "X", 0.0, LimitDirection::TwoSided, 0).expect("limit");
+
+        assert_eq!(result.to_string(), "diff(Y(X), X)");
     }
 
     #[test]

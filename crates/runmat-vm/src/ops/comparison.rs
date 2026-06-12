@@ -237,6 +237,9 @@ where
         (Value::HandleObject(_), _) | (_, Value::HandleObject(_)) => {
             stack.push(call_builtin("eq", a.clone(), b.clone()).await?);
         }
+        (Value::Symbolic(_), _) | (_, Value::Symbolic(_)) => {
+            stack.push(call_builtin("eq", a.clone(), b.clone()).await?);
+        }
         (Value::LogicalArray(la), Value::LogicalArray(lb)) => {
             if la.shape != lb.shape {
                 return Err(crate::interpreter::errors::mex(

@@ -2,7 +2,10 @@ pub(crate) mod limit;
 pub(crate) mod sym;
 pub(crate) mod syms;
 
-use runmat_builtins::{symbolic::SymbolicFunction, SymbolicExpr, Tensor, Value};
+use runmat_builtins::{
+    symbolic::{is_valid_symbolic_identifier, SymbolicFunction},
+    SymbolicExpr, Tensor, Value,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SymbolicBinaryOp {
@@ -56,6 +59,14 @@ pub(crate) fn symbolic_expr_to_value(expr: SymbolicExpr) -> Value {
     Value::Symbolic(expr)
 }
 
+pub(crate) fn symbolic_variable_name_from_value(value: &Value) -> Option<String> {
+    match value {
+        Value::Symbolic(expr) => expr.variable_name().map(ToOwned::to_owned),
+        _ => text_scalar(value).map(|text| text.trim().to_string()),
+    }
+    .filter(|name| is_valid_symbolic_identifier(name))
+}
+
 pub(crate) fn empty_return_value() -> Value {
     Value::Tensor(Tensor::zeros(vec![0, 0]))
 }
@@ -70,9 +81,5 @@ pub(crate) fn text_scalar(value: &Value) -> Option<String> {
 }
 
 pub(crate) fn is_valid_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    first.is_ascii_alphabetic() && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+    is_valid_symbolic_identifier(name)
 }

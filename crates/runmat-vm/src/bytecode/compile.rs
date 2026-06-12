@@ -3812,6 +3812,77 @@ f3 = limit(sin(z)/z + 1, z, 0);\n",
     }
 
     #[test]
+    fn compile_interprets_symbolic_function_declaration_workflow() {
+        let ast = runmat_parser::parse(
+            "\
+syms Y(X);\n\
+a = 0;\n\
+z = 0;\n\
+applied = Y(a);\n\
+reapplied = applied(1);\n\
+cond = applied == z;\n\
+dydx = diff(Y, X);\n\
+eqn = diff(Y, X) == 2*Y + X;\n\
+syms('F(P, Q)');\n\
+probe = F(1, 2);\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let entry_layout = &layout.entrypoints[&entrypoint];
+        let export = |name: &str| {
+            entry_layout
+                .exports
+                .iter()
+                .find(|export| export.name == name)
+                .unwrap_or_else(|| panic!("{name} export"))
+                .slot
+                .0
+        };
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[export("Y")].to_string(), "Y(X)");
+        assert_eq!(vars[export("X")].to_string(), "X");
+        assert_eq!(vars[export("applied")].to_string(), "Y(0)");
+        assert_eq!(vars[export("reapplied")].to_string(), "Y(0)");
+        assert_eq!(vars[export("cond")].to_string(), "Y(0) == 0");
+        assert_eq!(vars[export("dydx")].to_string(), "diff(Y(X), X)");
+        assert_eq!(
+            vars[export("eqn")].to_string(),
+            "diff(Y(X), X) == 2*Y(X) + X"
+        );
+        assert_eq!(vars[export("F")].to_string(), "F(P, Q)");
+        assert_eq!(vars[export("P")].to_string(), "P");
+        assert_eq!(vars[export("Q")].to_string(), "Q");
+        assert_eq!(vars[export("probe")].to_string(), "F(1, 2)");
+    }
+
+    #[test]
+    fn compile_rejects_symbolic_function_arity_mismatch() {
+        let ast = runmat_parser::parse(
+            "\
+syms Y(X);\n\
+bad = Y(1, 2);\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let err = block_on(crate::interpret(&bytecode)).expect_err("arity mismatch should fail");
+
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:SymbolicFunctionArity")
+        );
+    }
+
+    #[test]
     fn compile_interprets_symbolic_fractional_power_limit() {
         let ast = runmat_parser::parse(
             "\

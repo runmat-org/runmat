@@ -1542,12 +1542,17 @@ impl LoweringCtx {
             let Some((text, span)) = syms_argument_text(arg, allow_word_args) else {
                 continue;
             };
-            for name in text.split_whitespace() {
-                if saw_declared_symbol && is_syms_assumption_keyword(name) {
+            for token in runmat_builtins::symbolic::symbolic_declaration_tokens(&text) {
+                if saw_declared_symbol && is_syms_assumption_keyword(token) {
                     continue;
                 }
-                if is_matlab_identifier(name) {
-                    self.binding_for_write(name, span);
+                if let Ok(declaration) =
+                    runmat_builtins::symbolic::parse_symbolic_declaration(token)
+                {
+                    self.binding_for_write(&declaration.name, span);
+                    for parameter in declaration.parameters {
+                        self.binding_for_write(&parameter, span);
+                    }
                     saw_declared_symbol = true;
                 }
             }
@@ -3064,14 +3069,6 @@ fn unquote_string_literal(value: &str) -> String {
     } else {
         value.to_string()
     }
-}
-
-fn is_matlab_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    first.is_ascii_alphabetic() && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 fn is_syms_assumption_keyword(name: &str) -> bool {

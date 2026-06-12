@@ -62,6 +62,14 @@ impl SymbolicFunction {
 pub enum SymbolicExpr {
     Constant(f64),
     Variable(String),
+    FunctionReference(String, Vec<String>),
+    FunctionCall(String, Vec<SymbolicExpr>),
+    Equation(Box<SymbolicExpr>, Box<SymbolicExpr>),
+    Derivative {
+        expr: Box<SymbolicExpr>,
+        variable: String,
+        order: u32,
+    },
     Neg(Box<SymbolicExpr>),
     Add(Box<SymbolicExpr>, Box<SymbolicExpr>),
     Sub(Box<SymbolicExpr>, Box<SymbolicExpr>),
@@ -78,6 +86,35 @@ impl SymbolicExpr {
 
     pub fn variable(name: impl Into<String>) -> Self {
         SymbolicExpr::Variable(name.into())
+    }
+
+    pub fn function_reference(name: impl Into<String>, parameters: Vec<String>) -> Self {
+        SymbolicExpr::FunctionReference(name.into(), parameters).simplify()
+    }
+
+    pub fn function_call(name: impl Into<String>, args: Vec<SymbolicExpr>) -> Self {
+        SymbolicExpr::FunctionCall(name.into(), args).simplify()
+    }
+
+    pub fn equation(lhs: SymbolicExpr, rhs: SymbolicExpr) -> Self {
+        SymbolicExpr::Equation(Box::new(lhs), Box::new(rhs)).simplify()
+    }
+
+    pub fn derivative_expr(expr: SymbolicExpr, variable: impl Into<String>, order: u32) -> Self {
+        let variable = variable.into();
+        let expr = expr.simplify();
+        if order == 0 {
+            return expr;
+        }
+        if !expr.contains_variable(&variable) {
+            return SymbolicExpr::Constant(0.0);
+        }
+        SymbolicExpr::Derivative {
+            expr: Box::new(expr),
+            variable,
+            order,
+        }
+        .simplify()
     }
 
     pub fn function(function: SymbolicFunction, argument: SymbolicExpr) -> Self {
@@ -115,10 +152,34 @@ impl SymbolicExpr {
         }
     }
 
+    pub fn function_reference_name(&self) -> Option<&str> {
+        match self {
+            SymbolicExpr::FunctionReference(name, _) => Some(name),
+            _ => None,
+        }
+    }
+
+    pub fn function_reference_signature(&self) -> Option<(&str, &[String])> {
+        match self {
+            SymbolicExpr::FunctionReference(name, parameters) => Some((name, parameters)),
+            _ => None,
+        }
+    }
+
     pub fn contains_variable(&self, variable: &str) -> bool {
         match self {
             SymbolicExpr::Constant(_) => false,
             SymbolicExpr::Variable(name) => name == variable,
+            SymbolicExpr::FunctionReference(_, parameters) => {
+                parameters.iter().any(|parameter| parameter == variable)
+            }
+            SymbolicExpr::FunctionCall(_, args) => {
+                args.iter().any(|arg| arg.contains_variable(variable))
+            }
+            SymbolicExpr::Equation(lhs, rhs) => {
+                lhs.contains_variable(variable) || rhs.contains_variable(variable)
+            }
+            SymbolicExpr::Derivative { expr, .. } => expr.contains_variable(variable),
             SymbolicExpr::Neg(inner) | SymbolicExpr::Function(_, inner) => {
                 inner.contains_variable(variable)
             }
@@ -144,6 +205,23 @@ impl SymbolicExpr {
             SymbolicExpr::Variable(name) => {
                 variables.insert(name.clone());
             }
+            SymbolicExpr::FunctionReference(_, parameters) => {
+                for parameter in parameters {
+                    variables.insert(parameter.clone());
+                }
+            }
+            SymbolicExpr::FunctionCall(_, args) => {
+                for arg in args {
+                    arg.collect_variables(variables);
+                }
+            }
+            SymbolicExpr::Equation(lhs, rhs) => {
+                lhs.collect_variables(variables);
+                rhs.collect_variables(variables);
+            }
+            SymbolicExpr::Derivative { expr, .. } => {
+                expr.collect_variables(variables);
+            }
             SymbolicExpr::Neg(inner) | SymbolicExpr::Function(_, inner) => {
                 inner.collect_variables(variables)
             }
@@ -163,6 +241,45 @@ impl SymbolicExpr {
             SymbolicExpr::Constant(value) => SymbolicExpr::Constant(*value),
             SymbolicExpr::Variable(name) if name == variable => replacement.clone(),
             SymbolicExpr::Variable(name) => SymbolicExpr::Variable(name.clone()),
+            SymbolicExpr::FunctionReference(name, parameters) => {
+                let mut changed = false;
+                let args = parameters
+                    .iter()
+                    .map(|parameter| {
+                        if parameter == variable {
+                            changed = true;
+                            replacement.clone()
+                        } else {
+                            SymbolicExpr::variable(parameter)
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if changed {
+                    SymbolicExpr::function_call(name.clone(), args)
+                } else {
+                    SymbolicExpr::function_reference(name.clone(), parameters.clone())
+                }
+            }
+            SymbolicExpr::FunctionCall(name, args) => SymbolicExpr::function_call(
+                name.clone(),
+                args.iter()
+                    .map(|arg| arg.substitute(variable, replacement))
+                    .collect(),
+            ),
+            SymbolicExpr::Equation(lhs, rhs) => SymbolicExpr::equation(
+                lhs.substitute(variable, replacement),
+                rhs.substitute(variable, replacement),
+            ),
+            SymbolicExpr::Derivative {
+                expr,
+                variable: derivative_variable,
+                order,
+            } => SymbolicExpr::Derivative {
+                expr: Box::new(expr.substitute(variable, replacement)),
+                variable: derivative_variable.clone(),
+                order: *order,
+            }
+            .simplify(),
             SymbolicExpr::Neg(inner) => {
                 SymbolicExpr::neg_expr(inner.substitute(variable, replacement))
             }
@@ -197,6 +314,26 @@ impl SymbolicExpr {
             SymbolicExpr::Constant(_) => SymbolicExpr::constant(0.0),
             SymbolicExpr::Variable(name) if name == variable => SymbolicExpr::constant(1.0),
             SymbolicExpr::Variable(_) => SymbolicExpr::constant(0.0),
+            SymbolicExpr::FunctionReference(_, parameters) => {
+                if parameters.iter().any(|parameter| parameter == variable) {
+                    SymbolicExpr::derivative_expr(self.clone(), variable, 1)
+                } else {
+                    SymbolicExpr::constant(0.0)
+                }
+            }
+            SymbolicExpr::FunctionCall(_, args) => {
+                if args.iter().any(|arg| arg.contains_variable(variable)) {
+                    SymbolicExpr::derivative_expr(self.clone(), variable, 1)
+                } else {
+                    SymbolicExpr::constant(0.0)
+                }
+            }
+            SymbolicExpr::Equation(lhs, rhs) => {
+                SymbolicExpr::equation(lhs.derivative(variable), rhs.derivative(variable))
+            }
+            SymbolicExpr::Derivative { .. } => {
+                SymbolicExpr::derivative_expr(self.clone(), variable, 1)
+            }
             SymbolicExpr::Neg(inner) => SymbolicExpr::neg_expr(inner.derivative(variable)),
             SymbolicExpr::Add(lhs, rhs) => {
                 SymbolicExpr::add_expr(lhs.derivative(variable), rhs.derivative(variable))
@@ -291,6 +428,10 @@ impl SymbolicExpr {
         match self {
             SymbolicExpr::Constant(value) => (!value.is_nan()).then_some(*value),
             SymbolicExpr::Variable(_) => None,
+            SymbolicExpr::FunctionReference(_, _)
+            | SymbolicExpr::FunctionCall(_, _)
+            | SymbolicExpr::Equation(_, _)
+            | SymbolicExpr::Derivative { .. } => None,
             SymbolicExpr::Neg(inner) => finite_or_infinite(-inner.numeric_constant_value()?),
             SymbolicExpr::Add(lhs, rhs) => {
                 finite_or_infinite(lhs.numeric_constant_value()? + rhs.numeric_constant_value()?)
@@ -333,6 +474,15 @@ impl SymbolicExpr {
         match self {
             SymbolicExpr::Constant(value) => value.is_nan(),
             SymbolicExpr::Variable(_) => false,
+            SymbolicExpr::FunctionReference(_, _) => false,
+            SymbolicExpr::FunctionCall(_, args) => args
+                .iter()
+                .any(SymbolicExpr::has_undefined_constant_subexpression),
+            SymbolicExpr::Equation(lhs, rhs) => {
+                lhs.has_undefined_constant_subexpression()
+                    || rhs.has_undefined_constant_subexpression()
+            }
+            SymbolicExpr::Derivative { expr, .. } => expr.has_undefined_constant_subexpression(),
             SymbolicExpr::Neg(inner) => inner.has_undefined_constant_subexpression(),
             SymbolicExpr::Add(lhs, rhs)
             | SymbolicExpr::Sub(lhs, rhs)
@@ -367,6 +517,14 @@ impl SymbolicExpr {
         match self {
             SymbolicExpr::Constant(value) => !value.is_finite(),
             SymbolicExpr::Variable(_) => false,
+            SymbolicExpr::FunctionReference(_, _) => false,
+            SymbolicExpr::FunctionCall(_, args) => {
+                args.iter().any(SymbolicExpr::has_nonfinite_constant)
+            }
+            SymbolicExpr::Equation(lhs, rhs) => {
+                lhs.has_nonfinite_constant() || rhs.has_nonfinite_constant()
+            }
+            SymbolicExpr::Derivative { expr, .. } => expr.has_nonfinite_constant(),
             SymbolicExpr::Neg(inner) | SymbolicExpr::Function(_, inner) => {
                 inner.has_nonfinite_constant()
             }
@@ -390,6 +548,59 @@ impl SymbolicExpr {
 
     pub fn simplify(self) -> SymbolicExpr {
         match self {
+            SymbolicExpr::FunctionReference(name, parameters) => {
+                SymbolicExpr::FunctionReference(name, parameters)
+            }
+            SymbolicExpr::FunctionCall(name, args) => SymbolicExpr::FunctionCall(
+                name,
+                args.into_iter()
+                    .map(SymbolicExpr::simplify)
+                    .collect::<Vec<_>>(),
+            ),
+            SymbolicExpr::Equation(lhs, rhs) => {
+                SymbolicExpr::Equation(Box::new(lhs.simplify()), Box::new(rhs.simplify()))
+            }
+            SymbolicExpr::Derivative {
+                expr,
+                variable,
+                order,
+            } => {
+                let expr = expr.simplify();
+                if order == 0 {
+                    return expr;
+                }
+                if !expr.contains_variable(&variable) {
+                    return SymbolicExpr::Constant(0.0);
+                }
+                if let SymbolicExpr::Derivative {
+                    expr: inner,
+                    variable: inner_variable,
+                    order: inner_order,
+                } = expr
+                {
+                    if inner_variable == variable {
+                        return SymbolicExpr::Derivative {
+                            expr: inner,
+                            variable,
+                            order: inner_order.saturating_add(order),
+                        };
+                    }
+                    return SymbolicExpr::Derivative {
+                        expr: Box::new(SymbolicExpr::Derivative {
+                            expr: inner,
+                            variable: inner_variable,
+                            order: inner_order,
+                        }),
+                        variable,
+                        order,
+                    };
+                }
+                SymbolicExpr::Derivative {
+                    expr: Box::new(expr),
+                    variable,
+                    order,
+                }
+            }
             SymbolicExpr::Neg(inner) => {
                 let inner = inner.simplify();
                 match inner {
@@ -536,11 +747,17 @@ impl fmt::Display for SymbolicExpr {
 
 fn precedence(expr: &SymbolicExpr) -> u8 {
     match expr {
-        SymbolicExpr::Constant(_) | SymbolicExpr::Variable(_) | SymbolicExpr::Function(_, _) => 5,
+        SymbolicExpr::Constant(_)
+        | SymbolicExpr::Variable(_)
+        | SymbolicExpr::FunctionReference(_, _)
+        | SymbolicExpr::FunctionCall(_, _)
+        | SymbolicExpr::Derivative { .. }
+        | SymbolicExpr::Function(_, _) => 5,
         SymbolicExpr::Neg(_) => 4,
         SymbolicExpr::Pow(_, _) => 3,
         SymbolicExpr::Mul(_, _) | SymbolicExpr::Div(_, _) => 2,
         SymbolicExpr::Add(_, _) | SymbolicExpr::Sub(_, _) => 1,
+        SymbolicExpr::Equation(_, _) => 0,
     }
 }
 
@@ -559,6 +776,44 @@ fn fmt_expr(
     match expr {
         SymbolicExpr::Constant(value) => write!(f, "{}", format_number(*value))?,
         SymbolicExpr::Variable(name) => write!(f, "{name}")?,
+        SymbolicExpr::FunctionReference(name, parameters) => {
+            write!(f, "{name}(")?;
+            for (idx, parameter) in parameters.iter().enumerate() {
+                if idx > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{parameter}")?;
+            }
+            write!(f, ")")?;
+        }
+        SymbolicExpr::FunctionCall(name, args) => {
+            write!(f, "{name}(")?;
+            for (idx, arg) in args.iter().enumerate() {
+                if idx > 0 {
+                    write!(f, ", ")?;
+                }
+                fmt_expr(arg, f, 0, false)?;
+            }
+            write!(f, ")")?;
+        }
+        SymbolicExpr::Equation(lhs, rhs) => {
+            fmt_expr(lhs, f, own_precedence, false)?;
+            write!(f, " == ")?;
+            fmt_expr(rhs, f, own_precedence, true)?;
+        }
+        SymbolicExpr::Derivative {
+            expr,
+            variable,
+            order,
+        } => {
+            write!(f, "diff(")?;
+            fmt_expr(expr, f, 0, false)?;
+            write!(f, ", {variable}")?;
+            if *order != 1 {
+                write!(f, ", {order}")?;
+            }
+            write!(f, ")")?;
+        }
         SymbolicExpr::Neg(inner) => {
             write!(f, "-")?;
             fmt_expr(inner, f, own_precedence, false)?;
@@ -610,9 +865,142 @@ fn fmt_expr(
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolicDeclaration {
+    pub name: String,
+    pub parameters: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SymbolicDeclarationError {
+    Empty,
+    InvalidName,
+    InvalidParameter,
+    DuplicateParameter,
+    EmptyParameterList,
+    UnexpectedSyntax,
+}
+
+impl fmt::Display for SymbolicDeclarationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SymbolicDeclarationError::Empty => write!(f, "empty symbolic declaration"),
+            SymbolicDeclarationError::InvalidName => write!(f, "invalid symbolic name"),
+            SymbolicDeclarationError::InvalidParameter => write!(f, "invalid symbolic parameter"),
+            SymbolicDeclarationError::DuplicateParameter => {
+                write!(f, "duplicate symbolic function parameter")
+            }
+            SymbolicDeclarationError::EmptyParameterList => {
+                write!(
+                    f,
+                    "symbolic function declaration requires at least one parameter"
+                )
+            }
+            SymbolicDeclarationError::UnexpectedSyntax => {
+                write!(f, "invalid symbolic function declaration syntax")
+            }
+        }
+    }
+}
+
+pub fn parse_symbolic_declaration(
+    text: &str,
+) -> Result<SymbolicDeclaration, SymbolicDeclarationError> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err(SymbolicDeclarationError::Empty);
+    }
+
+    let Some(open) = trimmed.find('(') else {
+        if is_valid_symbolic_identifier(trimmed) {
+            return Ok(SymbolicDeclaration {
+                name: trimmed.to_string(),
+                parameters: Vec::new(),
+            });
+        }
+        return Err(SymbolicDeclarationError::InvalidName);
+    };
+
+    if !trimmed.ends_with(')') {
+        return Err(SymbolicDeclarationError::UnexpectedSyntax);
+    }
+    let inner = &trimmed[open + 1..trimmed.len() - 1];
+    if inner.contains('(') || inner.contains(')') {
+        return Err(SymbolicDeclarationError::UnexpectedSyntax);
+    }
+
+    let name = trimmed[..open].trim();
+    if !is_valid_symbolic_identifier(name) {
+        return Err(SymbolicDeclarationError::InvalidName);
+    }
+
+    if inner.trim().is_empty() {
+        return Err(SymbolicDeclarationError::EmptyParameterList);
+    }
+
+    let mut parameters = Vec::new();
+    for parameter in inner.split(',') {
+        let parameter = parameter.trim();
+        if !is_valid_symbolic_identifier(parameter) {
+            return Err(SymbolicDeclarationError::InvalidParameter);
+        }
+        if parameters.iter().any(|existing| existing == parameter) {
+            return Err(SymbolicDeclarationError::DuplicateParameter);
+        }
+        parameters.push(parameter.to_string());
+    }
+
+    Ok(SymbolicDeclaration {
+        name: name.to_string(),
+        parameters,
+    })
+}
+
+pub fn is_valid_symbolic_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    first.is_ascii_alphabetic() && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+pub fn symbolic_declaration_tokens(text: &str) -> Vec<&str> {
+    let mut tokens = Vec::new();
+    let mut start = None;
+    let mut paren_depth = 0usize;
+
+    for (idx, ch) in text.char_indices() {
+        if ch.is_whitespace() && paren_depth == 0 {
+            if let Some(token_start) = start.take() {
+                tokens.push(&text[token_start..idx]);
+            }
+            continue;
+        }
+
+        if start.is_none() {
+            start = Some(idx);
+        }
+
+        match ch {
+            '(' => paren_depth = paren_depth.saturating_add(1),
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+
+    if let Some(token_start) = start {
+        tokens.push(&text[token_start..]);
+    }
+
+    tokens
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{SymbolicExpr, SymbolicFunction};
+    use super::{
+        parse_symbolic_declaration, symbolic_declaration_tokens, SymbolicDeclarationError,
+        SymbolicExpr, SymbolicFunction,
+    };
 
     #[test]
     fn substitutes_and_simplifies_symbols() {
@@ -636,6 +1024,69 @@ mod tests {
         let expr = SymbolicExpr::function(SymbolicFunction::Sin, x);
 
         assert_eq!(expr.derivative("x").to_string(), "cos(x)");
+    }
+
+    #[test]
+    fn formats_named_symbolic_function_and_derivative() {
+        let expr = SymbolicExpr::function_reference("Y", vec!["X".to_string()]);
+
+        assert_eq!(expr.to_string(), "Y(X)");
+        assert_eq!(expr.derivative("X").to_string(), "diff(Y(X), X)");
+    }
+
+    #[test]
+    fn substitutes_symbolic_function_reference_parameters() {
+        let expr = SymbolicExpr::function_reference("Y", vec!["X".to_string()]);
+
+        assert_eq!(
+            expr.substitute("X", &SymbolicExpr::constant(0.0))
+                .to_string(),
+            "Y(0)"
+        );
+    }
+
+    #[test]
+    fn formats_symbolic_equation() {
+        let lhs = SymbolicExpr::function_call("Y", vec![SymbolicExpr::constant(0.0)]);
+        let rhs = SymbolicExpr::constant(0.0);
+
+        assert_eq!(SymbolicExpr::equation(lhs, rhs).to_string(), "Y(0) == 0");
+    }
+
+    #[test]
+    fn parses_symbolic_function_declarations() {
+        let decl = parse_symbolic_declaration("Y(X)").expect("declaration");
+
+        assert_eq!(decl.name, "Y");
+        assert_eq!(decl.parameters, vec!["X"]);
+
+        let decl = parse_symbolic_declaration("f(x, y)").expect("declaration");
+        assert_eq!(decl.name, "f");
+        assert_eq!(decl.parameters, vec!["x", "y"]);
+    }
+
+    #[test]
+    fn rejects_malformed_symbolic_function_declarations() {
+        assert_eq!(
+            parse_symbolic_declaration("Y(").unwrap_err(),
+            SymbolicDeclarationError::UnexpectedSyntax
+        );
+        assert_eq!(
+            parse_symbolic_declaration("f()").unwrap_err(),
+            SymbolicDeclarationError::EmptyParameterList
+        );
+        assert_eq!(
+            parse_symbolic_declaration("f(x,x)").unwrap_err(),
+            SymbolicDeclarationError::DuplicateParameter
+        );
+    }
+
+    #[test]
+    fn tokenizes_symbolic_declarations_without_splitting_parameter_lists() {
+        assert_eq!(
+            symbolic_declaration_tokens("x f(a, b) real g(t)"),
+            vec!["x", "f(a, b)", "real", "g(t)"]
+        );
     }
 
     #[test]
