@@ -1383,7 +1383,7 @@ impl Compiler {
                     .compile_error("workspace-first call lowering expected a static callee")
                     .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
             };
-            self.validate_static_call_callee(identity, call.fallback_policy)?;
+            self.validate_workspace_first_static_call_callee(identity, call.fallback_policy)?;
             for arg in &call.args {
                 self.compile_mir_call_arg(arg)?;
             }
@@ -2350,7 +2350,7 @@ impl Compiler {
                     .compile_error("workspace-first call lowering expected a static callee")
                     .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
             };
-            self.validate_static_call_callee(identity, call.fallback_policy)?;
+            self.validate_workspace_first_static_call_callee(identity, call.fallback_policy)?;
             for arg in &call.args {
                 self.compile_mir_call_arg(arg)?;
             }
@@ -2778,6 +2778,28 @@ impl Compiler {
                 .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
         }
         Ok(())
+    }
+
+    fn validate_workspace_first_static_call_callee(
+        &self,
+        identity: &CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+    ) -> Result<(), CompileError> {
+        if matches!(fallback_policy, CallableFallbackPolicy::None) {
+            return match identity {
+                CallableIdentity::Builtin(runmat_hir::BuiltinId(name)) if !name.trim().is_empty() => {
+                    Ok(())
+                }
+                CallableIdentity::BoundFunction(_) => Ok(()),
+                _ => Err(self
+                    .compile_error(format!(
+                        "MIR workspace-first call fallback policy {:?} is not supported for static callee {:?}",
+                        fallback_policy, identity
+                    ))
+                    .with_identifier(IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED)),
+            };
+        }
+        self.validate_static_call_callee(identity, fallback_policy)
     }
 
     fn mir_runtime_name_callee(&self, callee: &CallableIdentity) -> Option<String> {

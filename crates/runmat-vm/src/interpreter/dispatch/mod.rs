@@ -862,6 +862,7 @@ pub async fn dispatch_instruction(
                         refresh_workspace_state(vars);
                     }
                     vars[*index] = global_value;
+                    refresh_workspace_state(vars);
                 }
             }
             if missing_input_slots.contains(index) {
@@ -904,6 +905,7 @@ pub async fn dispatch_instruction(
                         refresh_workspace_state(vars);
                     }
                     vars[*index] = global_value;
+                    refresh_workspace_state(vars);
                 }
             }
             if missing_input_slots.contains(index) {
@@ -1601,10 +1603,15 @@ pub async fn dispatch_instruction(
                     function_registry,
                 )
                 .await?;
+            let mut captures_updated = false;
             for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
                 if *slot < vars.len() {
                     vars[*slot] = value;
+                    captures_updated = true;
                 }
+            }
+            if captures_updated {
+                refresh_workspace_state(vars);
             }
             stack.push(calls::normalize_requested_outputs(result, *out_count));
             Ok(Some(DispatchHandled::Generic(
@@ -1638,10 +1645,15 @@ pub async fn dispatch_instruction(
                     function_registry,
                 )
                 .await?;
+            let mut captures_updated = false;
             for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
                 if *slot < vars.len() {
                     vars[*slot] = value;
+                    captures_updated = true;
                 }
+            }
+            if captures_updated {
+                refresh_workspace_state(vars);
             }
             stack.push(calls::normalize_requested_outputs(result, out_count));
             Ok(Some(DispatchHandled::Generic(
@@ -2063,10 +2075,15 @@ pub async fn dispatch_instruction(
                     function_registry,
                 )
                 .await?;
+            let mut captures_updated = false;
             for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
                 if *slot < vars.len() {
                     vars[*slot] = value;
+                    captures_updated = true;
                 }
+            }
+            if captures_updated {
+                refresh_workspace_state(vars);
             }
             stack.push(calls::normalize_requested_outputs(result, *out_count));
             Ok(Some(DispatchHandled::Generic(
