@@ -3786,6 +3786,89 @@ f3 = limit(sin(z)/z + 1, z, 0);\n",
     }
 
     #[test]
+    fn compile_interprets_symbolic_fractional_power_limit() {
+        let ast = runmat_parser::parse(
+            "\
+syms x\n\
+f = (cos(x)^(1/3) - 1) / x^2;\n\
+L = limit(f, x, 0);\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let l_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "L")
+            .expect("L export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Symbolic(expr) = &vars[l_export.slot.0] else {
+            panic!(
+                "expected symbolic limit result, got {:?}",
+                vars[l_export.slot.0]
+            );
+        };
+        let result = expr.constant_value().expect("constant limit result");
+        assert!((result + 1.0 / 6.0).abs() < 1e-12, "{result}");
+    }
+
+    #[test]
+    fn compile_interprets_scalar_symbolic_power() {
+        let ast = runmat_parser::parse(
+            "\
+syms x\n\
+a = x^2;\n\
+b = 2^x;\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let entry_layout = &layout.entrypoints[&entrypoint];
+        let a_export = entry_layout
+            .exports
+            .iter()
+            .find(|export| export.name == "a")
+            .expect("a export");
+        let b_export = entry_layout
+            .exports
+            .iter()
+            .find(|export| export.name == "b")
+            .expect("b export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert!(matches!(&vars[a_export.slot.0], Value::Symbolic(_)));
+        assert!(matches!(&vars[b_export.slot.0], Value::Symbolic(_)));
+        assert_eq!(vars[a_export.slot.0].to_string(), "x^2");
+        assert_eq!(vars[b_export.slot.0].to_string(), "2^x");
+    }
+
+    #[test]
+    fn compile_rejects_nonscalar_symbolic_power_operand() {
+        let ast = runmat_parser::parse(
+            "\
+syms x\n\
+y = x^[1 2; 3 4];\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        block_on(crate::interpret(&bytecode))
+            .expect_err("symbolic power with a non-scalar operand should fail");
+    }
+
+    #[test]
     fn compile_rejects_dynamic_member_store_back_paren_index_with_read_context_identifier() {
         let ast =
             runmat_parser::parse("s = struct('x', {1, 2}); f = 'x'; s(1).(f) = 3;").expect("parse");

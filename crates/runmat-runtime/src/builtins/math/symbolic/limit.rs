@@ -537,6 +537,23 @@ mod tests {
     }
 
     #[test]
+    fn computes_fractional_power_limit() {
+        let x = SymbolicExpr::variable("x");
+        let numerator = SymbolicExpr::sub_expr(
+            SymbolicExpr::pow_expr(
+                SymbolicExpr::function(SymbolicFunction::Cos, x.clone()),
+                SymbolicExpr::constant(1.0 / 3.0),
+            ),
+            SymbolicExpr::constant(1.0),
+        );
+        let denominator = SymbolicExpr::pow_expr(x, SymbolicExpr::constant(2.0));
+        let expr = SymbolicExpr::div_expr(numerator, denominator);
+        let result = evaluate_limit(&expr, "x", 0.0, LimitDirection::TwoSided, 0).expect("limit");
+
+        assert_eq!(result, SymbolicExpr::constant(-1.0 / 6.0));
+    }
+
+    #[test]
     fn computes_removable_product_quotient() {
         let x = SymbolicExpr::variable("x");
         let reciprocal = SymbolicExpr::div_expr(SymbolicExpr::constant(1.0), x.clone());

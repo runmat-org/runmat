@@ -25,7 +25,8 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::math::symbolic::limit::tests",
-    "integration": "runmat_vm::bytecode::compile::tests::compile_interprets_symbolic_limit_workflow"
+    "integration": "runmat_vm::bytecode::compile::tests::compile_interprets_symbolic_limit_workflow",
+    "fractional_power": "runmat_vm::bytecode::compile::tests::compile_interprets_symbolic_fractional_power_limit"
   },
   "description": "`limit` evaluates scalar symbolic expressions at a finite numeric point. It first performs direct substitution and simplification, then applies repeated L'Hopital reduction for removable `0/0` quotients.",
   "behaviors": [
@@ -43,6 +44,10 @@
     {
       "description": "Finite-difference derivative limit",
       "input": "syms x h\nf = limit((cos(x+h) - cos(x))/h, h, 0)"
+    },
+    {
+      "description": "Fractional symbolic power limit",
+      "input": "syms x\nf = limit((cos(x)^(1/3) - 1) / x^2, x, 0)"
     }
   ],
   "faqs": [
