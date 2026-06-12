@@ -92,6 +92,31 @@ fn pulstran_rectpuls_builtin_executes_for_impulse_train_shape() {
 }
 
 #[test]
+fn upsample_downsample_builtin_executes_for_discrete_signal_workflow() {
+    let input = r#"
+        x = [1 2 3 4 5];
+        up = upsample(x, 2);
+        down = downsample(x, 2);
+        shifted = downsample(x, 2, 1);
+        out = [numel(up), up(1), up(2), up(9), up(10), ...
+               numel(down), down(1), down(3), ...
+               numel(shifted), shifted(1), shifted(2)];
+    "#;
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 11] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected sample-rate summary tensor");
+    assert_eq!(
+        out.data,
+        vec![10.0, 1.0, 0.0, 5.0, 0.0, 3.0, 1.0, 5.0, 2.0, 2.0, 4.0]
+    );
+}
+
+#[test]
 fn struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates() {
     let bytecode = compile_source("s = struct{version = 1, version = 2};").expect("compile source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
