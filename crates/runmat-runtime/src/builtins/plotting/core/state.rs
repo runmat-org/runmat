@@ -501,6 +501,19 @@ pub fn set_grid_enabled(enabled: bool) {
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 }
 
+pub fn set_minor_grid_enabled(enabled: bool) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        let axes = state.active_axes;
+        state.figure.set_axes_minor_grid_enabled(axes, enabled);
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
 pub fn set_grid_enabled_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -508,6 +521,20 @@ pub fn set_grid_enabled_for_axes(
 ) -> Result<(), FigureError> {
     let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         state.figure.set_axes_grid_enabled(axes_index, enabled);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_minor_grid_enabled_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    enabled: bool,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state
+            .figure
+            .set_axes_minor_grid_enabled(axes_index, enabled);
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
@@ -525,6 +552,25 @@ pub fn toggle_grid() -> bool {
             .map(|m| m.grid_enabled)
             .unwrap_or(true);
         state.figure.set_axes_grid_enabled(axes, next);
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone(), next)
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    enabled
+}
+
+pub fn toggle_minor_grid() -> bool {
+    let (handle, figure_clone, enabled) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        let axes = state.active_axes;
+        let next = !state
+            .figure
+            .axes_metadata(axes)
+            .map(|m| m.minor_grid_enabled)
+            .unwrap_or(false);
+        state.figure.set_axes_minor_grid_enabled(axes, next);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone(), next)
     };

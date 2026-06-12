@@ -433,6 +433,7 @@ fn get_axes_property(
                 ]),
             );
             st.insert("Grid", Value::Bool(meta.grid_enabled));
+            st.insert("MinorGrid", Value::Bool(meta.minor_grid_enabled));
             st.insert("Box", Value::Bool(meta.box_enabled));
             st.insert("AxisEqual", Value::Bool(meta.axis_equal));
             st.insert("Colorbar", Value::Bool(meta.colorbar_enabled));
@@ -491,6 +492,7 @@ fn get_axes_property(
             }))
         }
         Some("grid") => Ok(Value::Bool(meta.grid_enabled)),
+        Some("minorgrid") => Ok(Value::Bool(meta.minor_grid_enabled)),
         Some("box") => Ok(Value::Bool(meta.box_enabled)),
         Some("axisequal") => Ok(Value::Bool(meta.axis_equal)),
         Some("colorbar") => Ok(Value::Bool(meta.colorbar_enabled)),
@@ -755,7 +757,8 @@ fn canonical_property_name(name: &str) -> &str {
         "ylabel" => "ylabel",
         "zlabel" => "zlabel",
         "view" => "view",
-        "grid" => "grid",
+        "grid" | "xgrid" | "ygrid" | "zgrid" => "grid",
+        "minorgrid" | "xminorgrid" | "yminorgrid" | "zminorgrid" => "minorgrid",
         "axisequal" => "axisequal",
         "colorbar" => "colorbar",
         "colorbarvisible" => "colorbarvisible",
@@ -954,6 +957,16 @@ fn apply_axes_property(
                 plotting_error(builtin, format!("{builtin}: Grid must be logical"))
             })?;
             crate::builtins::plotting::state::set_grid_enabled_for_axes(
+                handle, axes_index, enabled,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "minorgrid" => {
+            let enabled = value_as_bool(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: MinorGrid must be logical"))
+            })?;
+            crate::builtins::plotting::state::set_minor_grid_enabled_for_axes(
                 handle, axes_index, enabled,
             )
             .map_err(|err| map_figure_error(builtin, err))?;

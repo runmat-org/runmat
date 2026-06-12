@@ -31,6 +31,7 @@ pub struct Figure {
     pub z_label: Option<String>,
     pub legend_enabled: bool,
     pub grid_enabled: bool,
+    pub minor_grid_enabled: bool,
     pub box_enabled: bool,
     pub background_color: Vec4,
 
@@ -140,6 +141,7 @@ pub struct AxesMetadata {
     pub view_elevation_deg: Option<f32>,
     pub view_revision: u64,
     pub grid_enabled: bool,
+    pub minor_grid_enabled: bool,
     pub box_enabled: bool,
     pub axis_equal: bool,
     pub legend_enabled: bool,
@@ -229,6 +231,7 @@ impl Figure {
             z_label: None,
             legend_enabled: true,
             grid_enabled: true,
+            minor_grid_enabled: false,
             box_enabled: true,
             background_color: Vec4::new(1.0, 1.0, 1.0, 1.0), // White background
             x_limits: None,
@@ -251,6 +254,7 @@ impl Figure {
                 y_limits: None,
                 z_limits: None,
                 grid_enabled: true,
+                minor_grid_enabled: false,
                 box_enabled: true,
                 axis_equal: false,
                 legend_enabled: true,
@@ -270,6 +274,7 @@ impl Figure {
                 y_limits: None,
                 z_limits: None,
                 grid_enabled: true,
+                minor_grid_enabled: false,
                 box_enabled: true,
                 axis_equal: false,
                 legend_enabled: true,
@@ -294,6 +299,7 @@ impl Figure {
             self.x_log = meta.x_log;
             self.y_log = meta.y_log;
             self.grid_enabled = meta.grid_enabled;
+            self.minor_grid_enabled = meta.minor_grid_enabled;
             self.box_enabled = meta.box_enabled;
             self.axis_equal = meta.axis_equal;
             self.legend_enabled = meta.legend_enabled;
@@ -632,6 +638,27 @@ impl Figure {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
             meta.grid_enabled = enabled;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn with_minor_grid(mut self, enabled: bool) -> Self {
+        self.set_minor_grid(enabled);
+        self
+    }
+
+    pub fn set_minor_grid(&mut self, enabled: bool) {
+        self.set_axes_minor_grid_enabled(self.active_axes_index, enabled);
+        self.dirty = true;
+    }
+
+    pub fn set_axes_minor_grid_enabled(&mut self, axes_index: usize, enabled: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.minor_grid_enabled = enabled;
         }
         if axes_index == self.active_axes_index {
             self.sync_legacy_fields_from_active_axes();
@@ -2290,6 +2317,7 @@ mod tests {
         figure.set_axes_limits(1, Some((1.0, 2.0)), Some((3.0, 4.0)));
         figure.set_axes_z_limits(1, Some((5.0, 6.0)));
         figure.set_axes_grid_enabled(1, false);
+        figure.set_axes_minor_grid_enabled(1, true);
         figure.set_axes_box_enabled(1, false);
         figure.set_axes_axis_equal(1, true);
         figure.set_axes_colorbar_enabled(1, true);
@@ -2300,7 +2328,9 @@ mod tests {
         let right = figure.axes_metadata(1).unwrap();
         assert_eq!(left.x_limits, None);
         assert_eq!(right.x_limits, Some((1.0, 2.0)));
+        assert!(!left.minor_grid_enabled);
         assert!(!right.grid_enabled);
+        assert!(right.minor_grid_enabled);
         assert!(!right.box_enabled);
         assert!(right.axis_equal);
         assert!(right.colorbar_enabled);

@@ -1,4 +1,4 @@
-use runmat_parser::{parse_with_options, CompatMode, Expr, ParserOptions, Stmt};
+use runmat_parser::{parse_with_options, BinOp, CompatMode, Expr, ParserOptions, Stmt};
 
 mod parse;
 use parse::parse;
@@ -60,10 +60,10 @@ fn command_form_does_not_continue_on_bare_newline() {
         other => panic!("statement 1: expected identifier, got {other:?}"),
     }
 
-    let known_command = parse("grid\non").unwrap();
+    let known_command = parse("hold\non").unwrap();
     assert_eq!(known_command.body.len(), 2);
     match &known_command.body[0] {
-        Stmt::ExprStmt(Expr::Ident(name, _), _, _) => assert_eq!(name, "grid"),
+        Stmt::ExprStmt(Expr::Ident(name, _), _, _) => assert_eq!(name, "hold"),
         other => panic!("statement 0: expected identifier, got {other:?}"),
     }
 }
@@ -150,6 +150,48 @@ fn axis_on_off_rewrite_to_string_args() {
                 assert!(matches!(&args[0], Expr::String(s, _) if s.trim_matches('"') == expected));
             }
             _ => panic!("expected {src} command form"),
+        }
+    }
+}
+
+#[test]
+fn grid_command_forms_rewrite_to_string_args() {
+    for src in ["grid on", "grid off", "grid minor"] {
+        let program = parse_with_options(src, ParserOptions::new(CompatMode::Matlab)).unwrap();
+        match &program.body[0] {
+            Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+                assert_eq!(name, "grid");
+                assert_eq!(args.len(), 1);
+                let expected = src.split_whitespace().nth(1).unwrap();
+                assert!(matches!(&args[0], Expr::String(s, _) if s.trim_matches('"') == expected));
+            }
+            _ => panic!("expected {src} command form"),
+        }
+    }
+}
+
+#[test]
+fn grid_without_arg_is_command_form() {
+    let program = parse_with_options("grid", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "grid");
+            assert!(args.is_empty());
+        }
+        _ => panic!("expected grid command form"),
+    }
+}
+
+#[test]
+fn grid_zero_arg_command_form_does_not_capture_binary_expressions() {
+    for (src, op) in [("grid + 1", BinOp::Add), ("grid - x", BinOp::Sub)] {
+        let program = parse_with_options(src, ParserOptions::new(CompatMode::Matlab)).unwrap();
+        match &program.body[0] {
+            Stmt::ExprStmt(Expr::Binary(lhs, actual_op, _, _), false, _) => {
+                assert_eq!(*actual_op, op);
+                assert!(matches!(&**lhs, Expr::Ident(name, _) if name == "grid"));
+            }
+            other => panic!("expected {src} to parse as binary expression, got {other:?}"),
         }
     }
 }

@@ -1158,7 +1158,10 @@ impl PlotOverlay {
                 }
 
                 // Grid (2D)
-                if config.show_grid && plot_renderer.overlay_show_grid_for_axes(i) {
+                if config.show_grid
+                    && (plot_renderer.overlay_show_grid_for_axes(i)
+                        || plot_renderer.overlay_show_minor_grid_for_axes(i))
+                {
                     let b = plot_renderer.view_bounds_for_axes(i);
                     self.draw_grid(ui, r, plot_renderer, b, Some(i));
                 }
@@ -1288,7 +1291,10 @@ impl PlotOverlay {
                     self.draw_2d_border(ui, centered_frame_rect);
                 }
                 // Draw grid if enabled
-                if config.show_grid {
+                if config.show_grid
+                    && (plot_renderer.overlay_show_grid()
+                        || plot_renderer.overlay_show_minor_grid())
+                {
                     self.draw_grid(ui, centered_plot_rect, plot_renderer, None, None);
                 }
 
@@ -1488,7 +1494,7 @@ impl PlotOverlay {
             .or_else(|| plot_renderer.view_bounds())
             .or_else(|| plot_renderer.data_bounds())
         {
-            let (grid_color_major, _grid_color_minor) = self.themed_grid_colors();
+            let (grid_color_major, grid_color_minor) = self.themed_grid_colors();
 
             let (x_min, x_max, y_min, y_max) = data_bounds;
             let x_range = x_max - x_min;
@@ -1501,6 +1507,12 @@ impl PlotOverlay {
             let y_log = axes_index
                 .map(|idx| plot_renderer.overlay_y_log_for_axes(idx))
                 .unwrap_or_else(|| plot_renderer.overlay_y_log());
+            let show_major_grid = axes_index
+                .map(|idx| plot_renderer.overlay_show_grid_for_axes(idx))
+                .unwrap_or_else(|| plot_renderer.overlay_show_grid());
+            let show_minor_grid = axes_index
+                .map(|idx| plot_renderer.overlay_show_minor_grid_for_axes(idx))
+                .unwrap_or_else(|| plot_renderer.overlay_show_minor_grid());
 
             let x_ticks = if x_log {
                 Vec::new()
@@ -1520,9 +1532,13 @@ impl PlotOverlay {
                 let end_decade = x_max.log10().ceil() as i32;
                 for d in start_decade..=end_decade {
                     let decade = 10f64.powi(d);
-                    for m in [1.0, 2.0, 5.0].iter() {
-                        let x_val = decade * m;
+                    for mantissa in 1..=9 {
+                        let x_val = decade * mantissa as f64;
                         if x_val < x_min || x_val > x_max {
+                            continue;
+                        }
+                        let is_major = mantissa == 1;
+                        if (is_major && !show_major_grid) || (!is_major && !show_minor_grid) {
                             continue;
                         }
                         let x_screen = plot_rect.min.x
@@ -1540,27 +1556,65 @@ impl PlotOverlay {
                                 Pos2::new(x_screen, plot_rect.min.y),
                                 Pos2::new(x_screen, plot_rect.max.y),
                             ],
-                            Stroke::new(0.8, grid_color_major),
+                            Stroke::new(
+                                if is_major { 0.8 } else { 0.6 },
+                                if is_major {
+                                    grid_color_major
+                                } else {
+                                    grid_color_minor
+                                },
+                            ),
                         );
                     }
                 }
             } else {
-                for x_val in x_ticks {
-                    let x_screen =
-                        plot_rect.min.x + ((x_val - x_min) / x_range) as f32 * plot_rect.width();
-                    let x_screen = Self::snap_coord(x_screen, ppp);
-                    if (x_screen - plot_rect.min.x).abs() <= edge_eps
-                        || (x_screen - plot_rect.max.x).abs() <= edge_eps
-                    {
-                        continue;
+                if show_minor_grid {
+                    for pair in x_ticks.windows(2) {
+                        let step = (pair[1] - pair[0]) / 5.0;
+                        if !step.is_finite() || step <= 0.0 {
+                            continue;
+                        }
+                        for n in 1..5 {
+                            let x_val = pair[0] + step * n as f64;
+                            if x_val < x_min || x_val > x_max {
+                                continue;
+                            }
+                            let x_screen = plot_rect.min.x
+                                + ((x_val - x_min) / x_range) as f32 * plot_rect.width();
+                            let x_screen = Self::snap_coord(x_screen, ppp);
+                            if (x_screen - plot_rect.min.x).abs() <= edge_eps
+                                || (x_screen - plot_rect.max.x).abs() <= edge_eps
+                            {
+                                continue;
+                            }
+                            ui.painter().line_segment(
+                                [
+                                    Pos2::new(x_screen, plot_rect.min.y),
+                                    Pos2::new(x_screen, plot_rect.max.y),
+                                ],
+                                Stroke::new(0.6, grid_color_minor),
+                            );
+                        }
                     }
-                    ui.painter().line_segment(
-                        [
-                            Pos2::new(x_screen, plot_rect.min.y),
-                            Pos2::new(x_screen, plot_rect.max.y),
-                        ],
-                        Stroke::new(0.8, grid_color_major),
-                    );
+                }
+                if show_major_grid {
+                    for x_val in x_ticks {
+                        let x_screen = plot_rect.min.x
+                            + ((x_val - x_min) / x_range) as f32 * plot_rect.width();
+                        let x_screen = Self::snap_coord(x_screen, ppp);
+                        if (x_screen - plot_rect.min.x).abs() <= edge_eps
+                            || (x_screen - plot_rect.max.x).abs() <= edge_eps
+                        {
+                            continue;
+                        }
+                        ui.painter().line_segment(
+                            [
+                                Pos2::new(x_screen, plot_rect.min.y),
+                                Pos2::new(x_screen, plot_rect.max.y),
+                            ],
+                            Stroke::new(0.8, grid_color_major),
+                        );
+                    }
                 }
             }
 
@@ -1570,9 +1624,13 @@ impl PlotOverlay {
                 let end_decade = y_max.log10().ceil() as i32;
                 for d in start_decade..=end_decade {
                     let decade = 10f64.powi(d);
-                    for m in [1.0, 2.0, 5.0].iter() {
-                        let y_val = decade * m;
+                    for mantissa in 1..=9 {
+                        let y_val = decade * mantissa as f64;
                         if y_val < y_min || y_val > y_max {
+                            continue;
+                        }
+                        let is_major = mantissa == 1;
+                        if (is_major && !show_major_grid) || (!is_major && !show_minor_grid) {
                             continue;
                         }
                         let y_screen = plot_rect.max.y
@@ -1590,27 +1648,65 @@ impl PlotOverlay {
                                 Pos2::new(plot_rect.min.x, y_screen),
                                 Pos2::new(plot_rect.max.x, y_screen),
                             ],
-                            Stroke::new(0.8, grid_color_major),
+                            Stroke::new(
+                                if is_major { 0.8 } else { 0.6 },
+                                if is_major {
+                                    grid_color_major
+                                } else {
+                                    grid_color_minor
+                                },
+                            ),
                         );
                     }
                 }
             } else {
-                for y_val in y_ticks {
-                    let y_screen =
-                        plot_rect.max.y - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
-                    let y_screen = Self::snap_coord(y_screen, ppp);
-                    if (y_screen - plot_rect.min.y).abs() <= edge_eps
-                        || (y_screen - plot_rect.max.y).abs() <= edge_eps
-                    {
-                        continue;
+                if show_minor_grid {
+                    for pair in y_ticks.windows(2) {
+                        let step = (pair[1] - pair[0]) / 5.0;
+                        if !step.is_finite() || step <= 0.0 {
+                            continue;
+                        }
+                        for n in 1..5 {
+                            let y_val = pair[0] + step * n as f64;
+                            if y_val < y_min || y_val > y_max {
+                                continue;
+                            }
+                            let y_screen = plot_rect.max.y
+                                - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                            let y_screen = Self::snap_coord(y_screen, ppp);
+                            if (y_screen - plot_rect.min.y).abs() <= edge_eps
+                                || (y_screen - plot_rect.max.y).abs() <= edge_eps
+                            {
+                                continue;
+                            }
+                            ui.painter().line_segment(
+                                [
+                                    Pos2::new(plot_rect.min.x, y_screen),
+                                    Pos2::new(plot_rect.max.x, y_screen),
+                                ],
+                                Stroke::new(0.6, grid_color_minor),
+                            );
+                        }
                     }
-                    ui.painter().line_segment(
-                        [
-                            Pos2::new(plot_rect.min.x, y_screen),
-                            Pos2::new(plot_rect.max.x, y_screen),
-                        ],
-                        Stroke::new(0.8, grid_color_major),
-                    );
+                }
+                if show_major_grid {
+                    for y_val in y_ticks {
+                        let y_screen = plot_rect.max.y
+                            - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                        let y_screen = Self::snap_coord(y_screen, ppp);
+                        if (y_screen - plot_rect.min.y).abs() <= edge_eps
+                            || (y_screen - plot_rect.max.y).abs() <= edge_eps
+                        {
+                            continue;
+                        }
+                        ui.painter().line_segment(
+                            [
+                                Pos2::new(plot_rect.min.x, y_screen),
+                                Pos2::new(plot_rect.max.x, y_screen),
+                            ],
+                            Stroke::new(0.8, grid_color_major),
+                        );
+                    }
                 }
             }
         }

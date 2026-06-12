@@ -389,6 +389,7 @@ impl FigureScene {
             .map(TextStyle::from)
             .unwrap_or_default();
         figure.grid_enabled = self.metadata.grid_enabled;
+        figure.minor_grid_enabled = self.metadata.minor_grid_enabled;
         figure.z_limits = self.metadata.z_limits.map(|[lo, hi]| (lo, hi));
         figure.colorbar_enabled = self.metadata.colorbar_enabled;
         figure.axis_equal = self.metadata.axis_equal;
@@ -456,6 +457,8 @@ pub struct FigureMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub y_label: Option<String>,
     pub grid_enabled: bool,
+    #[serde(default)]
+    pub minor_grid_enabled: bool,
     pub legend_enabled: bool,
     pub colorbar_enabled: bool,
     pub axis_equal: bool,
@@ -491,6 +494,7 @@ impl FigureMetadata {
             x_label: figure.x_label.clone(),
             y_label: figure.y_label.clone(),
             grid_enabled: figure.grid_enabled,
+            minor_grid_enabled: figure.minor_grid_enabled,
             legend_enabled: figure.legend_enabled,
             colorbar_enabled: figure.colorbar_enabled,
             axis_equal: figure.axis_equal,
@@ -640,6 +644,8 @@ pub struct SerializedAxesMetadata {
     #[serde(default)]
     pub grid_enabled: bool,
     #[serde(default)]
+    pub minor_grid_enabled: bool,
+    #[serde(default)]
     pub box_enabled: bool,
     #[serde(default)]
     pub axis_equal: bool,
@@ -683,6 +689,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             view_azimuth_deg: value.view_azimuth_deg,
             view_elevation_deg: value.view_elevation_deg,
             grid_enabled: value.grid_enabled,
+            minor_grid_enabled: value.minor_grid_enabled,
             box_enabled: value.box_enabled,
             axis_equal: value.axis_equal,
             legend_enabled: value.legend_enabled,
@@ -721,6 +728,7 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             view_elevation_deg: value.view_elevation_deg,
             view_revision: 0,
             grid_enabled: value.grid_enabled,
+            minor_grid_enabled: value.minor_grid_enabled,
             box_enabled: value.box_enabled,
             axis_equal: value.axis_equal,
             legend_enabled: value.legend_enabled,
@@ -2265,6 +2273,7 @@ mod tests {
         figure.set_axes_limits(1, Some((1.0, 2.0)), Some((3.0, 4.0)));
         figure.set_axes_z_limits(1, Some((5.0, 6.0)));
         figure.set_axes_grid_enabled(1, false);
+        figure.set_axes_minor_grid_enabled(1, true);
         figure.set_axes_box_enabled(1, false);
         figure.set_axes_axis_equal(1, true);
         figure.set_axes_colorbar_enabled(1, true);
@@ -2280,6 +2289,7 @@ mod tests {
         assert_eq!(meta.y_limits, Some((3.0, 4.0)));
         assert_eq!(meta.z_limits, Some((5.0, 6.0)));
         assert!(!meta.grid_enabled);
+        assert!(meta.minor_grid_enabled);
         assert!(!meta.box_enabled);
         assert!(meta.axis_equal);
         assert!(meta.colorbar_enabled);

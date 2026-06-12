@@ -12,8 +12,8 @@ use runmat_macros::runtime_builtin;
 use super::op_common::cmd_parsing::{as_lower_str, parse_on_off};
 use super::state::{
     clear_current_axes, set_axis_equal, set_axis_limits, set_box_enabled, set_colorbar_enabled,
-    set_colormap, set_grid_enabled, set_surface_shading, set_z_limits, toggle_box, toggle_colorbar,
-    toggle_grid,
+    set_colormap, set_grid_enabled, set_minor_grid_enabled, set_surface_shading, set_z_limits,
+    toggle_box, toggle_colorbar, toggle_grid, toggle_minor_grid,
 };
 use crate::builtins::plotting::type_resolvers::bool_type;
 use crate::{build_runtime_error, RuntimeError};
@@ -31,7 +31,7 @@ const GRID_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Optional,
     default: Some("\"toggle\""),
-    description: "Grid mode token ('on'|'off').",
+    description: "Grid mode token ('on'|'off'|'minor').",
 }];
 const GRID_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
@@ -58,6 +58,12 @@ pub const GRID_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &GRID_ERRORS,
 };
+
+enum GridMode {
+    ToggleMajor,
+    Major(bool),
+    ToggleMinor,
+}
 
 const BOX_OUTPUT_ENABLED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "enabled",
@@ -304,21 +310,62 @@ fn cmd_error_with_message(
     builtin_path = "crate::builtins::plotting::cmds"
 )]
 pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
-    match parse_on_off("grid", args.first()).map_err(|err| {
-        cmd_error_with_message(
-            "grid",
-            format!("{}: {}", GRID_ERROR_INVALID_ARGUMENT.message, err.message()),
-            &GRID_ERROR_INVALID_ARGUMENT,
-        )
-    })? {
-        Some(enabled) => {
-            set_grid_enabled(enabled);
-            Ok(enabled)
-        }
-        None => {
+    match parse_grid_mode(&args)? {
+        GridMode::ToggleMajor => {
             let enabled = toggle_grid();
             Ok(enabled)
         }
+        GridMode::Major(enabled) => {
+            set_grid_enabled(enabled);
+            if !enabled {
+                set_minor_grid_enabled(false);
+            }
+            Ok(enabled)
+        }
+        GridMode::ToggleMinor => {
+            let enabled = toggle_minor_grid();
+            Ok(enabled)
+        }
+    }
+}
+
+fn parse_grid_mode(args: &[Value]) -> crate::BuiltinResult<GridMode> {
+    if args.len() > 1 {
+        return Err(cmd_error_with_message(
+            "grid",
+            format!(
+                "{}: expected at most one mode argument",
+                GRID_ERROR_INVALID_ARGUMENT.message
+            ),
+            &GRID_ERROR_INVALID_ARGUMENT,
+        ));
+    }
+
+    let Some(arg) = args.first() else {
+        return Ok(GridMode::ToggleMajor);
+    };
+    let Some(mode) = as_lower_str(arg) else {
+        return Err(cmd_error_with_message(
+            "grid",
+            format!(
+                "{}: expected string argument",
+                GRID_ERROR_INVALID_ARGUMENT.message
+            ),
+            &GRID_ERROR_INVALID_ARGUMENT,
+        ));
+    };
+    match mode.trim() {
+        "on" => Ok(GridMode::Major(true)),
+        "off" => Ok(GridMode::Major(false)),
+        "minor" => Ok(GridMode::ToggleMinor),
+        other => Err(cmd_error_with_message(
+            "grid",
+            format!(
+                "{}: expected 'on', 'off', or 'minor' (got '{other}')",
+                GRID_ERROR_INVALID_ARGUMENT.message
+            ),
+            &GRID_ERROR_INVALID_ARGUMENT,
+        )),
     }
 }
 
@@ -652,6 +699,63 @@ mod tests {
             axis_builtin(vec![Value::String(mode.into())])
                 .unwrap_or_else(|err| panic!("axis {mode} should be accepted: {err:?}"));
         }
+    }
+
+    #[test]
+    fn grid_minor_toggles_minor_grid_without_changing_major_grid() {
+        let _guard = setup();
+        let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
+
+        let enabled = grid_builtin(vec![Value::String("minor".into())]).unwrap();
+        assert!(enabled);
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("Grid".into())]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("MinorGrid".into())]).unwrap(),
+            Value::Bool(true)
+        );
+
+        let enabled = grid_builtin(vec![Value::String("minor".into())]).unwrap();
+        assert!(!enabled);
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("Grid".into())]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("MinorGrid".into())]).unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn grid_off_disables_major_and_minor_grid() {
+        let _guard = setup();
+        let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
+
+        grid_builtin(vec![Value::String("minor".into())]).unwrap();
+        let enabled = grid_builtin(vec![Value::String("off".into())]).unwrap();
+        assert!(!enabled);
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("Grid".into())]).unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("MinorGrid".into())]).unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn grid_rejects_extra_arguments() {
+        let _guard = setup();
+        let err = grid_builtin(vec![
+            Value::String("minor".into()),
+            Value::String("on".into()),
+        ])
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:grid:InvalidArgument"));
     }
 
     #[test]

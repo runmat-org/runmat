@@ -31,8 +31,8 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     CommandVerb {
         name: "grid",
         arg_kind: CommandArgKind::Keyword {
-            allowed: &["on", "off"],
-            optional: false,
+            allowed: &["on", "off", "minor"],
+            optional: true,
         },
     },
     CommandVerb {
@@ -209,8 +209,12 @@ impl Parser {
                 break;
             }
         }
-        if !saw_arg && !zero_arg_allowed {
-            return false;
+        if !saw_arg {
+            return zero_arg_allowed
+                && matches!(
+                    self.peek_token_at(i),
+                    None | Some(Token::Semicolon) | Some(Token::Comma) | Some(Token::Newline)
+                );
         }
 
         match self.peek_token_at(i) {
