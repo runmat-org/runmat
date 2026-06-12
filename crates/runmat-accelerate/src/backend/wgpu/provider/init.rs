@@ -129,7 +129,7 @@ impl WgpuProvider {
             instance_desc.backends = wgpu::Backends::BROWSER_WEBGPU;
         }
 
-        let instance = Arc::new(wgpu::Instance::new(instance_desc));
+        let instance = Arc::new(crate::backend::wgpu::compat::instance_new(instance_desc));
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: opts.power_preference,
@@ -213,22 +213,22 @@ impl WgpuProvider {
         #[cfg(not(target_arch = "wasm32"))]
         let (device_raw, queue_raw) = adapter
             .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("RunMat WGPU Device"),
+                &crate::backend::wgpu::compat::device_descriptor(
+                    Some("RunMat WGPU Device"),
                     required_features,
-                    required_limits: limits.clone(),
-                },
+                    limits.clone(),
+                ),
                 None,
             )
             .await?;
         #[cfg(target_arch = "wasm32")]
         let (device_raw, queue_raw) = adapter
             .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("RunMat WGPU Device"),
+                &crate::backend::wgpu::compat::device_descriptor(
+                    Some("RunMat WGPU Device"),
                     required_features,
-                    required_limits: limits.clone(),
-                },
+                    limits.clone(),
+                ),
                 None,
             )
             .await

@@ -59,12 +59,13 @@ pub fn pack_vertices_from_xy(
         bind_group_layouts: &[&bind_group_layout],
         push_constant_ranges: &[],
     });
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("stem-pack-pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: "main",
-    });
+    let pipeline =
+        device.create_compute_pipeline(&crate::wgpu_compat::wgpu_compute_pipeline_descriptor! {
+            label: Some("stem-pack-pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "main",
+        });
     let baseline_count = if params.baseline_visible { 2 } else { 0 };
     let vertex_count = baseline_count as u64 + inputs.len as u64 * 2;
     let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {

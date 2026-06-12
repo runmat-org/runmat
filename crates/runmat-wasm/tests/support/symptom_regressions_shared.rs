@@ -1,6 +1,6 @@
 #![cfg(target_arch = "wasm32")]
 
-use runmat_wasm::init_runmat;
+use runmat_wasm::{init_runmat, RunMatWasm};
 use serde::Deserialize;
 use wasm_bindgen::JsValue;
 
@@ -35,10 +35,7 @@ fn init_options(enable_gpu: bool) -> JsValue {
     options.into()
 }
 
-async fn execute_script(script: &str) -> ExecPayload {
-    let runtime = init_runmat(init_options(false))
-        .await
-        .expect("initialize wasm runtime");
+pub(crate) async fn execute_script_with_runtime(runtime: &RunMatWasm, script: &str) -> ExecPayload {
     let request = text_execute_request("symptom_regression.m", script);
     serde_wasm_bindgen::from_value(
         runtime
@@ -47,6 +44,13 @@ async fn execute_script(script: &str) -> ExecPayload {
             .expect("execute script"),
     )
     .expect("deserialize execution payload")
+}
+
+async fn execute_script(script: &str) -> ExecPayload {
+    let runtime = init_runmat(init_options(false))
+        .await
+        .expect("initialize wasm runtime");
+    execute_script_with_runtime(&runtime, script).await
 }
 
 fn text_execute_request(name: &str, script: &str) -> JsValue {
@@ -76,7 +80,7 @@ fn text_execute_request(name: &str, script: &str) -> JsValue {
     request.into()
 }
 
-fn stdout_text(payload: &ExecPayload) -> String {
+pub(crate) fn stdout_text(payload: &ExecPayload) -> String {
     payload
         .stdout
         .iter()

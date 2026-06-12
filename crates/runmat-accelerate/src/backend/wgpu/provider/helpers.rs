@@ -500,15 +500,14 @@ impl WgpuProvider {
             persist_workgroup_size,
             persist_wgsl_src,
         );
-        let p = Arc::new(
-            self.device
-                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some(label),
-                    layout: Some(pipeline_layout),
-                    module,
-                    entry_point: "main",
-                }),
-        );
+        let p = Arc::new(self.device.create_compute_pipeline(
+            &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                label: Some(label),
+                layout: Some(pipeline_layout),
+                module: module,
+                entry_point: "main",
+            },
+        ));
         if let Ok(mut guard) = self.fused_pipeline_cache.try_lock() {
             guard.insert(hash_key, p.clone());
         }

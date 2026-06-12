@@ -53,7 +53,7 @@ pub(crate) fn validate_webgpu_runtime() -> Result<(), String> {
     let _gpu = get_required_member(&navigator, "gpu")?;
     let limits_ctor = get_required_member(&global, "GPUSupportedLimits")?;
     let prototype = get_required_member(&limits_ctor, "prototype")?;
-    let required_limit_fields = ["maxInterStageShaderComponents"];
+    let required_limit_fields = ["maxInterStageShaderVariables"];
     for field in required_limit_fields {
         let has = js_sys::Reflect::has(&prototype, &JsValue::from_str(field)).unwrap_or(false);
         if !has {

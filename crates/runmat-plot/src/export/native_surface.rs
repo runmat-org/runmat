@@ -73,8 +73,12 @@ impl NativeSurfaceRenderContext {
         let overlay = {
             let egui_ctx = egui::Context::default();
             ModernDarkTheme::default().apply_to_egui(&egui_ctx);
-            let egui_renderer =
-                egui_wgpu::Renderer::new(&renderer.wgpu_renderer.device, format, None, 1);
+            let egui_renderer = crate::wgpu_compat::egui_renderer_new(
+                &renderer.wgpu_renderer.device,
+                format,
+                None,
+                1,
+            );
             Some(NativeOverlayState {
                 egui_ctx,
                 egui_renderer,
@@ -233,15 +237,15 @@ impl NativeSurfaceRenderContext {
             label: Some("Native Surface RGBA Copy Encoder"),
         });
         copy_encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
+            crate::wgpu_compat::TexelCopyTextureInfo {
                 texture: &color_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            wgpu::ImageCopyBuffer {
+            crate::wgpu_compat::TexelCopyBufferInfo {
                 buffer: &output_buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: crate::wgpu_compat::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(padded_bytes_per_row),
                     rows_per_image: Some(height),
@@ -653,7 +657,7 @@ impl NativeSurfaceRenderContext {
             }
 
             {
-                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("runmat-native-egui-overlay"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: target_view,
@@ -667,6 +671,10 @@ impl NativeSurfaceRenderContext {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
+                #[cfg(target_arch = "wasm32")]
+                let mut render_pass = render_pass.forget_lifetime();
+                #[cfg(not(target_arch = "wasm32"))]
+                let mut render_pass = render_pass;
                 overlay
                     .egui_renderer
                     .render(&mut render_pass, &paint_jobs, &screen_descriptor);
@@ -740,13 +748,15 @@ async fn create_headless_context(
         height
     );
 
-    let instance = panic::catch_unwind(|| wgpu::Instance::new(wgpu::InstanceDescriptor::default()))
-        .map_err(|payload| {
-            format!(
-                "{HEADLESS_GPU_CONTEXT_PANICKED_PREFIX} {}",
-                panic_payload_to_string(payload)
-            )
-        })?;
+    let instance = panic::catch_unwind(|| {
+        crate::wgpu_compat::instance_new(wgpu::InstanceDescriptor::default())
+    })
+    .map_err(|payload| {
+        format!(
+            "{HEADLESS_GPU_CONTEXT_PANICKED_PREFIX} {}",
+            panic_payload_to_string(payload)
+        )
+    })?;
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -756,7 +766,7 @@ async fn create_headless_context(
         .await
         .ok_or(HEADLESS_GPU_ADAPTER_UNAVAILABLE)?;
     let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor::default(), None)
+        .request_device(&crate::wgpu_compat::default_device_descriptor(), None)
         .await
         .map_err(|err| format!("{HEADLESS_GPU_DEVICE_CREATION_FAILED_PREFIX} {err}"))?;
     let context =
