@@ -2790,7 +2790,6 @@ impl Compiler {
                 CallableIdentity::Builtin(runmat_hir::BuiltinId(name)) if !name.trim().is_empty() => {
                     Ok(())
                 }
-                CallableIdentity::BoundFunction(_) => Ok(()),
                 _ => Err(self
                     .compile_error(format!(
                         "MIR workspace-first call fallback policy {:?} is not supported for static callee {:?}",

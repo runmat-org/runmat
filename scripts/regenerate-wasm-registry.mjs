@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,7 +13,7 @@ const registryPath = join(
   "builtins",
   "generated_wasm_registry.rs",
 );
-const tmpDir = mkdtempSync(join(tmpdir(), "runmat-wasm-registry-"));
+const tmpDir = mkdtempSync(join(dirname(registryPath), ".runmat-wasm-registry-"));
 const tmpRegistry = join(tmpDir, "generated_wasm_registry.rs");
 
 try {

@@ -34,6 +34,47 @@ fn u64_to_usize(value: u64, context: &str) -> SnapshotResult<usize> {
     })
 }
 
+fn snapshot_header_size(bytes: &[u8]) -> SnapshotResult<usize> {
+    if bytes.len() < 4 {
+        return Err(SnapshotError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Snapshot bytes too small to contain header size",
+        )));
+    }
+    Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize)
+}
+
+fn snapshot_data_bounds(
+    header: &SnapshotHeader,
+    header_size: usize,
+    container_len: usize,
+    overflow_message: &str,
+    out_of_bounds_message: &str,
+) -> SnapshotResult<(usize, usize)> {
+    let data_start = if header.data_info.data_offset != 0 {
+        u64_to_usize(header.data_info.data_offset, "snapshot data offset")?
+    } else {
+        4 + header_size
+    };
+    let compressed_size =
+        u64_to_usize(header.data_info.compressed_size, "snapshot compressed size")?;
+    let data_end =
+        data_start
+            .checked_add(compressed_size)
+            .ok_or_else(|| SnapshotError::Configuration {
+                message: overflow_message.to_string(),
+            })?;
+
+    if data_end > container_len {
+        return Err(SnapshotError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            out_of_bounds_message,
+        )));
+    }
+
+    Ok((data_start, data_end))
+}
+
 /// High-performance snapshot loader
 pub struct SnapshotLoader {
     /// Configuration
@@ -164,7 +205,7 @@ impl SnapshotLoader {
             )));
         }
 
-        let header_size = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+        let header_size = snapshot_header_size(bytes)?;
         if bytes.len() < 4 + header_size {
             return Err(SnapshotError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -181,25 +222,13 @@ impl SnapshotLoader {
 
         header.validate()?;
 
-        let data_start = if header.data_info.data_offset != 0 {
-            u64_to_usize(header.data_info.data_offset, "snapshot data offset")?
-        } else {
-            4 + header_size
-        };
-        let compressed_size =
-            u64_to_usize(header.data_info.compressed_size, "snapshot compressed size")?;
-        let data_end = data_start.checked_add(compressed_size).ok_or_else(|| {
-            SnapshotError::Configuration {
-                message: "Snapshot data section overflowed buffer length".to_string(),
-            }
-        })?;
-
-        if data_end > bytes.len() {
-            return Err(SnapshotError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Snapshot data section extends beyond provided buffer",
-            )));
-        }
+        let (data_start, data_end) = snapshot_data_bounds(
+            &header,
+            header_size,
+            bytes.len(),
+            "Snapshot data section overflowed buffer length",
+            "Snapshot data section extends beyond provided buffer",
+        )?;
 
         let compressed_data = &bytes[data_start..data_end];
         self.stats.compressed_size = compressed_data.len() as u64;
@@ -260,36 +289,21 @@ impl SnapshotLoader {
             .await
             .map_err(SnapshotError::Io)?;
 
-        // Validate file format
-        if file_contents.len() < std::mem::size_of::<SnapshotHeader>() {
-            return Err(SnapshotError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "File too small to contain valid snapshot header",
-            )));
-        }
-
         // Parse header
+        let header_size = snapshot_header_size(&file_contents)?;
         let header = parse_snapshot_header(&file_contents)?;
 
         // Validate header
         header.validate()?;
 
         // Extract and decompress data
-        let data_start = u64_to_usize(header.data_info.data_offset, "snapshot data offset")?;
-        let compressed_size =
-            u64_to_usize(header.data_info.compressed_size, "snapshot compressed size")?;
-        let data_end = data_start.checked_add(compressed_size).ok_or_else(|| {
-            SnapshotError::Configuration {
-                message: "Snapshot data section overflowed file bounds".to_string(),
-            }
-        })?;
-
-        if data_end > file_contents.len() {
-            return Err(SnapshotError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Data section extends beyond file size",
-            )));
-        }
+        let (data_start, data_end) = snapshot_data_bounds(
+            &header,
+            header_size,
+            file_contents.len(),
+            "Snapshot data section overflowed file bounds",
+            "Data section extends beyond file size",
+        )?;
 
         let compressed_data = &file_contents[data_start..data_end];
         self.stats.compressed_size = compressed_data.len() as u64;
@@ -311,9 +325,9 @@ impl SnapshotLoader {
         let snapshot = self.deserialize_snapshot(&decompressed_data)?;
 
         // Validate snapshot if enabled
+        #[cfg(feature = "validation")]
         if self.config.validation_enabled {
-            // Skip detailed validation for async loading (simplified)
-            // In production, this would validate the snapshot structure
+            self.validate_snapshot(&snapshot)?;
         }
 
         // Update stats
@@ -806,13 +820,7 @@ impl SnapshotLoader {
 }
 
 fn parse_snapshot_header(bytes: &[u8]) -> SnapshotResult<SnapshotHeader> {
-    if bytes.len() < 4 {
-        return Err(SnapshotError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "Snapshot bytes too small to contain header size",
-        )));
-    }
-    let header_size = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+    let header_size = snapshot_header_size(bytes)?;
     if bytes.len() < 4 + header_size {
         return Err(SnapshotError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
