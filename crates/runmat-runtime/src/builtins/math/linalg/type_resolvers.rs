@@ -201,6 +201,26 @@ pub fn rref_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
+pub fn null_type(args: &[Type], _context: &ResolveContext) -> Type {
+    let Some(input) = args.first() else {
+        return Type::Unknown;
+    };
+    match input {
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            let (_rows, cols) = matrix_dims(shape);
+            Type::Tensor {
+                shape: Some(vec![cols, None]),
+            }
+        }
+        Type::Tensor { shape: None } | Type::Logical { shape: None } => Type::tensor(),
+        Type::Num | Type::Int | Type::Bool => Type::Tensor {
+            shape: Some(vec![Some(1), None]),
+        },
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 pub fn eig_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;

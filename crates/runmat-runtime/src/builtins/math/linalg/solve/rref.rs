@@ -326,7 +326,7 @@ fn rref_complex_eval(matrix: ComplexTensor, tol: Option<f64>) -> BuiltinResult<R
     })
 }
 
-fn rref_real_impl(
+pub(super) fn rref_real_impl(
     mut data: Vec<f64>,
     rows: usize,
     cols: usize,
@@ -386,7 +386,7 @@ fn rref_real_impl(
     Ok((data, pivots))
 }
 
-fn rref_complex_impl(
+pub(super) fn rref_complex_impl(
     mut data: Vec<Complex64>,
     rows: usize,
     cols: usize,
@@ -450,11 +450,11 @@ fn rref_complex_impl(
     Ok((data, pivots))
 }
 
-fn default_real_tolerance(data: &[f64], rows: usize, cols: usize) -> f64 {
+pub(super) fn default_real_tolerance(data: &[f64], rows: usize, cols: usize) -> f64 {
     default_tolerance(real_inf_norm(data, rows, cols), rows, cols)
 }
 
-fn default_complex_tolerance(data: &[(f64, f64)], rows: usize, cols: usize) -> f64 {
+pub(super) fn default_complex_tolerance(data: &[(f64, f64)], rows: usize, cols: usize) -> f64 {
     default_tolerance(complex_inf_norm(data, rows, cols), rows, cols)
 }
 

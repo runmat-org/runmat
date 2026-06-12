@@ -10399,6 +10399,24 @@ fn simple_builtin_call_uses_semantic_vm() {
 }
 
 #[test]
+fn null_row_reduction_builtin_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "A = [1 2 3; 2 4 6]; Z = null(A, 'r');";
+    let prepared = session.compile_input(source).expect("compile null call");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "null should compile through semantic HIR/MIR/VM"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    let expected = runmat_builtins::Value::Tensor(
+        runmat_builtins::Tensor::new(vec![-2.0, 1.0, 0.0, -3.0, 0.0, 1.0], vec![3, 2])
+            .expect("expected null basis"),
+    );
+    assert!(outcome_has_named_upsert(&outcome, "Z", &expected));
+}
+
+#[test]
 fn multi_assign_deal_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let prepared = session
