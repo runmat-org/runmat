@@ -15,6 +15,11 @@ crate-type = ["cdylib", "rlib"]
 default = ["gpu"]
 jit = ["runmat-core/jit"]
 gpu = ["runmat-accelerate/wgpu"]
+occt-wasm-host = [
+    "runmat-core/occt-wasm-host",
+    "runmat-geometry-io/occt-wasm-host",
+    "runmat-runtime/occt-wasm-host",
+]
 
 [dependencies]
 runmat-core = { workspace = true }

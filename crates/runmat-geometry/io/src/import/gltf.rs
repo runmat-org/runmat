@@ -202,6 +202,7 @@ impl GltfRegionTracker {
                 name.to_string()
             },
             tag: Some("gltf_mesh".to_string()),
+            cad_ownership: None,
         });
         region_id
     }

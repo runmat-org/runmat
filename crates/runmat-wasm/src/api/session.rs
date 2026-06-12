@@ -107,6 +107,7 @@ async fn inspect_geometry_path(
                 byte_count,
                 supported: is_supported_geometry_path(&path),
                 stats: None,
+                geometry_summary: None,
                 regions: Vec::new(),
                 diagnostics: Vec::new(),
                 degraded_reason: Some(format!(
@@ -131,6 +132,7 @@ async fn inspect_geometry_path(
         byte_count: inspect.data.byte_count as u64,
         supported: false,
         stats: None,
+        geometry_summary: None,
         regions: Vec::new(),
         diagnostics: Vec::new(),
         degraded_reason: None,
@@ -181,6 +183,8 @@ async fn inspect_geometry_path(
         total_elements: stats.total_elements,
         region_count: stats.region_count,
     });
+    payload.geometry_summary =
+        serde_json::to_value(runmat_runtime::geometry::geometry_asset_summary(&asset)).ok();
     payload.regions = asset
         .regions
         .iter()
@@ -543,6 +547,7 @@ struct GeometryInspectPayload {
     byte_count: u64,
     supported: bool,
     stats: Option<GeometryStatsPayload>,
+    geometry_summary: Option<JsonValue>,
     regions: Vec<JsonValue>,
     diagnostics: Vec<JsonValue>,
     degraded_reason: Option<String>,

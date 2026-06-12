@@ -2,7 +2,7 @@
 title: "Current Status"
 category: "FEA"
 section: "13.9"
-last_updated: "June 10, 2026"
+last_updated: "June 11, 2026"
 ---
 
 # Current Status
@@ -38,8 +38,9 @@ V&V levels are defined in [Verification & Validation](/docs/fea/validation).
 | Capability | Status | Evidence | Boundary |
 | --- | --- | --- | --- |
 | Format inspection | Works today | `geometry.inspect/v1` tests | Detects supported families; deep CAD semantics depend on source data. |
-| Geometry loading | Works today | `geometry.load/v1` tests | STL, STEP, OBJ, PLY, and glTF importer paths are covered; fidelity varies by format. |
-| Regions and entities | Works today | list/query operation tests | Mesh-only inputs may not contain useful regions. |
+| Geometry loading | Works today | `geometry.load/v1` tests | STL, OBJ, PLY, and glTF load without optional CAD dependencies. Source builds without OCCT load STEP metadata only. Official CLI and desktop builds enable OCCT, so STEP, IGES, and BREP import tessellated CAD topology. STEP and IGES also map XCAF ownership metadata when present. |
+| Geometry summaries | Works today | runtime summary tests and Desktop contract wiring | Host clients receive source kind, assembly/material evidence when available, mesh counts/bounds, compact mapping summaries, semantic CAD region counts, and CAD region status. Full mapping ranges stay in runtime queries or plot scenes for scale. |
+| Regions and entities | Works today | list/query operation tests | Mesh/group regions are format dependent. OCCT CAD import produces mapped face regions. STEP and IGES produce additional selectable semantic regions for CAD labels, bodies, components, assemblies, layers, colors, and materials when the exchange file contains that ownership data. |
 | Statistics | Works today | geometry stats tests | Statistics are import-derived and do not prove model suitability. |
 | View capture | Works today with adapter fallback | capture operation tests | Output depends on configured capture adapter. |
 | Prep artifacts | Works today and evidence-backed | prep conformance and health tests | Meshing/adaptivity depth continues to expand. |

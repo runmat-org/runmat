@@ -6,6 +6,8 @@ pub mod normalize;
 pub mod report;
 pub mod sniff;
 
+mod occt;
+
 pub use import::{import_geometry, GeometryImportOptions};
 pub use report::{ImportDiagnostic, ImportDiagnosticSeverity, ImportReport, ImportResult};
 pub use sniff::{detect_geometry_format, GeometryFormat};
@@ -365,6 +367,28 @@ mod tests {
             2
         );
         assert_eq!(result.asset.source_geometry.material_evidence.len(), 1);
+    }
+
+    #[test]
+    fn iges_import_without_occt_reports_backend_unavailable() {
+        let error = import_geometry(
+            "/assembly.iges",
+            b"not parsed without OCCT",
+            GeometryImportOptions::default(),
+        )
+        .expect_err("IGES requires OCCT backend");
+        assert!(error.to_string().contains("GEOMETRY_BACKEND_UNAVAILABLE"));
+    }
+
+    #[test]
+    fn brep_import_without_occt_reports_backend_unavailable() {
+        let error = import_geometry(
+            "/assembly.brep",
+            b"not parsed without OCCT",
+            GeometryImportOptions::default(),
+        )
+        .expect_err("BREP requires OCCT backend");
+        assert!(error.to_string().contains("GEOMETRY_BACKEND_UNAVAILABLE"));
     }
 
     #[test]

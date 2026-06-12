@@ -185,6 +185,7 @@ impl ObjRegionTracker {
                 region_id: candidate.clone(),
                 name: label,
                 tag: Some(format!("obj_{kind}")),
+                cad_ownership: None,
             });
             candidate
         };
@@ -214,6 +215,7 @@ impl ObjRegionTracker {
             region_id: region_id.clone(),
             name: "Default Region".to_string(),
             tag: Some("mesh_default".to_string()),
+            cad_ownership: None,
         });
         region_id
     }

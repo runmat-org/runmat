@@ -122,7 +122,7 @@ run:
     quality_policy: balanced
 ```
 
-Supported region selectors are direct region ids, `id:<region-id>`, `region:<region-id>`, `name:<region-name>`, and `tag:<tag>`.
+Supported region selectors are direct region ids, `id:<region-id>`, `region:<region-id>`, `name:<region-name>`, and `tag:<tag>`. CAD imports commonly expose tags such as `occt_face`, `cad_body`, `cad_layer`, and `cad_material`; inspect the loaded geometry before relying on a selector.
 
 ## Sweep File
 

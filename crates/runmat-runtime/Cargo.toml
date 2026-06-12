@@ -112,6 +112,11 @@ wgpu = []
 # Internal helper to make stdin/key prompts behave interactively during tests.
 interaction-test-hooks = []
 
+# Optional CAD topology import through OpenCascade. The native feature links OCCT
+# through runmat-geometry-io; the wasm feature expects a host-provided sidecar.
+occt-native = ["runmat-geometry-io/occt-native"]
+occt-wasm-host = ["runmat-geometry-io/occt-wasm-host"]
+
 [dev-dependencies]
 async-trait = "0.1"
 runmat-macros = { workspace = true } 

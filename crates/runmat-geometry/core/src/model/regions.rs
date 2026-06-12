@@ -7,6 +7,73 @@ pub struct Region {
     pub region_id: String,
     pub name: String,
     pub tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cad_ownership: Option<CadRegionOwnership>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CadSemanticKind {
+    Assembly,
+    Component,
+    Reference,
+    Body,
+    Compound,
+    Face,
+    Subshape,
+    Layer,
+    Color,
+    Material,
+    Shape,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CadLabelRef {
+    pub label_entry: String,
+    pub name: String,
+    pub kind: CadSemanticKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CadColorEvidence {
+    pub source: String,
+    pub color_type: String,
+    pub hex_rgba: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CadPhysicalMaterialEvidence {
+    pub label_entry: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub density: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub density_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub density_value_type: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CadRegionOwnership {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub face_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<CadLabelRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owner_path: Vec<CadLabelRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<CadColorEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<CadPhysicalMaterialEvidence>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

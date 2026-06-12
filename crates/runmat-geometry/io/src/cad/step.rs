@@ -61,6 +61,7 @@ pub(crate) fn parse_step_summary(path: &str, text: &str) -> Result<StepImportSum
             region_id: "region_1".to_string(),
             name: model_label.clone(),
             tag: Some("step_part".to_string()),
+            cad_ownership: None,
         }]
     } else {
         product_labels
@@ -70,6 +71,7 @@ pub(crate) fn parse_step_summary(path: &str, text: &str) -> Result<StepImportSum
                 region_id: format!("region_{}", index + 1),
                 name: label.clone(),
                 tag: Some("step_part".to_string()),
+                cad_ownership: None,
             })
             .collect()
     };

@@ -9,7 +9,10 @@ use std::sync::{Mutex, MutexGuard};
 
 use self::capture::DEFAULT_SVG_CAPTURE_ADAPTER;
 use chrono::Utc;
-use runmat_geometry_core::{EntityKind, EntityRef, GeometryAsset, Region};
+use runmat_geometry_core::{
+    EntityIdRange, EntityKind, EntityRef, GeometryAsset, GeometrySource, MeshKind, Region,
+    SourceGeometry, SourceGeometryKind, TessellationProfile, UnitSystem,
+};
 use runmat_geometry_io::{
     import::GeometryImportError, import_geometry, GeometryFormat, GeometryImportOptions,
 };
@@ -42,6 +45,7 @@ const GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION: &str = "geometry.prep_for_analysis/
 const GEOMETRY_PREP_ARTIFACT_HEALTH_OPERATION: &str = "geometry.prep_artifact_health";
 const GEOMETRY_PREP_ARTIFACT_HEALTH_OP_VERSION: &str = "geometry.prep_artifact_health/v1";
 const DEFAULT_QUERY_LIMIT: usize = 2048;
+const DEFAULT_MAPPING_RANGE_PREVIEW_LIMIT: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GeometryInspectResult {
@@ -66,6 +70,82 @@ pub struct GeometryEntityQuery {
 pub struct GeometryEntityQueryResult {
     pub entities: Vec<EntityRef>,
     pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometryBoundsSummary {
+    pub min: [f64; 3],
+    pub max: [f64; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometryMeshSummary {
+    pub mesh_id: String,
+    pub kind: MeshKind,
+    pub vertex_count: u64,
+    pub element_count: u64,
+    pub surface_vertex_count: Option<u64>,
+    pub surface_triangle_count: Option<u64>,
+    pub bounds: Option<GeometryBoundsSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometryRegionMappingSummaryEntry {
+    pub region_id: String,
+    pub mesh_id: String,
+    pub entity_kind: EntityKind,
+    pub range_count: usize,
+    pub entity_count: u64,
+    pub range_preview: Vec<EntityIdRange>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometryRegionMappingSummary {
+    pub mapping_count: usize,
+    pub mapped_region_count: usize,
+    pub total_entity_count: u64,
+    pub range_preview_limit: usize,
+    pub entries: Vec<GeometryRegionMappingSummaryEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GeometryCadRegionStatus {
+    NotCad,
+    MetadataOnly,
+    GenericFaceTopology,
+    SemanticRegions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometryCadSummary {
+    pub backend: Option<String>,
+    pub source_format: Option<String>,
+    pub face_region_count: usize,
+    pub mapped_face_region_count: usize,
+    pub semantic_region_count: usize,
+    pub mapped_semantic_region_count: usize,
+    pub region_status: GeometryCadRegionStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometryAssetSummary {
+    pub geometry_id: String,
+    pub revision: u32,
+    pub source: GeometrySource,
+    pub source_geometry: SourceGeometry,
+    pub tessellation_profile: TessellationProfile,
+    pub units: UnitSystem,
+    pub meshes: Vec<GeometryMeshSummary>,
+    pub mapping_summary: GeometryRegionMappingSummary,
+    pub cad: GeometryCadSummary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -788,6 +868,175 @@ pub fn geometry_compute_stats(asset: &GeometryAsset) -> BuiltinResult<GeometrySt
     Ok(envelope.data)
 }
 
+pub fn geometry_asset_summary(asset: &GeometryAsset) -> GeometryAssetSummary {
+    geometry_asset_summary_with_options(asset, DEFAULT_MAPPING_RANGE_PREVIEW_LIMIT)
+}
+
+pub fn geometry_asset_summary_with_options(
+    asset: &GeometryAsset,
+    range_preview_limit: usize,
+) -> GeometryAssetSummary {
+    GeometryAssetSummary {
+        geometry_id: asset.geometry_id.clone(),
+        revision: asset.revision,
+        source: asset.source.clone(),
+        source_geometry: asset.source_geometry.clone(),
+        tessellation_profile: asset.tessellation_profile.clone(),
+        units: asset.units,
+        meshes: mesh_summaries(asset),
+        mapping_summary: region_mapping_summary(asset, range_preview_limit),
+        cad: cad_summary(asset),
+    }
+}
+
+fn mesh_summaries(asset: &GeometryAsset) -> Vec<GeometryMeshSummary> {
+    asset
+        .meshes
+        .iter()
+        .map(|mesh| {
+            let surface_mesh = asset
+                .surface_meshes
+                .iter()
+                .find(|surface| surface.mesh_id == mesh.mesh_id);
+            GeometryMeshSummary {
+                mesh_id: mesh.mesh_id.clone(),
+                kind: mesh.kind,
+                vertex_count: mesh.vertex_count,
+                element_count: mesh.element_count,
+                surface_vertex_count: surface_mesh.map(|surface| surface.vertices.len() as u64),
+                surface_triangle_count: surface_mesh.map(|surface| surface.triangles.len() as u64),
+                bounds: surface_mesh.and_then(|surface| bounds_for_vertices(&surface.vertices)),
+            }
+        })
+        .collect()
+}
+
+fn bounds_for_vertices(vertices: &[[f64; 3]]) -> Option<GeometryBoundsSummary> {
+    let first = vertices.first().copied()?;
+    let mut min = first;
+    let mut max = first;
+    for vertex in vertices.iter().skip(1) {
+        for axis in 0..3 {
+            min[axis] = min[axis].min(vertex[axis]);
+            max[axis] = max[axis].max(vertex[axis]);
+        }
+    }
+    Some(GeometryBoundsSummary { min, max })
+}
+
+fn region_mapping_summary(
+    asset: &GeometryAsset,
+    range_preview_limit: usize,
+) -> GeometryRegionMappingSummary {
+    let mut mapped_regions = BTreeSet::new();
+    let mut total_entity_count = 0_u64;
+    let entries = asset
+        .region_entity_mappings
+        .iter()
+        .map(|mapping| {
+            mapped_regions.insert(mapping.region_id.clone());
+            let entity_count = mapping.entity_count();
+            total_entity_count = total_entity_count.saturating_add(entity_count);
+            let range_count = mapping.ranges.len();
+            GeometryRegionMappingSummaryEntry {
+                region_id: mapping.region_id.clone(),
+                mesh_id: mapping.mesh_id.clone(),
+                entity_kind: mapping.entity_kind,
+                range_count,
+                entity_count,
+                range_preview: mapping
+                    .ranges
+                    .iter()
+                    .take(range_preview_limit)
+                    .copied()
+                    .collect(),
+                truncated: range_count > range_preview_limit,
+            }
+        })
+        .collect();
+
+    GeometryRegionMappingSummary {
+        mapping_count: asset.region_entity_mappings.len(),
+        mapped_region_count: mapped_regions.len(),
+        total_entity_count,
+        range_preview_limit,
+        entries,
+    }
+}
+
+fn cad_summary(asset: &GeometryAsset) -> GeometryCadSummary {
+    let importer_parts = asset.source.importer_version.split('/').collect::<Vec<_>>();
+    let backend = match importer_parts.as_slice() {
+        ["cad", backend, ..] => Some((*backend).to_string()),
+        ["step", ..] if asset.source_geometry.kind == SourceGeometryKind::Cad => {
+            Some("metadata".to_string())
+        }
+        _ => None,
+    };
+    let source_format = match importer_parts.as_slice() {
+        ["cad", _, format, ..] => Some((*format).to_string()),
+        [format, ..] if asset.source_geometry.kind == SourceGeometryKind::Cad => {
+            Some((*format).to_string())
+        }
+        _ => None,
+    };
+    let face_region_ids = asset
+        .regions
+        .iter()
+        .filter(|region| region.tag.as_deref() == Some("occt_face"))
+        .map(|region| region.region_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mapped_face_region_ids = asset
+        .region_entity_mappings
+        .iter()
+        .filter_map(|mapping| {
+            (mapping.entity_kind == EntityKind::Face
+                && face_region_ids.contains(mapping.region_id.as_str()))
+            .then_some(mapping.region_id.as_str())
+        })
+        .collect::<BTreeSet<_>>();
+    let semantic_region_ids = asset
+        .regions
+        .iter()
+        .filter(|region| {
+            region.cad_ownership.is_some()
+                && region
+                    .tag
+                    .as_deref()
+                    .is_some_and(|tag| tag.starts_with("cad_"))
+        })
+        .map(|region| region.region_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mapped_semantic_region_ids = asset
+        .region_entity_mappings
+        .iter()
+        .filter_map(|mapping| {
+            (mapping.entity_kind == EntityKind::Face
+                && semantic_region_ids.contains(mapping.region_id.as_str()))
+            .then_some(mapping.region_id.as_str())
+        })
+        .collect::<BTreeSet<_>>();
+    let region_status = if asset.source_geometry.kind != SourceGeometryKind::Cad {
+        GeometryCadRegionStatus::NotCad
+    } else if mapped_face_region_ids.is_empty() {
+        GeometryCadRegionStatus::MetadataOnly
+    } else if !mapped_semantic_region_ids.is_empty() {
+        GeometryCadRegionStatus::SemanticRegions
+    } else {
+        GeometryCadRegionStatus::GenericFaceTopology
+    };
+
+    GeometryCadSummary {
+        backend,
+        source_format,
+        face_region_count: face_region_ids.len(),
+        mapped_face_region_count: mapped_face_region_ids.len(),
+        semantic_region_count: semantic_region_ids.len(),
+        mapped_semantic_region_count: mapped_semantic_region_ids.len(),
+        region_status,
+    }
+}
+
 pub fn geometry_list_regions_op(
     asset: &GeometryAsset,
     context: OperationContext,
@@ -1365,6 +1614,8 @@ fn format_name(format: GeometryFormat) -> &'static str {
     match format {
         runmat_geometry_io::GeometryFormat::Stl => "stl",
         runmat_geometry_io::GeometryFormat::Step => "step",
+        runmat_geometry_io::GeometryFormat::Iges => "iges",
+        runmat_geometry_io::GeometryFormat::Brep => "brep",
         runmat_geometry_io::GeometryFormat::Obj => "obj",
         runmat_geometry_io::GeometryFormat::Ply => "ply",
         runmat_geometry_io::GeometryFormat::Gltf => "gltf",
@@ -1391,6 +1642,11 @@ fn map_geometry_load_error(
         GeometryImportError::CapacityExceeded { .. } => (
             "RM.GEOMETRY.LOAD.CAPACITY_LIMIT_EXCEEDED",
             OperationErrorType::Capacity,
+            false,
+        ),
+        GeometryImportError::BackendUnavailable(_) => (
+            "RM.GEOMETRY.LOAD.BACKEND_UNAVAILABLE",
+            OperationErrorType::Backend,
             false,
         ),
     };

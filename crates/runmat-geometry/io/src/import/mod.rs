@@ -1,7 +1,7 @@
+mod cad;
 mod gltf;
 mod obj;
 mod ply;
-mod step;
 mod stl;
 
 use runmat_geometry_core::{
@@ -36,6 +36,8 @@ pub enum GeometryImportError {
     UnsupportedFormat,
     #[error("GEOMETRY_PARSE_FAILED: {0}")]
     ParseFailed(String),
+    #[error("GEOMETRY_BACKEND_UNAVAILABLE: {0}")]
+    BackendUnavailable(String),
     #[error("CAPACITY_LIMIT_EXCEEDED: triangle count {triangles} exceeds limit {limit}")]
     CapacityExceeded { triangles: u64, limit: u64 },
 }
@@ -45,9 +47,12 @@ pub fn import_geometry(
     bytes: &[u8],
     options: GeometryImportOptions,
 ) -> Result<ImportResult, GeometryImportError> {
-    match detect_geometry_format(path, bytes) {
+    let format = detect_geometry_format(path, bytes);
+    match format {
         GeometryFormat::Stl => stl::import_stl(path, bytes, options),
-        GeometryFormat::Step => step::import_step(path, bytes, options),
+        GeometryFormat::Step | GeometryFormat::Iges | GeometryFormat::Brep => {
+            cad::import_cad(path, bytes, format, options)
+        }
         GeometryFormat::Obj => obj::import_obj(path, bytes, options),
         GeometryFormat::Ply => ply::import_ply(path, bytes, options),
         GeometryFormat::Gltf => gltf::import_gltf(path, bytes, options),
@@ -123,6 +128,7 @@ pub(crate) fn default_surface_regions(
         region_id: region_id.clone(),
         name: "Default Region".to_string(),
         tag: Some("mesh_default".to_string()),
+        cad_ownership: None,
     }];
     let mappings = surface_meshes
         .iter()

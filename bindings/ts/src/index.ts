@@ -590,12 +590,102 @@ export interface GeometryStats {
   regionCount: number;
 }
 
+export interface GeometryBoundsSummary {
+  min: [number, number, number];
+  max: [number, number, number];
+}
+
+export interface GeometryMeshSummary {
+  meshId: string;
+  kind: string;
+  vertexCount: number;
+  elementCount: number;
+  surfaceVertexCount?: number | null;
+  surfaceTriangleCount?: number | null;
+  bounds?: GeometryBoundsSummary | null;
+}
+
+export interface GeometryRegionMappingSummaryEntry {
+  regionId: string;
+  meshId: string;
+  entityKind: string;
+  rangeCount: number;
+  entityCount: number;
+  rangePreview: { start: number; count: number }[];
+  truncated: boolean;
+}
+
+export interface GeometryRegionMappingSummary {
+  mappingCount: number;
+  mappedRegionCount: number;
+  totalEntityCount: number;
+  rangePreviewLimit: number;
+  entries: GeometryRegionMappingSummaryEntry[];
+}
+
+export interface GeometryCadSummary {
+  backend?: string | null;
+  sourceFormat?: string | null;
+  faceRegionCount: number;
+  mappedFaceRegionCount: number;
+  semanticRegionCount: number;
+  mappedSemanticRegionCount: number;
+  regionStatus: "not_cad" | "metadata_only" | "generic_face_topology" | "semantic_regions";
+}
+
+export interface GeometrySourceSummary {
+  path: string;
+  sha256: string;
+  importer_version: string;
+}
+
+export interface GeometryAssemblyNodeSummary {
+  node_id: string;
+  label: string;
+  children: GeometryAssemblyNodeSummary[];
+}
+
+export interface GeometryMaterialEvidenceSummary {
+  source_key: string;
+  normalized_key: string;
+  value: string;
+  confidence: "high" | "medium" | "low";
+  unit_basis?: string | null;
+  assumptions: string[];
+}
+
+export interface GeometrySourceGeometrySummary {
+  kind: "mesh" | "cad";
+  assembly?: GeometryAssemblyNodeSummary | null;
+  material_evidence: GeometryMaterialEvidenceSummary[];
+}
+
+export interface GeometryTessellationProfileSummary {
+  profile_id: string;
+  chord_tolerance?: number | null;
+  angle_tolerance_deg?: number | null;
+  healing_mode: "safe" | "off" | "aggressive";
+}
+
+export interface GeometryAssetSummary {
+  geometryId: string;
+  revision: number;
+  source: GeometrySourceSummary;
+  sourceGeometry: GeometrySourceGeometrySummary;
+  tessellationProfile: GeometryTessellationProfileSummary;
+  units: string;
+  meshes: GeometryMeshSummary[];
+  mappingSummary: GeometryRegionMappingSummary;
+  cad: GeometryCadSummary;
+}
+
 export interface GeometryInspectResult {
   path: string;
   format: string;
   byteCount: number;
   supported: boolean;
   stats?: GeometryStats | null;
+  geometrySummary?: GeometryAssetSummary | null;
   regions?: unknown[];
   diagnostics?: unknown[];
   degradedReason?: string | null;

@@ -7,6 +7,7 @@ license-file = "../../../LICENSE.md"
 description = "Geometry import/export and normalization for RunMat"
 homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
+build = "build.rs"
 
 [dependencies]
 runmat-geometry-core = { workspace = true }
@@ -16,5 +17,20 @@ sha2 = "0.10"
 thiserror = { workspace = true }
 base64 = "0.22"
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cxx = { version = "1", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { version = "0.2", optional = true }
+
+[build-dependencies]
+cxx-build = { version = "1", optional = true }
+occt-sys = { version = "0.6", optional = true }
+
 [dev-dependencies]
 anyhow = { workspace = true }
+
+[features]
+default = []
+occt-native = ["dep:cxx", "dep:cxx-build", "dep:occt-sys"]
+occt-wasm-host = ["dep:wasm-bindgen"]

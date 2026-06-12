@@ -341,6 +341,7 @@ fn sample_geometry_asset() -> GeometryAsset {
             region_id: "region_default".to_string(),
             name: "Default Region".to_string(),
             tag: Some("mesh_default".to_string()),
+            cad_ownership: None,
         }],
         region_entity_mappings: vec![RegionEntityMapping::all_faces(
             "region_default",
@@ -367,11 +368,13 @@ fn sample_step_like_geometry_asset() -> GeometryAsset {
             region_id: "region_root".to_string(),
             name: "Base_Mount".to_string(),
             tag: Some("fixed".to_string()),
+            cad_ownership: None,
         },
         Region {
             region_id: "region_tip".to_string(),
             name: "Tip_Load".to_string(),
             tag: Some("load".to_string()),
+            cad_ownership: None,
         },
     ];
     asset.region_entity_mappings = vec![

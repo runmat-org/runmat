@@ -312,6 +312,7 @@ mod tests {
                 region_id: "region_main".to_string(),
                 name: "main".to_string(),
                 tag: None,
+                cad_ownership: None,
             }],
             region_entity_mappings: vec![RegionEntityMapping::all_faces(
                 "region_main",

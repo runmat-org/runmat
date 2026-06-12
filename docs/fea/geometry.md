@@ -2,7 +2,7 @@
 title: "Geometry"
 category: "FEA"
 section: "13.2"
-last_updated: "June 10, 2026"
+last_updated: "June 11, 2026"
 ---
 
 # Geometry
@@ -28,19 +28,23 @@ geometry:
     max_triangles: 16000000
 ```
 
-From host code, use `geometry.inspect/v1` when you need format and byte-level inspection before import. Use `geometry.load/v1` when you are ready to create a `GeometryAsset`.
-
 ## Supported Inputs
 
 | Format family | Typical use | Notes |
 | --- | --- | --- |
 | STL | Surface mesh input | Good for mesh-only workflows. Region semantics are limited. |
-| STEP | CAD exchange input | Can carry product labels and material evidence when present. |
+| STEP | CAD exchange input | Source builds without OCCT read STEP metadata. OCCT-enabled builds import topology, tessellate faces, and map XCAF assembly, label, layer, color, and material ownership to selectable regions when the file carries that data. |
+| IGES | CAD exchange input | Requires the OCCT CAD backend. Imports topology as tessellated face regions and maps XCAF names, layers, and colors when available. |
+| BREP | Native OCCT B-rep input | Requires the OCCT CAD backend. Imports topology as tessellated face regions. BREP files do not normally carry STEP-style exchange metadata. |
 | OBJ | Mesh-style geometry input | Useful for polygonal assets. |
 | PLY | Mesh or point-oriented input | Useful for mesh/scan style data. |
 | glTF | Scene or mesh input | Useful when geometry arrives as a scene asset. |
 
 Format support means RunMat can ingest the file family. It does not guarantee that every file contains the region names, topology, or material evidence your study needs.
+
+Source builds that do not enable the optional OCCT feature do not link OCCT. In those builds, STEP remains useful for assembly, product-label, and material-evidence metadata, but it does not produce CAD face topology. Official RunMat CLI and desktop binaries are built with OCCT enabled, so they can import STEP, IGES, and BREP topology through OCCT. Browser/WASM builds use the `occt-wasm-host` feature with a configured browser sidecar.
+
+Native packagers can build the OCCT path from the bundled OCCT source or point RunMat at an existing OCCT installation with `RUNMAT_OCCT_ROOT`, or with `RUNMAT_OCCT_INCLUDE_DIR` and `RUNMAT_OCCT_LIB_DIR`. `RUNMAT_OCCT_ROOT` accepts both `include/` and `include/opencascade/` header layouts. Use `RUNMAT_OCCT_LINK_MODE=static` for static CLI-style linking. Use `RUNMAT_OCCT_LINK_MODE=dylib` for dynamic desktop packaging; dynamic mode requires an existing dynamic OCCT installation and does not use the bundled static OCCT builder.
 
 ## Inspect Before Modeling
 
@@ -69,6 +73,10 @@ Supported selectors are:
 | `region:region_1` | Explicit region id. |
 | `name:Base_Mount` | Region whose imported name is `Base_Mount`. |
 | `tag:step_part` | First region with the imported tag `step_part`. |
+| `tag:occt_face` | First face region produced by the OCCT CAD backend. |
+| `tag:cad_body` | First body-level semantic region mapped from CAD ownership metadata. |
+| `tag:cad_layer` | First layer-level semantic region mapped from CAD ownership metadata. |
+| `tag:cad_material` | First material-level semantic region mapped from CAD ownership metadata. |
 
 Always inspect the loaded geometry before writing selectors:
 
@@ -77,9 +85,15 @@ geom = geometry.load("geometry/bracket.step");
 regions = geometry.listRegions(geom);
 ```
 
-For STEP today, RunMat derives regions from STEP `PRODUCT` labels when they are present. If a STEP file does not contain explicit product labels, the importer creates a synthetic `region_1` for the model. That means CAD setup matters: use stable part, body, or product names in the CAD tool and preserve them during STEP export. Mesh-only formats often have weaker region metadata and may need a workflow-specific annotation step before they are useful for boundary conditions.
+Without OCCT, STEP regions are derived from STEP `PRODUCT` labels when they are present. If a STEP file does not contain explicit product labels, the metadata importer creates a synthetic `region_1` for the model.
 
-Face-level named selections are not the same thing as part-level product labels. If a study needs “fixed face” or “loaded face” semantics, verify that those names appear as imported regions before using them in `.fea` or `fea.boundaryCondition(...)`.
+With the OCCT CAD backend, STEP, IGES, and BREP imports produce tessellated face regions such as `face_000001` with the tag `occt_face`. Those regions map directly to imported mesh faces, so they can be picked, highlighted, and used by `.fea` selectors.
+
+STEP and IGES imports also use the OCCT XCAF document model. When the file contains usable ownership metadata, RunMat creates additional semantic regions from CAD labels, bodies, components, assemblies, layers, colors, and materials. These regions use ids such as `cad_label_0_1_1`, `cad_layer_boundary_faces`, or `cad_material_aluminum_6061`, and tags such as `cad_body`, `cad_component`, `cad_assembly`, `cad_layer`, `cad_color`, and `cad_material`.
+
+Semantic CAD regions are evidence from the imported exchange file. If a CAD file does not carry layer names, material assignments, color assignments, or meaningful product/body labels, RunMat still imports topology and face regions, but it cannot invent authored boundary names.
+
+Mesh-only formats often have weaker region metadata and may need a workflow-specific annotation step before they are useful for boundary conditions.
 
 ## Prepare Geometry
 
@@ -123,8 +137,9 @@ Use `geometry.prep_artifact_health/v1` to inspect retained artifact counts, ages
 
 ## Boundaries
 
-- Importer depth varies by file format and source data.
-- STEP can expose useful product labels, but CAD semantic depth is not uniform.
+- STEP and IGES can expose useful product, body, layer, color, and material ownership, but the quality of that ownership depends on the exported CAD data.
+- OCCT-enabled CAD import provides face-level topology for STEP, IGES, and BREP, plus semantic regions for STEP and IGES when XCAF ownership metadata is present.
+- Builds without OCCT enabled can load STEP metadata but not face-level topology.
 - Mesh-only formats usually need additional region or boundary data from the workflow.
 - Prep artifacts improve reproducibility; they do not prove that a physics model is well posed.
 

@@ -1,6 +1,10 @@
 use super::*;
 use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
 use base64::Engine;
+use runmat_geometry_core::{
+    CadLabelRef, CadRegionOwnership, CadSemanticKind, MeshDescriptor, RegionEntityMapping,
+    SurfaceMesh,
+};
 
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
@@ -248,6 +252,31 @@ fn load_and_stats_work_for_stl() {
     let stats = geometry_compute_stats(&asset).expect("stats should work");
     assert_eq!(stats.mesh_count, 1);
     assert_eq!(stats.total_elements, 1);
+}
+
+#[test]
+fn asset_summary_reports_mesh_bounds_and_mapping_counts() {
+    let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
+    let summary = geometry_asset_summary_with_options(&asset, 0);
+
+    assert_eq!(summary.geometry_id, asset.geometry_id);
+    assert_eq!(summary.meshes.len(), 1);
+    assert_eq!(summary.meshes[0].mesh_id, "mesh_1");
+    assert_eq!(summary.meshes[0].surface_triangle_count, Some(1));
+    assert_eq!(
+        summary.meshes[0].bounds,
+        Some(GeometryBoundsSummary {
+            min: [0.0, 0.0, 0.0],
+            max: [1.0, 1.0, 0.0],
+        })
+    );
+    assert_eq!(summary.mapping_summary.mapping_count, 1);
+    assert_eq!(summary.mapping_summary.mapped_region_count, 1);
+    assert_eq!(summary.mapping_summary.total_entity_count, 1);
+    assert_eq!(summary.mapping_summary.entries[0].range_count, 1);
+    assert!(summary.mapping_summary.entries[0].range_preview.is_empty());
+    assert!(summary.mapping_summary.entries[0].truncated);
+    assert_eq!(summary.cad.region_status, GeometryCadRegionStatus::NotCad);
 }
 
 #[test]
@@ -966,4 +995,81 @@ fn prep_artifact_health_reports_metrics_and_distribution() {
     assert!(!health.data.per_geometry.is_empty());
 
     reset_prep_artifact_store_for_tests();
+}
+
+#[test]
+fn asset_summary_reports_semantic_cad_region_status() {
+    let asset = GeometryAsset {
+        geometry_id: "geo_semantic".to_string(),
+        source: GeometrySource {
+            path: "/models/bracket.step".to_string(),
+            sha256: "abc123".to_string(),
+            importer_version: "cad/occt/step/v1".to_string(),
+        },
+        source_geometry: SourceGeometry {
+            kind: SourceGeometryKind::Cad,
+            assembly: None,
+            material_evidence: vec![],
+        },
+        tessellation_profile: TessellationProfile::default(),
+        units: UnitSystem::Meter,
+        revision: 1,
+        meshes: vec![MeshDescriptor {
+            mesh_id: "mesh_1".to_string(),
+            kind: MeshKind::Surface,
+            vertex_count: 3,
+            element_count: 1,
+        }],
+        surface_meshes: vec![SurfaceMesh::new(
+            "mesh_1",
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            vec![[0, 1, 2]],
+        )],
+        regions: vec![
+            Region {
+                region_id: "face_000001".to_string(),
+                name: "Face 1".to_string(),
+                tag: Some("occt_face".to_string()),
+                cad_ownership: Some(CadRegionOwnership {
+                    face_id: Some(0),
+                    label: None,
+                    owner_path: Vec::new(),
+                    layers: Vec::new(),
+                    color: None,
+                    material: None,
+                }),
+            },
+            Region {
+                region_id: "cad_label_0_1_1".to_string(),
+                name: "Bracket".to_string(),
+                tag: Some("cad_body".to_string()),
+                cad_ownership: Some(CadRegionOwnership {
+                    face_id: None,
+                    label: Some(CadLabelRef {
+                        label_entry: "0:1:1".to_string(),
+                        name: "Bracket".to_string(),
+                        kind: CadSemanticKind::Body,
+                    }),
+                    owner_path: Vec::new(),
+                    layers: Vec::new(),
+                    color: None,
+                    material: None,
+                }),
+            },
+        ],
+        region_entity_mappings: vec![
+            RegionEntityMapping::all_faces("face_000001", "mesh_1", 1),
+            RegionEntityMapping::all_faces("cad_label_0_1_1", "mesh_1", 1),
+        ],
+        diagnostics: vec![],
+    };
+
+    let summary = geometry_asset_summary(&asset);
+    assert_eq!(summary.cad.face_region_count, 1);
+    assert_eq!(summary.cad.semantic_region_count, 1);
+    assert_eq!(summary.cad.mapped_semantic_region_count, 1);
+    assert_eq!(
+        summary.cad.region_status,
+        GeometryCadRegionStatus::SemanticRegions
+    );
 }

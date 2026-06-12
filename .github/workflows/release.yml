@@ -246,19 +246,20 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
+          sudo apt-get install -y cmake libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
 
       - name: Install macOS dependencies (ZMQ)
         if: runner.os == 'macOS'
         run: |
           brew update
+          brew list cmake >/dev/null 2>&1 || brew install cmake
           brew install zeromq
 
       - name: Install Windows MSVC dependencies (ZMQ, vcpkg + OpenBLAS/LAPACK)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
         run: |
-          choco install -y pkgconfiglite
+          choco install -y pkgconfiglite cmake --installargs 'ADD_CMAKE_TO_PATH=System'
 
           Write-Host "Fetching prebuilt ZeroMQ for Windows (MSVC)"
           curl -L -o libzmq.zip https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.zip
@@ -308,11 +309,13 @@ jobs:
       - name: Cross build (linux-x86_64)
         if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
         uses: houseabsolute/actions-rust-cross@v0
+        env:
+          RUNMAT_OCCT_LINK_MODE: static
         with:
           command: ${{ matrix.platform.command }}
           target: ${{ matrix.platform.target }}
           # Use system OpenSSL via pkg-config; libssl-dev installed above
-          args: "--locked --release --bin runmat --features blas-lapack"
+          args: "--locked --release --bin runmat --features blas-lapack,occt-native"
           strip: true
 
       - name: Cross build (other targets)
@@ -321,11 +324,12 @@ jobs:
         env:
           OPENSSL_NO_PKG_CONFIG: '1'
           OPENSSL_STATIC: '1'
+          RUNMAT_OCCT_LINK_MODE: static
         with:
           command: ${{ matrix.platform.command }}
           target: ${{ matrix.platform.target }}
           # Build all targets with vendored OpenSSL and full BLAS+LAPACK
-          args: "--locked --release --bin runmat --features blas-lapack,vendored-openssl"
+          args: "--locked --release --bin runmat --features blas-lapack,vendored-openssl,occt-native"
           strip: true
 
       - name: Import signing cert and codesign (macOS)

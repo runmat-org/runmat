@@ -69,6 +69,7 @@ blas-lapack = ["runmat-runtime/blas-lapack"]
 blas-only = ["runmat-runtime/blas-only"]
 jit = ["runmat-core/jit"]
 vendored-openssl = ["openssl/vendored", "openssl-sys/vendored"]
+occt-native = ["runmat-core/occt-native", "runmat-runtime/occt-native"]
 
 [dev-dependencies]
 tempfile = "3.12" 

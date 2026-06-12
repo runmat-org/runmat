@@ -2,6 +2,8 @@
 pub enum GeometryFormat {
     Stl,
     Step,
+    Iges,
+    Brep,
     Obj,
     Ply,
     Gltf,
@@ -15,6 +17,12 @@ pub fn detect_geometry_format(path: &str, bytes: &[u8]) -> GeometryFormat {
     }
     if lower.ends_with(".step") || lower.ends_with(".stp") {
         return GeometryFormat::Step;
+    }
+    if lower.ends_with(".iges") || lower.ends_with(".igs") {
+        return GeometryFormat::Iges;
+    }
+    if lower.ends_with(".brep") || lower.ends_with(".brp") {
+        return GeometryFormat::Brep;
     }
     if lower.ends_with(".obj") {
         return GeometryFormat::Obj;
@@ -36,6 +44,12 @@ pub fn detect_geometry_format(path: &str, bytes: &[u8]) -> GeometryFormat {
     }
     if header.contains("iso-10303-21") {
         return GeometryFormat::Step;
+    }
+    if header.contains("s      1") && header.contains("g      1") {
+        return GeometryFormat::Iges;
+    }
+    if header.starts_with("dbrep_drawableshape") || header.starts_with("drawableshape") {
+        return GeometryFormat::Brep;
     }
     if header.starts_with("ply\n") || header.starts_with("ply\r\n") {
         return GeometryFormat::Ply;
@@ -100,6 +114,18 @@ mod tests {
     fn step_detected_from_header_without_extension() {
         let format = detect_geometry_format("/model.dat", b"ISO-10303-21;\nHEADER;\n");
         assert_eq!(format, GeometryFormat::Step);
+    }
+
+    #[test]
+    fn iges_detected_from_extension() {
+        let format = detect_geometry_format("/model.igs", b"not-needed");
+        assert_eq!(format, GeometryFormat::Iges);
+    }
+
+    #[test]
+    fn brep_detected_from_extension() {
+        let format = detect_geometry_format("/model.brep", b"not-needed");
+        assert_eq!(format, GeometryFormat::Brep);
     }
 
     #[test]
