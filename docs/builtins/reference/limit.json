@@ -1,0 +1,73 @@
+{
+  "title": "limit",
+  "category": "math/symbolic",
+  "keywords": [
+    "limit",
+    "symbolic",
+    "calculus",
+    "lhopital"
+  ],
+  "summary": "Evaluate scalar symbolic limits by substitution and L'Hopital reduction.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Symbolic limits execute on the host and do not participate in GPU fusion."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::symbolic::limit::tests",
+    "integration": "runmat_vm::bytecode::compile::tests::compile_interprets_symbolic_limit_workflow",
+    "fractional_power": "runmat_vm::bytecode::compile::tests::compile_interprets_symbolic_fractional_power_limit"
+  },
+  "description": "`limit` evaluates scalar symbolic expressions at a finite numeric point. It first performs direct substitution and simplification, then applies repeated L'Hopital reduction for removable `0/0` quotients.",
+  "behaviors": [
+    "Supports `limit(expr)`, `limit(expr, point)`, `limit(expr, var)`, `limit(expr, var, point)`, and an optional direction string.",
+    "Infers the limit variable when the expression contains exactly one symbolic variable.",
+    "Simplifies symbolic arithmetic involving `+`, `-`, `*`, `/`, powers with numeric exponents, and the functions `sin`, `cos`, `tan`, `exp`, `log`, and `sqrt`.",
+    "Returns scalar symbolic values, including symbolic constants when the limit simplifies to a finite value.",
+    "One-sided directions are accepted as `left`, `right`, `-`, or `+` for simple pole detection."
+  ],
+  "examples": [
+    {
+      "description": "Classic sinc limit",
+      "input": "syms x\nf = limit(sin(x)/x, x, 0)"
+    },
+    {
+      "description": "Finite-difference derivative limit",
+      "input": "syms x h\nf = limit((cos(x+h) - cos(x))/h, h, 0)"
+    },
+    {
+      "description": "Fractional symbolic power limit",
+      "input": "syms x\nf = limit((cos(x)^(1/3) - 1) / x^2, x, 0)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `limit` implement the full Symbolic Math Toolbox?",
+      "answer": "No. It implements RunMat's scalar symbolic expression core for common calculus expressions used in MATLAB scripts."
+    }
+  ],
+  "links": [
+    {
+      "label": "sym",
+      "url": "./sym"
+    },
+    {
+      "label": "syms",
+      "url": "./syms"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/symbolic/limit.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/symbolic/limit.rs"
+  }
+}

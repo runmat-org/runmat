@@ -1055,6 +1055,7 @@ impl TypeName for Value {
             Value::String(_) => "string",
             Value::StringArray(_) => "string array",
             Value::CharArray(_) => "char array",
+            Value::Symbolic(_) => "sym",
             Value::Tensor(_) => "double array",
             Value::ComplexTensor(_) => "complex double array",
             Value::Cell(_) => "cell array",

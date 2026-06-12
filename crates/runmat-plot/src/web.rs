@@ -211,7 +211,7 @@ impl WebRenderer {
             (ctx.instance.clone(), Some(ctx))
         } else {
             (
-                Arc::new(wgpu::Instance::new(wgpu::InstanceDescriptor {
+                Arc::new(crate::wgpu_compat::instance_new(wgpu::InstanceDescriptor {
                     backends: wgpu::Backends::all(),
                     ..Default::default()
                 })),
@@ -242,11 +242,11 @@ impl WebRenderer {
             let limits = adapter.limits();
             let (device_raw, queue_raw) = adapter
                 .request_device(
-                    &wgpu::DeviceDescriptor {
-                        label: Some("runmat-plot-web"),
-                        required_features: wgpu::Features::empty(),
-                        required_limits: limits.clone(),
-                    },
+                    &crate::wgpu_compat::device_descriptor(
+                        Some("runmat-plot-web"),
+                        wgpu::Features::empty(),
+                        limits.clone(),
+                    ),
                     None,
                 )
                 .await?;
@@ -279,7 +279,8 @@ impl WebRenderer {
         let overlay = if options.enable_overlay {
             let egui_ctx = egui::Context::default();
             ModernDarkTheme::default().apply_to_egui(&egui_ctx);
-            let egui_renderer = egui_wgpu::Renderer::new(&device, surface_config.format, None, 1);
+            let egui_renderer =
+                crate::wgpu_compat::egui_renderer_new(&device, surface_config.format, None, 1);
             Some(WebOverlayState {
                 egui_ctx,
                 egui_renderer,
@@ -966,7 +967,7 @@ impl WebRenderer {
 
                 // Render egui on top.
                 {
-                    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("runmat-plot-web-egui"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             view: &frame_view,
@@ -980,6 +981,10 @@ impl WebRenderer {
                         timestamp_writes: None,
                         occlusion_query_set: None,
                     });
+                    #[cfg(target_arch = "wasm32")]
+                    let mut render_pass = render_pass.forget_lifetime();
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let mut render_pass = render_pass;
                     overlay
                         .egui_renderer
                         .render(&mut render_pass, &paint_jobs, &screen_descriptor);

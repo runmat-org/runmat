@@ -8,7 +8,7 @@ use crate::runtime::workspace::{
     WorkspaceTarget, WorkspaceValueSnapshot,
 };
 use runmat_builtins::Value;
-use runmat_hir::{QualifiedName, SymbolName};
+use runmat_hir::{CallableIdentity, FunctionId, QualifiedName, SymbolName};
 use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_thread_local::runmat_thread_local;
@@ -727,10 +727,24 @@ fn compile_dynamic_workspace_eval(
                 &format!("{builtin}: parse error: {err}"),
             )
         })?;
+    let function_output_arities = function_registry
+        .functions
+        .iter()
+        .map(|(id, function)| {
+            (
+                *id,
+                runmat_hir::FunctionOutputArity::new(
+                    function.output_slots.len(),
+                    function.varargout_slot.is_some(),
+                ),
+            )
+        })
+        .collect::<HashMap<_, _>>();
     let lowering = runmat_hir::lower(
         &ast,
         &runmat_hir::LoweringContext::new(workspace_bindings)
             .with_bound_functions(&function_registry.names)
+            .with_function_output_arities(&function_output_arities)
             .with_runmat_extensions_enabled(options.runmat_extensions_enabled)
             .with_top_level_await_enabled(options.top_level_await_enabled),
     )
@@ -1008,13 +1022,169 @@ fn merge_eval_function_registry(bytecode: &mut Bytecode, parent_registry: &Funct
     let mut merged = parent_registry.clone();
     let mut ids = eval_registry.functions.keys().copied().collect::<Vec<_>>();
     ids.sort_by_key(|id| id.0);
+    let remap = eval_function_id_remap(&ids, parent_registry);
+    for instr in &mut bytecode.instructions {
+        remap_eval_local_function_instr(instr, &remap);
+    }
     for id in ids {
         if let Some(function) = eval_registry.functions.get(&id) {
-            merged.insert_replacing_name(function.clone());
+            let mut function = function.clone();
+            if let Some(new_id) = remap.get(&id).copied() {
+                function.function = new_id;
+                for instr in &mut function.instructions {
+                    remap_eval_local_function_instr(instr, &remap);
+                }
+            }
+            merged.insert_replacing_name(function);
         }
     }
     bytecode.bound_functions = merged.functions.clone();
     bytecode.function_registry = merged;
+}
+
+fn eval_function_id_remap(
+    eval_ids: &[FunctionId],
+    parent_registry: &FunctionRegistry,
+) -> HashMap<FunctionId, FunctionId> {
+    let mut used_ids = parent_registry
+        .functions
+        .keys()
+        .map(|id| id.0)
+        .collect::<HashSet<_>>();
+    let mut next_id = used_ids.iter().copied().max().map(|id| id + 1).unwrap_or(0);
+    let mut remap = HashMap::new();
+    for old_id in eval_ids {
+        while used_ids.contains(&next_id) {
+            next_id += 1;
+        }
+        let new_id = FunctionId(next_id);
+        used_ids.insert(next_id);
+        next_id += 1;
+        remap.insert(*old_id, new_id);
+    }
+    remap
+}
+
+fn remap_eval_local_function_instr(instr: &mut Instr, remap: &HashMap<FunctionId, FunctionId>) {
+    match instr {
+        Instr::CreateSemanticClosure(function, _, _)
+        | Instr::CreateBoundFunctionHandle(function, _)
+        | Instr::CreateSemanticFuture(function, _, _)
+        | Instr::CreateSemanticFutureExpandMultiOutput(function, _, _)
+        | Instr::CallSemanticFunctionMulti(function, _, _)
+        | Instr::CallSemanticFunctionMultiUsingOutputSlot(function, _, _)
+        | Instr::CallSemanticFunctionExpandMultiOutput(function, _, _) => {
+            remap_function_id(function, remap);
+        }
+        Instr::CallSemanticNestedFunctionMulti { function, .. }
+        | Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { function, .. }
+        | Instr::CallSemanticNestedFunctionExpandMultiOutput { function, .. } => {
+            remap_function_id(function, remap);
+        }
+        Instr::CallFunctionMulti { identity, .. }
+        | Instr::CallFunctionMultiUsingOutputSlot { identity, .. }
+        | Instr::CallFunctionExpandMultiOutput { identity, .. } => {
+            remap_eval_local_callable_identity(identity, remap);
+        }
+        Instr::IndexSliceExpr {
+            range_start_exprs,
+            range_step_exprs,
+            range_end_exprs,
+            end_numeric_exprs,
+            ..
+        }
+        | Instr::StoreSliceExpr {
+            range_start_exprs,
+            range_step_exprs,
+            range_end_exprs,
+            end_numeric_exprs,
+            ..
+        }
+        | Instr::StoreSliceExprDelete {
+            range_start_exprs,
+            range_step_exprs,
+            range_end_exprs,
+            end_numeric_exprs,
+            ..
+        } => {
+            for expr in range_start_exprs.iter_mut().flatten() {
+                remap_eval_local_end_expr(expr, remap);
+            }
+            for expr in range_step_exprs.iter_mut().flatten() {
+                remap_eval_local_end_expr(expr, remap);
+            }
+            for expr in range_end_exprs {
+                remap_eval_local_end_expr(expr, remap);
+            }
+            for (_, expr) in end_numeric_exprs {
+                remap_eval_local_end_expr(expr, remap);
+            }
+        }
+        Instr::IndexCell { end_exprs, .. }
+        | Instr::IndexCellExpand { end_exprs, .. }
+        | Instr::IndexCellList { end_exprs, .. }
+        | Instr::StoreIndexCell { end_exprs, .. }
+        | Instr::StoreIndexCellDelete { end_exprs, .. } => {
+            for (_, expr) in end_exprs {
+                remap_eval_local_end_expr(expr, remap);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn remap_function_id(function: &mut FunctionId, remap: &HashMap<FunctionId, FunctionId>) {
+    if let Some(new_id) = remap.get(function).copied() {
+        *function = new_id;
+    }
+}
+
+fn remap_eval_local_callable_identity(
+    identity: &mut CallableIdentity,
+    remap: &HashMap<FunctionId, FunctionId>,
+) {
+    match identity {
+        CallableIdentity::BoundFunction(function)
+        | CallableIdentity::AnonymousFunction(function) => remap_function_id(function, remap),
+        CallableIdentity::ExternalFunction { .. }
+        | CallableIdentity::Builtin(_)
+        | CallableIdentity::Imported(_)
+        | CallableIdentity::Method(_)
+        | CallableIdentity::DynamicName(_)
+        | CallableIdentity::ExternalName(_) => {}
+    }
+}
+
+fn remap_eval_local_end_expr(
+    expr: &mut crate::bytecode::EndExpr,
+    remap: &HashMap<FunctionId, FunctionId>,
+) {
+    match expr {
+        crate::bytecode::EndExpr::ResolvedCall { identity, args, .. } => {
+            remap_eval_local_callable_identity(identity, remap);
+            for arg in args {
+                remap_eval_local_end_expr(arg, remap);
+            }
+        }
+        crate::bytecode::EndExpr::Add(lhs, rhs)
+        | crate::bytecode::EndExpr::Sub(lhs, rhs)
+        | crate::bytecode::EndExpr::Mul(lhs, rhs)
+        | crate::bytecode::EndExpr::Div(lhs, rhs)
+        | crate::bytecode::EndExpr::LeftDiv(lhs, rhs)
+        | crate::bytecode::EndExpr::Pow(lhs, rhs) => {
+            remap_eval_local_end_expr(lhs, remap);
+            remap_eval_local_end_expr(rhs, remap);
+        }
+        crate::bytecode::EndExpr::Neg(inner)
+        | crate::bytecode::EndExpr::Pos(inner)
+        | crate::bytecode::EndExpr::Floor(inner)
+        | crate::bytecode::EndExpr::Ceil(inner)
+        | crate::bytecode::EndExpr::Round(inner)
+        | crate::bytecode::EndExpr::Fix(inner) => remap_eval_local_end_expr(inner, remap),
+        crate::bytecode::EndExpr::End
+        | crate::bytecode::EndExpr::Const(_)
+        | crate::bytecode::EndExpr::Var(_) => {}
+    }
 }
 
 pub enum ImportedBuiltinResolution {

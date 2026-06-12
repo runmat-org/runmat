@@ -190,6 +190,7 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
             RenderMode::TopLevel => split_lines(text),
             RenderMode::Nested => vec![quote_double(text)],
         },
+        Value::Symbolic(expr) => vec![expr.to_string()],
         Value::CharArray(array) => format_char_array(array, mode),
         Value::StringArray(array) => format_string_array(array, mode),
         Value::Num(n) => vec![format_scalar_number(*n)],
@@ -593,6 +594,7 @@ fn summarize_for_cell(value: &Value) -> String {
                 format!("[{} string]", dims_to_string(&canonical_dims(&array.shape)))
             }
         }
+        Value::Symbolic(expr) => expr.to_string(),
         Value::Struct(_) => "[1x1 struct]".to_string(),
         Value::Cell(inner) => format!("[{} cell]", dims_to_string(&canonical_dims(&inner.shape))),
         Value::FunctionHandle(_)
@@ -770,7 +772,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::make_cell;
-    use runmat_builtins::{ComplexTensor, IntValue, StringArray, Tensor};
+    use runmat_builtins::{ComplexTensor, IntValue, StringArray, SymbolicExpr, Tensor};
 
     #[test]
     fn disp_descriptor_signatures_cover_core_forms() {
@@ -787,6 +789,14 @@ pub(crate) mod tests {
     fn string_scalar_without_quotes() {
         let lines = format_for_disp(&Value::String("Simulation complete.".into()));
         assert_eq!(lines, vec!["Simulation complete.".to_string()]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn symbolic_scalar_displays_expression() {
+        let lines = format_for_disp(&Value::Symbolic(SymbolicExpr::variable("x")));
+
+        assert_eq!(lines, vec!["x".to_string()]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

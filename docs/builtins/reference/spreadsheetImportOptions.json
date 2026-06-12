@@ -1,0 +1,87 @@
+{
+  "title": "spreadsheetImportOptions",
+  "category": "io/tabular",
+  "keywords": [
+    "spreadsheetImportOptions",
+    "readtable",
+    "spreadsheet",
+    "xlsx",
+    "xls",
+    "DataRange",
+    "VariableTypes"
+  ],
+  "summary": "Create spreadsheet import options structs for `readtable`.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Builds host-side import metadata. File I/O and parsing happen later when the options are passed to `readtable`."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::table::tests",
+    "integration": "builtins::table::tests::readtable_consumes_spreadsheet_import_options_struct"
+  },
+  "description": "`opts = spreadsheetImportOptions(...)` returns an editable import-options struct accepted by `readtable` for spreadsheet files. The struct supports MATLAB-style dot assignment before import, including data ranges, sheet selection, variable names, and variable types.",
+  "behaviors": [
+    "Accepts name-value options including `'NumVariables'`, `'VariableNames'`, `'VariableTypes'`, `'DataRange'`, `'Range'`, `'Sheet'`, `'ReadVariableNames'`, `'ReadRowNames'`, `'TreatAsMissing'`, `'VariableNamingRule'`, `'TextType'`, `'DatetimeType'`, and `'EmptyLineRule'`.",
+    "`'NumVariables'` creates default `Var1`, `Var2`, ... names and `auto` variable types; edited `VariableNames` and `VariableTypes` are validated against that count.",
+    "`DataRange` is treated as the spreadsheet cell range for `readtable`, matching the common MATLAB workflow `opts.DataRange = 'C2:C37'`.",
+    "`VariableTypes` entries guide import coercion for double, single, uint8, uint16, logical, string, char, cellstr, datetime, and duration columns.",
+    "Requests for table column classes that RunMat cannot represent yet, including categorical and signed integer array imports, raise explicit errors instead of silently returning a different class.",
+    "Default options do not force a zero-column import; `readtable` infers the column count unless a positive `NumVariables` is supplied.",
+    "Invalid option names, malformed ranges, unsupported sheets, and unparseable typed values raise descriptive `readtable` errors instead of silently changing the schema."
+  ],
+  "examples": [
+    {
+      "description": "Import A Spreadsheet Column With An Options Struct",
+      "input": "opts = spreadsheetImportOptions('NumVariables', 1);\nopts.DataRange = 'C2:C37';\nopts.VariableNames = {'Amount'};\nopts.VariableTypes = {'double'};\nT = readtable('data.xlsx', opts)"
+    },
+    {
+      "description": "Select A Worksheet And Preserve Variable Names",
+      "input": "opts = spreadsheetImportOptions('Sheet', 'Data', 'VariableNamingRule', 'preserve');\nT = readtable('workbook.xlsx', opts)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is the returned value an object?",
+      "answer": "RunMat represents import options as a scalar struct so MATLAB-style field assignment works naturally and `readtable` can consume the same value directly."
+    },
+    {
+      "question": "What happens if `VariableTypes` asks for a type that cannot parse a column?",
+      "answer": "`readtable` raises a typed import error for the offending non-missing value. It does not fall back to a string column when the schema explicitly requested another type."
+    },
+    {
+      "question": "Can I use the options with text files?",
+      "answer": "The constructor is spreadsheet-focused, but the struct fields that also apply to text imports are parsed by `readtable`; spreadsheet-only fields such as `Sheet` remain valid only for spreadsheet files."
+    }
+  ],
+  "links": [
+    {
+      "label": "readtable",
+      "url": "./readtable"
+    },
+    {
+      "label": "readmatrix",
+      "url": "./readmatrix"
+    }
+  ],
+  "implementation": {
+    "summary": "`spreadsheetImportOptions` builds a validated struct in `crates/runmat-runtime/src/builtins/table/mod.rs`. `readtable` parses the struct, applies spreadsheet ranges and sheet selectors, and coerces imported columns according to `VariableTypes`.",
+    "source": [
+      {
+        "label": "`crates/runmat-runtime/src/builtins/table/mod.rs`",
+        "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"
+      }
+    ]
+  },
+  "gpu_residency": "No GPU work is performed. Options are host metadata, and later `readtable` imports create host table variables."
+}

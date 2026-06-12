@@ -1,5 +1,7 @@
 use js_sys::{Array, Function, Promise, Reflect};
-use runmat_filesystem::{DirEntry, FsMetadata, ReadManyEntry};
+use runmat_filesystem::{
+    DirEntry, FsMetadata, OpenFileDialogRequest, OpenFileDialogSelection, ReadManyEntry,
+};
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 use wasm_bindgen::prelude::*;
@@ -7,7 +9,8 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 
 use super::convert::{
-    js_error, js_value_to_bytes, map_js_error, parse_dir_entries, parse_metadata, path_to_string,
+    js_error, js_value_to_bytes, map_js_error, open_file_request_to_js, parse_dir_entries,
+    parse_metadata, parse_open_file_selection, path_to_string,
 };
 
 #[derive(Clone)]
@@ -27,6 +30,7 @@ pub(super) struct JsFsFuncs {
     remove_dir_all: Option<Function>,
     rename: Option<Function>,
     set_readonly: Option<Function>,
+    select_file_open: Option<Function>,
 }
 
 impl JsFsFuncs {
@@ -50,6 +54,7 @@ impl JsFsFuncs {
             remove_dir_all: get_fn(bindings, "removeDirAll")?,
             rename: get_fn(bindings, "rename")?,
             set_readonly: get_fn(bindings, "setReadonly")?,
+            select_file_open: get_fn(bindings, "selectFileOpen")?,
         })
     }
 
@@ -290,6 +295,21 @@ impl JsFsFuncs {
                 "fsProvider.setReadonly not implemented",
             ))
         }
+    }
+
+    pub(super) async fn select_file_open_async(
+        &self,
+        request: &OpenFileDialogRequest,
+    ) -> io::Result<Option<OpenFileDialogSelection>> {
+        let Some(func) = &self.select_file_open else {
+            return Ok(None);
+        };
+        let js_request = open_file_request_to_js(request)?;
+        let value = func
+            .call1(&self.bindings, &js_request)
+            .map_err(|err| map_js_error("selectFileOpen", err))?;
+        let value = resolve_maybe_promise(value, "selectFileOpen").await?;
+        parse_open_file_selection(value)
     }
 
     fn require_fn<'a>(

@@ -1,0 +1,123 @@
+{
+  "title": "hilbert",
+  "category": "math/signal",
+  "keywords": [
+    "hilbert",
+    "analytic signal",
+    "signal processing",
+    "fft",
+    "complex"
+  ],
+  "summary": "Construct analytic signals with the Hilbert transform.",
+  "references": [
+    "title: \"MATLAB hilbert documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "GPU inputs are accepted through the active provider gather path. The host implementation computes the FFT-domain analytic signal and returns a complex host tensor."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::hilbert::tests",
+    "integration": "runmat-vm basics hilbert_builtin_executes_for_fm_demod_shape"
+  },
+  "description": "`z = hilbert(x)` returns the analytic signal associated with a real signal `x`. The real part of `z` is the original signal, and the imaginary part is the Hilbert transform of `x`.",
+  "behaviors": [
+    "Accepts real numeric, logical, integer, vector, matrix, and N-D tensor inputs.",
+    "Operates along the first non-singleton dimension, matching MATLAB's column-wise behavior for matrices and row-wise behavior for row vectors.",
+    "`hilbert(x, N)` pads with zeros or truncates along the transform dimension before constructing the analytic signal.",
+    "Returns complex scalar or complex tensor output; output shape follows the input shape except that the transform dimension becomes `N` when supplied.",
+    "The FFT-domain multiplier preserves DC and, for even lengths, Nyquist bins; positive-frequency bins are doubled and negative-frequency bins are zeroed.",
+    "Complex inputs are rejected because MATLAB's `hilbert` expects a real signal."
+  ],
+  "examples": [
+    {
+      "description": "Analytic signal of a sampled cosine",
+      "input": "x = [1 0 -1 0];\nz = hilbert(x)",
+      "output": "z = [1.0000 + 0.0000i, 0.0000 + 1.0000i, -1.0000 + 0.0000i, 0.0000 - 1.0000i]"
+    },
+    {
+      "description": "Use Hilbert output for phase demodulation",
+      "input": "fs = 8000;\nt = 0:1/fs:0.1;\ns = cos(2*pi*500*t + 2*sin(2*pi*20*t));\nz = hilbert(s);\nphase = unwrap(angle(z));"
+    },
+    {
+      "description": "Specify an FFT length",
+      "input": "x = [1 0 -1 0];\nz = hilbert(x, 8);\nsize(z)",
+      "output": "ans = [1 8]"
+    },
+    {
+      "description": "Operate down matrix columns",
+      "input": "X = [1 0; 0 1; -1 0; 0 -1];\nZ = hilbert(X);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does `hilbert` return?",
+      "answer": "`hilbert` returns an analytic signal. Its real part is the input signal and its imaginary part is the Hilbert transform."
+    },
+    {
+      "question": "Which dimension is transformed?",
+      "answer": "RunMat follows MATLAB's default: the first non-singleton dimension. For a column vector this is rows, for a row vector this is columns, and for a matrix this means each column is transformed independently."
+    },
+    {
+      "question": "How is the transform computed?",
+      "answer": "RunMat computes an FFT, applies the standard one-sided analytic-signal multiplier, and then computes an inverse FFT."
+    },
+    {
+      "question": "Can I pass complex input?",
+      "answer": "No. `hilbert` is defined for real input signals and returns a complex analytic signal."
+    },
+    {
+      "question": "Does `hilbert` run on GPU tensors?",
+      "answer": "GPU tensors are supported as inputs. The current implementation gathers through the active provider, computes the analytic signal with the host FFT path, and returns a complex host tensor."
+    }
+  ],
+  "links": [
+    {
+      "label": "fft",
+      "url": "./fft"
+    },
+    {
+      "label": "ifft",
+      "url": "./ifft"
+    },
+    {
+      "label": "angle",
+      "url": "./angle"
+    },
+    {
+      "label": "unwrap",
+      "url": "./unwrap"
+    },
+    {
+      "label": "butter",
+      "url": "./butter"
+    },
+    {
+      "label": "filter",
+      "url": "./filter"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/hilbert.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/hilbert.rs"
+  },
+  "gpu_residency": "`hilbert` accepts GPU tensors through the normal gather path. Because the result is complex and the runtime currently materializes complex analytic signals on the host, downstream GPU residency resumes only after an explicit `gpuArray` or another operation that uploads the result.",
+  "gpu_behavior": [
+    "GPU inputs are downloaded through the active provider with dtype normalization.",
+    "The host FFT implementation then applies MATLAB-compatible analytic-signal weighting.",
+    "The output is a complex host value, matching the runtime's current complex tensor representation."
+  ]
+}

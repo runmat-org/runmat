@@ -203,7 +203,8 @@ impl MarkSweepCollector {
             | Value::Num(_)
             | Value::Complex(_, _)
             | Value::Bool(_)
-            | Value::LogicalArray(_) => {
+            | Value::LogicalArray(_)
+            | Value::Symbolic(_) => {
                 // Primitive values don't contain references
             }
             Value::FunctionHandle(_)

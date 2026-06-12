@@ -91,6 +91,7 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
         Value::String(_) | Value::StringArray(_) => "string".to_string(),
         Value::CharArray(_) => "char".to_string(),
+        Value::Symbolic(_) => "sym".to_string(),
         Value::Cell(_) => "cell".to_string(),
         Value::Struct(_) => "struct".to_string(),
         Value::GpuTensor(_) => "gpuArray".to_string(),
@@ -121,7 +122,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, Listener, LogicalArray,
-        MException, ObjectInstance, StringArray, StructValue, Tensor,
+        MException, ObjectInstance, StringArray, StructValue, SymbolicExpr, Tensor,
     };
     use runmat_gc_api::GcPtr;
 
@@ -137,6 +138,14 @@ pub(crate) mod tests {
     fn class_reports_integer_type_names() {
         let name = class_builtin(Value::Int(IntValue::I32(12))).expect("class");
         assert_eq!(name, "int32");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn class_reports_sym_for_symbolic_values() {
+        let name = class_builtin(Value::Symbolic(SymbolicExpr::variable("x"))).expect("class");
+
+        assert_eq!(name, "sym");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -12,12 +12,14 @@ pub fn try_compile_kernel(device: &wgpu::Device, label: &str, wgsl_src: &str) {
         bind_group_layouts: &[],
         push_constant_ranges: &[],
     });
-    let _pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some(&format!("{}-pipeline", label)),
-        layout: Some(&pl),
-        module: &module,
-        entry_point: "main",
-    });
+    let _pipeline = device.create_compute_pipeline(
+        &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+            label: Some(&format!("{}-pipeline", label)),
+            layout: Some(&pl),
+            module: &module,
+            entry_point: "main",
+        },
+    );
     log::info!(
         "try_compile_kernel: '{}' compiled in {:.3} ms",
         label,
@@ -67,12 +69,14 @@ pub fn probe_kernel_with_buffers(
         bind_group_layouts: &[&bgl],
         push_constant_ranges: &[],
     });
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some(&format!("{}-pipeline", label)),
-        layout: Some(&pl),
-        module: &module,
-        entry_point: "main",
-    });
+    let pipeline = device.create_compute_pipeline(
+        &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+            label: Some(&format!("{}-pipeline", label)),
+            layout: Some(&pl),
+            module: &module,
+            entry_point: "main",
+        },
+    );
 
     let in_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(&format!("{}-in", label)),

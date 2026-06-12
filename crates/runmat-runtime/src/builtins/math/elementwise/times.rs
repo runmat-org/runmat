@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -356,12 +357,14 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             &TIMES_ERROR_INVALID_ARGUMENT,
             "GPU prototypes for 'like' only support real numeric outputs",
         )),
-        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => {
-            Err(times_error_with_detail(
-                &TIMES_ERROR_INVALID_ARGUMENT,
-                "unsupported prototype conversion to GPU output",
-            ))
-        }
+        Value::String(_)
+        | Value::StringArray(_)
+        | Value::Cell(_)
+        | Value::Struct(_)
+        | Value::Symbolic(_) => Err(times_error_with_detail(
+            &TIMES_ERROR_INVALID_ARGUMENT,
+            "unsupported prototype conversion to GPU output",
+        )),
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -618,6 +621,9 @@ fn scalar_times_value(lhs: &Value, rhs: &Value) -> Option<Value> {
 }
 
 fn times_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if let Some(result) = symbolic_binary(&lhs, &rhs, SymbolicBinaryOp::Mul) {
+        return Ok(result);
+    }
     if let Some(result) = scalar_times_value(&lhs, &rhs) {
         return Ok(result);
     }

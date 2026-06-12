@@ -165,6 +165,10 @@ async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
         Value::StringArray(strings) => logical_from_string_array(strings),
         Value::GpuTensor(handle) => logical_from_gpu(handle).await,
         Value::String(_) => Err(conversion_error("string")),
+        Value::Symbolic(expr) => expr
+            .numeric_constant_value()
+            .map(|value| Value::Bool(value != 0.0))
+            .ok_or_else(|| conversion_error("sym")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),
@@ -371,7 +375,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CellArray, IntValue, MException, ObjectInstance, StructValue};
+    use runmat_builtins::{
+        CellArray, IntValue, MException, ObjectInstance, StructValue, SymbolicExpr,
+    };
 
     fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::logical_builtin(value, rest))
@@ -397,6 +403,31 @@ pub(crate) mod tests {
 
         let zero_result = logical_builtin(Value::Num(0.0), Vec::new()).expect("logical");
         assert_eq!(zero_result, Value::Bool(false));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn logical_converts_symbolic_constants() {
+        let nonzero = logical_builtin(Value::Symbolic(SymbolicExpr::constant(2.0)), Vec::new())
+            .expect("logical");
+        assert_eq!(nonzero, Value::Bool(true));
+
+        let zero = logical_builtin(Value::Symbolic(SymbolicExpr::constant(0.0)), Vec::new())
+            .expect("logical");
+        assert_eq!(zero, Value::Bool(false));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn logical_rejects_symbolic_variables() {
+        let err = logical_builtin(Value::Symbolic(SymbolicExpr::variable("x")), Vec::new())
+            .expect_err("symbolic variable should not convert");
+
+        assert_eq!(
+            err.identifier(),
+            LOGICAL_ERROR_CONVERSION_NOT_POSSIBLE.identifier
+        );
+        assert!(err.message().contains("logical from sym"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

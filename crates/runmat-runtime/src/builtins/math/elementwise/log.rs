@@ -19,9 +19,11 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::symbolic::symbolic_function;
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_builtins::SymbolicFunction;
 
 const IMAG_EPS: f64 = 1e-12;
 
@@ -131,6 +133,9 @@ fn log_error_with_detail(
     builtin_path = "crate::builtins::math::elementwise::log"
 )]
 async fn log_builtin(value: Value) -> BuiltinResult<Value> {
+    if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Log) {
+        return Ok(symbolic);
+    }
     match value {
         Value::GpuTensor(handle) => log_gpu(handle).await,
         Value::Complex(re, im) => {

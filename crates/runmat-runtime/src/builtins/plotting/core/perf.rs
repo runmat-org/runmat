@@ -145,10 +145,34 @@ pub(crate) fn scatter3_lod_stride(point_count: u32, extent_hint: f32) -> u32 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    struct PerfTestGuard {
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for PerfTestGuard {
+        fn drop(&mut self) {
+            set_scatter_target_points(DEFAULT_SCATTER_TARGET_POINTS);
+            set_surface_vertex_budget(DEFAULT_SURFACE_VERTEX_BUDGET);
+        }
+    }
+
+    fn perf_test_guard() -> PerfTestGuard {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let guard = LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        set_scatter_target_points(DEFAULT_SCATTER_TARGET_POINTS);
+        set_surface_vertex_budget(DEFAULT_SURFACE_VERTEX_BUDGET);
+        PerfTestGuard { _guard: guard }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter_target_env_override() {
+        let _guard = perf_test_guard();
         set_scatter_target_points(300_000);
         assert_eq!(scatter_target_points(), 300_000);
     }
@@ -175,6 +199,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scatter3_stride_scales_with_extent() {
+        let _guard = perf_test_guard();
         set_scatter_target_points(100_000);
         let dense = scatter3_lod_stride(1_000_000, 50.0);
         let sparse = scatter3_lod_stride(1_000_000, 5_000.0);

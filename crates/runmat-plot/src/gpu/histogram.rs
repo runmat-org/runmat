@@ -292,14 +292,14 @@ fn run_histogram_pass(
             push_constant_ranges: &[],
         });
 
-    let pipeline = inputs
-        .device
-        .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+    let pipeline = inputs.device.create_compute_pipeline(
+        &crate::wgpu_compat::wgpu_compute_pipeline_descriptor! {
             label: Some("histogram-counts-pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader,
             entry_point: "main",
-        });
+        },
+    );
 
     let mut encoder = inputs
         .device
@@ -312,7 +312,7 @@ fn run_histogram_pass(
             timestamp_writes: None,
         });
         pass.set_pipeline(&pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
+        pass.set_bind_group(0, bind_group.as_ref(), &[]);
         let workgroups = inputs.sample_count.div_ceil(workgroup_size);
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
@@ -506,12 +506,13 @@ fn run_convert_pass(
         push_constant_ranges: &[],
     });
 
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("histogram-convert-pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: "main",
-    });
+    let pipeline =
+        device.create_compute_pipeline(&crate::wgpu_compat::wgpu_compute_pipeline_descriptor! {
+            label: Some("histogram-convert-pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "main",
+        });
 
     let uniforms = ConvertUniforms {
         bin_count,

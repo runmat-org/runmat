@@ -1147,6 +1147,20 @@ impl<'a> ExprParser<'a> {
                 value = if value == rhs { 1.0 } else { 0.0 };
                 continue;
             }
+            if self.match_symbol('>') {
+                let inclusive = self.match_symbol('=');
+                let rhs = self.parse_term()?;
+                let passed = if inclusive { value >= rhs } else { value > rhs };
+                value = if passed { 1.0 } else { 0.0 };
+                continue;
+            }
+            if self.match_symbol('<') {
+                let inclusive = self.match_symbol('=');
+                let rhs = self.parse_term()?;
+                let passed = if inclusive { value <= rhs } else { value < rhs };
+                value = if passed { 1.0 } else { 0.0 };
+                continue;
+            }
             break;
         }
         Ok(value)
@@ -2491,6 +2505,66 @@ fn fused_literal_constant_and_extended_builtins() {
         let v_data = check_tensor(vars.get(v_index).expect("value for v"));
         let v_expected: Vec<f64> = [4.0f64, 5.0, 6.0].iter().map(|x| x.sqrt()).collect();
         assert_eq!(v_data, v_expected);
+    });
+}
+
+#[test]
+fn fused_heaviside_preserves_nan_and_zero_semantics() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+
+        let source = r#"
+        x = [-2, -0, 0, 3, 0/0];
+        y = heaviside(x) + 0;
+        "#;
+
+        let bytecode = compile_semantic(source);
+        if let Some(graph) = graph_for_fusion_test(&bytecode) {
+            let groups = graph.detect_fusion_groups();
+            assert!(
+                groups
+                    .iter()
+                    .any(|g| matches!(g.kind, FusionKind::ElementwiseChain)),
+                "expected elementwise fusion group, got {:?}",
+                groups.iter().map(|g| g.kind.clone()).collect::<Vec<_>>()
+            );
+            let plan = runmat_accelerate::FusionPlan::from_graph(&graph, &groups);
+            assert!(
+                plan.groups.iter().any(|g| g.kernel.supported),
+                "expected supported fusion plan, groups={:?} supported={:?}",
+                &bytecode.fusion_groups,
+                plan.groups
+                    .iter()
+                    .map(|g| g.kernel.supported)
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        let vars = interpret(&bytecode).expect("interpret");
+        let y_index = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .next_back()
+            .expect("store var for y");
+
+        let y_value = vars.get(y_index).expect("value for y");
+        let handle = match y_value {
+            Value::GpuTensor(handle) => handle,
+            other => panic!("expected GPU tensor, got {other:?}"),
+        };
+        assert!(fusion_residency::is_resident(handle));
+
+        let tensor = match gather_if_needed(y_value).expect("gather y") {
+            Value::Tensor(tensor) => tensor,
+            Value::GpuTensor(_) => panic!("expected gathered tensor after gather_if_needed"),
+            other => panic!("expected gathered tensor, got {other:?}"),
+        };
+
+        assert_real_sequence_matches(&tensor.data, &[0.0, 0.5, 0.5, 1.0, f64::NAN]);
     });
 }
 

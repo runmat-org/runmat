@@ -575,6 +575,15 @@ impl AccelProvider for WgpuProvider {
         )
     }
 
+    fn unary_heaviside<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Heaviside, a)
+        })
+    }
+
     fn unary_conj<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

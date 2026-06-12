@@ -1010,6 +1010,7 @@ impl BytecodeCompiler {
                     | Instr::CreateExternalFunctionHandle(_)
                     | Instr::CreateMethodFunctionHandle(_)
                     | Instr::CreateBoundFunctionHandle(_, _)
+                    | Instr::CreateExternalBoundFunctionHandle(_, _)
                     | Instr::CreateClosure(_, _)
                     | Instr::CreateSemanticClosure(_, _, _)
                     | Instr::CallMethodOrMemberIndexMulti { .. }

@@ -247,6 +247,9 @@ fn expr_emit_disposition(expr: &runmat_hir::HirExpr, suppressed: bool) -> FinalS
         return FinalStmtEmitDisposition::Suppressed;
     }
     if let HirExprKind::Call(call) = &expr.kind {
+        if call.requested_outputs.fixed_count() == 0 {
+            return FinalStmtEmitDisposition::Suppressed;
+        }
         if let runmat_hir::HirCallableRef::Builtin(builtin) = &call.callee {
             if runmat_builtins::suppresses_auto_output(builtin.0.as_str()) {
                 return FinalStmtEmitDisposition::Suppressed;

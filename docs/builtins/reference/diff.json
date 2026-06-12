@@ -6,9 +6,10 @@
     "difference",
     "finite difference",
     "nth difference",
+    "symbolic derivative",
     "gpu"
   ],
-  "summary": "Compute forward finite differences in MATLAB and RunMat.",
+  "summary": "Compute forward finite differences or scalar symbolic derivatives in MATLAB and RunMat.",
   "references": [],
   "gpu_support": {
     "elementwise": false,
@@ -31,11 +32,12 @@
     "unit": "builtins::math::reduction::diff::tests",
     "integration": "builtins::math::reduction::diff::tests::diff_gpu_provider_roundtrip"
   },
-  "description": "`diff(X)` computes forward finite differences along the first non-singleton dimension by default. Higher-order and explicit-dimension forms follow MATLAB semantics.",
+  "description": "`diff(X)` computes forward finite differences along the first non-singleton dimension by default. Higher-order and explicit-dimension forms follow MATLAB semantics. When `X` is a scalar symbolic expression, `diff` builds a symbolic derivative expression.",
   "behaviors": [
     "`diff(X)` walks along the first non-singleton dimension. Column vectors therefore differentiate down the rows, while row vectors operate across columns.",
     "`diff(X, N)` computes the Nth forward difference. `N = 0` returns `X` unchanged. Each order reduces the length of the working dimension by one, so the output length becomes `max(len - N, 0)`.",
     "`diff(X, N, dim)` lets you choose the dimension explicitly. Passing `[]` for `N` or `dim` keeps the defaults, and dimensions larger than `ndims(X)` behave like length-1 axes (so any positive order yields an empty result).",
+    "For scalar symbolic inputs, `diff(expr, var)` and `diff(expr, var, N)` return symbolic derivative expressions. `diff(expr, N, var)` is accepted for MATLAB-compatible argument order.",
     "Real, logical, and character inputs promote to double precision tensors before differencing. Complex inputs retain their complex type, with forward differences applied to both the real and imaginary parts independently.",
     "Empty slices propagate: if the selected dimension has length 0 or 1, the corresponding axis in the output has length 0."
   ],
@@ -69,6 +71,11 @@
       "description": "Applying `diff` to character data",
       "input": "codes = diff('ACEG')",
       "output": "codes = [2 2 2]"
+    },
+    {
+      "description": "Build a symbolic derivative",
+      "input": "syms Y(X)\ndydx = diff(Y, X)",
+      "output": "dydx = diff(Y(X), X)"
     }
   ],
   "faqs": [
@@ -115,6 +122,10 @@
     {
       "question": "Does diff support GPU acceleration in RunMat?",
       "answer": "Yes. `diff` runs on GPU arrays in RunMat. The GPU path produces the same results as the CPU path for both real and complex inputs."
+    },
+    {
+      "question": "Does `diff` support symbolic expressions?",
+      "answer": "Yes. Scalar symbolic expressions return symbolic derivative expressions such as `diff(Y(X), X)`. Numeric arrays still use finite-difference semantics."
     }
   ],
   "links": [

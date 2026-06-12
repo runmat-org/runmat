@@ -81,12 +81,13 @@ pub fn pack_vertices(
         bind_group_layouts: &[&bind_group_layout],
         push_constant_ranges: &[],
     });
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("area-pack-pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: "main",
-    });
+    let pipeline =
+        device.create_compute_pipeline(&crate::wgpu_compat::wgpu_compute_pipeline_descriptor! {
+            label: Some("area-pack-pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "main",
+        });
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("area-pack-bind-group"),
         layout: &bind_group_layout,
@@ -187,11 +188,11 @@ mod tests {
             .block_on()?;
         let (device, queue) = adapter
             .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("runmat-plot-area-test-device"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: adapter.limits(),
-                },
+                &crate::wgpu_compat::device_descriptor(
+                    Some("runmat-plot-area-test-device"),
+                    wgpu::Features::empty(),
+                    adapter.limits(),
+                ),
                 None,
             )
             .block_on()

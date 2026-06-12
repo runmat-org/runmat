@@ -102,6 +102,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: CommandArgKind::Any,
     },
     CommandVerb {
+        name: "syms",
+        arg_kind: CommandArgKind::StringifyWords,
+    },
+    CommandVerb {
         name: "close",
         arg_kind: CommandArgKind::StringifyWords,
     },
@@ -184,31 +188,25 @@ impl Parser {
         let mut saw_arg = false;
         self.skip_command_continuations(&mut i);
 
-        if self.try_skip_dash_option(verb, &mut i) {
+        if self.has_malformed_syms_parameter_suffix(verb, i) {
+            return false;
+        }
+        if self.try_skip_command_arg(verb, &mut i) {
             saw_arg = true;
-        } else if !matches!(
-            self.peek_token_at(i),
-            Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End)
-        ) {
-            if !zero_arg_allowed {
-                return false;
-            }
-        } else {
-            saw_arg = true;
+        } else if !matches!(self.peek_token_at(i), Some(Token::Ellipsis)) && !zero_arg_allowed {
+            return false;
         }
 
         loop {
-            match self.peek_token_at(i) {
-                Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End) => {
-                    saw_arg = true;
-                    i += 1;
-                    self.skip_dotted_word_suffix(verb, &mut i);
-                }
-                Some(Token::Minus) if self.try_skip_dash_option(verb, &mut i) => {
-                    saw_arg = true;
-                }
-                Some(Token::Ellipsis) => self.skip_command_continuations(&mut i),
-                _ => break,
+            if self.has_malformed_syms_parameter_suffix(verb, i) {
+                return false;
+            }
+            if self.try_skip_command_arg(verb, &mut i) {
+                saw_arg = true;
+            } else if matches!(self.peek_token_at(i), Some(Token::Ellipsis)) {
+                self.skip_command_continuations(&mut i);
+            } else {
+                break;
             }
         }
         if !saw_arg && !zero_arg_allowed {
@@ -244,6 +242,17 @@ impl Parser {
                     let start = token.position;
                     let mut end = token.end;
                     let mut word = token.lexeme;
+                    if self.can_parse_syms_function_arg(verb)
+                        && matches!(self.peek_token(), Some(Token::LParen))
+                    {
+                        if self.skip_syms_parameter_suffix(0).is_none() {
+                            break;
+                        }
+                        if let Some((suffix, suffix_end)) = self.parse_syms_parameter_suffix() {
+                            word.push_str(&suffix);
+                            end = suffix_end;
+                        }
+                    }
                     if self.can_parse_dotted_word_arg(verb) {
                         while matches!(self.peek_token(), Some(Token::Dot))
                             && matches!(self.peek_token_at(1), Some(Token::Ident | Token::Integer))
@@ -303,6 +312,33 @@ impl Parser {
         args
     }
 
+    fn try_skip_command_arg(&self, verb: &str, offset: &mut usize) -> bool {
+        if self.try_skip_dash_option(verb, offset) {
+            return true;
+        }
+        match self.peek_token_at(*offset) {
+            Some(Token::Ident) => {
+                if self.can_parse_syms_function_arg(verb)
+                    && matches!(self.peek_token_at(*offset + 1), Some(Token::LParen))
+                {
+                    let Some(after_suffix) = self.skip_syms_parameter_suffix(*offset + 1) else {
+                        return false;
+                    };
+                    *offset = after_suffix;
+                } else {
+                    *offset += 1;
+                    self.skip_dotted_word_suffix(verb, offset);
+                }
+                true
+            }
+            Some(Token::Integer | Token::Float | Token::Str | Token::End) => {
+                *offset += 1;
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn try_skip_dash_option(&self, verb: &str, offset: &mut usize) -> bool {
         if !self.can_parse_dash_option_arg(verb) {
             return false;
@@ -322,6 +358,65 @@ impl Parser {
 
     fn can_parse_dotted_word_arg(&self, verb: &str) -> bool {
         verb.eq_ignore_ascii_case("print")
+    }
+
+    fn can_parse_syms_function_arg(&self, verb: &str) -> bool {
+        verb.eq_ignore_ascii_case("syms")
+    }
+
+    fn has_malformed_syms_parameter_suffix(&self, verb: &str, offset: usize) -> bool {
+        self.can_parse_syms_function_arg(verb)
+            && matches!(self.peek_token_at(offset), Some(Token::Ident))
+            && matches!(self.peek_token_at(offset + 1), Some(Token::LParen))
+            && self.skip_syms_parameter_suffix(offset + 1).is_none()
+    }
+
+    fn skip_syms_parameter_suffix(&self, offset: usize) -> Option<usize> {
+        if !matches!(self.peek_token_at(offset), Some(Token::LParen)) {
+            return None;
+        }
+        let mut i = offset + 1;
+        loop {
+            match self.peek_token_at(i) {
+                Some(Token::Ident) => {
+                    i += 1;
+                    match self.peek_token_at(i) {
+                        Some(Token::Comma) => i += 1,
+                        Some(Token::RParen) => return Some(i + 1),
+                        _ => return None,
+                    }
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    fn parse_syms_parameter_suffix(&mut self) -> Option<(String, usize)> {
+        self.skip_syms_parameter_suffix(0)?;
+        let open = self.next()?;
+        if !matches!(open.token, Token::LParen) {
+            return None;
+        }
+        let mut suffix = String::from("(");
+        loop {
+            let parameter = self.next()?;
+            if !matches!(parameter.token, Token::Ident) {
+                return None;
+            }
+            suffix.push_str(&parameter.lexeme);
+
+            if self.consume(&Token::Comma) {
+                suffix.push(',');
+                continue;
+            }
+
+            let close = self.next()?;
+            if !matches!(close.token, Token::RParen) {
+                return None;
+            }
+            suffix.push(')');
+            return Some((suffix, close.end));
+        }
     }
 
     fn skip_dotted_word_suffix(&self, verb: &str, offset: &mut usize) {

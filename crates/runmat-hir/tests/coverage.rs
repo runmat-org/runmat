@@ -312,8 +312,11 @@ fn function_handle_prefers_semantic_function_identity_from_context() {
         &stmt.kind,
         HirStmtKind::Assign(_, expr, _)
             if matches!(
-                expr.kind,
-                HirExprKind::FunctionHandle(FunctionHandleTarget::Function(FunctionId(4242)))
+                &expr.kind,
+                HirExprKind::FunctionHandle(FunctionHandleTarget::ExternalFunction {
+                    function: FunctionId(4242),
+                    display_name,
+                }) if display_name == "remote_inc"
             )
     )));
 }

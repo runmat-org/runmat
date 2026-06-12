@@ -435,7 +435,8 @@ async fn execute_resolved_callable(
         CallableIdentity::Builtin(id) => {
             call_builtin_with_requested_outputs(&id.0, &args, requested_outputs).await
         }
-        CallableIdentity::BoundFunction(function) => {
+        CallableIdentity::BoundFunction(function)
+        | CallableIdentity::ExternalFunction { function, .. } => {
             if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
                 function.0,
                 &args,
@@ -479,7 +480,8 @@ async fn try_execute_resolved_callable(
                 .await
                 .map(Some)
         }
-        CallableIdentity::BoundFunction(function) => {
+        CallableIdentity::BoundFunction(function)
+        | CallableIdentity::ExternalFunction { function, .. } => {
             if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
                 function.0,
                 &args,

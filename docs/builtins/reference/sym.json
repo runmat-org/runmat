@@ -1,0 +1,67 @@
+{
+  "title": "sym",
+  "category": "math/symbolic",
+  "keywords": [
+    "sym",
+    "symbolic",
+    "variable",
+    "algebra"
+  ],
+  "summary": "Create a scalar symbolic variable or constant.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Symbolic expressions are host algebra values and are not uploaded to GPU providers."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::symbolic::sym::tests",
+    "integration": "runmat_vm::bytecode::compile::tests::compile_interprets_symbolic_limit_workflow"
+  },
+  "description": "`sym` creates scalar symbolic variables from identifier text and scalar symbolic constants from numeric input. Nonconstant symbolic values remain symbolic through supported arithmetic, trigonometric, and limit operations.",
+  "behaviors": [
+    "Text that is a valid MATLAB identifier creates a symbolic variable with that name.",
+    "Finite numeric, integer, logical, and scalar numeric tensor inputs create scalar symbolic constants with class `sym`.",
+    "Text containing a finite numeric scalar creates that numeric symbolic constant.",
+    "Symbolic values are host-only and do not participate in GPU fusion or residency."
+  ],
+  "examples": [
+    {
+      "description": "Create a symbolic variable",
+      "input": "x = sym('x')"
+    },
+    {
+      "description": "Create a symbolic numeric constant",
+      "input": "a = sym(2)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `sym` create symbolic arrays?",
+      "answer": "No. RunMat currently represents scalar symbolic expressions; array-valued symbolic containers are not materialized."
+    }
+  ],
+  "links": [
+    {
+      "label": "syms",
+      "url": "./syms"
+    },
+    {
+      "label": "limit",
+      "url": "./limit"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/symbolic/sym.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/symbolic/sym.rs"
+  }
+}

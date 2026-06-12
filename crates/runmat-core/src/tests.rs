@@ -60,6 +60,33 @@ fn end_expr_contains_display_name(expr: &runmat_vm::EndExpr, name: &str) -> bool
     }
 }
 
+fn end_expr_contains_external_function(expr: &runmat_vm::EndExpr) -> bool {
+    use runmat_vm::EndExpr;
+    match expr {
+        EndExpr::ResolvedCall { identity, args, .. } => {
+            matches!(
+                identity,
+                runmat_hir::CallableIdentity::ExternalFunction { .. }
+            ) || args.iter().any(end_expr_contains_external_function)
+        }
+        EndExpr::Add(lhs, rhs)
+        | EndExpr::Sub(lhs, rhs)
+        | EndExpr::Mul(lhs, rhs)
+        | EndExpr::Div(lhs, rhs)
+        | EndExpr::LeftDiv(lhs, rhs)
+        | EndExpr::Pow(lhs, rhs) => {
+            end_expr_contains_external_function(lhs) || end_expr_contains_external_function(rhs)
+        }
+        EndExpr::Neg(inner)
+        | EndExpr::Pos(inner)
+        | EndExpr::Floor(inner)
+        | EndExpr::Ceil(inner)
+        | EndExpr::Round(inner)
+        | EndExpr::Fix(inner) => end_expr_contains_external_function(inner),
+        EndExpr::End | EndExpr::Const(_) | EndExpr::Var(_) => false,
+    }
+}
+
 fn execute_text_request(
     session: &mut RunMatSession,
     source_text: &str,
@@ -113,6 +140,45 @@ fn outcome_has_named_upsert(
         };
         matches_name && upsert.value == *expected
     })
+}
+
+fn stdout_text(outcome: &abi::ExecutionOutcome) -> String {
+    outcome
+        .streams
+        .iter()
+        .filter(|entry| entry.stream == ExecutionStreamKind::Stdout)
+        .map(|entry| entry.text.as_str())
+        .collect::<String>()
+}
+
+fn is_external_function_call_multi(
+    instr: &runmat_vm::Instr,
+    expected_arg_count: usize,
+    expected_output_count: usize,
+) -> bool {
+    matches!(
+        instr,
+        runmat_vm::Instr::CallFunctionMulti {
+            identity: runmat_hir::CallableIdentity::ExternalFunction { .. },
+            arg_count,
+            out_count,
+            ..
+        } if *arg_count == expected_arg_count && *out_count == expected_output_count
+    )
+}
+
+fn is_external_function_expand_multi(
+    instr: &runmat_vm::Instr,
+    expected_output_count: usize,
+) -> bool {
+    matches!(
+        instr,
+        runmat_vm::Instr::CallFunctionExpandMultiOutput {
+            identity: runmat_hir::CallableIdentity::ExternalFunction { .. },
+            out_count,
+            ..
+        } if *out_count == expected_output_count
+    )
 }
 
 fn outcome_named_upsert_value<'a>(
@@ -8413,6 +8479,10 @@ roots = ["."]
             instr,
             runmat_vm::Instr::CreateBoundFunctionHandle(_, name)
                 if name == "summarize" || name.ends_with(".summarize")
+        ) || matches!(
+            instr,
+            runmat_vm::Instr::CreateExternalBoundFunctionHandle(_, name)
+                if name == "summarize" || name.ends_with(".summarize")
         )),
         "wildcard dependency-alias function handle should lower to exact alias-qualified external function-handle bytecode"
     );
@@ -8889,6 +8959,14 @@ fn end_expression_user_function_call_uses_semantic_identity() {
             instr,
             runmat_vm::Instr::CallSemanticFunctionMulti(_, _, _)
                 | runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
+                | runmat_vm::Instr::CallFunctionMulti {
+                    identity: runmat_hir::CallableIdentity::ExternalFunction { .. },
+                    ..
+                }
+                | runmat_vm::Instr::CallFunctionExpandMultiOutput {
+                    identity: runmat_hir::CallableIdentity::ExternalFunction { .. },
+                    ..
+                }
         )
     });
     assert!(
@@ -8933,6 +9011,14 @@ fn end_expression_session_function_call_uses_semantic_identity() {
             instr,
             runmat_vm::Instr::CallSemanticFunctionMulti(_, _, _)
                 | runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
+                | runmat_vm::Instr::CallFunctionMulti {
+                    identity: runmat_hir::CallableIdentity::ExternalFunction { .. },
+                    ..
+                }
+                | runmat_vm::Instr::CallFunctionExpandMultiOutput {
+                    identity: runmat_hir::CallableIdentity::ExternalFunction { .. },
+                    ..
+                }
         )
     });
     assert!(
@@ -8941,7 +9027,10 @@ fn end_expression_session_function_call_uses_semantic_identity() {
             runmat_vm::Instr::IndexSliceExpr { end_numeric_exprs, .. }
                 if end_numeric_exprs
                     .iter()
-                    .any(|(_, expr)| end_expr_contains_display_name(expr, "pick"))
+                    .any(|(_, expr)| {
+                        end_expr_contains_display_name(expr, "pick")
+                            || end_expr_contains_external_function(expr)
+                    })
         ))) || (saw_end_numeric_expr && saw_semantic_call),
         "session end-expression user calls should carry semantic function identity"
     );
@@ -10310,6 +10399,24 @@ fn simple_builtin_call_uses_semantic_vm() {
 }
 
 #[test]
+fn null_row_reduction_builtin_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "A = [1 2 3; 2 4 6]; Z = null(A, 'r');";
+    let prepared = session.compile_input(source).expect("compile null call");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "null should compile through semantic HIR/MIR/VM"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    let expected = runmat_builtins::Value::Tensor(
+        runmat_builtins::Tensor::new(vec![-2.0, 1.0, 0.0, -3.0, 0.0, 1.0], vec![3, 2])
+            .expect("expected null basis"),
+    );
+    assert!(outcome_has_named_upsert(&outcome, "Z", &expected));
+}
+
+#[test]
 fn multi_assign_deal_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let prepared = session
@@ -11536,14 +11643,321 @@ fn direct_session_function_call_uses_semantic_registry() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 1, 1))),
-        "direct call should lower to semantic function bytecode"
+            .any(|instr| is_external_function_call_multi(instr, 1, 1)),
+        "direct session call should lower to an external semantic function call"
     );
     let outcome = execute_text_request(&mut session, "y = inc(2);").expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
     }));
+}
+
+#[test]
+fn expression_statement_zero_output_local_function_requests_zero_outputs() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "function show_value(x)\n  disp(x)\nend\nshow_value(7)";
+
+    let prepared = session
+        .compile_input(source)
+        .expect("compile zero-output local function statement");
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 1, 0))),
+        "zero-output statement call should request zero semantic outputs"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(!outcome.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RunMat:TooManyOutputs"
+            && matches!(diagnostic.severity, abi::DiagnosticSeverity::Error)
+    }));
+    assert!(outcome.flow.is_no_value());
+    assert!(outcome.display_events.is_empty());
+    assert!(!outcome_has_upsert_name(&outcome, "ans"));
+    assert_eq!(stdout_text(&outcome), "7\n");
+}
+
+#[test]
+fn expression_statement_zero_output_nested_function_requests_zero_outputs() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source =
+        "function outer()\n  inner(9)\n  function inner(x)\n    disp(x)\n  end\nend\nouter()";
+
+    let prepared = session
+        .compile_input(source)
+        .expect("compile zero-output nested function statement");
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 0, 0))),
+        "top-level call into the zero-output outer function should request zero semantic outputs"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(!outcome.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RunMat:TooManyOutputs"
+            && matches!(diagnostic.severity, abi::DiagnosticSeverity::Error)
+    }));
+    assert!(outcome.flow.is_no_value());
+    assert!(outcome.display_events.is_empty());
+    assert!(!outcome_has_upsert_name(&outcome, "ans"));
+    assert_eq!(stdout_text(&outcome), "9\n");
+}
+
+#[test]
+fn expression_statement_zero_output_persisted_function_requests_zero_outputs() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    execute_text_request(&mut session, "function show_value(x)\n  disp(x)\nend")
+        .expect("define session function");
+
+    let prepared = session
+        .compile_input("show_value(11)")
+        .expect("compile zero-output persisted function statement");
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| is_external_function_call_multi(instr, 1, 0)),
+        "persisted zero-output statement call should request zero semantic outputs"
+    );
+
+    let outcome = execute_text_request(&mut session, "show_value(11)").expect("exec succeeds");
+    assert!(outcome.flow.is_no_value());
+    assert!(outcome.display_events.is_empty());
+    assert!(!outcome_has_upsert_name(&outcome, "ans"));
+    assert_eq!(stdout_text(&outcome), "11\n");
+}
+
+#[test]
+fn expression_statement_persisted_function_arity_survives_local_function_id_collision() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    execute_text_request(&mut session, "function y = inc(x)\n  y = x + 1;\nend")
+        .expect("define session function");
+    let source = "function local_zero()\nend\ninc(2)";
+
+    let prepared = session
+        .compile_input(source)
+        .expect("compile mixed persisted and local function statement");
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| is_external_function_call_multi(instr, 1, 1)),
+        "persisted one-output function should keep one requested output despite local id reuse"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(
+        matches!(
+            outcome.flow,
+            abi::RuntimeFlow::Single(runmat_builtins::Value::Num(value)) if value == 3.0
+        ),
+        "persisted function call should return 3; outcome={outcome:?}"
+    );
+    assert_eq!(outcome.display_events.len(), 1);
+    assert_eq!(
+        outcome.display_events[0].value,
+        runmat_builtins::Value::Num(3.0)
+    );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ans",
+        &runmat_builtins::Value::Num(3.0)
+    ));
+}
+
+#[test]
+fn dynamic_eval_zero_output_persisted_function_requests_zero_outputs() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    execute_text_request(&mut session, "function show_value(x)\n  disp(x)\nend")
+        .expect("define session function");
+
+    let outcome = execute_text_request(&mut session, "eval('show_value(12)');")
+        .expect("dynamic eval succeeds");
+    assert!(outcome.diagnostics.is_empty());
+    assert!(outcome.flow.is_no_value());
+    assert!(outcome.display_events.is_empty());
+    assert!(!outcome_has_upsert_name(&outcome, "ans"));
+    assert_eq!(stdout_text(&outcome), "12\n");
+}
+
+#[test]
+fn dynamic_eval_persisted_function_call_survives_eval_local_function_id_collision() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    execute_text_request(&mut session, "function show_value(x)\n  disp(x)\nend")
+        .expect("define session function");
+
+    let outcome = execute_text_request(
+        &mut session,
+        "eval('function local_zero(); end; show_value(12);');",
+    )
+    .expect("dynamic eval succeeds");
+    assert!(outcome.diagnostics.is_empty());
+    assert!(outcome.flow.is_no_value());
+    assert_eq!(stdout_text(&outcome), "12\n");
+}
+
+#[test]
+fn dynamic_eval_persisted_function_handle_survives_eval_local_function_id_collision() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    execute_text_request(&mut session, "function y = inc(x)\n  y = x + 1;\nend")
+        .expect("define session function");
+
+    let outcome = execute_text_request(
+        &mut session,
+        "eval('function local_zero(); end; f = @inc; y = f(2);');",
+    )
+    .expect("dynamic eval succeeds");
+    assert!(outcome.diagnostics.is_empty());
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(3.0)
+    ));
+}
+
+#[test]
+fn identifier_statement_zero_output_local_function_requests_zero_outputs() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "function show_zero()\n  disp(5)\nend\nshow_zero";
+
+    let prepared = session
+        .compile_input(source)
+        .expect("compile identifier zero-output local function statement");
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 0, 0))),
+        "identifier zero-output statement call should request zero semantic outputs"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome.flow.is_no_value());
+    assert!(outcome.display_events.is_empty());
+    assert!(!outcome_has_upsert_name(&outcome, "ans"));
+    assert_eq!(stdout_text(&outcome), "5\n");
+}
+
+#[test]
+fn identifier_statement_zero_output_persisted_function_requests_zero_outputs() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    execute_text_request(&mut session, "function show_zero()\n  disp(6)\nend")
+        .expect("define session function");
+
+    let prepared = session
+        .compile_input("show_zero")
+        .expect("compile identifier zero-output persisted function statement");
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| is_external_function_call_multi(instr, 0, 0)),
+        "identifier persisted zero-output call should request zero semantic outputs"
+    );
+
+    let outcome = execute_text_request(&mut session, "show_zero").expect("exec succeeds");
+    assert!(outcome.flow.is_no_value());
+    assert!(outcome.display_events.is_empty());
+    assert!(!outcome_has_upsert_name(&outcome, "ans"));
+    assert_eq!(stdout_text(&outcome), "6\n");
+}
+
+#[test]
+fn expression_statement_shadowed_zero_output_function_name_indexes_variable() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "function foo()\n  disp(100)\nend\nfoo = [10 20];\nfoo(2)";
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(matches!(
+        outcome.flow,
+        abi::RuntimeFlow::Single(runmat_builtins::Value::Num(value)) if value == 20.0
+    ));
+    assert_eq!(outcome.display_events.len(), 1);
+    assert_eq!(
+        outcome.display_events[0].value,
+        runmat_builtins::Value::Num(20.0)
+    );
+    assert_eq!(stdout_text(&outcome), "ans = 20\n");
+}
+
+#[test]
+fn expression_statement_one_output_function_keeps_ans_display() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "function y = inc(x)\n  y = x + 1;\nend\ninc(2)";
+
+    let prepared = session
+        .compile_input(source)
+        .expect("compile one-output local function statement");
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 1, 1))),
+        "one-output statement call should still request one semantic output"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(matches!(
+        outcome.flow,
+        abi::RuntimeFlow::Single(runmat_builtins::Value::Num(value)) if value == 3.0
+    ));
+    assert_eq!(outcome.display_events.len(), 1);
+    assert_eq!(
+        outcome.display_events[0].value,
+        runmat_builtins::Value::Num(3.0)
+    );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ans",
+        &runmat_builtins::Value::Num(3.0)
+    ));
+}
+
+#[test]
+fn expression_statement_varargout_function_keeps_ans_display() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source =
+        "function varargout = first_value(x)\n  varargout{1} = x + 1;\nend\nfirst_value(4)";
+
+    let prepared = session
+        .compile_input(source)
+        .expect("compile varargout local function statement");
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 1, 1))),
+        "varargout statement call should still request one semantic output"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(matches!(
+        outcome.flow,
+        abi::RuntimeFlow::Single(runmat_builtins::Value::Num(value)) if value == 5.0
+    ));
+    assert_eq!(outcome.display_events.len(), 1);
+    assert_eq!(
+        outcome.display_events[0].value,
+        runmat_builtins::Value::Num(5.0)
+    );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ans",
+        &runmat_builtins::Value::Num(5.0)
+    ));
 }
 
 #[test]
@@ -11563,8 +11977,8 @@ fn direct_session_function_multi_output_uses_semantic_registry() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 1, 2))),
-        "direct multi-output call should lower to semantic function bytecode"
+            .any(|instr| is_external_function_call_multi(instr, 1, 2)),
+        "direct multi-output session call should lower to an external semantic function call"
     );
     let outcome = execute_text_request(&mut session, "[a, b] = pair(2);").expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -11590,11 +12004,12 @@ fn direct_session_function_cell_expansion_uses_semantic_registry() {
         .compile_input("C = {2}; y = inc(C{:});")
         .expect("compile direct session expansion function call");
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(_, _, 1)
-        )),
-        "direct expansion call should lower to semantic function bytecode"
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| is_external_function_expand_multi(instr, 1)),
+        "direct expansion session call should lower to an external semantic function call"
     );
     let outcome =
         execute_text_request(&mut session, "C = {2}; y = inc(C{:});").expect("exec succeeds");
@@ -11617,11 +12032,12 @@ fn direct_session_function_expansion_multi_output_uses_semantic_registry() {
         .compile_input("C = {2}; [a, b] = pair(C{:});")
         .expect("compile direct session expansion multi-output function call");
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(_, _, 2)
-        )),
-        "direct expansion multi-output call should lower to semantic function bytecode"
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| is_external_function_expand_multi(instr, 2)),
+        "direct expansion multi-output session call should lower to an external semantic function call"
     );
     let outcome =
         execute_text_request(&mut session, "C = {2}; [a, b] = pair(C{:});").expect("exec succeeds");
@@ -11656,11 +12072,10 @@ fn session_function_handle_uses_semantic_registry() {
         "function handle target should be present in semantic registry"
     );
     assert!(
-        prepared
-            .bytecode
-            .instructions
-            .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::CreateBoundFunctionHandle(_, _))),
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateExternalBoundFunctionHandle(_, name) if name == "inc"
+        )),
         "session function handles should carry semantic identity"
     );
     assert!(
@@ -11670,12 +12085,142 @@ fn session_function_handle_uses_semantic_registry() {
         )),
         "session function handles should not remain name-only handles"
     );
-    let outcome = execute_text_request(&mut session, "f = @inc; y = f(2);")
+    let outcome = execute_text_request(&mut session, "f = @inc; name = func2str(f); y = f(2);")
         .expect("function handle call succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
     }));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "name",
+        &runmat_builtins::Value::String("inc".to_string())
+    ));
+}
+
+#[test]
+fn function_handle_name_value_arguments_execute_as_name_value_pairs() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function [n, first_name, first_value, second_name, second_value] = collect(varargin)
+            n = nargin;
+            first_name = varargin{1};
+            first_value = varargin{2};
+            second_name = varargin{3};
+            second_value = varargin{4};
+        end
+
+        f = @collect;
+        [n, first_name, first_value, second_name, second_value] = f(Name=7, Mode="fast");
+    "#;
+    let prepared = session
+        .compile_input(source)
+        .expect("compile function handle name-value call");
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| {
+            matches!(
+                instr,
+                runmat_vm::Instr::CallFevalMulti(4, 5)
+                    | runmat_vm::Instr::CallFevalMultiUsingOutputSlot(4, _)
+            )
+        }),
+        "name-value function handle call should lower to four runtime arguments"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "n",
+        &runmat_builtins::Value::Num(4.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "first_name",
+        &runmat_builtins::Value::String("Name".to_string())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "first_value",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "second_name",
+        &runmat_builtins::Value::String("Mode".to_string())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "second_value",
+        &runmat_builtins::Value::String("fast".to_string())
+    ));
+}
+
+#[test]
+fn one_output_function_handle_name_value_call_uses_dynamic_dispatch() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function n = count_inputs(varargin)
+            n = nargin;
+        end
+
+        f = @count_inputs;
+        n = f(Name=7);
+    "#;
+    let prepared = session
+        .compile_input(source)
+        .expect("compile one-output function handle name-value call");
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CallFevalMulti(2, 1)
+                | runmat_vm::Instr::CallFevalMultiUsingOutputSlot(2, _)
+        )),
+        "one-output name-value function handle call should use dynamic call dispatch"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "n",
+        &runmat_builtins::Value::Num(2.0)
+    ));
+}
+
+#[test]
+fn name_value_brace_value_executes_as_single_value_argument() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function [n, value] = collect(varargin)
+            n = nargin;
+            value = varargin{2};
+        end
+
+        C = {7};
+        [n, value] = collect(Name=C{:});
+    "#;
+    let prepared = session
+        .compile_input(source)
+        .expect("compile name-value brace value call");
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 2, 2))),
+        "brace value inside name-value syntax should remain one runtime argument"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "n",
+        &runmat_builtins::Value::Num(2.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "value",
+        &runmat_builtins::Value::Num(7.0)
+    ));
 }
 
 #[test]

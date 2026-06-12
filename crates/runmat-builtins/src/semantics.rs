@@ -322,6 +322,18 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::Filesystem,
             ..BuiltinSemantics::unknown()
         },
+        "uigetfile" => BuiltinSemantics {
+            compatibility: BuiltinCompatibility::InteractiveOnly,
+            async_behavior: BuiltinAsyncBehavior::MaySuspend,
+            effects: BuiltinEffects::none()
+                .with_filesystem()
+                .with_ui()
+                .with_host_callback(),
+            workspace_effect: None,
+            environment_effect: None,
+            purity: BuiltinPurity::Impure,
+            semantic_kind: BuiltinSemanticKind::Filesystem,
+        },
         "webread" | "webwrite" | "tcpclient" | "tcpserver" | "accept" | "read" | "readline"
         | "write" => network_io(),
         "path" | "addpath" | "rmpath" => BuiltinSemantics {
@@ -376,7 +388,7 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::Workspace,
             ..BuiltinSemantics::unknown()
         },
-        "assignin" => BuiltinSemantics {
+        "assignin" | "syms" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_workspace(),
             workspace_effect: Some(BuiltinWorkspaceEffect::CreatesBinding),
             purity: BuiltinPurity::Impure,

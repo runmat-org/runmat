@@ -15,7 +15,7 @@ use crate::indexing::selectors::{
 use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
 use crate::interpreter::dispatch::calls::normalize_requested_outputs;
-use runmat_builtins::{CellArray, Value};
+use runmat_builtins::{CellArray, SymbolicExpr, Value};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::future::Future;
 use std::pin::Pin;
@@ -57,6 +57,57 @@ fn map_cell_scalar_selector_error(err: RuntimeError) -> RuntimeError {
         }
         _ => err,
     }
+}
+
+async fn read_scalar_like_slice(
+    base: &Value,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+) -> Result<Value, RuntimeError> {
+    if dims != 1 {
+        return Err(crate::interpreter::errors::mex(
+            "SliceNonTensor",
+            "Slicing only supported on tensors",
+        ));
+    }
+    if (colon_mask & 1u32) != 0 {
+        return Err(crate::interpreter::errors::mex(
+            "SliceNonTensor",
+            "Slicing only supported on tensors",
+        ));
+    }
+    let selectors = build_slice_selectors(1, colon_mask, end_mask, numeric, &[1usize]).await?;
+    let linear_indices: Vec<f64> = match selectors.first() {
+        Some(SliceSelector::Scalar(index)) => vec![*index as f64],
+        Some(SliceSelector::Indices(indices)) => {
+            indices.iter().map(|&index| index as f64).collect()
+        }
+        Some(SliceSelector::LinearIndices { values, .. }) => {
+            values.iter().map(|&index| index as f64).collect()
+        }
+        Some(SliceSelector::Colon) | None => {
+            return Err(crate::interpreter::errors::mex(
+                "SliceNonTensor",
+                "Slicing only supported on tensors",
+            ));
+        }
+    };
+    if matches!(base, Value::Symbolic(_)) {
+        if linear_indices.len() == 1 && linear_indices[0] == 1.0 {
+            return Ok(base.clone());
+        }
+        return Err(crate::interpreter::errors::mex(
+            "SliceNonTensor",
+            "Slicing only supported on tensors",
+        ));
+    }
+    runmat_runtime::perform_indexing(base, &linear_indices)
+        .await
+        .map_err(|_| {
+            crate::interpreter::errors::mex("SliceNonTensor", "Slicing only supported on tensors")
+        })
 }
 
 fn missing_member_index_overload_error(base: &Value, op: ObjectIndexOp) -> Option<RuntimeError> {
@@ -873,11 +924,71 @@ pub async fn paren_index_value(
         {
             crate::call::feval::FevalDispatch::Completed(value) => Ok(value),
         },
+        Value::Symbolic(expr) => {
+            if let Some((name, parameters)) = expr.function_reference_signature() {
+                apply_symbolic_function_reference(name, parameters, &raw_indices)
+            } else {
+                let numeric = linear_index_values_to_f64(&raw_indices).await?;
+                if numeric.len() == 1 && numeric[0] == 1.0 {
+                    Ok(Value::Symbolic(expr.clone()))
+                } else {
+                    idx_read_linear::generic_index(&Value::Symbolic(expr.clone()), &numeric).await
+                }
+            }
+        }
         _ => {
             let numeric = linear_index_values_to_f64(&raw_indices).await?;
             idx_read_linear::generic_index(&base, &numeric).await
         }
     }
+}
+
+fn symbolic_scalar_from_value(value: &Value) -> Result<SymbolicExpr, RuntimeError> {
+    match value {
+        Value::Symbolic(expr) => Ok(expr.clone()),
+        Value::Num(value) => Ok(SymbolicExpr::constant(*value)),
+        Value::Int(value) => Ok(SymbolicExpr::constant(value.to_f64())),
+        Value::Bool(value) => Ok(SymbolicExpr::constant(if *value { 1.0 } else { 0.0 })),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(SymbolicExpr::constant(tensor.data[0]))
+        }
+        Value::LogicalArray(logical) if logical.data.len() == 1 => {
+            Ok(SymbolicExpr::constant(if logical.data[0] != 0 {
+                1.0
+            } else {
+                0.0
+            }))
+        }
+        other => Err(crate::interpreter::errors::mex(
+            "InvalidSymbolicFunctionArgument",
+            &format!("symbolic function arguments must be scalar values, got {other:?}"),
+        )),
+    }
+}
+
+fn apply_symbolic_function_reference(
+    name: &str,
+    parameters: &[String],
+    raw_indices: &[Value],
+) -> Result<Value, RuntimeError> {
+    if raw_indices.len() != parameters.len() {
+        return Err(crate::interpreter::errors::mex(
+            "SymbolicFunctionArity",
+            &format!(
+                "symbolic function {name} expects {} argument(s), got {}",
+                parameters.len(),
+                raw_indices.len()
+            ),
+        ));
+    }
+    let args = raw_indices
+        .iter()
+        .map(symbolic_scalar_from_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Value::Symbolic(SymbolicExpr::function_call(
+        name.to_string(),
+        args,
+    )))
 }
 
 pub async fn dispatch_indexing(
@@ -1230,6 +1341,30 @@ pub async fn dispatch_indexing(
                         crate::call::feval::FevalDispatch::Completed(value) => stack.push(value),
                     }
                 }
+                Value::Symbolic(expr) => {
+                    if let Some((name, parameters)) = expr.function_reference_signature() {
+                        if *colon_mask != 0 || *end_mask != 0 {
+                            return Err(crate::interpreter::errors::mex(
+                                "UnsupportedSymbolicFunctionSelector",
+                                "symbolic function calls do not support colon or end selector syntax",
+                            ));
+                        }
+                        stack.push(apply_symbolic_function_reference(
+                            name, parameters, &numeric,
+                        )?);
+                    } else {
+                        stack.push(
+                            read_scalar_like_slice(
+                                &Value::Symbolic(expr),
+                                *dims,
+                                *colon_mask,
+                                *end_mask,
+                                &numeric,
+                            )
+                            .await?,
+                        );
+                    }
+                }
                 Value::Tensor(t) => {
                     if *dims == 1 {
                         stack.push(
@@ -1286,46 +1421,10 @@ pub async fn dispatch_indexing(
                     stack.push(gather_cell_with_plan(&ca, &plan)?);
                 }
                 other => {
-                    if *dims == 1 {
-                        if (*colon_mask & 1u32) != 0 {
-                            return Err(crate::interpreter::errors::mex(
-                                "SliceNonTensor",
-                                "Slicing only supported on tensors",
-                            ));
-                        }
-                        let selectors =
-                            build_slice_selectors(1, *colon_mask, *end_mask, &numeric, &[1usize])
-                                .await?;
-                        let linear_indices: Vec<f64> = match selectors.first() {
-                            Some(SliceSelector::Scalar(index)) => vec![*index as f64],
-                            Some(SliceSelector::Indices(indices)) => {
-                                indices.iter().map(|&index| index as f64).collect()
-                            }
-                            Some(SliceSelector::LinearIndices { values, .. }) => {
-                                values.iter().map(|&index| index as f64).collect()
-                            }
-                            Some(SliceSelector::Colon) | None => {
-                                return Err(crate::interpreter::errors::mex(
-                                    "SliceNonTensor",
-                                    "Slicing only supported on tensors",
-                                ));
-                            }
-                        };
-                        let v = runmat_runtime::perform_indexing(&other, &linear_indices)
-                            .await
-                            .map_err(|_| {
-                                crate::interpreter::errors::mex(
-                                    "SliceNonTensor",
-                                    "Slicing only supported on tensors",
-                                )
-                            })?;
-                        stack.push(v);
-                    } else {
-                        return Err(crate::interpreter::errors::mex(
-                            "SliceNonTensor",
-                            "Slicing only supported on tensors",
-                        ));
-                    }
+                    stack.push(
+                        read_scalar_like_slice(&other, *dims, *colon_mask, *end_mask, &numeric)
+                            .await?,
+                    );
                 }
             }
             if logical_base {
