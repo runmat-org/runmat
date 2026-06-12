@@ -288,6 +288,8 @@ mod tests {
             Value::Bool(true),
             Value::String("Colormap".into()),
             Value::String("hot".into()),
+            Value::String("FontSize".into()),
+            Value::Num(14.0),
         ])
         .unwrap();
 
@@ -296,6 +298,11 @@ mod tests {
         assert_eq!(meta.y_limits, Some((2.0, 8.0)));
         assert!(meta.colorbar_enabled);
         assert_eq!(format!("{:?}", meta.colormap), "Hot");
+        assert_eq!(meta.axes_style.font_size, Some(14.0));
+        assert_eq!(
+            get_builtin(vec![Value::Num(ax), Value::String("FontSize".into())]).unwrap(),
+            Value::Num(14.0)
+        );
     }
 
     #[test]
@@ -375,5 +382,18 @@ mod tests {
         ])
         .unwrap_err();
         assert!(err.message.contains("unsupported property"));
+
+        let ax = crate::builtins::plotting::gca::gca_builtin(Vec::new()).unwrap();
+        for invalid in [0.0, -1.0, f64::NAN, 1.0e6] {
+            let err = set_builtin(vec![
+                ax.clone(),
+                Value::String("FontSize".into()),
+                Value::Num(invalid),
+            ])
+            .unwrap_err();
+            assert!(err
+                .message
+                .contains("FontSize must be a positive finite value"));
+        }
     }
 }

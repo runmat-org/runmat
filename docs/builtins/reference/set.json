@@ -17,7 +17,7 @@
   "behaviors": [
     "`set` requires a plotting handle followed by one or more property/value pairs.",
     "Different handle families accept different properties, and unsupported properties raise plotting errors rather than silently succeeding.",
-    "Axes-local state such as limits, log modes, and legend visibility can be updated through axes handles.",
+    "Axes-local state such as limits, log modes, legend visibility, and axes font size can be updated through axes handles.",
     "Plot-child properties such as line width, display names, marker styling, and selected object semantics are updated in place through the returned plot handles.",
     "Legend and text objects participate in the same property path, so figure annotation workflows stay consistent with the rest of the handle model."
   ],
@@ -28,7 +28,7 @@
     },
     {
       "description": "Update axes-local state through an axes handle",
-      "input": "ax = subplot(1, 2, 2);\nplot(1:5, [2 3 5 4 1]);\nset(ax, 'XScale', 'log', 'Grid', false);"
+      "input": "ax = subplot(1, 2, 2);\nplot(1:5, [2 3 5 4 1]);\nset(ax, 'XScale', 'log', 'Grid', false, 'FontSize', 12);"
     },
     {
       "description": "Change a legend after it has been created",

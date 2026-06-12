@@ -28,8 +28,8 @@
     },
     {
       "description": "Read an axes-local property",
-      "input": "ax = subplot(1, 2, 2);\nsemilogx(logspace(0, 2, 50), logspace(0, 2, 50));\nget(ax, 'XScale')",
-      "output": "ans =\n    'log'"
+      "input": "ax = subplot(1, 2, 2);\nsemilogx(logspace(0, 2, 50), logspace(0, 2, 50));\nset(ax, 'FontSize', 12);\nget(ax, 'FontSize')",
+      "output": "ans =\n    12"
     },
     {
       "description": "Inspect a legend handle after creation",
@@ -43,7 +43,7 @@
     },
     {
       "question": "Can I query properties on axes handles, not just plot objects?",
-      "answer": "Yes. `get(gca, 'XScale')` reads the x-axis scale mode, `get(gca, 'View')` reads the camera angle, and so on. Axes handles, legend handles, text handles, and plot-child handles all go through the same `get` interface."
+      "answer": "Yes. `get(gca, 'XScale')` reads the x-axis scale mode, `get(gca, 'View')` reads the camera angle, `get(gca, 'FontSize')` reads the axes tick-label font size, and so on. Axes handles, legend handles, text handles, and plot-child handles all go through the same `get` interface."
     },
     {
       "question": "What happens if I query a property that doesn't exist?",

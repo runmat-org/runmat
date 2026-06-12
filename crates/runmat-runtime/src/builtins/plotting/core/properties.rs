@@ -6,7 +6,7 @@ use super::state::{
     axes_handle_exists, axes_handles_for_figure, axes_metadata_snapshot, axes_state_snapshot,
     current_axes_handle_for_figure, decode_axes_handle, decode_plot_object_handle,
     figure_handle_exists, figure_has_sg_title, legend_entries_snapshot, select_axes_for_figure,
-    set_legend_for_axes, set_sg_title_properties_for_figure,
+    set_axes_style_for_axes, set_legend_for_axes, set_sg_title_properties_for_figure,
     set_text_annotation_properties_for_axes, set_text_properties_for_axes, FigureHandle,
     PlotObjectKind,
 };
@@ -17,6 +17,8 @@ use super::{plotting_error, plotting_error_with_source};
 use crate::builtins::plotting::op_common::limits::limit_value;
 use crate::builtins::plotting::op_common::value_as_text_string;
 use crate::BuiltinResult;
+
+const MAX_AXES_FONT_SIZE_POINTS: f64 = 512.0;
 
 #[derive(Clone, Debug)]
 pub enum PlotHandle {
@@ -446,6 +448,10 @@ fn get_axes_property(
             st.insert("ZLim", limit_value(meta.z_limits));
             st.insert("CLim", limit_value(meta.color_limits));
             st.insert(
+                "FontSize",
+                Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64),
+            );
+            st.insert(
                 "XScale",
                 Value::String(if meta.x_log { "log" } else { "linear" }.into()),
             );
@@ -503,6 +509,7 @@ fn get_axes_property(
         Some("ylim") => Ok(limit_value(meta.y_limits)),
         Some("zlim") => Ok(limit_value(meta.z_limits)),
         Some("clim") => Ok(limit_value(meta.color_limits)),
+        Some("fontsize") => Ok(Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64)),
         Some("xscale") => Ok(Value::String(
             if meta.x_log { "log" } else { "linear" }.into(),
         )),
@@ -1004,6 +1011,26 @@ fn apply_axes_property(
             })?;
             let cmap = parse_colormap_name(&name, builtin)?;
             crate::builtins::plotting::state::set_colormap_for_axes(handle, axes_index, cmap)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "fontsize" => {
+            let font_size = value_as_f64(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: FontSize must be numeric"))
+            })?;
+            if !font_size.is_finite() || font_size <= 0.0 || font_size > MAX_AXES_FONT_SIZE_POINTS {
+                return Err(plotting_error(
+                    builtin,
+                    format!(
+                        "{builtin}: FontSize must be a positive finite value no larger than {MAX_AXES_FONT_SIZE_POINTS}"
+                    ),
+                ));
+            }
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let mut style = meta.axes_style;
+            style.font_size = Some(font_size as f32);
+            set_axes_style_for_axes(handle, axes_index, style)
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }

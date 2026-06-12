@@ -3032,6 +3032,12 @@ impl PlotRenderer {
             .and_then(|f| f.axes_metadata(axes_index))
             .map(|m| &m.x_label_style)
     }
+    pub fn overlay_axes_style_for_axes(&self, axes_index: usize) -> Option<&TextStyle> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| &m.axes_style)
+    }
     pub fn overlay_y_label(&self) -> Option<&String> {
         self.figure_y_label.as_ref()
     }

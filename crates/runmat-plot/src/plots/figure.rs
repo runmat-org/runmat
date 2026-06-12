@@ -148,6 +148,7 @@ pub struct AxesMetadata {
     pub colorbar_enabled: bool,
     pub colormap: ColorMap,
     pub color_limits: Option<(f64, f64)>,
+    pub axes_style: TextStyle,
     pub title_style: TextStyle,
     pub x_label_style: TextStyle,
     pub y_label_style: TextStyle,
@@ -528,6 +529,14 @@ impl Figure {
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
             meta.x_tick_labels = x_labels;
             meta.y_tick_labels = y_labels;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_style(&mut self, axes_index: usize, style: TextStyle) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.axes_style = style;
         }
         self.dirty = true;
     }
@@ -2103,6 +2112,13 @@ mod tests {
         figure.set_axes_xlabel(0, "Left X");
         figure.set_axes_ylabel(0, "Left Y");
         figure.set_axes_title(1, "Right Title");
+        figure.set_axes_style(
+            1,
+            TextStyle {
+                font_size: Some(14.0),
+                ..Default::default()
+            },
+        );
         figure.set_axes_legend_enabled(0, false);
         figure.set_axes_legend_style(
             1,
@@ -2137,6 +2153,11 @@ mod tests {
                 .location
                 .as_deref(),
             Some("southwest")
+        );
+        assert_eq!(figure.axes_metadata(0).unwrap().axes_style.font_size, None);
+        assert_eq!(
+            figure.axes_metadata(1).unwrap().axes_style.font_size,
+            Some(14.0)
         );
     }
 

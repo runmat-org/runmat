@@ -704,7 +704,7 @@ fn get_axes_style_and_display_prefs(
         .or(meta.y_label_style.font_size)
         .or(meta.z_label_style.font_size);
     let label_scale = text_scale_from_font_size(label_font, 2);
-    let tick_scale = text_scale_from_font_size(label_font.map(|s| (s - 2.0).max(8.0)), 1);
+    let tick_scale = text_scale_from_font_size(meta.axes_style.font_size, 1);
 
     (
         title_scale,

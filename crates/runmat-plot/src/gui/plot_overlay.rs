@@ -169,6 +169,18 @@ impl PlotOverlay {
         style.font_size.unwrap_or(default_size) * scale.max(0.75)
     }
 
+    fn axes_tick_font_size(
+        plot_renderer: &PlotRenderer,
+        axes_index: Option<usize>,
+        scale: f32,
+    ) -> f32 {
+        let font_size = axes_index
+            .and_then(|idx| plot_renderer.overlay_axes_style_for_axes(idx))
+            .and_then(|style| style.font_size)
+            .unwrap_or(10.0);
+        font_size * scale.max(0.75)
+    }
+
     fn style_is_bold(style: &TextStyle) -> bool {
         style
             .font_weight
@@ -306,7 +318,7 @@ impl PlotOverlay {
         has_y_label: bool,
         scale: f32,
     ) -> f32 {
-        let tick_font_size = 10.0 * scale;
+        let tick_font_size = Self::axes_tick_font_size(plot_renderer, Some(axes_index), scale);
         let label_offset = 15.0 * scale;
 
         let y_log = plot_renderer.overlay_y_log_for_axes(axes_index);
@@ -362,7 +374,7 @@ impl PlotOverlay {
         axes_index: usize,
         scale: f32,
     ) -> f32 {
-        let tick_font_size = 10.0 * scale;
+        let tick_font_size = Self::axes_tick_font_size(plot_renderer, Some(axes_index), scale);
         let x_log = plot_renderer.overlay_x_log_for_axes(axes_index);
 
         let explicit_tick_labels = plot_renderer
@@ -1733,7 +1745,8 @@ impl PlotOverlay {
             let scale = config.font_scale.max(0.75);
             let tick_length = 6.0 * scale;
             let label_offset = 15.0 * scale;
-            let tick_font = FontId::proportional(10.0 * scale);
+            let tick_font_size = Self::axes_tick_font_size(plot_renderer, axes_index, scale);
+            let tick_font = FontId::proportional(tick_font_size);
             let axis_color = self.theme_axis_color();
             let label_color = self.theme_text_color();
             let border_left = plot_rect.min.x;
@@ -2206,7 +2219,11 @@ impl PlotOverlay {
         let axis_len = (major_step as f32 * 5.0).max(0.5);
 
         let scale = font_scale.max(0.75);
-        let font = FontId::proportional(10.0 * scale);
+        let font = FontId::proportional(Self::axes_tick_font_size(
+            plot_renderer,
+            Some(axes_index),
+            scale,
+        ));
         let painter = ui.painter();
         let col_x = Color32::from_rgb(235, 80, 80);
         let col_y = Color32::from_rgb(90, 220, 120);

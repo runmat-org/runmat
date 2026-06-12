@@ -50,6 +50,21 @@ fn grid_minor_command_form_sets_minor_grid_property() {
 }
 
 #[test]
+fn bare_gca_can_set_axes_font_size() {
+    unsafe {
+        std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
+    }
+    let input = "\
+        figure; \
+        plot(1:3, [1 2 3]); \
+        set(gca, 'FontSize', 10); \
+        if get(gca, 'FontSize') ~= 10; \
+            error('axes font size did not update'); \
+        end;";
+    execute_source(input).expect("execute bare gca axes font-size script");
+}
+
+#[test]
 fn invalid_axes_shaped_handle_member_access_reports_non_object() {
     unsafe {
         std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");

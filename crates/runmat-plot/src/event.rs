@@ -532,6 +532,12 @@ pub struct SerializedTextStyle {
     pub visible: bool,
 }
 
+impl Default for SerializedTextStyle {
+    fn default() -> Self {
+        TextStyle::default().into()
+    }
+}
+
 impl From<TextStyle> for SerializedTextStyle {
     fn from(value: TextStyle) -> Self {
         Self {
@@ -655,6 +661,8 @@ pub struct SerializedAxesMetadata {
     pub colormap: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_limits: Option<[f64; 2]>,
+    #[serde(default)]
+    pub axes_style: SerializedTextStyle,
     pub title_style: SerializedTextStyle,
     pub x_label_style: SerializedTextStyle,
     pub y_label_style: SerializedTextStyle,
@@ -696,6 +704,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             colorbar_enabled: value.colorbar_enabled,
             colormap: format!("{:?}", value.colormap),
             color_limits: value.color_limits.map(|(a, b)| [a, b]),
+            axes_style: value.axes_style.into(),
             title_style: value.title_style.into(),
             x_label_style: value.x_label_style.into(),
             y_label_style: value.y_label_style.into(),
@@ -735,6 +744,7 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             colorbar_enabled: value.colorbar_enabled,
             colormap: parse_colormap_name(&value.colormap),
             color_limits: value.color_limits.map(|[a, b]| (a, b)),
+            axes_style: value.axes_style.into(),
             title_style: value.title_style.into(),
             x_label_style: value.x_label_style.into(),
             y_label_style: value.y_label_style.into(),
@@ -2279,6 +2289,13 @@ mod tests {
         figure.set_axes_colorbar_enabled(1, true);
         figure.set_axes_colormap(1, ColorMap::Hot);
         figure.set_axes_color_limits(1, Some((0.0, 10.0)));
+        figure.set_axes_style(
+            1,
+            TextStyle {
+                font_size: Some(14.0),
+                ..Default::default()
+            },
+        );
         figure.set_active_axes_index(1);
 
         let rebuilt = FigureScene::capture(&figure)
@@ -2295,6 +2312,28 @@ mod tests {
         assert!(meta.colorbar_enabled);
         assert_eq!(format!("{:?}", meta.colormap), "Hot");
         assert_eq!(meta.color_limits, Some((0.0, 10.0)));
+        assert_eq!(meta.axes_style.font_size, Some(14.0));
+    }
+
+    #[test]
+    fn axes_metadata_deserializes_without_axes_style() {
+        let json = r#"{
+            "legendEnabled": true,
+            "colormap": "Parula",
+            "titleStyle": {"visible": true},
+            "xLabelStyle": {"visible": true},
+            "yLabelStyle": {"visible": true},
+            "zLabelStyle": {"visible": true},
+            "legendStyle": {"visible": true}
+        }"#;
+        let serialized: SerializedAxesMetadata = serde_json::from_str(json).unwrap();
+        let metadata = AxesMetadata::from(serialized);
+        assert!(metadata.axes_style.color.is_none());
+        assert!(metadata.axes_style.font_size.is_none());
+        assert!(metadata.axes_style.font_weight.is_none());
+        assert!(metadata.axes_style.font_angle.is_none());
+        assert!(metadata.axes_style.interpreter.is_none());
+        assert!(metadata.axes_style.visible);
     }
 
     #[test]

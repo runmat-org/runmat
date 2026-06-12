@@ -603,6 +603,18 @@ pub fn set_box_enabled_for_axes(
     Ok(())
 }
 
+pub fn set_axes_style_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    style: TextStyle,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_style(axes_index, style);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
 pub fn set_figure_title_for_axes(
     handle: FigureHandle,
     axes_index: usize,
