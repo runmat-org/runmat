@@ -537,7 +537,6 @@ async fn eval_workspace_source(
         source_label,
     )
     .await?;
-    effects.replay();
     let vars = match outcome {
         Ok(crate::interpreter::api::InterpreterOutcome::Completed(vars)) => {
             if let Some(snapshot) = updated_workspace {
@@ -571,9 +570,11 @@ async fn eval_workspace_source(
                     })?;
                 }
             }
+            effects.replay();
             return Err(err);
         }
     };
+    effects.replay();
     let result = if requested_outputs == 0 {
         Value::OutputList(Vec::new())
     } else if let Some(slot) = result_slot {

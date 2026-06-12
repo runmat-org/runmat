@@ -5,8 +5,8 @@ use crate::instr::{ArgSpec, EndExpr, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
 use runmat_hir::{
-    BindingId, CallSyntax, CallableIdentity, EntrypointId, FunctionId, HirAssembly, IndexKind,
-    IndexResultContext, OperatorKind, RequestedOutputCount,
+    BindingId, CallSyntax, CallableFallbackPolicy, CallableIdentity, EntrypointId, FunctionId,
+    HirAssembly, IndexKind, IndexResultContext, OperatorKind, RequestedOutputCount,
 };
 use runmat_mir::{
     BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirCallee,
@@ -1383,6 +1383,7 @@ impl Compiler {
                     .compile_error("workspace-first call lowering expected a static callee")
                     .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
             };
+            self.validate_workspace_first_static_call_callee(identity, call.fallback_policy)?;
             for arg in &call.args {
                 self.compile_mir_call_arg(arg)?;
             }
@@ -1566,22 +1567,7 @@ impl Compiler {
             }
             MirCallee::Static(identity) => {
                 let fallback_policy = call.fallback_policy;
-                if !fallback_policy.supports_vm_static_call() {
-                    return Err(self
-                        .compile_error(format!(
-                            "MIR call fallback policy {:?} is not supported for static callee {:?}",
-                            fallback_policy, identity
-                        ))
-                        .with_identifier(IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED));
-                }
-                if self.mir_runtime_name_callee(identity).is_none() {
-                    return Err(self
-                        .compile_error(format!(
-                            "MIR static call callee identity {:?} is missing a valid runtime name shape",
-                            identity
-                        ))
-                        .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
-                }
+                self.validate_static_call_callee(identity, fallback_policy)?;
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -2364,6 +2350,7 @@ impl Compiler {
                     .compile_error("workspace-first call lowering expected a static callee")
                     .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
             };
+            self.validate_workspace_first_static_call_callee(identity, call.fallback_policy)?;
             for arg in &call.args {
                 self.compile_mir_call_arg(arg)?;
             }
@@ -2670,22 +2657,7 @@ impl Compiler {
             }
             MirCallee::Static(identity) => {
                 let fallback_policy = call.fallback_policy;
-                if !fallback_policy.supports_vm_static_call() {
-                    return Err(self
-                        .compile_error(format!(
-                            "MIR call fallback policy {:?} is not supported for static callee {:?}",
-                            fallback_policy, identity
-                        ))
-                        .with_identifier(IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED));
-                }
-                if self.mir_runtime_name_callee(identity).is_none() {
-                    return Err(self
-                        .compile_error(format!(
-                            "MIR static call callee identity {:?} is missing a valid runtime name shape",
-                            identity
-                        ))
-                        .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
-                }
+                self.validate_static_call_callee(identity, fallback_policy)?;
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -2782,6 +2754,52 @@ impl Compiler {
         targets
             .validate_fixed_arity("MIR multi-assign")
             .map_err(|message| self.compile_error(message))
+    }
+
+    fn validate_static_call_callee(
+        &self,
+        identity: &CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+    ) -> Result<(), CompileError> {
+        if !fallback_policy.supports_vm_static_call() {
+            return Err(self
+                .compile_error(format!(
+                    "MIR call fallback policy {:?} is not supported for static callee {:?}",
+                    fallback_policy, identity
+                ))
+                .with_identifier(IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED));
+        }
+        if self.mir_runtime_name_callee(identity).is_none() {
+            return Err(self
+                .compile_error(format!(
+                    "MIR static call callee identity {:?} is missing a valid runtime name shape",
+                    identity
+                ))
+                .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
+        }
+        Ok(())
+    }
+
+    fn validate_workspace_first_static_call_callee(
+        &self,
+        identity: &CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+    ) -> Result<(), CompileError> {
+        if matches!(fallback_policy, CallableFallbackPolicy::None) {
+            return match identity {
+                CallableIdentity::Builtin(runmat_hir::BuiltinId(name)) if !name.trim().is_empty() => {
+                    Ok(())
+                }
+                CallableIdentity::BoundFunction(_) => Ok(()),
+                _ => Err(self
+                    .compile_error(format!(
+                        "MIR workspace-first call fallback policy {:?} is not supported for static callee {:?}",
+                        fallback_policy, identity
+                    ))
+                    .with_identifier(IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED)),
+            };
+        }
+        self.validate_static_call_callee(identity, fallback_policy)
     }
 
     fn mir_runtime_name_callee(&self, callee: &CallableIdentity) -> Option<String> {

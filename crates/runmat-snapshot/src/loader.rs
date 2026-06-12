@@ -278,7 +278,11 @@ impl SnapshotLoader {
         let data_start = u64_to_usize(header.data_info.data_offset, "snapshot data offset")?;
         let compressed_size =
             u64_to_usize(header.data_info.compressed_size, "snapshot compressed size")?;
-        let data_end = data_start + compressed_size;
+        let data_end = data_start.checked_add(compressed_size).ok_or_else(|| {
+            SnapshotError::Configuration {
+                message: "Snapshot data section overflowed file bounds".to_string(),
+            }
+        })?;
 
         if data_end > file_contents.len() {
             return Err(SnapshotError::Io(std::io::Error::new(

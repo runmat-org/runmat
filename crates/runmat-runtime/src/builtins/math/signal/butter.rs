@@ -382,10 +382,11 @@ fn butter_error_with_message(
     builtin_path = "crate::builtins::math::signal::butter"
 )]
 async fn butter_builtin(n: Value, wn: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let out_count = crate::output_count::current_output_count();
     let args = ButterArgs::parse(n, wn, &rest).await?;
     let design = design_butterworth(&args)?;
 
-    if let Some(out_count) = crate::output_count::current_output_count() {
+    if let Some(out_count) = out_count {
         return match out_count {
             0 => Ok(Value::OutputList(Vec::new())),
             1 => Ok(Value::OutputList(vec![design.numerator_value()?])),
