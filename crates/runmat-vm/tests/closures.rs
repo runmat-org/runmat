@@ -392,6 +392,18 @@ fn fzero_accepts_optimset_options() {
 }
 
 #[test]
+fn fzero_returns_optional_function_value() {
+    let vars = execute_source(
+        "f = @(x) x.^2 - 4; [x, fval] = fzero(f, [0 3]); ok = abs(x - 2) < 1e-6 && abs(fval) < 1e-6; swapped = abs(x) < 1e-6 && abs(fval - 2) < 1e-6; score = 0; if ok; score = score + 1; end; if swapped; score = score + 10; end;",
+    )
+    .unwrap();
+    let ordered_ok = vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-12));
+    assert!(ordered_ok, "expected ordered x/fval score of 1 in {vars:?}");
+}
+
+#[test]
 fn integral_accepts_anonymous_function() {
     let vars = execute_source("q = integral(@(x) x.^2, 0, 1);").unwrap();
     assert!(vars
