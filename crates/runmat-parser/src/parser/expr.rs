@@ -5,6 +5,38 @@ use crate::{BinOp, Expr, Span, SyntaxError, UnOp};
 use super::{Parser, TokenInfo};
 
 impl Parser {
+    pub(super) fn parse_call_argument(&mut self) -> Result<Expr, SyntaxError> {
+        if self.peek_token() == Some(&Token::Ident) && self.peek_token_at(1) == Some(&Token::Assign)
+        {
+            let name = self.next().expect("peeked identifier");
+            self.pos += 1; // consume '='
+            let value = self.parse_expr()?;
+            let span = self.span_from(name.position, value.span().end);
+            return Ok(Expr::NameValueArg(name.lexeme, Box::new(value), span));
+        }
+        self.parse_expr()
+    }
+
+    pub(super) fn parse_call_arguments_until(
+        &mut self,
+        end_token: Token,
+        expected_message: &str,
+        expected: &str,
+    ) -> Result<Vec<Expr>, SyntaxError> {
+        let mut args = Vec::new();
+        if self.consume(&end_token) {
+            return Ok(args);
+        }
+        args.push(self.parse_call_argument()?);
+        while self.consume(&Token::Comma) {
+            args.push(self.parse_call_argument()?);
+        }
+        if !self.consume(&end_token) {
+            return Err(self.error_with_expected(expected_message, expected));
+        }
+        Ok(args)
+    }
+
     pub(super) fn parse_expr(&mut self) -> Result<Expr, SyntaxError> {
         self.parse_logical_or()
     }
@@ -185,16 +217,11 @@ impl Parser {
         loop {
             if self.consume(&Token::LParen) {
                 let start = expr.span().start;
-                let mut args = Vec::new();
-                if !self.consume(&Token::RParen) {
-                    args.push(self.parse_expr()?);
-                    while self.consume(&Token::Comma) {
-                        args.push(self.parse_expr()?);
-                    }
-                    if !self.consume(&Token::RParen) {
-                        return Err(self.error_with_expected("expected ')' after arguments", "')'"));
-                    }
-                }
+                let args = self.parse_call_arguments_until(
+                    Token::RParen,
+                    "expected ')' after arguments",
+                    "')'",
+                )?;
                 let end = self.last_token_end();
                 let span = self.span_from(start, end);
                 // Binder-based disambiguation:
@@ -286,19 +313,11 @@ impl Parser {
                     }
                 };
                 if self.consume(&Token::LParen) {
-                    let mut args = Vec::new();
-                    if !self.consume(&Token::RParen) {
-                        args.push(self.parse_expr()?);
-                        while self.consume(&Token::Comma) {
-                            args.push(self.parse_expr()?);
-                        }
-                        if !self.consume(&Token::RParen) {
-                            return Err(self.error_with_expected(
-                                "expected ')' after method arguments",
-                                "')'",
-                            ));
-                        }
-                    }
+                    let args = self.parse_call_arguments_until(
+                        Token::RParen,
+                        "expected ')' after method arguments",
+                        "')'",
+                    )?;
                     let end = self.last_token_end();
                     let span = self.span_from(expr.span().start, end);
                     if matches!(expr, Expr::MetaClass(_, _)) {
@@ -423,22 +442,11 @@ impl Parser {
                                 "'('",
                             ));
                         }
-                        let mut args = Vec::new();
-                        if !self.consume(&Token::RParen) {
-                            loop {
-                                args.push(self.parse_expr()?);
-                                if self.consume(&Token::Comma) {
-                                    continue;
-                                }
-                                if self.consume(&Token::RParen) {
-                                    break;
-                                }
-                                return Err(self.error_with_expected(
-                                    "expected ',' or ')' in argument list",
-                                    "',' or ')'",
-                                ));
-                            }
-                        }
+                        let args = self.parse_call_arguments_until(
+                            Token::RParen,
+                            "expected ',' or ')' in argument list",
+                            "',' or ')'",
+                        )?;
                         let end = self.last_token_end();
                         let span = self.span_from(info.position, end);
                         let class_name = self.current_classdef_name.clone().ok_or_else(|| {

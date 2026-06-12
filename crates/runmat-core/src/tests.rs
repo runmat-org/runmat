@@ -12081,6 +12081,131 @@ fn session_function_handle_uses_semantic_registry() {
 }
 
 #[test]
+fn function_handle_name_value_arguments_execute_as_name_value_pairs() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function [n, first_name, first_value, second_name, second_value] = collect(varargin)
+            n = nargin;
+            first_name = varargin{1};
+            first_value = varargin{2};
+            second_name = varargin{3};
+            second_value = varargin{4};
+        end
+
+        f = @collect;
+        [n, first_name, first_value, second_name, second_value] = f(Name=7, Mode="fast");
+    "#;
+    let prepared = session
+        .compile_input(source)
+        .expect("compile function handle name-value call");
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| {
+            matches!(
+                instr,
+                runmat_vm::Instr::CallFevalMulti(4, 5)
+                    | runmat_vm::Instr::CallFevalMultiUsingOutputSlot(4, _)
+            )
+        }),
+        "name-value function handle call should lower to four runtime arguments"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "n",
+        &runmat_builtins::Value::Num(4.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "first_name",
+        &runmat_builtins::Value::String("Name".to_string())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "first_value",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "second_name",
+        &runmat_builtins::Value::String("Mode".to_string())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "second_value",
+        &runmat_builtins::Value::String("fast".to_string())
+    ));
+}
+
+#[test]
+fn one_output_function_handle_name_value_call_uses_dynamic_dispatch() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function n = count_inputs(varargin)
+            n = nargin;
+        end
+
+        f = @count_inputs;
+        n = f(Name=7);
+    "#;
+    let prepared = session
+        .compile_input(source)
+        .expect("compile one-output function handle name-value call");
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CallFevalMulti(2, 1)
+                | runmat_vm::Instr::CallFevalMultiUsingOutputSlot(2, _)
+        )),
+        "one-output name-value function handle call should use dynamic call dispatch"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "n",
+        &runmat_builtins::Value::Num(2.0)
+    ));
+}
+
+#[test]
+fn name_value_brace_value_executes_as_single_value_argument() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function [n, value] = collect(varargin)
+            n = nargin;
+            value = varargin{2};
+        end
+
+        C = {7};
+        [n, value] = collect(Name=C{:});
+    "#;
+    let prepared = session
+        .compile_input(source)
+        .expect("compile name-value brace value call");
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 2, 2))),
+        "brace value inside name-value syntax should remain one runtime argument"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "n",
+        &runmat_builtins::Value::Num(2.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "value",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+}
+
+#[test]
 fn session_function_handle_feval_multi_output_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     execute_text_request(

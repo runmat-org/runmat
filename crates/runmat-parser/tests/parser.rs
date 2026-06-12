@@ -193,6 +193,9 @@ fn strip_expr(expr: &Expr) -> Expr {
             Span::default(),
         ),
         Expr::Colon(_) => Expr::Colon(Span::default()),
+        Expr::NameValueArg(name, value, _) => {
+            Expr::NameValueArg(name.clone(), Box::new(strip_expr(value)), Span::default())
+        }
         Expr::FuncCall(name, args, _) => Expr::FuncCall(
             name.clone(),
             args.iter().map(strip_expr).collect(),

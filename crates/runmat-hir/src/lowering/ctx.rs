@@ -717,13 +717,15 @@ impl LoweringCtx {
         args: Vec<HirExpr>,
         requested_outputs: RequestedOutputCount,
         span: Span,
+        force_dynamic_call_dispatch: bool,
     ) -> HirExprKind {
         let base = HirExpr {
             id: self.alloc_expr_id(),
             kind: HirExprKind::Binding(binding),
             span,
         };
-        let needs_dynamic_call_dispatch = requested_outputs.fixed_count() != 1
+        let needs_dynamic_call_dispatch = force_dynamic_call_dispatch
+            || requested_outputs.fixed_count() != 1
             || args.iter().any(|arg| {
                 matches!(
                     &arg.kind,
@@ -1929,6 +1931,13 @@ impl LoweringCtx {
         let kind = match expr {
             AstExpr::Number(value, _) => HirExprKind::Number(value.clone()),
             AstExpr::String(value, _) => HirExprKind::String(StringLiteral(value.clone())),
+            AstExpr::NameValueArg(_, _, _) => {
+                return Err(HirError::new(
+                    "name-value arguments are only valid inside function calls",
+                )
+                .with_span(span)
+                .with_identifier("RunMat:NameValueArgumentContext"));
+            }
             AstExpr::Ident(name, _) => {
                 if let Some(binding) = self.binding_for_read(name, span) {
                     HirExprKind::Binding(binding)
@@ -1981,6 +1990,9 @@ impl LoweringCtx {
                 }
             }
             AstExpr::FuncCall(name, args, _) => {
+                let has_name_value_args = args
+                    .iter()
+                    .any(|arg| matches!(arg, AstExpr::NameValueArg(_, _, _)));
                 let args: Vec<HirExpr> = self.lower_call_arguments_for_name(name, args)?;
                 if name == AWAIT_EXTENSION_NAME && args.len() == 1 {
                     if !self.runmat_extensions_enabled {
@@ -2024,7 +2036,13 @@ impl LoweringCtx {
                         span,
                     )?)
                 } else if let Some(binding) = self.binding_for_read(name, span) {
-                    self.binding_call_expr_kind(binding, args, requested_outputs, span)
+                    self.binding_call_expr_kind(
+                        binding,
+                        args,
+                        requested_outputs,
+                        span,
+                        has_name_value_args,
+                    )
                 } else {
                     let mut call =
                         self.call_for_name(name, args, CallSyntax::Plain, requested_outputs, span)?;
@@ -2040,10 +2058,7 @@ impl LoweringCtx {
                 args,
                 ..
             } => {
-                let lowered_args = args
-                    .iter()
-                    .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let lowered_args = self.lower_call_arguments(args)?;
                 HirExprKind::Call(HirCall {
                     callee: HirCallableRef::SuperConstructor {
                         current_class: SymbolName(current_class.clone()),
@@ -2068,10 +2083,7 @@ impl LoweringCtx {
                 args,
                 ..
             } => {
-                let lowered_args = args
-                    .iter()
-                    .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let lowered_args = self.lower_call_arguments(args)?;
                 HirExprKind::Call(HirCall {
                     callee: HirCallableRef::SuperMethod {
                         current_class: SymbolName(current_class.clone()),
@@ -2289,11 +2301,7 @@ impl LoweringCtx {
             | AstExpr::MethodCall(base, name, args, _) => {
                 if let AstExpr::MetaClass(class_name, _) = &**base {
                     let mut call_args = vec![self.classref_expr(class_name, base.span())?];
-                    call_args.extend(
-                        args.iter()
-                            .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
-                            .collect::<Result<Vec<_>, _>>()?,
-                    );
+                    call_args.extend(self.lower_call_arguments(args)?);
                     return Ok(HirExpr {
                         id: self.alloc_expr_id(),
                         kind: HirExprKind::Call(self.call_for_name(
@@ -2314,10 +2322,7 @@ impl LoweringCtx {
                             ))
                             .with_span(span));
                         }
-                        let mut call_args: Vec<HirExpr> = args
-                            .iter()
-                            .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
-                            .collect::<Result<_, _>>()?;
+                        let mut call_args = self.lower_call_arguments(args)?;
                         if let Some(class_argument) = method.implicit_class_argument {
                             call_args.push(HirExpr {
                                 id: self.alloc_expr_id(),
@@ -2352,11 +2357,7 @@ impl LoweringCtx {
                             self.classref_expr(class_name, base.span())?
                         };
                         let mut call_args = vec![classref];
-                        call_args.extend(
-                            args.iter()
-                                .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
-                                .collect::<Result<Vec<_>, _>>()?,
-                        );
+                        call_args.extend(self.lower_call_arguments(args)?);
                         return Ok(HirExpr {
                             id: self.alloc_expr_id(),
                             kind: HirExprKind::Call(self.call_for_name(
@@ -2417,11 +2418,7 @@ impl LoweringCtx {
                     });
                 }
                 let mut call_args = vec![self.lower_expr_semantic(base)?];
-                call_args.extend(
-                    args.iter()
-                        .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
-                        .collect::<Result<Vec<_>, _>>()?,
-                );
+                call_args.extend(self.lower_call_arguments(args)?);
                 HirExprKind::Call(self.call_for_name(
                     name,
                     call_args,
@@ -2454,9 +2451,46 @@ impl LoweringCtx {
         _name: &str,
         args: &[AstExpr],
     ) -> Result<Vec<HirExpr>, HirError> {
-        args.iter()
-            .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
-            .collect()
+        self.lower_call_arguments(args)
+    }
+
+    fn lower_call_arguments(&mut self, args: &[AstExpr]) -> Result<Vec<HirExpr>, HirError> {
+        let mut lowered = Vec::new();
+        for arg in args {
+            if let AstExpr::NameValueArg(name, value, span) = arg {
+                let name_span = Span {
+                    start: span.start,
+                    end: span.start.saturating_add(name.len()).min(span.end),
+                };
+                lowered.push(HirExpr {
+                    id: self.alloc_expr_id(),
+                    kind: HirExprKind::String(StringLiteral(name.clone())),
+                    span: name_span,
+                });
+                lowered.push(self.lower_name_value_argument_value(value)?);
+            } else {
+                lowered.push(self.lower_call_argument(arg, RequestedOutputCount::One)?);
+            }
+        }
+        Ok(lowered)
+    }
+
+    fn lower_name_value_argument_value(&mut self, value: &AstExpr) -> Result<HirExpr, HirError> {
+        if let AstExpr::IndexCell(base, indices, _) = value {
+            return Ok(HirExpr {
+                id: self.alloc_expr_id(),
+                kind: HirExprKind::Index(
+                    Box::new(self.lower_expr_semantic(base)?),
+                    self.lower_indexing_with_context(
+                        indices,
+                        IndexKind::Brace,
+                        IndexResultContext::ReadCommaList,
+                    )?,
+                ),
+                span: value.span(),
+            });
+        }
+        self.lower_expr_semantic_requested(value, RequestedOutputCount::One)
     }
 
     fn lower_call_argument(
