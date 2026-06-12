@@ -266,6 +266,7 @@ fn is_statement_form_call() -> bool {
 }
 
 async fn plot_multiple_step_responses(first_sys: Value, rest: Vec<Value>) -> BuiltinResult<()> {
+    let first_sys = crate::gather_if_needed_async(&first_sys).await?;
     let mut systems = vec![(first_sys, None)];
     let mut time_arg = None;
     for arg in rest {
