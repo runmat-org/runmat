@@ -8,7 +8,6 @@ CHROMEDRIVER_RESOLVER="${REPO_ROOT}/scripts/resolve-chromedriver.sh"
 export CHROME_BIN="${CHROME_BIN:-${CHROME_WRAPPER}}"
 export CHROMEDRIVER_ARGS="${CHROMEDRIVER_ARGS:---log-level=SEVERE}"
 export WASM_BINDGEN_TEST_TIMEOUT="${WASM_BINDGEN_TEST_TIMEOUT:-300}"
-export RUNMAT_GENERATE_WASM_REGISTRY=1
 # Ensure at least opt-level=1 so the test binary stays within the wasm
 # spec limit on locals per function (opt-level=0 exceeds it).
 # In CI this is already set at the job level; this is a local-run fallback.
@@ -26,10 +25,7 @@ else
 fi
 
 echo "==> regenerating wasm registry"
-cargo check -p runmat-runtime --target wasm32-unknown-unknown >/dev/null
-# Unset so wasm-pack test does not re-trigger proc-macro writes to the registry
-# file (which would cause an infinite rebuild loop via cargo's include! tracking).
-unset RUNMAT_GENERATE_WASM_REGISTRY
+"${REPO_ROOT}/scripts/regenerate-wasm-registry.sh"
 echo "==> wasm-bindgen timeout: ${WASM_BINDGEN_TEST_TIMEOUT}s"
 
 run_crate_tests () {

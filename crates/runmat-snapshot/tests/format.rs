@@ -71,6 +71,10 @@ fn test_invalid_header_validation() {
     header.magic = *SNAPSHOT_MAGIC;
     header.version = SNAPSHOT_VERSION + 1;
     assert!(header.validate().is_err());
+
+    // Older serialized layouts are not compatible after format evolution.
+    header.version = MIN_SUPPORTED_SNAPSHOT_VERSION - 1;
+    assert!(header.validate().is_err());
 }
 
 #[test]

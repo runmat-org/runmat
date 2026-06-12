@@ -52,6 +52,7 @@ struct ScopeFrame {
     owner: FunctionId,
     bindings: HashMap<String, BindingId>,
     workspace_visibility: WorkspaceVisibility,
+    external_bindings_visible: bool,
 }
 
 struct LoweringCtx {
@@ -494,6 +495,7 @@ impl LoweringCtx {
             owner,
             bindings: HashMap::new(),
             workspace_visibility,
+            external_bindings_visible: false,
         });
         self.function_modifiers.push(modifiers);
         self.top_level_await.push(top_level_await);
@@ -576,6 +578,145 @@ impl LoweringCtx {
             span,
         });
         Some(binding)
+    }
+
+    fn binding_or_external_for_read(&mut self, name: &str, span: Span) -> Option<BindingId> {
+        if let Some(binding) = self.binding_for_read(name, span) {
+            return Some(binding);
+        }
+        if !self.current_scope().external_bindings_visible {
+            return None;
+        }
+        Some(self.define_external_binding_for_read(name, span))
+    }
+
+    fn define_external_binding_for_read(&mut self, name: &str, span: Span) -> BindingId {
+        let binding = self.define_binding(
+            name,
+            BindingRole::ExternalWorkspace,
+            BindingStorage::Lexical,
+            span,
+        );
+        self.hir_index.references.push(ReferenceResolution {
+            name: SymbolName(name.to_string()),
+            kind: ReferenceKind::Binding(binding),
+            span,
+        });
+        binding
+    }
+
+    fn mark_external_bindings_visible(&mut self) {
+        self.current_scope_mut().external_bindings_visible = true;
+    }
+
+    fn stmt_expr_call_loads_external_bindings(&self, expr: &AstExpr) -> Result<bool, HirError> {
+        if self.current_scope().external_bindings_visible {
+            return Ok(false);
+        }
+        let (call_name, lexical_bindings_apply, span) = match expr {
+            AstExpr::Ident(name, span) | AstExpr::FuncCall(name, _, span) => {
+                (name.as_str(), true, *span)
+            }
+            AstExpr::CommandCall(name, _, span) => (name.as_str(), false, *span),
+            _ => return Ok(false),
+        };
+
+        let Some(semantics) = runmat_builtins::builtin_function_by_name(call_name)
+            .map(|builtin| builtin.semantics())
+            .or_else(|| runmat_builtins::builtin_semantics_for_name(call_name))
+        else {
+            return Ok(false);
+        };
+        if !matches!(
+            semantics.workspace_effect,
+            Some(runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings)
+        ) {
+            return Ok(false);
+        }
+
+        Ok(self
+            .plain_call_builtin_workspace_effect(call_name, span, lexical_bindings_apply)?
+            .is_some_and(|effect| {
+                matches!(
+                    effect,
+                    runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings
+                )
+            }))
+    }
+
+    fn plain_call_builtin_workspace_effect(
+        &self,
+        name: &str,
+        span: Span,
+        lexical_bindings_apply: bool,
+    ) -> Result<Option<runmat_builtins::BuiltinWorkspaceEffect>, HirError> {
+        if lexical_bindings_apply && self.lookup_binding(name).is_some() {
+            return Ok(None);
+        }
+        if self
+            .resolve_imported_constructor_target(name, span)?
+            .is_some()
+            || self.class_id_for_name(name).is_some()
+            || self.resolve_scoped_function_name(name).is_some()
+            || self.external_function_names.contains_key(name)
+        {
+            return Ok(None);
+        }
+        if let Some(semantics) = runmat_builtins::builtin_function_by_name(name)
+            .map(|builtin| builtin.semantics())
+            .or_else(|| runmat_builtins::builtin_semantics_for_name(name))
+        {
+            return Ok(semantics.workspace_effect);
+        }
+        if self.resolve_imported_call_target(name, span)?.is_some() {
+            return Ok(None);
+        }
+        Ok(None)
+    }
+
+    fn binding_call_expr_kind(
+        &mut self,
+        binding: BindingId,
+        args: Vec<HirExpr>,
+        requested_outputs: RequestedOutputCount,
+        span: Span,
+    ) -> HirExprKind {
+        let base = HirExpr {
+            id: self.alloc_expr_id(),
+            kind: HirExprKind::Binding(binding),
+            span,
+        };
+        let needs_dynamic_call_dispatch = requested_outputs.fixed_count() != 1
+            || args.iter().any(|arg| {
+                matches!(
+                    &arg.kind,
+                    HirExprKind::Index(_, indexing)
+                        if indexing.kind == IndexKind::Brace
+                            && matches!(
+                                indexing.result_context,
+                                IndexResultContext::FunctionArgumentExpansion
+                            )
+                )
+            });
+        if needs_dynamic_call_dispatch {
+            HirExprKind::Call(HirCall {
+                callee: HirCallableRef::DynamicExpr(Box::new(base)),
+                args,
+                syntax: CallSyntax::Plain,
+                requested_outputs,
+                workspace_first_name: None,
+                bare_identifier: false,
+            })
+        } else {
+            HirExprKind::Index(
+                Box::new(base),
+                IndexingSemantics {
+                    kind: IndexKind::Paren,
+                    components: args.into_iter().map(IndexComponent::Expr).collect(),
+                    result_context: IndexResultContext::ReadSingle,
+                },
+            )
+        }
     }
 
     fn seed_existing_workspace_bindings(
@@ -1360,16 +1501,20 @@ impl LoweringCtx {
         let span = stmt.span();
         let kind = match stmt {
             AstStmt::ExprStmt(expr, suppressed, _) => {
-                let requested_outputs =
-                    if *suppressed || stmt_expr_call_loads_external_bindings(expr) {
-                        RequestedOutputCount::Zero
-                    } else {
-                        RequestedOutputCount::One
-                    };
-                HirStmtKind::ExprStmt(
+                let loads_external_bindings = self.stmt_expr_call_loads_external_bindings(expr)?;
+                let requested_outputs = if *suppressed || loads_external_bindings {
+                    RequestedOutputCount::Zero
+                } else {
+                    RequestedOutputCount::One
+                };
+                let stmt = HirStmtKind::ExprStmt(
                     self.lower_expr_semantic_requested(expr, requested_outputs)?,
                     *suppressed,
-                )
+                );
+                if loads_external_bindings {
+                    self.mark_external_bindings_visible();
+                }
+                stmt
             }
             AstStmt::Assign(name, expr, suppressed, _) => {
                 let binding = self.binding_for_write(name, span);
@@ -1723,6 +1868,12 @@ impl LoweringCtx {
             AstExpr::Ident(name, _) => {
                 if let Some(binding) = self.binding_for_read(name, span) {
                     HirExprKind::Binding(binding)
+                } else if self.current_scope().external_bindings_visible
+                    && runmat_builtins::constants()
+                        .iter()
+                        .any(|c| c.name == name.as_str())
+                {
+                    HirExprKind::Binding(self.define_external_binding_for_read(name, span))
                 } else if runmat_builtins::constants()
                     .iter()
                     .any(|c| c.name == name.as_str())
@@ -1731,8 +1882,31 @@ impl LoweringCtx {
                 } else if let Some(class_name) =
                     self.resolve_imported_static_property_target(name, span)?
                 {
-                    let class_ref = self.classref_expr(&class_name, span)?;
-                    HirExprKind::Member(Box::new(class_ref), MemberName(name.clone()))
+                    if self.current_scope().external_bindings_visible {
+                        HirExprKind::WorkspaceFirstStaticProperty {
+                            workspace_name: SymbolName(name.clone()),
+                            class_name,
+                            property: MemberName(name.clone()),
+                        }
+                    } else {
+                        let class_ref = self.classref_expr(&class_name, span)?;
+                        HirExprKind::Member(Box::new(class_ref), MemberName(name.clone()))
+                    }
+                } else if is_builtin(name) {
+                    let mut call = self.call_for_name(
+                        name,
+                        Vec::new(),
+                        CallSyntax::Plain,
+                        requested_outputs,
+                        span,
+                    )?;
+                    call.bare_identifier = true;
+                    if self.current_scope().external_bindings_visible {
+                        call.workspace_first_name = Some(SymbolName(name.clone()));
+                    }
+                    HirExprKind::Call(call)
+                } else if let Some(binding) = self.binding_or_external_for_read(name, span) {
+                    HirExprKind::Binding(binding)
                 } else {
                     return Err(HirError::new(format!("undefined variable '{name}'"))
                         .with_span(span)
@@ -1783,48 +1957,14 @@ impl LoweringCtx {
                         span,
                     )?)
                 } else if let Some(binding) = self.binding_for_read(name, span) {
-                    let base = HirExpr {
-                        id: self.alloc_expr_id(),
-                        kind: HirExprKind::Binding(binding),
-                        span,
-                    };
-                    let needs_dynamic_call_dispatch = requested_outputs.fixed_count() != 1
-                        || args.iter().any(|arg| {
-                            matches!(
-                                &arg.kind,
-                                HirExprKind::Index(_, indexing)
-                                    if indexing.kind == IndexKind::Brace
-                                        && matches!(
-                                            indexing.result_context,
-                                            IndexResultContext::FunctionArgumentExpansion
-                                        )
-                            )
-                        });
-                    if needs_dynamic_call_dispatch {
-                        HirExprKind::Call(HirCall {
-                            callee: HirCallableRef::DynamicExpr(Box::new(base)),
-                            args,
-                            syntax: CallSyntax::Plain,
-                            requested_outputs,
-                        })
-                    } else {
-                        HirExprKind::Index(
-                            Box::new(base),
-                            IndexingSemantics {
-                                kind: IndexKind::Paren,
-                                components: args.into_iter().map(IndexComponent::Expr).collect(),
-                                result_context: IndexResultContext::ReadSingle,
-                            },
-                        )
-                    }
+                    self.binding_call_expr_kind(binding, args, requested_outputs, span)
                 } else {
-                    HirExprKind::Call(self.call_for_name(
-                        name,
-                        args,
-                        CallSyntax::Plain,
-                        requested_outputs,
-                        span,
-                    )?)
+                    let mut call =
+                        self.call_for_name(name, args, CallSyntax::Plain, requested_outputs, span)?;
+                    if self.current_scope().external_bindings_visible {
+                        call.workspace_first_name = Some(SymbolName(name.clone()));
+                    }
+                    HirExprKind::Call(call)
                 }
             }
             AstExpr::SuperConstructorCall {
@@ -1850,6 +1990,8 @@ impl LoweringCtx {
                     args: lowered_args,
                     syntax: CallSyntax::Plain,
                     requested_outputs,
+                    workspace_first_name: None,
+                    bare_identifier: false,
                 })
             }
             AstExpr::SuperMethodCall {
@@ -1877,6 +2019,8 @@ impl LoweringCtx {
                     args: lowered_args,
                     syntax: CallSyntax::Method,
                     requested_outputs,
+                    workspace_first_name: None,
+                    bare_identifier: false,
                 })
             }
             AstExpr::CommandCall(name, args, _) => HirExprKind::CommandCall(HirCommandCall {
@@ -2399,6 +2543,8 @@ impl LoweringCtx {
             args,
             syntax,
             requested_outputs,
+            workspace_first_name: None,
+            bare_identifier: false,
         })
     }
 
@@ -2801,19 +2947,6 @@ fn is_empty_array_expr(expr: &AstExpr) -> bool {
 
 fn lvalue_supports_deletion(lvalue: &runmat_parser::LValue) -> bool {
     matches!(lvalue, runmat_parser::LValue::Index(_, _))
-}
-
-fn stmt_expr_call_loads_external_bindings(expr: &AstExpr) -> bool {
-    let call_name = match expr {
-        AstExpr::FuncCall(name, _, _) | AstExpr::CommandCall(name, _, _) => name.as_str(),
-        _ => return false,
-    };
-    runmat_builtins::builtin_function_by_name(call_name).is_some_and(|builtin| {
-        matches!(
-            builtin.semantics().workspace_effect,
-            Some(runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings)
-        )
-    })
 }
 
 fn requested_outputs_for_lvalue_assignment(

@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 pub const SNAPSHOT_MAGIC: &[u8; 7] = b"RUNMAT\0";
 
 /// Current snapshot format version
-pub const SNAPSHOT_VERSION: u32 = 1;
+pub const SNAPSHOT_VERSION: u32 = 2;
+
+/// Oldest snapshot format version this build can safely load.
+pub const MIN_SUPPORTED_SNAPSHOT_VERSION: u32 = 2;
 
 /// Snapshot file format structure
 #[derive(Debug, Clone)]
@@ -239,9 +242,13 @@ impl SnapshotHeader {
             });
         }
 
-        if self.version > SNAPSHOT_VERSION {
+        if !(MIN_SUPPORTED_SNAPSHOT_VERSION..=SNAPSHOT_VERSION).contains(&self.version) {
             return Err(crate::SnapshotError::VersionMismatch {
-                expected: SNAPSHOT_VERSION.to_string(),
+                expected: if MIN_SUPPORTED_SNAPSHOT_VERSION == SNAPSHOT_VERSION {
+                    SNAPSHOT_VERSION.to_string()
+                } else {
+                    format!("{MIN_SUPPORTED_SNAPSHOT_VERSION}..={SNAPSHOT_VERSION}")
+                },
                 found: self.version.to_string(),
             });
         }

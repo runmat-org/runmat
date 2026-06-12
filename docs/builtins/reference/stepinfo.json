@@ -1,0 +1,101 @@
+{
+  "title": "stepinfo",
+  "category": "control",
+  "keywords": [
+    "stepinfo",
+    "step response",
+    "rise time",
+    "settling time",
+    "overshoot",
+    "control system"
+  ],
+  "summary": "Compute step-response metrics from SISO models or sampled responses.",
+  "references": [
+    "title: \"MATLAB stepinfo documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`stepinfo` gathers sampled data and computes metrics on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`stepinfo` returns a metrics struct and is not fused."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::stepinfo::tests",
+    "integration": "crates/runmat-vm/tests/control.rs"
+  },
+  "description": "`stepinfo(sys)` simulates the step response for a supported SISO `tf` model and returns response metrics. `stepinfo(y, t, yfinal)` computes metrics from sampled response data.",
+  "behaviors": [
+    "Supports `stepinfo(sys)` for SISO `tf` models supported by `step`.",
+    "Supports sampled forms `stepinfo(y)`, `stepinfo(y, t)`, and `stepinfo(y, t, yfinal)`.",
+    "Returns a struct with `RiseTime`, `TransientTime`, `SettlingTime`, `SettlingMin`, `SettlingMax`, `Overshoot`, `Undershoot`, `Peak`, `PeakTime`, and `SteadyStateValue`.",
+    "Uses a default settling-time threshold of 2%.",
+    "Accepts the name-value option `'SettlingTimeThreshold'` with a scalar value between 0 and 1.",
+    "Rise-time crossings are linearly interpolated between adjacent samples."
+  ],
+  "examples": [
+    {
+      "description": "Metrics from a transfer function",
+      "input": "s = tf('s');\nT = feedback(2/(s + 1), 1);\ninfo = stepinfo(T);\ninfo.Overshoot",
+      "output": "ans = 0"
+    },
+    {
+      "description": "Metrics from sampled data",
+      "input": "t = 0:0.1:5;\ny = 1 - exp(-t);\ninfo = stepinfo(y, t, 1);\ninfo.SteadyStateValue",
+      "output": "ans = 1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `stepinfo` require a transfer-function model?",
+      "answer": "No. It can also operate on sampled response vectors."
+    },
+    {
+      "question": "Are the metrics exact analytical values?",
+      "answer": "For model inputs, metrics are computed from the sampled `step` response. Crossings are linearly interpolated from those samples."
+    }
+  ],
+  "links": [
+    {
+      "label": "step",
+      "url": "./step"
+    },
+    {
+      "label": "dcgain",
+      "url": "./dcgain"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/stepinfo.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/stepinfo.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "info = stepinfo(sys)\ninfo = stepinfo(y)\ninfo = stepinfo(y, t)\ninfo = stepinfo(y, t, yfinal)\ninfo = stepinfo(..., 'SettlingTimeThreshold', tol)",
+      "output": "info is a scalar struct of response metrics."
+    },
+    "points": [
+      "`sys` must be a supported SISO `tf` object.",
+      "`y` and `t` must be finite real vectors with the same number of samples.",
+      "`t` must be nondecreasing.",
+      "`yfinal` must be a finite scalar when supplied."
+    ]
+  },
+  "validation": {
+    "summary": "`stepinfo` validates system inputs, sampled data shape, finite values, time ordering, final value, and settling-threshold options. Tests cover sampled metrics, system metrics through `step` and `dcgain`, and VM control workflows.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/control/stepinfo.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/stepinfo.rs"
+    }
+  },
+  "gpu_residency": "`stepinfo` returns a host struct."
+}

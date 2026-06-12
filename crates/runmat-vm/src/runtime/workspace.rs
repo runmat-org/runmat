@@ -35,10 +35,18 @@ struct WorkspaceState {
 struct WorkspaceFrame {
     state: WorkspaceState,
     vars_ptr: *mut Vec<Value>,
+    vars_snapshot: Vec<Value>,
     publish_on_drop: bool,
 }
 
 pub type WorkspaceSnapshot = (HashMap<String, usize>, HashSet<String>);
+
+#[derive(Debug, Clone)]
+pub struct WorkspaceValueSnapshot {
+    pub vars: Vec<Value>,
+    pub names: HashMap<String, usize>,
+    pub assigned: HashSet<String>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceTarget {
@@ -65,7 +73,7 @@ pub struct WorkspaceAssignedReport {
 runmat_thread_local! {
     static WORKSPACE_STACK: RefCell<Vec<WorkspaceFrame>> = const { RefCell::new(Vec::new()) };
     static PENDING_WORKSPACE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
-    static LAST_WORKSPACE_STATE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
+    static LAST_WORKSPACE_STATE: RefCell<Option<WorkspaceValueSnapshot>> = const { RefCell::new(None) };
     static LAST_WORKSPACE_ASSIGNED_REPORT: RefCell<Option<WorkspaceAssignedReport>> = const { RefCell::new(None) };
 }
 
@@ -168,7 +176,11 @@ impl Drop for WorkspaceStateGuard {
                     });
                 });
                 LAST_WORKSPACE_STATE.with(|slot| {
-                    *slot.borrow_mut() = Some((ws.names, ws.assigned));
+                    *slot.borrow_mut() = Some(WorkspaceValueSnapshot {
+                        vars: frame.vars_snapshot,
+                        names: ws.names,
+                        assigned: ws.assigned,
+                    });
                 });
             }
         });
@@ -199,7 +211,7 @@ pub fn take_pending_workspace_state() -> Option<WorkspaceSnapshot> {
     PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take())
 }
 
-pub fn take_updated_workspace_state() -> Option<WorkspaceSnapshot> {
+pub fn take_updated_workspace_state() -> Option<WorkspaceValueSnapshot> {
     LAST_WORKSPACE_STATE.with(|slot| slot.borrow_mut().take())
 }
 
@@ -252,6 +264,7 @@ fn set_workspace_state_with_publish(
                 len: vars.len(),
             },
             vars_ptr,
+            vars_snapshot: vars.clone(),
             publish_on_drop,
         });
     });
@@ -263,6 +276,7 @@ pub fn refresh_workspace_state(vars: &[Value]) {
         if let Some(frame) = stack.borrow_mut().last_mut() {
             frame.state.data_ptr = vars.as_ptr();
             frame.state.len = vars.len();
+            frame.vars_snapshot = vars.to_vec();
         }
     });
 }
@@ -337,6 +351,7 @@ pub fn workspace_clear() -> Result<(), String> {
         let ws = &mut frame.state;
         let vars = unsafe { &mut *frame.vars_ptr };
         vars.clear();
+        frame.vars_snapshot.clear();
         for (name, idx) in ws.names.clone() {
             mark_slot_unassigned(ws, idx, name);
         }
@@ -359,6 +374,7 @@ pub fn workspace_remove(name: &str) -> Result<(), String> {
         if let Some(idx) = ws.names.remove(name) {
             ws.assigned.remove(name);
             mark_slot_unassigned(ws, idx, name.to_string());
+            frame.vars_snapshot = vars.clone();
             ws.data_ptr = vars.as_ptr();
             ws.len = vars.len();
         }
@@ -428,6 +444,7 @@ pub fn replace_workspace_target_vars_and_state(
             .ok_or_else(|| "workspace state unavailable".to_string())?;
         let target_vars = unsafe { &mut *frame.vars_ptr };
         *target_vars = vars;
+        frame.vars_snapshot = target_vars.clone();
         frame.state.names = names;
         frame.state.assigned = assigned;
         frame.state.slot_lifecycle =
@@ -476,6 +493,7 @@ fn set_workspace_variable_in_frame(
         vars.resize(idx + 1, Value::Num(0.0));
     }
     vars[idx] = value;
+    frame.vars_snapshot = vars.clone();
     ws.data_ptr = vars.as_ptr();
     ws.len = vars.len();
     ws.assigned.insert(name.to_string());
@@ -506,6 +524,8 @@ pub fn mark_workspace_assigned(index: usize) {
                 ws.assigned_names_this_execution.insert(name.clone());
                 ws.assigned_ids_this_execution.insert(index);
                 mark_slot_assigned(ws, index, name);
+                let vars = unsafe { &*frame.vars_ptr };
+                frame.vars_snapshot = vars.clone();
             }
         }
     });
@@ -581,11 +601,11 @@ mod tests {
             assert_eq!(vars[0], Value::Num(42.0));
         }
 
-        let (names, assigned) =
-            take_updated_workspace_state().expect("workspace state should be recorded");
-        assert_eq!(names.get("x"), Some(&0));
-        assert_eq!(names.get("z"), Some(&1));
-        assert!(assigned.contains("x"));
-        assert!(assigned.contains("z"));
+        let snapshot = take_updated_workspace_state().expect("workspace state should be recorded");
+        assert_eq!(snapshot.names.get("x"), Some(&0));
+        assert_eq!(snapshot.names.get("z"), Some(&1));
+        assert!(snapshot.assigned.contains("x"));
+        assert!(snapshot.assigned.contains("z"));
+        assert_eq!(snapshot.vars[0], Value::Num(42.0));
     }
 }

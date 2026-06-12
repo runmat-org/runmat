@@ -1,0 +1,107 @@
+{
+  "title": "run",
+  "category": "io/repl_fs",
+  "keywords": [
+    "run",
+    "script",
+    "matlab script",
+    "workspace",
+    "path"
+  ],
+  "summary": "Execute a MATLAB script file in the caller workspace.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Script resolution and execution run on the host. gpuArray text inputs are gathered before lookup."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::run::tests",
+    "integration": [
+      "run_executes_script_file_in_current_workspace",
+      "run_exposes_script_variables_to_following_call_syntax",
+      "run_script_variables_shadow_builtin_constants",
+      "run_replays_script_stdout_to_request_streams",
+      "run_command_syntax_resolves_scripts_on_search_path",
+      "run_preserves_script_source_context",
+      "run_missing_file_and_output_errors_are_catchable"
+    ]
+  },
+  "description": "`run` locates a `.m` script by file name, relative path, absolute path, or active MATLAB search path entry, then executes that script in the caller workspace. Variables assigned by the script are visible to following statements in the caller.",
+  "behaviors": [
+    "`run('script')` resolves `script.m` when no extension is supplied. Bare `.m` filenames also search the active MATLAB path. `run('folder/script.m')` executes the file at that path.",
+    "Command syntax is supported: `run script_name` is equivalent to `run('script_name')`.",
+    "The target file is executed as a script, not as a function. Assignments mutate the caller workspace and local functions in the script remain available to that script.",
+    "`mfilename` inside the executed script reports the executed file name and full path, matching the script source context.",
+    "`run` has no outputs. Requesting an output raises `RunMat:run:TooManyOutputs` before executing the file.",
+    "If the script throws an error, the error is catchable by the caller and assignments performed before that error remain in the caller workspace.",
+    "Names that may be introduced by a script are tracked as dynamic workspace bindings. Bare reads of names the script did not assign raise `RunMat:UndefinedVariable` at runtime unless the name is a builtin constant; call syntax such as `name(...)` checks the caller workspace first, then falls back to normal function or builtin resolution."
+  ],
+  "examples": [
+    {
+      "description": "Execute a script in the current folder",
+      "input": "run('setup_experiment');\nresult = configured_gain * 2;"
+    },
+    {
+      "description": "Execute a script found on the search path",
+      "input": "addpath('examples');\nrun fm_demo\nplot(t, demodulated)"
+    },
+    {
+      "description": "Catch script execution errors",
+      "input": "try\n    run('maybe_missing_script');\ncatch e\n    disp(e.identifier)\nend"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `run` call functions?",
+      "answer": "No. `run` executes script files. Function files should be called by their function name."
+    },
+    {
+      "question": "Can `run` return a value?",
+      "answer": "No. MATLAB's `run` executes for side effects in the caller workspace and does not return outputs."
+    },
+    {
+      "question": "Where does `run` search?",
+      "answer": "RunMat first resolves the provided file or relative path, then searches the active MATLAB path. It appends `.m` when the supplied name has no extension, and a bare filename that already ends in `.m` is also searched on the active path."
+    },
+    {
+      "question": "What happens if the script creates variables?",
+      "answer": "Assignments made by the script are visible in the caller workspace after `run`. Subsequent call syntax uses MATLAB variable precedence, so a script-created array can be indexed with `x(...)` and can shadow a builtin name."
+    },
+    {
+      "question": "What happens if the script fails?",
+      "answer": "The error propagates to the caller and can be caught with `try`/`catch`. Assignments made before the error remain visible in the caller workspace, matching script execution semantics."
+    }
+  ],
+  "links": [
+    {
+      "label": "addpath",
+      "url": "./addpath"
+    },
+    {
+      "label": "path",
+      "url": "./path"
+    },
+    {
+      "label": "which",
+      "url": "./which"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/run.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/run.rs"
+  },
+  "gpu_residency": "No manual action is required. `run` always executes on the host. Any GPU-resident text argument is gathered before path resolution.",
+  "gpu_behavior": [
+    "`run` is a host-side script execution boundary. It does not create GPU kernels or participate in fusion. Values created by the executed script can still be promoted by downstream acceleration heuristics."
+  ]
+}

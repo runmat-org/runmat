@@ -5,10 +5,7 @@ use std::sync::Once;
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod generated {
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../target/runmat_wasm_registry.rs"
-    ));
+    include!("generated_wasm_registry.rs");
 }
 
 #[cfg(target_arch = "wasm32")]

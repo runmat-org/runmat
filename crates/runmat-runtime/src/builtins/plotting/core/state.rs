@@ -1830,6 +1830,10 @@ fn note_recent_figure(handle: FigureHandle) {
     });
 }
 
+pub fn record_recent_figure(handle: FigureHandle) {
+    note_recent_figure(handle);
+}
+
 pub fn reset_recent_figures() {
     RECENT_FIGURES.with(|set| set.borrow_mut().clear());
 }

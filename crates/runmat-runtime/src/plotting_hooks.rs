@@ -23,3 +23,17 @@ pub fn take_recent_figures() -> Vec<u32> {
         Vec::new()
     }
 }
+
+/// Record raw figure handles that were touched on another execution thread.
+pub fn record_recent_figures(handles: impl IntoIterator<Item = u32>) {
+    #[cfg(feature = "plot-core")]
+    {
+        for handle in handles {
+            crate::builtins::plotting::record_recent_figure(handle.into());
+        }
+    }
+    #[cfg(not(feature = "plot-core"))]
+    {
+        let _ = handles;
+    }
+}

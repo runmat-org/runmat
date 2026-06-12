@@ -1,0 +1,104 @@
+{
+  "title": "feedback",
+  "category": "control",
+  "keywords": [
+    "feedback",
+    "closed loop",
+    "control system",
+    "transfer function",
+    "tf"
+  ],
+  "summary": "Form SISO feedback interconnections for transfer-function models.",
+  "references": [
+    "title: \"MATLAB feedback documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`feedback` combines host-side transfer-function metadata. GPU-resident coefficient inputs are gathered when the source `tf` object is constructed."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`feedback` constructs a new model object and terminates numeric fusion chains."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::feedback::tests",
+    "integration": "crates/runmat-vm/tests/control.rs"
+  },
+  "description": "`feedback(sys1, sys2)` returns the closed-loop SISO transfer function for negative feedback. `sys2` may be another compatible `tf` object or a scalar gain.",
+  "behaviors": [
+    "Supports real or complex SISO `tf` objects represented by numerator and denominator coefficient vectors.",
+    "`feedback(sys1)` uses unity negative feedback.",
+    "`feedback(sys1, sys2)` computes `sys1/(1 + sys1*sys2)`.",
+    "`feedback(sys1, sys2, +1)` computes positive feedback as `sys1/(1 - sys1*sys2)`.",
+    "Scalar gains are promoted to constant transfer functions using the other operand's variable and sample time.",
+    "Input systems must have compatible sample times.",
+    "Nonzero input or output delays are rejected with a clear unsupported-model diagnostic."
+  ],
+  "examples": [
+    {
+      "description": "Unity negative feedback",
+      "input": "s = tf('s');\nG = 2/(s + 3);\nT = feedback(G, 1);\nT.Denominator",
+      "output": "ans = [1 5]"
+    },
+    {
+      "description": "Positive feedback",
+      "input": "G = tf(2, [1 3]);\nT = feedback(G, 1, +1);\nT.Denominator",
+      "output": "ans = [1 1]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `feedback` support MIMO systems?",
+      "answer": "Not yet. This implementation supports SISO transfer-function objects and scalar gains."
+    },
+    {
+      "question": "Does it support state-space models?",
+      "answer": "Not yet. The current model-family support is SISO `tf`."
+    }
+  ],
+  "links": [
+    {
+      "label": "tf",
+      "url": "./tf"
+    },
+    {
+      "label": "step",
+      "url": "./step"
+    },
+    {
+      "label": "isstable",
+      "url": "./isstable"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/feedback.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/feedback.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "T = feedback(sys1)\nT = feedback(sys1, sys2)\nT = feedback(sys1, sys2, sign)",
+      "output": "T is a SISO tf object."
+    },
+    "points": [
+      "`sign` must be `-1` for negative feedback or `+1` for positive feedback.",
+      "`sys1` and `sys2` must be compatible SISO `tf` models or scalar gains.",
+      "Sample times must match when both operands are transfer functions."
+    ]
+  },
+  "validation": {
+    "summary": "`feedback` validates argument count, feedback sign, sample-time compatibility, zero-delay support, and transfer-function model shape. Tests cover unity negative feedback, positive feedback, scalar gains, and VM workflows using `tf('s')`.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/control/feedback.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/feedback.rs"
+    }
+  },
+  "gpu_residency": "`feedback` returns a host-side `tf` object. It does not preserve gpuArray residency."
+}

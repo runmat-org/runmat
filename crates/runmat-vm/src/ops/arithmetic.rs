@@ -5,14 +5,17 @@ use runmat_runtime::builtins::common::shape::is_scalar_shape;
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
-pub async fn add<CM, CMFut, F, FFut>(
+pub async fn add<CM, CMFut, RM, RMFut, F, FFut>(
     stack: &mut Vec<Value>,
     mut call_method: CM,
+    mut right_method: RM,
     mut fallback: F,
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
     CMFut: Future<Output = Result<Value, RuntimeError>>,
+    RM: FnMut(Value, Value, &'static str) -> RMFut,
+    RMFut: Future<Output = Result<Value, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
     FFut: Future<Output = Result<Value, RuntimeError>>,
 {
@@ -25,7 +28,7 @@ where
             }
         }
         (_, Value::Object(obj)) => {
-            match call_method(Value::Object(obj.clone()), "plus", a.clone()).await {
+            match right_method(a.clone(), Value::Object(obj.clone()), "plus").await {
                 Ok(v) => v,
                 Err(_) => fallback(a.clone(), b.clone()).await?,
             }
@@ -45,7 +48,7 @@ pub async fn sub<CM, CMFut, RM, RMFut, F, FFut>(
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
     CMFut: Future<Output = Result<Value, RuntimeError>>,
-    RM: FnMut(Value, Value) -> RMFut,
+    RM: FnMut(Value, Value, &'static str) -> RMFut,
     RMFut: Future<Output = Result<Value, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
     FFut: Future<Output = Result<Value, RuntimeError>>,
@@ -59,7 +62,7 @@ where
             }
         }
         (_, Value::Object(obj)) => {
-            match right_method(Value::Object(obj.clone()), a.clone()).await {
+            match right_method(a.clone(), Value::Object(obj.clone()), "minus").await {
                 Ok(v) => v,
                 Err(_) => fallback(a.clone(), b.clone()).await?,
             }
@@ -70,14 +73,17 @@ where
     Ok(())
 }
 
-pub async fn mul<CM, CMFut, F, FFut>(
+pub async fn mul<CM, CMFut, RM, RMFut, F, FFut>(
     stack: &mut Vec<Value>,
     mut call_method: CM,
+    mut right_method: RM,
     mut fallback: F,
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
     CMFut: Future<Output = Result<Value, RuntimeError>>,
+    RM: FnMut(Value, Value, &'static str) -> RMFut,
+    RMFut: Future<Output = Result<Value, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
     FFut: Future<Output = Result<Value, RuntimeError>>,
 {
@@ -90,7 +96,7 @@ where
             }
         }
         (_, Value::Object(obj)) => {
-            match call_method(Value::Object(obj.clone()), "mtimes", a.clone()).await {
+            match right_method(a.clone(), Value::Object(obj.clone()), "mtimes").await {
                 Ok(v) => v,
                 Err(_) => fallback(a.clone(), b.clone()).await?,
             }
@@ -101,15 +107,18 @@ where
     Ok(())
 }
 
-pub async fn binary_method<CM, CMFut, F, FFut>(
+pub async fn binary_method_ordered<CM, CMFut, RM, RMFut, F, FFut>(
     stack: &mut Vec<Value>,
     method: &'static str,
     mut call_method: CM,
+    mut call_right_method: RM,
     mut fallback: F,
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
     CMFut: Future<Output = Result<Value, RuntimeError>>,
+    RM: FnMut(Value, Value, &'static str) -> RMFut,
+    RMFut: Future<Output = Result<Value, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
     FFut: Future<Output = Result<Value, RuntimeError>>,
 {
@@ -122,7 +131,7 @@ where
             }
         }
         (_, Value::Object(obj)) => {
-            match call_method(Value::Object(obj.clone()), method, a.clone()).await {
+            match call_right_method(a.clone(), Value::Object(obj.clone()), method).await {
                 Ok(v) => v,
                 Err(_) => fallback(a.clone(), b.clone()).await?,
             }
@@ -146,14 +155,17 @@ where
     Ok(())
 }
 
-pub async fn power<CM, CMFut, F, FFut>(
+pub async fn power<CM, CMFut, RM, RMFut, F, FFut>(
     stack: &mut Vec<Value>,
     mut call_method: CM,
+    mut call_right_method: RM,
     mut fallback: F,
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
     CMFut: Future<Output = Result<Value, RuntimeError>>,
+    RM: FnMut(Value, Value, &'static str) -> RMFut,
+    RMFut: Future<Output = Result<Value, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
     FFut: Future<Output = Result<Value, RuntimeError>>,
 {
@@ -166,7 +178,7 @@ where
             }
         }
         (_, Value::Object(obj)) => {
-            match call_method(Value::Object(obj.clone()), "power", a.clone()).await {
+            match call_right_method(a.clone(), Value::Object(obj.clone()), "power").await {
                 Ok(v) => v,
                 Err(_) => fallback(a.clone(), b.clone()).await?,
             }
@@ -200,16 +212,19 @@ pub fn is_scalarish_for_division(value: &Value) -> bool {
     }
 }
 
-pub async fn execute_right_division<CM, CMFut, SF, SFFut, MF, MFFut>(
+pub async fn execute_right_division<CM, CMFut, RM, RMFut, SF, SFFut, MF, MFFut>(
     lhs: &Value,
     rhs: &Value,
     mut call_method: CM,
+    mut call_right_method: RM,
     mut scalarish_fallback: SF,
     mut matrix_fallback: MF,
 ) -> Result<Value, RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
     CMFut: Future<Output = Result<Value, RuntimeError>>,
+    RM: FnMut(Value, Value, &'static str) -> RMFut,
+    RMFut: Future<Output = Result<Value, RuntimeError>>,
     SF: FnMut(Value, Value) -> SFFut,
     SFFut: Future<Output = Result<Value, RuntimeError>>,
     MF: FnMut(Value, Value) -> MFFut,
@@ -229,7 +244,7 @@ where
             }
         }
         (_, Value::Object(obj)) => {
-            match call_method(Value::Object(obj.clone()), "mrdivide", lhs.clone()).await {
+            match call_right_method(lhs.clone(), Value::Object(obj.clone()), "mrdivide").await {
                 Ok(v) => Ok(v),
                 Err(_) => {
                     if is_scalarish_for_division(rhs) {
@@ -250,16 +265,19 @@ where
     }
 }
 
-pub async fn execute_left_division<CM, CMFut, SF, SFFut, MF, MFFut>(
+pub async fn execute_left_division<CM, CMFut, RM, RMFut, SF, SFFut, MF, MFFut>(
     lhs: &Value,
     rhs: &Value,
     mut call_method: CM,
+    mut call_right_method: RM,
     mut scalarish_fallback: SF,
     mut matrix_fallback: MF,
 ) -> Result<Value, RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
     CMFut: Future<Output = Result<Value, RuntimeError>>,
+    RM: FnMut(Value, Value, &'static str) -> RMFut,
+    RMFut: Future<Output = Result<Value, RuntimeError>>,
     SF: FnMut(Value, Value) -> SFFut,
     SFFut: Future<Output = Result<Value, RuntimeError>>,
     MF: FnMut(Value, Value) -> MFFut,
@@ -279,7 +297,7 @@ where
             }
         }
         (_, Value::Object(obj)) => {
-            match call_method(Value::Object(obj.clone()), "mldivide", lhs.clone()).await {
+            match call_right_method(lhs.clone(), Value::Object(obj.clone()), "mldivide").await {
                 Ok(v) => Ok(v),
                 Err(_) => {
                     if is_scalarish_for_division(lhs) {

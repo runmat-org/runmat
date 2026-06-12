@@ -16,6 +16,7 @@ pub mod path;
 pub mod pwd;
 pub mod rmdir;
 pub mod rmpath;
+pub mod run;
 pub mod savepath;
 pub mod setenv;
 pub mod tempdir;

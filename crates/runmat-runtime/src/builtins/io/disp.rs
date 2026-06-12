@@ -153,6 +153,15 @@ fn format_for_disp(value: &Value) -> Vec<String> {
 
 fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
     match value {
+        Value::Object(obj) if obj.is_class(crate::builtins::table::TABLE_CLASS) => match mode {
+            RenderMode::TopLevel => crate::builtins::table::table_display_text(value)
+                .unwrap_or_else(|_| value.to_string())
+                .lines()
+                .map(|line| line.to_string())
+                .collect(),
+            RenderMode::Nested => vec![crate::builtins::table::table_summary_text(value)
+                .unwrap_or_else(|_| value.to_string())],
+        },
         Value::Object(obj) if obj.is_class("datetime") => match mode {
             RenderMode::TopLevel => crate::builtins::datetime::datetime_display_text(value)
                 .map(|text| text.unwrap_or_else(|| value.to_string()))

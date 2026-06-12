@@ -1,6 +1,7 @@
 //! Signal processing builtins.
 
 pub(crate) mod blackman;
+pub mod butter;
 pub(crate) mod common;
 pub(crate) mod conv;
 pub(crate) mod conv2;

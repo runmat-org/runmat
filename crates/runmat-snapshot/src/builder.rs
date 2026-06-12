@@ -125,12 +125,7 @@ impl BuildPhase {
 impl SnapshotBuilder {
     /// Create a new snapshot builder
     pub fn new(config: SnapshotConfig) -> Self {
-        let compression_config = CompressionConfig {
-            default_level: config.compression_level,
-            adaptive_selection: true,
-            prefer_speed: false,
-            ..CompressionConfig::default()
-        };
+        let compression_config = Self::compression_config_for(&config);
 
         let compression = CompressionEngine::new(compression_config);
 
@@ -157,6 +152,21 @@ impl SnapshotBuilder {
             validator,
             stats: Arc::new(RwLock::new(BuildStats::default())),
             progress,
+        }
+    }
+
+    fn compression_config_for(config: &SnapshotConfig) -> CompressionConfig {
+        CompressionConfig {
+            default_level: config.compression_level,
+            adaptive_selection: matches!(
+                config.compression_algorithm,
+                crate::CompressionAlgorithm::Auto
+            ),
+            prefer_speed: matches!(
+                config.compression_algorithm,
+                crate::CompressionAlgorithm::Lz4
+            ) || config.compression_level <= 3,
+            ..CompressionConfig::default()
         }
     }
 
@@ -1064,17 +1074,7 @@ impl SnapshotBuilder {
         let uncompressed_size = serialized.len() as u64;
 
         // Compress if enabled
-        let (data, _compression_info) = if self.config.compression_enabled {
-            let mut compression = CompressionEngine::new(CompressionConfig {
-                default_level: self.config.compression_level,
-                ..CompressionConfig::default()
-            });
-
-            let result = compression.compress(&serialized)?;
-            (result.data, Some(result.info))
-        } else {
-            (serialized, None)
-        };
+        let (data, compression_info) = self.compress_snapshot_data(&serialized)?;
 
         // Create format
         let mut header = SnapshotHeader::new(snapshot.metadata.clone());
@@ -1082,19 +1082,7 @@ impl SnapshotBuilder {
         // Update data info with actual sizes
         header.data_info.compressed_size = data.len() as u64;
         header.data_info.uncompressed_size = uncompressed_size;
-        if self.config.compression_enabled {
-            header.data_info.compression = _compression_info.unwrap_or_else(|| CompressionInfo {
-                algorithm: format::CompressionAlgorithm::None,
-                level: 0,
-                parameters: std::collections::HashMap::new(),
-            });
-        } else {
-            header.data_info.compression = CompressionInfo {
-                algorithm: format::CompressionAlgorithm::None,
-                level: 0,
-                parameters: std::collections::HashMap::new(),
-            };
-        }
+        header.data_info.compression = compression_info;
 
         let mut format = SnapshotFormat::new(header, data);
 
@@ -1109,6 +1097,45 @@ impl SnapshotBuilder {
 
         log::info!("Snapshot saved successfully");
         Ok(())
+    }
+
+    fn compress_snapshot_data(
+        &self,
+        serialized: &[u8],
+    ) -> SnapshotResult<(Vec<u8>, CompressionInfo)> {
+        if !self.config.compression_enabled
+            || matches!(
+                self.config.compression_algorithm,
+                crate::CompressionAlgorithm::None
+            )
+        {
+            return Ok((
+                serialized.to_vec(),
+                CompressionInfo {
+                    algorithm: format::CompressionAlgorithm::None,
+                    level: 0,
+                    parameters: std::collections::HashMap::new(),
+                },
+            ));
+        }
+
+        let mut compression = CompressionEngine::new(Self::compression_config_for(&self.config));
+        let result = match self.config.compression_algorithm {
+            crate::CompressionAlgorithm::Auto => compression.compress(serialized)?,
+            crate::CompressionAlgorithm::Lz4 => compression.compress_with_algorithm(
+                serialized,
+                format::CompressionAlgorithm::Lz4 {
+                    fast: self.config.compression_level <= 3,
+                },
+            )?,
+            crate::CompressionAlgorithm::Zstd => compression.compress_with_algorithm(
+                serialized,
+                format::CompressionAlgorithm::Zstd { dictionary: None },
+            )?,
+            crate::CompressionAlgorithm::None => unreachable!("handled before compression"),
+        };
+
+        Ok((result.data, result.info))
     }
 
     /// Write snapshot format to file

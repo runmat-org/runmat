@@ -29,6 +29,129 @@ fn tf_constructs_object_through_vm_dispatch() {
 }
 
 #[test]
+fn tf_variable_control_workflow_runs_through_vm_dispatch() {
+    let program = r#"
+        s = tf('s');
+        G = 2.5 / (0.4*s^2 + 1.8*s + 1);
+        T = feedback(3.2 * G, 1);
+        [y, t] = step(T, 0:0.5:2);
+        info = stepinfo(y, t, dcgain(T));
+        p = pole(T);
+        stable = isstable(T);
+        ss = dcgain(T);
+        H = 2 / s;
+        hn = H.Numerator;
+        hd = H.Denominator;
+        assert(stable);
+        assert(abs(ss - 8/9) < 1e-6);
+        assert(length(y) == 5);
+        assert(info.RiseTime >= 0 || isnan(info.RiseTime));
+        assert(info.Overshoot >= 0);
+        assert(all(real(p) < 0));
+        assert(hn(1) == 2);
+        assert(hd(1) == 1);
+        assert(hd(2) == 0);
+    "#;
+    execute_source(program).unwrap();
+}
+
+#[test]
+fn tf_rhs_elementwise_division_preserves_operand_order() {
+    let program = r#"
+        s = tf('s');
+
+        A = 2 ./ s;
+        B = s ./ 2;
+        C = 2 .\ s;
+        D = s .\ 2;
+
+        an = A.Numerator;
+        ad = A.Denominator;
+        bn = B.Numerator;
+        bd = B.Denominator;
+        cn = C.Numerator;
+        cd = C.Denominator;
+        dn = D.Numerator;
+        dd = D.Denominator;
+
+        assert(length(an) == 1);
+        assert(an(1) == 2);
+        assert(length(ad) == 2);
+        assert(ad(1) == 1);
+        assert(ad(2) == 0);
+
+        assert(length(bn) == 2);
+        assert(bn(1) == 1);
+        assert(bn(2) == 0);
+        assert(length(bd) == 1);
+        assert(bd(1) == 2);
+
+        assert(length(cn) == 2);
+        assert(cn(1) == 1);
+        assert(cn(2) == 0);
+        assert(length(cd) == 1);
+        assert(cd(1) == 2);
+
+        assert(length(dn) == 1);
+        assert(dn(1) == 2);
+        assert(length(dd) == 2);
+        assert(dd(1) == 1);
+        assert(dd(2) == 0);
+    "#;
+    execute_source(program).unwrap();
+}
+
+#[test]
+fn tf_rhs_matrix_operators_preserve_operand_order() {
+    let program = r#"
+        s = tf('s');
+
+        A = 5 - s;
+        B = 2 / s;
+        C = 2 \ s;
+
+        an = A.Numerator;
+        ad = A.Denominator;
+        bn = B.Numerator;
+        bd = B.Denominator;
+        cn = C.Numerator;
+        cd = C.Denominator;
+
+        assert(length(an) == 2);
+        assert(an(1) == -1);
+        assert(an(2) == 5);
+        assert(length(ad) == 1);
+        assert(ad(1) == 1);
+
+        assert(length(bn) == 1);
+        assert(bn(1) == 2);
+        assert(length(bd) == 2);
+        assert(bd(1) == 1);
+        assert(bd(2) == 0);
+
+        assert(length(cn) == 2);
+        assert(cn(1) == 1);
+        assert(cn(2) == 0);
+        assert(length(cd) == 1);
+        assert(cd(1) == 2);
+    "#;
+    execute_source(program).unwrap();
+}
+
+#[test]
+fn step_statement_form_accepts_multiple_system_plot_syntax() {
+    let program = r#"
+        s = tf('s');
+        H1 = 1 / (s + 1);
+        H2 = 2 / (s + 2);
+        step(H1, 'b');
+        step(H1, H2);
+        step(H1, 'b', H2, 'r--', 2);
+    "#;
+    execute_source(program).unwrap();
+}
+
+#[test]
 fn ss_constructs_object_through_vm_dispatch() {
     let program = r#"
         G = ss([0 1; -2 -3], [0; 1], [1 0], 0, 0.1);

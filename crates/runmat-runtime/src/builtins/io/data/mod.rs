@@ -3124,7 +3124,7 @@ fn json_to_value(value: &serde_json::Value) -> Value {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use crate::dispatcher::call_builtin;
@@ -3142,15 +3142,16 @@ mod tests {
     };
     use serde::Deserialize;
     use std::path::Path;
-    use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+    use std::sync::{Arc, Mutex, MutexGuard};
     use tokio::runtime::Runtime;
     use tokio::sync::oneshot;
 
     fn serial_test_guard() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("data test serial lock poisoned")
+        runmat_filesystem::provider_override_lock()
+    }
+
+    fn native_provider_guard() -> runmat_filesystem::ProviderGuard {
+        runmat_filesystem::replace_provider(Arc::new(NativeFsProvider))
     }
 
     #[test]
@@ -3510,6 +3511,7 @@ mod tests {
     #[test]
     fn create_open_write_read_dataset() {
         let _serial = serial_test_guard();
+        let _provider_guard = native_provider_guard();
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("sample.data").to_string_lossy().to_string();
 
@@ -3563,6 +3565,7 @@ mod tests {
     #[test]
     fn write_and_read_slice_payload() {
         let _serial = serial_test_guard();
+        let _provider_guard = native_provider_guard();
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("slice.data").to_string_lossy().to_string();
 
@@ -3625,6 +3628,7 @@ mod tests {
     #[test]
     fn slice_write_updates_only_touched_chunks() {
         let _serial = serial_test_guard();
+        let _provider_guard = native_provider_guard();
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir
             .path()

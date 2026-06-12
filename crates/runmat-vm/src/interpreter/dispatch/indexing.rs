@@ -1,9 +1,9 @@
 use crate::bytecode::EndExpr;
 use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::call::shared::{
-    call_object_index_descriptor_method, class_defines_member_subsasgn,
-    class_defines_member_subsref, expand_brace_values, ObjectIndexDescriptor, ObjectIndexOp,
-    ObjectParenExprSelectorSpec,
+    call_object_index_descriptor_method, call_object_index_descriptor_method_with_outputs,
+    class_defines_member_subsasgn, class_defines_member_subsref, expand_brace_values,
+    ObjectIndexDescriptor, ObjectIndexOp, ObjectParenExprSelectorSpec,
 };
 use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
@@ -835,6 +835,51 @@ async fn build_expr_slice_plan(
     .await
 }
 
+pub async fn paren_index_value(
+    base: Value,
+    raw_indices: Vec<Value>,
+    requested_outputs: usize,
+    function_registry: &crate::bytecode::FunctionRegistry,
+) -> Result<Value, RuntimeError> {
+    match &base {
+        Value::Object(_) | Value::HandleObject(_) => {
+            if let Some(err) = missing_member_index_overload_error(&base, ObjectIndexOp::Subsref) {
+                return Err(err);
+            }
+            let descriptor = ObjectIndexDescriptor::subsref_paren(
+                base,
+                crate::call::shared::ObjectIndexSelector::IndexValues {
+                    values: raw_indices,
+                },
+            );
+            call_object_index_descriptor_method_with_outputs(descriptor, requested_outputs).await
+        }
+        Value::Cell(ca) => {
+            let selectors = build_cell_scalar_selectors(&raw_indices).await?;
+            let plan = build_index_plan(&selectors, raw_indices.len(), &ca.shape)?;
+            Ok(gather_cell_with_plan(ca, &plan)?)
+        }
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
+        | Value::Closure(_) => match crate::call::feval::execute_feval(
+            base,
+            raw_indices,
+            requested_outputs,
+            function_registry,
+        )
+        .await?
+        {
+            crate::call::feval::FevalDispatch::Completed(value) => Ok(value),
+        },
+        _ => {
+            let numeric = linear_index_values_to_f64(&raw_indices).await?;
+            idx_read_linear::generic_index(&base, &numeric).await
+        }
+    }
+}
+
 pub async fn dispatch_indexing(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
@@ -857,43 +902,7 @@ pub async fn dispatch_indexing(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            match &base {
-                Value::Object(_) | Value::HandleObject(_) => {
-                    if let Some(err) =
-                        missing_member_index_overload_error(&base, ObjectIndexOp::Subsref)
-                    {
-                        return Err(err);
-                    }
-                    let descriptor = ObjectIndexDescriptor::subsref_paren(
-                        base,
-                        crate::call::shared::ObjectIndexSelector::IndexValues {
-                            values: raw_indices.clone(),
-                        },
-                    );
-                    stack.push(call_object_index_descriptor_method(descriptor).await?);
-                }
-                Value::Cell(ca) => {
-                    let selectors = build_cell_scalar_selectors(&raw_indices).await?;
-                    let plan = build_index_plan(&selectors, raw_indices.len(), &ca.shape)?;
-                    stack.push(gather_cell_with_plan(ca, &plan)?);
-                }
-                Value::FunctionHandle(_)
-                | Value::ExternalFunctionHandle(_)
-                | Value::MethodFunctionHandle(_)
-                | Value::BoundFunctionHandle { .. }
-                | Value::Closure(_) => {
-                    let args = raw_indices;
-                    match crate::call::feval::execute_feval(base, args, 1, function_registry)
-                        .await?
-                    {
-                        crate::call::feval::FevalDispatch::Completed(value) => stack.push(value),
-                    }
-                }
-                _ => {
-                    let numeric = linear_index_values_to_f64(&raw_indices).await?;
-                    stack.push(idx_read_linear::generic_index(&base, &numeric).await?);
-                }
-            }
+            stack.push(paren_index_value(base, raw_indices, 1, function_registry).await?);
             Ok(true)
         }
         crate::bytecode::Instr::IndexCell {

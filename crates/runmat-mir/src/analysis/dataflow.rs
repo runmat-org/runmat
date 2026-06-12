@@ -207,6 +207,7 @@ fn simple_rvalue_fact(value: &MirRvalue) -> SimpleValueFact {
         },
         MirRvalue::Member { .. }
         | MirRvalue::DynamicMember { .. }
+        | MirRvalue::WorkspaceFirstStaticProperty { .. }
         | MirRvalue::MetaClass(_)
         | MirRvalue::Colon
         | MirRvalue::End
@@ -696,6 +697,7 @@ fn diagnose_rvalue_reads(
             diagnose_operand_read(base, state, span, diagnostics);
             diagnose_operand_read(member, state, span, diagnostics);
         }
+        MirRvalue::WorkspaceFirstStaticProperty { .. } => {}
         MirRvalue::Future { args, .. } => {
             for arg in args {
                 diagnose_operand_read(arg.operand(), state, span, diagnostics);

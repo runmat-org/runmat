@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::timing::tic::{decode_handle, take_latest_start};
+use crate::builtins::timing::tic::{decode_handle, elapsed_since, take_latest_start};
 use crate::builtins::timing::type_resolvers::toc_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::toc")]
@@ -147,7 +147,7 @@ fn latest_elapsed() -> Result<f64, crate::RuntimeError> {
             &TOC_ERROR_NO_MATCHING_TIC,
         )
     })?;
-    Ok(start.elapsed().as_secs_f64())
+    Ok(elapsed_since(start).as_secs_f64())
 }
 
 fn elapsed_from_value(value: &Value) -> Result<f64, crate::RuntimeError> {
@@ -223,6 +223,15 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         clear_tic_stack();
         let err = block_on(toc_builtin(vec![Value::Num(f64::NAN)])).unwrap_err();
+        assert_toc_error_identifier(err, TOC_ERROR_INVALID_HANDLE.identifier.unwrap());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn toc_rejects_overflowing_handle() {
+        let _guard = TEST_GUARD.lock().unwrap();
+        clear_tic_stack();
+        let err = block_on(toc_builtin(vec![Value::Num(f64::MAX)])).unwrap_err();
         assert_toc_error_identifier(err, TOC_ERROR_INVALID_HANDLE.identifier.unwrap());
     }
 

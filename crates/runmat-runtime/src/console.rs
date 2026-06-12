@@ -79,6 +79,16 @@ pub fn take_thread_buffer() -> Vec<ConsoleEntry> {
     THREAD_BUFFER.with(|buf| buf.borrow_mut().drain(..).collect())
 }
 
+/// Append console entries captured on another execution thread without
+/// forwarding them again to live stream listeners.
+pub fn append_thread_buffer(entries: impl IntoIterator<Item = ConsoleEntry>) {
+    THREAD_BUFFER.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        buf.extend(entries);
+        buf.sort_by_key(|entry| entry.timestamp_ms);
+    });
+}
+
 /// Install (or remove) a global forwarder for console output. Passing `None`
 /// removes the current listener.
 pub fn install_forwarder(forwarder: Option<Arc<StreamForwarder>>) {
@@ -146,4 +156,31 @@ fn inject_label_into_nd_page_headers(label: &str, text: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(text: &str, timestamp_ms: u64) -> ConsoleEntry {
+        ConsoleEntry {
+            stream: ConsoleStream::Stdout,
+            text: text.to_string(),
+            timestamp_ms,
+        }
+    }
+
+    #[test]
+    fn append_thread_buffer_orders_entries_by_timestamp_stably() {
+        reset_thread_buffer();
+        append_thread_buffer(vec![entry("late", 20)]);
+        append_thread_buffer(vec![entry("early", 10), entry("same-time", 20)]);
+
+        let entries = take_thread_buffer();
+        let texts = entries
+            .into_iter()
+            .map(|entry| entry.text)
+            .collect::<Vec<_>>();
+        assert_eq!(texts, vec!["early", "late", "same-time"]);
+    }
 }

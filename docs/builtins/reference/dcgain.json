@@ -1,0 +1,86 @@
+{
+  "title": "dcgain",
+  "category": "control",
+  "keywords": [
+    "dcgain",
+    "steady state",
+    "control system",
+    "transfer function",
+    "tf"
+  ],
+  "summary": "Evaluate steady-state gain of SISO transfer-function models.",
+  "references": [
+    "title: \"MATLAB dcgain documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`dcgain` evaluates host-side transfer-function metadata."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`dcgain` is scalar model analysis and is not fused."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::dcgain::tests",
+    "integration": "crates/runmat-vm/tests/control.rs"
+  },
+  "description": "`dcgain(sys)` evaluates a SISO transfer function at `s = 0` for continuous-time models or `z = 1` for discrete-time models.",
+  "behaviors": [
+    "Supports SISO `tf` objects.",
+    "Returns a real scalar for real-valued gains and a complex scalar for complex-valued gains.",
+    "Continuous-time models are evaluated at zero frequency.",
+    "Discrete-time models are evaluated at `z = 1`."
+  ],
+  "examples": [
+    {
+      "description": "Continuous-time DC gain",
+      "input": "H = tf(2, [1 3]);\ndcgain(H)",
+      "output": "ans = 0.6667"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `dcgain` simulate a step response?",
+      "answer": "No. It evaluates the transfer-function polynomials directly at the steady-state point."
+    }
+  ],
+  "links": [
+    {
+      "label": "tf",
+      "url": "./tf"
+    },
+    {
+      "label": "stepinfo",
+      "url": "./stepinfo"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/dcgain.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/dcgain.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "gain = dcgain(sys)",
+      "output": "gain is a scalar."
+    },
+    "points": [
+      "`sys` must be a SISO `tf` object."
+    ]
+  },
+  "validation": {
+    "summary": "`dcgain` validates the input model and evaluates numerator and denominator polynomials at the steady-state point. Tests cover real continuous-time gains and VM integration.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/control/dcgain.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/dcgain.rs"
+    }
+  },
+  "gpu_residency": "`dcgain` returns a host scalar."
+}

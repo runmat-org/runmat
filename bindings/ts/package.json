@@ -34,7 +34,7 @@
   "scripts": {
     "clean": "rimraf dist pkg pkg-web lsp-web ../../crates/runmat-wasm/pkg ../../crates/runmat-wasm/pkg-web ../../crates/runmat-lsp/pkg ../../crates/runmat-lsp/pkg-web",
     "generate:builtins": "node ./scripts/generate-builtins.cjs",
-    "build:registry": "RUNMAT_GENERATE_WASM_REGISTRY=1 cargo check -p runmat-runtime --target wasm32-unknown-unknown",
+    "build:registry": "node ../../scripts/regenerate-wasm-registry.mjs",
     "build:wasm:bundler": "wasm-pack build ../../crates/runmat-wasm --target bundler --out-dir ../../bindings/ts/pkg --out-name runmat_wasm --release",
     "build:wasm:web": "wasm-pack build ../../crates/runmat-wasm --target web --out-dir ../../bindings/ts/pkg-web --out-name runmat_wasm_web --release",
     "build:lsp": "wasm-pack build ../../crates/runmat-lsp --target web --out-dir ../../bindings/ts/lsp-web --out-name runmat_lsp --release -- --no-default-features --features wasm",
