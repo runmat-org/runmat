@@ -2730,6 +2730,32 @@ mod tests {
     }
 
     #[test]
+    fn compile_interprets_uigetfile_cancel_destructuring() {
+        let ast =
+            runmat_parser::parse("[file, path] = uigetfile('*.xlsx', 'Select a spreadsheet');")
+                .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let file_slot = bytecode
+            .var_names
+            .iter()
+            .find_map(|(slot, name)| (name == "file").then_some(*slot))
+            .expect("file slot");
+        let path_slot = bytecode
+            .var_names
+            .iter()
+            .find_map(|(slot, name)| (name == "path").then_some(*slot))
+            .expect("path slot");
+
+        assert_eq!(vars[file_slot], Value::Num(0.0));
+        assert_eq!(vars[path_slot], Value::Num(0.0));
+    }
+
+    #[test]
     fn compile_interprets_matrix_literal_assignment() {
         let ast = runmat_parser::parse("x = [1 2; 3 4];").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");

@@ -1,0 +1,84 @@
+{
+  "title": "uigetfile",
+  "category": "io/repl_fs",
+  "keywords": [
+    "uigetfile",
+    "file picker",
+    "file dialog",
+    "open file",
+    "filesystem",
+    "ui"
+  ],
+  "summary": "Open a host file-selection dialog and return the selected file name and path.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs through the host filesystem provider. GPU-resident textual arguments are gathered before the file-selection request is made."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::uigetfile::tests",
+    "integration": "builtins::io::repl_fs::uigetfile::tests::parses_filter_title_default_and_selection_outputs"
+  },
+  "description": "`uigetfile` requests an open-file selection from the active RunMat filesystem provider and returns MATLAB-compatible output values. Interactive hosts can implement the provider hook to show a native or browser picker; noninteractive hosts return the standard cancellation values.",
+  "behaviors": [
+    "`file = uigetfile()` uses an all-files filter.",
+    "`uigetfile(filter)` accepts a character vector, string scalar, semicolon-delimited pattern list, or an N-by-1/N-by-2 cell array of patterns and descriptions.",
+    "`uigetfile(filter, title, defaultName)` forwards the dialog title and initial file or directory path to the filesystem provider.",
+    "`uigetfile(..., 'MultiSelect', 'on')` allows multiple selected files. When multiple files are selected, `file` is a cell array of character vectors. A single selected file is returned as a character vector.",
+    "The selected `path` output is the containing directory with a trailing path separator. The `index` output is the one-based selected filter index.",
+    "Cancellation returns numeric zero for `file`, `path`, and `index`, matching MATLAB. This is also the behavior for filesystem providers that do not implement an open-file picker."
+  ],
+  "examples": [
+    {
+      "description": "Select A Spreadsheet",
+      "input": "[file, path] = uigetfile('*.xlsx', 'Select a spreadsheet');\nif isequal(file, 0)\n    return;\nend\nscores = readtable(fullfile(path, file));"
+    },
+    {
+      "description": "Use Multiple Filters",
+      "input": "filters = {'*.m;*.mlx', 'MATLAB files'; '*.txt', 'Text files'};\n[file, path, index] = uigetfile(filters, 'Open source file');"
+    },
+    {
+      "description": "Allow Multiple Files",
+      "input": "[files, path] = uigetfile('*.csv', 'Select CSV files', pwd, 'MultiSelect', 'on');\nif isequal(files, 0)\n    return;\nend"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What happens in noninteractive or headless RunMat hosts?",
+      "answer": "RunMat returns the MATLAB cancellation values (`0`) unless the active filesystem provider implements `selectFileOpen` / `select_file_open`."
+    },
+    {
+      "question": "How does a browser host provide a real file picker?",
+      "answer": "Install a filesystem provider with a `selectFileOpen(request)` function. Return `null` or `false` for cancellation, a string path for one file, an array of string paths for multiple files, or an object such as `{ paths: ['/data/a.csv'], filterIndex: 1 }`."
+    },
+    {
+      "question": "Does `uigetfile` read the selected file?",
+      "answer": "No. It only returns the selected file name and directory. Use `fullfile(path, file)` with `readtable`, `fopen`, `load`, or another file-reading builtin to consume the file."
+    }
+  ],
+  "links": [
+    {
+      "label": "fullfile",
+      "url": "./fullfile"
+    },
+    {
+      "label": "readtable",
+      "url": "./readtable"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/uigetfile.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/uigetfile.rs"
+  },
+  "gpu_residency": "No. File-selection dialogs are host/UI operations and always execute outside GPU residency. The provider hook returns paths in the active filesystem namespace, so browser hosts that import user-selected files should map them into the mounted provider namespace before returning the path."
+}

@@ -23,7 +23,10 @@ export type {
   RunMatFsFileType,
   RunMatFilesystemDirEntry,
   RunMatFilesystemMetadata,
-  RunMatFilesystemProvider
+  RunMatFilesystemProvider,
+  RunMatOpenFileDialogFilter,
+  RunMatOpenFileDialogRequest,
+  RunMatOpenFileDialogSelection
 } from "./fs/provider-types.js";
 export { createWorkspaceHoverProvider } from "./workspace-hover.js";
 export type {
