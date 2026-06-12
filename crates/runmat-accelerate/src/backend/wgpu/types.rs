@@ -62,6 +62,7 @@ pub enum UnaryOpCode {
     Single = 31,
     NextPow2 = 32,
     Sinc = 33,
+    Heaviside = 34,
 }
 
 #[derive(Clone, Copy)]

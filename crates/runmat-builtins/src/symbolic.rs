@@ -12,6 +12,9 @@ pub enum SymbolicFunction {
     Exp,
     Log,
     Sqrt,
+    Heaviside,
+    Dirac,
+    DiracDerivative(u32),
 }
 
 impl SymbolicFunction {
@@ -23,6 +26,9 @@ impl SymbolicFunction {
             SymbolicFunction::Exp => "exp",
             SymbolicFunction::Log => "log",
             SymbolicFunction::Sqrt => "sqrt",
+            SymbolicFunction::Heaviside => "heaviside",
+            SymbolicFunction::Dirac => "dirac",
+            SymbolicFunction::DiracDerivative(_) => "dirac",
         }
     }
 
@@ -34,6 +40,14 @@ impl SymbolicFunction {
             SymbolicFunction::Exp => value.exp(),
             SymbolicFunction::Log => value.ln(),
             SymbolicFunction::Sqrt => value.sqrt(),
+            SymbolicFunction::Heaviside if value > 0.0 => 1.0,
+            SymbolicFunction::Heaviside if value < 0.0 => 0.0,
+            SymbolicFunction::Heaviside if value == 0.0 => 0.5,
+            SymbolicFunction::Heaviside => value,
+            SymbolicFunction::Dirac if value == 0.0 => f64::INFINITY,
+            SymbolicFunction::Dirac => 0.0,
+            SymbolicFunction::DiracDerivative(_) if value == 0.0 => f64::INFINITY,
+            SymbolicFunction::DiracDerivative(_) => 0.0,
         };
         (!result.is_nan()).then_some(result)
     }
@@ -255,6 +269,17 @@ impl SymbolicExpr {
                             SymbolicExpr::constant(2.0),
                             SymbolicExpr::function(SymbolicFunction::Sqrt, (**inner).clone()),
                         ),
+                    ),
+                    SymbolicFunction::Heaviside => {
+                        SymbolicExpr::function(SymbolicFunction::Dirac, (**inner).clone())
+                    }
+                    SymbolicFunction::Dirac => SymbolicExpr::function(
+                        SymbolicFunction::DiracDerivative(1),
+                        (**inner).clone(),
+                    ),
+                    SymbolicFunction::DiracDerivative(order) => SymbolicExpr::function(
+                        SymbolicFunction::DiracDerivative(order.saturating_add(1)),
+                        (**inner).clone(),
                     ),
                 };
                 SymbolicExpr::mul_expr(outer, inner_derivative)
@@ -568,6 +593,11 @@ fn fmt_expr(
             write!(f, "^")?;
             fmt_expr(rhs, f, own_precedence, true)?;
         }
+        SymbolicExpr::Function(SymbolicFunction::DiracDerivative(order), inner) => {
+            write!(f, "dirac({order}, ")?;
+            fmt_expr(inner, f, 0, false)?;
+            write!(f, ")")?;
+        }
         SymbolicExpr::Function(function, inner) => {
             write!(f, "{}(", function.name())?;
             fmt_expr(inner, f, 0, false)?;
@@ -657,6 +687,45 @@ mod tests {
         assert_eq!(
             SymbolicExpr::constant(f64::NAN).numeric_constant_value(),
             None
+        );
+    }
+
+    #[test]
+    fn symbolic_heaviside_simplifies_constants_and_formats_variables() {
+        let x = SymbolicExpr::variable("x");
+        let expr = SymbolicExpr::function(SymbolicFunction::Heaviside, x);
+        assert_eq!(expr.to_string(), "heaviside(x)");
+        assert_eq!(
+            SymbolicExpr::function(SymbolicFunction::Heaviside, SymbolicExpr::constant(-2.0)),
+            SymbolicExpr::constant(0.0)
+        );
+        assert_eq!(
+            SymbolicExpr::function(SymbolicFunction::Heaviside, SymbolicExpr::constant(-0.0)),
+            SymbolicExpr::constant(0.5)
+        );
+        assert_eq!(
+            SymbolicExpr::function(SymbolicFunction::Heaviside, SymbolicExpr::constant(3.0)),
+            SymbolicExpr::constant(1.0)
+        );
+    }
+
+    #[test]
+    fn symbolic_heaviside_derivative_is_formal_dirac() {
+        let x = SymbolicExpr::variable("x");
+        let expr = SymbolicExpr::function(SymbolicFunction::Heaviside, x);
+
+        assert_eq!(expr.derivative("x").to_string(), "dirac(x)");
+    }
+
+    #[test]
+    fn symbolic_dirac_derivatives_preserve_order() {
+        let x = SymbolicExpr::variable("x");
+        let expr = SymbolicExpr::function(SymbolicFunction::Dirac, x);
+
+        assert_eq!(expr.derivative("x").to_string(), "dirac(1, x)");
+        assert_eq!(
+            expr.derivative("x").derivative("x").to_string(),
+            "dirac(2, x)"
         );
     }
 }
