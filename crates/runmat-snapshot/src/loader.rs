@@ -44,6 +44,14 @@ fn snapshot_header_size(bytes: &[u8]) -> SnapshotResult<usize> {
     Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize)
 }
 
+fn snapshot_header_end(header_size: usize, overflow_message: &str) -> SnapshotResult<usize> {
+    4usize
+        .checked_add(header_size)
+        .ok_or_else(|| SnapshotError::Configuration {
+            message: overflow_message.to_string(),
+        })
+}
+
 fn snapshot_data_bounds(
     header: &SnapshotHeader,
     header_size: usize,
@@ -54,7 +62,10 @@ fn snapshot_data_bounds(
     let data_start = if header.data_info.data_offset != 0 {
         u64_to_usize(header.data_info.data_offset, "snapshot data offset")?
     } else {
-        4 + header_size
+        snapshot_header_end(
+            header_size,
+            "Snapshot header section overflowed container bounds",
+        )?
     };
     let compressed_size =
         u64_to_usize(header.data_info.compressed_size, "snapshot compressed size")?;
@@ -206,14 +217,18 @@ impl SnapshotLoader {
         }
 
         let header_size = snapshot_header_size(bytes)?;
-        if bytes.len() < 4 + header_size {
+        let header_end = snapshot_header_end(
+            header_size,
+            "Snapshot header section overflowed buffer length",
+        )?;
+        if bytes.len() < header_end {
             return Err(SnapshotError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Byte buffer too small to contain snapshot header",
             )));
         }
 
-        let header_data = &bytes[4..4 + header_size];
+        let header_data = &bytes[4..header_end];
         let header: SnapshotHeader = bincode::deserialize(header_data)
             .context("Failed to deserialize snapshot header")
             .map_err(|e| SnapshotError::Configuration {
@@ -660,14 +675,18 @@ impl FormatLoader {
                     as usize;
 
             // Read header data
-            if mmap_data.len() < 4 + header_size {
+            let header_end = snapshot_header_end(
+                header_size,
+                "Snapshot header section overflowed file bounds",
+            )?;
+            if mmap_data.len() < header_end {
                 return Err(crate::SnapshotError::Io(std::io::Error::new(
                     std::io::ErrorKind::UnexpectedEof,
                     "File too small to contain header",
                 )));
             }
 
-            let header_data = &mmap_data[4..4 + header_size];
+            let header_data = &mmap_data[4..header_end];
             let header: SnapshotHeader = bincode::deserialize(header_data)
                 .context("Failed to deserialize header from memory map")
                 .map_err(|e| crate::SnapshotError::Configuration {
@@ -713,7 +732,10 @@ impl FormatLoader {
             u64_to_usize(self.header.data_info.data_offset, "snapshot data offset")?
         } else {
             let header_size = bincode::serialized_size(&self.header)? as usize;
-            4 + header_size
+            snapshot_header_end(
+                header_size,
+                "Snapshot header section overflowed file bounds",
+            )?
         };
         let compressed_size = u64_to_usize(
             self.header.data_info.compressed_size,
@@ -821,13 +843,17 @@ impl SnapshotLoader {
 
 fn parse_snapshot_header(bytes: &[u8]) -> SnapshotResult<SnapshotHeader> {
     let header_size = snapshot_header_size(bytes)?;
-    if bytes.len() < 4 + header_size {
+    let header_end = snapshot_header_end(
+        header_size,
+        "Snapshot header section overflowed buffer length",
+    )?;
+    if bytes.len() < header_end {
         return Err(SnapshotError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "Snapshot bytes too small to contain full header",
         )));
     }
-    bincode::deserialize(&bytes[4..4 + header_size]).map_err(|e| SnapshotError::Configuration {
+    bincode::deserialize(&bytes[4..header_end]).map_err(|e| SnapshotError::Configuration {
         message: format!("Failed to deserialize snapshot header: {e}"),
     })
 }
@@ -841,6 +867,15 @@ mod tests {
         let config = SnapshotConfig::default();
         let loader = SnapshotLoader::new(config);
         assert_eq!(loader.stats.load_time, Duration::ZERO);
+    }
+
+    #[test]
+    fn snapshot_header_end_rejects_overflow() {
+        let err = snapshot_header_end(usize::MAX, "header overflow").expect_err("overflow");
+        assert!(matches!(
+            err,
+            SnapshotError::Configuration { ref message } if message == "header overflow"
+        ));
     }
 
     #[test]
