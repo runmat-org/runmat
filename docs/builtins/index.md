@@ -146,7 +146,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `io/filetext` | `fileread`, `filewrite`, `fopen`, `fclose`, `fread`, `fwrite`, `feof`, `fgetl`, `fgets`, `fprintf` | host | - | - | Text and binary file I/O. |
 | done | `io/core` | `disp` | host | - | - | Display output sink. |
 | done | `io/interactive` | `input` | host | - | - | Prompted input, including text mode. |
-| done | `io/tabular` | `readtable`, `readmatrix`, `writematrix`, `csvread`, `csvwrite`, `dlmread`, `dlmwrite` | host | - | - | Tabular I/O; `readtable` imports delimited text and spreadsheet files as table variables with sheet/range/name options. |
+| done | `io/tabular` | `readtable`, `spreadsheetImportOptions`, `readmatrix`, `writematrix`, `csvread`, `csvwrite`, `dlmread`, `dlmwrite` | host | - | - | Tabular I/O; `readtable` imports delimited text and spreadsheet files as table variables with sheet/range/name/type options. |
 | done | `io/mat` | `save`, `load` | host | - | - | MAT-like persistence. |
 
 ## I/O - JSON, Networking, and Images

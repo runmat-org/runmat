@@ -12,8 +12,8 @@ use encoding_rs::{Encoding, UTF_8};
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ClassDef, ComplexTensor, LogicalArray, MethodDef, ObjectInstance, PropertyDef,
-    StringArray, StructValue, Tensor, Value,
+    CellArray, CharArray, ClassDef, ComplexTensor, LogicalArray, MethodDef, NumericDType,
+    ObjectInstance, PropertyDef, StringArray, StructValue, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -88,6 +88,21 @@ const READTABLE_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
         description: "Name-value import options.",
     },
 ];
+const SPREADSHEET_IMPORT_OPTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "opts",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Spreadsheet import options struct.",
+}];
+const SPREADSHEET_IMPORT_OPTIONS_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 1] =
+    [BuiltinParamDescriptor {
+        name: "nameValuePairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name-value option pairs.",
+    }];
 const TABLE_INPUTS_VALUES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "variables",
     ty: BuiltinParamType::Any,
@@ -191,6 +206,18 @@ const READTABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &ANY_OUTPUT,
     },
 ];
+const SPREADSHEET_IMPORT_OPTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "opts = spreadsheetImportOptions()",
+        inputs: &[],
+        outputs: &SPREADSHEET_IMPORT_OPTIONS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "opts = spreadsheetImportOptions(nameValuePairs...)",
+        inputs: &SPREADSHEET_IMPORT_OPTIONS_INPUTS_NAME_VALUE,
+        outputs: &SPREADSHEET_IMPORT_OPTIONS_OUTPUT,
+    },
+];
 const TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "T = table(variables...)",
     inputs: &TABLE_INPUTS_VALUES,
@@ -262,6 +289,12 @@ const TABLE_ERRORS: [BuiltinErrorDescriptor; 5] = [
 
 pub const READTABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &READTABLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const SPREADSHEET_IMPORT_OPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SPREADSHEET_IMPORT_OPTIONS_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,
@@ -464,6 +497,21 @@ async fn readtable_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value
 }
 
 #[runtime_builtin(
+    name = "spreadsheetImportOptions",
+    category = "io/tabular",
+    summary = "Create spreadsheet import options for readtable.",
+    keywords = "spreadsheetImportOptions,readtable,spreadsheet,xlsx,xls,DataRange,VariableTypes,VariableNames,NumVariables",
+    accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::struct_type),
+    descriptor(crate::builtins::table::SPREADSHEET_IMPORT_OPTIONS_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn spreadsheet_import_options_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let gathered = gather_values(&args).await?;
+    spreadsheet_import_options(gathered)
+}
+
+#[runtime_builtin(
     name = "height",
     category = "table",
     summary = "Return the number of rows in a table.",
@@ -631,7 +679,9 @@ struct ReadTableOptions {
     delimiter: Option<Delimiter>,
     read_variable_names: Option<bool>,
     read_row_names: bool,
+    num_variables: Option<usize>,
     variable_names: Option<Vec<String>>,
+    variable_types: Option<Vec<ImportVariableType>>,
     row_names: Option<Vec<String>>,
     num_header_lines: usize,
     range: Option<RangeSpec>,
@@ -639,7 +689,9 @@ struct ReadTableOptions {
     preserve_variable_names: bool,
     treat_as_missing: HashSet<String>,
     empty_line_rule: EmptyLineRule,
+    text_type: TextImportType,
     encoding: String,
+    datetime_type: DatetimeImportType,
 }
 
 impl Default for ReadTableOptions {
@@ -649,7 +701,9 @@ impl Default for ReadTableOptions {
             delimiter: None,
             read_variable_names: None,
             read_row_names: false,
+            num_variables: None,
             variable_names: None,
+            variable_types: None,
             row_names: None,
             num_header_lines: 0,
             range: None,
@@ -657,7 +711,9 @@ impl Default for ReadTableOptions {
             preserve_variable_names: false,
             treat_as_missing: HashSet::new(),
             empty_line_rule: EmptyLineRule::Skip,
+            text_type: TextImportType::String,
             encoding: "utf-8".to_string(),
+            datetime_type: DatetimeImportType::Datetime,
         }
     }
 }
@@ -694,16 +750,23 @@ impl ReadTableOptions {
             self.read_variable_names = Some(bool_scalar(value, "ReadVariableNames")?);
         } else if name.eq_ignore_ascii_case("ReadRowNames") {
             self.read_row_names = bool_scalar(value, "ReadRowNames")?;
+        } else if name.eq_ignore_ascii_case("NumVariables") {
+            let count = nonnegative_usize(value, "NumVariables")?;
+            self.num_variables = (count > 0).then_some(count);
         } else if name.eq_ignore_ascii_case("VariableNames") {
-            self.variable_names = Some(variable_name_list(value)?);
+            self.variable_names = optional_raw_variable_name_list(value)?;
+        } else if name.eq_ignore_ascii_case("VariableTypes") {
+            self.variable_types = optional_variable_type_list(value)?;
         } else if name.eq_ignore_ascii_case("RowNames") {
             self.row_names = Some(string_list(value)?);
         } else if name.eq_ignore_ascii_case("NumHeaderLines") {
             self.num_header_lines = nonnegative_usize(value, "NumHeaderLines")?;
         } else if name.eq_ignore_ascii_case("Range") {
             self.range = Some(RangeSpec::parse(value)?);
+        } else if name.eq_ignore_ascii_case("DataRange") {
+            self.range = optional_range_spec(value)?;
         } else if name.eq_ignore_ascii_case("Sheet") {
-            self.sheet = Some(SheetSelector::parse(value)?);
+            self.sheet = optional_sheet_selector(value)?;
         } else if name.eq_ignore_ascii_case("TreatAsMissing") {
             for token in string_list(value)? {
                 self.treat_as_missing
@@ -738,23 +801,9 @@ impl ReadTableOptions {
             validate_encoding_label(&encoding)?;
             self.encoding = encoding;
         } else if name.eq_ignore_ascii_case("TextType") {
-            let text_type = scalar_text(value, "TextType")?;
-            if !(text_type.eq_ignore_ascii_case("string") || text_type.eq_ignore_ascii_case("char"))
-            {
-                return Err(invalid_argument(format!(
-                    "readtable: unsupported TextType '{text_type}'"
-                )));
-            };
+            self.text_type = TextImportType::parse(value, "readtable")?;
         } else if name.eq_ignore_ascii_case("DatetimeType") {
-            let datetime_type = scalar_text(value, "DatetimeType")?;
-            if !(datetime_type.eq_ignore_ascii_case("datetime")
-                || datetime_type.eq_ignore_ascii_case("text")
-                || datetime_type.eq_ignore_ascii_case("exceldatenum"))
-            {
-                return Err(invalid_argument(format!(
-                    "readtable: unsupported DatetimeType '{datetime_type}'"
-                )));
-            }
+            self.datetime_type = DatetimeImportType::parse(value)?;
         } else {
             return Err(invalid_argument(format!(
                 "readtable: unsupported option '{name}'"
@@ -772,10 +821,341 @@ impl ReadTableOptions {
     }
 }
 
+fn spreadsheet_import_options(args: Vec<Value>) -> BuiltinResult<Value> {
+    if !args.len().is_multiple_of(2) {
+        return Err(invalid_argument(
+            "spreadsheetImportOptions: name-value options must be provided in pairs",
+        ));
+    }
+    let mut options = SpreadsheetImportOptions::default();
+    let mut idx = 0usize;
+    while idx < args.len() {
+        let name = scalar_text(&args[idx], "spreadsheetImportOptions option")?;
+        options.apply(&name, &args[idx + 1])?;
+        idx += 2;
+    }
+    Ok(Value::Struct(options.into_struct()?))
+}
+
+#[derive(Clone)]
+struct SpreadsheetImportOptions {
+    num_variables: usize,
+    read_variable_names: Option<bool>,
+    read_row_names: bool,
+    variable_names: Vec<String>,
+    variable_types: Vec<String>,
+    data_range: Option<Value>,
+    sheet: Option<Value>,
+    treat_as_missing: Vec<String>,
+    preserve_variable_names: bool,
+    empty_line_rule: String,
+    text_type: String,
+    datetime_type: String,
+}
+
+impl Default for SpreadsheetImportOptions {
+    fn default() -> Self {
+        let num_variables = 0;
+        Self {
+            num_variables,
+            read_variable_names: None,
+            read_row_names: false,
+            variable_names: Vec::new(),
+            variable_types: Vec::new(),
+            data_range: None,
+            sheet: None,
+            treat_as_missing: Vec::new(),
+            preserve_variable_names: false,
+            empty_line_rule: "skip".to_string(),
+            text_type: "string".to_string(),
+            datetime_type: "datetime".to_string(),
+        }
+    }
+}
+
+impl SpreadsheetImportOptions {
+    fn apply(&mut self, name: &str, value: &Value) -> BuiltinResult<()> {
+        if name.eq_ignore_ascii_case("NumVariables") {
+            self.resize_variables(positive_usize(value, "NumVariables")?);
+        } else if name.eq_ignore_ascii_case("VariableNames") {
+            self.variable_names = raw_variable_name_list(value)?;
+            self.align_variable_metadata_count(self.variable_names.len(), "VariableNames")?;
+            self.ensure_variable_metadata_len();
+        } else if name.eq_ignore_ascii_case("VariableTypes") {
+            let types = variable_type_names(value)?;
+            self.variable_types = types;
+            self.align_variable_metadata_count(self.variable_types.len(), "VariableTypes")?;
+            self.ensure_variable_metadata_len();
+        } else if name.eq_ignore_ascii_case("DataRange") || name.eq_ignore_ascii_case("Range") {
+            self.data_range = if option_value_is_empty(value) {
+                None
+            } else {
+                RangeSpec::parse(value)?;
+                Some(value.clone())
+            };
+        } else if name.eq_ignore_ascii_case("Sheet") {
+            self.sheet = if option_value_is_empty(value) {
+                None
+            } else {
+                SheetSelector::parse(value)?;
+                Some(value.clone())
+            };
+        } else if name.eq_ignore_ascii_case("ReadVariableNames") {
+            self.read_variable_names = Some(bool_scalar(value, "ReadVariableNames")?);
+        } else if name.eq_ignore_ascii_case("ReadRowNames") {
+            self.read_row_names = bool_scalar(value, "ReadRowNames")?;
+        } else if name.eq_ignore_ascii_case("TreatAsMissing") {
+            self.treat_as_missing = string_list(value)?;
+        } else if name.eq_ignore_ascii_case("PreserveVariableNames") {
+            self.preserve_variable_names = bool_scalar(value, "PreserveVariableNames")?;
+        } else if name.eq_ignore_ascii_case("VariableNamingRule") {
+            let rule = scalar_text(value, "VariableNamingRule")?;
+            if rule.eq_ignore_ascii_case("preserve") {
+                self.preserve_variable_names = true;
+            } else if rule.eq_ignore_ascii_case("modify") {
+                self.preserve_variable_names = false;
+            } else {
+                return Err(invalid_argument(format!(
+                    "spreadsheetImportOptions: unsupported VariableNamingRule '{rule}'"
+                )));
+            }
+        } else if name.eq_ignore_ascii_case("EmptyLineRule") {
+            let rule = scalar_text(value, "EmptyLineRule")?;
+            if !(rule.eq_ignore_ascii_case("read") || rule.eq_ignore_ascii_case("skip")) {
+                return Err(invalid_argument(format!(
+                    "spreadsheetImportOptions: unsupported EmptyLineRule '{rule}'"
+                )));
+            }
+            self.empty_line_rule = rule.to_ascii_lowercase();
+        } else if name.eq_ignore_ascii_case("TextType") {
+            let text_type = scalar_text(value, "TextType")?;
+            if !(text_type.eq_ignore_ascii_case("string") || text_type.eq_ignore_ascii_case("char"))
+            {
+                return Err(invalid_argument(format!(
+                    "spreadsheetImportOptions: unsupported TextType '{text_type}'"
+                )));
+            }
+            self.text_type = text_type.to_ascii_lowercase();
+        } else if name.eq_ignore_ascii_case("DatetimeType") {
+            let datetime_type = scalar_text(value, "DatetimeType")?;
+            if !(datetime_type.eq_ignore_ascii_case("datetime")
+                || datetime_type.eq_ignore_ascii_case("text")
+                || datetime_type.eq_ignore_ascii_case("exceldatenum"))
+            {
+                return Err(invalid_argument(format!(
+                    "spreadsheetImportOptions: unsupported DatetimeType '{datetime_type}'"
+                )));
+            }
+            self.datetime_type = datetime_type.to_ascii_lowercase();
+        } else {
+            return Err(invalid_argument(format!(
+                "spreadsheetImportOptions: unsupported option '{name}'"
+            )));
+        }
+        Ok(())
+    }
+
+    fn resize_variables(&mut self, num_variables: usize) {
+        self.num_variables = num_variables;
+        if self.variable_names.len() > num_variables {
+            self.variable_names.truncate(num_variables);
+        }
+        if self.variable_types.len() > num_variables {
+            self.variable_types.truncate(num_variables);
+        }
+        self.ensure_variable_metadata_len();
+    }
+
+    fn align_variable_metadata_count(&mut self, len: usize, field: &str) -> BuiltinResult<()> {
+        if self.num_variables == 0 {
+            self.num_variables = len;
+            return Ok(());
+        }
+        if len > self.num_variables {
+            return Err(invalid_argument(format!(
+                "spreadsheetImportOptions: {field} length exceeds NumVariables"
+            )));
+        }
+        Ok(())
+    }
+
+    fn ensure_variable_metadata_len(&mut self) {
+        if self.num_variables == 0 {
+            return;
+        }
+        while self.variable_names.len() < self.num_variables {
+            self.variable_names
+                .push(format!("Var{}", self.variable_names.len() + 1));
+        }
+        self.variable_names.truncate(self.num_variables);
+        while self.variable_types.len() < self.num_variables {
+            self.variable_types.push("auto".to_string());
+        }
+        self.variable_types.truncate(self.num_variables);
+    }
+
+    fn into_struct(mut self) -> BuiltinResult<StructValue> {
+        self.ensure_variable_metadata_len();
+        let mut out = StructValue::new();
+        out.insert("FileType", Value::String("spreadsheet".to_string()));
+        out.insert("NumVariables", Value::Num(self.num_variables as f64));
+        if let Some(read_variable_names) = self.read_variable_names {
+            out.insert("ReadVariableNames", Value::Bool(read_variable_names));
+        }
+        out.insert("ReadRowNames", Value::Bool(self.read_row_names));
+        out.insert(
+            "VariableNames",
+            Value::StringArray(
+                StringArray::new(
+                    self.variable_names.clone(),
+                    vec![1, self.variable_names.len()],
+                )
+                .map_err(|err| invalid_variable(format!("spreadsheetImportOptions: {err}")))?,
+            ),
+        );
+        out.insert(
+            "VariableTypes",
+            Value::StringArray(
+                StringArray::new(
+                    self.variable_types.clone(),
+                    vec![1, self.variable_types.len()],
+                )
+                .map_err(|err| invalid_variable(format!("spreadsheetImportOptions: {err}")))?,
+            ),
+        );
+        out.insert(
+            "DataRange",
+            self.data_range
+                .unwrap_or_else(|| Value::String(String::new())),
+        );
+        out.insert(
+            "Sheet",
+            self.sheet.unwrap_or_else(|| Value::String(String::new())),
+        );
+        out.insert(
+            "TreatAsMissing",
+            Value::StringArray(
+                StringArray::new(
+                    self.treat_as_missing.clone(),
+                    vec![1, self.treat_as_missing.len()],
+                )
+                .map_err(|err| invalid_variable(format!("spreadsheetImportOptions: {err}")))?,
+            ),
+        );
+        out.insert(
+            "PreserveVariableNames",
+            Value::Bool(self.preserve_variable_names),
+        );
+        out.insert(
+            "VariableNamingRule",
+            Value::String(if self.preserve_variable_names {
+                "preserve".to_string()
+            } else {
+                "modify".to_string()
+            }),
+        );
+        out.insert("EmptyLineRule", Value::String(self.empty_line_rule));
+        out.insert("TextType", Value::String(self.text_type));
+        out.insert("DatetimeType", Value::String(self.datetime_type));
+        Ok(out)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ImportVariableType {
+    Auto,
+    Numeric(NumericDType),
+    Logical,
+    Text(TextImportType),
+    CellStr,
+    Datetime,
+    Duration,
+}
+
+impl ImportVariableType {
+    fn parse(raw: &str) -> BuiltinResult<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "" | "auto" => Ok(Self::Auto),
+            "double" => Ok(Self::Numeric(NumericDType::F64)),
+            "single" => Ok(Self::Numeric(NumericDType::F32)),
+            "uint8" => Ok(Self::Numeric(NumericDType::U8)),
+            "uint16" => Ok(Self::Numeric(NumericDType::U16)),
+            "logical" | "bool" | "boolean" => Ok(Self::Logical),
+            "string" => Ok(Self::Text(TextImportType::String)),
+            "char" => Ok(Self::Text(TextImportType::Char)),
+            "cellstr" => Ok(Self::CellStr),
+            "int8" | "int16" | "int32" | "int64" | "uint32" | "uint64" => {
+                Err(invalid_argument(format!(
+                    "readtable: unsupported VariableTypes entry '{}'; RunMat table imports currently support double, single, uint8, and uint16 numeric arrays",
+                    raw.trim()
+                )))
+            }
+            "categorical" => Err(invalid_argument(
+                "readtable: unsupported VariableTypes entry 'categorical'; categorical arrays are not implemented in RunMat yet",
+            )),
+            "datetime" => Ok(Self::Datetime),
+            "duration" => Ok(Self::Duration),
+            other => Err(invalid_argument(format!(
+                "readtable: unsupported VariableTypes entry '{other}'"
+            ))),
+        }
+    }
+
+    fn canonical_label(raw: &str) -> BuiltinResult<String> {
+        Self::parse(raw)?;
+        let label = raw.trim().to_ascii_lowercase();
+        Ok(if label.is_empty() {
+            "auto".to_string()
+        } else {
+            label
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TextImportType {
+    String,
+    Char,
+}
+
+impl TextImportType {
+    fn parse(value: &Value, context: &str) -> BuiltinResult<Self> {
+        let text_type = scalar_text(value, "TextType")?;
+        match text_type.trim().to_ascii_lowercase().as_str() {
+            "string" => Ok(Self::String),
+            "char" => Ok(Self::Char),
+            other => Err(invalid_argument(format!(
+                "{context}: unsupported TextType '{other}'"
+            ))),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum EmptyLineRule {
     Skip,
     Read,
+}
+
+#[derive(Clone, Copy)]
+enum DatetimeImportType {
+    Datetime,
+    Text,
+    ExcelDatenum,
+}
+
+impl DatetimeImportType {
+    fn parse(value: &Value) -> BuiltinResult<Self> {
+        let text = scalar_text(value, "DatetimeType")?;
+        match text.trim().to_ascii_lowercase().as_str() {
+            "datetime" => Ok(Self::Datetime),
+            "text" => Ok(Self::Text),
+            "exceldatenum" => Ok(Self::ExcelDatenum),
+            other => Err(invalid_argument(format!(
+                "readtable: unsupported DatetimeType '{other}'"
+            ))),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1476,14 +1856,6 @@ fn import_rows_to_table(
     mut rows: Vec<Vec<ImportCell>>,
     options: &ReadTableOptions,
 ) -> BuiltinResult<Value> {
-    if rows.is_empty() {
-        return table_from_columns_with_properties(
-            Vec::new(),
-            Vec::new(),
-            options.row_names.clone(),
-        );
-    }
-
     let mut variable_names = options.variable_names.clone();
     let read_variable_names = options
         .read_variable_names
@@ -1517,26 +1889,8 @@ fn import_rows_to_table(
         }
     }
 
-    let max_cols = rows
-        .iter()
-        .map(Vec::len)
-        .max()
-        .unwrap_or(0)
-        .max(variable_names.as_ref().map(Vec::len).unwrap_or(0));
-    let names = match variable_names {
-        Some(mut names) => {
-            while names.len() < max_cols {
-                names.push(format!("Var{}", names.len() + 1));
-            }
-            names.truncate(max_cols);
-            if options.preserve_variable_names {
-                make_unique_names(names)
-            } else {
-                make_unique_variable_names(names)
-            }
-        }
-        None => generated_variable_names(max_cols),
-    };
+    let column_count = import_column_count(&rows, &variable_names, options)?;
+    let names = import_variable_names(variable_names, column_count, options);
 
     let mut columns = Vec::with_capacity(names.len());
     for col in 0..names.len() {
@@ -1544,9 +1898,59 @@ fn import_rows_to_table(
             .iter()
             .map(|row| row.get(col).cloned().unwrap_or(ImportCell::Empty))
             .collect::<Vec<_>>();
-        columns.push(infer_import_column(values, options)?);
+        let requested_type = options
+            .variable_types
+            .as_ref()
+            .and_then(|types| types.get(col))
+            .copied();
+        columns.push(import_column(values, options, requested_type)?);
     }
     table_from_columns_with_properties(names, columns, row_names)
+}
+
+fn import_column_count(
+    rows: &[Vec<ImportCell>],
+    variable_names: &Option<Vec<String>>,
+    options: &ReadTableOptions,
+) -> BuiltinResult<usize> {
+    let data_cols = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let name_cols = variable_names.as_ref().map(Vec::len).unwrap_or(0);
+    let type_cols = options.variable_types.as_ref().map(Vec::len).unwrap_or(0);
+    if let Some(count) = options.num_variables {
+        if name_cols > count {
+            return Err(invalid_argument(
+                "readtable: VariableNames length exceeds NumVariables",
+            ));
+        }
+        if type_cols > count {
+            return Err(invalid_argument(
+                "readtable: VariableTypes length exceeds NumVariables",
+            ));
+        }
+        return Ok(count);
+    }
+    Ok(data_cols.max(name_cols).max(type_cols))
+}
+
+fn import_variable_names(
+    variable_names: Option<Vec<String>>,
+    column_count: usize,
+    options: &ReadTableOptions,
+) -> Vec<String> {
+    match variable_names {
+        Some(mut names) => {
+            while names.len() < column_count {
+                names.push(format!("Var{}", names.len() + 1));
+            }
+            names.truncate(column_count);
+            if options.preserve_variable_names {
+                make_unique_names(names)
+            } else {
+                make_unique_variable_names(names)
+            }
+        }
+        None => generated_variable_names(column_count),
+    }
 }
 
 fn should_read_variable_names(rows: &[Vec<ImportCell>], options: &ReadTableOptions) -> bool {
@@ -1568,6 +1972,281 @@ fn should_read_variable_names(rows: &[Vec<ImportCell>], options: &ReadTableOptio
         return false;
     }
     true
+}
+
+fn import_column(
+    values: Vec<ImportCell>,
+    options: &ReadTableOptions,
+    requested_type: Option<ImportVariableType>,
+) -> BuiltinResult<Value> {
+    match requested_type.unwrap_or(ImportVariableType::Auto) {
+        ImportVariableType::Auto => infer_import_column(values, options),
+        ImportVariableType::Numeric(dtype) => import_numeric_column(values, options, dtype),
+        ImportVariableType::Logical => import_logical_column(values, options),
+        ImportVariableType::Text(kind) => import_text_column(values, options, kind),
+        ImportVariableType::CellStr => import_cellstr_column(values, options),
+        ImportVariableType::Datetime => import_datetime_column(values, options),
+        ImportVariableType::Duration => import_duration_column(values, options),
+    }
+}
+
+fn import_numeric_column(
+    values: Vec<ImportCell>,
+    options: &ReadTableOptions,
+    dtype: NumericDType,
+) -> BuiltinResult<Value> {
+    let mut numeric = Vec::with_capacity(values.len());
+    for value in &values {
+        let parsed = numeric_from_import_cell(value, options, dtype.class_name())?;
+        numeric.push(cast_import_numeric(parsed, dtype));
+    }
+    Tensor::new_with_dtype(numeric, vec![values.len(), 1], dtype)
+        .map(Value::Tensor)
+        .map_err(|err| invalid_variable(format!("readtable: {err}")))
+}
+
+fn numeric_from_import_cell(
+    value: &ImportCell,
+    options: &ReadTableOptions,
+    context: &str,
+) -> BuiltinResult<f64> {
+    match value {
+        ImportCell::Empty => Ok(f64::NAN),
+        ImportCell::Number(value) => Ok(*value),
+        ImportCell::Logical(value) => Ok(if *value { 1.0 } else { 0.0 }),
+        ImportCell::DateTime(serial) => Ok(*serial),
+        ImportCell::Text(text) => {
+            let token = unquote(text.trim()).trim();
+            if options.is_missing(token) {
+                Ok(f64::NAN)
+            } else {
+                parse_numeric(token).ok_or_else(|| {
+                    invalid_variable(format!("readtable: cannot import '{token}' as {context}"))
+                })
+            }
+        }
+        ImportCell::Error(text) => Err(invalid_variable(format!(
+            "readtable: cannot import spreadsheet error '{text}' as {context}"
+        ))),
+    }
+}
+
+fn cast_import_numeric(value: f64, dtype: NumericDType) -> f64 {
+    match dtype {
+        NumericDType::F64 => value,
+        NumericDType::F32 => (value as f32) as f64,
+        NumericDType::U8 => {
+            if value.is_finite() {
+                value.round().clamp(0.0, u8::MAX as f64)
+            } else {
+                0.0
+            }
+        }
+        NumericDType::U16 => {
+            if value.is_finite() {
+                value.round().clamp(0.0, u16::MAX as f64)
+            } else {
+                0.0
+            }
+        }
+    }
+}
+
+fn import_logical_column(
+    values: Vec<ImportCell>,
+    options: &ReadTableOptions,
+) -> BuiltinResult<Value> {
+    let mut logical = Vec::with_capacity(values.len());
+    for value in &values {
+        logical.push(logical_from_import_cell(value, options)?);
+    }
+    LogicalArray::new(logical, vec![values.len(), 1])
+        .map(Value::LogicalArray)
+        .map_err(|err| invalid_variable(format!("readtable: {err}")))
+}
+
+fn logical_from_import_cell(value: &ImportCell, options: &ReadTableOptions) -> BuiltinResult<u8> {
+    let flag = match value {
+        ImportCell::Empty => false,
+        ImportCell::Logical(value) => *value,
+        ImportCell::Number(value) => *value != 0.0,
+        ImportCell::DateTime(serial) => *serial != 0.0,
+        ImportCell::Text(text) => {
+            let token = unquote(text.trim()).trim();
+            if options.is_missing(token) {
+                false
+            } else if let Some(value) = parse_logical(token) {
+                value
+            } else if let Some(value) = parse_numeric(token) {
+                value != 0.0
+            } else {
+                return Err(invalid_variable(format!(
+                    "readtable: cannot import '{token}' as logical"
+                )));
+            }
+        }
+        ImportCell::Error(text) => {
+            return Err(invalid_variable(format!(
+                "readtable: cannot import spreadsheet error '{text}' as logical"
+            )));
+        }
+    };
+    Ok(u8::from(flag))
+}
+
+fn import_text_column(
+    values: Vec<ImportCell>,
+    options: &ReadTableOptions,
+    kind: TextImportType,
+) -> BuiltinResult<Value> {
+    let strings = import_text_values(values, options);
+    match kind {
+        TextImportType::String => StringArray::new(strings.clone(), vec![strings.len(), 1])
+            .map(Value::StringArray)
+            .map_err(|err| invalid_variable(format!("readtable: {err}"))),
+        TextImportType::Char => import_char_column(strings),
+    }
+}
+
+fn import_text_values(values: Vec<ImportCell>, options: &ReadTableOptions) -> Vec<String> {
+    values
+        .into_iter()
+        .map(|value| {
+            if value.is_missing(options) {
+                String::new()
+            } else {
+                unquote(value.display_text().trim()).to_string()
+            }
+        })
+        .collect()
+}
+
+fn import_char_column(strings: Vec<String>) -> BuiltinResult<Value> {
+    let rows = strings.len();
+    let cols = strings
+        .iter()
+        .map(|text| text.chars().count())
+        .max()
+        .unwrap_or(0);
+    let mut data = vec![' '; rows * cols];
+    for (row, text) in strings.iter().enumerate() {
+        for (col, ch) in text.chars().enumerate() {
+            data[row * cols + col] = ch;
+        }
+    }
+    CharArray::new(data, rows, cols)
+        .map(Value::CharArray)
+        .map_err(|err| invalid_variable(format!("readtable: {err}")))
+}
+
+fn import_cellstr_column(
+    values: Vec<ImportCell>,
+    options: &ReadTableOptions,
+) -> BuiltinResult<Value> {
+    let strings = import_text_values(values, options);
+    let rows = strings.len();
+    let cells = strings
+        .into_iter()
+        .map(|text| Value::CharArray(CharArray::new_row(&text)))
+        .collect::<Vec<_>>();
+    CellArray::new(cells, rows, 1)
+        .map(Value::Cell)
+        .map_err(|err| invalid_variable(format!("readtable: {err}")))
+}
+
+fn import_datetime_column(
+    values: Vec<ImportCell>,
+    options: &ReadTableOptions,
+) -> BuiltinResult<Value> {
+    if matches!(options.datetime_type, DatetimeImportType::Text) {
+        return import_text_column(values, options, options.text_type);
+    }
+
+    let mut serials = Vec::with_capacity(values.len());
+    for value in &values {
+        serials.push(datetime_serial_from_import_cell(value, options)?);
+    }
+    let tensor = Tensor::new(serials, vec![values.len(), 1])
+        .map_err(|err| invalid_variable(format!("readtable: {err}")))?;
+    if matches!(options.datetime_type, DatetimeImportType::ExcelDatenum) {
+        Ok(Value::Tensor(tensor))
+    } else {
+        crate::builtins::datetime::datetime_object_from_serial_tensor(tensor, "yyyy-MM-dd HH:mm:ss")
+    }
+}
+
+fn datetime_serial_from_import_cell(
+    value: &ImportCell,
+    options: &ReadTableOptions,
+) -> BuiltinResult<f64> {
+    match value {
+        ImportCell::Empty => Ok(f64::NAN),
+        ImportCell::DateTime(serial) => Ok(*serial),
+        ImportCell::Number(value) => Ok(*value),
+        ImportCell::Text(text) => {
+            let token = unquote(text.trim()).trim();
+            if options.is_missing(token) {
+                Ok(f64::NAN)
+            } else if let Some(serial) = parse_iso_datetime_to_datenum(token) {
+                Ok(serial)
+            } else if let Some(serial) = parse_numeric(token) {
+                Ok(serial)
+            } else {
+                Err(invalid_variable(format!(
+                    "readtable: cannot import '{token}' as datetime"
+                )))
+            }
+        }
+        ImportCell::Logical(_) => Err(invalid_variable(
+            "readtable: cannot import logical value as datetime",
+        )),
+        ImportCell::Error(text) => Err(invalid_variable(format!(
+            "readtable: cannot import spreadsheet error '{text}' as datetime"
+        ))),
+    }
+}
+
+fn import_duration_column(
+    values: Vec<ImportCell>,
+    options: &ReadTableOptions,
+) -> BuiltinResult<Value> {
+    let mut days = Vec::with_capacity(values.len());
+    for value in &values {
+        days.push(duration_days_from_import_cell(value, options)?);
+    }
+    let tensor = Tensor::new(days, vec![values.len(), 1])
+        .map_err(|err| invalid_variable(format!("readtable: {err}")))?;
+    crate::builtins::duration::duration_object_from_days_tensor(
+        tensor,
+        crate::builtins::duration::DEFAULT_DURATION_FORMAT,
+    )
+}
+
+fn duration_days_from_import_cell(
+    value: &ImportCell,
+    options: &ReadTableOptions,
+) -> BuiltinResult<f64> {
+    match value {
+        ImportCell::Empty => Ok(f64::NAN),
+        ImportCell::Number(value) => Ok(*value),
+        ImportCell::Logical(value) => Ok(if *value { 1.0 } else { 0.0 }),
+        ImportCell::Text(text) => {
+            let token = unquote(text.trim()).trim();
+            if options.is_missing(token) {
+                Ok(f64::NAN)
+            } else {
+                parse_duration_to_days(token).ok_or_else(|| {
+                    invalid_variable(format!("readtable: cannot import '{token}' as duration"))
+                })
+            }
+        }
+        ImportCell::DateTime(_) => Err(invalid_variable(
+            "readtable: cannot import datetime value as duration",
+        )),
+        ImportCell::Error(text) => Err(invalid_variable(format!(
+            "readtable: cannot import spreadsheet error '{text}' as duration"
+        ))),
+    }
 }
 
 fn infer_import_column(
@@ -1632,51 +2311,44 @@ fn infer_import_column(
             .map_err(|err| invalid_variable(format!("readtable: {err}")));
     }
 
-    let mut serials = Vec::with_capacity(values.len());
-    let mut all_datetime = true;
-    for value in &values {
-        match value {
-            ImportCell::Empty => serials.push(f64::NAN),
-            ImportCell::DateTime(serial) => serials.push(*serial),
-            ImportCell::Text(text) => {
-                let token = unquote(text.trim()).trim();
-                if options.is_missing(token) {
-                    serials.push(f64::NAN);
-                } else if let Some(serial) = parse_iso_datetime_to_datenum(token) {
-                    serials.push(serial);
-                } else {
+    if !matches!(options.datetime_type, DatetimeImportType::Text) {
+        let mut serials = Vec::with_capacity(values.len());
+        let mut all_datetime = true;
+        for value in &values {
+            match value {
+                ImportCell::Empty => serials.push(f64::NAN),
+                ImportCell::DateTime(serial) => serials.push(*serial),
+                ImportCell::Text(text) => {
+                    let token = unquote(text.trim()).trim();
+                    if options.is_missing(token) {
+                        serials.push(f64::NAN);
+                    } else if let Some(serial) = parse_iso_datetime_to_datenum(token) {
+                        serials.push(serial);
+                    } else {
+                        all_datetime = false;
+                        break;
+                    }
+                }
+                _ => {
                     all_datetime = false;
                     break;
                 }
             }
-            _ => {
-                all_datetime = false;
-                break;
+        }
+        if all_datetime {
+            let tensor = Tensor::new(serials, vec![values.len(), 1])
+                .map_err(|err| invalid_variable(format!("readtable: {err}")))?;
+            if matches!(options.datetime_type, DatetimeImportType::ExcelDatenum) {
+                return Ok(Value::Tensor(tensor));
             }
+            return crate::builtins::datetime::datetime_object_from_serial_tensor(
+                tensor,
+                "yyyy-MM-dd HH:mm:ss",
+            );
         }
     }
-    if all_datetime {
-        let tensor = Tensor::new(serials, vec![values.len(), 1])
-            .map_err(|err| invalid_variable(format!("readtable: {err}")))?;
-        return crate::builtins::datetime::datetime_object_from_serial_tensor(
-            tensor,
-            "yyyy-MM-dd HH:mm:ss",
-        );
-    }
 
-    let strings = values
-        .into_iter()
-        .map(|value| {
-            if value.is_missing(options) {
-                return String::new();
-            }
-            unquote(value.display_text().trim()).to_string()
-        })
-        .collect::<Vec<_>>();
-    let len = strings.len();
-    StringArray::new(strings, vec![len, 1])
-        .map(Value::StringArray)
-        .map_err(|err| invalid_variable(format!("readtable: {err}")))
+    import_text_column(values, options, options.text_type)
 }
 
 fn parse_numeric(token: &str) -> Option<f64> {
@@ -1694,6 +2366,47 @@ fn parse_logical(token: &str) -> Option<bool> {
         "false" | "f" | "no" | "off" => Some(false),
         _ => None,
     }
+}
+
+fn parse_duration_to_days(token: &str) -> Option<f64> {
+    parse_numeric(token).or_else(|| parse_clock_duration_to_days(token))
+}
+
+fn parse_clock_duration_to_days(token: &str) -> Option<f64> {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let (sign, body) = if let Some(rest) = trimmed.strip_prefix('-') {
+        (-1.0, rest)
+    } else if let Some(rest) = trimmed.strip_prefix('+') {
+        (1.0, rest)
+    } else {
+        (1.0, trimmed)
+    };
+    let parts = body.split(':').collect::<Vec<_>>();
+    let (hours, minutes, seconds) = match parts.as_slice() {
+        [hours, minutes] => (
+            hours.parse::<f64>().ok()?,
+            minutes.parse::<f64>().ok()?,
+            0.0,
+        ),
+        [hours, minutes, seconds] => (
+            hours.parse::<f64>().ok()?,
+            minutes.parse::<f64>().ok()?,
+            seconds.parse::<f64>().ok()?,
+        ),
+        _ => return None,
+    };
+    if !hours.is_finite()
+        || !minutes.is_finite()
+        || !seconds.is_finite()
+        || !(0.0..60.0).contains(&minutes)
+        || !(0.0..60.0).contains(&seconds)
+    {
+        return None;
+    }
+    Some(sign * (hours * 3600.0 + minutes * 60.0 + seconds) / 86_400.0)
 }
 
 fn parse_iso_datetime_to_datenum(token: &str) -> Option<f64> {
@@ -2313,6 +3026,10 @@ fn value_row_count(value: &Value) -> BuiltinResult<usize> {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .map(|tensor| tensor.rows())
         }
+        Value::Object(obj) if obj.is_class("duration") => {
+            crate::builtins::duration::duration_tensor_from_duration_value(value)
+                .map(|tensor| tensor.rows())
+        }
         Value::Object(obj) if obj.is_class(TABLE_CLASS) => table_height(obj),
         _ => Ok(1),
     }
@@ -2361,6 +3078,21 @@ fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value> {
                 .map(Value::StringArray)
                 .map_err(invalid_variable)
         }
+        Value::CharArray(array) => {
+            let mut data = Vec::with_capacity(rows.len() * array.cols);
+            for &row in rows {
+                if row >= array.rows {
+                    return Err(invalid_index(
+                        "table: char variable row index out of bounds",
+                    ));
+                }
+                let start = row * array.cols;
+                data.extend_from_slice(&array.data[start..start + array.cols]);
+            }
+            CharArray::new(data, rows.len(), array.cols)
+                .map(Value::CharArray)
+                .map_err(invalid_variable)
+        }
         Value::LogicalArray(array) => {
             let source_rows = array.shape.first().copied().unwrap_or(array.data.len());
             let cols = array.shape.get(1).copied().unwrap_or(1);
@@ -2396,6 +3128,19 @@ fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value> {
                     crate::builtins::datetime::datetime_object_from_serial_tensor(
                         tensor,
                         crate::builtins::datetime::datetime_format_from_value(value),
+                    )
+                }
+                _ => unreachable!("select_rows tensor branch returns tensor"),
+            }
+        }
+        Value::Object(obj) if obj.is_class("duration") => {
+            let tensor = crate::builtins::duration::duration_tensor_from_duration_value(value)?;
+            let selected = select_rows(&Value::Tensor(tensor), rows)?;
+            match selected {
+                Value::Tensor(tensor) => {
+                    crate::builtins::duration::duration_object_from_days_tensor(
+                        tensor,
+                        crate::builtins::duration::duration_format_from_value(value),
                     )
                 }
                 _ => unreachable!("select_rows tensor branch returns tensor"),
@@ -2998,6 +3743,37 @@ fn nonnegative_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
     }
 }
 
+fn positive_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
+    let value = nonnegative_usize(value, context)?;
+    if value == 0 {
+        return Err(invalid_argument(format!(
+            "table: {context} must be a positive integer"
+        )));
+    }
+    Ok(value)
+}
+
+fn option_value_is_empty(value: &Value) -> bool {
+    match value {
+        Value::String(text) => text.trim().is_empty(),
+        Value::CharArray(array) => {
+            array.data.is_empty()
+                || (array.rows == 1 && array.data.iter().all(|ch| ch.is_whitespace()))
+        }
+        Value::StringArray(array) => {
+            array.data.is_empty() || (array.data.len() == 1 && array.data[0].trim().is_empty())
+        }
+        Value::Cell(cell) => {
+            cell.data.is_empty()
+                || cell
+                    .data
+                    .iter()
+                    .all(|handle| option_value_is_empty(unsafe { &*handle.as_raw() }))
+        }
+        _ => false,
+    }
+}
+
 fn string_list(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![text.clone()]),
@@ -3017,12 +3793,62 @@ fn string_list(value: &Value) -> BuiltinResult<Vec<String>> {
     }
 }
 
-fn variable_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
+fn optional_raw_variable_name_list(value: &Value) -> BuiltinResult<Option<Vec<String>>> {
+    if option_value_is_empty(value) {
+        Ok(None)
+    } else {
+        raw_variable_name_list(value).map(Some)
+    }
+}
+
+fn raw_variable_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
     let names = string_list(value)?;
     if names.is_empty() {
         return Err(invalid_variable("table: variable names must not be empty"));
     }
-    Ok(make_unique_variable_names(names))
+    Ok(names)
+}
+
+fn variable_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
+    raw_variable_name_list(value).map(make_unique_variable_names)
+}
+
+fn optional_variable_type_list(value: &Value) -> BuiltinResult<Option<Vec<ImportVariableType>>> {
+    if option_value_is_empty(value) {
+        Ok(None)
+    } else {
+        variable_type_list(value).map(Some)
+    }
+}
+
+fn variable_type_list(value: &Value) -> BuiltinResult<Vec<ImportVariableType>> {
+    string_list(value)?
+        .iter()
+        .map(|raw| ImportVariableType::parse(raw))
+        .collect()
+}
+
+fn variable_type_names(value: &Value) -> BuiltinResult<Vec<String>> {
+    string_list(value)?
+        .iter()
+        .map(|raw| ImportVariableType::canonical_label(raw))
+        .collect()
+}
+
+fn optional_range_spec(value: &Value) -> BuiltinResult<Option<RangeSpec>> {
+    if option_value_is_empty(value) {
+        Ok(None)
+    } else {
+        RangeSpec::parse(value).map(Some)
+    }
+}
+
+fn optional_sheet_selector(value: &Value) -> BuiltinResult<Option<SheetSelector>> {
+    if option_value_is_empty(value) {
+        Ok(None)
+    } else {
+        SheetSelector::parse(value).map(Some)
+    }
 }
 
 fn generated_variable_names(count: usize) -> Vec<String> {
@@ -3113,6 +3939,19 @@ mod tests {
             args,
         ))
         .expect_err("expected readtable failure")
+    }
+
+    fn spreadsheet_options(args: Vec<Value>) -> StructValue {
+        match block_on(spreadsheet_import_options_builtin(args)).expect("spreadsheetImportOptions")
+        {
+            Value::Struct(options) => options,
+            other => panic!("expected struct options, got {other:?}"),
+        }
+    }
+
+    fn char_row(array: &CharArray, row: usize) -> String {
+        let start = row * array.cols;
+        array.data[start..start + array.cols].iter().collect()
     }
 
     fn object(value: Value) -> ObjectInstance {
@@ -3359,6 +4198,249 @@ mod tests {
             Value::Tensor(tensor) => assert_eq!(tensor.data, vec![200.0, 90.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn spreadsheet_import_options_registers_public_descriptor() {
+        assert!(runmat_builtins::builtin_function_by_name("spreadsheetImportOptions").is_some());
+        let labels = SPREADSHEET_IMPORT_OPTIONS_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"opts = spreadsheetImportOptions()"));
+        assert!(labels.contains(&"opts = spreadsheetImportOptions(nameValuePairs...)"));
+    }
+
+    #[test]
+    fn spreadsheet_import_options_builds_editable_options_struct() {
+        let options = spreadsheet_options(vec![
+            Value::from("NumVariables"),
+            Value::Num(2.0),
+            Value::from("VariableTypes"),
+            Value::StringArray(
+                StringArray::new(vec!["double".into(), "string".into()], vec![1, 2]).unwrap(),
+            ),
+            Value::from("DataRange"),
+            Value::from("A2:B5"),
+        ]);
+        assert_eq!(
+            options.fields.get("FileType"),
+            Some(&Value::from("spreadsheet"))
+        );
+        assert_eq!(options.fields.get("NumVariables"), Some(&Value::Num(2.0)));
+        assert_eq!(options.fields.get("DataRange"), Some(&Value::from("A2:B5")));
+        match options.fields.get("VariableNames").unwrap() {
+            Value::StringArray(array) => {
+                assert_eq!(array.data, vec!["Var1".to_string(), "Var2".to_string()]);
+                assert_eq!(array.shape, vec![1, 2]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+        match options.fields.get("VariableTypes").unwrap() {
+            Value::StringArray(array) => {
+                assert_eq!(array.data, vec!["double".to_string(), "string".to_string()]);
+                assert_eq!(array.shape, vec![1, 2]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn readtable_consumes_spreadsheet_import_options_struct() {
+        let path = unique_path("readtable_spreadsheet_options");
+        let path = path.with_extension("xlsx");
+        write_minimal_xlsx(&path);
+        let mut options = spreadsheet_options(vec![Value::from("NumVariables"), Value::Num(1.0)]);
+        options.insert("Sheet", Value::from("Data"));
+        options.insert("DataRange", Value::from("C2:C3"));
+        options.insert(
+            "VariableNames",
+            Value::StringArray(StringArray::new(vec!["Amount".into()], vec![1, 1]).unwrap()),
+        );
+        options.insert(
+            "VariableTypes",
+            Value::StringArray(StringArray::new(vec!["double".into()], vec![1, 1]).unwrap()),
+        );
+        let table = object(read_table(&path, vec![Value::Struct(options)]));
+        assert_eq!(
+            table_variable_names_from_object(&table).unwrap(),
+            vec!["Amount".to_string()]
+        );
+        match table_member_get(&table, &Value::from("Amount")).unwrap() {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.data, vec![200.0, 90.0]);
+                assert_eq!(tensor.dtype, NumericDType::F64);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn readtable_default_spreadsheet_options_still_infers_headers() {
+        let path = unique_path("readtable_default_spreadsheet_options");
+        let path = path.with_extension("xlsx");
+        write_minimal_xlsx(&path);
+        let options = spreadsheet_options(Vec::new());
+        let table = object(read_table(&path, vec![Value::Struct(options)]));
+        assert_eq!(
+            table_variable_names_from_object(&table).unwrap(),
+            vec![
+                "Date".to_string(),
+                "Orders".to_string(),
+                "Revenue".to_string()
+            ]
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn readtable_variable_types_coerce_imported_columns() {
+        let path = unique_path("readtable_variable_types");
+        fs::write(
+            &path,
+            "Value,Flag,When,Elapsed\n1.5,true,2026-06-01,01:30:00\n2.25,false,2026-06-02,02:00:00\n",
+        )
+        .expect("write sample");
+        let types = StringArray::new(
+            vec![
+                "single".to_string(),
+                "logical".to_string(),
+                "datetime".to_string(),
+                "duration".to_string(),
+            ],
+            vec![1, 4],
+        )
+        .unwrap();
+        let table = object(read_table(
+            &path,
+            vec![Value::from("VariableTypes"), Value::StringArray(types)],
+        ));
+        match table_member_get(&table, &Value::from("Value")).unwrap() {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.dtype, NumericDType::F32);
+                assert_eq!(tensor.data, vec![1.5, 2.25]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        match table_member_get(&table, &Value::from("Flag")).unwrap() {
+            Value::LogicalArray(array) => assert_eq!(array.data, vec![1, 0]),
+            other => panic!("expected logical array, got {other:?}"),
+        }
+        match table_member_get(&table, &Value::from("When")).unwrap() {
+            Value::Object(object) => assert!(object.is_class("datetime")),
+            other => panic!("expected datetime object, got {other:?}"),
+        }
+        match table_member_get(&table, &Value::from("Elapsed")).unwrap() {
+            Value::Object(object) => assert!(object.is_class("duration")),
+            other => panic!("expected duration object, got {other:?}"),
+        }
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn readtable_preserves_explicit_import_variable_names_when_requested() {
+        let path = unique_path("readtable_preserve_explicit_names");
+        fs::write(&path, "100,10\n125,12\n").expect("write sample");
+        let names = StringArray::new(
+            vec!["daily revenue".to_string(), "total orders".to_string()],
+            vec![1, 2],
+        )
+        .unwrap();
+        let table = object(read_table(
+            &path,
+            vec![
+                Value::from("ReadVariableNames"),
+                Value::Bool(false),
+                Value::from("VariableNames"),
+                Value::StringArray(names),
+                Value::from("VariableNamingRule"),
+                Value::from("preserve"),
+            ],
+        ));
+        assert_eq!(
+            table_variable_names_from_object(&table).unwrap(),
+            vec!["daily revenue".to_string(), "total orders".to_string()]
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn readtable_text_type_char_imports_text_columns_as_char_matrix() {
+        let path = unique_path("readtable_text_type_char");
+        fs::write(&path, "Name\nAda\nGrace\n").expect("write sample");
+        let table = object(read_table(
+            &path,
+            vec![Value::from("TextType"), Value::from("char")],
+        ));
+        match table_member_get(&table, &Value::from("Name")).unwrap() {
+            Value::CharArray(array) => {
+                assert_eq!(array.rows, 2);
+                assert_eq!(array.cols, 5);
+                assert_eq!(char_row(&array, 0), "Ada  ");
+                assert_eq!(char_row(&array, 1), "Grace");
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn readtable_variable_types_cellstr_imports_cell_column() {
+        let path = unique_path("readtable_variable_types_cellstr");
+        fs::write(&path, "Name\nAda\nGrace\n").expect("write sample");
+        let types = StringArray::new(vec!["cellstr".to_string()], vec![1, 1]).unwrap();
+        let table = object(read_table(
+            &path,
+            vec![Value::from("VariableTypes"), Value::StringArray(types)],
+        ));
+        match table_member_get(&table, &Value::from("Name")).unwrap() {
+            Value::Cell(cell) => {
+                assert_eq!(cell.rows, 2);
+                assert_eq!(cell.cols, 1);
+                assert_eq!(
+                    cell.get(0, 0).unwrap(),
+                    Value::CharArray(CharArray::new_row("Ada"))
+                );
+                assert_eq!(
+                    cell.get(1, 0).unwrap(),
+                    Value::CharArray(CharArray::new_row("Grace"))
+                );
+            }
+            other => panic!("expected cell array, got {other:?}"),
+        }
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn readtable_rejects_unrepresented_import_variable_types() {
+        let path = unique_path("readtable_unsupported_variable_types");
+        fs::write(&path, "A\n1\n").expect("write sample");
+        let unsupported_integer = StringArray::new(vec!["int8".to_string()], vec![1, 1]).unwrap();
+        let err = read_table_err(
+            &path,
+            vec![
+                Value::from("VariableTypes"),
+                Value::StringArray(unsupported_integer),
+            ],
+        );
+        assert!(err
+            .message()
+            .contains("unsupported VariableTypes entry 'int8'"));
+        let categorical = StringArray::new(vec!["categorical".to_string()], vec![1, 1]).unwrap();
+        let err = read_table_err(
+            &path,
+            vec![
+                Value::from("VariableTypes"),
+                Value::StringArray(categorical),
+            ],
+        );
+        assert!(err
+            .message()
+            .contains("unsupported VariableTypes entry 'categorical'"));
         let _ = fs::remove_file(&path);
     }
 
