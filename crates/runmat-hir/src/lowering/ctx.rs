@@ -8,14 +8,14 @@ use crate::{
     CallSyntax, CapturedBinding, ClassArgumentBlock, ClassEnumeration, ClassEvent, ClassId,
     ClassKind, ClassMethod, ClassProperty, ClassResolution, CommandArgument, DefPath,
     DefPathSegment, EntrypointId, EntrypointName, EntrypointOrigin, EntrypointPolicy, ExprId,
-    FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, FunctionResolution,
-    HirAssembly, HirBinding, HirBlock, HirCall, HirCallableRef, HirClass, HirCommandCall,
-    HirEntrypoint, HirError, HirExpr, HirExprKind, HirFunction, HirImport, HirIndex, HirModule,
-    HirPlace, HirStmt as HirStmtNode, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
-    IndexResultContext, IndexingSemantics, LoweringContext, LoweringResult, MemberAccess,
-    MemberName, ModuleId, OperatorKind, PackageName, PlaceMutation, PlaceMutationKind,
-    QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount, SourceId,
-    SourceUnitKind, Span, StmtId, StringLiteral, SymbolName, WorkspaceExportPolicy,
+    FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, FunctionOutputArity,
+    FunctionResolution, HirAssembly, HirBinding, HirBlock, HirCall, HirCallableRef, HirClass,
+    HirCommandCall, HirEntrypoint, HirError, HirExpr, HirExprKind, HirFunction, HirImport,
+    HirIndex, HirModule, HirPlace, HirStmt as HirStmtNode, HirStmtKind, ImportResolution,
+    IndexComponent, IndexKind, IndexResultContext, IndexingSemantics, LoweringContext,
+    LoweringResult, MemberAccess, MemberName, ModuleId, OperatorKind, PackageName, PlaceMutation,
+    PlaceMutationKind, QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount,
+    SourceId, SourceUnitKind, Span, StmtId, StringLiteral, SymbolName, WorkspaceExportPolicy,
     WorkspaceVisibility, AWAIT_EXTENSION_NAME, NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME,
     SPAWN_EXTENSION_NAME,
 };
@@ -76,6 +76,8 @@ struct LoweringCtx {
     private_function_aliases: HashMap<String, HashMap<String, String>>,
     private_alias_stack: Vec<HashMap<String, String>>,
     private_owner_stack: Vec<String>,
+    local_function_output_arities: HashMap<FunctionId, FunctionOutputArity>,
+    external_function_output_arities: HashMap<FunctionId, FunctionOutputArity>,
     captures: HashMap<FunctionId, Vec<CapturedBinding>>,
 }
 
@@ -240,6 +242,8 @@ impl LoweringCtx {
             private_function_aliases: context.private_function_aliases.clone(),
             private_alias_stack: Vec::new(),
             private_owner_stack: Vec::new(),
+            local_function_output_arities: HashMap::new(),
+            external_function_output_arities: context.function_output_arities.clone(),
             captures: HashMap::new(),
         };
 
@@ -255,8 +259,8 @@ impl LoweringCtx {
         });
 
         for stmt in &prog.body {
-            if let AstStmt::Function { name, .. } = stmt {
-                let id = ctx.reserve_function_name(name);
+            if let AstStmt::Function { name, outputs, .. } = stmt {
+                let id = ctx.reserve_function_name_with_outputs(name, outputs);
                 ctx.assembly.modules[ctx.module.0]
                     .top_level_functions
                     .push(id);
@@ -392,6 +396,13 @@ impl LoweringCtx {
         }
         let id = self.take_function_id();
         self.function_names.insert(name.to_string(), id);
+        id
+    }
+
+    fn reserve_function_name_with_outputs(&mut self, name: &str, outputs: &[String]) -> FunctionId {
+        let id = self.reserve_function_name(name);
+        self.local_function_output_arities
+            .insert(id, FunctionOutputArity::from_declared_outputs(outputs));
         id
     }
 
@@ -671,6 +682,35 @@ impl LoweringCtx {
         Ok(None)
     }
 
+    fn requested_outputs_for_expr_stmt(&self, expr: &AstExpr) -> RequestedOutputCount {
+        let name = match expr {
+            AstExpr::FuncCall(name, _, _) | AstExpr::Ident(name, _) => name,
+            _ => return RequestedOutputCount::One,
+        };
+        if self.lookup_binding(name).is_none() {
+            if let Some(function) = self.resolve_scoped_function_name(name) {
+                if self
+                    .local_function_output_arities
+                    .get(&function)
+                    .copied()
+                    .is_some_and(FunctionOutputArity::is_declared_zero_output)
+                {
+                    return RequestedOutputCount::Zero;
+                }
+            } else if let Some(function) = self.external_function_names.get(name).copied() {
+                if self
+                    .external_function_output_arities
+                    .get(&function)
+                    .copied()
+                    .is_some_and(FunctionOutputArity::is_declared_zero_output)
+                {
+                    return RequestedOutputCount::Zero;
+                }
+            }
+        }
+        RequestedOutputCount::One
+    }
+
     fn binding_call_expr_kind(
         &mut self,
         binding: BindingId,
@@ -835,8 +875,8 @@ impl LoweringCtx {
                 false,
                 |ctx| {
                     for stmt in body {
-                        if let AstStmt::Function { name, .. } = stmt {
-                            ctx.reserve_function_name(name);
+                        if let AstStmt::Function { name, outputs, .. } = stmt {
+                            ctx.reserve_function_name_with_outputs(name, outputs);
                         }
                     }
                     let mut param_ids = Vec::new();
@@ -1529,7 +1569,7 @@ impl LoweringCtx {
                 let requested_outputs = if *suppressed || loads_external_bindings {
                     RequestedOutputCount::Zero
                 } else {
-                    RequestedOutputCount::One
+                    self.requested_outputs_for_expr_stmt(expr)
                 };
                 let stmt = HirStmtKind::ExprStmt(
                     self.lower_expr_semantic_requested(expr, requested_outputs)?,
@@ -1916,7 +1956,10 @@ impl LoweringCtx {
                         let class_ref = self.classref_expr(&class_name, span)?;
                         HirExprKind::Member(Box::new(class_ref), MemberName(name.clone()))
                     }
-                } else if is_builtin(name) {
+                } else if is_builtin(name)
+                    || self.resolve_scoped_function_name(name).is_some()
+                    || self.external_function_names.contains_key(name)
+                {
                     let mut call = self.call_for_name(
                         name,
                         Vec::new(),
@@ -2530,7 +2573,10 @@ impl LoweringCtx {
             )
         } else if let Some(function) = self.external_function_names.get(name) {
             (
-                HirCallableRef::Function(*function),
+                HirCallableRef::ExternalFunction {
+                    function: *function,
+                    display_name: name.to_string(),
+                },
                 CallKind::DirectFunction(*function),
             )
         } else if method_like_syntax {
@@ -2766,7 +2812,10 @@ impl LoweringCtx {
             return Ok(crate::FunctionHandleTarget::Function(function));
         }
         if let Some(function) = self.external_function_names.get(name) {
-            return Ok(crate::FunctionHandleTarget::Function(*function));
+            return Ok(crate::FunctionHandleTarget::ExternalFunction {
+                function: *function,
+                display_name: name.to_string(),
+            });
         }
         if is_builtin(name) {
             return Ok(crate::FunctionHandleTarget::Builtin(BuiltinId(

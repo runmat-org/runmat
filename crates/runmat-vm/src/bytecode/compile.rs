@@ -6655,10 +6655,11 @@ f3 = limit(sin(z)/z + 1, z, 0);\n",
         let entrypoint = hir.assembly.entrypoints[0].id;
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
-        assert!(bytecode
-            .instructions
-            .iter()
-            .any(|instr| matches!(instr, Instr::CreateBoundFunctionHandle(FunctionId(9001), _))));
+        assert!(bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            Instr::CreateExternalBoundFunctionHandle(FunctionId(9001), name)
+                if name == "remote_inc"
+        )));
 
         let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
             Some(Arc::new(|name| {
@@ -6697,7 +6698,15 @@ f3 = limit(sin(z)/z + 1, z, 0);\n",
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
         assert!(bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            Instr::CallSemanticFunctionMulti(FunctionId(9001), 1, 1)
+            Instr::CallFunctionMulti {
+                identity: CallableIdentity::ExternalFunction {
+                    function: FunctionId(9001),
+                    ..
+                },
+                arg_count: 1,
+                out_count: 1,
+                ..
+            }
         )));
 
         let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(

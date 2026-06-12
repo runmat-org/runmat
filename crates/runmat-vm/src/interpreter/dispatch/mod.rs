@@ -2150,7 +2150,8 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CreateBoundFunctionHandle(function, name) => {
+        Instr::CreateBoundFunctionHandle(function, name)
+        | Instr::CreateExternalBoundFunctionHandle(function, name) => {
             stack.push(Value::BoundFunctionHandle {
                 name: name.clone(),
                 function: function.0,
