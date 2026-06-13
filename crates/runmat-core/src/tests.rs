@@ -1943,6 +1943,56 @@ fn execute_request_supports_command_syntax_rewrites_through_semantic_pipeline() 
 }
 
 #[test]
+fn execute_text_request_resolves_bare_tic_toc_as_zero_arg_builtins() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        tic;
+        pause(0.001);
+        toc;
+
+        tic();
+        elapsedParen = toc();
+
+        tic
+        elapsedBare = toc;
+
+        timerVal = tic();
+        elapsedHandle = toc(timerVal);
+        elapsedDrain = toc();
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    for name in [
+        "elapsedParen",
+        "elapsedBare",
+        "elapsedHandle",
+        "elapsedDrain",
+    ] {
+        let elapsed = outcome.workspace_delta.upserts.iter().find_map(|upsert| {
+            let matches_name = match &upsert.key {
+                abi::WorkspaceBindingKey::Interactive {
+                    name: binding_name, ..
+                } => binding_name.0 == name,
+                abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == name,
+                abi::WorkspaceBindingKey::Global { .. }
+                | abi::WorkspaceBindingKey::Persistent { .. } => false,
+            };
+            if !matches_name {
+                return None;
+            }
+            match upsert.value {
+                runmat_builtins::Value::Num(value) => Some(value),
+                _ => None,
+            }
+        });
+        let elapsed = elapsed.unwrap_or_else(|| panic!("{name} should be a numeric binding"));
+        assert!(
+            elapsed >= 0.0,
+            "{name} should be a nonnegative elapsed time, got {elapsed}"
+        );
+    }
+}
+
+#[test]
 fn execute_request_rejects_command_syntax_in_strict_mode() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let err = block_on(session.execute_request(abi::ExecutionRequest {
