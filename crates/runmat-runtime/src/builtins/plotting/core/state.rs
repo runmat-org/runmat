@@ -662,6 +662,43 @@ pub fn set_sg_title_properties_for_figure(
     Ok(object_handle)
 }
 
+pub fn set_figure_name(handle: FigureHandle, name: String) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        state.figure.set_name(name);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_figure_number_title(handle: FigureHandle, enabled: bool) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        state.figure.set_number_title(enabled);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_figure_visible(
+    handle: FigureHandle,
+    visible: bool,
+) -> Result<(bool, Figure), FigureError> {
+    let ((was_visible, now_visible), figure_clone) = with_figure_mut(handle, |state| {
+        let was_visible = state.figure.visible;
+        state.figure.set_visible(visible);
+        (was_visible, state.figure.visible)
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok((!was_visible && now_visible, figure_clone))
+}
+
+pub fn set_figure_background_color(handle: FigureHandle, color: Vec4) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        state.figure.set_background_color(color);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
 pub fn set_text_properties_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -2317,32 +2354,13 @@ where
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 
-    if rendering_disabled {
-        if host_managed_rendering {
-            return Ok(format!("Figure {} updated", handle.as_u32()));
-        }
-        return Err(plotting_error(builtin, ERR_PLOTTING_UNAVAILABLE));
-    }
-
-    if host_managed_rendering {
-        return Ok(format!("Figure {} updated", handle.as_u32()));
-    }
-
-    // On Web/WASM we deliberately decouple "mutate figure state" from "present pixels".
-    // The host coalesces figure events and presents on a frame cadence, and `drawnow()` /
-    // `pause()` provide explicit "flush" boundaries for scripts.
-    #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
-    {
-        let _ = figure_clone;
-        Ok(format!("Figure {} updated", handle.as_u32()))
-    }
-
-    #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
-    {
-        let rendered = render_figure(handle, figure_clone)
-            .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
-        Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
-    }
+    present_figure_update_with_options(
+        builtin,
+        handle,
+        figure_clone,
+        rendering_disabled,
+        host_managed_rendering,
+    )
 }
 
 pub fn append_active_plot<F>(
@@ -2388,28 +2406,66 @@ where
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 
+    present_figure_update_with_options(
+        builtin,
+        handle,
+        figure_clone,
+        rendering_disabled,
+        host_managed_rendering,
+    )
+}
+
+pub fn present_figure_update(
+    builtin: &'static str,
+    handle: FigureHandle,
+    figure_clone: Figure,
+) -> BuiltinResult<String> {
+    present_figure_update_with_options(
+        builtin,
+        handle,
+        figure_clone,
+        interactive_rendering_disabled(),
+        host_managed_rendering_enabled(),
+    )
+}
+
+fn present_figure_update_with_options(
+    builtin: &'static str,
+    handle: FigureHandle,
+    figure_clone: Figure,
+    rendering_disabled: bool,
+    host_managed_rendering: bool,
+) -> BuiltinResult<String> {
+    let updated = || format!("Figure {} updated", handle.as_u32());
+    if !figure_clone.visible {
+        return Ok(updated());
+    }
+
     if rendering_disabled {
         if host_managed_rendering {
-            return Ok(format!("Figure {} updated", handle.as_u32()));
+            return Ok(updated());
         }
         return Err(plotting_error(builtin, ERR_PLOTTING_UNAVAILABLE));
     }
 
     if host_managed_rendering {
-        return Ok(format!("Figure {} updated", handle.as_u32()));
+        return Ok(updated());
     }
 
+    // On Web/WASM we deliberately decouple "mutate figure state" from "present pixels".
+    // The host coalesces figure events and presents on a frame cadence, and `drawnow()` /
+    // `pause()` provide explicit "flush" boundaries for scripts.
     #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
     {
         let _ = figure_clone;
-        Ok(format!("Figure {} updated", handle.as_u32()))
+        Ok(updated())
     }
 
     #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
     {
         let rendered = render_figure(handle, figure_clone)
             .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
-        Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
+        Ok(format!("{}: {rendered}", updated()))
     }
 }
 
@@ -2500,5 +2556,20 @@ mod tests {
             figure_handles().is_empty(),
             "closing the last figure should not recreate a default visible figure"
         );
+    }
+
+    #[test]
+    fn hidden_figure_update_does_not_require_interactive_renderer() {
+        let _guard = lock_plot_test_registry();
+        ensure_plot_test_env();
+        reset_for_tests();
+
+        let handle = new_figure_handle();
+        let mut figure = clone_figure(handle).expect("figure exists");
+        figure.set_visible(false);
+
+        let result = present_figure_update_with_options("plot", handle, figure, true, false)
+            .expect("hidden figure should not try to present");
+        assert_eq!(result, format!("Figure {} updated", handle.as_u32()));
     }
 }

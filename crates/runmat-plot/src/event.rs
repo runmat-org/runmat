@@ -382,6 +382,9 @@ impl FigureScene {
             figure.y_label = self.metadata.y_label;
             figure.legend_enabled = self.metadata.legend_enabled;
         }
+        figure.name = self.metadata.name;
+        figure.number_title = self.metadata.number_title;
+        figure.visible = self.metadata.visible;
         figure.sg_title = self.metadata.sg_title;
         figure.sg_title_style = self
             .metadata
@@ -447,6 +450,12 @@ pub struct FigureLayout {
 #[serde(rename_all = "camelCase")]
 pub struct FigureMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub number_title: bool,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub visible: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sg_title: Option<String>,
@@ -485,6 +494,9 @@ impl FigureMetadata {
             .collect();
 
         Self {
+            name: figure.name.clone(),
+            number_title: figure.number_title,
+            visible: figure.visible,
             title: figure.title.clone(),
             sg_title: figure.sg_title.clone(),
             sg_title_style: figure
@@ -514,6 +526,14 @@ impl FigureMetadata {
             ),
         }
     }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1804,7 +1824,7 @@ mod tests {
     use crate::plots::{
         Figure, Line3Plot, LinePlot, PatchPlot, Scatter3Plot, ScatterPlot, SurfacePlot,
     };
-    use glam::Vec3;
+    use glam::{Vec3, Vec4};
 
     #[test]
     fn capture_snapshot_reflects_layout_and_metadata() {
@@ -1814,6 +1834,10 @@ mod tests {
             .with_labels("X", "Y")
             .with_grid(false)
             .with_subplot_grid(1, 2);
+        figure.set_name("Window Name");
+        figure.set_number_title(false);
+        figure.set_visible(false);
+        figure.set_background_color(Vec4::new(0.0, 0.0, 0.0, 1.0));
         let line = LinePlot::new(vec![0.0, 1.0], vec![0.0, 1.0]).unwrap();
         figure.add_line_plot_on_axes(line, 1);
 
@@ -1821,7 +1845,11 @@ mod tests {
         assert_eq!(snapshot.layout.axes_rows, 1);
         assert_eq!(snapshot.layout.axes_cols, 2);
         assert_eq!(snapshot.metadata.title.as_deref(), Some("Demo"));
+        assert_eq!(snapshot.metadata.name.as_deref(), Some("Window Name"));
+        assert!(!snapshot.metadata.number_title);
+        assert!(!snapshot.metadata.visible);
         assert_eq!(snapshot.metadata.sg_title.as_deref(), Some("Overview"));
+        assert_eq!(snapshot.metadata.background_rgba, [0.0, 0.0, 0.0, 1.0]);
         assert_eq!(snapshot.metadata.legend_entries.len(), 0);
         assert_eq!(snapshot.plots.len(), 1);
         assert_eq!(snapshot.plots[0].axes_index, 1);
@@ -1847,6 +1875,9 @@ mod tests {
     #[test]
     fn figure_scene_roundtrip_reconstructs_supported_plots() {
         let mut figure = Figure::new().with_title("Replay").with_subplot_grid(1, 2);
+        figure.set_name("Roundtrip");
+        figure.set_number_title(false);
+        figure.set_visible(false);
         let mut line = LinePlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap();
         line.label = Some("line".to_string());
         figure.add_line_plot_on_axes(line, 0);
@@ -1859,6 +1890,9 @@ mod tests {
         assert_eq!(rebuilt.axes_grid(), (1, 2));
         assert_eq!(rebuilt.plots().count(), 2);
         assert_eq!(rebuilt.title.as_deref(), Some("Replay"));
+        assert_eq!(rebuilt.name.as_deref(), Some("Roundtrip"));
+        assert!(!rebuilt.number_title);
+        assert!(!rebuilt.visible);
     }
 
     #[test]

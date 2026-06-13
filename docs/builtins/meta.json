@@ -20993,6 +20993,55 @@
               "description": "Figure handle."
             }
           ]
+        },
+        {
+          "label": "fig = figure(property, value, ...)",
+          "inputs": [
+            {
+              "name": "properties",
+              "ty": "PropertyName",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Figure property/value pairs such as 'Name', 'NumberTitle', 'Visible', or 'Color'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "fig",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure handle."
+            }
+          ]
+        },
+        {
+          "label": "fig = figure(h, property, value, ...)",
+          "inputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "\"next\"",
+              "description": "Figure handle or 'next' to create/select the next figure."
+            },
+            {
+              "name": "properties",
+              "ty": "PropertyName",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Figure property/value pairs to apply after selecting or creating the figure."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "fig",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure handle."
+            }
+          ]
         }
       ],
       "errors": [

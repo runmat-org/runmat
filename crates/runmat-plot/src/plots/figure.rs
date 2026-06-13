@@ -24,6 +24,9 @@ pub struct Figure {
     plots: Vec<PlotElement>,
 
     /// Figure-level settings
+    pub name: Option<String>,
+    pub number_title: bool,
+    pub visible: bool,
     pub title: Option<String>,
     pub sg_title: Option<String>,
     pub x_label: Option<String>,
@@ -225,6 +228,9 @@ impl Figure {
     pub fn new() -> Self {
         Self {
             plots: Vec::new(),
+            name: None,
+            number_title: true,
+            visible: true,
             title: None,
             sg_title: None,
             x_label: None,
@@ -343,6 +349,36 @@ impl Figure {
     pub fn set_sg_title_style(&mut self, style: TextStyle) {
         self.sg_title_style = style;
         self.dirty = true;
+    }
+
+    pub fn set_name<S: Into<String>>(&mut self, name: S) {
+        self.name = Some(name.into());
+        self.dirty = true;
+    }
+
+    pub fn set_number_title(&mut self, enabled: bool) {
+        self.number_title = enabled;
+        self.dirty = true;
+    }
+
+    pub fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+        self.dirty = true;
+    }
+
+    pub fn window_title(&self, handle: Option<u32>) -> String {
+        let name = self.name.as_deref().map(str::trim).unwrap_or_default();
+        let numbered = if self.number_title {
+            handle.filter(|h| *h > 0).map(|h| format!("Figure {h}"))
+        } else {
+            None
+        };
+        match (numbered, name.is_empty()) {
+            (Some(numbered), false) => format!("{numbered}: {name}"),
+            (Some(numbered), true) => numbered,
+            (None, false) => name.to_string(),
+            (None, true) => "RunMat Plot".to_string(),
+        }
     }
 
     pub fn has_any_titles(&self) -> bool {
@@ -677,8 +713,13 @@ impl Figure {
 
     /// Set background color
     pub fn with_background_color(mut self, color: Vec4) -> Self {
-        self.background_color = color;
+        self.set_background_color(color);
         self
+    }
+
+    pub fn set_background_color(&mut self, color: Vec4) {
+        self.background_color = color;
+        self.dirty = true;
     }
 
     /// Set log scale flags
@@ -1898,6 +1939,21 @@ mod tests {
         assert_eq!(figure.y_label, Some("Y Axis".to_string()));
         assert!(!figure.legend_enabled);
         assert!(!figure.grid_enabled);
+    }
+
+    #[test]
+    fn test_window_title_follows_name_and_number_title() {
+        let mut figure = Figure::new();
+        assert_eq!(figure.window_title(Some(7)), "Figure 7");
+
+        figure.set_name("demo");
+        assert_eq!(figure.window_title(Some(7)), "Figure 7: demo");
+
+        figure.set_number_title(false);
+        assert_eq!(figure.window_title(Some(7)), "demo");
+
+        figure.set_name("   ");
+        assert_eq!(figure.window_title(Some(7)), "RunMat Plot");
     }
 
     #[test]
