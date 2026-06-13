@@ -2,7 +2,9 @@ use super::{
     ffi, topology_from_raw, OcctCadFormat, OcctCadTopology, OcctRawAssemblyNode,
     OcctRawFaceSemantic, OcctRawTopology,
 };
-use crate::import::{GeometryImportError, GeometryImportOptions};
+use crate::import::{
+    GeometryImportBudgetPolicy, GeometryImportContext, GeometryImportError, GeometryImportOptions,
+};
 
 const DEFAULT_LINEAR_DEFLECTION: f64 = 0.01;
 const DEFAULT_ANGULAR_DEFLECTION: f64 = 0.5;
@@ -12,24 +14,44 @@ pub(crate) fn import_cad_topology(
     bytes: &[u8],
     format: OcctCadFormat,
     options: &GeometryImportOptions,
+    context: &GeometryImportContext,
 ) -> Result<OcctCadTopology, GeometryImportError> {
-    let payload = ffi::ffi::import_cad_bytes(
+    context.check_cancelled()?;
+    let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_flag());
+    let linear_deflection = options
+        .tessellation_profile
+        .chord_tolerance
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(DEFAULT_LINEAR_DEFLECTION);
+    let angular_deflection = options
+        .tessellation_profile
+        .angle_tolerance_deg
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .map(f64::to_radians)
+        .unwrap_or(DEFAULT_ANGULAR_DEFLECTION);
+    let payload = ffi::bridge::import_cad_bytes(
         path,
         bytes,
         ffi_format(format),
-        ffi::ffi::OcctImportOptions {
-            linear_deflection: DEFAULT_LINEAR_DEFLECTION,
-            angular_deflection: DEFAULT_ANGULAR_DEFLECTION,
-            relative_deflection: false,
+        ffi::bridge::OcctImportOptions {
+            linear_deflection,
+            angular_deflection,
+            relative_deflection: options.relative_deflection,
             max_triangles: options.max_triangles.unwrap_or(u64::MAX),
+            truncate_at_max_triangles: options.budget_policy
+                == GeometryImportBudgetPolicy::Truncate,
+            cancel_token_id: cancel_token.id(),
         },
     )
     .map_err(|err| GeometryImportError::ParseFailed(format!("OCCT CAD import failed: {err}")))?;
+    context.check_cancelled()?;
 
     topology_from_raw(
         OcctRawTopology {
             backend: payload.backend,
             format_name: payload.format_name,
+            truncated: payload.truncated,
+            triangle_budget: payload.triangle_budget,
             vertices: payload.vertices,
             triangles: payload.triangles,
             triangle_face_ids: payload.triangle_face_ids,
@@ -69,13 +91,14 @@ pub(crate) fn import_cad_topology(
             warnings: payload.warnings,
         },
         options,
+        context,
     )
 }
 
-fn ffi_format(format: OcctCadFormat) -> ffi::ffi::OcctCadFormat {
+fn ffi_format(format: OcctCadFormat) -> ffi::bridge::OcctCadFormat {
     match format {
-        OcctCadFormat::Step => ffi::ffi::OcctCadFormat::Step,
-        OcctCadFormat::Iges => ffi::ffi::OcctCadFormat::Iges,
-        OcctCadFormat::Brep => ffi::ffi::OcctCadFormat::Brep,
+        OcctCadFormat::Step => ffi::bridge::OcctCadFormat::Step,
+        OcctCadFormat::Iges => ffi::bridge::OcctCadFormat::Iges,
+        OcctCadFormat::Brep => ffi::bridge::OcctCadFormat::Brep,
     }
 }

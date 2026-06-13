@@ -11,6 +11,7 @@ use crate::{
         FeaDiagnostic, FeaDiagnosticSeverity,
     },
     physics::{coupling::thermo_mechanical, thermal::constitutive_stats},
+    progress::{check_cancelled, emit_phase, is_cancelled, FeaProgressPhase, FeaProgressStatus},
 };
 
 pub fn run_thermal(
@@ -25,7 +26,25 @@ pub fn run_thermal_with_options(
     backend: ComputeBackend,
     options: ThermalSolveOptions,
 ) -> Result<FeaThermalRunResult, FeaRunError> {
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::RegionResolution,
+        FeaProgressStatus::Started,
+        "validating thermal FEA model",
+        Some(0),
+        Some(5),
+    );
+    check_cancelled("fea.run_thermal")?;
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::RegionResolution,
+        FeaProgressStatus::Completed,
+        "thermal model validation complete",
+        Some(1),
+        Some(5),
+    );
+    check_cancelled("fea.run_thermal")?;
 
     let Some(thermo_context) = options.thermo_mechanical_context.clone() else {
         return Err(FeaRunError::InvalidModel(
@@ -39,12 +58,29 @@ pub fn run_thermal_with_options(
     }
 
     let step_count = options.step_count.max(2);
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Started,
+        "assembling thermal system",
+        Some(1),
+        Some(5),
+    );
     let summary = assemble_linear_system(
         model,
         options.prep_context,
         Some(thermo_context.clone()),
         None,
     );
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Completed,
+        "thermal system assembly complete",
+        Some(2),
+        Some(5),
+    );
+    check_cancelled("fea.run_thermal")?;
     let node_count = (summary.dof_count / 3).max(1);
 
     let region_avg_delta = if thermo_context.region_temperature_deltas.is_empty() {
@@ -70,7 +106,34 @@ pub fn run_thermal_with_options(
     let relax_gain = (constitutive.response_rate * dt * 10.0).clamp(0.05, 0.7);
     let diffusion_gain = (constitutive.diffusivity_proxy * dt * 2.0e6).clamp(0.0, 0.2);
 
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Started,
+        "solving thermal time steps",
+        Some(2),
+        Some(5),
+    );
     for step in 0..step_count {
+        if is_cancelled() {
+            emit_phase(
+                "fea.run_thermal",
+                FeaProgressPhase::Solve,
+                FeaProgressStatus::Cancelled,
+                "thermal solve cancelled",
+                Some(step as u64),
+                Some(step_count as u64),
+            );
+            break;
+        }
+        emit_phase(
+            "fea.run_thermal",
+            FeaProgressPhase::Solve,
+            FeaProgressStatus::Advanced,
+            format!("solving thermal step {}", step + 1),
+            Some(step as u64),
+            Some(step_count as u64),
+        );
         let normalized_time = if step_count <= 1 {
             0.0
         } else {
@@ -126,7 +189,24 @@ pub fn run_thermal_with_options(
         time_points_s.push(step as f64 * options.time_step_s.max(1.0e-9));
         temperature_snapshots_raw.push(temperatures);
     }
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Completed,
+        "thermal solve complete",
+        Some(temperature_snapshots_raw.len() as u64),
+        Some(step_count as u64),
+    );
+    check_cancelled("fea.run_thermal")?;
 
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::Postprocess,
+        FeaProgressStatus::Started,
+        "recovering thermal fields",
+        Some(3),
+        Some(5),
+    );
     let temperature_snapshots = temperature_snapshots_raw
         .iter()
         .enumerate()
@@ -138,6 +218,15 @@ pub fn run_thermal_with_options(
             )
         })
         .collect::<Vec<_>>();
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::Postprocess,
+        FeaProgressStatus::Completed,
+        "thermal result field recovery complete",
+        Some(4),
+        Some(5),
+    );
+    check_cancelled("fea.run_thermal")?;
 
     let final_snapshot = temperature_snapshots_raw
         .last()
@@ -262,6 +351,15 @@ pub fn run_thermal_with_options(
         diagnostics,
         fields: Vec::new(),
     };
+
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::Complete,
+        FeaProgressStatus::Completed,
+        "FEA thermal run complete",
+        Some(5),
+        Some(5),
+    );
 
     Ok(FeaThermalRunResult {
         run,

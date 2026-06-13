@@ -48,6 +48,7 @@ pub enum OperationErrorType {
     Backend,
     Internal,
     Contract,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

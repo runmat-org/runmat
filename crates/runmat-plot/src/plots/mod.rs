@@ -33,7 +33,10 @@ pub use figure::{
 };
 pub use line::{LineGpuStyle, LineMarkerAppearance, LinePlot, LineStyle};
 pub use line3::Line3Plot;
-pub use mesh::{MeshPlot, MeshRegion, MeshTriangleRange};
+pub use mesh::{
+    MeshDeformation, MeshEdgeMode, MeshFieldLocation, MeshPlot, MeshRegion, MeshScalarField,
+    MeshTriangleRange, MeshVectorField,
+};
 pub use patch::{PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
 pub use pie::PieChart;
 pub use quiver::QuiverPlot;

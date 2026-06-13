@@ -1,7 +1,8 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::ErrorKind;
 use std::path::PathBuf;
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use chrono::Utc;
 use runmat_analysis_core::{
@@ -15,7 +16,8 @@ use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::{
     run_electromagnetic_with_options, run_linear_static_with_options, run_modal_with_options,
     run_nonlinear_with_options, run_thermal_with_options, run_transient_with_options,
-    ComputeBackend, ElectromagneticSolveOptions, LinearStaticSolveOptions, ModalSolveOptions,
+    ComputeBackend, ElectromagneticSolveOptions, FeaProgressEvent, FeaProgressHandler,
+    FeaProgressPhase, FeaProgressStatus, FeaRunError, LinearStaticSolveOptions, ModalSolveOptions,
     ThermalSolveOptions,
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
@@ -49,6 +51,8 @@ use policy::{
 
 mod contracts;
 mod fea_document;
+#[cfg(feature = "plot-core")]
+mod figures;
 mod policy;
 mod promotion;
 pub mod storage;
@@ -84,6 +88,52 @@ pub fn configure_fea_runtime(config: FeaRuntimeConfig) -> Result<(), String> {
     Ok(())
 }
 
+thread_local! {
+    static FEA_PROGRESS_HANDLER: RefCell<Option<FeaProgressHandler>> = const { RefCell::new(None) };
+}
+
+pub struct FeaProgressHandlerGuard {
+    previous: Option<FeaProgressHandler>,
+}
+
+impl Drop for FeaProgressHandlerGuard {
+    fn drop(&mut self) {
+        FEA_PROGRESS_HANDLER.with(|slot| {
+            slot.replace(self.previous.take());
+        });
+    }
+}
+
+pub fn replace_fea_progress_handler(
+    handler: Option<FeaProgressHandler>,
+) -> FeaProgressHandlerGuard {
+    let previous = FEA_PROGRESS_HANDLER.with(|slot| slot.replace(handler));
+    FeaProgressHandlerGuard { previous }
+}
+
+fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard {
+    let host_handler = FEA_PROGRESS_HANDLER.with(|slot| slot.borrow().clone());
+    let handler = Some(Arc::new(move |event: FeaProgressEvent| {
+        tracing::info!(
+            target: "runmat_analysis",
+            operation = %event.operation,
+            phase = ?event.phase,
+            status = ?event.status,
+            current = event.current,
+            total = event.total,
+            fraction = event.fraction,
+            "{}", event.message
+        );
+        if let Some(host_handler) = host_handler.as_ref() {
+            host_handler(event);
+        }
+    }) as FeaProgressHandler);
+    runmat_analysis_fea::replace_fea_progress_context(
+        handler,
+        Some(Arc::new(crate::interrupt::is_cancelled)),
+    )
+}
+
 pub use contracts::{
     AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
     AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext, AnalysisCreateModelProfile,
@@ -109,6 +159,11 @@ pub use contracts::{
 pub use fea_document::{
     is_fea_file_path, load_fea_document_from_path_async, parse_and_resolve_fea_document,
     FeaResolvedDocument,
+};
+#[cfg(feature = "plot-core")]
+pub use figures::{
+    analysis_generate_study_run_figures, AnalysisFigureGenerationOptions, AnalysisGeneratedFigure,
+    AnalysisGeneratedFigureKind,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "fea.create_model";
@@ -154,6 +209,105 @@ const ANALYSIS_RESULTS_COMPARE_OP_VERSION: &str = "fea.results_compare/v1";
 const ANALYSIS_TRENDS_OPERATION: &str = "fea.trends";
 const ANALYSIS_TRENDS_OP_VERSION: &str = "fea.trends/v1";
 const TRANSIENT_RESIDUAL_WARN_THRESHOLD: f64 = 1.0e-4;
+
+fn map_fea_run_error(
+    operation: &str,
+    op_version: &str,
+    default_error_code: &'static str,
+    cancel_error_code: &'static str,
+    model: &AnalysisModel,
+    context: &OperationContext,
+    err: FeaRunError,
+) -> OperationErrorEnvelope {
+    match err {
+        FeaRunError::Cancelled => operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: cancel_error_code,
+                error_type: OperationErrorType::Cancelled,
+                retryable: false,
+                severity: OperationErrorSeverity::Warning,
+            },
+            "FEA run cancelled by user",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        ),
+        FeaRunError::InvalidModel(message) => operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: default_error_code,
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            message,
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        ),
+    }
+}
+
+fn persist_fea_run_result_with_progress(
+    operation: &str,
+    op_version: &str,
+    artifact_error_code: &'static str,
+    context: &OperationContext,
+    result: &AnalysisRunResult,
+) -> Result<(), OperationErrorEnvelope> {
+    runmat_analysis_fea::emit_fea_progress_phase(
+        operation,
+        FeaProgressPhase::ArtifactPersistence,
+        FeaProgressStatus::Started,
+        "persisting FEA run artifact",
+        None,
+        None,
+    );
+    match storage::persist_run_result(result) {
+        Ok(_record) => {
+            runmat_analysis_fea::emit_fea_progress_phase(
+                operation,
+                FeaProgressPhase::ArtifactPersistence,
+                FeaProgressStatus::Completed,
+                "FEA run artifact persisted",
+                None,
+                None,
+            );
+            Ok(())
+        }
+        Err(err) => {
+            let message = format!("failed to persist FEA run artifact: {err}");
+            runmat_analysis_fea::emit_fea_progress_phase(
+                operation,
+                FeaProgressPhase::ArtifactPersistence,
+                FeaProgressStatus::Failed,
+                &message,
+                None,
+                None,
+            );
+            Err(operation_error(
+                operation,
+                op_version,
+                context,
+                OperationErrorSpec {
+                    error_code: artifact_error_code,
+                    error_type: OperationErrorType::Internal,
+                    retryable: true,
+                    severity: OperationErrorSeverity::Error,
+                },
+                message,
+                BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
+            ))
+        }
+    }
+}
 
 pub fn analysis_create_model_op(
     geometry: &GeometryAsset,
@@ -1543,6 +1697,7 @@ pub fn analysis_run_modal_with_options_op(
     options: AnalysisModalRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let _solver_context = install_fea_solver_context();
     let has_modal_step = model
         .steps
         .iter()
@@ -1645,21 +1800,14 @@ pub fn analysis_run_modal_with_options_op(
         },
     )
     .map_err(|err| {
-        operation_error(
+        map_fea_run_error(
             ANALYSIS_RUN_MODAL_OPERATION,
             ANALYSIS_RUN_MODAL_OP_VERSION,
+            "RM.FEA.RUN_MODAL.SOLVER_MODEL_INVALID",
+            "RM.FEA.RUN_MODAL.CANCELLED",
+            model,
             &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_MODAL.SOLVER_MODEL_INVALID",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            err.to_string(),
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
+            err,
         )
     })?;
 
@@ -1865,21 +2013,13 @@ pub fn analysis_run_modal_with_options_op(
         }
     }
 
-    storage::persist_run_result(&result).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_MODAL_OPERATION,
-            ANALYSIS_RUN_MODAL_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_MODAL.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to persist FEA run artifact: {err}"),
-            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
-        )
-    })?;
+    persist_fea_run_result_with_progress(
+        ANALYSIS_RUN_MODAL_OPERATION,
+        ANALYSIS_RUN_MODAL_OP_VERSION,
+        "RM.FEA.RUN_MODAL.ARTIFACT_STORE_FAILED",
+        &context,
+        &result,
+    )?;
 
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_MODAL_OPERATION,
@@ -1895,6 +2035,7 @@ pub fn analysis_run_acoustic_with_options_op(
     options: AnalysisAcousticRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let _solver_context = install_fea_solver_context();
     let has_modal_step = model
         .steps
         .iter()
@@ -1997,21 +2138,14 @@ pub fn analysis_run_acoustic_with_options_op(
         },
     )
     .map_err(|err| {
-        operation_error(
+        map_fea_run_error(
             ANALYSIS_RUN_ACOUSTIC_OPERATION,
             ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+            "RM.FEA.RUN_ACOUSTIC.SOLVER_MODEL_INVALID",
+            "RM.FEA.RUN_ACOUSTIC.CANCELLED",
+            model,
             &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ACOUSTIC.SOLVER_MODEL_INVALID",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            err.to_string(),
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
+            err,
         )
     })?;
 
@@ -2188,21 +2322,13 @@ pub fn analysis_run_acoustic_with_options_op(
         },
     };
 
-    storage::persist_run_result(&result).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_ACOUSTIC_OPERATION,
-            ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ACOUSTIC.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to persist FEA run artifact: {err}"),
-            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
-        )
-    })?;
+    persist_fea_run_result_with_progress(
+        ANALYSIS_RUN_ACOUSTIC_OPERATION,
+        ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+        "RM.FEA.RUN_ACOUSTIC.ARTIFACT_STORE_FAILED",
+        &context,
+        &result,
+    )?;
 
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_ACOUSTIC_OPERATION,
@@ -2239,6 +2365,7 @@ pub fn analysis_run_cfd_with_options_op(
     options: AnalysisCfdRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let _solver_context = install_fea_solver_context();
     let has_cfd_step = model
         .steps
         .iter()
@@ -2481,27 +2608,21 @@ pub fn analysis_run_cfd_with_options_op(
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
+            progress_operation: ANALYSIS_RUN_CFD_OPERATION.to_string(),
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
             thermo_mechanical_context: None,
             electro_thermal_context: None,
         },
     )
     .map_err(|err| {
-        operation_error(
+        map_fea_run_error(
             ANALYSIS_RUN_CFD_OPERATION,
             ANALYSIS_RUN_CFD_OP_VERSION,
+            "RM.FEA.RUN_CFD.SOLVER_MODEL_INVALID",
+            "RM.FEA.RUN_CFD.CANCELLED",
+            model,
             &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CFD.SOLVER_MODEL_INVALID",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            err.to_string(),
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
+            err,
         )
     })?;
 
@@ -2657,21 +2778,13 @@ pub fn analysis_run_cfd_with_options_op(
         },
     };
 
-    storage::persist_run_result(&result).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CFD.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to persist FEA run artifact: {err}"),
-            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
-        )
-    })?;
+    persist_fea_run_result_with_progress(
+        ANALYSIS_RUN_CFD_OPERATION,
+        ANALYSIS_RUN_CFD_OP_VERSION,
+        "RM.FEA.RUN_CFD.ARTIFACT_STORE_FAILED",
+        &context,
+        &result,
+    )?;
 
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_CFD_OPERATION,
@@ -2708,6 +2821,7 @@ pub fn analysis_run_cht_with_options_op(
     options: AnalysisChtRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let _solver_context = install_fea_solver_context();
     let has_cfd_step = model
         .steps
         .iter()
@@ -2985,21 +3099,14 @@ pub fn analysis_run_cht_with_options_op(
         },
     )
     .map_err(|err| {
-        operation_error(
+        map_fea_run_error(
             ANALYSIS_RUN_CHT_OPERATION,
             ANALYSIS_RUN_CHT_OP_VERSION,
+            "RM.FEA.RUN_CHT.SOLVER_MODEL_INVALID",
+            "RM.FEA.RUN_CHT.CANCELLED",
+            model,
             &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.SOLVER_MODEL_INVALID",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            err.to_string(),
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
+            err,
         )
     })?;
 
@@ -3022,27 +3129,21 @@ pub fn analysis_run_cht_with_options_op(
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
+            progress_operation: ANALYSIS_RUN_CHT_OPERATION.to_string(),
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(Some(thermo_options)),
             electro_thermal_context: None,
         },
     )
     .map_err(|err| {
-        operation_error(
+        map_fea_run_error(
             ANALYSIS_RUN_CHT_OPERATION,
             ANALYSIS_RUN_CHT_OP_VERSION,
+            "RM.FEA.RUN_CHT.SOLVER_MODEL_INVALID",
+            "RM.FEA.RUN_CHT.CANCELLED",
+            model,
             &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.SOLVER_MODEL_INVALID",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            err.to_string(),
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
+            err,
         )
     })?;
 
@@ -3232,21 +3333,13 @@ pub fn analysis_run_cht_with_options_op(
         },
     };
 
-    storage::persist_run_result(&result).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to persist FEA run artifact: {err}"),
-            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
-        )
-    })?;
+    persist_fea_run_result_with_progress(
+        ANALYSIS_RUN_CHT_OPERATION,
+        ANALYSIS_RUN_CHT_OP_VERSION,
+        "RM.FEA.RUN_CHT.ARTIFACT_STORE_FAILED",
+        &context,
+        &result,
+    )?;
 
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_CHT_OPERATION,
@@ -3270,6 +3363,7 @@ pub fn analysis_run_fsi_with_options_op(
     options: AnalysisFsiRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let _solver_context = install_fea_solver_context();
     let has_cfd_step = model
         .steps
         .iter()
@@ -3513,27 +3607,21 @@ pub fn analysis_run_fsi_with_options_op(
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
+            progress_operation: ANALYSIS_RUN_FSI_OPERATION.to_string(),
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
             thermo_mechanical_context: None,
             electro_thermal_context: None,
         },
     )
     .map_err(|err| {
-        operation_error(
+        map_fea_run_error(
             ANALYSIS_RUN_FSI_OPERATION,
             ANALYSIS_RUN_FSI_OP_VERSION,
+            "RM.FEA.RUN_FSI.SOLVER_MODEL_INVALID",
+            "RM.FEA.RUN_FSI.CANCELLED",
+            model,
             &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.SOLVER_MODEL_INVALID",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            err.to_string(),
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
+            err,
         )
     })?;
 
@@ -3703,21 +3791,13 @@ pub fn analysis_run_fsi_with_options_op(
         },
     };
 
-    storage::persist_run_result(&result).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to persist FEA run artifact: {err}"),
-            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
-        )
-    })?;
+    persist_fea_run_result_with_progress(
+        ANALYSIS_RUN_FSI_OPERATION,
+        ANALYSIS_RUN_FSI_OP_VERSION,
+        "RM.FEA.RUN_FSI.ARTIFACT_STORE_FAILED",
+        &context,
+        &result,
+    )?;
 
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_FSI_OPERATION,
@@ -3733,6 +3813,7 @@ pub fn analysis_run_thermal_with_options_op(
     options: AnalysisThermalRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let _solver_context = install_fea_solver_context();
     let has_thermal_step = model
         .steps
         .iter()
@@ -3815,21 +3896,14 @@ pub fn analysis_run_thermal_with_options_op(
         },
     )
     .map_err(|err| {
-        operation_error(
+        map_fea_run_error(
             ANALYSIS_RUN_THERMAL_OPERATION,
             ANALYSIS_RUN_THERMAL_OP_VERSION,
+            "RM.FEA.RUN_THERMAL.SOLVER_MODEL_INVALID",
+            "RM.FEA.RUN_THERMAL.CANCELLED",
+            model,
             &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_THERMAL.SOLVER_MODEL_INVALID",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            err.to_string(),
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
+            err,
         )
     })?;
 
@@ -3948,21 +4022,13 @@ pub fn analysis_run_thermal_with_options_op(
         },
     };
 
-    storage::persist_run_result(&result).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_THERMAL_OPERATION,
-            ANALYSIS_RUN_THERMAL_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_THERMAL.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to persist FEA run artifact: {err}"),
-            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
-        )
-    })?;
+    persist_fea_run_result_with_progress(
+        ANALYSIS_RUN_THERMAL_OPERATION,
+        ANALYSIS_RUN_THERMAL_OP_VERSION,
+        "RM.FEA.RUN_THERMAL.ARTIFACT_STORE_FAILED",
+        &context,
+        &result,
+    )?;
 
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_THERMAL_OPERATION,
@@ -3978,6 +4044,7 @@ pub fn analysis_run_transient_with_options_op(
     options: AnalysisTransientRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let _solver_context = install_fea_solver_context();
     let has_transient_step = model
         .steps
         .iter()
@@ -4069,27 +4136,21 @@ pub fn analysis_run_transient_with_options_op(
             adapt_retry_growth_cap: options.adapt_retry_growth_cap,
             adapt_nonconverged_shrink: options.adapt_nonconverged_shrink,
             dt_bucket_rel_tolerance: options.dt_bucket_rel_tolerance,
+            progress_operation: ANALYSIS_RUN_TRANSIENT_OPERATION.to_string(),
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         }
     })
     .map_err(|err| {
-        operation_error(
+        map_fea_run_error(
             ANALYSIS_RUN_TRANSIENT_OPERATION,
             ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+            "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
+            "RM.FEA.RUN_TRANSIENT.CANCELLED",
+            model,
             &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            err.to_string(),
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
+            err,
         )
     })?;
 
@@ -4395,21 +4456,13 @@ pub fn analysis_run_transient_with_options_op(
         },
     };
 
-    storage::persist_run_result(&result).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_TRANSIENT_OPERATION,
-            ANALYSIS_RUN_TRANSIENT_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_TRANSIENT.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to persist FEA run artifact: {err}"),
-            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
-        )
-    })?;
+    persist_fea_run_result_with_progress(
+        ANALYSIS_RUN_TRANSIENT_OPERATION,
+        ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+        "RM.FEA.RUN_TRANSIENT.ARTIFACT_STORE_FAILED",
+        &context,
+        &result,
+    )?;
 
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_TRANSIENT_OPERATION,
@@ -4438,6 +4491,7 @@ pub fn analysis_run_nonlinear_with_options_op(
     options: AnalysisNonlinearRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let _solver_context = install_fea_solver_context();
     let has_nonlinear_step = model
         .steps
         .iter()
@@ -4697,21 +4751,14 @@ pub fn analysis_run_nonlinear_with_options_op(
         }
     })
     .map_err(|err| {
-        operation_error(
+        map_fea_run_error(
             ANALYSIS_RUN_NONLINEAR_OPERATION,
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID",
+            "RM.FEA.RUN_NONLINEAR.CANCELLED",
+            model,
             &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            err.to_string(),
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
+            err,
         )
     })?;
 
@@ -5053,21 +5100,13 @@ pub fn analysis_run_nonlinear_with_options_op(
         },
     };
 
-    storage::persist_run_result(&result).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_NONLINEAR_OPERATION,
-            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_NONLINEAR.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to persist FEA run artifact: {err}"),
-            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
-        )
-    })?;
+    persist_fea_run_result_with_progress(
+        ANALYSIS_RUN_NONLINEAR_OPERATION,
+        ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+        "RM.FEA.RUN_NONLINEAR.ARTIFACT_STORE_FAILED",
+        &context,
+        &result,
+    )?;
 
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_NONLINEAR_OPERATION,
@@ -5083,6 +5122,7 @@ pub fn analysis_run_linear_static_with_options(
     options: AnalysisRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let _solver_context = install_fea_solver_context();
     let thermo_options = resolve_thermo_coupling_options(
         model,
         model_thermo_coupling_options(model),
@@ -5160,21 +5200,14 @@ pub fn analysis_run_linear_static_with_options(
         }
     })
     .map_err(|err| {
-        operation_error(
+        map_fea_run_error(
             ANALYSIS_RUN_OPERATION,
             ANALYSIS_RUN_OP_VERSION,
+            "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID",
+            "RM.FEA.RUN_LINEAR_STATIC.CANCELLED",
+            model,
             &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            err.to_string(),
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
+            err,
         )
     })?;
 
@@ -5301,21 +5334,13 @@ pub fn analysis_run_linear_static_with_options(
         },
     };
 
-    storage::persist_run_result(&result).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_OPERATION,
-            ANALYSIS_RUN_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_LINEAR_STATIC.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to persist FEA run artifact: {err}"),
-            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
-        )
-    })?;
+    persist_fea_run_result_with_progress(
+        ANALYSIS_RUN_OPERATION,
+        ANALYSIS_RUN_OP_VERSION,
+        "RM.FEA.RUN_LINEAR_STATIC.ARTIFACT_STORE_FAILED",
+        &context,
+        &result,
+    )?;
 
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_OPERATION,
@@ -5344,6 +5369,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
     options: AnalysisElectromagneticRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let _solver_context = install_fea_solver_context();
     let has_electromagnetic_step = model
         .steps
         .iter()
@@ -5531,21 +5557,14 @@ pub fn analysis_run_electromagnetic_with_options_op(
         let sweep_run =
             run_electromagnetic_with_options(&sweep_model, backend, solve_options.clone())
                 .map_err(|err| {
-                    operation_error(
+                    map_fea_run_error(
                         ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
                         ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+                        "RM.FEA.RUN_ELECTROMAGNETIC.SOLVER_MODEL_INVALID",
+                        "RM.FEA.RUN_ELECTROMAGNETIC.CANCELLED",
+                        model,
                         &context,
-                        OperationErrorSpec {
-                            error_code: "RM.FEA.RUN_ELECTROMAGNETIC.SOLVER_MODEL_INVALID",
-                            error_type: OperationErrorType::Validation,
-                            retryable: false,
-                            severity: OperationErrorSeverity::Error,
-                        },
-                        err.to_string(),
-                        BTreeMap::from([
-                            ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                            ("geometry_id".to_string(), model.geometry_id.clone()),
-                        ]),
+                        err,
                     )
                 })?;
         sweep_peak_flux_density.push(peak_abs_field_value(&sweep_run.flux_density_field));
@@ -6133,21 +6152,13 @@ pub fn analysis_run_electromagnetic_with_options_op(
         },
     };
 
-    storage::persist_run_result(&result).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to persist FEA run artifact: {err}"),
-            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
-        )
-    })?;
+    persist_fea_run_result_with_progress(
+        ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+        ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+        "RM.FEA.RUN_ELECTROMAGNETIC.ARTIFACT_STORE_FAILED",
+        &context,
+        &result,
+    )?;
 
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
@@ -6187,6 +6198,15 @@ fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<Analysi
         for field in &nonlinear.displacement_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
+    }
+
+    if let Some(electromagnetic) = run_result.electromagnetic_results.as_ref() {
+        push_analysis_result_field(
+            &mut fields,
+            &mut seen,
+            &electromagnetic.vector_potential_proxy,
+        );
+        push_analysis_result_field(&mut fields, &mut seen, &electromagnetic.flux_density_proxy);
     }
 
     fields

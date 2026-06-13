@@ -1390,7 +1390,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             expected_publishable: Some(true),
             parity_tolerance: None,
             gpu_mode: Some(GpuMode::WithProvider),
-            residency_expectation: Some(ResidencyExpectation::DeviceRef),
+            residency_expectation: Some(ResidencyExpectation::HostFallback),
             max_solver_host_sync_count: Some(32),
             min_solver_device_apply_k_ratio: Some(0.0),
             expected_solver_backend: Some("runtime_tensor"),

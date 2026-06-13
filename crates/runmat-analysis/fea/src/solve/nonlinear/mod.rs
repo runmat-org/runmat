@@ -132,6 +132,7 @@ pub fn solve_nonlinear_system(
             adapt_retry_growth_cap: 1.0,
             adapt_nonconverged_shrink: 1.0,
             dt_bucket_rel_tolerance: 0.0,
+            progress_operation: "fea.run_nonlinear".to_string(),
             prep_context: options.prep_context,
             thermo_mechanical_context: options.thermo_mechanical_context.clone(),
             electro_thermal_context: options.electro_thermal_context.clone(),

@@ -14,7 +14,8 @@ use runmat_geometry_core::{
     SourceGeometry, SourceGeometryKind, TessellationProfile, UnitSystem,
 };
 use runmat_geometry_io::{
-    import::GeometryImportError, import_geometry, GeometryFormat, GeometryImportOptions,
+    import::GeometryImportError, import_geometry_with_context, GeometryFormat,
+    GeometryImportContext, GeometryImportOptions,
 };
 use runmat_geometry_ops::{compute_stats, find_region, GeometryStats, QueryError};
 use runmat_meshing_core::{
@@ -165,8 +166,18 @@ pub struct GeometryCaptureViewResult {
 
 #[cfg(feature = "plot-core")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GeometryPreviewPresentation {
+    Analysis,
+    Cad,
+}
+
+#[cfg(feature = "plot-core")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GeometryPreviewFigureOptions {
     pub edge_overlay_triangle_limit: usize,
+    pub presentation: GeometryPreviewPresentation,
+    pub xray: bool,
 }
 
 #[cfg(feature = "plot-core")]
@@ -174,9 +185,27 @@ impl Default for GeometryPreviewFigureOptions {
     fn default() -> Self {
         Self {
             edge_overlay_triangle_limit: 250_000,
+            presentation: GeometryPreviewPresentation::Analysis,
+            xray: false,
         }
     }
 }
+
+#[cfg(feature = "plot-core")]
+impl GeometryPreviewFigureOptions {
+    pub fn cad_preview() -> Self {
+        Self {
+            edge_overlay_triangle_limit: 250_000,
+            presentation: GeometryPreviewPresentation::Cad,
+            xray: false,
+        }
+    }
+}
+
+#[cfg(feature = "plot-core")]
+const CAD_DEFAULT_FACE_COLOR: glam::Vec4 = glam::Vec4::new(0.66, 0.72, 0.80, 1.0);
+#[cfg(feature = "plot-core")]
+const CAD_FEATURE_EDGE_COLOR: glam::Vec4 = glam::Vec4::new(0.08, 0.10, 0.13, 1.0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -824,7 +853,8 @@ pub fn geometry_load_with_options_op(
     options: GeometryImportOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<GeometryAsset>, OperationErrorEnvelope> {
-    let imported = import_geometry(path, bytes, options)
+    let import_context = current_geometry_import_context();
+    let imported = import_geometry_with_context(path, bytes, options, &import_context)
         .map_err(|error| map_geometry_load_error(path, error, &context))?;
     Ok(OperationEnvelope::new(
         GEOMETRY_LOAD_OPERATION,
@@ -843,6 +873,12 @@ pub fn geometry_load(path: &str, bytes: &[u8]) -> BuiltinResult<GeometryAsset> {
                 .build()
         })?;
     Ok(envelope.data)
+}
+
+fn current_geometry_import_context() -> GeometryImportContext {
+    crate::interrupt::current_interrupt()
+        .map(GeometryImportContext::with_cancellation)
+        .unwrap_or_default()
 }
 
 pub fn geometry_compute_stats_op(
@@ -1408,12 +1444,24 @@ pub fn geometry_preview_figure(
         return Err("geometry asset does not contain renderable surface mesh data".to_string());
     }
 
-    let mut figure = runmat_plot::plots::Figure::new()
-        .with_title(title)
-        .with_labels("X", "Y")
-        .with_grid(true)
-        .with_axis_equal(true);
-    figure.z_label = Some("Z".to_string());
+    let cad_presentation = options.presentation == GeometryPreviewPresentation::Cad;
+    let mut figure = if cad_presentation {
+        runmat_plot::plots::Figure::new()
+            .with_grid(false)
+            .with_legend(false)
+            .with_axis_equal(true)
+    } else {
+        let mut figure = runmat_plot::plots::Figure::new()
+            .with_title(title)
+            .with_labels("X", "Y")
+            .with_grid(true)
+            .with_axis_equal(true);
+        figure.z_label = Some("Z".to_string());
+        figure
+    };
+    if cad_presentation {
+        figure.set_axes_view(0, -38.0, 24.0);
+    }
 
     for (index, surface_mesh) in asset.surface_meshes.iter().enumerate() {
         let vertices = surface_mesh
@@ -1430,24 +1478,202 @@ pub fn geometry_preview_figure(
         let mut mesh = runmat_plot::plots::MeshPlot::new(vertices, surface_mesh.triangles.clone())?;
         mesh.set_mesh_id(Some(surface_mesh.mesh_id.clone()));
         mesh.set_regions(mesh_regions_for_surface(asset, &surface_mesh.mesh_id));
-        mesh.set_label(Some(format!(
-            "{}: {} triangles",
-            surface_mesh.mesh_id,
-            surface_mesh.triangles.len()
-        )));
-        let color = preview_mesh_color(index);
-        mesh.set_face_color(color);
-        mesh.set_edge_color(glam::Vec4::new(0.86, 0.91, 1.0, 0.82));
-        mesh.set_face_alpha(0.92);
-        if surface_mesh.triangles.len() > options.edge_overlay_triangle_limit {
-            mesh.set_edge_width(0.0);
+        if !cad_presentation {
+            mesh.set_label(Some(format!(
+                "{}: {} triangles",
+                surface_mesh.mesh_id,
+                surface_mesh.triangles.len()
+            )));
+        }
+
+        if cad_presentation {
+            let presentation = cad_mesh_presentation(
+                asset,
+                &surface_mesh.mesh_id,
+                surface_mesh.triangles.len(),
+                surface_mesh.vertices.len(),
+            );
+            mesh.set_face_color(CAD_DEFAULT_FACE_COLOR);
+            mesh.set_edge_color(CAD_FEATURE_EDGE_COLOR);
+            mesh.set_face_alpha(if options.xray { 0.34 } else { 1.0 });
+            mesh.set_edge_alpha(if options.xray { 0.9 } else { 0.72 });
+            if let Some(colors) = presentation.vertex_colors {
+                mesh.set_vertex_colors(Some(colors))?;
+            }
+            if let Some(groups) = presentation.feature_edge_groups {
+                mesh.set_feature_edge_groups(Some(groups))?;
+                mesh.set_edge_mode(runmat_plot::plots::MeshEdgeMode::Feature);
+                mesh.set_edge_width(0.85);
+            } else if surface_mesh.triangles.len() > options.edge_overlay_triangle_limit {
+                mesh.set_edge_mode(runmat_plot::plots::MeshEdgeMode::None);
+                mesh.set_edge_width(0.0);
+            } else {
+                mesh.set_edge_mode(runmat_plot::plots::MeshEdgeMode::All);
+                mesh.set_edge_width(0.28);
+            }
         } else {
-            mesh.set_edge_width(0.35);
+            let color = preview_mesh_color(index);
+            mesh.set_face_color(color);
+            mesh.set_edge_color(glam::Vec4::new(0.86, 0.91, 1.0, 0.82));
+            mesh.set_face_alpha(0.92);
+            if surface_mesh.triangles.len() > options.edge_overlay_triangle_limit {
+                mesh.set_edge_width(0.0);
+            } else {
+                mesh.set_edge_width(0.35);
+            }
         }
         figure.add_mesh_plot(mesh);
     }
 
     Ok(figure)
+}
+
+#[cfg(feature = "plot-core")]
+#[derive(Debug, Default)]
+struct CadMeshPresentation {
+    feature_edge_groups: Option<Vec<u64>>,
+    vertex_colors: Option<Vec<glam::Vec4>>,
+}
+
+#[cfg(feature = "plot-core")]
+fn cad_mesh_presentation(
+    asset: &GeometryAsset,
+    mesh_id: &str,
+    triangle_count: usize,
+    vertex_count: usize,
+) -> CadMeshPresentation {
+    if triangle_count == 0 {
+        return CadMeshPresentation::default();
+    }
+
+    let prefer_face_mappings = asset.source_geometry.kind == SourceGeometryKind::Cad;
+    let mut feature_edge_groups = vec![0_u64; triangle_count];
+    let mut vertex_colors = vec![CAD_DEFAULT_FACE_COLOR; vertex_count];
+    let mut group_ids_by_region = BTreeMap::<String, u64>::new();
+    let mut assigned_groups = false;
+    let mut assigned_colors = false;
+    let surface_triangles = asset
+        .surface_meshes
+        .iter()
+        .find(|surface_mesh| surface_mesh.mesh_id == mesh_id)
+        .map(|surface_mesh| surface_mesh.triangles.as_slice());
+
+    for mapping in asset.region_entity_mappings.iter().filter(|mapping| {
+        mapping.mesh_id == mesh_id
+            && matches!(mapping.entity_kind, EntityKind::Face | EntityKind::Element)
+    }) {
+        let Some(region) = asset
+            .regions
+            .iter()
+            .find(|region| region.region_id == mapping.region_id)
+        else {
+            continue;
+        };
+        let face_id = region
+            .cad_ownership
+            .as_ref()
+            .and_then(|ownership| ownership.face_id);
+        if prefer_face_mappings && face_id.is_none() {
+            continue;
+        }
+        let group_id = face_id
+            .map(|face_id| face_id.saturating_add(1))
+            .unwrap_or_else(|| {
+                if let Some(group_id) = group_ids_by_region.get(&mapping.region_id) {
+                    *group_id
+                } else {
+                    let group_id = group_ids_by_region.len() as u64 + 1;
+                    group_ids_by_region.insert(mapping.region_id.clone(), group_id);
+                    group_id
+                }
+            });
+        let color = cad_region_color(region);
+        for range in &mapping.ranges {
+            for triangle_index in bounded_range(range, triangle_count) {
+                feature_edge_groups[triangle_index] = group_id;
+                assigned_groups = true;
+                if let Some(color) = color {
+                    assigned_colors |= color_vertices_for_triangle(
+                        surface_triangles,
+                        triangle_index,
+                        color,
+                        &mut vertex_colors,
+                    );
+                }
+            }
+        }
+    }
+
+    CadMeshPresentation {
+        feature_edge_groups: assigned_groups.then_some(feature_edge_groups),
+        vertex_colors: assigned_colors.then_some(vertex_colors),
+    }
+}
+
+#[cfg(feature = "plot-core")]
+fn bounded_range(range: &EntityIdRange, upper_bound: usize) -> std::ops::Range<usize> {
+    let start = usize::try_from(range.start).unwrap_or(usize::MAX);
+    let count = usize::try_from(range.count).unwrap_or(usize::MAX);
+    let start = start.min(upper_bound);
+    let end = start.saturating_add(count).min(upper_bound);
+    start..end
+}
+
+#[cfg(feature = "plot-core")]
+fn color_vertices_for_triangle(
+    triangles: Option<&[[u32; 3]]>,
+    triangle_index: usize,
+    color: glam::Vec4,
+    vertex_colors: &mut [glam::Vec4],
+) -> bool {
+    let Some(triangle) = triangles.and_then(|triangles| triangles.get(triangle_index)) else {
+        return false;
+    };
+    let mut colored = false;
+    for vertex_id in triangle {
+        if let Some(slot) = vertex_colors.get_mut(*vertex_id as usize) {
+            *slot = color;
+            colored = true;
+        }
+    }
+    colored
+}
+
+#[cfg(feature = "plot-core")]
+fn cad_region_color(region: &Region) -> Option<glam::Vec4> {
+    region
+        .cad_ownership
+        .as_ref()
+        .and_then(|ownership| ownership.color.as_ref())
+        .and_then(|color| parse_cad_hex_rgba(&color.hex_rgba))
+        .map(cad_display_color)
+}
+
+#[cfg(feature = "plot-core")]
+fn parse_cad_hex_rgba(value: &str) -> Option<glam::Vec4> {
+    let value = value.trim().trim_start_matches('#');
+    if value.len() != 6 && value.len() != 8 {
+        return None;
+    }
+    let r = u8::from_str_radix(&value[0..2], 16).ok()? as f32 / 255.0;
+    let g = u8::from_str_radix(&value[2..4], 16).ok()? as f32 / 255.0;
+    let b = u8::from_str_radix(&value[4..6], 16).ok()? as f32 / 255.0;
+    let a = if value.len() == 8 {
+        u8::from_str_radix(&value[6..8], 16).ok()? as f32 / 255.0
+    } else {
+        1.0
+    };
+    Some(glam::Vec4::new(r, g, b, a))
+}
+
+#[cfg(feature = "plot-core")]
+fn cad_display_color(color: glam::Vec4) -> glam::Vec4 {
+    let rgb = glam::Vec3::new(color.x, color.y, color.z);
+    let gray = glam::Vec3::splat((rgb.x + rgb.y + rgb.z) / 3.0);
+    let softened = rgb
+        .lerp(gray, 0.18)
+        .lerp(CAD_DEFAULT_FACE_COLOR.truncate(), 0.16);
+    glam::Vec4::new(softened.x, softened.y, softened.z, color.w.max(0.2))
 }
 
 #[cfg(feature = "plot-core")]
@@ -1647,6 +1873,11 @@ fn map_geometry_load_error(
         GeometryImportError::BackendUnavailable(_) => (
             "RM.GEOMETRY.LOAD.BACKEND_UNAVAILABLE",
             OperationErrorType::Backend,
+            false,
+        ),
+        GeometryImportError::Cancelled => (
+            "RM.GEOMETRY.LOAD.CANCELLED",
+            OperationErrorType::Cancelled,
             false,
         ),
     };

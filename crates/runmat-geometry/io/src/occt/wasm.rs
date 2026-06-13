@@ -5,7 +5,9 @@ use super::{
     topology_from_raw, OcctCadFormat, OcctCadTopology, OcctRawAssemblyNode, OcctRawFaceSemantic,
     OcctRawTopology,
 };
-use crate::import::{GeometryImportError, GeometryImportOptions};
+use crate::import::{
+    GeometryImportBudgetPolicy, GeometryImportContext, GeometryImportError, GeometryImportOptions,
+};
 
 #[wasm_bindgen]
 extern "C" {
@@ -15,6 +17,8 @@ extern "C" {
         format: &str,
         bytes: &[u8],
         max_triangles: f64,
+        linear_deflection: f64,
+        angular_deflection: f64,
     ) -> Result<String, JsValue>;
 }
 
@@ -25,6 +29,10 @@ struct WasmOcctPayload {
     backend: String,
     #[serde(default)]
     format_name: String,
+    #[serde(default)]
+    truncated: bool,
+    #[serde(default)]
+    triangle_budget: Option<u64>,
     vertices: Vec<f64>,
     triangles: Vec<u32>,
     #[serde(default)]
@@ -92,23 +100,65 @@ pub(crate) fn import_cad_topology(
     bytes: &[u8],
     format: OcctCadFormat,
     options: &GeometryImportOptions,
+    context: &GeometryImportContext,
 ) -> Result<OcctCadTopology, GeometryImportError> {
-    let max_triangles = options
-        .max_triangles
-        .map(|value| value as f64)
-        .unwrap_or(f64::INFINITY);
-    let payload =
-        runmat_occt_import_cad(path, format.as_str(), bytes, max_triangles).map_err(|err| {
-            GeometryImportError::ParseFailed(format!(
-                "OCCT WASM CAD sidecar failed: {}",
-                js_error_message(err)
-            ))
-        })?;
+    context.check_cancelled()?;
+    let truncate_preview = options.budget_policy == GeometryImportBudgetPolicy::Truncate;
+    let max_triangles = if truncate_preview {
+        f64::INFINITY
+    } else {
+        options
+            .max_triangles
+            .map(|value| value as f64)
+            .unwrap_or(f64::INFINITY)
+    };
+    let linear_deflection = options
+        .tessellation_profile
+        .chord_tolerance
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(0.01);
+    let angular_deflection = options
+        .tessellation_profile
+        .angle_tolerance_deg
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .map(f64::to_radians)
+        .unwrap_or(0.5);
+    let payload = runmat_occt_import_cad(
+        path,
+        format.as_str(),
+        bytes,
+        max_triangles,
+        linear_deflection,
+        angular_deflection,
+    )
+    .map_err(|err| {
+        GeometryImportError::ParseFailed(format!(
+            "OCCT WASM CAD sidecar failed: {}",
+            js_error_message(err)
+        ))
+    })?;
+    context.check_cancelled()?;
     let payload: WasmOcctPayload = serde_json::from_str(&payload).map_err(|err| {
         GeometryImportError::ParseFailed(format!(
             "OCCT WASM CAD sidecar returned invalid JSON: {err}"
         ))
     })?;
+
+    let mut payload = payload;
+    let rust_truncated = if truncate_preview {
+        truncate_wasm_payload(&mut payload, options.max_triangles, context)?
+    } else {
+        false
+    };
+    let triangle_budget = payload
+        .triangle_budget
+        .or(options.max_triangles)
+        .unwrap_or(u64::MAX);
+    if rust_truncated {
+        payload.warnings.push(format!(
+            "OCCT WASM preview tessellation was truncated at the requested triangle budget of {triangle_budget} triangles"
+        ));
+    }
 
     let triangle_face_ids = if payload.triangle_face_ids.is_empty() {
         vec![0; payload.triangles.len() / 3]
@@ -130,6 +180,8 @@ pub(crate) fn import_cad_topology(
         OcctRawTopology {
             backend: payload.backend,
             format_name,
+            truncated: payload.truncated || rust_truncated,
+            triangle_budget,
             vertices: payload.vertices,
             triangles: payload.triangles,
             triangle_face_ids,
@@ -169,7 +221,74 @@ pub(crate) fn import_cad_topology(
             warnings: payload.warnings,
         },
         options,
+        context,
     )
+}
+
+fn truncate_wasm_payload(
+    payload: &mut WasmOcctPayload,
+    max_triangles: Option<u64>,
+    context: &GeometryImportContext,
+) -> Result<bool, GeometryImportError> {
+    let Some(max_triangles) = max_triangles else {
+        return Ok(false);
+    };
+    let triangle_count = payload.triangles.len() / 3;
+    let max_triangles = usize::try_from(max_triangles).unwrap_or(usize::MAX);
+    if triangle_count <= max_triangles {
+        return Ok(false);
+    }
+
+    let retained_index_count = max_triangles.saturating_mul(3);
+    payload.triangles.truncate(retained_index_count);
+    if !payload.triangle_face_ids.is_empty() {
+        payload.triangle_face_ids.truncate(max_triangles);
+    }
+    compact_wasm_vertices(payload, context)?;
+    payload.truncated = true;
+    Ok(true)
+}
+
+fn compact_wasm_vertices(
+    payload: &mut WasmOcctPayload,
+    context: &GeometryImportContext,
+) -> Result<(), GeometryImportError> {
+    use std::collections::BTreeMap;
+
+    let source_vertex_count = payload.vertices.len() / 3;
+    let mut remap = BTreeMap::<u32, u32>::new();
+    for (index, vertex_index) in payload.triangles.iter().enumerate() {
+        crate::import::check_cancelled_periodic(context, index)?;
+        let source_index = *vertex_index as usize;
+        if source_index >= source_vertex_count {
+            return Err(GeometryImportError::ParseFailed(
+                "OCCT WASM sidecar returned a triangle index outside the vertex buffer".to_string(),
+            ));
+        }
+        if !remap.contains_key(vertex_index) {
+            let next = u32::try_from(remap.len()).map_err(|_| {
+                GeometryImportError::ParseFailed(
+                    "OCCT WASM preview exceeded u32 vertex indexing capacity".to_string(),
+                )
+            })?;
+            remap.insert(*vertex_index, next);
+        }
+    }
+
+    let mut vertices = Vec::with_capacity(remap.len().saturating_mul(3));
+    for (source_index, _) in &remap {
+        let start = *source_index as usize * 3;
+        vertices.extend_from_slice(&payload.vertices[start..start + 3]);
+    }
+    for triangle_index in &mut payload.triangles {
+        *triangle_index = *remap.get(triangle_index).ok_or_else(|| {
+            GeometryImportError::ParseFailed(
+                "OCCT WASM preview vertex remap missed a triangle index".to_string(),
+            )
+        })?;
+    }
+    payload.vertices = vertices;
+    Ok(())
 }
 
 fn default_backend() -> String {

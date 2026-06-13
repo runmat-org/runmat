@@ -1,5 +1,8 @@
 use std::cell::{Cell, RefCell};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 
 use log::warn;
 use runmat_core::RunMatSession;
@@ -59,8 +62,49 @@ pub struct RunMatWasm {
     config: RefCell<SessionConfig>,
     gpu_status: GpuStatus,
     disposed: Cell<bool>,
-    active_interrupt: RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>,
+    active_interrupt: RefCell<Option<Arc<AtomicBool>>>,
     telemetry_sink: Option<Arc<dyn TelemetrySink>>,
+}
+
+struct WasmInterruptGuard<'a> {
+    slot: &'a RefCell<Option<Arc<AtomicBool>>>,
+    _runtime_guard: runmat_runtime::interrupt::InterruptGuard,
+}
+
+impl Drop for WasmInterruptGuard<'_> {
+    fn drop(&mut self) {
+        self.slot.borrow_mut().take();
+    }
+}
+
+fn install_wasm_interrupt(
+    slot: &RefCell<Option<Arc<AtomicBool>>>,
+    handle: Arc<AtomicBool>,
+) -> WasmInterruptGuard<'_> {
+    handle.store(false, Ordering::Relaxed);
+    slot.borrow_mut().replace(Arc::clone(&handle));
+    let runtime_guard = runmat_runtime::interrupt::replace_interrupt(Some(handle));
+    WasmInterruptGuard {
+        slot,
+        _runtime_guard: runtime_guard,
+    }
+}
+
+fn ensure_runtime_not_cancelled(operation: &str) -> Result<(), String> {
+    if runmat_runtime::interrupt::is_cancelled() {
+        Err(format!("{operation} cancelled by user"))
+    } else {
+        Ok(())
+    }
+}
+
+fn operation_error_message(err: runmat_runtime::operations::OperationErrorEnvelope) -> String {
+    format!("{}: {}", err.error_code, err.message)
+}
+
+struct GeometryInspectWithAsset {
+    inspect: GeometryInspectPayload,
+    asset: Option<runmat_geometry_core::GeometryAsset>,
 }
 
 impl RunMatWasm {
@@ -94,25 +138,38 @@ async fn inspect_geometry_path(
     path: String,
     budget: Option<GeometryPreviewBudgetPayload>,
 ) -> Result<GeometryInspectPayload, String> {
-    let _preview_timeout_ms = budget.as_ref().and_then(|item| item.timeout_ms);
+    inspect_geometry_path_with_asset(path, budget)
+        .await
+        .map(|result| result.inspect)
+}
+
+async fn inspect_geometry_path_with_asset(
+    path: String,
+    budget: Option<GeometryPreviewBudgetPayload>,
+) -> Result<GeometryInspectWithAsset, String> {
+    ensure_runtime_not_cancelled("geometry inspection")?;
     let metadata = runmat_filesystem::metadata_async(std::path::PathBuf::from(&path))
         .await
         .map_err(|err| format!("failed to inspect geometry metadata {path}: {err}"))?;
+    ensure_runtime_not_cancelled("geometry inspection")?;
     let byte_count = metadata.len();
     if let Some(max_bytes) = budget.as_ref().and_then(|item| item.max_bytes) {
         if byte_count > max_bytes {
-            return Ok(GeometryInspectPayload {
-                path: path.clone(),
-                format: geometry_format_from_path(&path),
-                byte_count,
-                supported: is_supported_geometry_path(&path),
-                stats: None,
-                geometry_summary: None,
-                regions: Vec::new(),
-                diagnostics: Vec::new(),
-                degraded_reason: Some(format!(
-                    "Geometry file is {byte_count} bytes, above the preview budget of {max_bytes} bytes."
-                )),
+            return Ok(GeometryInspectWithAsset {
+                inspect: GeometryInspectPayload {
+                    path: path.clone(),
+                    format: geometry_format_from_path(&path),
+                    byte_count,
+                    supported: is_supported_geometry_path(&path),
+                    stats: None,
+                    geometry_summary: None,
+                    regions: Vec::new(),
+                    diagnostics: Vec::new(),
+                    degraded_reason: Some(format!(
+                        "Geometry file is {byte_count} bytes, above the preview budget of {max_bytes} bytes."
+                    )),
+                },
+                asset: None,
             });
         }
     }
@@ -120,12 +177,14 @@ async fn inspect_geometry_path(
     let bytes = runmat_filesystem::read_async(std::path::PathBuf::from(&path))
         .await
         .map_err(|err| format!("failed to read geometry file {path}: {err}"))?;
+    ensure_runtime_not_cancelled("geometry inspection")?;
     let inspect = runmat_runtime::geometry::geometry_inspect_op(
         &path,
         &bytes,
         runmat_runtime::operations::OperationContext::new(None, None),
     )
-    .map_err(|err| err.message)?;
+    .map_err(operation_error_message)?;
+    ensure_runtime_not_cancelled("geometry inspection")?;
     let mut payload = GeometryInspectPayload {
         path: path.clone(),
         format: inspect.data.format,
@@ -141,7 +200,10 @@ async fn inspect_geometry_path(
 
     if !payload.supported {
         payload.degraded_reason = Some("Unsupported geometry format.".to_string());
-        return Ok(payload);
+        return Ok(GeometryInspectWithAsset {
+            inspect: payload,
+            asset: None,
+        });
     }
 
     let max_triangles = budget
@@ -151,23 +213,24 @@ async fn inspect_geometry_path(
     let asset = match runmat_runtime::geometry::geometry_load_with_options_op(
         &path,
         &bytes,
-        runmat_geometry_io::GeometryImportOptions {
-            max_triangles,
-            units: runmat_geometry_core::UnitSystem::Meter,
-        },
+        geometry_import_options_from_budget(budget.as_ref(), max_triangles),
         runmat_runtime::operations::OperationContext::new(None, None),
     ) {
         Ok(envelope) => envelope.data,
         Err(err) => {
-            payload.degraded_reason = Some(err.message);
-            return Ok(payload);
+            payload.degraded_reason = Some(operation_error_message(err));
+            return Ok(GeometryInspectWithAsset {
+                inspect: payload,
+                asset: None,
+            });
         }
     };
+    ensure_runtime_not_cancelled("geometry inspection")?;
     let stats = runmat_runtime::geometry::geometry_compute_stats_op(
         &asset,
         runmat_runtime::operations::OperationContext::new(None, None),
     )
-    .map_err(|err| err.message)?
+    .map_err(operation_error_message)?
     .data;
     if let Some(max_vertices) = budget.as_ref().and_then(|item| item.max_vertices) {
         if stats.total_vertices > max_vertices {
@@ -195,15 +258,22 @@ async fn inspect_geometry_path(
         .iter()
         .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
         .collect();
-    Ok(payload)
+    Ok(GeometryInspectWithAsset {
+        inspect: payload,
+        asset: Some(asset),
+    })
 }
 
 async fn preview_geometry_path(
     path: String,
     budget: Option<GeometryPreviewBudgetPayload>,
 ) -> Result<GeometryPreviewPayload, String> {
-    let inspect = inspect_geometry_path(path, budget.clone()).await?;
-    if inspect.degraded_reason.is_some() || inspect.stats.is_none() {
+    ensure_runtime_not_cancelled("geometry preview")?;
+    let figure_options = geometry_preview_figure_options_from_budget(budget.as_ref());
+    let inspected = inspect_geometry_path_with_asset(path, budget).await?;
+    let GeometryInspectWithAsset { inspect, asset } = inspected;
+    ensure_runtime_not_cancelled("geometry preview")?;
+    if asset.is_none() || inspect.stats.is_none() {
         return Ok(GeometryPreviewPayload {
             inspect,
             scene_kind: "unavailable".to_string(),
@@ -212,44 +282,85 @@ async fn preview_geometry_path(
             preview_message: Some("Geometry preview is unavailable for this file.".to_string()),
         });
     }
-    let asset = load_geometry_asset_for_preview(&inspect.path, budget).await?;
-    let figure = runmat_runtime::geometry::geometry_preview_figure(
+    let asset = asset.ok_or_else(|| "geometry preview asset was not available".to_string())?;
+    let truncated = geometry_asset_preview_truncated(&asset);
+    ensure_runtime_not_cancelled("geometry preview")?;
+    let figure = match runmat_runtime::geometry::geometry_preview_figure(
         &asset,
         format!("Geometry Preview: {}", filename_for_display(&inspect.path)),
-        runmat_runtime::geometry::GeometryPreviewFigureOptions::default(),
-    )?;
+        figure_options,
+    ) {
+        Ok(figure) => figure,
+        Err(err) => {
+            return Ok(GeometryPreviewPayload {
+                inspect,
+                scene_kind: "summary".to_string(),
+                figure_handle: None,
+                truncated,
+                preview_message: Some(err),
+            });
+        }
+    };
+    ensure_runtime_not_cancelled("geometry preview")?;
     let figure_handle = runtime_import_figure(figure).as_u32();
     Ok(GeometryPreviewPayload {
         inspect,
         scene_kind: "mesh".to_string(),
         figure_handle: Some(figure_handle),
-        truncated: false,
-        preview_message: None,
+        truncated,
+        preview_message: truncated
+            .then(|| "Preview mesh was limited by the requested CAD preview budget.".to_string()),
     })
 }
 
-async fn load_geometry_asset_for_preview(
-    path: &str,
-    budget: Option<GeometryPreviewBudgetPayload>,
-) -> Result<runmat_geometry_core::GeometryAsset, String> {
-    let bytes = runmat_filesystem::read_async(std::path::PathBuf::from(path))
-        .await
-        .map_err(|err| format!("failed to read geometry file {path}: {err}"))?;
-    let max_triangles = budget
-        .as_ref()
-        .and_then(|item| item.max_triangles)
-        .or(Some(16_000_000));
-    runmat_runtime::geometry::geometry_load_with_options_op(
-        path,
-        &bytes,
-        runmat_geometry_io::GeometryImportOptions {
-            max_triangles,
-            units: runmat_geometry_core::UnitSystem::Meter,
-        },
-        runmat_runtime::operations::OperationContext::new(None, None),
-    )
-    .map(|envelope| envelope.data)
-    .map_err(|err| err.message)
+fn geometry_asset_preview_truncated(asset: &runmat_geometry_core::GeometryAsset) -> bool {
+    asset
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "CAD_IMPORT_TESSELLATION_TRUNCATED")
+}
+
+fn geometry_import_options_from_budget(
+    budget: Option<&GeometryPreviewBudgetPayload>,
+    max_triangles: Option<u64>,
+) -> runmat_geometry_io::GeometryImportOptions {
+    runmat_geometry_io::GeometryImportOptions {
+        max_triangles,
+        budget_policy: runmat_geometry_io::GeometryImportBudgetPolicy::Truncate,
+        units: runmat_geometry_core::UnitSystem::Meter,
+        tessellation_profile: tessellation_profile_from_budget(budget),
+        relative_deflection: true,
+    }
+}
+
+fn tessellation_profile_from_budget(
+    budget: Option<&GeometryPreviewBudgetPayload>,
+) -> runmat_geometry_core::TessellationProfile {
+    let Some(profile) = budget.and_then(|budget| budget.tessellation_profile.as_ref()) else {
+        return runmat_geometry_core::TessellationProfile::default();
+    };
+    runmat_geometry_core::TessellationProfile {
+        profile_id: profile
+            .profile_id
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "preview-v1".to_string()),
+        chord_tolerance: finite_positive(profile.chord_tolerance),
+        angle_tolerance_deg: finite_positive(profile.angle_tolerance_deg),
+        healing_mode: Default::default(),
+    }
+}
+
+fn geometry_preview_figure_options_from_budget(
+    budget: Option<&GeometryPreviewBudgetPayload>,
+) -> runmat_runtime::geometry::GeometryPreviewFigureOptions {
+    let mut options = runmat_runtime::geometry::GeometryPreviewFigureOptions::cad_preview();
+    options.xray = budget.and_then(|budget| budget.xray).unwrap_or(false);
+    options
+}
+
+fn finite_positive(value: Option<f64>) -> Option<f64> {
+    value.filter(|value| value.is_finite() && *value > 0.0)
 }
 
 async fn check_fea_path(path: String) -> Result<FeaCheckPayload, String> {
@@ -334,18 +445,21 @@ async fn check_fea_path(path: String) -> Result<FeaCheckPayload, String> {
 }
 
 async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
+    ensure_runtime_not_cancelled("FEA run")?;
     let document = runmat_runtime::analysis::load_fea_document_from_path_async(
         &std::path::PathBuf::from(&path),
     )
     .await?;
+    ensure_runtime_not_cancelled("FEA run")?;
     match document {
         runmat_runtime::analysis::FeaResolvedDocument::Study(study) => {
             let run = runmat_runtime::analysis::analysis_run_study_op(
                 &study,
                 runmat_runtime::operations::OperationContext::new(None, None),
             )
-            .map_err(|err| err.message)?
+            .map_err(operation_error_message)?
             .data;
+            ensure_runtime_not_cancelled("FEA run")?;
             let results = runmat_runtime::analysis::analysis_results_by_run_id_op(
                 &run.run_id,
                 runmat_runtime::analysis::AnalysisResultsQuery::metadata_only(),
@@ -363,6 +477,7 @@ async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
                 .map(|data| serde_json::to_value(&data.summary))
                 .transpose()
                 .map_err(|err| err.to_string())?;
+            let (figure_handles, diagnostics) = generated_fea_figure_handles(&study, &run.run_id)?;
             Ok(FeaRunPayload {
                 path,
                 document_kind: "study".to_string(),
@@ -373,9 +488,10 @@ async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
                     .map_err(|err| err.to_string())?,
                 field_descriptors,
                 result_summary,
-                figure_handles: Vec::new(),
+                figure_handles,
                 artifact_manifest: None,
-                diagnostics: Vec::new(),
+                diagnostics,
+                progress_events: Vec::new(),
             })
         }
         runmat_runtime::analysis::FeaResolvedDocument::Sweep(sweep) => {
@@ -383,7 +499,7 @@ async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
                 &sweep,
                 runmat_runtime::operations::OperationContext::new(None, None),
             )
-            .map_err(|err| err.message)?
+            .map_err(operation_error_message)?
             .data;
             Ok(FeaRunPayload {
                 path,
@@ -395,9 +511,35 @@ async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
                 figure_handles: Vec::new(),
                 artifact_manifest: None,
                 diagnostics: Vec::new(),
+                progress_events: Vec::new(),
             })
         }
     }
+}
+
+fn generated_fea_figure_handles(
+    study: &runmat_runtime::analysis::AnalysisStudySpec,
+    run_id: &str,
+) -> Result<(Vec<u32>, Vec<JsonValue>), String> {
+    let generated = runmat_runtime::analysis::analysis_generate_study_run_figures(
+        study,
+        run_id,
+        runmat_runtime::analysis::AnalysisFigureGenerationOptions::default(),
+    )?;
+    let mut handles = Vec::with_capacity(generated.len());
+    let mut diagnostics = Vec::new();
+    for figure in generated {
+        handles.push(runtime_import_figure(figure.figure).as_u32());
+        diagnostics.extend(figure.warnings.into_iter().map(|message| {
+            serde_json::json!({
+                "code": "FEA_VISUALIZATION_WARNING",
+                "severity": "warning",
+                "message": message,
+                "source": "runmat.fea.visualization",
+            })
+        }));
+    }
+    Ok((handles, diagnostics))
 }
 
 fn load_fea_results(run_id: String) -> Result<FeaResultsPayload, String> {
@@ -528,6 +670,16 @@ struct GeometryPreviewBudgetPayload {
     max_triangles: Option<u64>,
     max_vertices: Option<u64>,
     timeout_ms: Option<u64>,
+    tessellation_profile: Option<GeometryPreviewTessellationProfilePayload>,
+    xray: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct GeometryPreviewTessellationProfilePayload {
+    profile_id: Option<String>,
+    chord_tolerance: Option<f64>,
+    angle_tolerance_deg: Option<f64>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -604,6 +756,7 @@ struct FeaRunPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     artifact_manifest: Option<JsonValue>,
     diagnostics: Vec<JsonValue>,
+    progress_events: Vec<JsonValue>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -838,6 +991,8 @@ impl RunMatWasm {
         budget_value: JsValue,
     ) -> Result<JsValue, JsValue> {
         self.ensure_not_disposed()?;
+        let interrupt_handle = self.session.borrow().interrupt_handle();
+        let _interrupt_guard = install_wasm_interrupt(&self.active_interrupt, interrupt_handle);
         let budget = if budget_value.is_null() || budget_value.is_undefined() {
             None
         } else {
@@ -862,6 +1017,8 @@ impl RunMatWasm {
         budget_value: JsValue,
     ) -> Result<JsValue, JsValue> {
         self.ensure_not_disposed()?;
+        let interrupt_handle = self.session.borrow().interrupt_handle();
+        let _interrupt_guard = install_wasm_interrupt(&self.active_interrupt, interrupt_handle);
         let budget = if budget_value.is_null() || budget_value.is_undefined() {
             None
         } else {
@@ -877,6 +1034,14 @@ impl RunMatWasm {
             .map_err(|err| js_error(&err))?;
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize geometry preview: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = disposeGeometryPreview)]
+    pub fn dispose_geometry_preview_js(&self, figure_handle: u32) -> Result<(), JsValue> {
+        self.ensure_not_disposed()?;
+        runtime_close_figure(Some(FigureHandle::from(figure_handle)))
+            .map(|_| ())
+            .map_err(|err| js_error(&format!("disposeGeometryPreview failed: {err}")))
     }
 
     #[wasm_bindgen(js_name = feaCapabilities)]
@@ -912,6 +1077,17 @@ impl RunMatWasm {
         artifact_root: Option<String>,
     ) -> Result<JsValue, JsValue> {
         self.ensure_not_disposed()?;
+        init_logging_once();
+        let interrupt_handle = self.session.borrow().interrupt_handle();
+        let _interrupt_guard = install_wasm_interrupt(&self.active_interrupt, interrupt_handle);
+        let progress_events = Arc::new(Mutex::new(Vec::new()));
+        let progress_events_for_handler = Arc::clone(&progress_events);
+        let _progress_guard =
+            runmat_runtime::analysis::replace_fea_progress_handler(Some(Arc::new(move |event| {
+                if let Ok(mut slot) = progress_events_for_handler.lock() {
+                    slot.push(event);
+                }
+            })));
         if let Some(root) = artifact_root
             .as_deref()
             .filter(|value| !value.trim().is_empty())
@@ -931,7 +1107,17 @@ impl RunMatWasm {
                 },
             );
         }
-        let payload = run_fea_path(path).await.map_err(|err| js_error(&err))?;
+        let mut payload = run_fea_path(path).await.map_err(|err| js_error(&err))?;
+        payload.progress_events = progress_events
+            .lock()
+            .ok()
+            .map(|events| {
+                events
+                    .iter()
+                    .filter_map(|event| serde_json::to_value(event).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize FEA run result: {err}")))
     }
@@ -1011,7 +1197,7 @@ impl RunMatWasm {
     #[wasm_bindgen(js_name = cancelExecution)]
     pub fn cancel_execution(&self) {
         if let Some(flag) = self.active_interrupt.borrow().as_ref() {
-            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            flag.store(true, Ordering::Relaxed);
             return;
         }
         self.session.borrow().cancel_execution();

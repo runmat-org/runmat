@@ -7,16 +7,18 @@ use std::collections::BTreeMap;
 use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
 
 use super::{
-    build_asset, build_result, capacity_guard, is_degenerate_triangle, push_entity_range,
-    push_mesh_count_diagnostics, push_utf8_bom_stripped_diagnostic, strip_utf8_bom_bytes,
-    GeometryImportError, GeometryImportOptions,
+    build_asset, build_result, capacity_guard, check_cancelled_periodic, is_degenerate_triangle,
+    push_entity_range, push_mesh_count_diagnostics, push_utf8_bom_stripped_diagnostic,
+    strip_utf8_bom_bytes, GeometryImportContext, GeometryImportError, GeometryImportOptions,
 };
 
 pub(super) fn import_gltf(
     path: &str,
     bytes: &[u8],
     options: GeometryImportOptions,
+    context: &GeometryImportContext,
 ) -> Result<crate::report::ImportResult, GeometryImportError> {
+    context.check_cancelled()?;
     let (bytes, stripped_bom) = strip_utf8_bom_bytes(bytes);
     if bytes.len() >= 4 && &bytes[0..4] == b"glTF" {
         return Err(GeometryImportError::ParseFailed(
@@ -62,6 +64,7 @@ pub(super) fn import_gltf(
     let mut region_tracker = GltfRegionTracker::default();
 
     for (mesh_index, mesh) in meshes.iter().enumerate() {
+        check_cancelled_periodic(context, mesh_index)?;
         let region_id = region_tracker.ensure_mesh_region(mesh_index, mesh);
         let primitives = mesh
             .get("primitives")
@@ -77,13 +80,13 @@ pub(super) fn import_gltf(
                     mode
                 )));
             }
-            let (positions, uses_accessor_data_uri) = parse_positions(&value, primitive)?;
+            let (positions, uses_accessor_data_uri) = parse_positions(&value, primitive, context)?;
             let uses_implicit_indices = primitive.get("indices").is_none();
             let base_vertex = all_positions.len();
             all_positions.extend_from_slice(&positions);
 
             let (indices, indices_use_accessor_data_uri) =
-                parse_indices(&value, primitive, positions.len())?;
+                parse_indices(&value, primitive, positions.len(), context)?;
             if uses_accessor_data_uri || indices_use_accessor_data_uri {
                 diagnostics.push(ImportDiagnostic {
                     code: "GEOMETRY_GLTF_ACCESSOR_DATA_URI_USED".to_string(),
@@ -106,7 +109,8 @@ pub(super) fn import_gltf(
                     "GLTF indices must be a multiple of 3 for triangle primitives".to_string(),
                 ));
             }
-            for tri in indices.chunks_exact(3) {
+            for (tri_index, tri) in indices.chunks_exact(3).enumerate() {
+                check_cancelled_periodic(context, tri_index)?;
                 capacity_guard(triangle_count + 1, &options)?;
                 let a = base_vertex + tri[0];
                 let b = base_vertex + tri[1];
@@ -159,6 +163,7 @@ pub(super) fn import_gltf(
         path,
         "gltf/v1",
         options.units,
+        options.tessellation_profile.clone(),
         all_positions.len() as u64,
         triangle_count,
         vec![SurfaceMesh::new("mesh_1", all_positions, triangles)],
@@ -273,6 +278,7 @@ fn stable_region_slug(value: &str) -> String {
 fn parse_positions(
     root: &Value,
     primitive: &Value,
+    context: &GeometryImportContext,
 ) -> Result<(Vec<[f64; 3]>, bool), GeometryImportError> {
     let position_ref = primitive
         .get("attributes")
@@ -281,17 +287,23 @@ fn parse_positions(
             GeometryImportError::ParseFailed("GLTF POSITION attribute is required".to_string())
         })?;
     if let Some(position_values) = position_ref.as_array() {
-        return Ok((parse_inline_positions(position_values)?, false));
+        return Ok((parse_inline_positions(position_values, context)?, false));
     }
     if let Some(accessor_index) = position_ref.as_u64() {
-        return Ok((parse_accessor_positions(root, accessor_index)?, true));
+        return Ok((
+            parse_accessor_positions(root, accessor_index, context)?,
+            true,
+        ));
     }
     Err(GeometryImportError::ParseFailed(
         "GLTF POSITION attribute must be an inline array or accessor index".to_string(),
     ))
 }
 
-fn parse_inline_positions(position_values: &[Value]) -> Result<Vec<[f64; 3]>, GeometryImportError> {
+fn parse_inline_positions(
+    position_values: &[Value],
+    context: &GeometryImportContext,
+) -> Result<Vec<[f64; 3]>, GeometryImportError> {
     if position_values.len() < 3 {
         return Err(GeometryImportError::ParseFailed(
             "GLTF POSITION must contain at least 3 vertices".to_string(),
@@ -300,7 +312,9 @@ fn parse_inline_positions(position_values: &[Value]) -> Result<Vec<[f64; 3]>, Ge
 
     position_values
         .iter()
-        .map(|entry| {
+        .enumerate()
+        .map(|(index, entry)| {
+            check_cancelled_periodic(context, index)?;
             let coords = entry.as_array().ok_or_else(|| {
                 GeometryImportError::ParseFailed("GLTF POSITION entry must be [x,y,z]".to_string())
             })?;
@@ -327,25 +341,31 @@ fn parse_indices(
     root: &Value,
     primitive: &Value,
     position_count: usize,
+    context: &GeometryImportContext,
 ) -> Result<(Vec<usize>, bool), GeometryImportError> {
     let Some(indices) = primitive.get("indices") else {
         return Ok(((0..position_count).collect(), false));
     };
     if let Some(values) = indices.as_array() {
-        return Ok((parse_inline_indices(values)?, false));
+        return Ok((parse_inline_indices(values, context)?, false));
     }
     if let Some(accessor_index) = indices.as_u64() {
-        return Ok((parse_accessor_indices(root, accessor_index)?, true));
+        return Ok((parse_accessor_indices(root, accessor_index, context)?, true));
     }
     Err(GeometryImportError::ParseFailed(
         "GLTF indices must be an inline array or accessor index".to_string(),
     ))
 }
 
-fn parse_inline_indices(values: &[Value]) -> Result<Vec<usize>, GeometryImportError> {
+fn parse_inline_indices(
+    values: &[Value],
+    context: &GeometryImportContext,
+) -> Result<Vec<usize>, GeometryImportError> {
     values
         .iter()
-        .map(|value| {
+        .enumerate()
+        .map(|(offset, value)| {
+            check_cancelled_periodic(context, offset)?;
             let index = value.as_u64().ok_or_else(|| {
                 GeometryImportError::ParseFailed(
                     "GLTF inline index must be unsigned integer".to_string(),
@@ -363,6 +383,7 @@ fn parse_inline_indices(values: &[Value]) -> Result<Vec<usize>, GeometryImportEr
 fn parse_accessor_positions(
     root: &Value,
     accessor_index: u64,
+    context: &GeometryImportContext,
 ) -> Result<Vec<[f64; 3]>, GeometryImportError> {
     let decoded = resolve_accessor_decode(root, accessor_index)?;
     if decoded.accessor_type != "VEC3" {
@@ -391,6 +412,7 @@ fn parse_accessor_positions(
 
     let mut positions = Vec::<[f64; 3]>::with_capacity(decoded.count);
     for i in 0..decoded.count {
+        check_cancelled_periodic(context, i)?;
         let offset = decoded.base_offset + i.saturating_mul(decoded.stride);
         let x = read_f32_le_as_f64(&decoded.bytes, decoded.view_end, offset, "POSITION x")?;
         let y = read_f32_le_as_f64(&decoded.bytes, decoded.view_end, offset + 4, "POSITION y")?;
@@ -403,6 +425,7 @@ fn parse_accessor_positions(
 fn parse_accessor_indices(
     root: &Value,
     accessor_index: u64,
+    context: &GeometryImportContext,
 ) -> Result<Vec<usize>, GeometryImportError> {
     let decoded = resolve_accessor_decode(root, accessor_index)?;
     if decoded.accessor_type != "SCALAR" {
@@ -432,6 +455,7 @@ fn parse_accessor_indices(
 
     let mut indices = Vec::<usize>::with_capacity(decoded.count);
     for i in 0..decoded.count {
+        check_cancelled_periodic(context, i)?;
         let offset = decoded.base_offset + i.saturating_mul(decoded.stride);
         let index = match decoded.component_type {
             5121 => {

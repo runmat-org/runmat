@@ -2,9 +2,9 @@ use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
 use runmat_geometry_core::SurfaceMesh;
 
 use super::{
-    build_asset, build_result, capacity_guard, is_degenerate_triangle, parse_f64,
-    push_mesh_count_diagnostics, push_utf8_bom_stripped_diagnostic, strip_utf8_bom_bytes,
-    GeometryImportError, GeometryImportOptions,
+    build_asset, build_result, capacity_guard, check_cancelled_periodic, is_degenerate_triangle,
+    parse_f64, push_mesh_count_diagnostics, push_utf8_bom_stripped_diagnostic,
+    strip_utf8_bom_bytes, GeometryImportContext, GeometryImportError, GeometryImportOptions,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,7 +38,9 @@ pub(super) fn import_ply(
     path: &str,
     bytes: &[u8],
     options: GeometryImportOptions,
+    context: &GeometryImportContext,
 ) -> Result<crate::report::ImportResult, GeometryImportError> {
+    context.check_cancelled()?;
     let mut diagnostics = Vec::<ImportDiagnostic>::new();
     let (bytes, stripped_bom) = strip_utf8_bom_bytes(bytes);
     if stripped_bom {
@@ -65,6 +67,7 @@ pub(super) fn import_ply(
                     header.face_count,
                     &mut mesh,
                     &options,
+                    context,
                 )?;
             }
             PlyFormat::BinaryLittleEndian10 => {
@@ -75,6 +78,7 @@ pub(super) fn import_ply(
                     face_index_type,
                     &mut mesh,
                     &options,
+                    context,
                 )?;
             }
         }
@@ -90,6 +94,7 @@ pub(super) fn import_ply(
         path,
         "ply/v1",
         options.units,
+        options.tessellation_profile.clone(),
         vertices.len() as u64,
         triangle_count,
         vec![SurfaceMesh::new("mesh_1", vertices, triangles)],
@@ -248,12 +253,14 @@ fn parse_ascii_body(
     face_count: usize,
     mesh: &mut PlyMeshAccumulator<'_>,
     options: &GeometryImportOptions,
+    context: &GeometryImportContext,
 ) -> Result<(), GeometryImportError> {
     let body_text = std::str::from_utf8(body).map_err(|_| {
         GeometryImportError::ParseFailed("invalid UTF-8 PLY ASCII body".to_string())
     })?;
     let mut lines = body_text.lines();
-    for _ in 0..vertex_count {
+    for index in 0..vertex_count {
+        check_cancelled_periodic(context, index)?;
         let vertex_line = lines.next().ok_or_else(|| {
             GeometryImportError::ParseFailed(format!(
                 "PLY declared {} vertices but parsed {}",
@@ -274,7 +281,8 @@ fn parse_ascii_body(
         mesh.vertices.push([x, y, z]);
     }
 
-    for _ in 0..face_count {
+    for face_index in 0..face_count {
+        check_cancelled_periodic(context, face_index)?;
         let face_line = lines
             .next()
             .ok_or_else(|| GeometryImportError::ParseFailed("PLY missing face line".to_string()))?;
@@ -307,7 +315,7 @@ fn parse_ascii_body(
             indices.push(index);
         }
 
-        emit_face_triangles(&indices, mesh, options)?;
+        emit_face_triangles(&indices, mesh, options, context)?;
     }
     Ok(())
 }
@@ -318,9 +326,11 @@ fn parse_binary_little_endian_body(
     face_index_type: BinaryFaceIndexType,
     mesh: &mut PlyMeshAccumulator<'_>,
     options: &GeometryImportOptions,
+    context: &GeometryImportContext,
 ) -> Result<(), GeometryImportError> {
     let mut cursor = 0usize;
-    for _ in 0..header.vertex_count {
+    for index in 0..header.vertex_count {
+        check_cancelled_periodic(context, index)?;
         let x = read_f32_le(body, cursor, "PLY binary vertex x")?;
         let y = read_f32_le(body, cursor + 4, "PLY binary vertex y")?;
         let z = read_f32_le(body, cursor + 8, "PLY binary vertex z")?;
@@ -328,7 +338,8 @@ fn parse_binary_little_endian_body(
         cursor = cursor.saturating_add(12);
     }
 
-    for _ in 0..header.face_count {
+    for face_index in 0..header.face_count {
+        check_cancelled_periodic(context, face_index)?;
         let face_vertex_count = *body.get(cursor).ok_or_else(|| {
             GeometryImportError::ParseFailed(
                 "PLY binary face data is truncated at list count".to_string(),
@@ -373,7 +384,7 @@ fn parse_binary_little_endian_body(
             indices.push(index);
         }
 
-        emit_face_triangles(&indices, mesh, options)?;
+        emit_face_triangles(&indices, mesh, options, context)?;
     }
     Ok(())
 }
@@ -382,9 +393,11 @@ fn emit_face_triangles(
     indices: &[usize],
     mesh: &mut PlyMeshAccumulator<'_>,
     options: &GeometryImportOptions,
+    context: &GeometryImportContext,
 ) -> Result<(), GeometryImportError> {
     let pivot = indices[0];
     for i in 1..(indices.len() - 1) {
+        check_cancelled_periodic(context, i)?;
         capacity_guard(*mesh.triangle_count + 1, options)?;
         let tri = [
             mesh.vertices[pivot],

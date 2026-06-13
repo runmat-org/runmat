@@ -8,6 +8,7 @@ use crate::{
         FeaDiagnostic, FeaDiagnosticSeverity,
     },
     post::fields::recover_result_fields,
+    progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::{backend::build_backend, linear::solve_linear_system},
 };
 
@@ -23,13 +24,57 @@ pub fn run_linear_static_with_options(
     backend: ComputeBackend,
     options: LinearStaticSolveOptions,
 ) -> Result<FeaRunResult, FeaRunError> {
+    emit_phase(
+        "fea.run_linear_static",
+        FeaProgressPhase::RegionResolution,
+        FeaProgressStatus::Started,
+        "validating FEA model",
+        Some(0),
+        Some(5),
+    );
+    check_cancelled("fea.run_linear_static")?;
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+    emit_phase(
+        "fea.run_linear_static",
+        FeaProgressPhase::RegionResolution,
+        FeaProgressStatus::Completed,
+        "FEA model validation complete",
+        Some(1),
+        Some(5),
+    );
+    check_cancelled("fea.run_linear_static")?;
 
+    emit_phase(
+        "fea.run_linear_static",
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Started,
+        "assembling linear system",
+        Some(1),
+        Some(5),
+    );
     let summary = assemble_linear_system(
         model,
         options.prep_context,
         options.thermo_mechanical_context,
         options.electro_thermal_context,
+    );
+    emit_phase(
+        "fea.run_linear_static",
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Completed,
+        "linear system assembly complete",
+        Some(2),
+        Some(5),
+    );
+    check_cancelled("fea.run_linear_static")?;
+
+    emit_phase(
+        "fea.run_linear_static",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Started,
+        "solving linear system",
+        Some(2),
+        Some(5),
     );
     let algebra_backend = build_backend(options.algebra_backend_kind);
     let solve_result = solve_linear_system(
@@ -38,7 +83,34 @@ pub fn run_linear_static_with_options(
         options.algebra_backend_kind,
         algebra_backend.as_ref(),
     );
+    emit_phase(
+        "fea.run_linear_static",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Completed,
+        "linear solve complete",
+        Some(3),
+        Some(5),
+    );
+    check_cancelled("fea.run_linear_static")?;
+
+    emit_phase(
+        "fea.run_linear_static",
+        FeaProgressPhase::Postprocess,
+        FeaProgressStatus::Started,
+        "recovering result fields",
+        Some(3),
+        Some(5),
+    );
     let fields = recover_result_fields(&summary, &solve_result);
+    emit_phase(
+        "fea.run_linear_static",
+        FeaProgressPhase::Postprocess,
+        FeaProgressStatus::Completed,
+        "result field recovery complete",
+        Some(4),
+        Some(5),
+    );
+    check_cancelled("fea.run_linear_static")?;
     let solver_device_apply_k_ratio = if solve_result.device_apply_k_attempt_count == 0 {
         0.0
     } else {
@@ -74,6 +146,15 @@ pub fn run_linear_static_with_options(
         },
     );
     diagnostics.extend(solve_result.diagnostics);
+
+    emit_phase(
+        "fea.run_linear_static",
+        FeaProgressPhase::Complete,
+        FeaProgressStatus::Completed,
+        "FEA linear static run complete",
+        Some(5),
+        Some(5),
+    );
 
     Ok(FeaRunResult {
         backend,

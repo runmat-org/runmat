@@ -7,6 +7,7 @@ use crate::{
         FeaRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
+    progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::nonlinear::{solve_nonlinear_system, NonlinearSolveOptions},
 };
 
@@ -22,13 +23,75 @@ pub fn run_nonlinear_with_options(
     backend: ComputeBackend,
     options: NonlinearSolveOptions,
 ) -> Result<FeaNonlinearRunResult, FeaRunError> {
+    emit_phase(
+        "fea.run_nonlinear",
+        FeaProgressPhase::RegionResolution,
+        FeaProgressStatus::Started,
+        "validating nonlinear FEA model",
+        Some(0),
+        Some(5),
+    );
+    check_cancelled("fea.run_nonlinear")?;
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+    emit_phase(
+        "fea.run_nonlinear",
+        FeaProgressPhase::RegionResolution,
+        FeaProgressStatus::Completed,
+        "nonlinear model validation complete",
+        Some(1),
+        Some(5),
+    );
+    check_cancelled("fea.run_nonlinear")?;
     let prep_context = options.prep_context;
     let thermo_context = options.thermo_mechanical_context.clone();
     let electro_context = options.electro_thermal_context.clone();
 
+    emit_phase(
+        "fea.run_nonlinear",
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Started,
+        "assembling nonlinear system",
+        Some(1),
+        Some(5),
+    );
     let summary = assemble_linear_system(model, prep_context, thermo_context, electro_context);
+    emit_phase(
+        "fea.run_nonlinear",
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Completed,
+        "nonlinear system assembly complete",
+        Some(2),
+        Some(5),
+    );
+    check_cancelled("fea.run_nonlinear")?;
+
+    emit_phase(
+        "fea.run_nonlinear",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Started,
+        "solving nonlinear increments",
+        Some(2),
+        Some(5),
+    );
     let nonlinear = solve_nonlinear_system(&summary, options.clone(), backend);
+    emit_phase(
+        "fea.run_nonlinear",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Completed,
+        "nonlinear solve complete",
+        Some(3),
+        Some(5),
+    );
+    check_cancelled("fea.run_nonlinear")?;
+
+    emit_phase(
+        "fea.run_nonlinear",
+        FeaProgressPhase::Postprocess,
+        FeaProgressStatus::Started,
+        "recovering nonlinear fields",
+        Some(3),
+        Some(5),
+    );
     let mut diagnostics = nonlinear.diagnostics.clone();
     extend_common_run_diagnostics(
         &mut diagnostics,
@@ -97,6 +160,24 @@ pub fn run_nonlinear_with_options(
             )
         })
         .collect();
+
+    emit_phase(
+        "fea.run_nonlinear",
+        FeaProgressPhase::Postprocess,
+        FeaProgressStatus::Completed,
+        "nonlinear result field recovery complete",
+        Some(4),
+        Some(5),
+    );
+    check_cancelled("fea.run_nonlinear")?;
+    emit_phase(
+        "fea.run_nonlinear",
+        FeaProgressPhase::Complete,
+        FeaProgressStatus::Completed,
+        "FEA nonlinear run complete",
+        Some(5),
+        Some(5),
+    );
 
     Ok(FeaNonlinearRunResult {
         run,

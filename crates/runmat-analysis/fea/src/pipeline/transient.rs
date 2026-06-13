@@ -7,6 +7,7 @@ use crate::{
         FeaTransientRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
+    progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::transient::{solve_transient_system, TransientSolveOptions},
 };
 
@@ -22,13 +23,75 @@ pub fn run_transient_with_options(
     backend: ComputeBackend,
     options: TransientSolveOptions,
 ) -> Result<FeaTransientRunResult, FeaRunError> {
+    emit_phase(
+        "fea.run_transient",
+        FeaProgressPhase::RegionResolution,
+        FeaProgressStatus::Started,
+        "validating transient FEA model",
+        Some(0),
+        Some(5),
+    );
+    check_cancelled("fea.run_transient")?;
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+    emit_phase(
+        "fea.run_transient",
+        FeaProgressPhase::RegionResolution,
+        FeaProgressStatus::Completed,
+        "transient model validation complete",
+        Some(1),
+        Some(5),
+    );
+    check_cancelled("fea.run_transient")?;
     let prep_context = options.prep_context;
     let thermo_context = options.thermo_mechanical_context.clone();
     let electro_context = options.electro_thermal_context.clone();
 
+    emit_phase(
+        "fea.run_transient",
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Started,
+        "assembling transient system",
+        Some(1),
+        Some(5),
+    );
     let summary = assemble_linear_system(model, prep_context, thermo_context, electro_context);
+    emit_phase(
+        "fea.run_transient",
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Completed,
+        "transient system assembly complete",
+        Some(2),
+        Some(5),
+    );
+    check_cancelled("fea.run_transient")?;
+
+    emit_phase(
+        "fea.run_transient",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Started,
+        "solving transient steps",
+        Some(2),
+        Some(5),
+    );
     let transient = solve_transient_system(&summary, options.clone(), backend);
+    emit_phase(
+        "fea.run_transient",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Completed,
+        "transient solve complete",
+        Some(3),
+        Some(5),
+    );
+    check_cancelled("fea.run_transient")?;
+
+    emit_phase(
+        "fea.run_transient",
+        FeaProgressPhase::Postprocess,
+        FeaProgressStatus::Started,
+        "recovering transient fields",
+        Some(3),
+        Some(5),
+    );
     let mut diagnostics = transient.diagnostics.clone();
     extend_common_run_diagnostics(
         &mut diagnostics,
@@ -92,6 +155,24 @@ pub fn run_transient_with_options(
             )
         })
         .collect();
+
+    emit_phase(
+        "fea.run_transient",
+        FeaProgressPhase::Postprocess,
+        FeaProgressStatus::Completed,
+        "transient result field recovery complete",
+        Some(4),
+        Some(5),
+    );
+    check_cancelled("fea.run_transient")?;
+    emit_phase(
+        "fea.run_transient",
+        FeaProgressPhase::Complete,
+        FeaProgressStatus::Completed,
+        "FEA transient run complete",
+        Some(5),
+        Some(5),
+    );
 
     Ok(FeaTransientRunResult {
         run,

@@ -3,16 +3,18 @@ use runmat_geometry_core::{EntityIdRange, EntityKind, Region, RegionEntityMappin
 use std::collections::BTreeMap;
 
 use super::{
-    build_asset, build_result, capacity_guard, is_degenerate_triangle, parse_f64,
-    push_entity_range, push_mesh_count_diagnostics, push_utf8_bom_stripped_diagnostic,
-    strip_utf8_bom_text, GeometryImportError, GeometryImportOptions,
+    build_asset, build_result, capacity_guard, check_cancelled_periodic, is_degenerate_triangle,
+    parse_f64, push_entity_range, push_mesh_count_diagnostics, push_utf8_bom_stripped_diagnostic,
+    strip_utf8_bom_text, GeometryImportContext, GeometryImportError, GeometryImportOptions,
 };
 
 pub(super) fn import_obj(
     path: &str,
     bytes: &[u8],
     options: GeometryImportOptions,
+    context: &GeometryImportContext,
 ) -> Result<crate::report::ImportResult, GeometryImportError> {
+    context.check_cancelled()?;
     let text = std::str::from_utf8(bytes)
         .map_err(|_| GeometryImportError::ParseFailed("invalid UTF-8 OBJ payload".to_string()))?;
 
@@ -27,6 +29,7 @@ pub(super) fn import_obj(
     let mut regions = ObjRegionTracker::default();
 
     for (line_idx, line) in text.lines().enumerate() {
+        check_cancelled_periodic(context, line_idx)?;
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
@@ -92,6 +95,7 @@ pub(super) fn import_obj(
 
         let pivot = face_indices[0];
         for i in 1..(face_indices.len() - 1) {
+            check_cancelled_periodic(context, i)?;
             let tri = [pivot, face_indices[i], face_indices[i + 1]];
             capacity_guard(triangle_count + 1, &options)?;
 
@@ -141,6 +145,7 @@ pub(super) fn import_obj(
         path,
         "obj/v1",
         options.units,
+        options.tessellation_profile.clone(),
         vertex_pool.len() as u64,
         triangle_count,
         vec![SurfaceMesh::new("mesh_1", vertex_pool, triangles)],

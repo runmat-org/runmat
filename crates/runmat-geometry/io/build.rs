@@ -7,6 +7,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=RUNMAT_OCCT_LIB_DIR");
     println!("cargo:rerun-if-env-changed=RUNMAT_OCCT_LINK_MODE");
     println!("cargo:rerun-if-env-changed=CMAKE_POLICY_VERSION_MINIMUM");
+    println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
+    println!("cargo:rerun-if-env-changed=CMAKE_OSX_DEPLOYMENT_TARGET");
 
     if std::env::var_os("CARGO_FEATURE_OCCT_NATIVE").is_none() {
         return;
@@ -21,6 +23,7 @@ fn build_occt_backend() {
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let is_windows = target.to_ascii_lowercase().contains("windows");
     let is_windows_gnu = target.to_ascii_lowercase().contains("windows-gnu");
+    configure_macos_deployment_target(&target);
 
     let link_mode = env::var("RUNMAT_OCCT_LINK_MODE").unwrap_or_else(|_| "static".to_string());
     if link_mode != "static" && link_mode != "dylib" {
@@ -36,6 +39,11 @@ fn build_occt_backend() {
 
     if is_windows {
         println!("cargo:rustc-link-lib=dylib=user32");
+    }
+    if target.to_ascii_lowercase().contains("apple-darwin") {
+        println!("cargo:rustc-link-lib=dylib=objc");
+        println!("cargo:rustc-link-lib=framework=AppKit");
+        println!("cargo:rustc-link-lib=framework=IOKit");
     }
     if link_mode == "dylib" && !is_windows {
         for rpath in occt_rpaths(&occt_lib) {
@@ -67,6 +75,20 @@ fn build_occt_backend() {
 
 #[cfg(not(feature = "occt-native"))]
 fn build_occt_backend() {}
+
+#[cfg(feature = "occt-native")]
+fn configure_macos_deployment_target(target: &str) {
+    if !target.to_ascii_lowercase().contains("apple-darwin") {
+        return;
+    }
+
+    let deployment_target =
+        env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "11.0".to_string());
+    env::set_var("MACOSX_DEPLOYMENT_TARGET", &deployment_target);
+    if env::var_os("CMAKE_OSX_DEPLOYMENT_TARGET").is_none() {
+        env::set_var("CMAKE_OSX_DEPLOYMENT_TARGET", deployment_target);
+    }
+}
 
 #[cfg(feature = "occt-native")]
 fn occt_paths(link_mode: &str) -> (PathBuf, PathBuf) {
@@ -144,6 +166,10 @@ fn occt_link_libs(occt_lib: &std::path::Path) -> Vec<&'static str> {
             "TKDE",
             "TKXSBase",
             "TKXCAF",
+            "TKVCAF",
+            "TKV3d",
+            "TKHLR",
+            "TKService",
             "TKLCAF",
             "TKCAF",
             "TKCDF",

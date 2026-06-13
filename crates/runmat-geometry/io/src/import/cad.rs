@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     build_asset, build_result, capacity_guard, push_entity_range, push_mesh_count_diagnostics,
-    GeometryImportError, GeometryImportOptions,
+    GeometryImportContext, GeometryImportError, GeometryImportOptions,
 };
 
 pub(super) fn import_cad(
@@ -23,17 +23,21 @@ pub(super) fn import_cad(
     bytes: &[u8],
     format: GeometryFormat,
     options: GeometryImportOptions,
+    context: &GeometryImportContext,
 ) -> Result<ImportResult, GeometryImportError> {
+    context.check_cancelled()?;
     let Some(occt_format) = OcctCadFormat::from_geometry_format(format) else {
         return Err(GeometryImportError::UnsupportedFormat);
     };
 
     let metadata = match occt_format {
-        OcctCadFormat::Step => Some(parse_step_metadata(path, bytes)?),
+        OcctCadFormat::Step => Some(parse_step_metadata(path, bytes, context)?),
         OcctCadFormat::Iges | OcctCadFormat::Brep => None,
     };
 
-    if let Some(topology) = import_cad_topology(path, bytes, occt_format, &options)? {
+    context.check_cancelled()?;
+    if let Some(topology) = import_cad_topology(path, bytes, occt_format, &options, context)? {
+        context.check_cancelled()?;
         return build_topology_result(path, occt_format, topology, metadata, options);
     }
 
@@ -50,12 +54,20 @@ pub(super) fn import_cad(
     }
 }
 
-fn parse_step_metadata(path: &str, bytes: &[u8]) -> Result<StepImportSummary, GeometryImportError> {
+fn parse_step_metadata(
+    path: &str,
+    bytes: &[u8],
+    context: &GeometryImportContext,
+) -> Result<StepImportSummary, GeometryImportError> {
+    context.check_cancelled()?;
     let text = std::str::from_utf8(bytes)
         .map_err(|_| GeometryImportError::ParseFailed("invalid UTF-8 STEP payload".to_string()))?;
 
-    parse_step_summary(path, text)
-        .map_err(|reason| GeometryImportError::ParseFailed(format!("STEP parse failed: {reason}")))
+    let summary = parse_step_summary(path, text).map_err(|reason| {
+        GeometryImportError::ParseFailed(format!("STEP parse failed: {reason}"))
+    })?;
+    context.check_cancelled()?;
+    Ok(summary)
 }
 
 fn build_step_metadata_result(
@@ -75,6 +87,7 @@ fn build_step_metadata_result(
         path,
         "step/v1",
         options.units,
+        options.tessellation_profile.clone(),
         0,
         0,
         Vec::new(),
@@ -119,6 +132,22 @@ fn build_topology_result(
             topology.faces.len()
         ),
     });
+    if topology.truncated {
+        diagnostics.push(ImportDiagnostic {
+            code: "CAD_IMPORT_TESSELLATION_TRUNCATED".to_string(),
+            severity: ImportDiagnosticSeverity::Warning,
+            message: match topology.triangle_budget {
+                Some(limit) => format!(
+                    "{} import returned a bounded preview mesh truncated at {limit} triangles",
+                    topology.format_name.to_uppercase()
+                ),
+                None => format!(
+                    "{} import returned a bounded preview mesh truncated by the CAD backend",
+                    topology.format_name.to_uppercase()
+                ),
+            },
+        });
+    }
     for warning in &topology.warnings {
         diagnostics.push(ImportDiagnostic {
             code: "CAD_IMPORT_TOPOLOGY_WARNING".to_string(),
@@ -140,13 +169,18 @@ fn build_topology_result(
         path,
         &format!("cad/occt/{}/v1", format.as_str()),
         options.units,
+        options.tessellation_profile.clone(),
         vertex_count,
         triangle_count,
-        vec![SurfaceMesh::new(
-            "mesh_1",
-            topology.vertices,
-            topology.triangles,
-        )],
+        if topology.triangles.is_empty() {
+            Vec::new()
+        } else {
+            vec![SurfaceMesh::new(
+                "mesh_1",
+                topology.vertices,
+                topology.triangles,
+            )]
+        },
         diagnostics.clone(),
     );
 
@@ -454,6 +488,8 @@ mod tests {
         let topology = OcctCadTopology {
             backend: "test".to_string(),
             format_name: "step".to_string(),
+            truncated: false,
+            triangle_budget: None,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
             triangles: vec![[0, 1, 2]],
             triangle_face_ids: vec![0],
@@ -528,5 +564,43 @@ mod tests {
         assert!(mappings.iter().any(|mapping| {
             mapping.region_id == "cad_material_aluminum_6061" && mapping.entity_count() == 1
         }));
+    }
+
+    #[test]
+    fn topology_result_preserves_truncated_preview_as_warning() {
+        let topology = OcctCadTopology {
+            backend: "test".to_string(),
+            format_name: "step".to_string(),
+            truncated: true,
+            triangle_budget: Some(1),
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            triangles: vec![[0, 1, 2]],
+            triangle_face_ids: vec![0],
+            faces: vec![OcctCadFace {
+                face_id: 0,
+                name: "Face 1".to_string(),
+                ownership: None,
+            }],
+            assembly: None,
+            warnings: Vec::new(),
+        };
+        let options = GeometryImportOptions {
+            max_triangles: Some(1),
+            budget_policy: crate::GeometryImportBudgetPolicy::Truncate,
+            units: runmat_geometry_core::UnitSystem::Meter,
+            tessellation_profile: Default::default(),
+            relative_deflection: true,
+        };
+
+        let result =
+            build_topology_result("/part.step", OcctCadFormat::Step, topology, None, options)
+                .expect("truncated preview topology should import");
+
+        assert_eq!(result.asset.surface_meshes[0].triangles.len(), 1);
+        assert!(result
+            .asset
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "CAD_IMPORT_TESSELLATION_TRUNCATED"));
     }
 }

@@ -544,6 +544,27 @@ fn load_op_maps_unsupported_format_error_code() {
 }
 
 #[test]
+fn load_op_maps_cancelled_import_error_code() {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+
+    let cancelled = Arc::new(AtomicBool::new(true));
+    let _guard = crate::interrupt::replace_interrupt(Some(Arc::clone(&cancelled)));
+    let error = geometry_load_op(
+        "/cancelled.stl",
+        TRIANGLE_STL.as_bytes(),
+        OperationContext::new(None, None),
+    )
+    .expect_err("cancelled geometry import should fail");
+
+    assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.CANCELLED");
+    assert_eq!(error.error_type, OperationErrorType::Cancelled);
+    cancelled.store(false, Ordering::Relaxed);
+}
+
+#[test]
 fn load_op_maps_parse_error_for_glb_payload() {
     let error = geometry_load_op(
         "/mesh.glb",

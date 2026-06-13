@@ -2,27 +2,31 @@ use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
 use runmat_geometry_core::SurfaceMesh;
 
 use super::{
-    build_asset, build_result, capacity_guard, is_degenerate_triangle, parse_f64,
-    push_mesh_count_diagnostics, GeometryImportError, GeometryImportOptions,
+    build_asset, build_result, capacity_guard, check_cancelled_periodic, is_degenerate_triangle,
+    parse_f64, push_mesh_count_diagnostics, GeometryImportContext, GeometryImportError,
+    GeometryImportOptions,
 };
 
 pub(super) fn import_stl(
     path: &str,
     bytes: &[u8],
     options: GeometryImportOptions,
+    context: &GeometryImportContext,
 ) -> Result<crate::report::ImportResult, GeometryImportError> {
+    context.check_cancelled()?;
     if looks_like_binary_stl(bytes) {
-        return import_binary_stl(path, bytes, options);
+        return import_binary_stl(path, bytes, options, context);
     }
     let text = std::str::from_utf8(bytes)
         .map_err(|_| GeometryImportError::ParseFailed("invalid ASCII STL payload".to_string()))?;
-    import_ascii_stl(path, text, options)
+    import_ascii_stl(path, text, options, context)
 }
 
 fn import_ascii_stl(
     path: &str,
     text: &str,
     options: GeometryImportOptions,
+    context: &GeometryImportContext,
 ) -> Result<crate::report::ImportResult, GeometryImportError> {
     let mut diagnostics = Vec::<ImportDiagnostic>::new();
     let mut vertices: Vec<[f64; 3]> = Vec::new();
@@ -30,7 +34,8 @@ fn import_ascii_stl(
     let mut triangle_count = 0u64;
     let mut current = Vec::<[f64; 3]>::new();
 
-    for line in text.lines() {
+    for (line_index, line) in text.lines().enumerate() {
+        check_cancelled_periodic(context, line_index)?;
         let trimmed = line.trim();
         if !trimmed.starts_with("vertex ") {
             continue;
@@ -81,6 +86,7 @@ fn import_ascii_stl(
         path,
         "stl/v1",
         options.units,
+        options.tessellation_profile.clone(),
         vertices.len() as u64,
         triangle_count,
         vec![SurfaceMesh::new("mesh_1", vertices, triangles)],
@@ -93,6 +99,7 @@ fn import_binary_stl(
     path: &str,
     bytes: &[u8],
     options: GeometryImportOptions,
+    context: &GeometryImportContext,
 ) -> Result<crate::report::ImportResult, GeometryImportError> {
     if bytes.len() < 84 {
         return Err(GeometryImportError::ParseFailed(
@@ -116,6 +123,7 @@ fn import_binary_stl(
     let mut accepted_triangles = 0u64;
 
     for index in 0..triangle_count {
+        check_cancelled_periodic(context, index)?;
         let tri_offset = 84 + index * 50;
         let v0 = read_binary_vertex(bytes, tri_offset + 12)?;
         let v1 = read_binary_vertex(bytes, tri_offset + 24)?;
@@ -152,6 +160,7 @@ fn import_binary_stl(
         path,
         "stl/v1",
         options.units,
+        options.tessellation_profile.clone(),
         vertices.len() as u64,
         accepted_triangles,
         vec![SurfaceMesh::new("mesh_1", vertices, triangles)],

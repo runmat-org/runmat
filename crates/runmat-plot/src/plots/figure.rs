@@ -1286,6 +1286,9 @@ impl Figure {
                     if let Some(edge_data) = plot.edge_render_data() {
                         out.push((axes_index, edge_data));
                     }
+                    if let Some(vector_data) = plot.vector_render_data() {
+                        out.push((axes_index, vector_data));
+                    }
                 }
                 PlotElement::Line3(plot) => out.push((
                     axes_index,

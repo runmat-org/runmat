@@ -192,16 +192,29 @@ pub fn prepare_geometry_for_analysis(
         mesh_ids.sort();
     }
 
+    let fallback_source_mesh_ids = prepared_meshes
+        .iter()
+        .map(|mesh| mesh.source_mesh_id.clone())
+        .collect::<Vec<_>>();
+    let fallback_prepared_mesh_ids = prepared_meshes
+        .iter()
+        .map(|mesh| mesh.prepared_mesh_id.clone())
+        .collect::<Vec<_>>();
+
     let mut region_mappings = Vec::<RegionMeshMapping>::new();
     for region in &geometry.regions {
         let source_mesh_ids = source_mesh_ids_by_region
             .get(&region.region_id)
             .cloned()
-            .unwrap_or_default();
-        let prepared_mesh_ids = source_mesh_ids
+            .filter(|mesh_ids| !mesh_ids.is_empty())
+            .unwrap_or_else(|| fallback_source_mesh_ids.clone());
+        let mut prepared_mesh_ids = source_mesh_ids
             .iter()
             .filter_map(|mesh_id| prepared_by_source.get(mesh_id).cloned())
             .collect::<Vec<_>>();
+        if prepared_mesh_ids.is_empty() {
+            prepared_mesh_ids = fallback_prepared_mesh_ids.clone();
+        }
         region_mappings.push(RegionMeshMapping {
             region_id: region.region_id.clone(),
             source_mesh_ids,
@@ -350,6 +363,22 @@ mod tests {
         )
         .expect_err("zero budget should fail");
         assert!(error.contains("target_element_budget"));
+    }
+
+    #[test]
+    fn metadata_only_regions_map_to_prepared_meshes() {
+        let mut geometry = sample_geometry();
+        geometry.region_entity_mappings.clear();
+
+        let prep = prepare_geometry_for_analysis(&geometry, MeshingOptions::default())
+            .expect("meshing prep should work");
+        let mapping = prep
+            .region_mappings
+            .iter()
+            .find(|mapping| mapping.region_id == "region_main")
+            .expect("region mapping should exist");
+        assert_eq!(mapping.source_mesh_ids, vec!["mesh_a"]);
+        assert_eq!(mapping.prepared_mesh_ids, vec!["prep_7_mesh_a"]);
     }
 
     #[test]

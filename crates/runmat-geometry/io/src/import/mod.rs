@@ -4,6 +4,11 @@ mod obj;
 mod ply;
 mod stl;
 
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
 use runmat_geometry_core::{
     GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
     SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
@@ -18,15 +23,75 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct GeometryImportOptions {
     pub max_triangles: Option<u64>,
+    pub budget_policy: GeometryImportBudgetPolicy,
     pub units: UnitSystem,
+    pub tessellation_profile: TessellationProfile,
+    pub relative_deflection: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeometryImportBudgetPolicy {
+    Strict,
+    Truncate,
 }
 
 impl Default for GeometryImportOptions {
     fn default() -> Self {
         Self {
             max_triangles: Some(16_000_000),
+            budget_policy: GeometryImportBudgetPolicy::Strict,
             units: UnitSystem::Meter,
+            tessellation_profile: TessellationProfile::default(),
+            relative_deflection: false,
         }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct GeometryImportContext {
+    cancellation: Option<Arc<AtomicBool>>,
+}
+
+impl std::fmt::Debug for GeometryImportContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GeometryImportContext")
+            .field("cancellable", &self.cancellation.is_some())
+            .finish()
+    }
+}
+
+impl GeometryImportContext {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_cancellation(cancellation: Arc<AtomicBool>) -> Self {
+        Self {
+            cancellation: Some(cancellation),
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancellation
+            .as_ref()
+            .map(|flag| flag.load(Ordering::Relaxed))
+            .unwrap_or(false)
+    }
+
+    pub fn check_cancelled(&self) -> Result<(), GeometryImportError> {
+        if self.is_cancelled() {
+            Err(GeometryImportError::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cfg(any(
+        all(not(target_arch = "wasm32"), feature = "occt-native"),
+        all(target_arch = "wasm32", feature = "occt-wasm-host")
+    ))]
+    pub(crate) fn cancellation_flag(&self) -> Option<Arc<AtomicBool>> {
+        self.cancellation.clone()
     }
 }
 
@@ -40,6 +105,8 @@ pub enum GeometryImportError {
     BackendUnavailable(String),
     #[error("CAPACITY_LIMIT_EXCEEDED: triangle count {triangles} exceeds limit {limit}")]
     CapacityExceeded { triangles: u64, limit: u64 },
+    #[error("GEOMETRY_IMPORT_CANCELLED: geometry import cancelled")]
+    Cancelled,
 }
 
 pub fn import_geometry(
@@ -47,23 +114,46 @@ pub fn import_geometry(
     bytes: &[u8],
     options: GeometryImportOptions,
 ) -> Result<ImportResult, GeometryImportError> {
+    import_geometry_with_context(path, bytes, options, &GeometryImportContext::new())
+}
+
+pub fn import_geometry_with_context(
+    path: &str,
+    bytes: &[u8],
+    options: GeometryImportOptions,
+    context: &GeometryImportContext,
+) -> Result<ImportResult, GeometryImportError> {
+    context.check_cancelled()?;
     let format = detect_geometry_format(path, bytes);
-    match format {
-        GeometryFormat::Stl => stl::import_stl(path, bytes, options),
+    let result = match format {
+        GeometryFormat::Stl => stl::import_stl(path, bytes, options, context),
         GeometryFormat::Step | GeometryFormat::Iges | GeometryFormat::Brep => {
-            cad::import_cad(path, bytes, format, options)
+            cad::import_cad(path, bytes, format, options, context)
         }
-        GeometryFormat::Obj => obj::import_obj(path, bytes, options),
-        GeometryFormat::Ply => ply::import_ply(path, bytes, options),
-        GeometryFormat::Gltf => gltf::import_gltf(path, bytes, options),
+        GeometryFormat::Obj => obj::import_obj(path, bytes, options, context),
+        GeometryFormat::Ply => ply::import_ply(path, bytes, options, context),
+        GeometryFormat::Gltf => gltf::import_gltf(path, bytes, options, context),
         _ => Err(GeometryImportError::UnsupportedFormat),
+    };
+    context.check_cancelled()?;
+    result
+}
+
+pub(crate) fn check_cancelled_periodic(
+    context: &GeometryImportContext,
+    index: usize,
+) -> Result<(), GeometryImportError> {
+    if index & 0x3ff == 0 {
+        context.check_cancelled()?;
     }
+    Ok(())
 }
 
 pub(crate) fn build_asset(
     path: &str,
     importer_version: &str,
     units: UnitSystem,
+    tessellation_profile: TessellationProfile,
     vertex_count: u64,
     element_count: u64,
     surface_meshes: Vec<SurfaceMesh>,
@@ -83,7 +173,7 @@ pub(crate) fn build_asset(
             assembly: None,
             material_evidence: Vec::new(),
         },
-        tessellation_profile: TessellationProfile::default(),
+        tessellation_profile,
         units,
         revision: 1,
         meshes: vec![MeshDescriptor {

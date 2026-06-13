@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -18,8 +18,9 @@ use runmat_analysis_core::{
     ReferenceFrame,
 };
 use runmat_analysis_fea::{
-    fea_modal_mode_shape_field_id, ComputeBackend, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_VON_MISES,
+    fea_modal_mode_shape_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
+    FEA_FIELD_EM_FLUX_DENSITY_PROXY, FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
     GeometryAsset, GeometrySource, MaterialEvidence, MaterialEvidenceConfidence, MeshDescriptor,
@@ -1657,6 +1658,115 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     assert_eq!(envelope.data.provenance.quality_policy, "balanced");
     assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
     assert_eq!(envelope.data.provenance.solver_host_sync_count, 0);
+}
+
+#[test]
+fn analysis_run_linear_static_persists_artifacts_through_runtime_filesystem_provider() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let sandbox_root = temp_artifact_root("artifact-provider");
+    let _ = fs::remove_dir_all(&sandbox_root);
+    let provider = Arc::new(
+        runmat_filesystem::SandboxFsProvider::new(sandbox_root.clone())
+            .expect("sandbox filesystem provider should be created"),
+    );
+    let _provider_guard = runmat_filesystem::replace_provider(provider);
+    storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::Filesystem {
+        root: PathBuf::from("/fea-artifacts"),
+    })
+    .expect("configure provider-backed filesystem artifact store");
+
+    let model = sample_model();
+    let envelope = analysis_run_linear_static_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-provider-artifact".to_string()), None),
+    )
+    .expect("run should pass");
+    let artifact_path = PathBuf::from("/fea-artifacts")
+        .join("runs")
+        .join(format!("{}.json", envelope.data.run_id));
+
+    let bytes =
+        runmat_filesystem::read(&artifact_path).expect("artifact should be provider-readable");
+    assert!(!bytes.is_empty());
+    let persisted = storage::load_run_result(&envelope.data.run_id)
+        .expect("provider-backed artifact load should succeed")
+        .expect("run artifact should exist");
+    assert_eq!(persisted.run_id, envelope.data.run_id);
+    assert!(sandbox_root
+        .join("fea-artifacts")
+        .join("runs")
+        .join(format!("{}.json", envelope.data.run_id))
+        .exists());
+
+    storage::reset_artifact_store_for_tests();
+    let _ = fs::remove_dir_all(&sandbox_root);
+}
+
+#[test]
+fn analysis_run_linear_static_cancellation_maps_normalized_error() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let cancelled = Arc::new(AtomicBool::new(true));
+    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(cancelled));
+    let model = sample_model();
+
+    let err = analysis_run_linear_static_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-cancel".to_string()), None),
+    )
+    .expect_err("cancelled run should fail");
+
+    assert_eq!(err.error_code, "RM.FEA.RUN_LINEAR_STATIC.CANCELLED");
+    assert_eq!(err.error_type, OperationErrorType::Cancelled);
+    assert_eq!(err.severity, OperationErrorSeverity::Warning);
+    assert!(!err.retryable);
+    storage::reset_artifact_store_for_tests();
+}
+
+#[test]
+fn analysis_run_linear_static_emits_solver_and_artifact_progress_events() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_for_handler = Arc::clone(&events);
+    let _progress_guard = replace_fea_progress_handler(Some(Arc::new(move |event| {
+        events_for_handler
+            .lock()
+            .expect("progress event lock should not be poisoned")
+            .push(event);
+    })));
+    let model = sample_model();
+
+    analysis_run_linear_static_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-progress".to_string()), None),
+    )
+    .expect("run should pass");
+
+    let events = events
+        .lock()
+        .expect("progress event lock should not be poisoned");
+    assert!(events.iter().any(|event| {
+        event.operation == "fea.run_linear_static"
+            && event.phase == FeaProgressPhase::Solve
+            && event.status == FeaProgressStatus::Started
+    }));
+    assert!(events.iter().any(|event| {
+        event.operation == "fea.run_linear_static"
+            && event.phase == FeaProgressPhase::ArtifactPersistence
+            && event.status == FeaProgressStatus::Completed
+    }));
+    assert!(events.iter().any(|event| {
+        event.operation == "fea.run_linear_static"
+            && event.phase == FeaProgressPhase::Complete
+            && event.status == FeaProgressStatus::Completed
+    }));
+
+    storage::reset_artifact_store_for_tests();
 }
 
 #[test]
@@ -5203,6 +5313,55 @@ fn analysis_results_include_transient_payload_for_transient_runs() {
         transient.time_points_s.len(),
         transient.displacement_snapshots.len()
     );
+}
+
+#[test]
+fn analysis_results_include_electromagnetic_fields_for_em_runs() {
+    let _guard = analysis_test_guard();
+    let spec = sample_electromagnetic_study_spec();
+    let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("electromagnetic study should run");
+
+    let results = analysis_results_by_run_id_op(
+        &run.data.run_id,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("electromagnetic results should load");
+    let field_ids = results
+        .data
+        .field_descriptors
+        .iter()
+        .map(|field| field.field_id.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(field_ids.contains(&FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY));
+    assert!(field_ids.contains(&FEA_FIELD_EM_FLUX_DENSITY_PROXY));
+}
+
+#[cfg(feature = "plot-core")]
+#[test]
+fn analysis_generate_study_run_figures_returns_mesh_figures() {
+    let _guard = analysis_test_guard();
+    let spec = sample_linear_static_study_spec();
+    let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("linear static study should run");
+
+    let figures = analysis_generate_study_run_figures(
+        &spec,
+        &run.data.run_id,
+        AnalysisFigureGenerationOptions {
+            include_comparison: false,
+            include_trends: false,
+            ..AnalysisFigureGenerationOptions::default()
+        },
+    )
+    .expect("study figures should be generated");
+
+    assert!(figures
+        .iter()
+        .any(|figure| matches!(figure.kind, AnalysisGeneratedFigureKind::MeshResult)));
+    assert!(figures.iter().any(|figure| !figure.figure.is_empty()));
 }
 
 #[test]

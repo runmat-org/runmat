@@ -8,7 +8,10 @@ pub mod sniff;
 
 mod occt;
 
-pub use import::{import_geometry, GeometryImportOptions};
+pub use import::{
+    import_geometry, import_geometry_with_context, GeometryImportBudgetPolicy,
+    GeometryImportContext, GeometryImportOptions,
+};
 pub use report::{ImportDiagnostic, ImportDiagnosticSeverity, ImportReport, ImportResult};
 pub use sniff::{detect_geometry_format, GeometryFormat};
 
@@ -324,6 +327,30 @@ mod tests {
         let error = import_geometry("/too-large.stl", TRIANGLE_STL.as_bytes(), options)
             .expect_err("capacity guard should fail");
         assert!(error.to_string().contains("CAPACITY_LIMIT_EXCEEDED"));
+    }
+
+    #[test]
+    fn import_context_cancels_geometry_load() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+
+        let cancelled = Arc::new(AtomicBool::new(true));
+        let context = crate::GeometryImportContext::with_cancellation(Arc::clone(&cancelled));
+        let error = crate::import_geometry_with_context(
+            "/cancelled.stl",
+            TRIANGLE_STL.as_bytes(),
+            GeometryImportOptions::default(),
+            &context,
+        )
+        .expect_err("cancelled import should fail");
+        assert!(matches!(
+            error,
+            crate::import::GeometryImportError::Cancelled
+        ));
+        assert!(context.is_cancelled());
+        cancelled.store(false, Ordering::Relaxed);
     }
 
     #[test]

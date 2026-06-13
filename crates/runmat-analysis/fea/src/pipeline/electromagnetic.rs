@@ -13,6 +13,7 @@ use crate::{
     },
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     operator::{apply_k, OperatorSystem},
+    progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::backend::kind::LinearAlgebraBackendKind,
 };
 
@@ -29,7 +30,25 @@ pub fn run_electromagnetic_with_options(
     options: ElectromagneticSolveOptions,
 ) -> Result<FeaElectromagneticRunResult, FeaRunError> {
     let prepared_start = Instant::now();
+    emit_phase(
+        "fea.run_electromagnetic",
+        FeaProgressPhase::RegionResolution,
+        FeaProgressStatus::Started,
+        "validating electromagnetic FEA model",
+        Some(0),
+        Some(5),
+    );
+    check_cancelled("fea.run_electromagnetic")?;
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+    emit_phase(
+        "fea.run_electromagnetic",
+        FeaProgressPhase::RegionResolution,
+        FeaProgressStatus::Completed,
+        "electromagnetic model validation complete",
+        Some(1),
+        Some(5),
+    );
+    check_cancelled("fea.run_electromagnetic")?;
 
     let Some(domain) = model.electromagnetic.as_ref() else {
         return Err(FeaRunError::InvalidModel(
@@ -52,7 +71,32 @@ pub fn run_electromagnetic_with_options(
         ));
     }
 
+    emit_phase(
+        "fea.run_electromagnetic",
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Started,
+        "assembling electromagnetic system",
+        Some(1),
+        Some(5),
+    );
     let mut summary = assemble_linear_system(model, options.prep_context, None, None);
+    emit_phase(
+        "fea.run_electromagnetic",
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Completed,
+        "electromagnetic system assembly complete",
+        Some(2),
+        Some(5),
+    );
+    check_cancelled("fea.run_electromagnetic")?;
+    emit_phase(
+        "fea.run_electromagnetic",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Started,
+        "solving electromagnetic harmonic system",
+        Some(2),
+        Some(5),
+    );
     let node_count = summary.dof_count.max(8);
     let coefficient_profile =
         electromagnetic_coefficient_profile(model, domain.reference_frequency_hz);
@@ -744,6 +788,24 @@ pub fn run_electromagnetic_with_options(
     let dispersive_phase_conductivity_attenuation_ratio =
         mean_phase_attenuated_conductivity / mean_unattenuated_conductivity.max(1.0e-9);
 
+    emit_phase(
+        "fea.run_electromagnetic",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Completed,
+        "electromagnetic solve complete",
+        Some(3),
+        Some(5),
+    );
+    check_cancelled("fea.run_electromagnetic")?;
+    emit_phase(
+        "fea.run_electromagnetic",
+        FeaProgressPhase::Postprocess,
+        FeaProgressStatus::Started,
+        "recovering electromagnetic fields",
+        Some(3),
+        Some(5),
+    );
+
     diagnostics.push(FeaDiagnostic {
         code: "FEA_EM_STATIC".to_string(),
         severity: if max_residual_norm <= residual_warning_threshold {
@@ -834,6 +896,24 @@ pub fn run_electromagnetic_with_options(
             ),
         ],
     };
+
+    emit_phase(
+        "fea.run_electromagnetic",
+        FeaProgressPhase::Postprocess,
+        FeaProgressStatus::Completed,
+        "electromagnetic result field recovery complete",
+        Some(4),
+        Some(5),
+    );
+    check_cancelled("fea.run_electromagnetic")?;
+    emit_phase(
+        "fea.run_electromagnetic",
+        FeaProgressPhase::Complete,
+        FeaProgressStatus::Completed,
+        "FEA electromagnetic run complete",
+        Some(5),
+        Some(5),
+    );
 
     Ok(FeaElectromagneticRunResult {
         run,

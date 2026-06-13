@@ -322,7 +322,10 @@ async fn load_geometry(
         .map_err(|err| format!("failed to read geometry file {}: {err}", path.display()))?;
     let options = GeometryImportOptions {
         max_triangles: geometry.import.max_triangles.or(Some(16_000_000)),
+        budget_policy: runmat_geometry_io::GeometryImportBudgetPolicy::Strict,
         units: geometry.units,
+        tessellation_profile: Default::default(),
+        relative_deflection: false,
     };
     crate::geometry::geometry_load_with_options_op(
         &path.to_string_lossy(),

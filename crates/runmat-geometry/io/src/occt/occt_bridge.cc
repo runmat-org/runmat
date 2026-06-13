@@ -7,6 +7,8 @@
 #include <IGESControl_Reader.hxx>
 #include <IGESCAFControl_Reader.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <IMeshTools_Parameters.hxx>
+#include <Message_ProgressIndicator.hxx>
 #include <Message_ProgressRange.hxx>
 #include <Poly_Triangle.hxx>
 #include <Poly_Triangulation.hxx>
@@ -49,6 +51,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace runmat_geometry_io {
@@ -85,6 +88,28 @@ struct CadDocument {
   bool has_xcaf = false;
 };
 
+void check_cancelled(const OcctImportOptions& options) {
+  if (options.cancel_token_id != 0 && occt_import_cancelled(options.cancel_token_id)) {
+    throw std::runtime_error("OCCT CAD import cancelled");
+  }
+}
+
+class RunmatCancelProgressIndicator final : public Message_ProgressIndicator {
+public:
+  explicit RunmatCancelProgressIndicator(const OcctImportOptions& options)
+    : options_(options) {}
+
+protected:
+  Standard_Boolean UserBreak() override {
+    return options_.cancel_token_id != 0 && occt_import_cancelled(options_.cancel_token_id);
+  }
+
+  void Show(const Message_ProgressScope&, const Standard_Boolean) override {}
+
+private:
+  OcctImportOptions options_;
+};
+
 Handle(TDocStd_Document) new_xcaf_document() {
   Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
   Handle(TDocStd_Document) document;
@@ -116,7 +141,10 @@ CadDocument finish_xcaf_document(const Handle(TDocStd_Document)& document) {
   return result;
 }
 
-CadDocument read_step_shape(const std::string& path, std::istream& stream) {
+CadDocument read_step_shape(const std::string& path,
+                            std::istream& stream,
+                            const OcctImportOptions& options) {
+  check_cancelled(options);
   STEPCAFControl_Reader reader;
   reader.SetNameMode(Standard_True);
   reader.SetColorMode(Standard_True);
@@ -124,36 +152,50 @@ CadDocument read_step_shape(const std::string& path, std::istream& stream) {
   reader.SetPropsMode(Standard_True);
   reader.SetMatMode(Standard_True);
   IFSelect_ReturnStatus status = reader.ReadStream(path.c_str(), stream);
+  check_cancelled(options);
   if (status != IFSelect_RetDone) {
     throw std::runtime_error("OCCT STEP reader did not return IFSelect_RetDone");
   }
   Handle(TDocStd_Document) document = new_xcaf_document();
-  if (!reader.Transfer(document, Message_ProgressRange())) {
+  RunmatCancelProgressIndicator transfer_progress(options);
+  if (!reader.Transfer(document, transfer_progress.Start())) {
+    check_cancelled(options);
     throw std::runtime_error("OCCT STEP XCAF transfer failed");
   }
+  check_cancelled(options);
   return finish_xcaf_document(document);
 }
 
-CadDocument read_iges_shape(const std::string& path, std::istream& stream) {
+CadDocument read_iges_shape(const std::string& path,
+                            std::istream& stream,
+                            const OcctImportOptions& options) {
+  check_cancelled(options);
   IGESCAFControl_Reader reader;
   reader.SetNameMode(Standard_True);
   reader.SetColorMode(Standard_True);
   reader.SetLayerMode(Standard_True);
   IFSelect_ReturnStatus status = reader.ReadStream(path.c_str(), stream);
+  check_cancelled(options);
   if (status != IFSelect_RetDone) {
     throw std::runtime_error("OCCT IGES reader did not return IFSelect_RetDone");
   }
   Handle(TDocStd_Document) document = new_xcaf_document();
-  if (!reader.Transfer(document, Message_ProgressRange())) {
+  RunmatCancelProgressIndicator transfer_progress(options);
+  if (!reader.Transfer(document, transfer_progress.Start())) {
+    check_cancelled(options);
     throw std::runtime_error("OCCT IGES XCAF transfer failed");
   }
+  check_cancelled(options);
   return finish_xcaf_document(document);
 }
 
-CadDocument read_brep_shape(std::istream& stream) {
+CadDocument read_brep_shape(std::istream& stream, const OcctImportOptions& options) {
+  check_cancelled(options);
   TopoDS_Shape shape;
   BRep_Builder builder;
-  BRepTools::Read(shape, stream, builder, Message_ProgressRange());
+  RunmatCancelProgressIndicator read_progress(options);
+  BRepTools::Read(shape, stream, builder, read_progress.Start());
+  check_cancelled(options);
   if (shape.IsNull()) {
     throw std::runtime_error("OCCT BREP reader returned a null shape");
   }
@@ -164,16 +206,17 @@ CadDocument read_brep_shape(std::istream& stream) {
 
 CadDocument read_shape(const std::string& path,
                        rust::Slice<const std::uint8_t> bytes,
-                       OcctCadFormat format) {
+                       OcctCadFormat format,
+                       const OcctImportOptions& options) {
   std::string payload = bytes_to_string(bytes);
   std::istringstream stream(payload);
   switch (format) {
     case OcctCadFormat::Step:
-      return read_step_shape(path, stream);
+      return read_step_shape(path, stream, options);
     case OcctCadFormat::Iges:
-      return read_iges_shape(path, stream);
+      return read_iges_shape(path, stream, options);
     case OcctCadFormat::Brep:
-      return read_brep_shape(stream);
+      return read_brep_shape(stream, options);
   }
   throw std::runtime_error("unsupported OCCT CAD format");
 }
@@ -474,7 +517,9 @@ void append_assembly_label(OcctImportPayload& result,
                            const TDF_Label& label,
                            const std::string& parent_node_id,
                            std::set<std::string>& active_path,
-                           std::uint32_t depth) {
+                           std::uint32_t depth,
+                           const OcctImportOptions& options) {
+  check_cancelled(options);
   if (label.IsNull() || depth > 256) {
     return;
   }
@@ -500,15 +545,18 @@ void append_assembly_label(OcctImportPayload& result,
   if (XCAFDoc_ShapeTool::IsAssembly(child_owner) &&
       XCAFDoc_ShapeTool::GetComponents(child_owner, components, Standard_False)) {
     for (Standard_Integer index = 1; index <= components.Length(); ++index) {
+      check_cancelled(options);
       append_assembly_label(
-          result, shape_tool, components.Value(index), node_id, active_path, depth + 1);
+          result, shape_tool, components.Value(index), node_id, active_path, depth + 1, options);
     }
   }
 
   active_path.erase(node_id);
 }
 
-void append_assembly_tree(OcctImportPayload& result, const CadDocument& document) {
+void append_assembly_tree(OcctImportPayload& result,
+                          const CadDocument& document,
+                          const OcctImportOptions& options) {
   if (!document.has_xcaf || document.shape_tool.IsNull()) {
     return;
   }
@@ -516,33 +564,17 @@ void append_assembly_tree(OcctImportPayload& result, const CadDocument& document
   document.shape_tool->GetFreeShapes(free_shapes);
   std::set<std::string> active_path;
   for (Standard_Integer index = 1; index <= free_shapes.Length(); ++index) {
+    check_cancelled(options);
     append_assembly_label(
-        result, document.shape_tool, free_shapes.Value(index), "", active_path, 0);
+        result, document.shape_tool, free_shapes.Value(index), "", active_path, 0, options);
   }
-}
-
-std::uint32_t checked_vertex_index(std::size_t index_offset, Standard_Integer local_index) {
-  if (local_index <= 0) {
-    throw std::runtime_error("OCCT returned a non-positive triangle node index");
-  }
-  const std::size_t value = index_offset + static_cast<std::size_t>(local_index - 1);
-  if (value > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
-    throw std::runtime_error("OCCT tessellation exceeded u32 vertex indexing capacity");
-  }
-  return static_cast<std::uint32_t>(value);
 }
 
 void push_triangle(OcctImportPayload& result,
                    std::uint32_t a,
                    std::uint32_t b,
                    std::uint32_t c,
-                   std::uint64_t face_id,
-                   std::uint64_t max_triangles) {
-  const std::uint64_t next_count =
-      static_cast<std::uint64_t>(result.triangle_face_ids.size()) + 1;
-  if (next_count > max_triangles) {
-    throw std::runtime_error("OCCT tessellation exceeded max_triangles");
-  }
+                   std::uint64_t face_id) {
   result.triangles.push_back(a);
   result.triangles.push_back(b);
   result.triangles.push_back(c);
@@ -553,11 +585,18 @@ void append_face_mesh(OcctImportPayload& result,
                       const TopoDS_Face& face,
                       std::uint64_t face_id,
                       const std::string& resolved_face_name,
-                      std::uint64_t max_triangles) {
+                      const OcctImportOptions& options) {
+  check_cancelled(options);
   TopLoc_Location location;
   Handle(Poly_Triangulation) triangulation = BRep_Tool::Triangulation(face, location);
   result.face_ids.push_back(face_id);
   result.face_names.push_back(resolved_face_name.empty() ? face_name(face_id) : resolved_face_name);
+
+  if (static_cast<std::uint64_t>(result.triangle_face_ids.size()) >= options.max_triangles &&
+      options.truncate_at_max_triangles) {
+    result.truncated = true;
+    return;
+  }
 
   if (triangulation.IsNull()) {
     result.warnings.push_back("OCCT face " + std::to_string(face_id + 1) +
@@ -565,28 +604,92 @@ void append_face_mesh(OcctImportPayload& result,
     return;
   }
 
-  const std::size_t index_offset = result.vertices.size() / 3;
+  const Standard_Integer triangle_count = triangulation->NbTriangles();
+  const std::uint64_t current_count =
+      static_cast<std::uint64_t>(result.triangle_face_ids.size());
+  if (current_count >= options.max_triangles) {
+    if (options.truncate_at_max_triangles) {
+      result.truncated = true;
+      return;
+    }
+    throw std::runtime_error("OCCT tessellation exceeded max_triangles");
+  }
+
+  const std::uint64_t remaining =
+      options.max_triangles == std::numeric_limits<std::uint64_t>::max()
+          ? std::numeric_limits<std::uint64_t>::max()
+          : options.max_triangles - current_count;
+  std::uint64_t emit_count = static_cast<std::uint64_t>(triangle_count);
+  if (emit_count > remaining) {
+    if (options.truncate_at_max_triangles) {
+      emit_count = remaining;
+      result.truncated = true;
+    } else {
+      throw std::runtime_error("OCCT tessellation exceeded max_triangles");
+    }
+  }
+  if (emit_count == 0) {
+    return;
+  }
+
+  std::vector<Poly_Triangle> triangles;
+  triangles.reserve(static_cast<std::size_t>(emit_count));
+  std::vector<Standard_Integer> node_ids;
+  node_ids.reserve(static_cast<std::size_t>(emit_count) * 3);
+  for (Standard_Integer i = 1; i <= triangle_count; ++i) {
+    if ((i & 1023) == 1) {
+      check_cancelled(options);
+    }
+    if (static_cast<std::uint64_t>(triangles.size()) >= emit_count) {
+      break;
+    }
+    const Poly_Triangle triangle = triangulation->Triangle(i);
+    triangles.push_back(triangle);
+    node_ids.push_back(triangle.Value(1));
+    node_ids.push_back(triangle.Value(2));
+    node_ids.push_back(triangle.Value(3));
+  }
+
+  std::sort(node_ids.begin(), node_ids.end());
+  node_ids.erase(std::unique(node_ids.begin(), node_ids.end()), node_ids.end());
+
   const gp_Trsf transform = location.Transformation();
-  const Standard_Integer node_count = triangulation->NbNodes();
-  for (Standard_Integer i = 1; i <= node_count; ++i) {
-    gp_Pnt point = triangulation->Node(i);
+  std::unordered_map<Standard_Integer, std::uint32_t> global_index_by_local_node;
+  global_index_by_local_node.reserve(node_ids.size());
+  for (std::size_t index = 0; index < node_ids.size(); ++index) {
+    if ((index & 1023) == 0) {
+      check_cancelled(options);
+    }
+    const Standard_Integer node_id = node_ids[index];
+    if (node_id <= 0 || node_id > triangulation->NbNodes()) {
+      throw std::runtime_error("OCCT returned a triangle node index outside the node buffer");
+    }
+    const std::size_t global_vertex_offset = result.vertices.size() / 3;
+    if (global_vertex_offset >
+        static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+      throw std::runtime_error("OCCT tessellation exceeded u32 vertex indexing capacity");
+    }
+    gp_Pnt point = triangulation->Node(node_id);
     point.Transform(transform);
+    global_index_by_local_node.emplace(node_id, static_cast<std::uint32_t>(global_vertex_offset));
     result.vertices.push_back(point.X());
     result.vertices.push_back(point.Y());
     result.vertices.push_back(point.Z());
   }
 
   const bool forward = face.Orientation() == TopAbs_FORWARD;
-  const Standard_Integer triangle_count = triangulation->NbTriangles();
-  for (Standard_Integer i = 1; i <= triangle_count; ++i) {
-    const Poly_Triangle triangle = triangulation->Triangle(i);
-    const std::uint32_t n1 = checked_vertex_index(index_offset, triangle.Value(1));
-    const std::uint32_t n2 = checked_vertex_index(index_offset, triangle.Value(2));
-    const std::uint32_t n3 = checked_vertex_index(index_offset, triangle.Value(3));
+  for (std::size_t index = 0; index < triangles.size(); ++index) {
+    if ((index & 1023) == 0) {
+      check_cancelled(options);
+    }
+    const Poly_Triangle& triangle = triangles[index];
+    const std::uint32_t n1 = global_index_by_local_node.at(triangle.Value(1));
+    const std::uint32_t n2 = global_index_by_local_node.at(triangle.Value(2));
+    const std::uint32_t n3 = global_index_by_local_node.at(triangle.Value(3));
     if (forward) {
-      push_triangle(result, n1, n2, n3, face_id, max_triangles);
+      push_triangle(result, n1, n2, n3, face_id);
     } else {
-      push_triangle(result, n3, n2, n1, face_id, max_triangles);
+      push_triangle(result, n3, n2, n1, face_id);
     }
   }
 }
@@ -598,30 +701,54 @@ OcctImportPayload import_cad_bytes(rust::Str path,
                                    OcctCadFormat format,
                                    OcctImportOptions options) {
   const std::string path_string = str_from_rust(path);
-  CadDocument document = read_shape(path_string, bytes, format);
+  check_cancelled(options);
+  CadDocument document = read_shape(path_string, bytes, format, options);
+  check_cancelled(options);
 
-  BRepMesh_IncrementalMesh mesh(document.shape,
-                                options.linear_deflection,
-                                options.relative_deflection,
-                                options.angular_deflection,
-                                Standard_False);
-  if (!mesh.IsDone()) {
-    throw std::runtime_error("OCCT tessellation did not complete");
+  IMeshTools_Parameters mesh_parameters;
+  mesh_parameters.Deflection = options.linear_deflection;
+  mesh_parameters.Relative = options.relative_deflection;
+  mesh_parameters.Angle = options.angular_deflection;
+  mesh_parameters.InParallel = Standard_False;
+  if (!options.truncate_at_max_triangles) {
+    RunmatCancelProgressIndicator mesh_progress(options);
+    BRepMesh_IncrementalMesh mesh(document.shape,
+                                  mesh_parameters,
+                                  mesh_progress.Start());
+    check_cancelled(options);
+    if (!mesh.IsDone()) {
+      throw std::runtime_error("OCCT tessellation did not complete");
+    }
   }
 
   OcctImportPayload result;
   result.backend = "occt-native";
   result.format_name = format_name(format);
-  append_assembly_tree(result, document);
+  result.truncated = false;
+  result.triangle_budget = options.max_triangles;
+  append_assembly_tree(result, document, options);
 
   std::uint64_t face_id = 0;
   for (TopExp_Explorer explorer(document.shape, TopAbs_FACE); explorer.More(); explorer.Next()) {
+    check_cancelled(options);
     const TopoDS_Face face = TopoDS::Face(explorer.Current());
     OcctFaceSemanticPayload semantic = face_semantics(document, face, face_id);
     const std::string resolved_face_name = semantic.label_name.empty()
                                                ? face_name(face_id)
                                                : static_cast<std::string>(semantic.label_name);
-    append_face_mesh(result, face, face_id, resolved_face_name, options.max_triangles);
+    if (options.truncate_at_max_triangles &&
+        static_cast<std::uint64_t>(result.triangle_face_ids.size()) < options.max_triangles) {
+      RunmatCancelProgressIndicator face_mesh_progress(options);
+      BRepMesh_IncrementalMesh face_mesh(face,
+                                         mesh_parameters,
+                                         face_mesh_progress.Start());
+      check_cancelled(options);
+      if (!face_mesh.IsDone()) {
+        result.warnings.push_back("OCCT preview tessellation did not complete for face " +
+                                  std::to_string(face_id + 1));
+      }
+    }
+    append_face_mesh(result, face, face_id, resolved_face_name, options);
     if (has_face_semantics(semantic)) {
       result.face_semantics.push_back(semantic);
     }
@@ -631,8 +758,13 @@ OcctImportPayload import_cad_bytes(rust::Str path,
   if (face_id == 0) {
     throw std::runtime_error("OCCT import produced no faces");
   }
-  if (result.triangle_face_ids.empty()) {
+  if (result.triangle_face_ids.empty() && !result.truncated) {
     throw std::runtime_error("OCCT import produced no tessellated triangles");
+  }
+  if (result.truncated) {
+    result.warnings.push_back(
+        "OCCT preview tessellation was truncated at the requested triangle budget of " +
+        std::to_string(options.max_triangles) + " triangles");
   }
 
   return result;

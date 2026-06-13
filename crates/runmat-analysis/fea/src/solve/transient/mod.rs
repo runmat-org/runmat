@@ -9,6 +9,7 @@ use crate::{
         coupling::{electro_thermal, thermo_mechanical},
         structural,
     },
+    progress::{emit_phase, is_cancelled, FeaProgressPhase, FeaProgressStatus},
     solve::runtime_tensor_solver::RuntimeTensorPreparedLinearSystem,
     ComputeBackend, FeaElectroThermalContext, FeaPrepContext, FeaThermoMechanicalContext,
 };
@@ -39,9 +40,15 @@ pub struct TransientSolveOptions {
     pub adapt_retry_growth_cap: f64,
     pub adapt_nonconverged_shrink: f64,
     pub dt_bucket_rel_tolerance: f64,
+    #[serde(default = "default_progress_operation")]
+    pub progress_operation: String,
     pub prep_context: Option<FeaPrepContext>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
+}
+
+fn default_progress_operation() -> String {
+    "fea.run_transient".to_string()
 }
 
 impl Default for TransientSolveOptions {
@@ -62,6 +69,7 @@ impl Default for TransientSolveOptions {
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
+            progress_operation: default_progress_operation(),
             prep_context: None,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
@@ -164,8 +172,28 @@ pub fn solve_transient_system(
     let mut adapt_scale_min = f64::INFINITY;
     let mut adapt_scale_max = 0.0_f64;
     let dt_bucket_rel_tolerance = options.dt_bucket_rel_tolerance.max(0.0);
+    let progress_operation = options.progress_operation.as_str();
 
     for step_index in 0..options.step_count {
+        if is_cancelled() {
+            emit_phase(
+                progress_operation,
+                FeaProgressPhase::Solve,
+                FeaProgressStatus::Cancelled,
+                "transient solve cancelled",
+                Some(step_index as u64),
+                Some(options.step_count as u64),
+            );
+            break;
+        }
+        emit_phase(
+            progress_operation,
+            FeaProgressPhase::Solve,
+            FeaProgressStatus::Advanced,
+            format!("solving transient step {}", step_index + 1),
+            Some(step_index as u64),
+            Some(options.step_count as u64),
+        );
         let step_progress = if options.step_count <= 1 {
             1.0
         } else {
@@ -308,6 +336,15 @@ pub fn solve_transient_system(
             dt = step_dt;
         }
     }
+
+    emit_phase(
+        progress_operation,
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Advanced,
+        "transient step solve loop complete",
+        Some(accepted_time_steps_s.len() as u64),
+        Some(options.step_count as u64),
+    );
 
     let mut max_step_l2_jump_ratio = 0.0_f64;
     let mut nonfinite_displacement_count = 0usize;

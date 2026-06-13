@@ -8,6 +8,7 @@ use crate::{
         FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
+    progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::modal::solve_modal_system,
 };
 
@@ -23,15 +24,77 @@ pub fn run_modal_with_options(
     backend: ComputeBackend,
     options: ModalSolveOptions,
 ) -> Result<FeaModalRunResult, FeaRunError> {
+    emit_phase(
+        "fea.run_modal",
+        FeaProgressPhase::RegionResolution,
+        FeaProgressStatus::Started,
+        "validating modal FEA model",
+        Some(0),
+        Some(5),
+    );
+    check_cancelled("fea.run_modal")?;
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+    emit_phase(
+        "fea.run_modal",
+        FeaProgressPhase::RegionResolution,
+        FeaProgressStatus::Completed,
+        "modal model validation complete",
+        Some(1),
+        Some(5),
+    );
+    check_cancelled("fea.run_modal")?;
 
+    emit_phase(
+        "fea.run_modal",
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Started,
+        "assembling modal system",
+        Some(1),
+        Some(5),
+    );
     let summary = assemble_linear_system(
         model,
         options.prep_context,
         options.thermo_mechanical_context,
         options.electro_thermal_context,
     );
+    emit_phase(
+        "fea.run_modal",
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Completed,
+        "modal system assembly complete",
+        Some(2),
+        Some(5),
+    );
+    check_cancelled("fea.run_modal")?;
+
+    emit_phase(
+        "fea.run_modal",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Started,
+        "solving modal basis",
+        Some(2),
+        Some(5),
+    );
     let modal = solve_modal_system(&summary, options.mode_count, backend);
+    emit_phase(
+        "fea.run_modal",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Completed,
+        "modal solve complete",
+        Some(3),
+        Some(5),
+    );
+    check_cancelled("fea.run_modal")?;
+
+    emit_phase(
+        "fea.run_modal",
+        FeaProgressPhase::Postprocess,
+        FeaProgressStatus::Started,
+        "recovering modal fields",
+        Some(3),
+        Some(5),
+    );
     let mut diagnostics = modal.diagnostics.clone();
     extend_common_run_diagnostics(
         &mut diagnostics,
@@ -99,6 +162,24 @@ pub fn run_modal_with_options(
             )
         })
         .collect();
+
+    emit_phase(
+        "fea.run_modal",
+        FeaProgressPhase::Postprocess,
+        FeaProgressStatus::Completed,
+        "modal result field recovery complete",
+        Some(4),
+        Some(5),
+    );
+    check_cancelled("fea.run_modal")?;
+    emit_phase(
+        "fea.run_modal",
+        FeaProgressPhase::Complete,
+        FeaProgressStatus::Completed,
+        "FEA modal run complete",
+        Some(5),
+        Some(5),
+    );
 
     Ok(FeaModalRunResult {
         run,
