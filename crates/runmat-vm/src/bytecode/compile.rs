@@ -990,6 +990,19 @@ mod tests {
     };
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_csv_temp_path(prefix: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "runmat_{prefix}_{}_{}.csv",
+            std::process::id(),
+            nanos
+        ))
+    }
 
     #[test]
     fn compile_attaches_derived_layout() {
@@ -3590,12 +3603,7 @@ mod tests {
 
     #[test]
     fn compile_interprets_readtable_weekly_groupsummary_workflow() {
-        let mut path = std::env::temp_dir();
-        path.push(format!(
-            "runmat_readtable_weekly_{}_{}.csv",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
+        let path = unique_csv_temp_path("readtable_weekly");
         std::fs::write(
             &path,
             "Date,Orders,Revenue\n2024-03-11,10,100\n2024-03-12,20,300\n2024-03-18,6,90\n",
