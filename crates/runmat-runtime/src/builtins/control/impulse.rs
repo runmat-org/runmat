@@ -598,6 +598,7 @@ fn validate_time_vector(system: &TfSystem, values: &[f64]) -> BuiltinResult<()> 
 struct ImpulseResponse {
     t: Vec<f64>,
     y: Vec<f64>,
+    #[cfg(feature = "plot-core")]
     discrete: bool,
 }
 
@@ -634,6 +635,7 @@ fn evaluate_impulse(system: &TfSystem, time: TimeSpec) -> BuiltinResult<ImpulseR
     Ok(ImpulseResponse {
         t,
         y,
+        #[cfg(feature = "plot-core")]
         discrete: system.is_discrete(),
     })
 }

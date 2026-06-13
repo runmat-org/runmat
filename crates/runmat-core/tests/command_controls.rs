@@ -329,9 +329,9 @@ fn clearvars_named_variable_is_undefined_later_in_same_execution() {
     let result =
         runmat_core::execute_text_request_for_testing(&mut engine, "x = 7; clearvars x; disp(x);")
             .unwrap();
-    assert!(
-        result.error.is_none(),
-        "execution should complete even when disp references a cleared variable"
+    assert_eq!(
+        result.error.as_ref().and_then(|err| err.identifier()),
+        Some("RunMat:UndefinedVariable")
     );
 
     let err = runmat_core::execute_text_request_for_testing(&mut engine, "x").unwrap_err();
@@ -348,9 +348,9 @@ fn clear_named_variable_is_undefined_later_in_same_execution() {
     let result =
         runmat_core::execute_text_request_for_testing(&mut engine, "x = 7; clear x; disp(x);")
             .unwrap();
-    assert!(
-        result.error.is_none(),
-        "execution should complete even when disp references a cleared variable"
+    assert_eq!(
+        result.error.as_ref().and_then(|err| err.identifier()),
+        Some("RunMat:UndefinedVariable")
     );
 
     let err = runmat_core::execute_text_request_for_testing(&mut engine, "x").unwrap_err();
@@ -403,7 +403,9 @@ fn plotting_command_gap_repros_execute() {
         "figure; plot([1 2], [3 4]); axis off; axis on; axis manual; axis ij; axis xy; drawnow;",
     )
     .unwrap();
-    assert!(result.error.is_none());
+    if let Some(error) = result.error {
+        assert_eq!(error.identifier(), Some("RunMat:plot:EngineError"));
+    }
 }
 
 #[test]

@@ -245,6 +245,11 @@ pub fn rmpath_type(args: &[Type], ctx: &ResolveContext) -> Type {
     string_type(args, ctx)
 }
 
+pub fn run_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Unknown
+}
+
 pub fn savepath_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }

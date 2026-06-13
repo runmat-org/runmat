@@ -1,6 +1,7 @@
 use crate::{MirCallArg, MirIndexing, MirOperand, MirStmt};
 use runmat_hir::{
     CallSyntax, FunctionId, MemberName, OperatorKind, QualifiedName, RequestedOutputCount,
+    SymbolName,
 };
 use serde::{Deserialize, Serialize};
 
@@ -45,6 +46,11 @@ pub enum MirRvalue {
     DynamicMember {
         base: MirOperand,
         member: MirOperand,
+    },
+    WorkspaceFirstStaticProperty {
+        workspace_name: SymbolName,
+        class_name: String,
+        property: MemberName,
     },
     MetaClass(QualifiedName),
     Colon,

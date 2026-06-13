@@ -9,7 +9,13 @@ on:
       - "crates/runmat-wasm/**"
       - "crates/runmat-runtime/**"
       - "crates/runmat-lsp/**"
+      - "scripts/chrome-headless.sh"
+      - "scripts/regenerate-wasm-registry.sh"
+      - "scripts/resolve-chromedriver.sh"
       - "scripts/test-wasm-headless.sh"
+      - "scripts/test-wasm-regression-suite.sh"
+      - "scripts/test-wasm-replay-smoke.sh"
+      - "scripts/test-wasm-symptom-closure.sh"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/wasm-bindings.yml"
@@ -138,13 +144,21 @@ jobs:
         working-directory: bindings/ts
         run: npm ci
 
+      - name: Regenerate wasm builtin registry
+        run: scripts/regenerate-wasm-registry.sh
+
       - name: Build wasm32 target
-        run: RUNMAT_GENERATE_WASM_REGISTRY=1 cargo build -p runmat-wasm --target wasm32-unknown-unknown
+        run: cargo build -p runmat-wasm --target wasm32-unknown-unknown
 
       - name: Run wasm headless tests
         env:
           WASM_BINDGEN_TEST_TIMEOUT: "300"
         run: scripts/test-wasm-headless.sh
+
+      - name: Run wasm symptom regression suite
+        env:
+          WASM_BINDGEN_TEST_TIMEOUT: "300"
+        run: scripts/test-wasm-regression-suite.sh symptom-closure
 
       - name: Determine publish settings
         id: publish_settings

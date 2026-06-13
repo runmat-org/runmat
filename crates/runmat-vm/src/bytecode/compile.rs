@@ -13,9 +13,7 @@ use runmat_builtins::{builtin_functions, AccelTag, BuiltinSemanticKind};
 use runmat_hir::{EntrypointId, FunctionId, HirAssembly};
 use runmat_mir::MirAssembly;
 use runmat_mir::{MirRvalue, MirStmtKind, MirTerminatorKind};
-use std::collections::HashMap;
-#[cfg(feature = "native-accel")]
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub fn compile(
     hir: &HirAssembly,
@@ -29,16 +27,20 @@ pub fn compile(
     let bound_functions =
         compile_semantic_functions(hir, mir, c.layout.as_ref().unwrap(), Some(entrypoint))?;
     let function_registry = FunctionRegistry::new(bound_functions.clone());
-    let var_names = c
+    let (var_names, initially_unassigned_slots) = c
         .layout
         .as_ref()
-        .and_then(|layout| layout.entrypoints.get(&entrypoint))
-        .map(|entrypoint_layout| {
-            entrypoint_layout
-                .exports
-                .iter()
-                .map(|export| (export.slot.0, export.name.clone()))
-                .collect()
+        .and_then(|layout| {
+            let entrypoint_layout = layout.entrypoints.get(&entrypoint)?;
+            let function_layout = layout.functions.get(&entrypoint_layout.target)?;
+            Some((
+                entrypoint_layout
+                    .exports
+                    .iter()
+                    .map(|export| (export.slot.0, export.name.clone()))
+                    .collect(),
+                function_layout_initially_unassigned_slots(hir, function_layout),
+            ))
         })
         .unwrap_or_default();
     let entrypoint_target = hir
@@ -106,6 +108,7 @@ pub fn compile(
         function_registry,
         var_types: c.var_types,
         var_names,
+        initially_unassigned_slots,
         layout: c.layout,
         async_metadata,
         #[cfg(feature = "native-accel")]
@@ -743,6 +746,7 @@ fn rvalue_has_fusion_signal(value: &MirRvalue) -> bool {
         | MirRvalue::Index { .. }
         | MirRvalue::Member { .. }
         | MirRvalue::DynamicMember { .. }
+        | MirRvalue::WorkspaceFirstStaticProperty { .. }
         | MirRvalue::MetaClass(_)
         | MirRvalue::Colon
         | MirRvalue::End
@@ -821,6 +825,10 @@ fn compile_semantic_functions(
                     .map(|capture| capture.slot.0)
                     .collect(),
                 var_names: function_layout_var_names(hir, function_layout)?,
+                initially_unassigned_slots: function_layout_initially_unassigned_slots(
+                    hir,
+                    function_layout,
+                ),
                 argument_validations: function
                     .argument_validations
                     .iter()
@@ -942,6 +950,24 @@ fn function_layout_var_names(
         names.insert(slot.0, hir_binding.name.0.clone());
     }
     Ok(names)
+}
+
+fn function_layout_initially_unassigned_slots(
+    hir: &HirAssembly,
+    function_layout: &crate::layout::VmFunctionLayout,
+) -> HashSet<usize> {
+    function_layout
+        .binding_slots
+        .iter()
+        .filter_map(|(binding, slot)| {
+            hir.bindings
+                .get(binding.0)
+                .is_some_and(|hir_binding| {
+                    matches!(hir_binding.role, runmat_hir::BindingRole::ExternalWorkspace)
+                })
+                .then_some(slot.0)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -3560,6 +3586,162 @@ mod tests {
 
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         assert_eq!(vars[y_export.slot.0], Value::Num(9.0));
+    }
+
+    #[test]
+    fn compile_interprets_readtable_weekly_groupsummary_workflow() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "runmat_readtable_weekly_{}_{}.csv",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::write(
+            &path,
+            "Date,Orders,Revenue\n2024-03-11,10,100\n2024-03-12,20,300\n2024-03-18,6,90\n",
+        )
+        .expect("write csv");
+        let source = format!(
+            "\
+T = readtable('{}');\n\
+T.Date = datetime(T.Date, 'InputFormat', 'yyyy-MM-dd');\n\
+T.Week = dateshift(T.Date, 'start', 'week');\n\
+weekly = groupsummary(T, 'Week', 'mean', {{'Orders', 'Revenue'}});\n\
+weekly.Properties.VariableNames(end-1:end) = {{'AvgOrders', 'AvgRevenue'}};\n\
+weekly = sortrows(weekly, 'Week');\n\
+out = weekly.AvgRevenue;\n",
+            path.to_string_lossy()
+        );
+        let ast = runmat_parser::parse(&source).expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let out_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "out")
+            .expect("out export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[out_export.slot.0] else {
+            panic!(
+                "expected numeric AvgRevenue tensor, got {:?}",
+                vars[out_export.slot.0]
+            );
+        };
+        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.data, vec![200.0, 90.0]);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn compile_interprets_imhist_uint8_workflow() {
+        let ast = runmat_parser::parse(
+            "\
+img = uint8([0 1 1; 2 2 2]);\n\
+[counts, bins] = imhist(img);\n\
+[peak, idx] = max(counts);\n\
+dominant = bins(idx);\n\
+total = sum(counts);\n\
+summary = [peak; dominant; total];\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let summary_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "summary")
+            .expect("summary export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[summary_export.slot.0] else {
+            panic!(
+                "expected numeric summary tensor, got {:?}",
+                vars[summary_export.slot.0]
+            );
+        };
+        assert_eq!(tensor.shape, vec![3, 1]);
+        assert_eq!(tensor.data, vec![3.0, 2.0, 6.0]);
+    }
+
+    #[test]
+    fn compile_interprets_butter_filter_workflow() {
+        let ast = runmat_parser::parse(
+            "\
+[b, a] = butter(2, 0.25, 'low');\n\
+x = [1 zeros(1, 5)];\n\
+y = filter(b, a, x);\n\
+expected = [0.0976310729378175 0.2873096041807672 0.3359654745135361];\n\
+err = max(abs(y(1:3) - expected));\n\
+summary = [numel(b); numel(a); all(isfinite(y)); err < 1e-12];\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let summary_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "summary")
+            .expect("summary export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[summary_export.slot.0] else {
+            panic!(
+                "expected numeric summary tensor, got {:?}",
+                vars[summary_export.slot.0]
+            );
+        };
+        assert_eq!(tensor.shape, vec![4, 1]);
+        assert_eq!(tensor.data, vec![3.0, 3.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn compile_interprets_rref_rank_workflow() {
+        let ast = runmat_parser::parse(
+            "\
+A = [1 2 3; 2 4 6; 1 1 1];\n\
+rankA = rank(A);\n\
+[R, p] = rref(A);\n\
+expected = [1 0 -1; 0 1 2; 0 0 0];\n\
+expected_p = [1 2];\n\
+err = max(max(abs(R - expected)));\n\
+pivot_ok = all(p == expected_p);\n\
+summary = [rankA; double(err < 1e-12); numel(p); double(pivot_ok)];\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let summary_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "summary")
+            .expect("summary export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[summary_export.slot.0] else {
+            panic!(
+                "expected numeric summary tensor, got {:?}",
+                vars[summary_export.slot.0]
+            );
+        };
+        assert_eq!(tensor.shape, vec![4, 1]);
+        assert_eq!(tensor.data, vec![2.0, 1.0, 2.0, 1.0]);
     }
 
     #[test]
@@ -6499,6 +6681,24 @@ mod tests {
         assert!(vars
             .iter()
             .any(|value| matches!(value, Value::Num(n) if (*n - 3.0).abs() < 1e-12)));
+    }
+
+    #[test]
+    fn compile_rejects_workspace_first_bound_function_fallback() {
+        let ast = runmat_parser::parse("run(\"setup.m\"); y = remote_inc(2);").expect("parse");
+        let mut bound_functions = HashMap::new();
+        bound_functions.insert("remote_inc".to_string(), FunctionId(9001));
+        let context = LoweringContext::empty().with_bound_functions(&bound_functions);
+        let hir = lower(&ast, &context).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let err = compile(&hir.assembly, &mir, entrypoint)
+            .expect_err("workspace-first bound function fallback should be rejected");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirCallFallbackPolicyUnsupported")
+        );
     }
 
     #[test]

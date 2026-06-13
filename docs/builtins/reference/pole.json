@@ -1,0 +1,86 @@
+{
+  "title": "pole",
+  "category": "control",
+  "keywords": [
+    "pole",
+    "poles",
+    "stability",
+    "control system",
+    "tf"
+  ],
+  "summary": "Return poles of SISO transfer-function models.",
+  "references": [
+    "title: \"MATLAB pole documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`pole` computes roots from host-side denominator metadata."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`pole` is model analysis and is not fused."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::pole::tests",
+    "integration": "crates/runmat-vm/tests/control.rs"
+  },
+  "description": "`pole(sys)` returns the roots of the denominator polynomial for a supported SISO `tf` model.",
+  "behaviors": [
+    "Supports SISO `tf` objects.",
+    "Returns an `N x 1` real vector when all poles are real.",
+    "Returns an `N x 1` complex vector when any pole has a nonzero imaginary part.",
+    "Static-gain models return an empty pole vector."
+  ],
+  "examples": [
+    {
+      "description": "Second-order poles",
+      "input": "H = tf(1, [1 3 2]);\npole(H)",
+      "output": "ans = [-1; -2]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `pole` cancel pole-zero pairs?",
+      "answer": "No. It returns roots of the stored denominator polynomial for the supplied model."
+    }
+  ],
+  "links": [
+    {
+      "label": "roots",
+      "url": "./roots"
+    },
+    {
+      "label": "isstable",
+      "url": "./isstable"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/pole.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/pole.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "p = pole(sys)",
+      "output": "p is a column vector."
+    },
+    "points": [
+      "`sys` must be a SISO `tf` object."
+    ]
+  },
+  "validation": {
+    "summary": "`pole` validates the input model and computes denominator roots through the shared control polynomial root path. Tests cover real poles and VM integration.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/control/pole.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/pole.rs"
+    }
+  },
+  "gpu_residency": "`pole` returns host-resident vectors."
+}

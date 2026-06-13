@@ -9,6 +9,14 @@ thread_local! {
     static CLASS_ACCESS_CONTEXT: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
+#[cfg(target_arch = "wasm32")]
+fn ensure_wasm_builtins_registered() {
+    crate::builtins::wasm_registry::register_all();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn ensure_wasm_builtins_registered() {}
+
 pub struct ClassAccessContextGuard {
     previous: Option<String>,
 }
@@ -223,6 +231,8 @@ async fn call_builtin_async_impl(
     args: &[Value],
     output_count: Option<usize>,
 ) -> Result<Value, RuntimeError> {
+    ensure_wasm_builtins_registered();
+
     let _output_guard = crate::output_count::push_output_count(output_count);
     let mut matching_builtins = Vec::new();
 
@@ -438,6 +448,7 @@ async fn call_registered_class_constructor(
     else {
         return Ok(default_object);
     };
+    let owner_qualified = format!("{owner}.{constructor_method_name}");
     let caller_class = current_class_access_context();
     let ctor_access_allowed = match ctor.access {
         runmat_builtins::Access::Public => true,
@@ -461,7 +472,6 @@ async fn call_registered_class_constructor(
     )
     .await
     else {
-        let owner_qualified = format!("{owner}.{constructor_method_name}");
         let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
             &owner_qualified,
             args,

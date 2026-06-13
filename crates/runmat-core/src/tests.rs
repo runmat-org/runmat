@@ -2390,7 +2390,7 @@ fn execute_request_path_error_returns_resolved_source_context() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let dir = tempfile::tempdir().expect("tempdir");
     let source_path = dir.path().join("source-context-error.m");
-    let source_text = "ss\nx = 1;\n";
+    let source_text = "missing_name_for_source_context\nx = 1;\n";
     std::fs::write(&source_path, source_text).expect("write test source");
     let source_path = source_path.to_string_lossy().to_string();
 
@@ -6149,6 +6149,35 @@ fn execute_path_request_reports_import_ambiguous_for_unqualified_class_construct
 }
 
 #[test]
+fn execute_path_request_bare_non_loader_identifier_does_not_probe_constructor_wildcards() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::create_dir_all(tmp.path().join("+pkg2")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("C.m"),
+        "classdef C; methods; function obj = C(), end; end; end",
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("+pkg2").join("C.m"),
+        "classdef C; methods; function obj = C(), end; end; end",
+    )
+    .expect("write class source");
+    std::fs::write(tmp.path().join("main.m"), "import pkg.*; import pkg2.*; C;")
+        .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let err = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect_err("bare C should fail as an undefined variable, not import ambiguity");
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic undefined-variable error");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
+}
+
+#[test]
 fn execute_path_request_specific_import_precedes_wildcard_for_unqualified_class_name() {
     let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -7583,224 +7612,239 @@ roots = ["."]
 
 #[test]
 fn execute_path_request_resolves_package_private_function_for_package_callee_only() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    std::fs::create_dir_all(tmp.path().join("+pkg/private")).expect("create package private dir");
-    std::fs::write(
-        tmp.path().join("runmat.toml"),
-        r#"
+    run_deep_semantic_test(|| {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("+pkg/private"))
+            .expect("create package private dir");
+        std::fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
 [package]
 name = "demo"
 
 [sources]
 roots = ["."]
 "#,
-    )
-    .expect("write manifest");
-    std::fs::write(
-        tmp.path().join("+pkg/entry.m"),
-        "function y = entry(); a = helper(40); h = @helper; b = h(41); c = feval(@helper, 42); y = a + b + c; end",
-    )
-    .expect("write package entry");
-    std::fs::write(
-        tmp.path().join("+pkg/private/helper.m"),
-        "function y = helper(x); y = x + 1; end",
-    )
-    .expect("write package private helper");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "r = pkg.entry(); try; leak = helper(1); leak_eid = 'NOERR'; catch e; leak_eid = e.identifier; end;",
-    )
-    .expect("write root source");
+        )
+        .expect("write manifest");
+        std::fs::write(
+            tmp.path().join("+pkg/entry.m"),
+            "function y = entry(); a = helper(40); h = @helper; b = h(41); c = feval(@helper, 42); y = a + b + c; end",
+        )
+        .expect("write package entry");
+        std::fs::write(
+            tmp.path().join("+pkg/private/helper.m"),
+            "function y = helper(x); y = x + 1; end",
+        )
+        .expect("write package private helper");
+        std::fs::write(
+            tmp.path().join("main.m"),
+            "r = pkg.entry(); try; leak = helper(1); leak_eid = 'NOERR'; catch e; leak_eid = e.identifier; end;",
+        )
+        .expect("write root source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let _cwd = push_cwd(tmp.path());
-    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let _cwd = push_cwd(tmp.path());
+        let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
-    assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(126.0)),
-        "package callee should resolve its private helper through direct, handle, and feval(@handle) routes; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
-    assert!(
-        outcome_has_named_upsert(
-            &outcome,
-            "leak_eid",
-            &runmat_builtins::Value::String("RunMat:UndefinedFunction".to_string())
-        ),
-        "root caller should not resolve package private helper directly; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
+        assert!(
+            outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(126.0)),
+            "package callee should resolve its private helper through direct, handle, and feval(@handle) routes; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+        assert!(
+            outcome_has_named_upsert(
+                &outcome,
+                "leak_eid",
+                &runmat_builtins::Value::String("RunMat:UndefinedFunction".to_string())
+            ),
+            "root caller should not resolve package private helper directly; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+    });
 }
 
 #[test]
 fn execute_path_request_resolves_package_private_string_routes_for_package_callee() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
-    std::fs::create_dir_all(tmp.path().join("+pkg/private")).expect("create package private dir");
-    std::fs::write(
-        tmp.path().join("runmat.toml"),
-        r#"
+    run_deep_semantic_test(|| {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
+        std::fs::create_dir_all(tmp.path().join("+pkg/private"))
+            .expect("create package private dir");
+        std::fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
 [package]
 name = "demo"
 
 [sources]
 roots = ["."]
 "#,
-    )
-    .expect("write manifest");
-    std::fs::write(
-        tmp.path().join("private/helper.m"),
-        "function y = helper(x); y = x + 100; end",
-    )
-    .expect("write root private helper");
-    std::fs::write(
-        tmp.path().join("+pkg/entry.m"),
-        "function y = entry(); a = helper(40); s = str2func('helper'); b = feval(s, 41); c = feval('helper', 42); y = a + b + c; end",
-    )
-    .expect("write package entry");
-    std::fs::write(
-        tmp.path().join("+pkg/private/helper.m"),
-        "function y = helper(x); y = x + 1; end",
-    )
-    .expect("write package private helper");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "root_value = helper(1); pkg_value = pkg.entry();",
-    )
-    .expect("write root source");
+        )
+        .expect("write manifest");
+        std::fs::write(
+            tmp.path().join("private/helper.m"),
+            "function y = helper(x); y = x + 100; end",
+        )
+        .expect("write root private helper");
+        std::fs::write(
+            tmp.path().join("+pkg/entry.m"),
+            "function y = entry(); a = helper(40); s = str2func('helper'); b = feval(s, 41); c = feval('helper', 42); y = a + b + c; end",
+        )
+        .expect("write package entry");
+        std::fs::write(
+            tmp.path().join("+pkg/private/helper.m"),
+            "function y = helper(x); y = x + 1; end",
+        )
+        .expect("write package private helper");
+        std::fs::write(
+            tmp.path().join("main.m"),
+            "root_value = helper(1); pkg_value = pkg.entry();",
+        )
+        .expect("write root source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let _cwd = push_cwd(tmp.path());
-    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let _cwd = push_cwd(tmp.path());
+        let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
-    assert!(
-        outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
-        "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
-    assert!(
-        outcome_has_named_upsert(&outcome, "pkg_value", &runmat_builtins::Value::Num(126.0)),
-        "package callee string routes should prefer package private helper; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
+        assert!(
+            outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
+            "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+        assert!(
+            outcome_has_named_upsert(&outcome, "pkg_value", &runmat_builtins::Value::Num(126.0)),
+            "package callee string routes should prefer package private helper; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+    });
 }
 
 #[test]
 fn execute_path_request_package_private_function_precedes_root_private_for_package_callee() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
-    std::fs::create_dir_all(tmp.path().join("+pkg/private")).expect("create package private dir");
-    std::fs::write(
-        tmp.path().join("runmat.toml"),
-        r#"
+    run_deep_semantic_test(|| {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
+        std::fs::create_dir_all(tmp.path().join("+pkg/private"))
+            .expect("create package private dir");
+        std::fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
 [package]
 name = "demo"
 
 [sources]
 roots = ["."]
 "#,
-    )
-    .expect("write manifest");
-    std::fs::write(
-        tmp.path().join("private/helper.m"),
-        "function y = helper(x); y = x + 100; end",
-    )
-    .expect("write root private helper");
-    std::fs::write(
-        tmp.path().join("+pkg/private/helper.m"),
-        "function y = helper(x); y = x + 1; end",
-    )
-    .expect("write package private helper");
-    std::fs::write(
-        tmp.path().join("+pkg/entry.m"),
-        "function y = entry(); y = helper(41); end",
-    )
-    .expect("write package entry");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "root_value = helper(1); pkg_value = pkg.entry();",
-    )
-    .expect("write root source");
+        )
+        .expect("write manifest");
+        std::fs::write(
+            tmp.path().join("private/helper.m"),
+            "function y = helper(x); y = x + 100; end",
+        )
+        .expect("write root private helper");
+        std::fs::write(
+            tmp.path().join("+pkg/private/helper.m"),
+            "function y = helper(x); y = x + 1; end",
+        )
+        .expect("write package private helper");
+        std::fs::write(
+            tmp.path().join("+pkg/entry.m"),
+            "function y = entry(); y = helper(41); end",
+        )
+        .expect("write package entry");
+        std::fs::write(
+            tmp.path().join("main.m"),
+            "root_value = helper(1); pkg_value = pkg.entry();",
+        )
+        .expect("write root source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let _cwd = push_cwd(tmp.path());
-    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let _cwd = push_cwd(tmp.path());
+        let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
-    assert!(
-        outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
-        "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
-    assert!(
-        outcome_has_named_upsert(&outcome, "pkg_value", &runmat_builtins::Value::Num(42.0)),
-        "package callee should prefer its package private helper over root private helper; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
+        assert!(
+            outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
+            "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+        assert!(
+            outcome_has_named_upsert(&outcome, "pkg_value", &runmat_builtins::Value::Num(42.0)),
+            "package callee should prefer its package private helper over root private helper; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+    });
 }
 
 #[test]
 fn execute_path_request_resolves_class_folder_private_function_for_class_folder_callee() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
-    std::fs::create_dir_all(tmp.path().join("@C/private")).expect("create class private dir");
-    std::fs::write(
-        tmp.path().join("runmat.toml"),
-        r#"
+    run_deep_semantic_test(|| {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
+        std::fs::create_dir_all(tmp.path().join("@C/private")).expect("create class private dir");
+        std::fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
 [package]
 name = "demo"
 
 [sources]
 roots = ["."]
 "#,
-    )
-    .expect("write manifest");
-    std::fs::write(
-        tmp.path().join("private/helper.m"),
-        "function y = helper(x); y = x + 100; end",
-    )
-    .expect("write root private helper");
-    std::fs::write(
-        tmp.path().join("@C/entry.m"),
-        "function y = entry(); a = helper(40); h = @helper; b = h(41); s = str2func('helper'); c = feval(s, 42); d = feval('helper', 43); y = a + b + c + d; end",
-    )
-    .expect("write class-folder entry");
-    std::fs::write(
-        tmp.path().join("@C/private/helper.m"),
-        "function y = helper(x); y = x + 1; end",
-    )
-    .expect("write class private helper");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "root_value = helper(1); class_value = C.entry();",
-    )
-    .expect("write root source");
+        )
+        .expect("write manifest");
+        std::fs::write(
+            tmp.path().join("private/helper.m"),
+            "function y = helper(x); y = x + 100; end",
+        )
+        .expect("write root private helper");
+        std::fs::write(
+            tmp.path().join("@C/entry.m"),
+            "function y = entry(); a = helper(40); h = @helper; b = h(41); s = str2func('helper'); c = feval(s, 42); d = feval('helper', 43); y = a + b + c + d; end",
+        )
+        .expect("write class-folder entry");
+        std::fs::write(
+            tmp.path().join("@C/private/helper.m"),
+            "function y = helper(x); y = x + 1; end",
+        )
+        .expect("write class private helper");
+        std::fs::write(
+            tmp.path().join("main.m"),
+            "root_value = helper(1); class_value = C.entry();",
+        )
+        .expect("write root source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let _cwd = push_cwd(tmp.path());
-    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let _cwd = push_cwd(tmp.path());
+        let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
-    assert!(
-        outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
-        "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
-    assert!(
-        outcome_has_named_upsert(&outcome, "class_value", &runmat_builtins::Value::Num(170.0)),
-        "class-folder callee should resolve its private helper through direct, handle, str2func, and feval string routes; upserts={:?}, diagnostics={:?}",
-        outcome.workspace_delta.upserts,
-        outcome.diagnostics
-    );
+        assert!(
+            outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
+            "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+        assert!(
+            outcome_has_named_upsert(&outcome, "class_value", &runmat_builtins::Value::Num(170.0)),
+            "class-folder callee should resolve its private helper through direct, handle, str2func, and feval string routes; upserts={:?}, diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+    });
 }
 
 #[test]
@@ -9731,6 +9775,469 @@ fn dynamic_workspace_evalin_invalid_selector_is_catchable() {
         "err",
         &runmat_builtins::Value::String("RunMat:DynamicWorkspaceSelector".into())
     ));
+}
+
+#[test]
+fn run_executes_script_file_in_current_workspace() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        temp.path().join("worker.m"),
+        r#"
+        generated = local_double(seed);
+
+        function out = local_double(x)
+            out = x * 2;
+        end
+    "#,
+    )
+    .expect("write worker script");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+        seed = 21;
+        run('worker');
+        after_run = generated + 1;
+    "#,
+    )
+    .expect("run script succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "generated",
+        &runmat_builtins::Value::Num(42.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "after_run",
+        &runmat_builtins::Value::Num(43.0)
+    ));
+}
+
+#[test]
+fn run_exposes_script_variables_to_following_call_syntax() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        temp.path().join("workspace_call_worker.m"),
+        r#"
+        generated = [11 22 33];
+        sin = [5 8 13];
+        rand = 9;
+        f = @rand;
+    "#,
+    )
+    .expect("write worker script");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+        run('workspace_call_worker');
+        second_value = generated(2);
+        shadowed_builtin_value = sin(2);
+        builtin_fallback_value = cos(0);
+        constant_fallback_value = pi;
+        shadowed_bare_builtin_value = rand;
+        bare_builtin_fallback_value = randn;
+        loaded_function_handle_call = f();
+        generated(1);
+        after_standalone_call = 7;
+    "#,
+    )
+    .expect("post-run call syntax succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "second_value",
+        &runmat_builtins::Value::Num(22.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "shadowed_builtin_value",
+        &runmat_builtins::Value::Num(8.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "builtin_fallback_value",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "constant_fallback_value",
+        &runmat_builtins::Value::Num(std::f64::consts::PI)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "shadowed_bare_builtin_value",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+    assert!(matches!(
+        outcome_named_upsert_value(&outcome, "bare_builtin_fallback_value"),
+        Some(runmat_builtins::Value::Num(value)) if value.is_finite()
+    ));
+    assert!(matches!(
+        outcome_named_upsert_value(&outcome, "loaded_function_handle_call"),
+        Some(runmat_builtins::Value::Num(value)) if value.is_finite()
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "after_standalone_call",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+}
+
+#[test]
+fn run_script_variables_shadow_builtin_constants() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(temp.path().join("constant_worker.m"), "pi = 4;\n").expect("write worker");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+        run('constant_worker');
+        shadowed_constant_value = pi;
+    "#,
+    )
+    .expect("post-run constant shadowing succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "shadowed_constant_value",
+        &runmat_builtins::Value::Num(4.0)
+    ));
+}
+
+#[test]
+fn run_script_variables_shadow_imported_static_properties() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        temp.path().join("RunStaticShadowFixture.m"),
+        r#"
+classdef RunStaticShadowFixture
+  properties(Static)
+    runStaticShadowValue = 42
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        temp.path().join("static_worker.m"),
+        "runStaticShadowValue = 9;\n",
+    )
+    .expect("write worker");
+    std::fs::write(
+        temp.path().join("main.m"),
+        r#"
+import RunStaticShadowFixture.*;
+run('static_worker');
+shadowed_static_value = runStaticShadowValue;
+"#,
+    )
+    .expect("write main script");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = temp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("post-run static property shadowing succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "shadowed_static_value",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+}
+
+#[test]
+fn run_keeps_imported_static_property_fallback_after_external_visibility() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        temp.path().join("RunStaticFallbackFixture.m"),
+        r#"
+classdef RunStaticFallbackFixture
+  properties(Static)
+    runStaticFallbackValue = 42
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(temp.path().join("empty_worker.m"), "worker_marker = 1;\n")
+        .expect("write worker");
+    std::fs::write(
+        temp.path().join("main.m"),
+        r#"
+import RunStaticFallbackFixture.*;
+run('empty_worker');
+fallback_static_value = runStaticFallbackValue;
+"#,
+    )
+    .expect("write main script");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = temp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("post-run static property fallback succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "fallback_static_value",
+        &runmat_builtins::Value::Num(42.0)
+    ));
+}
+
+#[test]
+fn run_replays_script_stdout_to_request_streams() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        temp.path().join("display_worker.m"),
+        r#"
+        disp('from run');
+        display_worker_value = 4;
+    "#,
+    )
+    .expect("write display worker");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome =
+        execute_text_request(&mut session, "run('display_worker');").expect("run display worker");
+    let stdout = outcome
+        .streams
+        .iter()
+        .filter(|entry| entry.stream == ExecutionStreamKind::Stdout)
+        .map(|entry| entry.text.as_str())
+        .collect::<String>();
+    assert_eq!(stdout, "from run\n");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "display_worker_value",
+        &runmat_builtins::Value::Num(4.0)
+    ));
+}
+
+#[test]
+fn run_command_syntax_resolves_scripts_on_search_path() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let scripts = temp.path().join("scripts");
+    std::fs::create_dir_all(&scripts).expect("create scripts dir");
+    std::fs::write(scripts.join("path_worker.m"), "path_value = 17;\n").expect("write path worker");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+        addpath('scripts');
+        run path_worker
+        path_after = path_value + 3;
+        run('path_worker.m');
+        path_after_string = path_value + 4;
+    "#,
+    )
+    .expect("run command syntax succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "path_after",
+        &runmat_builtins::Value::Num(20.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "path_after_string",
+        &runmat_builtins::Value::Num(21.0)
+    ));
+}
+
+#[test]
+fn run_preserves_script_source_context() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let source_path = temp.path().join("context_worker.m");
+    std::fs::write(
+        &source_path,
+        r#"
+        run_name = mfilename();
+        run_full = mfilename("fullpath");
+    "#,
+    )
+    .expect("write context worker");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome =
+        execute_text_request(&mut session, "run('context_worker');").expect("run context worker");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "run_name",
+        &runmat_builtins::Value::String("context_worker".into())
+    ));
+
+    let actual = outcome_named_upsert_value(&outcome, "run_full")
+        .and_then(|value| {
+            if let runmat_builtins::Value::String(text) = value {
+                Some(text.as_str())
+            } else {
+                None
+            }
+        })
+        .expect("run_full string upsert");
+    let expected = std::fs::canonicalize(&source_path)
+        .unwrap_or_else(|_| source_path.clone())
+        .with_extension("")
+        .to_string_lossy()
+        .to_string();
+    assert_eq!(
+        comparable_path_text(actual),
+        comparable_path_text(&expected),
+        "run_full should point at the executed script"
+    );
+}
+
+#[test]
+fn run_error_commits_script_mutations_before_the_error() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        temp.path().join("failing_worker.m"),
+        r#"
+        partial_run_value = 99;
+        error("RunMat:run:testBoom", "boom");
+    "#,
+    )
+    .expect("write failing worker");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+        try
+            run('failing_worker');
+            run_err = "NOERR";
+        catch e
+            run_err = e.identifier;
+        end
+        after_failure = 5;
+    "#,
+    )
+    .expect("run failure should be catchable");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "run_err",
+        &runmat_builtins::Value::String("RunMat:run:testBoom".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "after_failure",
+        &runmat_builtins::Value::Num(5.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "partial_run_value",
+        &runmat_builtins::Value::Num(99.0)
+    ));
+}
+
+#[test]
+fn run_missing_file_and_output_errors_are_catchable() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(temp.path().join("ok_worker.m"), "ok_value = 1;\n").expect("write worker");
+    std::fs::write(temp.path().join("empty_worker.m"), "% no assignments\n")
+        .expect("write empty worker");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+        try
+            run('missing_worker');
+            missing_err = "NOERR";
+        catch e
+            missing_err = e.identifier;
+        end
+
+        try
+            output_value = run('ok_worker');
+            output_err = "NOERR";
+        catch e
+            output_err = e.identifier;
+        end
+
+        try
+            run('empty_worker');
+            missing_after_run_value = missing_after_run;
+            missing_after_run_err = "NOERR";
+        catch e
+            missing_after_run_err = e.identifier;
+        end
+    "#,
+    )
+    .expect("run errors should be catchable");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "missing_err",
+        &runmat_builtins::Value::String("RunMat:run:FileNotFound".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "output_err",
+        &runmat_builtins::Value::String("RunMat:run:TooManyOutputs".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "missing_after_run_err",
+        &runmat_builtins::Value::String("RunMat:UndefinedVariable".into())
+    ));
+    assert!(
+        !outcome_has_upsert_name(&outcome, "ok_value"),
+        "run with requested output must fail before executing the target script"
+    );
+}
+
+#[test]
+fn run_respects_dynamic_eval_host_policy() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        temp.path().join("policy_worker.m"),
+        "policy_run_value = 12;\n",
+    )
+    .expect("write worker");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Text {
+            name: "run-policy.m".to_string(),
+            text: "run('policy_worker');".to_string(),
+        },
+        compatibility: CompatMode::Matlab,
+        host_policy: abi::HostExecutionPolicy {
+            top_level_await: true,
+            dynamic_eval: false,
+        },
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: session.workspace_handle(),
+    }))
+    .result
+    .expect("request should return an outcome with a policy diagnostic");
+    assert_eq!(outcome.diagnostics.len(), 1);
+    assert_eq!(outcome.diagnostics[0].code, "RunMat:DynamicEvalDisabled");
+    assert!(
+        !outcome_has_upsert_name(&outcome, "policy_run_value"),
+        "disabled dynamic execution must not run script files"
+    );
 }
 
 #[test]

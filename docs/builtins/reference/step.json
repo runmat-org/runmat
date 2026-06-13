@@ -37,6 +37,7 @@
     "Returns the response `y` as a column vector for single-output calls.",
     "Returns `[y, tOut]` for two-output calls.",
     "Plots the response for no-output calls.",
+    "No-output calls accept common multi-system plot syntax such as `step(sys1, 'b', sys2, 'r--', tFinal)`; style tokens are accepted for compatibility.",
     "Chooses an automatic time vector when no time input is supplied.",
     "Accepts a positive finite scalar final time.",
     "Accepts a finite, nonnegative, nondecreasing explicit time vector.",
@@ -62,6 +63,11 @@
       "description": "Plotting the step response",
       "input": "sys = tf(1, [1 1]);\nstep(sys);",
       "output": "A step-response plot is rendered."
+    },
+    {
+      "description": "Plotting multiple systems",
+      "input": "s = tf('s');\nH1 = 1/(s + 1);\nH2 = 2/(s + 2);\nstep(H1, 'b', H2, 'r--', 5);",
+      "output": "Both responses are plotted over the same final time."
     }
   ],
   "faqs": [
@@ -86,6 +92,10 @@
     {
       "label": "plot",
       "url": "./plot"
+    },
+    {
+      "label": "stepinfo",
+      "url": "./stepinfo"
     }
   ],
   "source": {
@@ -95,17 +105,18 @@
   "syntax": {
     "example": {
       "description": "Supported forms",
-      "input": "step(sys)\ny = step(sys)\n[y, tOut] = step(sys)\n[y, tOut] = step(sys, tFinal)\n[y, tOut] = step(sys, t)",
+      "input": "step(sys)\nstep(sys1, style1, sys2, style2, tFinal)\ny = step(sys)\n[y, tOut] = step(sys)\n[y, tOut] = step(sys, tFinal)\n[y, tOut] = step(sys, t)",
       "output": "Response data is returned when outputs are requested; otherwise a plot is rendered."
     },
     "points": [
       "`sys` must be a SISO `tf` object.",
       "`tFinal` is a positive finite scalar final time.",
-      "`t` is a finite, nonnegative, nondecreasing numeric time vector."
+      "`t` is a finite, nonnegative, nondecreasing numeric time vector.",
+      "Multiple-system style arguments are supported only for no-output plotting calls."
     ]
   },
   "validation": {
-    "summary": "`step` validates object class, coefficient type, properness, sample time, and time-vector inputs before simulation. Unit and integration tests cover first-order response values, scalar final time, explicit vectors, discrete sample-time behavior, multi-output ordering, and VM dispatch.",
+    "summary": "`step` validates object class, coefficient type, properness, sample time, and time-vector inputs before simulation. Unit and integration tests cover first-order response values, scalar final time, explicit vectors, discrete sample-time behavior, multi-output ordering, multi-system statement-form plotting syntax, and VM dispatch.",
     "implementation": {
       "label": "`crates/runmat-runtime/src/builtins/control/step.rs`",
       "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/step.rs"

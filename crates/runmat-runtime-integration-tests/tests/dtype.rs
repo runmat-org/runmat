@@ -1,5 +1,5 @@
 use futures::executor::block_on;
-use runmat_builtins::{CharArray, NumericDType, Tensor, Value};
+use runmat_builtins::{CharArray, NumericDType, SparseTensor, Tensor, Value};
 
 #[test]
 fn zeros_single_uses_f32_dtype() {
@@ -56,6 +56,32 @@ fn zeros_like_proto_preserves_numeric_dtype() {
             assert_eq!(t.dtype, NumericDType::F32);
         }
         other => panic!("expected tensor result, got {other:?}"),
+    }
+}
+
+#[test]
+fn zeros_like_sparse_proto_preserves_sparse_storage() {
+    let proto =
+        SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![1.0, 2.0]).expect("sparse proto");
+    let result = runmat_runtime::call_builtin(
+        "zeros",
+        &[
+            Value::Num(3.0),
+            Value::Num(4.0),
+            Value::String("like".into()),
+            Value::SparseTensor(proto),
+        ],
+    )
+    .expect("zeros like sparse proto");
+    match result {
+        Value::SparseTensor(sparse) => {
+            assert_eq!(sparse.shape(), vec![3, 4]);
+            assert_eq!(sparse.nnz(), 0);
+            assert_eq!(sparse.col_ptrs, vec![0, 0, 0, 0, 0]);
+            assert!(sparse.row_indices.is_empty());
+            assert!(sparse.values.is_empty());
+        }
+        other => panic!("expected sparse result, got {other:?}"),
     }
 }
 

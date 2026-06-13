@@ -201,6 +201,7 @@ async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::Int(i) => Ok(Value::Num(cast_f64_to_single(i.to_f64()))),
         Value::Bool(flag) => Ok(Value::Num(if flag { 1.0 } else { 0.0 })),
         Value::Tensor(tensor) => single_from_tensor(tensor),
+        Value::SparseTensor(_) => Err(conversion_error("sparse")),
         Value::Complex(re, im) => Ok(Value::Complex(
             cast_f64_to_single(re),
             cast_f64_to_single(im),

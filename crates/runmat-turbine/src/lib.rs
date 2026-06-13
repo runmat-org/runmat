@@ -982,6 +982,16 @@ impl TurbineEngine {
                     class.hash(&mut hasher);
                     prop.hash(&mut hasher);
                 }
+                Instr::LoadWorkspaceFirstStaticProperty {
+                    name,
+                    class_name,
+                    property,
+                } => {
+                    "LoadWorkspaceFirstStaticProperty".hash(&mut hasher);
+                    name.hash(&mut hasher);
+                    class_name.hash(&mut hasher);
+                    property.hash(&mut hasher);
+                }
                 Instr::EnterTry(catch_pc, catch_var) => {
                     "EnterTry".hash(&mut hasher);
                     catch_pc.hash(&mut hasher);

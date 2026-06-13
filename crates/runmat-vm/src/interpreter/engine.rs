@@ -13,6 +13,8 @@ use std::collections::{HashMap, HashSet};
 pub fn prepare_workspace_guard(
     var_names: &HashMap<usize, String>,
     vars: &mut Vec<Value>,
+    initial_assigned_var_count: usize,
+    initially_unassigned_slots: &HashSet<usize>,
 ) -> Option<WorkspaceStateGuard> {
     let pending_state = take_pending_workspace_state();
     let guard = pending_state.map(|(names, assigned)| {
@@ -33,7 +35,7 @@ pub fn prepare_workspace_guard(
     let mut assigned = HashSet::new();
     for (slot, name) in var_names {
         names.insert(name.clone(), *slot);
-        if *slot < vars.len() {
+        if *slot < initial_assigned_var_count && !initially_unassigned_slots.contains(slot) {
             assigned.insert(name.clone());
         }
     }

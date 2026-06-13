@@ -108,6 +108,21 @@ pub struct UserCallContext<'a> {
     pub exception: ExceptionRouteContext<'a>,
 }
 
+pub struct WorkspaceFirstCallContext<'a> {
+    pub stack: &'a mut Vec<Value>,
+    pub workspace_name: &'a str,
+    pub identity: CallableIdentity,
+    pub fallback_policy: CallableFallbackPolicy,
+    pub bare_identifier: bool,
+    pub out_count: usize,
+    pub source_id: Option<runmat_hir::SourceId>,
+    pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
+    pub current_function_name: &'a str,
+    pub imports: &'a [(Vec<String>, bool)],
+    pub function_registry: &'a crate::bytecode::FunctionRegistry,
+    pub exception: ExceptionRouteContext<'a>,
+}
+
 fn imported_static_method_owner(
     imports: &[(Vec<String>, bool)],
     method_name: &str,
@@ -583,6 +598,121 @@ pub async fn handle_user_function_call(
 ) -> Result<UserCallHandling, RuntimeError> {
     let args = crate::call::builtins::collect_call_args(ctx.stack, arg_count)?;
     handle_prepared_user_function_call(ctx, args, refresh_vars).await
+}
+
+pub async fn handle_workspace_first_prepared_call(
+    ctx: WorkspaceFirstCallContext<'_>,
+    args: Vec<Value>,
+    refresh_vars: impl Fn(&[Value]),
+) -> Result<UserCallHandling, RuntimeError> {
+    let WorkspaceFirstCallContext {
+        stack,
+        workspace_name,
+        identity,
+        fallback_policy,
+        bare_identifier,
+        out_count,
+        source_id,
+        call_arg_spans,
+        current_function_name,
+        imports,
+        function_registry,
+        exception,
+    } = ctx;
+
+    if let Some(base) = crate::runtime::workspace::workspace_lookup(workspace_name) {
+        if bare_identifier && args.is_empty() {
+            stack.push(normalize_requested_outputs(base, out_count));
+            return Ok(UserCallHandling::Completed);
+        }
+        let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
+        let _output_guard = runmat_runtime::output_context::push_output_count(out_count);
+        let result =
+            super::indexing::paren_index_value(base, args, out_count, function_registry).await;
+        let ExceptionRouteContext {
+            try_stack,
+            vars,
+            last_exception,
+            pc,
+        } = exception;
+        return match result {
+            Ok(value) => {
+                stack.push(normalize_requested_outputs(value, out_count));
+                Ok(UserCallHandling::Completed)
+            }
+            Err(err) => Ok(
+                match redirect_exception_to_catch(
+                    err,
+                    try_stack,
+                    vars,
+                    last_exception,
+                    pc,
+                    refresh_vars,
+                ) {
+                    ExceptionHandling::Caught => UserCallHandling::Caught,
+                    ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
+                },
+            ),
+        };
+    }
+
+    if let CallableIdentity::Builtin(id) = &identity {
+        if call_builtins::is_vm_dynamic_workspace_builtin(&id.0) {
+            let mut temp_stack = args;
+            let arg_count = temp_stack.len();
+            let result = call_builtins::vm_dynamic_workspace_builtin(
+                &mut temp_stack,
+                &id.0,
+                arg_count,
+                out_count,
+                function_registry,
+                source_id,
+            )
+            .await;
+            let ExceptionRouteContext {
+                try_stack,
+                vars,
+                last_exception,
+                pc,
+            } = exception;
+            return match result {
+                Ok(value) => {
+                    stack.push(normalize_requested_outputs(value, out_count));
+                    Ok(UserCallHandling::Completed)
+                }
+                Err(err) => Ok(
+                    match redirect_exception_to_catch(
+                        err,
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                        refresh_vars,
+                    ) {
+                        ExceptionHandling::Caught => UserCallHandling::Caught,
+                        ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
+                    },
+                ),
+            };
+        }
+    }
+
+    handle_prepared_user_function_call(
+        UserCallContext {
+            stack,
+            identity,
+            fallback_policy,
+            out_count,
+            source_id,
+            call_arg_spans,
+            current_function_name,
+            imports,
+            exception,
+        },
+        args,
+        refresh_vars,
+    )
+    .await
 }
 
 pub async fn handle_method_or_member_index_multi_call(

@@ -21,6 +21,16 @@ pub fn nonlinear_solve_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
+pub fn linear_programming_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    match _args.get(0) {
+        Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Tensor {
+            shape: shape.clone(),
+        },
+        Some(Type::Num | Type::Int | Type::Bool) => Type::Num,
+        _ => Type::tensor(),
+    }
+}
+
 pub fn optim_options_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Struct { known_fields: None }
 }

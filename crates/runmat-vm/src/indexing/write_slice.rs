@@ -199,7 +199,9 @@ pub fn build_string_rhs_view(
     if let Value::StringArray(rt) = rhs {
         let dims = selection_lengths.len();
         let mut shape = rt.shape.clone();
-        if shape.len() < dims {
+        if dims == 1 && shape.iter().filter(|&&dim| dim != 1).count() <= 1 {
+            shape = vec![rt.data.len()];
+        } else if shape.len() < dims {
             shape.resize(dims, 1);
         }
         if shape.len() > dims {
@@ -215,6 +217,12 @@ pub fn build_string_rhs_view(
                 return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
         }
+        let expected = shape
+            .iter()
+            .try_fold(1usize, |acc, &len| acc.checked_mul(len));
+        if expected != Some(rt.data.len()) {
+            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+        }
         let mut rstrides = vec![0usize; dims];
         let mut racc = 1usize;
         for d in 0..dims {
@@ -227,9 +235,67 @@ pub fn build_string_rhs_view(
             strides: rstrides,
         });
     }
+    if let Value::Cell(cell) = rhs {
+        let dims = selection_lengths.len();
+        let mut data = Vec::with_capacity(cell.data.len());
+        for handle in &cell.data {
+            let value = unsafe { &*handle.as_raw() };
+            match value {
+                Value::String(text) => data.push(text.clone()),
+                Value::CharArray(chars) => data.push(chars.to_string()),
+                Value::StringArray(strings) if strings.data.len() == 1 => {
+                    data.push(strings.data[0].clone())
+                }
+                other => {
+                    return Err(mex(
+                        "InvalidSliceAssignmentRhs",
+                        &format!(
+                            "rhs cell elements must be string scalars or character vectors, got {other:?}"
+                        ),
+                    ))
+                }
+            }
+        }
+        let mut shape = cell.shape.clone();
+        if dims == 1 && shape.iter().filter(|&&dim| dim != 1).count() <= 1 {
+            shape = vec![cell.data.len()];
+        } else if shape.len() < dims {
+            shape.resize(dims, 1);
+        }
+        if shape.len() > dims {
+            if shape.iter().skip(dims).any(|&s| s != 1) {
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+            }
+            shape.truncate(dims);
+        }
+        for d in 0..dims {
+            let out_len = selection_lengths[d];
+            let rhs_len = shape[d];
+            if !(rhs_len == 1 || rhs_len == out_len) {
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+            }
+        }
+        let expected = shape
+            .iter()
+            .try_fold(1usize, |acc, &len| acc.checked_mul(len));
+        if expected != Some(data.len()) {
+            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+        }
+        let mut rstrides = vec![0usize; dims];
+        let mut racc = 1usize;
+        for d in 0..dims {
+            rstrides[d] = racc;
+            racc *= shape[d];
+        }
+        return Ok(StringRhsView::Tensor {
+            data,
+            shape,
+            strides: rstrides,
+        });
+    }
     Err(mex(
         "InvalidSliceAssignmentRhs",
-        "rhs must be string or string array",
+        "rhs must be string, string array, or cellstr",
     ))
 }
 
@@ -768,7 +834,8 @@ pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
 #[cfg(test)]
 mod tests {
     use super::{build_complex_rhs_view, build_string_rhs_view, map_acceleration_error};
-    use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
+    use runmat_builtins::{CellArray, ComplexTensor, StringArray, Tensor, Value};
+    use runmat_gc::GcPtr;
 
     #[test]
     fn complex_rhs_view_shape_mismatch_reports_identifier() {
@@ -804,6 +871,29 @@ mod tests {
         );
         let err = match build_string_rhs_view(&rhs, &[2, 2]) {
             Ok(_) => panic!("shape mismatch should fail"),
+            Err(err) => err,
+        };
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn string_cell_rhs_view_rejects_shape_data_length_mismatch() {
+        let handles = ["a", "b", "c"]
+            .into_iter()
+            .map(|text| unsafe {
+                // The test leaks boxed values for the duration of the process,
+                // which is sufficient for this short-lived GcPtr fixture.
+                GcPtr::from_raw(Box::into_raw(Box::new(Value::String(text.to_string()))))
+            })
+            .collect();
+        let rhs = Value::Cell(CellArray {
+            data: handles,
+            shape: vec![2, 2],
+            rows: 2,
+            cols: 2,
+        });
+        let err = match build_string_rhs_view(&rhs, &[2, 2]) {
+            Ok(_) => panic!("cell shape/data mismatch should fail"),
             Err(err) => err,
         };
         assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));

@@ -256,6 +256,7 @@ async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
+        | Value::SparseTensor(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

@@ -95,6 +95,7 @@ pub fn declare_global(indices: Vec<usize>, vars: &mut Vec<Value>) {
                 refresh_workspace_state(vars);
             }
             vars[i] = v;
+            refresh_workspace_state(vars);
         }
     }
 }
@@ -117,6 +118,7 @@ pub fn declare_global_named(
                 refresh_workspace_state(vars);
             }
             vars[i] = v;
+            refresh_workspace_state(vars);
         }
         GLOBALS.with(|g| {
             let mut m = g.borrow_mut();
@@ -138,6 +140,7 @@ pub fn declare_persistent(func_name: &str, indices: Vec<usize>, vars: &mut Vec<V
                 refresh_workspace_state(vars);
             }
             vars[i] = v;
+            refresh_workspace_state(vars);
         }
     }
 }
@@ -168,6 +171,7 @@ pub fn declare_persistent_named(
                 refresh_workspace_state(vars);
             }
             vars[i] = v;
+            refresh_workspace_state(vars);
         }
         persistent_aliases.insert(i, name);
     }

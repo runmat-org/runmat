@@ -152,9 +152,9 @@ pub use properties::resolve_plot_handle;
 pub use state::{
     clear_figure, clone_figure, close_figure, configure_subplot, current_axes_state,
     current_figure_handle, figure_handles, import_figure, install_figure_observer,
-    new_figure_handle, reset_hold_state_for_run, reset_plot_state, reset_recent_figures,
-    select_axes_for_figure, select_figure, set_hold, take_recent_figures, FigureAxesState,
-    FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
+    new_figure_handle, record_recent_figure, reset_hold_state_for_run, reset_plot_state,
+    reset_recent_figures, select_axes_for_figure, select_figure, set_hold, take_recent_figures,
+    FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};

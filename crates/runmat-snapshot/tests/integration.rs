@@ -3,12 +3,18 @@
 //! Tests the complete snapshot creation, serialization, and loading pipeline.
 
 use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use tempfile::tempdir;
 
 use runmat_gc::gc_test_context;
+use runmat_snapshot::format::CompressionAlgorithm as HeaderCompressionAlgorithm;
 use runmat_snapshot::presets::SnapshotPreset;
-use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader, SnapshotManager};
+use runmat_snapshot::{
+    CompressionAlgorithm as ConfigCompressionAlgorithm, SnapshotBuilder, SnapshotConfig,
+    SnapshotHeader, SnapshotLoader, SnapshotManager,
+};
+use serde::{de::DeserializeOwned, Serialize};
 
 // Import runtime to ensure builtins are registered with inventory
 use runmat_runtime as _;
@@ -59,6 +65,82 @@ fn test_snapshot_creation_and_loading() {
     });
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn test_async_snapshot_loading_supports_zero_data_offset_fallback() {
+    gc_test_context(|| {
+        let temp_dir = tempdir().unwrap();
+        let snapshot_path = temp_dir.path().join("async_zero_offset.snapshot");
+
+        let config = SnapshotConfig {
+            compression_enabled: false,
+            validation_enabled: false,
+            ..SnapshotConfig::default()
+        };
+        let builder = SnapshotBuilder::new(config.clone());
+        builder.build_and_save(&snapshot_path).unwrap();
+        rewrite_snapshot_data_offset(&snapshot_path, 0);
+
+        let mut loader = SnapshotLoader::new(config);
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let (snapshot, stats) = runtime
+            .block_on(loader.load_async(&snapshot_path))
+            .expect("async load should honor zero data offset fallback");
+
+        assert!(!snapshot.builtins.functions.is_empty());
+        assert!(stats.compressed_size > 0);
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn rewrite_snapshot_data_offset(path: &Path, data_offset: u64) {
+    let bytes = fs::read(path).unwrap();
+    let old_header_size = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+    let mut header: SnapshotHeader = bincode::deserialize(&bytes[4..4 + old_header_size]).unwrap();
+    let old_data_start = if header.data_info.data_offset != 0 {
+        header.data_info.data_offset as usize
+    } else {
+        4 + old_header_size
+    };
+    let data = bytes[old_data_start..].to_vec();
+
+    header.data_info.data_offset = data_offset;
+    let header_data = bincode::serialize(&header).unwrap();
+    let header_size = header_data.len() as u32;
+    let mut rewritten = Vec::with_capacity(4 + header_data.len() + data.len());
+    rewritten.extend_from_slice(&header_size.to_le_bytes());
+    rewritten.extend_from_slice(&header_data);
+    rewritten.extend_from_slice(&data);
+    fs::write(path, rewritten).unwrap();
+}
+
+#[test]
+fn test_snapshot_bincode_roundtrip() {
+    gc_test_context(|| {
+        let config = SnapshotConfig {
+            compression_enabled: false,
+            validation_enabled: false,
+            ..SnapshotConfig::default()
+        };
+        let builder = SnapshotBuilder::new(config);
+        let snapshot = builder.build().unwrap();
+        let deserialized = assert_bincode_roundtrip("snapshot", &snapshot);
+        assert_eq!(
+            deserialized.builtins.functions.len(),
+            snapshot.builtins.functions.len()
+        );
+    });
+}
+
+fn assert_bincode_roundtrip<T>(name: &str, value: &T) -> T
+where
+    T: Serialize + DeserializeOwned,
+{
+    let serialized = bincode::serialize(value).unwrap();
+    bincode::deserialize::<T>(&serialized)
+        .unwrap_or_else(|err| panic!("{name} failed bincode roundtrip: {:?}", err))
+}
+
 #[test]
 fn test_snapshot_presets() {
     gc_test_context(|| {
@@ -91,6 +173,9 @@ fn test_snapshot_presets() {
                 preset.name()
             );
 
+            let header = SnapshotLoader::peek_header(&snapshot_path).unwrap();
+            assert_header_matches_configured_compression(preset.name(), &config, &header);
+
             // Try to load it
             let mut loader = SnapshotLoader::new(config);
             let result = loader.load(&snapshot_path);
@@ -102,6 +187,43 @@ fn test_snapshot_presets() {
             );
         }
     });
+}
+
+fn assert_header_matches_configured_compression(
+    preset_name: &str,
+    config: &SnapshotConfig,
+    header: &runmat_snapshot::SnapshotHeader,
+) {
+    match config.compression_algorithm {
+        ConfigCompressionAlgorithm::None => assert!(
+            matches!(
+                header.data_info.compression.algorithm,
+                HeaderCompressionAlgorithm::None
+            ),
+            "preset {preset_name} should not compress snapshot data"
+        ),
+        ConfigCompressionAlgorithm::Lz4 => assert!(
+            matches!(
+                header.data_info.compression.algorithm,
+                HeaderCompressionAlgorithm::Lz4 { .. } | HeaderCompressionAlgorithm::None
+            ),
+            "preset {preset_name} should use LZ4 or fall back to uncompressed"
+        ),
+        ConfigCompressionAlgorithm::Zstd => assert!(
+            matches!(
+                header.data_info.compression.algorithm,
+                HeaderCompressionAlgorithm::Zstd { .. } | HeaderCompressionAlgorithm::None
+            ),
+            "preset {preset_name} should use ZSTD or fall back to uncompressed"
+        ),
+        ConfigCompressionAlgorithm::Auto => assert!(
+            !matches!(
+                header.data_info.compression.algorithm,
+                HeaderCompressionAlgorithm::None
+            ) || header.data_info.compressed_size == header.data_info.uncompressed_size,
+            "preset {preset_name} should auto-select compression unless it is ineffective"
+        ),
+    }
 }
 
 #[test]

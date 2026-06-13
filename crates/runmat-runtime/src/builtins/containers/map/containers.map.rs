@@ -3,14 +3,15 @@
 use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    RwLock,
+    OnceLock, RwLock,
 };
 
 use once_cell::sync::Lazy;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, HandleRef, IntValue, LogicalArray, StructValue, Tensor, Value,
+    CharArray, ClassDef, HandleRef, IntValue, LogicalArray, MethodDef, PropertyDef, StructValue,
+    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -24,7 +25,7 @@ use crate::builtins::containers::type_resolvers::{
 };
 use crate::{
     build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError, OBJECT_INDEX_BRACE,
-    OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN,
+    OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN, OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
 };
 
 const CLASS_NAME: &str = "containers.Map";
@@ -428,6 +429,57 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 static MAP_REGISTRY: Lazy<RwLock<HashMap<u64, MapStore>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static CONTAINERS_MAP_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
+
+fn ensure_containers_map_class_registered() {
+    CONTAINERS_MAP_CLASS_REGISTERED.get_or_init(|| {
+        let mut properties = HashMap::new();
+        for name in ["Count", "KeyType", "ValueType"] {
+            properties.insert(
+                name.to_string(),
+                PropertyDef {
+                    name: name.to_string(),
+                    is_static: false,
+                    is_constant: false,
+                    is_dependent: true,
+                    get_access: Access::Public,
+                    set_access: Access::Private,
+                    default_value: None,
+                },
+            );
+        }
+
+        let mut methods = HashMap::new();
+        for (name, function_name) in [
+            ("keys", BUILTIN_KEYS),
+            ("values", BUILTIN_VALUES),
+            ("isKey", BUILTIN_IS_KEY),
+            ("remove", BUILTIN_REMOVE),
+            (OBJECT_SUBSREF_METHOD, BUILTIN_SUBSREF),
+            (OBJECT_SUBSASGN_METHOD, BUILTIN_SUBSASGN),
+        ] {
+            methods.insert(
+                name.to_string(),
+                MethodDef {
+                    name: name.to_string(),
+                    is_static: false,
+                    is_abstract: false,
+                    is_sealed: false,
+                    access: Access::Public,
+                    function_name: function_name.to_string(),
+                    implicit_class_argument: None,
+                },
+            );
+        }
+
+        runmat_builtins::register_class(ClassDef {
+            name: CLASS_NAME.to_string(),
+            parent: None,
+            properties,
+            methods,
+        });
+    });
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum KeyType {
@@ -1102,6 +1154,8 @@ fn build_store(args: ConstructorArgs, builtin: &'static str) -> BuiltinResult<Ma
 }
 
 fn allocate_handle(store: MapStore, builtin: &'static str) -> BuiltinResult<Value> {
+    ensure_containers_map_class_registered();
+
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     MAP_REGISTRY
         .write()
@@ -1533,6 +1587,7 @@ fn normalize_numeric_value(value: Value, builtin: &'static str) -> BuiltinResult
             Ok(Value::Tensor(tensor))
         }
         Value::Cell(_)
+        | Value::SparseTensor(_)
         | Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -1573,6 +1628,7 @@ fn normalize_logical_value(value: Value, builtin: &'static str) -> BuiltinResult
             Ok(Value::LogicalArray(logical))
         }
         Value::CharArray(_)
+        | Value::SparseTensor(_)
         | Value::String(_)
         | Value::StringArray(_)
         | Value::Struct(_)

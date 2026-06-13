@@ -272,6 +272,114 @@ fn local_function_call_resolves_to_function_id() {
 }
 
 #[test]
+fn unbound_builtin_identifier_lowers_to_zero_arg_builtin_call() {
+    let assembly = lower_semantic("x = rand;");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let entry_function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+
+    let HirStmtKind::Assign(_, expr, _) = &entry_function.body.statements[0].kind else {
+        panic!("expected assignment");
+    };
+    let HirExprKind::Call(call) = &expr.kind else {
+        panic!("expected bare builtin identifier to become a call");
+    };
+    assert!(matches!(&call.callee, HirCallableRef::Builtin(id) if id.0 == "rand"));
+    assert!(call.args.is_empty());
+    assert_eq!(call.requested_outputs, RequestedOutputCount::One);
+}
+
+#[test]
+fn local_binding_shadows_bare_builtin_identifier() {
+    let assembly = lower_semantic("rand = 7; x = rand;");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let entry_function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+
+    let HirStmtKind::Assign(_, expr, _) = &entry_function.body.statements[1].kind else {
+        panic!("expected assignment");
+    };
+    assert!(
+        matches!(expr.kind, HirExprKind::Binding(_)),
+        "local binding must keep precedence over builtin fallback"
+    );
+}
+
+#[test]
+fn bare_builtin_identifier_statement_preserves_requested_output_count() {
+    let assembly = lower_semantic("rand;");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let entry_function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+
+    let HirStmtKind::ExprStmt(expr, suppressed) = &entry_function.body.statements[0].kind else {
+        panic!("expected expression statement");
+    };
+    assert!(*suppressed);
+    let HirExprKind::Call(call) = &expr.kind else {
+        panic!("expected bare builtin identifier to become a call");
+    };
+    assert!(matches!(&call.callee, HirCallableRef::Builtin(id) if id.0 == "rand"));
+    assert!(
+        call.bare_identifier,
+        "bare builtin identifier calls should retain source syntax"
+    );
+    assert_eq!(call.requested_outputs, RequestedOutputCount::Zero);
+}
+
+#[test]
+fn bare_builtin_identifier_after_external_visibility_uses_workspace_first_call() {
+    let assembly = lower_semantic("run(\"setup.m\"); x = rand;");
+    let expr = assembly
+        .functions
+        .iter()
+        .flat_map(|function| function.body.statements.iter())
+        .find_map(|stmt| match &stmt.kind {
+            HirStmtKind::Assign(_, expr, _) => Some(expr),
+            _ => None,
+        })
+        .expect("expected assignment after run");
+    let HirExprKind::Call(call) = &expr.kind else {
+        panic!("expected bare builtin identifier to become a call");
+    };
+    assert!(matches!(&call.callee, HirCallableRef::Builtin(id) if id.0 == "rand"));
+    assert!(
+        call.bare_identifier,
+        "bare builtin identifier calls should retain source syntax"
+    );
+    assert_eq!(
+        call.workspace_first_name
+            .as_ref()
+            .map(|name| name.0.as_str()),
+        Some("rand")
+    );
+}
+
+#[test]
+fn shadowed_workspace_loading_identifier_does_not_expose_external_bindings() {
+    let ast = runmat_parser::parse("load = 7; load; x = missing_name;").unwrap();
+    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
+}
+
+#[test]
+fn user_function_named_workspace_loader_does_not_expose_external_bindings() {
+    let ast =
+        runmat_parser::parse("run(); x = missing_name; function run(); marker = 1; end").unwrap();
+    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
+}
+
+#[test]
 fn recursive_function_call_resolves_to_self_function_id() {
     let assembly = lower_semantic("function y = fact(n); y = fact(n - 1); end");
     let function_id = assembly.modules[0].top_level_functions[0];
@@ -822,6 +930,7 @@ fn lowering_emits_only_fixed_requested_output_counts() {
             HirExprKind::Member(base, _) => walk_expr(base),
             HirExprKind::FunctionHandle(_)
             | HirExprKind::AnonymousFunction(_)
+            | HirExprKind::WorkspaceFirstStaticProperty { .. }
             | HirExprKind::MetaClass(_)
             | HirExprKind::Number(_)
             | HirExprKind::String(_)

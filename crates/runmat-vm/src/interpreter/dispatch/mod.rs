@@ -27,7 +27,7 @@ pub use calls::{
     handle_create_semantic_closure, handle_load_method, handle_load_static_property,
     handle_method_or_member_index_expand_multi_call, handle_method_or_member_index_multi_call,
     handle_prepared_user_function_call, handle_register_class, handle_user_function_call,
-    BuiltinHandling, UserCallHandling,
+    handle_workspace_first_prepared_call, BuiltinHandling, UserCallHandling,
 };
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
 pub use exceptions::{redirect_exception_to_catch, ExceptionHandling};
@@ -35,6 +35,13 @@ pub use stack::{
     emit_stack_top, emit_var, load_bool, load_char_row, load_complex, load_const, load_local,
     load_string, load_var, store_local, store_var,
 };
+
+fn builtin_constant_value(name: &str) -> Option<Value> {
+    runmat_builtins::constants()
+        .into_iter()
+        .find(|constant| constant.name == name)
+        .map(|constant| constant.value.clone())
+}
 
 pub enum DispatchHandled {
     Generic(DispatchDecision),
@@ -201,6 +208,7 @@ fn for_each_gpu_handle_in_value_with_visited(
         | Value::StringArray(_)
         | Value::CharArray(_)
         | Value::Tensor(_)
+        | Value::SparseTensor(_)
         | Value::ComplexTensor(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
@@ -524,6 +532,7 @@ fn collect_spawn_task_ids_in_value_with_visited(
         | Value::StringArray(_)
         | Value::CharArray(_)
         | Value::Tensor(_)
+        | Value::SparseTensor(_)
         | Value::ComplexTensor(_)
         | Value::GpuTensor(_)
         | Value::Listener(_)
@@ -582,6 +591,7 @@ fn value_contains_spawn_task_id_with_visited(
         | Value::StringArray(_)
         | Value::CharArray(_)
         | Value::Tensor(_)
+        | Value::SparseTensor(_)
         | Value::ComplexTensor(_)
         | Value::GpuTensor(_)
         | Value::Listener(_)
@@ -855,6 +865,7 @@ pub async fn dispatch_instruction(
                         refresh_workspace_state(vars);
                     }
                     vars[*index] = global_value;
+                    refresh_workspace_state(vars);
                 }
             }
             if missing_input_slots.contains(index) {
@@ -869,6 +880,13 @@ pub async fn dispatch_instruction(
                 var_names.get(index),
             ) {
                 if slot_name == *var_name {
+                    if let Some(value) = builtin_constant_value(var_name) {
+                        debug::trace_load_var(*pc, *index, &value);
+                        stack.push(value);
+                        return Ok(Some(DispatchHandled::Generic(
+                            DispatchDecision::FallThrough,
+                        )));
+                    }
                     return Err(crate::interpreter::errors::mex(
                         "UndefinedVariable",
                         &format!("Undefined variable: {slot_name}"),
@@ -890,6 +908,7 @@ pub async fn dispatch_instruction(
                         refresh_workspace_state(vars);
                     }
                     vars[*index] = global_value;
+                    refresh_workspace_state(vars);
                 }
             }
             if missing_input_slots.contains(index) {
@@ -1587,10 +1606,15 @@ pub async fn dispatch_instruction(
                     function_registry,
                 )
                 .await?;
+            let mut captures_updated = false;
             for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
                 if *slot < vars.len() {
                     vars[*slot] = value;
+                    captures_updated = true;
                 }
+            }
+            if captures_updated {
+                refresh_workspace_state(vars);
             }
             stack.push(calls::normalize_requested_outputs(result, *out_count));
             Ok(Some(DispatchHandled::Generic(
@@ -1624,10 +1648,15 @@ pub async fn dispatch_instruction(
                     function_registry,
                 )
                 .await?;
+            let mut captures_updated = false;
             for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
                 if *slot < vars.len() {
                     vars[*slot] = value;
+                    captures_updated = true;
                 }
+            }
+            if captures_updated {
+                refresh_workspace_state(vars);
             }
             stack.push(calls::normalize_requested_outputs(result, out_count));
             Ok(Some(DispatchHandled::Generic(
@@ -1699,6 +1728,99 @@ pub async fn dispatch_instruction(
                     },
                 },
                 *arg_count,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallWorkspaceFirstMulti {
+            name,
+            identity,
+            fallback_policy,
+            bare_identifier,
+            arg_count,
+            out_count,
+        } => {
+            let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
+            match handle_workspace_first_prepared_call(
+                calls::WorkspaceFirstCallContext {
+                    stack,
+                    workspace_name: name,
+                    identity: identity.clone(),
+                    fallback_policy: *fallback_policy,
+                    bare_identifier: *bare_identifier,
+                    out_count: *out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
+                    current_function_name,
+                    imports: imports.as_slice(),
+                    function_registry,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                args,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallWorkspaceFirstMultiUsingOutputSlot {
+            name,
+            identity,
+            fallback_policy,
+            bare_identifier,
+            arg_count,
+            out_count_slot,
+        } => {
+            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
+            match handle_workspace_first_prepared_call(
+                calls::WorkspaceFirstCallContext {
+                    stack,
+                    workspace_name: name,
+                    identity: identity.clone(),
+                    fallback_policy: *fallback_policy,
+                    bare_identifier: *bare_identifier,
+                    out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
+                    current_function_name,
+                    imports: imports.as_slice(),
+                    function_registry,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                args,
                 refresh_workspace_state,
             )
             .await?
@@ -1806,6 +1928,99 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CallWorkspaceFirstExpandMultiOutput {
+            name,
+            identity,
+            fallback_policy,
+            bare_identifier,
+            specs,
+            out_count,
+        } => {
+            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            match handle_workspace_first_prepared_call(
+                calls::WorkspaceFirstCallContext {
+                    stack,
+                    workspace_name: name,
+                    identity: identity.clone(),
+                    fallback_policy: *fallback_policy,
+                    bare_identifier: *bare_identifier,
+                    out_count: *out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
+                    current_function_name,
+                    imports: imports.as_slice(),
+                    function_registry,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                args,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot {
+            name,
+            identity,
+            fallback_policy,
+            bare_identifier,
+            specs,
+            out_count_slot,
+        } => {
+            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            match handle_workspace_first_prepared_call(
+                calls::WorkspaceFirstCallContext {
+                    stack,
+                    workspace_name: name,
+                    identity: identity.clone(),
+                    fallback_policy: *fallback_policy,
+                    bare_identifier: *bare_identifier,
+                    out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
+                    current_function_name,
+                    imports: imports.as_slice(),
+                    function_registry,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                args,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::CallSemanticFunctionExpandMultiOutput(function, specs, out_count) => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
             match handle_prepared_user_function_call(
@@ -1863,10 +2078,15 @@ pub async fn dispatch_instruction(
                     function_registry,
                 )
                 .await?;
+            let mut captures_updated = false;
             for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
                 if *slot < vars.len() {
                     vars[*slot] = value;
+                    captures_updated = true;
                 }
+            }
+            if captures_updated {
+                refresh_workspace_state(vars);
             }
             stack.push(calls::normalize_requested_outputs(result, *out_count));
             Ok(Some(DispatchHandled::Generic(
@@ -1958,6 +2178,20 @@ pub async fn dispatch_instruction(
         }
         Instr::LoadStaticProperty(class_name, prop) => {
             handle_load_static_property(stack, class_name, prop)?;
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::LoadWorkspaceFirstStaticProperty {
+            name,
+            class_name,
+            property,
+        } => {
+            if let Some(value) = crate::runtime::workspace::workspace_lookup(name) {
+                stack.push(value);
+            } else {
+                handle_load_static_property(stack, class_name, property)?;
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

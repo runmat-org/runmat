@@ -1,0 +1,113 @@
+{
+  "title": "imhist",
+  "category": "image",
+  "keywords": [
+    "imhist",
+    "image histogram",
+    "grayscale image",
+    "indexed image",
+    "colormap",
+    "matlab imhist"
+  ],
+  "summary": "Compute or display grayscale and indexed-image histograms.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`imhist` gathers gpuArray inputs before binning so image-class validation, bin locations, and output shapes remain MATLAB-compatible."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::image::imhist::tests",
+    "integration": "runmat_vm::bytecode::compile::tests::compile_interprets_imhist_uint8_workflow"
+  },
+  "description": "`imhist` returns histogram counts for grayscale images and indexed images. Statement-form calls render a bar-chart histogram when plotting is available.",
+  "behaviors": [
+    "`imhist(I)` returns a 256-by-1 count vector for numeric grayscale images.",
+    "`imhist(I, n)` returns counts using `n` positive integer bins.",
+    "`[counts, binLocations] = imhist(I)` also returns the image-class bin centers.",
+    "Floating-point grayscale images must be finite normalized `single` or `double` data in `[0, 1]`.",
+    "`uint8` and `uint16` grayscale images use class ranges `[0, 255]` and `[0, 65535]` respectively.",
+    "Logical grayscale images use two bins for false and true values.",
+    "`imhist(X, map)` treats `X` as an indexed image and returns one bin per row of the Nx3 colormap.",
+    "Indexed images reject non-finite, non-integer, and out-of-range indices. Colormap values must be finite RGB values in `[0, 1]`.",
+    "Statement-form `imhist(...)` displays the histogram and returns no value. Builds without plotting support complete successfully without rendering."
+  ],
+  "examples": [
+    {
+      "description": "Count Intensities In A Byte Image",
+      "input": "I = uint8([0 1 1; 2 2 2]);\n[counts, bins] = imhist(I);\n[peak, idx] = max(counts);\n[bins(idx), peak]",
+      "output": "ans =\n     2     3"
+    },
+    {
+      "description": "Use Fewer Bins For A Normalized Image",
+      "input": "I = [0 0.25 0.5 1.0];\n[counts, bins] = imhist(I, 3);",
+      "output": "counts =\n     1\n     2\n     1"
+    },
+    {
+      "description": "Histogram An Indexed Image",
+      "input": "X = [1 2; 3 2];\nmap = [1 0 0; 0 1 0; 0 0 1];\n[counts, bins] = imhist(X, map);",
+      "output": "counts =\n     1\n     2\n     1"
+    },
+    {
+      "description": "Display A Histogram",
+      "input": "I = uint8([0 64 128; 128 192 255]);\nimhist(I);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `imhist` reject double values greater than 1?",
+      "answer": "MATLAB-style floating-point grayscale images are normalized image data. Use `uint8` or `uint16` when the values represent byte or word intensities."
+    },
+    {
+      "question": "How are indexed image offsets handled?",
+      "answer": "Double and single indexed images use one-based indices into the colormap. `uint8`, `uint16`, and logical indexed images use zero-based indices."
+    },
+    {
+      "question": "Does statement-form `imhist` always render a plot?",
+      "answer": "It renders when the plotting backend is available. Headless, no-plot, or non-main-thread contexts complete successfully without producing a value."
+    }
+  ],
+  "links": [
+    {
+      "label": "image",
+      "url": "./image"
+    },
+    {
+      "label": "imshow",
+      "url": "./imshow"
+    },
+    {
+      "label": "imread",
+      "url": "./imread"
+    },
+    {
+      "label": "histogram",
+      "url": "./histogram"
+    },
+    {
+      "label": "histcounts",
+      "url": "./histcounts"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/image/imhist.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/imhist.rs"
+  },
+  "gpu_residency": "`imhist` returns host-resident count and bin-location tensors because histogram assembly currently runs on the host.",
+  "gpu_behavior": [
+    "`imhist` gathers gpuArray inputs before validating image shape and class-specific ranges.",
+    "`imhist` terminates fusion chains because histogram counts depend on all image elements."
+  ]
+}

@@ -24,6 +24,32 @@ fn arithmetic_and_assignment() {
 }
 
 #[test]
+fn bare_random_builtin_identifiers_execute_as_zero_arg_calls() {
+    let input = "\
+        rng(123);
+        a = rand;
+        b = rand(2, 3);
+        c = randn;
+        rand = 7;
+        d = rand;
+        out = [a, numel(b), numel(c), d];
+    ";
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected output tensor");
+    assert_eq!(out.shape, vec![1, 4]);
+    assert!(out.data[0] > 0.0 && out.data[0] < 1.0);
+    assert_eq!(out.data[1], 6.0);
+    assert_eq!(out.data[2], 1.0);
+    assert_eq!(out.data[3], 7.0);
+}
+
+#[test]
 fn struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates() {
     let bytecode = compile_source("s = struct{version = 1, version = 2};").expect("compile source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(

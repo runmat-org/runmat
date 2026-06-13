@@ -224,6 +224,7 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
+        | Value::SparseTensor(_)
         | Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)

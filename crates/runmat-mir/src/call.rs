@@ -16,6 +16,10 @@ pub struct MirCall {
     pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
     pub fallback_policy: CallableFallbackPolicy,
+    #[serde(default)]
+    pub workspace_first_name: Option<runmat_hir::SymbolName>,
+    #[serde(default)]
+    pub bare_identifier: bool,
     pub async_behavior: AsyncBehaviorFact,
     pub effects: BuiltinEffects,
     pub workspace_effect: Option<BuiltinWorkspaceEffect>,

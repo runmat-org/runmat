@@ -29,6 +29,7 @@ pub fn value_kind(value: &Value) -> &'static str {
         Value::StringArray(_) => "StringArray",
         Value::CharArray(_) => "CharArray",
         Value::Tensor(_) => "Tensor",
+        Value::SparseTensor(_) => "SparseTensor",
         Value::ComplexTensor(_) => "ComplexTensor",
         Value::Cell(_) => "Cell",
         Value::Struct(_) => "Struct",
