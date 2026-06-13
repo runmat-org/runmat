@@ -823,6 +823,20 @@ pub fn set_axis_equal(enabled: bool) {
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 }
 
+pub fn set_axis_equal_and_limits(enabled: bool, x: Option<(f64, f64)>, y: Option<(f64, f64)>) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        let axes = state.active_axes;
+        state.figure.set_axes_axis_equal(axes, enabled);
+        state.figure.set_axes_limits(axes, x, y);
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
 pub fn set_axis_equal_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -1765,7 +1779,6 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
     });
 }
 
-#[allow(dead_code)]
 pub fn decode_axes_handle(value: f64) -> Result<(FigureHandle, usize), FigureError> {
     if !value.is_finite() || value <= 0.0 {
         return Err(FigureError::InvalidAxesHandle);

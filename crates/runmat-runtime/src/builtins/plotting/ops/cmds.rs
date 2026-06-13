@@ -11,9 +11,9 @@ use runmat_macros::runtime_builtin;
 
 use super::op_common::cmd_parsing::{as_lower_str, parse_on_off};
 use super::state::{
-    clear_current_axes, set_axis_equal, set_axis_limits, set_box_enabled, set_colorbar_enabled,
-    set_colormap, set_grid_enabled, set_minor_grid_enabled, set_surface_shading, set_z_limits,
-    toggle_box, toggle_colorbar, toggle_grid, toggle_minor_grid,
+    clear_current_axes, set_axis_equal, set_axis_equal_and_limits, set_axis_limits,
+    set_box_enabled, set_colorbar_enabled, set_colormap, set_grid_enabled, set_minor_grid_enabled,
+    set_surface_shading, set_z_limits, toggle_box, toggle_colorbar, toggle_grid, toggle_minor_grid,
 };
 use crate::builtins::plotting::type_resolvers::bool_type;
 use crate::{build_runtime_error, RuntimeError};
@@ -126,7 +126,7 @@ const AXIS_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Mode token: 'equal'|'auto'|'tight'|'manual'|'ij'|'xy'|'on'|'off'.",
+    description: "Mode token: 'equal'|'image'|'auto'|'tight'|'manual'|'ij'|'xy'|'on'|'off'.",
 }];
 const AXIS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
@@ -476,13 +476,16 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
             Ok(true)
         }
         "auto" => {
-            set_axis_equal(false);
-            set_axis_limits(None, None);
+            set_axis_equal_and_limits(false, None, None);
             Ok(true)
         }
         "tight" => {
             // Treat as auto; camera fit uses data bounds.
             set_axis_limits(None, None);
+            Ok(true)
+        }
+        "image" => {
+            set_axis_equal_and_limits(true, None, None);
             Ok(true)
         }
         "manual" | "ij" | "xy" | "on" | "off" => {
@@ -695,10 +698,39 @@ mod tests {
     #[test]
     fn axis_accepts_common_command_modes() {
         let _guard = setup();
-        for mode in ["equal", "auto", "tight", "manual", "ij", "xy", "on", "off"] {
+        for mode in [
+            "equal", "auto", "tight", "image", "manual", "ij", "xy", "on", "off",
+        ] {
             axis_builtin(vec![Value::String(mode.into())])
                 .unwrap_or_else(|err| panic!("axis {mode} should be accepted: {err:?}"));
         }
+    }
+
+    #[test]
+    fn axis_image_enables_equal_aspect_and_data_fitted_limits() {
+        let _guard = setup();
+        let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
+
+        axis_builtin(vec![Value::Tensor(Tensor {
+            rows: 1,
+            cols: 4,
+            shape: vec![1, 4],
+            data: vec![0.0, 10.0, -2.0, 2.0],
+            dtype: NumericDType::F64,
+        })])
+        .unwrap();
+        axis_builtin(vec![Value::String("image".into())]).unwrap();
+
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("AxisEqual".into())]).unwrap(),
+            Value::Bool(true)
+        );
+        let xlim = get_builtin(vec![ax.clone(), Value::String("XLim".into())]).unwrap();
+        let ylim = get_builtin(vec![ax, Value::String("YLim".into())]).unwrap();
+        let xlim = Tensor::try_from(&xlim).unwrap();
+        let ylim = Tensor::try_from(&ylim).unwrap();
+        assert!(xlim.data.iter().all(|value| value.is_nan()));
+        assert!(ylim.data.iter().all(|value| value.is_nan()));
     }
 
     #[test]

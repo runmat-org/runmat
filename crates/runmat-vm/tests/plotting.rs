@@ -50,6 +50,23 @@ fn grid_minor_command_form_sets_minor_grid_property() {
 }
 
 #[test]
+fn axis_image_command_form_enables_equal_aspect() {
+    unsafe {
+        std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
+    }
+    let input = "\
+        figure; \
+        imagesc([1 2; 3 4]); \
+        axis image; \
+        if get(gca, 'AxisEqual'); \
+            ok = true; \
+        else; \
+            error('axis image did not enable equal aspect'); \
+        end;";
+    execute_source(input).expect("execute axis image command-form script");
+}
+
+#[test]
 fn bare_gca_can_set_axes_font_size() {
     unsafe {
         std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");

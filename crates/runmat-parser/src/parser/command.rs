@@ -45,7 +45,9 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     CommandVerb {
         name: "axis",
         arg_kind: CommandArgKind::Keyword {
-            allowed: &["auto", "manual", "tight", "equal", "ij", "xy", "on", "off"],
+            allowed: &[
+                "auto", "manual", "tight", "equal", "image", "ij", "xy", "on", "off",
+            ],
             optional: false,
         },
     },

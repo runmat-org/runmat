@@ -139,8 +139,18 @@ fn drawnow_without_arg_is_command_form() {
 }
 
 #[test]
-fn axis_on_off_rewrite_to_string_args() {
-    for src in ["axis on", "axis off"] {
+fn axis_command_modes_rewrite_to_string_args() {
+    for src in [
+        "axis auto",
+        "axis manual",
+        "axis tight",
+        "axis equal",
+        "axis image",
+        "axis ij",
+        "axis xy",
+        "axis on",
+        "axis off",
+    ] {
         let program = parse_with_options(src, ParserOptions::new(CompatMode::Matlab)).unwrap();
         match &program.body[0] {
             Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
