@@ -270,7 +270,8 @@ async fn csvread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         options.start_row
     };
     let subset = if let Some(range) = options.range {
-        apply_range(&rows, max_cols, &range, 0.0)
+        let loaded_range = range.relative_to_loaded_rows();
+        apply_range(&rows, max_cols, &loaded_range, 0.0)
     } else {
         apply_offsets(&rows, max_cols, start_row, options.start_col, 0.0)
     };
@@ -427,15 +428,16 @@ async fn read_csv_rows(
         )
     })?;
     let mut reader = BufReader::new(file);
-    let mut buffer = String::new();
+    let mut buffer = Vec::new();
     let mut rows = Vec::new();
     let mut max_cols = 0usize;
     let mut line_index = 0usize;
+    let mut nonempty_row_index = 0usize;
     let mut skipped_rows = 0usize;
 
     loop {
         buffer.clear();
-        let bytes = reader.read_line(&mut buffer).map_err(|err| {
+        let bytes = reader.read_until(b'\n', &mut buffer).map_err(|err| {
             csvread_error_with_source(
                 &CSVREAD_ERROR_IO_READ,
                 format!("csvread: failed to read '{}': {err}", path.display()),
@@ -446,27 +448,32 @@ async fn read_csv_rows(
             break;
         }
         line_index += 1;
-        if buffer.trim().is_empty() {
+        trim_line_ending(&mut buffer);
+        if buffer.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        if buffer.ends_with('\n') {
-            buffer.pop();
-            if buffer.ends_with('\r') {
-                buffer.pop();
+        let current_row_index = nonempty_row_index;
+        nonempty_row_index += 1;
+        if let Some(range) = options.range {
+            if let Some(end_row) = range.end_row {
+                if current_row_index > end_row {
+                    break;
+                }
             }
-        } else if buffer.ends_with('\r') {
-            buffer.pop();
+            if current_row_index < range.start_row {
+                continue;
+            }
         }
         if options.range.is_none() && options.start_row > 0 && line_index <= options.start_row {
             skipped_rows += 1;
             continue;
         }
-        let parse_start_col = if options.range.is_none() {
-            options.start_col
-        } else {
-            0
+        let (parse_start_col, parse_end_col) = match options.range {
+            Some(range) => (range.start_col, range.end_col),
+            None => (options.start_col, None),
         };
-        let parsed = parse_csv_row(&buffer, line_index, parse_start_col)?;
+        let line = String::from_utf8_lossy(&buffer);
+        let parsed = parse_csv_row(&line, line_index, parse_start_col, parse_end_col)?;
         max_cols = max_cols.max(parsed.len());
         rows.push(parsed);
     }
@@ -474,7 +481,23 @@ async fn read_csv_rows(
     Ok((rows, max_cols, skipped_rows))
 }
 
-fn parse_csv_row(line: &str, line_index: usize, parse_start_col: usize) -> BuiltinResult<Vec<f64>> {
+fn trim_line_ending(buffer: &mut Vec<u8>) {
+    if buffer.ends_with(b"\n") {
+        buffer.pop();
+        if buffer.ends_with(b"\r") {
+            buffer.pop();
+        }
+    } else if buffer.ends_with(b"\r") {
+        buffer.pop();
+    }
+}
+
+fn parse_csv_row(
+    line: &str,
+    line_index: usize,
+    parse_start_col: usize,
+    parse_end_col: Option<usize>,
+) -> BuiltinResult<Vec<f64>> {
     let mut values = Vec::new();
     for (col_index, raw_field) in line.split(',').enumerate() {
         if col_index < parse_start_col {
@@ -482,6 +505,9 @@ fn parse_csv_row(line: &str, line_index: usize, parse_start_col: usize) -> Built
             // columns that will be dropped before materializing the output.
             values.push(0.0);
             continue;
+        }
+        if parse_end_col.is_some_and(|end_col| col_index > end_col) {
+            break;
         }
         let trimmed = raw_field.trim();
         if trimmed.is_empty() {
@@ -522,6 +548,25 @@ struct RangeSpec {
     start_col: usize,
     end_row: Option<usize>,
     end_col: Option<usize>,
+}
+
+impl RangeSpec {
+    fn relative_to_loaded_rows(self) -> Self {
+        if self.end_row.is_some_and(|end_row| end_row < self.start_row) {
+            return Self {
+                start_row: 1,
+                start_col: self.start_col,
+                end_row: Some(0),
+                end_col: self.end_col,
+            };
+        }
+        Self {
+            start_row: 0,
+            start_col: self.start_col,
+            end_row: self.end_row.map(|end_row| end_row - self.start_row),
+            end_col: self.end_col,
+        }
+    }
 }
 
 fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
@@ -1085,6 +1130,77 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        fs::remove_file(path).ok();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn csvread_skips_non_utf8_bytes_outside_requested_numeric_block() {
+        let path = unique_path("latin1_offsets").with_extension("csv");
+        fs::write(&path, b"label,\xFCtemp\n\xFFrow,21.5\n\xFErow,22.0\n").expect("write temp csv");
+        let args = vec![Value::Int(IntValue::I32(1)), Value::Int(IntValue::I32(1))];
+        let result =
+            csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.data, vec![21.5, 22.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        fs::remove_file(path).ok();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn csvread_numeric_range_ignores_bytes_and_text_outside_rectangle() {
+        let path = unique_path("latin1_numeric_range").with_extension("csv");
+        fs::write(
+            &path,
+            b"header,\xFCbad,tail\n\xFFlabel,21.5,\xFEtail\n\xFFlabel,22.0,\xFEtail\nafter,\xFCbad,tail\n",
+        )
+        .expect("write temp csv");
+        let range = BuiltinTensor::new(vec![1.0, 1.0, 2.0, 1.0], vec![4, 1]).expect("tensor");
+        let args = vec![
+            Value::Int(IntValue::I32(0)),
+            Value::Int(IntValue::I32(0)),
+            Value::from(range),
+        ];
+        let result =
+            csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.data, vec![21.5, 22.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        fs::remove_file(path).ok();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn csvread_a1_range_ignores_bytes_and_text_outside_rectangle() {
+        let path = unique_path("latin1_a1_range").with_extension("csv");
+        fs::write(
+            &path,
+            b"header,\xFCbad,tail\n\xFFlabel,21.5,\xFEtail\n\xFFlabel,22.0,\xFEtail\nafter,\xFCbad,tail\n",
+        )
+        .expect("write temp csv");
+        let args = vec![
+            Value::Int(IntValue::I32(0)),
+            Value::Int(IntValue::I32(0)),
+            Value::from("B2:B3"),
+        ];
+        let result =
+            csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.data, vec![21.5, 22.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
