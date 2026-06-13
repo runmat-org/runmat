@@ -409,6 +409,22 @@ fn plotting_command_gap_repros_execute() {
 }
 
 #[test]
+fn figure_name_property_pairs_execute_through_core() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut engine,
+        "f = figure('Name', 'demo', 'NumberTitle', 'off'); assert(strcmp(get(f, 'Name'), 'demo')); assert(~get(f, 'NumberTitle'));",
+    )
+    .unwrap();
+    assert!(
+        result.error.is_none(),
+        "unexpected execution error: {:?}",
+        result.error
+    );
+}
+
+#[test]
 fn warning_command_form_executes() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
 

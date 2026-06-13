@@ -70,6 +70,10 @@ pub fn pole_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::tensor()
 }
 
+pub fn rlocus_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::tensor()
+}
+
 pub fn isstable_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }

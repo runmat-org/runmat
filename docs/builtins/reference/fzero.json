@@ -26,13 +26,16 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::math::optim::fzero::tests",
-    "integration": "runmat-vm/tests/closures.rs::fzero_accepts_anonymous_function"
+    "integration": "runmat-vm/tests/closures.rs::fzero_returns_optional_function_value"
   },
-  "description": "`x = fzero(fun, x0)` searches near scalar initial point `x0` for a sign-changing bracket, then refines the root with a Brent-style method. `x = fzero(fun, [a b])` uses the supplied bracket directly, with tolerance, exit flag, and diagnostic behavior matching MATLAB semantics.",
+  "description": "`x = fzero(fun, x0)` searches near scalar initial point `x0` for a sign-changing bracket, then refines the root with a Brent-style method. `x = fzero(fun, [a b])` uses the supplied bracket directly. Optional outputs follow MATLAB's standard contract: `[x, fval]`, `[x, fval, exitflag]`, and `[x, fval, exitflag, output]`.",
   "behaviors": [
     "The function handle must return a finite real scalar.",
     "Bracket endpoints must have opposite signs unless one endpoint is already a root.",
     "Options are supplied as a struct, usually created with `optimset`. `TolX`, `MaxIter`, `MaxFunEvals`, and `Display` are accepted.",
+    "`fval` is the function value at the returned `x`; `exitflag` is 1 for convergence and 0 when the iteration/function-evaluation budget is exhausted.",
+    "The four-output `output` struct contains `iterations`, `funcCount`, `algorithm`, and `message` fields.",
+    "Requests for more than four outputs are rejected.",
     "Anonymous functions, named function handles, and function-handle strings work through RunMat's existing `feval` dispatch path."
   ],
   "examples": [
@@ -45,6 +48,11 @@
       "description": "Use an explicit bracket",
       "input": "x = fzero(@sin, [3 4])",
       "output": "x =\n    3.1416"
+    },
+    {
+      "description": "Return the root and function value",
+      "input": "f = @(x) x.^2 - 4;\n[x, fval] = fzero(f, [0 3])",
+      "output": "x =\n    2.0000\nfval =\n     0"
     },
     {
       "description": "Set a tighter tolerance",

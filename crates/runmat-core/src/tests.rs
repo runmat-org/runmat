@@ -10,9 +10,19 @@ struct CwdGuard {
     original: PathBuf,
 }
 
+struct PathStateGuard {
+    previous: String,
+}
+
 impl Drop for CwdGuard {
     fn drop(&mut self) {
         let _ = std::env::set_current_dir(&self.original);
+    }
+}
+
+impl Drop for PathStateGuard {
+    fn drop(&mut self) {
+        runmat_runtime::builtins::common::path_state::set_path_string(&self.previous);
     }
 }
 
@@ -20,6 +30,12 @@ fn push_cwd(path: &Path) -> CwdGuard {
     let original = std::env::current_dir().expect("read cwd");
     std::env::set_current_dir(path).expect("set cwd");
     CwdGuard { original }
+}
+
+fn push_path_state(path: &str) -> PathStateGuard {
+    let previous = runmat_runtime::builtins::common::path_state::current_path_string();
+    runmat_runtime::builtins::common::path_state::set_path_string(path);
+    PathStateGuard { previous }
 }
 
 fn run_deep_semantic_test(f: impl FnOnce() + Send + 'static) {
@@ -1924,6 +1940,56 @@ fn execute_request_supports_command_syntax_rewrites_through_semantic_pipeline() 
         h_is_logical_scalar,
         "hold() result should be captured as a logical scalar binding"
     );
+}
+
+#[test]
+fn execute_text_request_resolves_bare_tic_toc_as_zero_arg_builtins() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        tic;
+        pause(0.001);
+        toc;
+
+        tic();
+        elapsedParen = toc();
+
+        tic
+        elapsedBare = toc;
+
+        timerVal = tic();
+        elapsedHandle = toc(timerVal);
+        elapsedDrain = toc();
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    for name in [
+        "elapsedParen",
+        "elapsedBare",
+        "elapsedHandle",
+        "elapsedDrain",
+    ] {
+        let elapsed = outcome.workspace_delta.upserts.iter().find_map(|upsert| {
+            let matches_name = match &upsert.key {
+                abi::WorkspaceBindingKey::Interactive {
+                    name: binding_name, ..
+                } => binding_name.0 == name,
+                abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == name,
+                abi::WorkspaceBindingKey::Global { .. }
+                | abi::WorkspaceBindingKey::Persistent { .. } => false,
+            };
+            if !matches_name {
+                return None;
+            }
+            match upsert.value {
+                runmat_builtins::Value::Num(value) => Some(value),
+                _ => None,
+            }
+        });
+        let elapsed = elapsed.unwrap_or_else(|| panic!("{name} should be a numeric binding"));
+        assert!(
+            elapsed >= 0.0,
+            "{name} should be a nonnegative elapsed time, got {elapsed}"
+        );
+    }
 }
 
 #[test]
@@ -10144,6 +10210,74 @@ fn run_command_syntax_resolves_scripts_on_search_path() {
         "path_after_string",
         &runmat_builtins::Value::Num(21.0)
     ));
+}
+
+#[test]
+fn addpath_command_syntax_resolves_scripts_on_search_path() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let source_dir = temp.path().join("SourceCode");
+    std::fs::create_dir_all(&source_dir).expect("create source dir");
+    std::fs::write(
+        source_dir.join("path_worker.m"),
+        "path_command_value = 29;\n",
+    )
+    .expect("write path worker");
+    let _cwd = push_cwd(temp.path());
+    let _path = push_path_state("");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+        addpath ./SourceCode
+        run path_worker
+        path_command_after = path_command_value + 2;
+    "#,
+    )
+    .expect("addpath command syntax succeeds");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "path_command_after",
+        &runmat_builtins::Value::Num(31.0)
+    ));
+}
+
+#[test]
+fn filesystem_command_syntax_executes_path_word_builtins() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(temp.path().join("seed.txt"), "provider text").expect("write seed file");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+        mkdir ./workspace
+        cd ./workspace
+        cd ..
+        copyfile ./seed.txt ./workspace/copied.txt
+        movefile ./workspace/copied.txt ./workspace/moved.txt
+        dir ./workspace
+        ls ./workspace
+        delete ./workspace/moved.txt
+        rmdir ./workspace
+        filesystem_command_after = 42;
+    "#,
+    )
+    .expect("filesystem command syntax succeeds");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "filesystem_command_after",
+        &runmat_builtins::Value::Num(42.0)
+    ));
+    assert!(
+        !temp.path().join("workspace").exists(),
+        "rmdir command syntax should remove the workspace directory"
+    );
 }
 
 #[test]

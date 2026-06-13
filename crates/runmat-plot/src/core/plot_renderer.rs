@@ -49,6 +49,7 @@ struct AxesViewContractEntry {
 
 const PATCH_3D_ABS_EPSILON: f32 = 1e-9;
 const PATCH_3D_REL_EPSILON: f32 = 1e-6;
+const MAX_2D_GRID_LINES_PER_AXIS: usize = 4096;
 
 /// Unified plot renderer that handles both interactive and static rendering
 pub struct PlotRenderer {
@@ -73,6 +74,7 @@ pub struct PlotRenderer {
     figure_y_label: Option<String>,
     figure_z_label: Option<String>,
     figure_show_grid: bool,
+    figure_show_minor_grid: bool,
     figure_show_legend: bool,
     figure_show_box: bool,
     figure_x_limits: Option<(f64, f64)>,
@@ -278,6 +280,7 @@ impl PlotRenderer {
             figure_y_label: None,
             figure_z_label: None,
             figure_show_grid: true,
+            figure_show_minor_grid: false,
             figure_show_legend: true,
             figure_show_box: true,
             figure_x_limits: None,
@@ -722,6 +725,7 @@ impl PlotRenderer {
         self.figure_y_label = figure.y_label.clone();
         self.figure_z_label = figure.z_label.clone();
         self.figure_show_grid = figure.grid_enabled;
+        self.figure_show_minor_grid = figure.minor_grid_enabled;
         self.figure_show_legend = figure.legend_enabled;
         self.figure_show_box = figure.box_enabled;
         self.figure_x_limits = figure.x_limits;
@@ -2019,7 +2023,9 @@ impl PlotRenderer {
 
             // Procedural XY grid plane (depth-tested, no depth writes). This avoids far-plane
             // popping and keeps line density stable via shader derivatives.
-            if self.overlay_show_grid_for_axes(axes_index) {
+            let show_major_grid = self.overlay_show_grid_for_axes(axes_index);
+            let show_minor_grid = self.overlay_show_minor_grid_for_axes(axes_index);
+            if show_major_grid || show_minor_grid {
                 let theme = self.theme.build_theme();
                 let bg = theme.get_background_color();
                 let grid = theme.get_grid_color();
@@ -2037,6 +2043,12 @@ impl PlotRenderer {
                     minor_rgb = [grid.x * 0.33, grid.y * 0.33, grid.z * 0.33];
                     major_alpha = major_alpha.max(0.24);
                     minor_alpha = minor_alpha.max(0.12);
+                }
+                if !show_major_grid {
+                    major_alpha = 0.0;
+                }
+                if !show_minor_grid {
+                    minor_alpha = 0.0;
                 }
                 self.wgpu_renderer.ensure_grid_plane_pipeline();
                 self.wgpu_renderer.update_grid_uniforms_for_axes(
@@ -2215,7 +2227,9 @@ impl PlotRenderer {
         // Precompute optional grid geometry and uniforms so we can draw it under data
         // Grid is drawn only when enabled and in 2D orthographic
         let mut grid_vb_opt: Option<wgpu::Buffer> = None;
-        if is_2d && self.overlay_show_grid_for_axes(axes_index) {
+        let show_major_grid = self.overlay_show_grid_for_axes(axes_index);
+        let show_minor_grid = self.overlay_show_minor_grid_for_axes(axes_index);
+        if is_2d && (show_major_grid || show_minor_grid) {
             if let Some((l, r, b, t)) = self.view_bounds_for_axes(axes_index) {
                 // Update direct uniforms mapping for viewport
                 self.wgpu_renderer.update_direct_uniforms_for_axes(
@@ -2234,26 +2248,49 @@ impl PlotRenderer {
                 let y_step = plot_utils::calculate_tick_interval(y_range);
                 let mut grid_vertices: Vec<Vertex> = Vec::new();
                 let g = 80.0_f32 / 255.0_f32;
-                let col = Vec4::new(g, g, g, 1.0);
-                if x_step.is_finite() && x_step > 0.0 {
-                    let mut x = ((l / x_step).ceil() * x_step) as f32;
-                    let b_f = b as f32;
-                    let t_f = t as f32;
-                    while (x as f64) <= r {
-                        grid_vertices.push(Vertex::new(Vec3::new(x, b_f, 0.0), col));
-                        grid_vertices.push(Vertex::new(Vec3::new(x, t_f, 0.0), col));
-                        x += x_step as f32;
-                    }
+                let major_col = Vec4::new(g, g, g, 1.0);
+                let minor_col = Vec4::new(g, g, g, 0.42);
+                if show_minor_grid && x_step.is_finite() && x_step > 0.0 {
+                    let minor_step = (x_step / 5.0).max(f64::EPSILON);
+                    Self::push_vertical_grid_lines(
+                        &mut grid_vertices,
+                        (l, r),
+                        (b, t),
+                        minor_step,
+                        minor_col,
+                        Some((x_step, minor_step * 0.25)),
+                    );
                 }
-                if y_step.is_finite() && y_step > 0.0 {
-                    let mut y = ((b / y_step).ceil() * y_step) as f32;
-                    let l_f = l as f32;
-                    let r_f = r as f32;
-                    while (y as f64) <= t {
-                        grid_vertices.push(Vertex::new(Vec3::new(l_f, y, 0.0), col));
-                        grid_vertices.push(Vertex::new(Vec3::new(r_f, y, 0.0), col));
-                        y += y_step as f32;
-                    }
+                if show_minor_grid && y_step.is_finite() && y_step > 0.0 {
+                    let minor_step = (y_step / 5.0).max(f64::EPSILON);
+                    Self::push_horizontal_grid_lines(
+                        &mut grid_vertices,
+                        (b, t),
+                        (l, r),
+                        minor_step,
+                        minor_col,
+                        Some((y_step, minor_step * 0.25)),
+                    );
+                }
+                if show_major_grid && x_step.is_finite() && x_step > 0.0 {
+                    Self::push_vertical_grid_lines(
+                        &mut grid_vertices,
+                        (l, r),
+                        (b, t),
+                        x_step,
+                        major_col,
+                        None,
+                    );
+                }
+                if show_major_grid && y_step.is_finite() && y_step > 0.0 {
+                    Self::push_horizontal_grid_lines(
+                        &mut grid_vertices,
+                        (b, t),
+                        (l, r),
+                        y_step,
+                        major_col,
+                        None,
+                    );
                 }
                 if !grid_vertices.is_empty() {
                     grid_vb_opt = Some(self.wgpu_renderer.create_vertex_buffer(&grid_vertices));
@@ -2861,12 +2898,99 @@ impl PlotRenderer {
     pub fn overlay_show_grid(&self) -> bool {
         self.figure_show_grid
     }
+    pub fn overlay_show_minor_grid(&self) -> bool {
+        self.figure_show_minor_grid
+    }
     pub fn overlay_show_grid_for_axes(&self, axes_index: usize) -> bool {
         self.last_figure
             .as_ref()
             .and_then(|f| f.axes_metadata(axes_index))
             .map(|m| m.grid_enabled)
             .unwrap_or(self.figure_show_grid)
+    }
+    pub fn overlay_show_minor_grid_for_axes(&self, axes_index: usize) -> bool {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| m.minor_grid_enabled)
+            .unwrap_or(self.figure_show_minor_grid)
+    }
+
+    fn push_vertical_grid_lines(
+        vertices: &mut Vec<Vertex>,
+        x_bounds: (f64, f64),
+        y_bounds: (f64, f64),
+        step: f64,
+        color: Vec4,
+        skip_major: Option<(f64, f64)>,
+    ) {
+        Self::for_each_grid_position(x_bounds.0, x_bounds.1, step, skip_major, |x| {
+            let x = x as f32;
+            let y0 = y_bounds.0 as f32;
+            let y1 = y_bounds.1 as f32;
+            if x.is_finite() && y0.is_finite() && y1.is_finite() {
+                vertices.push(Vertex::new(Vec3::new(x, y0, 0.0), color));
+                vertices.push(Vertex::new(Vec3::new(x, y1, 0.0), color));
+            }
+        });
+    }
+
+    fn push_horizontal_grid_lines(
+        vertices: &mut Vec<Vertex>,
+        y_bounds: (f64, f64),
+        x_bounds: (f64, f64),
+        step: f64,
+        color: Vec4,
+        skip_major: Option<(f64, f64)>,
+    ) {
+        Self::for_each_grid_position(y_bounds.0, y_bounds.1, step, skip_major, |y| {
+            let y = y as f32;
+            let x0 = x_bounds.0 as f32;
+            let x1 = x_bounds.1 as f32;
+            if y.is_finite() && x0.is_finite() && x1.is_finite() {
+                vertices.push(Vertex::new(Vec3::new(x0, y, 0.0), color));
+                vertices.push(Vertex::new(Vec3::new(x1, y, 0.0), color));
+            }
+        });
+    }
+
+    fn for_each_grid_position(
+        min: f64,
+        max: f64,
+        step: f64,
+        skip_major: Option<(f64, f64)>,
+        mut visit: impl FnMut(f64),
+    ) {
+        if !min.is_finite() || !max.is_finite() || !step.is_finite() || step <= 0.0 || min > max {
+            return;
+        }
+        let start = (min / step).ceil() * step;
+        if !start.is_finite() {
+            return;
+        }
+
+        let mut value = start;
+        for _ in 0..MAX_2D_GRID_LINES_PER_AXIS {
+            if value > max {
+                break;
+            }
+            let is_major = skip_major
+                .map(|(major_step, tolerance)| {
+                    major_step.is_finite()
+                        && major_step > 0.0
+                        && (value - (value / major_step).round() * major_step).abs() <= tolerance
+                })
+                .unwrap_or(false);
+            if !is_major {
+                visit(value);
+            }
+
+            let next = value + step;
+            if !next.is_finite() || next <= value {
+                break;
+            }
+            value = next;
+        }
     }
     pub fn overlay_show_box(&self) -> bool {
         self.figure_show_box
@@ -2907,6 +3031,12 @@ impl PlotRenderer {
             .as_ref()
             .and_then(|f| f.axes_metadata(axes_index))
             .map(|m| &m.x_label_style)
+    }
+    pub fn overlay_axes_style_for_axes(&self, axes_index: usize) -> Option<&TextStyle> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| &m.axes_style)
     }
     pub fn overlay_y_label(&self) -> Option<&String> {
         self.figure_y_label.as_ref()
@@ -3206,6 +3336,7 @@ impl PlotRenderer {
         fig.y_label = self.figure_y_label.clone();
         fig.legend_enabled = self.figure_show_legend;
         fig.grid_enabled = self.figure_show_grid;
+        fig.minor_grid_enabled = self.figure_show_minor_grid;
         fig.box_enabled = self.figure_show_box;
         fig.x_limits = self.figure_x_limits;
         fig.y_limits = self.figure_y_limits;

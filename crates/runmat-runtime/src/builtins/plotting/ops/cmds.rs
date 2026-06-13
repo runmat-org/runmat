@@ -11,9 +11,9 @@ use runmat_macros::runtime_builtin;
 
 use super::op_common::cmd_parsing::{as_lower_str, parse_on_off};
 use super::state::{
-    clear_current_axes, set_axis_equal, set_axis_limits, set_box_enabled, set_colorbar_enabled,
-    set_colormap, set_grid_enabled, set_surface_shading, set_z_limits, toggle_box, toggle_colorbar,
-    toggle_grid,
+    clear_current_axes, set_axis_equal, set_axis_equal_and_limits, set_axis_limits,
+    set_box_enabled, set_colorbar_enabled, set_colormap, set_grid_enabled, set_minor_grid_enabled,
+    set_surface_shading, set_z_limits, toggle_box, toggle_colorbar, toggle_grid, toggle_minor_grid,
 };
 use crate::builtins::plotting::type_resolvers::bool_type;
 use crate::{build_runtime_error, RuntimeError};
@@ -31,7 +31,7 @@ const GRID_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Optional,
     default: Some("\"toggle\""),
-    description: "Grid mode token ('on'|'off').",
+    description: "Grid mode token ('on'|'off'|'minor').",
 }];
 const GRID_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
@@ -58,6 +58,12 @@ pub const GRID_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &GRID_ERRORS,
 };
+
+enum GridMode {
+    ToggleMajor,
+    Major(bool),
+    ToggleMinor,
+}
 
 const BOX_OUTPUT_ENABLED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "enabled",
@@ -120,7 +126,7 @@ const AXIS_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Mode token: 'equal'|'auto'|'tight'|'manual'|'ij'|'xy'|'on'|'off'.",
+    description: "Mode token: 'equal'|'image'|'auto'|'tight'|'manual'|'ij'|'xy'|'on'|'off'.",
 }];
 const AXIS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
@@ -304,21 +310,62 @@ fn cmd_error_with_message(
     builtin_path = "crate::builtins::plotting::cmds"
 )]
 pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
-    match parse_on_off("grid", args.first()).map_err(|err| {
-        cmd_error_with_message(
-            "grid",
-            format!("{}: {}", GRID_ERROR_INVALID_ARGUMENT.message, err.message()),
-            &GRID_ERROR_INVALID_ARGUMENT,
-        )
-    })? {
-        Some(enabled) => {
-            set_grid_enabled(enabled);
-            Ok(enabled)
-        }
-        None => {
+    match parse_grid_mode(&args)? {
+        GridMode::ToggleMajor => {
             let enabled = toggle_grid();
             Ok(enabled)
         }
+        GridMode::Major(enabled) => {
+            set_grid_enabled(enabled);
+            if !enabled {
+                set_minor_grid_enabled(false);
+            }
+            Ok(enabled)
+        }
+        GridMode::ToggleMinor => {
+            let enabled = toggle_minor_grid();
+            Ok(enabled)
+        }
+    }
+}
+
+fn parse_grid_mode(args: &[Value]) -> crate::BuiltinResult<GridMode> {
+    if args.len() > 1 {
+        return Err(cmd_error_with_message(
+            "grid",
+            format!(
+                "{}: expected at most one mode argument",
+                GRID_ERROR_INVALID_ARGUMENT.message
+            ),
+            &GRID_ERROR_INVALID_ARGUMENT,
+        ));
+    }
+
+    let Some(arg) = args.first() else {
+        return Ok(GridMode::ToggleMajor);
+    };
+    let Some(mode) = as_lower_str(arg) else {
+        return Err(cmd_error_with_message(
+            "grid",
+            format!(
+                "{}: expected string argument",
+                GRID_ERROR_INVALID_ARGUMENT.message
+            ),
+            &GRID_ERROR_INVALID_ARGUMENT,
+        ));
+    };
+    match mode.trim() {
+        "on" => Ok(GridMode::Major(true)),
+        "off" => Ok(GridMode::Major(false)),
+        "minor" => Ok(GridMode::ToggleMinor),
+        other => Err(cmd_error_with_message(
+            "grid",
+            format!(
+                "{}: expected 'on', 'off', or 'minor' (got '{other}')",
+                GRID_ERROR_INVALID_ARGUMENT.message
+            ),
+            &GRID_ERROR_INVALID_ARGUMENT,
+        )),
     }
 }
 
@@ -429,13 +476,16 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
             Ok(true)
         }
         "auto" => {
-            set_axis_equal(false);
-            set_axis_limits(None, None);
+            set_axis_equal_and_limits(false, None, None);
             Ok(true)
         }
         "tight" => {
             // Treat as auto; camera fit uses data bounds.
             set_axis_limits(None, None);
+            Ok(true)
+        }
+        "image" => {
+            set_axis_equal_and_limits(true, None, None);
             Ok(true)
         }
         "manual" | "ij" | "xy" | "on" | "off" => {
@@ -648,10 +698,96 @@ mod tests {
     #[test]
     fn axis_accepts_common_command_modes() {
         let _guard = setup();
-        for mode in ["equal", "auto", "tight", "manual", "ij", "xy", "on", "off"] {
+        for mode in [
+            "equal", "auto", "tight", "image", "manual", "ij", "xy", "on", "off",
+        ] {
             axis_builtin(vec![Value::String(mode.into())])
                 .unwrap_or_else(|err| panic!("axis {mode} should be accepted: {err:?}"));
         }
+    }
+
+    #[test]
+    fn axis_image_enables_equal_aspect_and_data_fitted_limits() {
+        let _guard = setup();
+        let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
+
+        axis_builtin(vec![Value::Tensor(Tensor {
+            rows: 1,
+            cols: 4,
+            shape: vec![1, 4],
+            data: vec![0.0, 10.0, -2.0, 2.0],
+            dtype: NumericDType::F64,
+        })])
+        .unwrap();
+        axis_builtin(vec![Value::String("image".into())]).unwrap();
+
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("AxisEqual".into())]).unwrap(),
+            Value::Bool(true)
+        );
+        let xlim = get_builtin(vec![ax.clone(), Value::String("XLim".into())]).unwrap();
+        let ylim = get_builtin(vec![ax, Value::String("YLim".into())]).unwrap();
+        let xlim = Tensor::try_from(&xlim).unwrap();
+        let ylim = Tensor::try_from(&ylim).unwrap();
+        assert!(xlim.data.iter().all(|value| value.is_nan()));
+        assert!(ylim.data.iter().all(|value| value.is_nan()));
+    }
+
+    #[test]
+    fn grid_minor_toggles_minor_grid_without_changing_major_grid() {
+        let _guard = setup();
+        let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
+
+        let enabled = grid_builtin(vec![Value::String("minor".into())]).unwrap();
+        assert!(enabled);
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("Grid".into())]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("MinorGrid".into())]).unwrap(),
+            Value::Bool(true)
+        );
+
+        let enabled = grid_builtin(vec![Value::String("minor".into())]).unwrap();
+        assert!(!enabled);
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("Grid".into())]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("MinorGrid".into())]).unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn grid_off_disables_major_and_minor_grid() {
+        let _guard = setup();
+        let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
+
+        grid_builtin(vec![Value::String("minor".into())]).unwrap();
+        let enabled = grid_builtin(vec![Value::String("off".into())]).unwrap();
+        assert!(!enabled);
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("Grid".into())]).unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            get_builtin(vec![ax.clone(), Value::String("MinorGrid".into())]).unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn grid_rejects_extra_arguments() {
+        let _guard = setup();
+        let err = grid_builtin(vec![
+            Value::String("minor".into()),
+            Value::String("on".into()),
+        ])
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:grid:InvalidArgument"));
     }
 
     #[test]

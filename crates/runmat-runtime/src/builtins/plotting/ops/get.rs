@@ -300,8 +300,18 @@ mod tests {
     #[test]
     fn get_reads_figure_properties() {
         let _guard = setup();
-        let fig =
-            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(1234.0)]).unwrap();
+        let fig = crate::builtins::plotting::figure::figure_builtin(vec![
+            Value::Num(1234.0),
+            Value::String("Name".into()),
+            Value::String("demo".into()),
+            Value::String("NumberTitle".into()),
+            Value::String("off".into()),
+            Value::String("Visible".into()),
+            Value::String("off".into()),
+            Value::String("Color".into()),
+            Value::String("k".into()),
+        ])
+        .unwrap();
         let ax = crate::builtins::plotting::subplot::subplot_builtin(
             Value::Num(1.0),
             Value::Num(2.0),
@@ -314,6 +324,10 @@ mod tests {
         };
         assert_eq!(st.fields.get("Number"), Some(&Value::Num(1234.0)));
         assert_eq!(st.fields.get("Type"), Some(&Value::String("figure".into())));
+        assert_eq!(st.fields.get("Name"), Some(&Value::String("demo".into())));
+        assert_eq!(st.fields.get("NumberTitle"), Some(&Value::Bool(false)));
+        assert_eq!(st.fields.get("Visible"), Some(&Value::Bool(false)));
+        assert_eq!(st.fields.get("Color"), Some(&Value::String("k".into())));
         assert_eq!(st.fields.get("CurrentAxes"), Some(&Value::Num(ax)));
         assert!(matches!(st.fields.get("Children"), Some(Value::Tensor(_))));
         let parent = st.fields.get("Parent").expect("parent property");
@@ -323,6 +337,8 @@ mod tests {
         assert!(v.is_nan());
         let sgtitle = get_builtin(vec![Value::Num(fig), Value::String("SGTitle".into())]).unwrap();
         assert!(matches!(sgtitle, Value::Num(_)));
+        let name = get_builtin(vec![Value::Num(fig), Value::String("Name".into())]).unwrap();
+        assert_eq!(name, Value::String("demo".into()));
     }
 
     #[test]

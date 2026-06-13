@@ -382,6 +382,9 @@ impl FigureScene {
             figure.y_label = self.metadata.y_label;
             figure.legend_enabled = self.metadata.legend_enabled;
         }
+        figure.name = self.metadata.name;
+        figure.number_title = self.metadata.number_title;
+        figure.visible = self.metadata.visible;
         figure.sg_title = self.metadata.sg_title;
         figure.sg_title_style = self
             .metadata
@@ -389,6 +392,7 @@ impl FigureScene {
             .map(TextStyle::from)
             .unwrap_or_default();
         figure.grid_enabled = self.metadata.grid_enabled;
+        figure.minor_grid_enabled = self.metadata.minor_grid_enabled;
         figure.z_limits = self.metadata.z_limits.map(|[lo, hi]| (lo, hi));
         figure.colorbar_enabled = self.metadata.colorbar_enabled;
         figure.axis_equal = self.metadata.axis_equal;
@@ -446,6 +450,12 @@ pub struct FigureLayout {
 #[serde(rename_all = "camelCase")]
 pub struct FigureMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub number_title: bool,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub visible: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sg_title: Option<String>,
@@ -456,6 +466,8 @@ pub struct FigureMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub y_label: Option<String>,
     pub grid_enabled: bool,
+    #[serde(default)]
+    pub minor_grid_enabled: bool,
     pub legend_enabled: bool,
     pub colorbar_enabled: bool,
     pub axis_equal: bool,
@@ -482,6 +494,9 @@ impl FigureMetadata {
             .collect();
 
         Self {
+            name: figure.name.clone(),
+            number_title: figure.number_title,
+            visible: figure.visible,
             title: figure.title.clone(),
             sg_title: figure.sg_title.clone(),
             sg_title_style: figure
@@ -491,6 +506,7 @@ impl FigureMetadata {
             x_label: figure.x_label.clone(),
             y_label: figure.y_label.clone(),
             grid_enabled: figure.grid_enabled,
+            minor_grid_enabled: figure.minor_grid_enabled,
             legend_enabled: figure.legend_enabled,
             colorbar_enabled: figure.colorbar_enabled,
             axis_equal: figure.axis_equal,
@@ -512,6 +528,14 @@ impl FigureMetadata {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SerializedTextStyle {
@@ -526,6 +550,12 @@ pub struct SerializedTextStyle {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interpreter: Option<String>,
     pub visible: bool,
+}
+
+impl Default for SerializedTextStyle {
+    fn default() -> Self {
+        TextStyle::default().into()
+    }
 }
 
 impl From<TextStyle> for SerializedTextStyle {
@@ -640,6 +670,8 @@ pub struct SerializedAxesMetadata {
     #[serde(default)]
     pub grid_enabled: bool,
     #[serde(default)]
+    pub minor_grid_enabled: bool,
+    #[serde(default)]
     pub box_enabled: bool,
     #[serde(default)]
     pub axis_equal: bool,
@@ -649,6 +681,8 @@ pub struct SerializedAxesMetadata {
     pub colormap: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_limits: Option<[f64; 2]>,
+    #[serde(default)]
+    pub axes_style: SerializedTextStyle,
     pub title_style: SerializedTextStyle,
     pub x_label_style: SerializedTextStyle,
     pub y_label_style: SerializedTextStyle,
@@ -683,12 +717,14 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             view_azimuth_deg: value.view_azimuth_deg,
             view_elevation_deg: value.view_elevation_deg,
             grid_enabled: value.grid_enabled,
+            minor_grid_enabled: value.minor_grid_enabled,
             box_enabled: value.box_enabled,
             axis_equal: value.axis_equal,
             legend_enabled: value.legend_enabled,
             colorbar_enabled: value.colorbar_enabled,
             colormap: format!("{:?}", value.colormap),
             color_limits: value.color_limits.map(|(a, b)| [a, b]),
+            axes_style: value.axes_style.into(),
             title_style: value.title_style.into(),
             x_label_style: value.x_label_style.into(),
             y_label_style: value.y_label_style.into(),
@@ -721,12 +757,14 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             view_elevation_deg: value.view_elevation_deg,
             view_revision: 0,
             grid_enabled: value.grid_enabled,
+            minor_grid_enabled: value.minor_grid_enabled,
             box_enabled: value.box_enabled,
             axis_equal: value.axis_equal,
             legend_enabled: value.legend_enabled,
             colorbar_enabled: value.colorbar_enabled,
             colormap: parse_colormap_name(&value.colormap),
             color_limits: value.color_limits.map(|[a, b]| (a, b)),
+            axes_style: value.axes_style.into(),
             title_style: value.title_style.into(),
             x_label_style: value.x_label_style.into(),
             y_label_style: value.y_label_style.into(),
@@ -1786,7 +1824,7 @@ mod tests {
     use crate::plots::{
         Figure, Line3Plot, LinePlot, PatchPlot, Scatter3Plot, ScatterPlot, SurfacePlot,
     };
-    use glam::Vec3;
+    use glam::{Vec3, Vec4};
 
     #[test]
     fn capture_snapshot_reflects_layout_and_metadata() {
@@ -1796,6 +1834,10 @@ mod tests {
             .with_labels("X", "Y")
             .with_grid(false)
             .with_subplot_grid(1, 2);
+        figure.set_name("Window Name");
+        figure.set_number_title(false);
+        figure.set_visible(false);
+        figure.set_background_color(Vec4::new(0.0, 0.0, 0.0, 1.0));
         let line = LinePlot::new(vec![0.0, 1.0], vec![0.0, 1.0]).unwrap();
         figure.add_line_plot_on_axes(line, 1);
 
@@ -1803,7 +1845,11 @@ mod tests {
         assert_eq!(snapshot.layout.axes_rows, 1);
         assert_eq!(snapshot.layout.axes_cols, 2);
         assert_eq!(snapshot.metadata.title.as_deref(), Some("Demo"));
+        assert_eq!(snapshot.metadata.name.as_deref(), Some("Window Name"));
+        assert!(!snapshot.metadata.number_title);
+        assert!(!snapshot.metadata.visible);
         assert_eq!(snapshot.metadata.sg_title.as_deref(), Some("Overview"));
+        assert_eq!(snapshot.metadata.background_rgba, [0.0, 0.0, 0.0, 1.0]);
         assert_eq!(snapshot.metadata.legend_entries.len(), 0);
         assert_eq!(snapshot.plots.len(), 1);
         assert_eq!(snapshot.plots[0].axes_index, 1);
@@ -1829,6 +1875,9 @@ mod tests {
     #[test]
     fn figure_scene_roundtrip_reconstructs_supported_plots() {
         let mut figure = Figure::new().with_title("Replay").with_subplot_grid(1, 2);
+        figure.set_name("Roundtrip");
+        figure.set_number_title(false);
+        figure.set_visible(false);
         let mut line = LinePlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap();
         line.label = Some("line".to_string());
         figure.add_line_plot_on_axes(line, 0);
@@ -1841,6 +1890,9 @@ mod tests {
         assert_eq!(rebuilt.axes_grid(), (1, 2));
         assert_eq!(rebuilt.plots().count(), 2);
         assert_eq!(rebuilt.title.as_deref(), Some("Replay"));
+        assert_eq!(rebuilt.name.as_deref(), Some("Roundtrip"));
+        assert!(!rebuilt.number_title);
+        assert!(!rebuilt.visible);
     }
 
     #[test]
@@ -2265,11 +2317,19 @@ mod tests {
         figure.set_axes_limits(1, Some((1.0, 2.0)), Some((3.0, 4.0)));
         figure.set_axes_z_limits(1, Some((5.0, 6.0)));
         figure.set_axes_grid_enabled(1, false);
+        figure.set_axes_minor_grid_enabled(1, true);
         figure.set_axes_box_enabled(1, false);
         figure.set_axes_axis_equal(1, true);
         figure.set_axes_colorbar_enabled(1, true);
         figure.set_axes_colormap(1, ColorMap::Hot);
         figure.set_axes_color_limits(1, Some((0.0, 10.0)));
+        figure.set_axes_style(
+            1,
+            TextStyle {
+                font_size: Some(14.0),
+                ..Default::default()
+            },
+        );
         figure.set_active_axes_index(1);
 
         let rebuilt = FigureScene::capture(&figure)
@@ -2280,11 +2340,34 @@ mod tests {
         assert_eq!(meta.y_limits, Some((3.0, 4.0)));
         assert_eq!(meta.z_limits, Some((5.0, 6.0)));
         assert!(!meta.grid_enabled);
+        assert!(meta.minor_grid_enabled);
         assert!(!meta.box_enabled);
         assert!(meta.axis_equal);
         assert!(meta.colorbar_enabled);
         assert_eq!(format!("{:?}", meta.colormap), "Hot");
         assert_eq!(meta.color_limits, Some((0.0, 10.0)));
+        assert_eq!(meta.axes_style.font_size, Some(14.0));
+    }
+
+    #[test]
+    fn axes_metadata_deserializes_without_axes_style() {
+        let json = r#"{
+            "legendEnabled": true,
+            "colormap": "Parula",
+            "titleStyle": {"visible": true},
+            "xLabelStyle": {"visible": true},
+            "yLabelStyle": {"visible": true},
+            "zLabelStyle": {"visible": true},
+            "legendStyle": {"visible": true}
+        }"#;
+        let serialized: SerializedAxesMetadata = serde_json::from_str(json).unwrap();
+        let metadata = AxesMetadata::from(serialized);
+        assert!(metadata.axes_style.color.is_none());
+        assert!(metadata.axes_style.font_size.is_none());
+        assert!(metadata.axes_style.font_weight.is_none());
+        assert!(metadata.axes_style.font_angle.is_none());
+        assert!(metadata.axes_style.interpreter.is_none());
+        assert!(metadata.axes_style.visible);
     }
 
     #[test]

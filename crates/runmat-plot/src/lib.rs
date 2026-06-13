@@ -111,6 +111,9 @@ pub fn show_plot_unified(
             // Interactive mode: Show GPU-accelerated window
             #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
             {
+                if !figure.visible {
+                    return Ok("Figure is hidden".to_string());
+                }
                 #[cfg(target_os = "macos")]
                 {
                     if !is_main_thread() {
@@ -316,6 +319,13 @@ pub fn render_interactive_with_handle(
 ) -> Result<String, String> {
     #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
     {
+        if !figure.visible {
+            if handle == 0 {
+                return Ok("Figure is hidden".to_string());
+            }
+            gui::lifecycle::request_close(handle);
+            return Ok(format!("Figure {handle} is hidden"));
+        }
         if std::env::var_os("RUNMAT_DISABLE_INTERACTIVE_PLOTS").is_some() {
             return Err(
                 "Plotting is unavailable in this environment (interactive rendering disabled)."

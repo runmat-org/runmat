@@ -18,19 +18,27 @@
   "fusion": {
     "elementwise": false,
     "reduction": false,
-    "max_inputs": 1,
+    "max_inputs": null,
     "constants": "inline"
   },
   "requires_feature": null,
   "tested": {
     "integration": "runmat-plot/tests/renderer_tests.rs"
   },
-  "description": "`figure` creates a new plotting figure or selects an existing one as current. With no arguments (or `'next'`) it allocates a fresh handle; passing a positive numeric handle selects that figure, creating it if needed. Handle selection and creation behavior follow MATLAB semantics.",
+  "description": "`figure` creates a new plotting figure or selects an existing one as current. With no arguments (or `'next'`) it allocates a fresh handle; passing a positive numeric handle selects that figure, creating it if needed. `figure` also accepts figure property/value pairs such as `'Name'`, `'NumberTitle'`, `'Visible'`, and `'Color'`. Handle selection, creation, and property assignment behavior follow MATLAB semantics.",
   "behaviors": [
     "`figure()` creates a new figure and returns its numeric handle.",
     "`figure(n)` selects figure `n`. If that handle does not exist yet, RunMat creates it.",
     "`figure('next')` creates a new figure instead of selecting an existing one.",
+    "`figure('Property', value, ...)` creates a fresh figure and applies the requested figure properties.",
+    "`figure(n, 'Property', value, ...)` selects or creates figure `n` and applies the requested figure properties.",
     "The selected figure becomes the target for subsequent plotting commands such as `plot`, `subplot`, `gca`, `clf`, and `hold`."
+  ],
+  "options": [
+    "`'Name'` sets the figure window name and can be inspected later with `get(f, 'Name')`.",
+    "`'NumberTitle'` accepts logical values or MATLAB-style `'on'`/`'off'` strings.",
+    "`'Visible'` accepts logical values or MATLAB-style `'on'`/`'off'` strings. Hidden figures keep their graphics state but do not open or update interactive windows until made visible again.",
+    "`'Color'` and `'BackgroundColor'` accept exact MATLAB color letters, full color names such as `'black'`, or RGB triples, and update the figure background color."
   ],
   "examples": [
     {
@@ -47,6 +55,11 @@
       "description": "Select a specific figure handle",
       "input": "figure(3);\nplot(1:5, [1 4 2 5 3]);",
       "output": "% plotting now targets figure 3"
+    },
+    {
+      "description": "Create a named figure with MATLAB-style property pairs",
+      "input": "f = figure('Name', 'demo', 'NumberTitle', 'off', 'Visible', 'off');\nplot(1:5, [1 4 2 5 3]);",
+      "output": "% f is a figure handle whose Name, NumberTitle, and Visible properties are set"
     }
   ],
   "faqs": [
@@ -57,6 +70,10 @@
     {
       "question": "What does `figure('next')` do?",
       "answer": "It forces creation of a new figure rather than reusing an existing handle."
+    },
+    {
+      "question": "Can `figure` set window properties at creation time?",
+      "answer": "Yes. Pass alternating property/value pairs, either directly or after a numeric handle: `figure('Name', 'demo')` or `figure(3, 'Name', 'demo', 'NumberTitle', 'off')`."
     },
     {
       "question": "Does `figure` draw anything by itself?",

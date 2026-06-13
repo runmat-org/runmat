@@ -501,6 +501,19 @@ pub fn set_grid_enabled(enabled: bool) {
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 }
 
+pub fn set_minor_grid_enabled(enabled: bool) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        let axes = state.active_axes;
+        state.figure.set_axes_minor_grid_enabled(axes, enabled);
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
 pub fn set_grid_enabled_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -508,6 +521,20 @@ pub fn set_grid_enabled_for_axes(
 ) -> Result<(), FigureError> {
     let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         state.figure.set_axes_grid_enabled(axes_index, enabled);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_minor_grid_enabled_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    enabled: bool,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state
+            .figure
+            .set_axes_minor_grid_enabled(axes_index, enabled);
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
@@ -525,6 +552,25 @@ pub fn toggle_grid() -> bool {
             .map(|m| m.grid_enabled)
             .unwrap_or(true);
         state.figure.set_axes_grid_enabled(axes, next);
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone(), next)
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    enabled
+}
+
+pub fn toggle_minor_grid() -> bool {
+    let (handle, figure_clone, enabled) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        let axes = state.active_axes;
+        let next = !state
+            .figure
+            .axes_metadata(axes)
+            .map(|m| m.minor_grid_enabled)
+            .unwrap_or(false);
+        state.figure.set_axes_minor_grid_enabled(axes, next);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone(), next)
     };
@@ -552,6 +598,18 @@ pub fn set_box_enabled_for_axes(
 ) -> Result<(), FigureError> {
     let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         state.figure.set_axes_box_enabled(axes_index, enabled);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_axes_style_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    style: TextStyle,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_style(axes_index, style);
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
@@ -602,6 +660,43 @@ pub fn set_sg_title_properties_for_figure(
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(object_handle)
+}
+
+pub fn set_figure_name(handle: FigureHandle, name: String) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        state.figure.set_name(name);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_figure_number_title(handle: FigureHandle, enabled: bool) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        state.figure.set_number_title(enabled);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_figure_visible(
+    handle: FigureHandle,
+    visible: bool,
+) -> Result<(bool, Figure), FigureError> {
+    let ((was_visible, now_visible), figure_clone) = with_figure_mut(handle, |state| {
+        let was_visible = state.figure.visible;
+        state.figure.set_visible(visible);
+        (was_visible, state.figure.visible)
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok((!was_visible && now_visible, figure_clone))
+}
+
+pub fn set_figure_background_color(handle: FigureHandle, color: Vec4) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_figure_mut(handle, |state| {
+        state.figure.set_background_color(color);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
 }
 
 pub fn set_text_properties_for_axes(
@@ -759,6 +854,20 @@ pub fn set_axis_equal(enabled: bool) {
         let state = get_state_mut(&mut reg, handle);
         let axes = state.active_axes;
         state.figure.set_axes_axis_equal(axes, enabled);
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_axis_equal_and_limits(enabled: bool, x: Option<(f64, f64)>, y: Option<(f64, f64)>) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        let axes = state.active_axes;
+        state.figure.set_axes_axis_equal(axes, enabled);
+        state.figure.set_axes_limits(axes, x, y);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())
     };
@@ -1707,7 +1816,6 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
     });
 }
 
-#[allow(dead_code)]
 pub fn decode_axes_handle(value: f64) -> Result<(FigureHandle, usize), FigureError> {
     if !value.is_finite() || value <= 0.0 {
         return Err(FigureError::InvalidAxesHandle);
@@ -2246,32 +2354,13 @@ where
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 
-    if rendering_disabled {
-        if host_managed_rendering {
-            return Ok(format!("Figure {} updated", handle.as_u32()));
-        }
-        return Err(plotting_error(builtin, ERR_PLOTTING_UNAVAILABLE));
-    }
-
-    if host_managed_rendering {
-        return Ok(format!("Figure {} updated", handle.as_u32()));
-    }
-
-    // On Web/WASM we deliberately decouple "mutate figure state" from "present pixels".
-    // The host coalesces figure events and presents on a frame cadence, and `drawnow()` /
-    // `pause()` provide explicit "flush" boundaries for scripts.
-    #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
-    {
-        let _ = figure_clone;
-        Ok(format!("Figure {} updated", handle.as_u32()))
-    }
-
-    #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
-    {
-        let rendered = render_figure(handle, figure_clone)
-            .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
-        Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
-    }
+    present_figure_update_with_options(
+        builtin,
+        handle,
+        figure_clone,
+        rendering_disabled,
+        host_managed_rendering,
+    )
 }
 
 pub fn append_active_plot<F>(
@@ -2317,28 +2406,66 @@ where
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 
+    present_figure_update_with_options(
+        builtin,
+        handle,
+        figure_clone,
+        rendering_disabled,
+        host_managed_rendering,
+    )
+}
+
+pub fn present_figure_update(
+    builtin: &'static str,
+    handle: FigureHandle,
+    figure_clone: Figure,
+) -> BuiltinResult<String> {
+    present_figure_update_with_options(
+        builtin,
+        handle,
+        figure_clone,
+        interactive_rendering_disabled(),
+        host_managed_rendering_enabled(),
+    )
+}
+
+fn present_figure_update_with_options(
+    builtin: &'static str,
+    handle: FigureHandle,
+    figure_clone: Figure,
+    rendering_disabled: bool,
+    host_managed_rendering: bool,
+) -> BuiltinResult<String> {
+    let updated = || format!("Figure {} updated", handle.as_u32());
+    if !figure_clone.visible {
+        return Ok(updated());
+    }
+
     if rendering_disabled {
         if host_managed_rendering {
-            return Ok(format!("Figure {} updated", handle.as_u32()));
+            return Ok(updated());
         }
         return Err(plotting_error(builtin, ERR_PLOTTING_UNAVAILABLE));
     }
 
     if host_managed_rendering {
-        return Ok(format!("Figure {} updated", handle.as_u32()));
+        return Ok(updated());
     }
 
+    // On Web/WASM we deliberately decouple "mutate figure state" from "present pixels".
+    // The host coalesces figure events and presents on a frame cadence, and `drawnow()` /
+    // `pause()` provide explicit "flush" boundaries for scripts.
     #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
     {
         let _ = figure_clone;
-        Ok(format!("Figure {} updated", handle.as_u32()))
+        Ok(updated())
     }
 
     #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
     {
         let rendered = render_figure(handle, figure_clone)
             .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
-        Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
+        Ok(format!("{}: {rendered}", updated()))
     }
 }
 
@@ -2429,5 +2556,20 @@ mod tests {
             figure_handles().is_empty(),
             "closing the last figure should not recreate a default visible figure"
         );
+    }
+
+    #[test]
+    fn hidden_figure_update_does_not_require_interactive_renderer() {
+        let _guard = lock_plot_test_registry();
+        ensure_plot_test_env();
+        reset_for_tests();
+
+        let handle = new_figure_handle();
+        let mut figure = clone_figure(handle).expect("figure exists");
+        figure.set_visible(false);
+
+        let result = present_figure_update_with_options("plot", handle, figure, true, false)
+            .expect("hidden figure should not try to present");
+        assert_eq!(result, format!("Figure {} updated", handle.as_u32()));
     }
 }

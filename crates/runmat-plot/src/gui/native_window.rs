@@ -76,6 +76,16 @@ impl NativeWindowManager {
         figure: Figure,
         signal: Option<CloseSignal>,
     ) -> Result<NativeWindowResult, String> {
+        let title = figure.window_title(None);
+        self.show_plot_native_with_signal_and_title(figure, signal, Some(title))
+    }
+
+    pub fn show_plot_native_with_signal_and_title(
+        &self,
+        figure: Figure,
+        signal: Option<CloseSignal>,
+        window_title: Option<String>,
+    ) -> Result<NativeWindowResult, String> {
         if !self.is_initialized {
             return Err("Native window manager not initialized".to_string());
         }
@@ -83,13 +93,13 @@ impl NativeWindowManager {
         // On macOS, run directly on main thread
         #[cfg(target_os = "macos")]
         {
-            self.show_plot_main_thread(figure, signal)
+            self.show_plot_main_thread(figure, signal, window_title)
         }
 
         // On other platforms, can use thread-based approach
         #[cfg(not(target_os = "macos"))]
         {
-            self.show_plot_threaded(figure, signal)
+            self.show_plot_threaded(figure, signal, window_title)
         }
     }
 
@@ -99,11 +109,15 @@ impl NativeWindowManager {
         &self,
         figure: Figure,
         signal: Option<CloseSignal>,
+        window_title: Option<String>,
     ) -> Result<NativeWindowResult, String> {
         use pollster;
 
         // Create and run the plot window directly using our WGPU rendering engine
-        let config = crate::gui::window::WindowConfig::default();
+        let mut config = crate::gui::window::WindowConfig::default();
+        if let Some(title) = window_title {
+            config.title = title;
+        }
         // We don't need a tokio runtime for the direct approach on macOS
         // pollster handles the async execution for us
 
@@ -134,10 +148,11 @@ impl NativeWindowManager {
         &self,
         figure: Figure,
         signal: Option<CloseSignal>,
+        window_title: Option<String>,
     ) -> Result<NativeWindowResult, String> {
         // For non-macOS platforms, we can use the existing thread-based approach
         // This would use the thread_manager system
-        match crate::gui::show_plot_global_with_signal(figure, signal) {
+        match crate::gui::show_plot_global_with_signal_and_title(figure, signal, window_title) {
             Ok(result) => match result {
                 crate::gui::GuiOperationResult::Success(msg) => {
                     Ok(NativeWindowResult::Success(msg))
@@ -186,6 +201,15 @@ pub fn show_plot_native_window_with_signal(
     figure: Figure,
     signal: Option<CloseSignal>,
 ) -> Result<String, String> {
+    let title = figure.window_title(None);
+    show_plot_native_window_with_signal_and_title(figure, signal, Some(title))
+}
+
+pub fn show_plot_native_window_with_signal_and_title(
+    figure: Figure,
+    signal: Option<CloseSignal>,
+    window_title: Option<String>,
+) -> Result<String, String> {
     let manager_mutex = NATIVE_WINDOW_MANAGER
         .get()
         .ok_or_else(|| "Native window system not initialized".to_string())?;
@@ -194,7 +218,7 @@ pub fn show_plot_native_window_with_signal(
         .lock()
         .map_err(|_| "Failed to acquire manager lock".to_string())?;
 
-    match manager.show_plot_native_with_signal(figure, signal) {
+    match manager.show_plot_native_with_signal_and_title(figure, signal, window_title) {
         Ok(NativeWindowResult::Success(msg)) => Ok(msg),
         Ok(NativeWindowResult::WindowClosed) => Ok("Plot window closed by user".to_string()),
         Ok(NativeWindowResult::Error(msg)) => Err(msg),

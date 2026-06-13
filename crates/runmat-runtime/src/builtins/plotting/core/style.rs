@@ -746,7 +746,7 @@ pub(crate) fn parse_color_value(
     value: &Value,
 ) -> BuiltinResult<Vec4> {
     if let Some(name) = value_as_string(value) {
-        if let Some(color) = name.trim().chars().next().and_then(color_from_token) {
+        if let Some(color) = color_from_name_or_token(name.trim()) {
             return Ok(color);
         }
         return Err(ctx_err(
@@ -764,6 +764,23 @@ pub(crate) fn parse_color_value(
         tensor.data[2] as f32,
         1.0,
     ))
+}
+
+fn color_from_name_or_token(name: &str) -> Option<Vec4> {
+    if name.chars().count() == 1 {
+        return name.chars().next().and_then(color_from_token);
+    }
+    match name.to_ascii_lowercase().as_str() {
+        "red" => Some(Vec4::new(1.0, 0.0, 0.0, 1.0)),
+        "green" => Some(Vec4::new(0.0, 1.0, 0.0, 1.0)),
+        "blue" => Some(Vec4::new(0.0, 0.0, 1.0, 1.0)),
+        "cyan" => Some(Vec4::new(0.0, 1.0, 1.0, 1.0)),
+        "magenta" => Some(Vec4::new(1.0, 0.0, 1.0, 1.0)),
+        "yellow" => Some(Vec4::new(1.0, 1.0, 0.0, 1.0)),
+        "black" => Some(Vec4::new(0.0, 0.0, 0.0, 1.0)),
+        "white" => Some(Vec4::new(1.0, 1.0, 1.0, 1.0)),
+        _ => None,
+    }
 }
 
 pub(crate) fn color_from_token(token: char) -> Option<Vec4> {

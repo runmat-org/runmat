@@ -604,7 +604,8 @@ impl<'window> PlotWindow<'window> {
             // Use PlotOverlay for unified UI rendering - no more duplicate sidebar code!
             let overlay_config = OverlayConfig {
                 // Grid drawn under data in WGPU; overlay handles axes/labels/titles only
-                show_grid: self.plot_renderer.overlay_show_grid(),
+                show_grid: self.plot_renderer.overlay_show_grid()
+                    || self.plot_renderer.overlay_show_minor_grid(),
                 show_axes: true,
                 show_title: true,
                 title: self

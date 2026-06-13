@@ -288,6 +288,8 @@ mod tests {
             Value::Bool(true),
             Value::String("Colormap".into()),
             Value::String("hot".into()),
+            Value::String("FontSize".into()),
+            Value::Num(14.0),
         ])
         .unwrap();
 
@@ -296,6 +298,11 @@ mod tests {
         assert_eq!(meta.y_limits, Some((2.0, 8.0)));
         assert!(meta.colorbar_enabled);
         assert_eq!(format!("{:?}", meta.colormap), "Hot");
+        assert_eq!(meta.axes_style.font_size, Some(14.0));
+        assert_eq!(
+            get_builtin(vec![Value::Num(ax), Value::String("FontSize".into())]).unwrap(),
+            Value::Num(14.0)
+        );
     }
 
     #[test]
@@ -337,6 +344,36 @@ mod tests {
     }
 
     #[test]
+    fn set_updates_figure_window_properties() {
+        let _guard = setup();
+        let fig =
+            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(8888.0)]).unwrap();
+        set_builtin(vec![
+            Value::Num(fig),
+            Value::String("Name".into()),
+            Value::String("demo".into()),
+            Value::String("NumberTitle".into()),
+            Value::String("off".into()),
+            Value::String("Visible".into()),
+            Value::String("off".into()),
+            Value::String("Color".into()),
+            Value::String("k".into()),
+        ])
+        .unwrap();
+
+        let figure = clone_figure(crate::builtins::plotting::state::FigureHandle::from(8888))
+            .expect("figure should exist");
+        assert_eq!(figure.name.as_deref(), Some("demo"));
+        assert!(!figure.number_title);
+        assert!(!figure.visible);
+        assert_eq!(figure.background_color, glam::Vec4::new(0.0, 0.0, 0.0, 1.0));
+        assert_eq!(
+            get_builtin(vec![Value::Num(fig), Value::String("Name".into())]).unwrap(),
+            Value::String("demo".into())
+        );
+    }
+
+    #[test]
     fn set_updates_stem_properties() {
         let _guard = setup();
         let handle = crate::builtins::plotting::stem::stem_builtin(vec![Value::Tensor(
@@ -375,5 +412,18 @@ mod tests {
         ])
         .unwrap_err();
         assert!(err.message.contains("unsupported property"));
+
+        let ax = crate::builtins::plotting::gca::gca_builtin(Vec::new()).unwrap();
+        for invalid in [0.0, -1.0, f64::NAN, 1.0e6] {
+            let err = set_builtin(vec![
+                ax.clone(),
+                Value::String("FontSize".into()),
+                Value::Num(invalid),
+            ])
+            .unwrap_err();
+            assert!(err
+                .message
+                .contains("FontSize must be a positive finite value"));
+        }
     }
 }

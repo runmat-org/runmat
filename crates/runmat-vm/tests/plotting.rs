@@ -32,6 +32,56 @@ fn figure_dot_property_access_routes_to_graphics_get() {
 }
 
 #[test]
+fn grid_minor_command_form_sets_minor_grid_property() {
+    unsafe {
+        std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
+    }
+    let input = "\
+        figure; \
+        plot(1:3); \
+        grid minor; \
+        ax = gca(); \
+        if get(ax, 'MinorGrid'); \
+            ok = true; \
+        else; \
+            error('minor grid not enabled'); \
+        end;";
+    execute_source(input).expect("execute grid minor command-form script");
+}
+
+#[test]
+fn axis_image_command_form_enables_equal_aspect() {
+    unsafe {
+        std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
+    }
+    let input = "\
+        figure; \
+        imagesc([1 2; 3 4]); \
+        axis image; \
+        if get(gca, 'AxisEqual'); \
+            ok = true; \
+        else; \
+            error('axis image did not enable equal aspect'); \
+        end;";
+    execute_source(input).expect("execute axis image command-form script");
+}
+
+#[test]
+fn bare_gca_can_set_axes_font_size() {
+    unsafe {
+        std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
+    }
+    let input = "\
+        figure; \
+        plot(1:3, [1 2 3]); \
+        set(gca, 'FontSize', 10); \
+        if get(gca, 'FontSize') ~= 10; \
+            error('axes font size did not update'); \
+        end;";
+    execute_source(input).expect("execute bare gca axes font-size script");
+}
+
+#[test]
 fn invalid_axes_shaped_handle_member_access_reports_non_object() {
     unsafe {
         std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
