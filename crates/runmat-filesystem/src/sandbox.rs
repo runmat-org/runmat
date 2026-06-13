@@ -112,6 +112,10 @@ impl SandboxFsProvider {
 #[cfg(not(target_arch = "wasm32"))]
 #[async_trait(?Send)]
 impl FsProvider for SandboxFsProvider {
+    fn current_dir_override(&self) -> Option<PathBuf> {
+        Some(PathBuf::from("/"))
+    }
+
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn crate::FileHandle>> {
         let target = self.resolve(path);
         if let Some(parent) = target.parent() {

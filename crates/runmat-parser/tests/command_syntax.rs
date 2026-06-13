@@ -1,4 +1,5 @@
-use runmat_parser::{parse_with_options, BinOp, CompatMode, Expr, ParserOptions, Stmt};
+use runmat_lexer::tokenize_detailed;
+use runmat_parser::{parse_with_options, BinOp, CompatMode, Expr, LValue, ParserOptions, Stmt};
 
 mod parse;
 use parse::parse;
@@ -390,6 +391,197 @@ fn print_command_form_stringifies_dash_options_and_dotted_filename() {
             assert!(matches!(args[2], Expr::String(ref s, _) if s == "\"command_style_plot.png\""));
         }
         other => panic!("expected print command form, got {other:?}"),
+    }
+}
+
+#[test]
+fn addpath_command_form_stringifies_path_words_and_options() {
+    let program = parse_with_options(
+        "addpath ./SourceCode:../lib -end -frozen",
+        ParserOptions::new(CompatMode::Matlab),
+    )
+    .unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "addpath");
+            assert_eq!(args.len(), 3);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"./SourceCode:../lib\""));
+            assert!(matches!(args[1], Expr::String(ref s, _) if s == "\"-end\""));
+            assert!(matches!(args[2], Expr::String(ref s, _) if s == "\"-frozen\""));
+        }
+        other => panic!("expected addpath command form, got {other:?}"),
+    }
+}
+
+#[test]
+fn filesystem_path_command_forms_stringify_path_words() {
+    let cases: &[(&str, &str, &[&str])] = &[
+        ("cd ..", "cd", &[".."]),
+        ("cd ./SourceCode", "cd", &["./SourceCode"]),
+        (
+            "rmpath ./SourceCode:../lib",
+            "rmpath",
+            &["./SourceCode:../lib"],
+        ),
+        ("dir *.m", "dir", &["*.m"]),
+        ("ls +pkg/@Thing/*.m", "ls", &["+pkg/@Thing/*.m"]),
+        ("mkdir ./out/cache", "mkdir", &["./out/cache"]),
+        ("rmdir ./out s", "rmdir", &["./out", "s"]),
+        (
+            "copyfile ./src/file.m ../dst/file.m f",
+            "copyfile",
+            &["./src/file.m", "../dst/file.m", "f"],
+        ),
+        (
+            "movefile ./src/file.m ../dst/file.m",
+            "movefile",
+            &["./src/file.m", "../dst/file.m"],
+        ),
+        ("delete ./tmp/*.mat", "delete", &["./tmp/*.mat"]),
+        (
+            "run ./SourceCode/path_worker.m",
+            "run",
+            &["./SourceCode/path_worker.m"],
+        ),
+        (
+            "save ./results/out.mat x -v7.3",
+            "save",
+            &["./results/out.mat", "x", "-v7.3"],
+        ),
+        (
+            "load ./results/out.mat x",
+            "load",
+            &["./results/out.mat", "x"],
+        ),
+        (
+            "which -all ./SourceCode/path_worker.m",
+            "which",
+            &["-all", "./SourceCode/path_worker.m"],
+        ),
+        (
+            "whos -file ./results/out.mat",
+            "whos",
+            &["-file", "./results/out.mat"],
+        ),
+        (
+            "print -dpng ./plots/figure-1.png",
+            "print",
+            &["-dpng", "./plots/figure-1.png"],
+        ),
+    ];
+
+    for (source, expected_name, expected_args) in cases {
+        assert_command_string_args(source, expected_name, expected_args);
+    }
+}
+
+#[test]
+fn zero_arg_filesystem_command_forms_are_allowed() {
+    for source in [
+        "cd",
+        "dir",
+        "genpath",
+        "getenv",
+        "ls",
+        "path",
+        "print",
+        "pwd",
+        "save",
+        "savepath",
+        "tempdir",
+        "tempname",
+        "uigetfile",
+        "who",
+        "whos",
+    ] {
+        let program = parse_with_options(source, ParserOptions::new(CompatMode::Matlab)).unwrap();
+        match &program.body[0] {
+            Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+                assert_eq!(name, source);
+                assert!(args.is_empty(), "{source} should not have parsed arguments");
+            }
+            other => panic!("expected {source} command form, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn elementwise_rdivide_expression_is_not_path_command_form() {
+    let program = parse_with_options("x ./ y", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::Binary(left, BinOp::ElemDiv, right, _), false, _) => {
+            assert!(matches!(&**left, Expr::Ident(name, _) if name == "x"));
+            assert!(matches!(&**right, Expr::Ident(name, _) if name == "y"));
+        }
+        other => panic!("expected elementwise rdivide expression, got {other:?}"),
+    }
+}
+
+#[test]
+fn path_command_names_do_not_steal_operator_expressions() {
+    let cases = [
+        ("path + 1", "path", BinOp::Add, "1"),
+        ("path.*x", "path", BinOp::ElemMul, "x"),
+        ("dir - x", "dir", BinOp::Sub, "x"),
+    ];
+
+    for (source, expected_left, expected_op, expected_right) in cases {
+        let program = parse_with_options(source, ParserOptions::new(CompatMode::Matlab))
+            .unwrap_or_else(|err| {
+                panic!(
+                    "{source}: parse failed: {err:?}; tokens: {:?}",
+                    tokenize_detailed(source)
+                )
+            });
+        match &program.body[0] {
+            Stmt::ExprStmt(Expr::Binary(left, op, right, _), false, _) => {
+                assert!(matches!(&**left, Expr::Ident(name, _) if name == expected_left));
+                assert_eq!(*op, expected_op);
+                match &**right {
+                    Expr::Ident(name, _) => assert_eq!(name, expected_right),
+                    Expr::Number(number, _) => assert_eq!(number, expected_right),
+                    other => panic!("{source}: unexpected right operand {other:?}"),
+                }
+            }
+            other => panic!("{source}: expected binary expression, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn known_path_command_name_member_assignment_is_not_command_form() {
+    let program =
+        parse_with_options("path.value = 1", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::AssignLValue(LValue::Member(base, field), value, false, _) => {
+            assert!(matches!(&**base, Expr::Ident(name, _) if name == "path"));
+            assert_eq!(field, "value");
+            assert!(matches!(value, Expr::Number(n, _) if n == "1"));
+        }
+        other => panic!("expected member assignment, got {other:?}"),
+    }
+}
+
+fn assert_command_string_args(source: &str, expected_name: &str, expected_args: &[&str]) {
+    let program = parse_with_options(source, ParserOptions::new(CompatMode::Matlab))
+        .unwrap_or_else(|err| {
+            panic!(
+                "{source}: parse failed: {err:?}; tokens: {:?}",
+                tokenize_detailed(source)
+            )
+        });
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, expected_name);
+            assert_eq!(args.len(), expected_args.len());
+            for (arg, expected) in args.iter().zip(expected_args) {
+                assert!(
+                    matches!(arg, Expr::String(actual, _) if actual.trim_matches('"') == *expected),
+                    "{source}: expected string argument {expected:?}, got {arg:?}"
+                );
+            }
+        }
+        other => panic!("expected {source} command form, got {other:?}"),
     }
 }
 
