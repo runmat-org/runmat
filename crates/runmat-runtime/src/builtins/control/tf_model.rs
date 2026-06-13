@@ -1040,6 +1040,7 @@ fn invalid_argument_identifier(builtin: &str) -> &'static str {
         "stepinfo" => "RunMat:stepinfo:InvalidArgument",
         "dcgain" => "RunMat:dcgain:InvalidArgument",
         "pole" => "RunMat:pole:InvalidArgument",
+        "rlocus" => "RunMat:rlocus:InvalidArgument",
         "isstable" => "RunMat:isstable:InvalidArgument",
         _ => "RunMat:tf:InvalidArgument",
     }
@@ -1051,6 +1052,7 @@ fn invalid_coefficients_identifier(builtin: &str) -> &'static str {
         "stepinfo" => "RunMat:stepinfo:InvalidData",
         "dcgain" => "RunMat:dcgain:InvalidModel",
         "pole" => "RunMat:pole:InvalidModel",
+        "rlocus" => "RunMat:rlocus:InvalidModel",
         "isstable" => "RunMat:isstable:InvalidModel",
         _ => "RunMat:tf:InvalidCoefficients",
     }
@@ -1062,6 +1064,7 @@ fn invalid_sample_time_identifier(builtin: &str) -> &'static str {
         "stepinfo" => "RunMat:stepinfo:InvalidArgument",
         "dcgain" => "RunMat:dcgain:InvalidModel",
         "pole" => "RunMat:pole:InvalidModel",
+        "rlocus" => "RunMat:rlocus:InvalidModel",
         "isstable" => "RunMat:isstable:InvalidModel",
         _ => "RunMat:tf:InvalidSampleTime",
     }
@@ -1073,6 +1076,7 @@ fn invalid_model_identifier(builtin: &str) -> &'static str {
         "stepinfo" => "RunMat:stepinfo:InvalidSystem",
         "dcgain" => "RunMat:dcgain:InvalidModel",
         "pole" => "RunMat:pole:InvalidModel",
+        "rlocus" => "RunMat:rlocus:InvalidModel",
         "isstable" => "RunMat:isstable:InvalidModel",
         _ => "RunMat:tf:InvalidModel",
     }
@@ -1084,6 +1088,7 @@ fn unsupported_model_identifier(builtin: &str) -> &'static str {
         "stepinfo" => "RunMat:stepinfo:UnsupportedModel",
         "dcgain" => "RunMat:dcgain:UnsupportedModel",
         "pole" => "RunMat:pole:UnsupportedModel",
+        "rlocus" => "RunMat:rlocus:UnsupportedModel",
         "isstable" => "RunMat:isstable:UnsupportedModel",
         _ => "RunMat:tf:UnsupportedModel",
     }
@@ -1095,6 +1100,7 @@ fn internal_identifier(builtin: &str) -> &'static str {
         "stepinfo" => "RunMat:stepinfo:Internal",
         "dcgain" => "RunMat:dcgain:Internal",
         "pole" => "RunMat:pole:Internal",
+        "rlocus" => "RunMat:rlocus:Internal",
         "isstable" => "RunMat:isstable:Internal",
         _ => "RunMat:tf:Internal",
     }

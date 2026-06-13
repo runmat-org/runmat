@@ -50865,6 +50865,157 @@
       ]
     },
     {
+      "name": "rlocus",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "r = rlocus(sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf or ss model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop pole locations as a branches-by-gains matrix."
+            }
+          ]
+        },
+        {
+          "label": "r = rlocus(sys, k)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf or ss model."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Finite nonnegative gain vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop pole locations as a branches-by-gains matrix."
+            }
+          ]
+        },
+        {
+          "label": "[r,k] = rlocus(sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf or ss model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop pole locations as a branches-by-gains matrix."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Gain vector used to compute the root locus."
+            }
+          ]
+        },
+        {
+          "label": "[r,k] = rlocus(sys, k)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf or ss model."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Finite nonnegative gain vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop pole locations as a branches-by-gains matrix."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Gain vector used to compute the root locus."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.RLOCUS.INVALID_ARGUMENT",
+          "identifier": "RunMat:rlocus:InvalidArgument",
+          "when": "Inputs do not match supported rlocus invocation forms.",
+          "message": "rlocus: invalid argument"
+        },
+        {
+          "code": "RM.RLOCUS.INVALID_MODEL",
+          "identifier": "RunMat:rlocus:InvalidModel",
+          "when": "Input system is not a valid SISO tf or ss object.",
+          "message": "rlocus: invalid model"
+        },
+        {
+          "code": "RM.RLOCUS.UNSUPPORTED_MODEL",
+          "identifier": "RunMat:rlocus:UnsupportedModel",
+          "when": "Model form is not supported by the current implementation.",
+          "message": "rlocus: unsupported model"
+        },
+        {
+          "code": "RM.RLOCUS.PLOT_FAILED",
+          "identifier": "RunMat:rlocus:PlotFailed",
+          "when": "Statement-form plotting failed for reasons other than known nonfatal setup conditions.",
+          "message": "rlocus: plotting failed"
+        },
+        {
+          "code": "RM.RLOCUS.INTERNAL",
+          "identifier": "RunMat:rlocus:Internal",
+          "when": "Root-locus computation or output construction failed.",
+          "message": "rlocus: internal error"
+        }
+      ]
+    },
+    {
       "name": "rmdir",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
