@@ -1094,3 +1094,124 @@ fn asset_summary_reports_semantic_cad_region_status() {
         GeometryCadRegionStatus::SemanticRegions
     );
 }
+
+#[cfg(feature = "plot-core")]
+#[test]
+fn geometry_preview_scene_batches_face_labels_under_same_assembly_owner() {
+    let owner = CadLabelRef {
+        label_entry: "0:1".to_string(),
+        name: "Bracket".to_string(),
+        kind: CadSemanticKind::Body,
+    };
+    let asset = GeometryAsset {
+        geometry_id: "geo_batched_preview".to_string(),
+        source: GeometrySource {
+            path: "/models/bracket.step".to_string(),
+            sha256: "abc123".to_string(),
+            importer_version: "cad/occt/step/v1".to_string(),
+        },
+        source_geometry: SourceGeometry {
+            kind: SourceGeometryKind::Cad,
+            assembly: Some(AssemblyNode {
+                node_id: owner.label_entry.clone(),
+                label: owner.name.clone(),
+                children: Vec::new(),
+            }),
+            material_evidence: vec![],
+        },
+        tessellation_profile: TessellationProfile::default(),
+        units: UnitSystem::Meter,
+        revision: 1,
+        meshes: vec![MeshDescriptor {
+            mesh_id: "mesh_1".to_string(),
+            kind: MeshKind::Surface,
+            vertex_count: 4,
+            element_count: 2,
+        }],
+        surface_meshes: vec![SurfaceMesh::new(
+            "mesh_1",
+            vec![
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+            vec![[0, 1, 2], [0, 2, 3]],
+        )],
+        regions: vec![
+            Region {
+                region_id: "face_000001".to_string(),
+                name: "Face 1".to_string(),
+                tag: Some("occt_face".to_string()),
+                cad_ownership: Some(CadRegionOwnership {
+                    face_id: Some(0),
+                    label: Some(CadLabelRef {
+                        label_entry: "0:1:face:1".to_string(),
+                        name: "Face 1".to_string(),
+                        kind: CadSemanticKind::Face,
+                    }),
+                    owner_path: vec![owner.clone()],
+                    layers: Vec::new(),
+                    color: None,
+                    material: None,
+                }),
+            },
+            Region {
+                region_id: "face_000002".to_string(),
+                name: "Face 2".to_string(),
+                tag: Some("occt_face".to_string()),
+                cad_ownership: Some(CadRegionOwnership {
+                    face_id: Some(1),
+                    label: Some(CadLabelRef {
+                        label_entry: "0:1:face:2".to_string(),
+                        name: "Face 2".to_string(),
+                        kind: CadSemanticKind::Face,
+                    }),
+                    owner_path: vec![owner.clone()],
+                    layers: Vec::new(),
+                    color: None,
+                    material: None,
+                }),
+            },
+        ],
+        region_entity_mappings: vec![
+            RegionEntityMapping::new(
+                "face_000001",
+                "mesh_1",
+                EntityKind::Face,
+                vec![EntityIdRange::new(0, 1)],
+            ),
+            RegionEntityMapping::new(
+                "face_000002",
+                "mesh_1",
+                EntityKind::Face,
+                vec![EntityIdRange::new(1, 1)],
+            ),
+        ],
+        diagnostics: vec![],
+    };
+
+    let scene = geometry_preview_scene(
+        &asset,
+        "Preview",
+        GeometryPreviewSceneOptions {
+            triangles_per_chunk: 16,
+            presentation: GeometryPreviewPresentation::Cad,
+            xray: false,
+            allow_create_fea_study: false,
+        },
+    )
+    .expect("cad preview scene should be generated");
+
+    assert_eq!(scene.chunks.len(), 1);
+    assert_eq!(scene.chunks[0].owner_node_ids, vec![owner.label_entry]);
+    assert_eq!(scene.chunks[0].regions.len(), 2);
+    assert!(scene.chunks[0]
+        .regions
+        .iter()
+        .any(|region| region.region_id == "face_000001"));
+    assert!(scene.chunks[0]
+        .regions
+        .iter()
+        .any(|region| region.region_id == "face_000002"));
+}

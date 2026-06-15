@@ -67,6 +67,28 @@ pub(crate) mod bridge {
         warnings: Vec<String>,
     }
 
+    #[derive(Debug, Clone)]
+    struct OcctPreviewSessionStartPayload {
+        session_id: u64,
+        face_count: u64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct OcctPreviewSessionChunkOptions {
+        target_triangles: u64,
+        max_faces: u64,
+        cancel_token_id: u64,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctPreviewSessionChunkPayload {
+        session_id: u64,
+        done: bool,
+        face_cursor: u64,
+        face_count: u64,
+        topology: OcctImportPayload,
+    }
+
     unsafe extern "C++" {
         include!("runmat-geometry-io/src/occt/occt_bridge.hxx");
 
@@ -76,6 +98,20 @@ pub(crate) mod bridge {
             format: OcctCadFormat,
             options: OcctImportOptions,
         ) -> Result<OcctImportPayload>;
+
+        fn start_cad_preview_session(
+            path: &str,
+            bytes: &[u8],
+            format: OcctCadFormat,
+            options: OcctImportOptions,
+        ) -> Result<OcctPreviewSessionStartPayload>;
+
+        fn read_cad_preview_session_chunk(
+            session_id: u64,
+            options: OcctPreviewSessionChunkOptions,
+        ) -> Result<OcctPreviewSessionChunkPayload>;
+
+        fn close_cad_preview_session(session_id: u64);
     }
 
     extern "Rust" {

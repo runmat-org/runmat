@@ -10,8 +10,9 @@ use std::sync::{Mutex, MutexGuard};
 use self::capture::DEFAULT_SVG_CAPTURE_ADAPTER;
 use chrono::Utc;
 use runmat_geometry_core::{
-    EntityIdRange, EntityKind, EntityRef, GeometryAsset, GeometrySource, MeshKind, Region,
-    SourceGeometry, SourceGeometryKind, TessellationProfile, UnitSystem,
+    AssemblyNode, DiagnosticSeverity, EntityIdRange, EntityKind, EntityRef, GeometryAsset,
+    GeometrySource, MeshKind, Region, SourceGeometry, SourceGeometryKind, TessellationProfile,
+    UnitSystem,
 };
 use runmat_geometry_io::{
     import::GeometryImportError, import_geometry_with_context, GeometryFormat,
@@ -178,6 +179,7 @@ pub struct GeometryPreviewFigureOptions {
     pub edge_overlay_triangle_limit: usize,
     pub presentation: GeometryPreviewPresentation,
     pub xray: bool,
+    pub allow_create_fea_study: bool,
 }
 
 #[cfg(feature = "plot-core")]
@@ -187,6 +189,7 @@ impl Default for GeometryPreviewFigureOptions {
             edge_overlay_triangle_limit: 250_000,
             presentation: GeometryPreviewPresentation::Analysis,
             xray: false,
+            allow_create_fea_study: false,
         }
     }
 }
@@ -198,6 +201,28 @@ impl GeometryPreviewFigureOptions {
             edge_overlay_triangle_limit: 250_000,
             presentation: GeometryPreviewPresentation::Cad,
             xray: false,
+            allow_create_fea_study: false,
+        }
+    }
+}
+
+#[cfg(feature = "plot-core")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeometryPreviewSceneOptions {
+    pub triangles_per_chunk: usize,
+    pub presentation: GeometryPreviewPresentation,
+    pub xray: bool,
+    pub allow_create_fea_study: bool,
+}
+
+#[cfg(feature = "plot-core")]
+impl Default for GeometryPreviewSceneOptions {
+    fn default() -> Self {
+        Self {
+            triangles_per_chunk: 128_000,
+            presentation: GeometryPreviewPresentation::Cad,
+            xray: false,
+            allow_create_fea_study: false,
         }
     }
 }
@@ -1435,6 +1460,298 @@ pub fn geometry_capture_view(
 }
 
 #[cfg(feature = "plot-core")]
+pub fn geometry_preview_scene(
+    asset: &GeometryAsset,
+    title: impl Into<String>,
+    options: GeometryPreviewSceneOptions,
+) -> Result<runmat_plot::GeometryScene, String> {
+    if asset.surface_meshes.is_empty() {
+        return Err("geometry asset does not contain renderable surface mesh data".to_string());
+    }
+
+    let triangles_per_chunk = options.triangles_per_chunk.max(1);
+    let cad_presentation = options.presentation == GeometryPreviewPresentation::Cad;
+    let mut chunks = Vec::new();
+
+    for (mesh_index, surface_mesh) in asset.surface_meshes.iter().enumerate() {
+        if surface_mesh.vertices.is_empty() || surface_mesh.triangles.is_empty() {
+            continue;
+        }
+        let positions = surface_mesh
+            .vertices
+            .iter()
+            .map(|position| {
+                Ok([
+                    f64_to_f32_coordinate(position[0])?,
+                    f64_to_f32_coordinate(position[1])?,
+                    f64_to_f32_coordinate(position[2])?,
+                ])
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
+        let presentation = cad_presentation.then(|| {
+            cad_mesh_presentation(
+                asset,
+                &surface_mesh.mesh_id,
+                surface_mesh.triangles.len(),
+                surface_mesh.vertices.len(),
+            )
+        });
+        let base_color = if cad_presentation {
+            CAD_DEFAULT_FACE_COLOR
+        } else {
+            preview_mesh_color(mesh_index)
+        };
+        let alpha = if options.xray { 0.34 } else { base_color.w };
+        let mut material = runmat_plot::cad_default_material();
+        material.albedo = glam::Vec4::new(base_color.x, base_color.y, base_color.z, alpha);
+        if options.xray {
+            material.alpha_mode = runmat_plot::core::AlphaMode::Blend;
+        }
+
+        let mut chunk_index = 0usize;
+        let mut chunk_start_triangle = 0usize;
+        while chunk_start_triangle < surface_mesh.triangles.len() {
+            let owner_node_ids = presentation
+                .as_ref()
+                .map(|item| {
+                    item.owner_node_ids_for_triangle(chunk_start_triangle)
+                        .to_vec()
+                })
+                .unwrap_or_default();
+            let mut chunk_end_triangle = chunk_start_triangle + 1;
+            while chunk_end_triangle < surface_mesh.triangles.len()
+                && chunk_end_triangle.saturating_sub(chunk_start_triangle) < triangles_per_chunk
+            {
+                let next_owner_node_ids = presentation
+                    .as_ref()
+                    .map(|item| item.owner_node_ids_for_triangle(chunk_end_triangle))
+                    .unwrap_or(&[]);
+                if next_owner_node_ids != owner_node_ids.as_slice() {
+                    break;
+                }
+                chunk_end_triangle += 1;
+            }
+            let triangles = &surface_mesh.triangles[chunk_start_triangle..chunk_end_triangle];
+            let mut remap = HashMap::<u32, u32>::with_capacity(triangles.len() * 3);
+            let mut local_positions = Vec::<[f32; 3]>::new();
+            let mut local_colors = Vec::<[f32; 4]>::new();
+            let mut indices = Vec::<u32>::with_capacity(triangles.len() * 3);
+
+            for triangle in triangles {
+                for source_index in triangle {
+                    let local_index = if let Some(local_index) = remap.get(source_index) {
+                        *local_index
+                    } else {
+                        let source_index_usize = usize::try_from(*source_index).map_err(|_| {
+                            format!(
+                                "surface mesh '{}' has an invalid vertex index",
+                                surface_mesh.mesh_id
+                            )
+                        })?;
+                        let position = positions.get(source_index_usize).ok_or_else(|| {
+                            format!(
+                                "surface mesh '{}' references vertex {} outside {} vertices",
+                                surface_mesh.mesh_id,
+                                source_index,
+                                positions.len()
+                            )
+                        })?;
+                        let local_index = u32::try_from(local_positions.len()).map_err(|_| {
+                            format!(
+                                "surface mesh '{}' preview chunk exceeded u32 vertex indices",
+                                surface_mesh.mesh_id
+                            )
+                        })?;
+                        local_positions.push(*position);
+                        let vertex_color = presentation
+                            .as_ref()
+                            .and_then(|item| item.vertex_colors.as_ref())
+                            .and_then(|colors| colors.get(source_index_usize))
+                            .copied()
+                            .unwrap_or(base_color);
+                        local_colors.push([vertex_color.x, vertex_color.y, vertex_color.z, alpha]);
+                        remap.insert(*source_index, local_index);
+                        local_index
+                    };
+                    indices.push(local_index);
+                }
+            }
+
+            let normals = local_vertex_normals(&local_positions, &indices);
+            let vertices = local_positions
+                .into_iter()
+                .zip(local_colors)
+                .zip(normals)
+                .map(|((position, color), normal)| {
+                    runmat_plot::geometry_scene_vertex(position, color, normal)
+                })
+                .collect::<Vec<_>>();
+            let regions = geometry_scene_regions_for_surface_chunk(
+                asset,
+                &surface_mesh.mesh_id,
+                chunk_start_triangle,
+                triangles.len(),
+            );
+            let chunk = runmat_plot::GeometrySceneChunk::indexed_triangles(
+                format!("{}:chunk_{chunk_index}", surface_mesh.mesh_id),
+                vertices,
+                indices,
+                material.clone(),
+            )
+            .with_mesh_id(surface_mesh.mesh_id.clone())
+            .with_label(format!(
+                "{} chunk {}",
+                surface_mesh.mesh_id,
+                chunk_index + 1
+            ))
+            .with_regions(regions)
+            .with_owner_node_ids(owner_node_ids);
+            chunks.push(chunk);
+            chunk_start_triangle = chunk_end_triangle;
+            chunk_index += 1;
+        }
+    }
+
+    if chunks.is_empty() {
+        return Err("geometry asset did not contain renderable surface mesh triangles".to_string());
+    }
+
+    Ok(
+        runmat_plot::GeometryScene::new(geometry_scene_id(asset), asset.revision as u64, chunks)
+            .with_title(title),
+    )
+}
+
+#[cfg(feature = "plot-core")]
+pub fn geometry_preview_scene_overlay(
+    asset: &GeometryAsset,
+    source_name: Option<String>,
+    status: runmat_plot::GeometrySceneCompleteness,
+    quality_label: impl Into<String>,
+    format: Option<String>,
+    byte_count: Option<u64>,
+    allow_create_fea_study: bool,
+) -> runmat_plot::GeometrySceneOverlay {
+    let mapping_summary = region_mapping_summary(asset, DEFAULT_MAPPING_RANGE_PREVIEW_LIMIT);
+    let source_label = Some(format!(
+        "{} / {}",
+        source_geometry_kind_label(asset.source_geometry.kind),
+        asset.source.importer_version
+    ));
+    let warnings = asset
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                diagnostic.severity,
+                DiagnosticSeverity::Warning | DiagnosticSeverity::Error
+            )
+        })
+        .take(4)
+        .map(|diagnostic| diagnostic.message.clone())
+        .collect();
+
+    runmat_plot::GeometrySceneOverlay {
+        source_name,
+        status,
+        quality_label: Some(quality_label.into()),
+        format,
+        source_label,
+        allow_create_fea_study,
+        byte_count,
+        mesh_count: asset.meshes.len(),
+        vertex_count: asset
+            .surface_meshes
+            .iter()
+            .map(|mesh| mesh.vertices.len())
+            .sum(),
+        triangle_count: asset
+            .surface_meshes
+            .iter()
+            .map(|mesh| mesh.triangles.len())
+            .sum(),
+        progress_percent: None,
+        region_count: asset.regions.len(),
+        mapped_region_count: mapping_summary.mapped_region_count,
+        assembly_nodes: asset
+            .source_geometry
+            .assembly
+            .as_ref()
+            .map(|node| vec![geometry_scene_assembly_node(node)])
+            .unwrap_or_default(),
+        regions: geometry_scene_region_summaries(asset),
+        warnings,
+    }
+}
+
+#[cfg(feature = "plot-core")]
+fn geometry_scene_assembly_node(node: &AssemblyNode) -> runmat_plot::GeometrySceneAssemblyNode {
+    runmat_plot::GeometrySceneAssemblyNode {
+        node_id: node.node_id.clone(),
+        label: node.label.clone(),
+        children: node
+            .children
+            .iter()
+            .map(geometry_scene_assembly_node)
+            .collect(),
+    }
+}
+
+#[cfg(feature = "plot-core")]
+fn geometry_scene_region_summaries(
+    asset: &GeometryAsset,
+) -> Vec<runmat_plot::GeometrySceneRegionSummary> {
+    let mut triangle_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for mapping in &asset.region_entity_mappings {
+        if !matches!(mapping.entity_kind, EntityKind::Face | EntityKind::Element) {
+            continue;
+        }
+        let count = mapping
+            .ranges
+            .iter()
+            .filter_map(|range| {
+                range
+                    .end_exclusive()
+                    .map(|end| end.saturating_sub(range.start))
+            })
+            .map(|count| usize::try_from(count).unwrap_or(usize::MAX))
+            .fold(0usize, |total, count| total.saturating_add(count));
+        triangle_counts
+            .entry(mapping.region_id.clone())
+            .and_modify(|total| *total = total.saturating_add(count))
+            .or_insert(count);
+    }
+
+    asset
+        .regions
+        .iter()
+        .map(|region| runmat_plot::GeometrySceneRegionSummary {
+            region_id: region.region_id.clone(),
+            label: region.name.clone(),
+            tag: region.tag.clone(),
+            kind: region
+                .cad_ownership
+                .as_ref()
+                .and_then(|ownership| ownership.label.as_ref())
+                .map(|label| format!("{:?}", label.kind).to_ascii_lowercase()),
+            triangle_count: triangle_counts
+                .get(&region.region_id)
+                .copied()
+                .unwrap_or_default(),
+        })
+        .collect()
+}
+
+#[cfg(feature = "plot-core")]
+fn source_geometry_kind_label(kind: SourceGeometryKind) -> &'static str {
+    match kind {
+        SourceGeometryKind::Mesh => "mesh",
+        SourceGeometryKind::Cad => "cad",
+    }
+}
+
+#[cfg(feature = "plot-core")]
 pub fn geometry_preview_figure(
     asset: &GeometryAsset,
     title: impl Into<String>,
@@ -1533,6 +1850,20 @@ pub fn geometry_preview_figure(
 struct CadMeshPresentation {
     feature_edge_groups: Option<Vec<u64>>,
     vertex_colors: Option<Vec<glam::Vec4>>,
+    owner_paths: Vec<Vec<String>>,
+    triangle_owner_path_indices: Option<Vec<Option<usize>>>,
+}
+
+#[cfg(feature = "plot-core")]
+impl CadMeshPresentation {
+    fn owner_node_ids_for_triangle(&self, triangle_index: usize) -> &[String] {
+        self.triangle_owner_path_indices
+            .as_ref()
+            .and_then(|indices| indices.get(triangle_index))
+            .and_then(|index| index.and_then(|index| self.owner_paths.get(index)))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
 }
 
 #[cfg(feature = "plot-core")]
@@ -1549,9 +1880,13 @@ fn cad_mesh_presentation(
     let prefer_face_mappings = asset.source_geometry.kind == SourceGeometryKind::Cad;
     let mut feature_edge_groups = vec![0_u64; triangle_count];
     let mut vertex_colors = vec![CAD_DEFAULT_FACE_COLOR; vertex_count];
+    let mut triangle_owner_path_indices = vec![None; triangle_count];
+    let mut owner_paths = Vec::<Vec<String>>::new();
+    let mut owner_path_indices = BTreeMap::<Vec<String>, usize>::new();
     let mut group_ids_by_region = BTreeMap::<String, u64>::new();
     let mut assigned_groups = false;
     let mut assigned_colors = false;
+    let mut assigned_owner_paths = false;
     let surface_triangles = asset
         .surface_meshes
         .iter()
@@ -1588,10 +1923,25 @@ fn cad_mesh_presentation(
                 }
             });
         let color = cad_region_color(region);
+        let owner_node_ids = cad_region_owner_node_ids(region);
+        let owner_path_index = if owner_node_ids.is_empty() {
+            None
+        } else if let Some(index) = owner_path_indices.get(&owner_node_ids) {
+            Some(*index)
+        } else {
+            let index = owner_paths.len();
+            owner_path_indices.insert(owner_node_ids.clone(), index);
+            owner_paths.push(owner_node_ids);
+            Some(index)
+        };
         for range in &mapping.ranges {
             for triangle_index in bounded_range(range, triangle_count) {
                 feature_edge_groups[triangle_index] = group_id;
                 assigned_groups = true;
+                if let Some(owner_path_index) = owner_path_index {
+                    triangle_owner_path_indices[triangle_index] = Some(owner_path_index);
+                    assigned_owner_paths = true;
+                }
                 if let Some(color) = color {
                     assigned_colors |= color_vertices_for_triangle(
                         surface_triangles,
@@ -1607,7 +1957,33 @@ fn cad_mesh_presentation(
     CadMeshPresentation {
         feature_edge_groups: assigned_groups.then_some(feature_edge_groups),
         vertex_colors: assigned_colors.then_some(vertex_colors),
+        owner_paths,
+        triangle_owner_path_indices: assigned_owner_paths.then_some(triangle_owner_path_indices),
     }
+}
+
+#[cfg(feature = "plot-core")]
+fn cad_region_owner_node_ids(region: &Region) -> Vec<String> {
+    let Some(ownership) = region.cad_ownership.as_ref() else {
+        return Vec::new();
+    };
+    let mut ids = Vec::new();
+    // Render chunk ownership drives assembly-tree visibility. Face labels remain
+    // region metadata so picking/selectors can stay face-level without forcing
+    // one GPU draw item per face.
+    for owner in &ownership.owner_path {
+        push_unique_owner_node_id(&mut ids, &owner.label_entry);
+    }
+    ids
+}
+
+#[cfg(feature = "plot-core")]
+fn push_unique_owner_node_id(ids: &mut Vec<String>, candidate: &str) {
+    let candidate = candidate.trim();
+    if candidate.is_empty() || ids.iter().any(|existing| existing == candidate) {
+        return;
+    }
+    ids.push(candidate.to_string());
 }
 
 #[cfg(feature = "plot-core")]
@@ -1717,6 +2093,119 @@ fn mesh_regions_for_surface(
             ))
         })
         .collect()
+}
+
+#[cfg(feature = "plot-core")]
+fn geometry_scene_id(asset: &GeometryAsset) -> String {
+    format!(
+        "{}:{}:{}",
+        asset.geometry_id, asset.source.sha256, asset.tessellation_profile.profile_id
+    )
+}
+
+#[cfg(feature = "plot-core")]
+fn geometry_scene_regions_for_surface_chunk(
+    asset: &GeometryAsset,
+    mesh_id: &str,
+    chunk_start_triangle: usize,
+    chunk_triangle_count: usize,
+) -> Vec<runmat_plot::GeometrySceneRegion> {
+    if chunk_triangle_count == 0 {
+        return Vec::new();
+    }
+    let chunk_start = chunk_start_triangle as u64;
+    let chunk_end = chunk_start.saturating_add(chunk_triangle_count as u64);
+    asset
+        .region_entity_mappings
+        .iter()
+        .filter(|mapping| {
+            mapping.mesh_id == mesh_id
+                && matches!(mapping.entity_kind, EntityKind::Face | EntityKind::Element)
+        })
+        .filter_map(|mapping| {
+            let triangle_ranges = mapping
+                .ranges
+                .iter()
+                .filter_map(|range| {
+                    let range_end = range.end_exclusive()?;
+                    let start = range.start.max(chunk_start);
+                    let end = range_end.min(chunk_end);
+                    if end <= start {
+                        return None;
+                    }
+                    let local_start = u32::try_from(start - chunk_start).ok()?;
+                    let count = u32::try_from(end - start).ok()?;
+                    Some(runmat_plot::GeometrySceneTriangleRange::new(
+                        local_start,
+                        count,
+                    ))
+                })
+                .collect::<Vec<_>>();
+            if triangle_ranges.is_empty() {
+                return None;
+            }
+            let region = asset
+                .regions
+                .iter()
+                .find(|region| region.region_id == mapping.region_id);
+            Some(runmat_plot::GeometrySceneRegion::new(
+                mapping.region_id.clone(),
+                region.map(|region| region.name.clone()),
+                region.and_then(|region| region.tag.clone()),
+                triangle_ranges,
+            ))
+        })
+        .collect()
+}
+
+#[cfg(feature = "plot-core")]
+fn local_vertex_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
+    let mut normals = vec![[0.0, 0.0, 0.0]; positions.len()];
+    for triangle in indices.chunks_exact(3) {
+        let a = triangle[0] as usize;
+        let b = triangle[1] as usize;
+        let c = triangle[2] as usize;
+        if a >= positions.len() || b >= positions.len() || c >= positions.len() {
+            continue;
+        }
+        let normal = face_normal(positions[a], positions[b], positions[c]);
+        accumulate_normal(&mut normals[a], normal);
+        accumulate_normal(&mut normals[b], normal);
+        accumulate_normal(&mut normals[c], normal);
+    }
+    normals.into_iter().map(normalize_or_default).collect()
+}
+
+#[cfg(feature = "plot-core")]
+fn face_normal(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> [f32; 3] {
+    let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    normalize_or_default([
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    ])
+}
+
+#[cfg(feature = "plot-core")]
+fn accumulate_normal(target: &mut [f32; 3], normal: [f32; 3]) {
+    target[0] += normal[0];
+    target[1] += normal[1];
+    target[2] += normal[2];
+}
+
+#[cfg(feature = "plot-core")]
+fn normalize_or_default(value: [f32; 3]) -> [f32; 3] {
+    let length_squared = value[0] * value[0] + value[1] * value[1] + value[2] * value[2];
+    if length_squared <= f32::EPSILON || !length_squared.is_finite() {
+        return [0.0, 0.0, 1.0];
+    }
+    let inv_length = length_squared.sqrt().recip();
+    [
+        value[0] * inv_length,
+        value[1] * inv_length,
+        value[2] * inv_length,
+    ]
 }
 
 #[cfg(feature = "plot-core")]

@@ -44,9 +44,12 @@
 #include <gp_Trsf.hxx>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <iomanip>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -88,10 +91,43 @@ struct CadDocument {
   bool has_xcaf = false;
 };
 
+struct CadPreviewSession {
+  std::string path;
+  OcctCadFormat format;
+  CadDocument document;
+  IMeshTools_Parameters mesh_parameters;
+  std::vector<TopoDS_Face> faces;
+  std::uint64_t face_cursor = 0;
+};
+
+std::mutex& preview_sessions_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::unordered_map<std::uint64_t, std::unique_ptr<CadPreviewSession>>& preview_sessions() {
+  static std::unordered_map<std::uint64_t, std::unique_ptr<CadPreviewSession>> sessions;
+  return sessions;
+}
+
+std::atomic<std::uint64_t>& next_preview_session_id() {
+  static std::atomic<std::uint64_t> next_id{1};
+  return next_id;
+}
+
 void check_cancelled(const OcctImportOptions& options) {
   if (options.cancel_token_id != 0 && occt_import_cancelled(options.cancel_token_id)) {
     throw std::runtime_error("OCCT CAD import cancelled");
   }
+}
+
+IMeshTools_Parameters mesh_parameters_from_options(const OcctImportOptions& options) {
+  IMeshTools_Parameters mesh_parameters;
+  mesh_parameters.Deflection = options.linear_deflection;
+  mesh_parameters.Relative = options.relative_deflection;
+  mesh_parameters.Angle = options.angular_deflection;
+  mesh_parameters.InParallel = Standard_False;
+  return mesh_parameters;
 }
 
 class RunmatCancelProgressIndicator final : public Message_ProgressIndicator {
@@ -705,11 +741,7 @@ OcctImportPayload import_cad_bytes(rust::Str path,
   CadDocument document = read_shape(path_string, bytes, format, options);
   check_cancelled(options);
 
-  IMeshTools_Parameters mesh_parameters;
-  mesh_parameters.Deflection = options.linear_deflection;
-  mesh_parameters.Relative = options.relative_deflection;
-  mesh_parameters.Angle = options.angular_deflection;
-  mesh_parameters.InParallel = Standard_False;
+  IMeshTools_Parameters mesh_parameters = mesh_parameters_from_options(options);
   if (!options.truncate_at_max_triangles) {
     RunmatCancelProgressIndicator mesh_progress(options);
     BRepMesh_IncrementalMesh mesh(document.shape,
@@ -768,6 +800,128 @@ OcctImportPayload import_cad_bytes(rust::Str path,
   }
 
   return result;
+}
+
+OcctPreviewSessionStartPayload start_cad_preview_session(
+    rust::Str path,
+    rust::Slice<const std::uint8_t> bytes,
+    OcctCadFormat format,
+    OcctImportOptions options) {
+  const std::string path_string = str_from_rust(path);
+  check_cancelled(options);
+  auto session = std::make_unique<CadPreviewSession>();
+  session->path = path_string;
+  session->format = format;
+  session->document = read_shape(path_string, bytes, format, options);
+  session->mesh_parameters = mesh_parameters_from_options(options);
+  check_cancelled(options);
+
+  for (TopExp_Explorer explorer(session->document.shape, TopAbs_FACE);
+       explorer.More();
+       explorer.Next()) {
+    check_cancelled(options);
+    session->faces.push_back(TopoDS::Face(explorer.Current()));
+  }
+  if (session->faces.empty()) {
+    throw std::runtime_error("OCCT import produced no faces");
+  }
+
+  const std::uint64_t session_id =
+      next_preview_session_id().fetch_add(1, std::memory_order_relaxed);
+  OcctPreviewSessionStartPayload result;
+  result.session_id = session_id;
+  result.face_count = static_cast<std::uint64_t>(session->faces.size());
+  {
+    std::lock_guard<std::mutex> lock(preview_sessions_mutex());
+    preview_sessions().emplace(session_id, std::move(session));
+  }
+  return result;
+}
+
+OcctPreviewSessionChunkPayload read_cad_preview_session_chunk(
+    std::uint64_t session_id,
+    OcctPreviewSessionChunkOptions chunk_options) {
+  std::lock_guard<std::mutex> lock(preview_sessions_mutex());
+  auto found = preview_sessions().find(session_id);
+  if (found == preview_sessions().end()) {
+    throw std::runtime_error("OCCT CAD preview session does not exist");
+  }
+
+  CadPreviewSession& session = *found->second;
+  OcctImportOptions options;
+  options.linear_deflection = session.mesh_parameters.Deflection;
+  options.angular_deflection = session.mesh_parameters.Angle;
+  options.relative_deflection = session.mesh_parameters.Relative;
+  options.max_triangles = std::numeric_limits<std::uint64_t>::max();
+  options.truncate_at_max_triangles = false;
+  options.cancel_token_id = chunk_options.cancel_token_id;
+  check_cancelled(options);
+
+  OcctImportPayload topology;
+  topology.backend = "occt-native";
+  topology.format_name = format_name(session.format);
+  topology.truncated = false;
+  topology.triangle_budget = chunk_options.target_triangles;
+  if (session.face_cursor == 0) {
+    append_assembly_tree(topology, session.document, options);
+  }
+
+  const std::uint64_t target_triangles =
+      chunk_options.target_triangles == 0 ? 128000 : chunk_options.target_triangles;
+  const std::uint64_t max_faces =
+      chunk_options.max_faces == 0 ? std::numeric_limits<std::uint64_t>::max()
+                                   : chunk_options.max_faces;
+  std::uint64_t faces_processed = 0;
+  while (session.face_cursor < session.faces.size()) {
+    check_cancelled(options);
+    if (!topology.triangle_face_ids.empty() &&
+        static_cast<std::uint64_t>(topology.triangle_face_ids.size()) >= target_triangles) {
+      break;
+    }
+    if (!topology.triangle_face_ids.empty() && faces_processed >= max_faces) {
+      break;
+    }
+
+    const std::uint64_t face_id = session.face_cursor;
+    const TopoDS_Face face = session.faces[static_cast<std::size_t>(session.face_cursor)];
+    OcctFaceSemanticPayload semantic = face_semantics(session.document, face, face_id);
+    const std::string resolved_face_name = semantic.label_name.empty()
+                                               ? face_name(face_id)
+                                               : static_cast<std::string>(semantic.label_name);
+    RunmatCancelProgressIndicator face_mesh_progress(options);
+    BRepMesh_IncrementalMesh face_mesh(face,
+                                       session.mesh_parameters,
+                                       face_mesh_progress.Start());
+    check_cancelled(options);
+    if (!face_mesh.IsDone()) {
+      topology.warnings.push_back("OCCT preview tessellation did not complete for face " +
+                                  std::to_string(face_id + 1));
+    }
+    append_face_mesh(topology, face, face_id, resolved_face_name, options);
+    if (has_face_semantics(semantic)) {
+      topology.face_semantics.push_back(semantic);
+    }
+    session.face_cursor += 1;
+    faces_processed += 1;
+  }
+
+  const bool done = session.face_cursor >= session.faces.size();
+  OcctPreviewSessionChunkPayload result;
+  result.session_id = session_id;
+  result.done = done;
+  result.face_cursor = session.face_cursor;
+  result.face_count = static_cast<std::uint64_t>(session.faces.size());
+  result.topology = std::move(topology);
+
+  if (done) {
+    preview_sessions().erase(found);
+  }
+  return result;
+}
+
+void close_cad_preview_session(std::uint64_t session_id) {
+  std::lock_guard<std::mutex> lock(preview_sessions_mutex());
+  preview_sessions().erase(session_id);
 }
 
 } // namespace occt_backend

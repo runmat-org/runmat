@@ -70,6 +70,21 @@ pub(crate) struct OcctCadTopology {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OcctCadPreviewSessionStart {
+    pub session_id: u64,
+    pub face_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OcctCadPreviewSessionChunk {
+    pub session_id: u64,
+    pub done: bool,
+    pub face_cursor: u64,
+    pub face_count: u64,
+    pub topology: OcctCadTopology,
+}
+
 #[cfg(any(
     all(not(target_arch = "wasm32"), feature = "occt-native"),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
@@ -158,6 +173,110 @@ pub(crate) fn import_cad_topology(
     let _ = (path, bytes, format, options, context);
     Ok(None)
 }
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub(crate) fn start_cad_preview_session(
+    path: &str,
+    bytes: &[u8],
+    format: OcctCadFormat,
+    options: &GeometryImportOptions,
+    context: &GeometryImportContext,
+) -> Result<OcctCadPreviewSessionStart, GeometryImportError> {
+    native::start_cad_preview_session(path, bytes, format, options, context)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub(crate) fn read_cad_preview_session_chunk(
+    session_id: u64,
+    target_triangles: u64,
+    max_faces: u64,
+    options: &GeometryImportOptions,
+    context: &GeometryImportContext,
+) -> Result<OcctCadPreviewSessionChunk, GeometryImportError> {
+    native::read_cad_preview_session_chunk(
+        session_id,
+        target_triangles,
+        max_faces,
+        options,
+        context,
+    )
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub(crate) fn close_cad_preview_session(session_id: u64) {
+    native::close_cad_preview_session(session_id);
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "occt-wasm-host"))]
+pub(crate) fn start_cad_preview_session(
+    path: &str,
+    bytes: &[u8],
+    format: OcctCadFormat,
+    options: &GeometryImportOptions,
+    context: &GeometryImportContext,
+) -> Result<OcctCadPreviewSessionStart, GeometryImportError> {
+    let _ = (path, bytes, format, options, context);
+    Err(GeometryImportError::BackendUnavailable(
+        "persistent OCCT preview sessions are not available in the wasm sidecar yet".to_string(),
+    ))
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "occt-wasm-host"))]
+pub(crate) fn read_cad_preview_session_chunk(
+    session_id: u64,
+    target_triangles: u64,
+    max_faces: u64,
+    options: &GeometryImportOptions,
+    context: &GeometryImportContext,
+) -> Result<OcctCadPreviewSessionChunk, GeometryImportError> {
+    let _ = (session_id, target_triangles, max_faces, options, context);
+    Err(GeometryImportError::BackendUnavailable(
+        "persistent OCCT preview sessions are not available in the wasm sidecar yet".to_string(),
+    ))
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "occt-wasm-host"))]
+pub(crate) fn close_cad_preview_session(_session_id: u64) {}
+
+#[cfg(not(any(
+    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(target_arch = "wasm32", feature = "occt-wasm-host")
+)))]
+pub(crate) fn start_cad_preview_session(
+    path: &str,
+    bytes: &[u8],
+    format: OcctCadFormat,
+    options: &GeometryImportOptions,
+    context: &GeometryImportContext,
+) -> Result<OcctCadPreviewSessionStart, GeometryImportError> {
+    let _ = (path, bytes, format, options, context);
+    Err(GeometryImportError::BackendUnavailable(
+        "OCCT CAD preview sessions require the occt-native feature".to_string(),
+    ))
+}
+
+#[cfg(not(any(
+    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(target_arch = "wasm32", feature = "occt-wasm-host")
+)))]
+pub(crate) fn read_cad_preview_session_chunk(
+    session_id: u64,
+    target_triangles: u64,
+    max_faces: u64,
+    options: &GeometryImportOptions,
+    context: &GeometryImportContext,
+) -> Result<OcctCadPreviewSessionChunk, GeometryImportError> {
+    let _ = (session_id, target_triangles, max_faces, options, context);
+    Err(GeometryImportError::BackendUnavailable(
+        "OCCT CAD preview sessions require the occt-native feature".to_string(),
+    ))
+}
+
+#[cfg(not(any(
+    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(target_arch = "wasm32", feature = "occt-wasm-host")
+)))]
+pub(crate) fn close_cad_preview_session(_session_id: u64) {}
 
 #[cfg(any(
     all(not(target_arch = "wasm32"), feature = "occt-native"),

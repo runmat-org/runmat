@@ -11,8 +11,12 @@ use runmat_core::{
     TelemetryRunFinish, TelemetrySink, WorkspaceEntry, WorkspaceResidency,
 };
 use runmat_runtime::builtins::plotting::{
-    close_figure as runtime_close_figure, current_figure_handle as runtime_current_figure_handle,
+    close_figure as runtime_close_figure, close_geometry_scene as runtime_close_geometry_scene,
+    current_figure_handle as runtime_current_figure_handle,
+    export_geometry_scene as runtime_export_geometry_scene,
     figure_handles as runtime_figure_handles, import_figure as runtime_import_figure,
+    import_geometry_scene as runtime_import_geometry_scene,
+    import_geometry_scene_payload as runtime_import_geometry_scene_payload,
     invalidate_surface_revisions as runtime_invalidate_surface_revisions,
     reset_hold_state_for_run as runtime_reset_hold_state_for_run,
     reset_plot_state as runtime_reset_plot_state, FigureHandle,
@@ -147,11 +151,14 @@ async fn inspect_geometry_path_with_asset(
     path: String,
     budget: Option<GeometryPreviewBudgetPayload>,
 ) -> Result<GeometryInspectWithAsset, String> {
+    let deadline = geometry_preview_deadline(budget.as_ref());
     ensure_runtime_not_cancelled("geometry inspection")?;
+    ensure_geometry_preview_deadline(deadline, "geometry inspection")?;
     let metadata = runmat_filesystem::metadata_async(std::path::PathBuf::from(&path))
         .await
         .map_err(|err| format!("failed to inspect geometry metadata {path}: {err}"))?;
     ensure_runtime_not_cancelled("geometry inspection")?;
+    ensure_geometry_preview_deadline(deadline, "geometry inspection")?;
     let byte_count = metadata.len();
     if let Some(max_bytes) = budget.as_ref().and_then(|item| item.max_bytes) {
         if byte_count > max_bytes {
@@ -178,6 +185,7 @@ async fn inspect_geometry_path_with_asset(
         .await
         .map_err(|err| format!("failed to read geometry file {path}: {err}"))?;
     ensure_runtime_not_cancelled("geometry inspection")?;
+    ensure_geometry_preview_deadline(deadline, "geometry inspection")?;
     let inspect = runmat_runtime::geometry::geometry_inspect_op(
         &path,
         &bytes,
@@ -185,6 +193,7 @@ async fn inspect_geometry_path_with_asset(
     )
     .map_err(operation_error_message)?;
     ensure_runtime_not_cancelled("geometry inspection")?;
+    ensure_geometry_preview_deadline(deadline, "geometry inspection")?;
     let mut payload = GeometryInspectPayload {
         path: path.clone(),
         format: inspect.data.format,
@@ -210,15 +219,39 @@ async fn inspect_geometry_path_with_asset(
         .as_ref()
         .and_then(|item| item.max_triangles)
         .or(Some(16_000_000));
+    let import_started_ms = js_sys::Date::now();
+    info!(
+        target: "runmat.geometry.preview",
+        path = %path,
+        max_triangles = ?max_triangles,
+        budget_policy = ?budget.as_ref().and_then(|item| item.budget_policy),
+        "geometry preview import started"
+    );
     let asset = match runmat_runtime::geometry::geometry_load_with_options_op(
         &path,
         &bytes,
         geometry_import_options_from_budget(budget.as_ref(), max_triangles),
         runmat_runtime::operations::OperationContext::new(None, None),
     ) {
-        Ok(envelope) => envelope.data,
+        Ok(envelope) => {
+            info!(
+                target: "runmat.geometry.preview",
+                path = %path,
+                elapsed_ms = (js_sys::Date::now() - import_started_ms) as u64,
+                "geometry preview import completed"
+            );
+            envelope.data
+        }
         Err(err) => {
-            payload.degraded_reason = Some(operation_error_message(err));
+            let message = operation_error_message(err);
+            warn!(
+                target: "runmat.geometry.preview",
+                "RunMat wasm: geometry preview import failed path={} elapsed_ms={} error={}",
+                path,
+                (js_sys::Date::now() - import_started_ms) as u64,
+                message
+            );
+            payload.degraded_reason = Some(message);
             return Ok(GeometryInspectWithAsset {
                 inspect: payload,
                 asset: None,
@@ -226,6 +259,7 @@ async fn inspect_geometry_path_with_asset(
         }
     };
     ensure_runtime_not_cancelled("geometry inspection")?;
+    ensure_geometry_preview_deadline(deadline, "geometry inspection")?;
     let stats = runmat_runtime::geometry::geometry_compute_stats_op(
         &asset,
         runmat_runtime::operations::OperationContext::new(None, None),
@@ -268,16 +302,24 @@ async fn preview_geometry_path(
     path: String,
     budget: Option<GeometryPreviewBudgetPayload>,
 ) -> Result<GeometryPreviewPayload, String> {
+    let deadline = geometry_preview_deadline(budget.as_ref());
     ensure_runtime_not_cancelled("geometry preview")?;
+    ensure_geometry_preview_deadline(deadline, "geometry preview")?;
     let figure_options = geometry_preview_figure_options_from_budget(budget.as_ref());
-    let inspected = inspect_geometry_path_with_asset(path, budget).await?;
+    let xray = budget
+        .as_ref()
+        .and_then(|budget| budget.xray)
+        .unwrap_or(false);
+    let inspected = inspect_geometry_path_with_asset(path, budget.clone()).await?;
     let GeometryInspectWithAsset { inspect, asset } = inspected;
     ensure_runtime_not_cancelled("geometry preview")?;
+    ensure_geometry_preview_deadline(deadline, "geometry preview")?;
     if asset.is_none() || inspect.stats.is_none() {
         return Ok(GeometryPreviewPayload {
             inspect,
             scene_kind: "unavailable".to_string(),
             figure_handle: None,
+            geometry_scene_handle: None,
             truncated: false,
             preview_message: Some("Geometry preview is unavailable for this file.".to_string()),
         });
@@ -285,28 +327,75 @@ async fn preview_geometry_path(
     let asset = asset.ok_or_else(|| "geometry preview asset was not available".to_string())?;
     let truncated = geometry_asset_preview_truncated(&asset);
     ensure_runtime_not_cancelled("geometry preview")?;
-    let figure = match runmat_runtime::geometry::geometry_preview_figure(
-        &asset,
-        format!("Geometry Preview: {}", filename_for_display(&inspect.path)),
-        figure_options,
-    ) {
-        Ok(figure) => figure,
-        Err(err) => {
+    ensure_geometry_preview_deadline(deadline, "geometry preview")?;
+    let title = format!("Geometry Preview: {}", filename_for_display(&inspect.path));
+    let scene_options = runmat_runtime::geometry::GeometryPreviewSceneOptions {
+        triangles_per_chunk: 24_000,
+        presentation: runmat_runtime::geometry::GeometryPreviewPresentation::Cad,
+        xray,
+        allow_create_fea_study: budget
+            .as_ref()
+            .and_then(|budget| budget.allow_create_fea_study)
+            .unwrap_or(false),
+    };
+    match runmat_runtime::geometry::geometry_preview_scene(&asset, title.clone(), scene_options) {
+        Ok(scene) => {
+            ensure_geometry_preview_deadline(deadline, "geometry preview")?;
+            let overlay = runmat_runtime::geometry::geometry_preview_scene_overlay(
+                &asset,
+                Some(filename_for_display(&inspect.path).to_string()),
+                if truncated {
+                    runmat_plot::GeometrySceneCompleteness::BoundedPreview
+                } else {
+                    runmat_plot::GeometrySceneCompleteness::Complete
+                },
+                geometry_preview_quality_label(budget.as_ref(), truncated),
+                Some(inspect.format.clone()),
+                Some(inspect.byte_count),
+                scene_options.allow_create_fea_study,
+            );
+            let scene = scene.with_overlay(overlay);
+            let geometry_scene_handle =
+                runtime_import_geometry_scene(scene).map_err(|err| err.to_string())?;
             return Ok(GeometryPreviewPayload {
                 inspect,
-                scene_kind: "summary".to_string(),
+                scene_kind: "mesh".to_string(),
                 figure_handle: None,
+                geometry_scene_handle: Some(geometry_scene_handle),
                 truncated,
-                preview_message: Some(err),
+                preview_message: truncated.then(|| {
+                    "Preview mesh was limited by the requested CAD preview budget.".to_string()
+                }),
             });
         }
-    };
+        Err(err) => {
+            warn!(
+                "RunMat wasm: chunked geometry scene generation failed; falling back to figure preview: {err}"
+            );
+        }
+    }
+    let figure =
+        match runmat_runtime::geometry::geometry_preview_figure(&asset, title, figure_options) {
+            Ok(figure) => figure,
+            Err(err) => {
+                return Ok(GeometryPreviewPayload {
+                    inspect,
+                    scene_kind: "summary".to_string(),
+                    figure_handle: None,
+                    geometry_scene_handle: None,
+                    truncated,
+                    preview_message: Some(err),
+                });
+            }
+        };
     ensure_runtime_not_cancelled("geometry preview")?;
+    ensure_geometry_preview_deadline(deadline, "geometry preview")?;
     let figure_handle = runtime_import_figure(figure).as_u32();
     Ok(GeometryPreviewPayload {
         inspect,
         scene_kind: "mesh".to_string(),
         figure_handle: Some(figure_handle),
+        geometry_scene_handle: None,
         truncated,
         preview_message: truncated
             .then(|| "Preview mesh was limited by the requested CAD preview budget.".to_string()),
@@ -320,13 +409,54 @@ fn geometry_asset_preview_truncated(asset: &runmat_geometry_core::GeometryAsset)
         .any(|diagnostic| diagnostic.code == "CAD_IMPORT_TESSELLATION_TRUNCATED")
 }
 
+#[derive(Debug, Clone, Copy)]
+struct GeometryPreviewDeadline {
+    started_ms: f64,
+    timeout_ms: u64,
+}
+
+fn geometry_preview_deadline(
+    budget: Option<&GeometryPreviewBudgetPayload>,
+) -> Option<GeometryPreviewDeadline> {
+    let timeout_ms = budget.and_then(|item| item.timeout_ms)?;
+    if timeout_ms == 0 {
+        return None;
+    }
+    Some(GeometryPreviewDeadline {
+        started_ms: js_sys::Date::now(),
+        timeout_ms,
+    })
+}
+
+fn ensure_geometry_preview_deadline(
+    deadline: Option<GeometryPreviewDeadline>,
+    context: &str,
+) -> Result<(), String> {
+    let Some(deadline) = deadline else {
+        return Ok(());
+    };
+    let elapsed_ms = js_sys::Date::now() - deadline.started_ms;
+    if elapsed_ms > deadline.timeout_ms as f64 {
+        return Err(format!(
+            "{context} timed out after {} ms",
+            deadline.timeout_ms
+        ));
+    }
+    Ok(())
+}
+
 fn geometry_import_options_from_budget(
     budget: Option<&GeometryPreviewBudgetPayload>,
     max_triangles: Option<u64>,
 ) -> runmat_geometry_io::GeometryImportOptions {
     runmat_geometry_io::GeometryImportOptions {
         max_triangles,
-        budget_policy: runmat_geometry_io::GeometryImportBudgetPolicy::Truncate,
+        budget_policy: match budget.and_then(|budget| budget.budget_policy) {
+            Some(GeometryPreviewBudgetPolicyPayload::Strict) => {
+                runmat_geometry_io::GeometryImportBudgetPolicy::Strict
+            }
+            _ => runmat_geometry_io::GeometryImportBudgetPolicy::Truncate,
+        },
         units: runmat_geometry_core::UnitSystem::Meter,
         tessellation_profile: tessellation_profile_from_budget(budget),
         relative_deflection: true,
@@ -357,6 +487,18 @@ fn geometry_preview_figure_options_from_budget(
     let mut options = runmat_runtime::geometry::GeometryPreviewFigureOptions::cad_preview();
     options.xray = budget.and_then(|budget| budget.xray).unwrap_or(false);
     options
+}
+
+fn geometry_preview_quality_label(
+    budget: Option<&GeometryPreviewBudgetPayload>,
+    truncated: bool,
+) -> &'static str {
+    match budget.and_then(|budget| budget.budget_policy) {
+        Some(GeometryPreviewBudgetPolicyPayload::Strict) if !truncated => "complete tessellation",
+        Some(GeometryPreviewBudgetPolicyPayload::Strict) => "strict tessellation",
+        _ if truncated => "bounded preview",
+        _ => "interactive preview",
+    }
 }
 
 fn finite_positive(value: Option<f64>) -> Option<f64> {
@@ -670,8 +812,18 @@ struct GeometryPreviewBudgetPayload {
     max_triangles: Option<u64>,
     max_vertices: Option<u64>,
     timeout_ms: Option<u64>,
+    budget_policy: Option<GeometryPreviewBudgetPolicyPayload>,
     tessellation_profile: Option<GeometryPreviewTessellationProfilePayload>,
     xray: Option<bool>,
+    allow_create_fea_study: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum GeometryPreviewBudgetPolicyPayload {
+    #[default]
+    Truncate,
+    Strict,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -712,6 +864,7 @@ struct GeometryPreviewPayload {
     inspect: GeometryInspectPayload,
     scene_kind: String,
     figure_handle: Option<u32>,
+    geometry_scene_handle: Option<u32>,
     truncated: bool,
     preview_message: Option<String>,
 }
@@ -1037,11 +1190,20 @@ impl RunMatWasm {
     }
 
     #[wasm_bindgen(js_name = disposeGeometryPreview)]
-    pub fn dispose_geometry_preview_js(&self, figure_handle: u32) -> Result<(), JsValue> {
+    pub fn dispose_geometry_preview_js(
+        &self,
+        figure_handle: Option<u32>,
+        geometry_scene_handle: Option<u32>,
+    ) -> Result<(), JsValue> {
         self.ensure_not_disposed()?;
-        runtime_close_figure(Some(FigureHandle::from(figure_handle)))
-            .map(|_| ())
-            .map_err(|err| js_error(&format!("disposeGeometryPreview failed: {err}")))
+        if let Some(figure_handle) = figure_handle {
+            runtime_close_figure(Some(FigureHandle::from(figure_handle)))
+                .map_err(|err| js_error(&format!("disposeGeometryPreview failed: {err}")))?;
+        }
+        if let Some(geometry_scene_handle) = geometry_scene_handle {
+            runtime_close_geometry_scene(geometry_scene_handle);
+        }
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = feaCapabilities)]
@@ -1490,6 +1652,18 @@ impl RunMatWasm {
         }
     }
 
+    #[wasm_bindgen(js_name = exportGeometryScene)]
+    pub fn export_geometry_scene(&self, handle: u32) -> Result<Option<Vec<u8>>, JsValue> {
+        self.ensure_not_disposed()?;
+        match runtime_export_geometry_scene(handle) {
+            Ok(payload) => Ok(payload),
+            Err(err) => {
+                warn!("RunMat wasm: geometry scene export rejected: {err}");
+                Ok(None)
+            }
+        }
+    }
+
     #[wasm_bindgen(js_name = importFigureScene)]
     pub async fn import_figure_scene(&self, scene: &[u8]) -> Result<Option<u32>, JsValue> {
         self.ensure_not_disposed()?;
@@ -1511,6 +1685,26 @@ impl RunMatWasm {
                     warn!("RunMat wasm: figure scene decode failed: {err}");
                 } else {
                     warn!("RunMat wasm: figure scene import rejected: {err}");
+                }
+                Err(runtime_error_to_js(&err))
+            }
+        }
+    }
+
+    #[wasm_bindgen(js_name = importGeometryScene)]
+    pub fn import_geometry_scene(&self, scene: &[u8]) -> Result<Option<u32>, JsValue> {
+        self.ensure_not_disposed()?;
+        log::debug!(
+            "RunMat wasm: importGeometryScene start bytes={}",
+            scene.len()
+        );
+        match runtime_import_geometry_scene_payload(scene) {
+            Ok(handle) => Ok(handle),
+            Err(err) => {
+                if err.identifier() == Some(ReplayErrorKind::DecodeFailed.identifier()) {
+                    warn!("RunMat wasm: geometry scene decode failed: {err}");
+                } else {
+                    warn!("RunMat wasm: geometry scene import rejected: {err}");
                 }
                 Err(runtime_error_to_js(&err))
             }

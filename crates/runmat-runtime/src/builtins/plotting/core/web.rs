@@ -40,6 +40,12 @@ pub enum PlotCameraProjection {
     },
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PlotSurfaceHostAction {
+    CreateFeaStudy,
+}
+
 fn web_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_identifier("RunMat:plot:WebError")
@@ -65,6 +71,7 @@ pub(crate) mod wasm {
     use runmat_plot::core::PlotEvent;
     use runmat_plot::styling::PlotThemeConfig;
     use runmat_plot::web::WebRenderer;
+    use runmat_plot::{GeometryScenePickIndex, GeometryScenePickResult, GeometryScenePresentation};
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -76,8 +83,21 @@ pub(crate) mod wasm {
 
     struct SurfaceEntry {
         renderer: WebRenderer,
-        bound_handle: Option<u32>,
+        bound_target: Option<BoundSurfaceTarget>,
         last_revision: Option<u64>,
+        geometry_presentation: GeometryScenePresentation,
+        geometry_pick_index: Option<CachedGeometryPickIndex>,
+    }
+
+    struct CachedGeometryPickIndex {
+        handle: u32,
+        index: GeometryScenePickIndex,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum BoundSurfaceTarget {
+        Figure(u32),
+        GeometryScene(u32),
     }
 
     pub(super) fn install_surface_impl(
@@ -92,8 +112,10 @@ pub(crate) mod wasm {
                 surface_id,
                 SurfaceEntry {
                     renderer,
-                    bound_handle: None,
+                    bound_target: None,
                     last_revision: None,
+                    geometry_presentation: GeometryScenePresentation::default(),
+                    geometry_pick_index: None,
                 },
             );
         });
@@ -120,9 +142,10 @@ pub(crate) mod wasm {
         SURFACES.with(|slot| {
             let mut map = slot.borrow_mut();
             for entry in map.values_mut() {
-                if entry.bound_handle == Some(handle) {
-                    entry.bound_handle = None;
+                if entry.bound_target == Some(BoundSurfaceTarget::Figure(handle)) {
+                    entry.bound_target = None;
                     entry.last_revision = None;
+                    entry.geometry_pick_index = None;
                     entry
                         .renderer
                         .clear_surface()
@@ -167,7 +190,7 @@ pub(crate) mod wasm {
                     "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
                 ))
             })?;
-            entry.bound_handle = Some(handle);
+            entry.bound_target = Some(BoundSurfaceTarget::Figure(handle));
             // Force a re-prime on next present.
             entry.last_revision = None;
             Ok(())
@@ -188,13 +211,22 @@ pub(crate) mod wasm {
             debug!("plot-web: applying theme to {} surfaces", map.len());
             for entry in map.values_mut() {
                 entry.renderer.set_theme_config(theme.clone());
-                if let Some(handle) = entry.bound_handle {
-                    if let Some(figure) = clone_figure(FigureHandle::from(handle)) {
+                match entry.bound_target {
+                    Some(BoundSurfaceTarget::Figure(handle)) => {
+                        if let Some(figure) = clone_figure(FigureHandle::from(handle)) {
+                            entry
+                                .renderer
+                                .render_figure(figure)
+                                .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+                        }
+                    }
+                    Some(BoundSurfaceTarget::GeometryScene(_)) => {
                         entry
                             .renderer
-                            .render_figure(figure)
+                            .render_current_scene()
                             .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
                     }
+                    None => {}
                 }
             }
             Ok(())
@@ -217,13 +249,105 @@ pub(crate) mod wasm {
                     "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
                 ))
             })?;
-            if entry.bound_handle != Some(handle) {
-                entry.bound_handle = Some(handle);
+            if entry.bound_target != Some(BoundSurfaceTarget::Figure(handle)) {
+                entry.bound_target = Some(BoundSurfaceTarget::Figure(handle));
                 entry.last_revision = None;
+                entry.geometry_pick_index = None;
             }
             Ok::<(), RuntimeError>(())
         })?;
         present_surface_impl(surface_id)
+    }
+
+    pub(super) fn present_geometry_scene_on_surface_impl(
+        surface_id: u32,
+        handle: u32,
+        scene: runmat_plot::GeometryScene,
+    ) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            let entry = map.get_mut(&surface_id).ok_or_else(|| {
+                web_error(format!(
+                    "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
+                ))
+            })?;
+            if entry.bound_target != Some(BoundSurfaceTarget::GeometryScene(handle))
+                || entry.last_revision != Some(scene.revision)
+            {
+                entry.geometry_pick_index = None;
+            }
+            entry.bound_target = Some(BoundSurfaceTarget::GeometryScene(handle));
+            entry.last_revision = Some(scene.revision);
+            let presentation = entry.geometry_presentation.clone();
+            entry
+                .renderer
+                .render_geometry_scene_with_presentation(scene, Some(presentation))
+                .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+            Ok(())
+        })
+    }
+
+    pub(super) fn set_geometry_scene_presentation_impl(
+        surface_id: u32,
+        presentation: GeometryScenePresentation,
+    ) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            let entry = map.get_mut(&surface_id).ok_or_else(|| {
+                web_error(format!(
+                    "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
+                ))
+            })?;
+            let Some(BoundSurfaceTarget::GeometryScene(_)) = entry.bound_target else {
+                return Err(web_error(
+                    "Plotting surface is not bound to a geometry scene.",
+                ));
+            };
+            entry.geometry_presentation = presentation.clone();
+            entry
+                .renderer
+                .set_geometry_scene_presentation(presentation)
+                .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+            Ok(())
+        })
+    }
+
+    pub(super) fn pick_geometry_scene_region_impl(
+        surface_id: u32,
+        x: f32,
+        y: f32,
+    ) -> BuiltinResult<Option<GeometryScenePickResult>> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            let entry = map.get_mut(&surface_id).ok_or_else(|| {
+                web_error(format!(
+                    "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
+                ))
+            })?;
+            let Some(BoundSurfaceTarget::GeometryScene(handle)) = entry.bound_target else {
+                return Ok(None);
+            };
+            let rebuild = entry
+                .geometry_pick_index
+                .as_ref()
+                .map(|cached| cached.handle != handle)
+                .unwrap_or(true);
+            if rebuild {
+                let scene =
+                    crate::builtins::plotting::clone_geometry_scene(handle).ok_or_else(|| {
+                        web_error(format!("geometry scene handle {handle} does not exist"))
+                    })?;
+                entry.geometry_pick_index = Some(CachedGeometryPickIndex {
+                    handle,
+                    index: GeometryScenePickIndex::build(&scene),
+                });
+            }
+            Ok(entry.geometry_pick_index.as_ref().and_then(|cached| {
+                entry
+                    .renderer
+                    .pick_geometry_scene_region(&cached.index, [x, y])
+            }))
+        })
     }
 
     pub(super) fn present_surface_impl(surface_id: u32) -> BuiltinResult<()> {
@@ -234,11 +358,16 @@ pub(crate) mod wasm {
                     "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
                 ))
             })?;
-            let handle = entry.bound_handle.ok_or_else(|| {
-                web_error(
-                    "Plotting surface is not bound to a figure handle. Call bindSurfaceToFigure().",
-                )
-            })?;
+            let target = entry
+                .bound_target
+                .ok_or_else(|| web_error("Plotting surface is not bound to a render target."))?;
+            let BoundSurfaceTarget::Figure(handle) = target else {
+                entry
+                    .renderer
+                    .render_current_scene()
+                    .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+                return Ok(());
+            };
             // "Better" path: only re-prime render data when the figure revision changed.
             let current_rev = current_figure_revision(FigureHandle::from(handle));
             if entry.last_revision != current_rev {
@@ -360,6 +489,25 @@ pub(crate) mod wasm {
         })
     }
 
+    pub(super) fn take_surface_host_actions_impl(
+        surface_id: u32,
+    ) -> BuiltinResult<Vec<PlotSurfaceHostAction>> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            let entry = map.get_mut(&surface_id).ok_or_else(|| {
+                web_error(format!(
+                    "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
+                ))
+            })?;
+            Ok(entry
+                .renderer
+                .take_host_actions()
+                .into_iter()
+                .map(convert_host_action)
+                .collect())
+        })
+    }
+
     pub fn render_current_scene(handle: u32) -> BuiltinResult<()> {
         debug!("plot-web: render_current_scene(handle={handle})");
         // If nothing is currently bound to this handle, try to claim the lowest-id unbound
@@ -367,14 +515,15 @@ pub(crate) mod wasm {
         // explicitly bound a surface yet.
         let needs_autobind = SURFACES.with(|slot| {
             let map = slot.borrow();
-            !map.values().any(|entry| entry.bound_handle == Some(handle))
+            !map.values()
+                .any(|entry| entry.bound_target == Some(BoundSurfaceTarget::Figure(handle)))
         });
         if needs_autobind {
             let maybe_unbound_surface = SURFACES.with(|slot| {
                 let map = slot.borrow();
                 map.iter()
                     .filter_map(|(surface_id, entry)| {
-                        if entry.bound_handle.is_none() {
+                        if entry.bound_target.is_none() {
                             Some(*surface_id)
                         } else {
                             None
@@ -393,7 +542,7 @@ pub(crate) mod wasm {
             slot.borrow()
                 .iter()
                 .filter_map(|(surface_id, entry)| {
-                    if entry.bound_handle == Some(handle) {
+                    if entry.bound_target == Some(BoundSurfaceTarget::Figure(handle)) {
                         Some(*surface_id)
                     } else {
                         None
@@ -423,6 +572,16 @@ pub(crate) mod wasm {
 
     // expose type to outer module
     pub(super) use runmat_plot::web::WebRenderer as RendererType;
+
+    fn convert_host_action(
+        action: runmat_plot::web::WebSurfaceHostAction,
+    ) -> PlotSurfaceHostAction {
+        match action {
+            runmat_plot::web::WebSurfaceHostAction::CreateFeaStudy => {
+                PlotSurfaceHostAction::CreateFeaStudy
+            }
+        }
+    }
 }
 
 #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
@@ -480,6 +639,29 @@ pub(crate) mod wasm {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
 
+    pub(super) fn present_geometry_scene_on_surface_impl(
+        _surface_id: u32,
+        _handle: u32,
+        _scene: runmat_plot::GeometryScene,
+    ) -> BuiltinResult<()> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
+
+    pub(super) fn set_geometry_scene_presentation_impl(
+        _surface_id: u32,
+        _presentation: runmat_plot::GeometryScenePresentation,
+    ) -> BuiltinResult<()> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
+
+    pub(super) fn pick_geometry_scene_region_impl(
+        _surface_id: u32,
+        _x: f32,
+        _y: f32,
+    ) -> BuiltinResult<Option<runmat_plot::GeometryScenePickResult>> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
+
     pub(super) fn fit_surface_extents_impl(_surface_id: u32) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
@@ -509,6 +691,12 @@ pub(crate) mod wasm {
 
     pub(super) fn current_theme_config_impl() -> runmat_plot::styling::PlotThemeConfig {
         runmat_plot::styling::PlotThemeConfig::default()
+    }
+
+    pub(super) fn take_surface_host_actions_impl(
+        _surface_id: u32,
+    ) -> BuiltinResult<Vec<PlotSurfaceHostAction>> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
 }
 
@@ -557,6 +745,29 @@ pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> BuiltinResult<
     wasm::present_figure_on_surface_impl(surface_id, handle)
 }
 
+pub fn present_geometry_scene_on_surface(
+    surface_id: u32,
+    handle: u32,
+    scene: runmat_plot::GeometryScene,
+) -> BuiltinResult<()> {
+    wasm::present_geometry_scene_on_surface_impl(surface_id, handle, scene)
+}
+
+pub fn set_geometry_scene_presentation(
+    surface_id: u32,
+    presentation: runmat_plot::GeometryScenePresentation,
+) -> BuiltinResult<()> {
+    wasm::set_geometry_scene_presentation_impl(surface_id, presentation)
+}
+
+pub fn pick_geometry_scene_region(
+    surface_id: u32,
+    x: f32,
+    y: f32,
+) -> BuiltinResult<Option<runmat_plot::GeometryScenePickResult>> {
+    wasm::pick_geometry_scene_region_impl(surface_id, x, y)
+}
+
 pub fn fit_surface_extents(surface_id: u32) -> BuiltinResult<()> {
     wasm::fit_surface_extents_impl(surface_id)
 }
@@ -574,6 +785,10 @@ pub fn set_surface_camera_state(
     state: PlotSurfaceCameraState,
 ) -> BuiltinResult<()> {
     wasm::set_surface_camera_state_impl(surface_id, state)
+}
+
+pub fn take_surface_host_actions(surface_id: u32) -> BuiltinResult<Vec<PlotSurfaceHostAction>> {
+    wasm::take_surface_host_actions_impl(surface_id)
 }
 
 pub fn set_plot_theme_config(theme: runmat_plot::styling::PlotThemeConfig) -> BuiltinResult<()> {

@@ -101,7 +101,7 @@ fn build_step_metadata_result(
     Ok(build_result(asset, diagnostics))
 }
 
-fn build_topology_result(
+pub(crate) fn build_topology_result(
     path: &str,
     format: OcctCadFormat,
     topology: OcctCadTopology,

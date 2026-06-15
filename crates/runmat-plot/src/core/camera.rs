@@ -25,6 +25,17 @@ pub enum ProjectionType {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CameraViewPreset {
+    Perspective,
+    Top,
+    Bottom,
+    Front,
+    Back,
+    Left,
+    Right,
+}
+
 impl Default for ProjectionType {
     fn default() -> Self {
         Self::Perspective {
@@ -724,18 +735,14 @@ impl CameraController {
                     return;
                 }
 
-                // Prefer anchoring to the XY plane (Z=0). If near-parallel, fall back to a plane
-                // through the current target perpendicular to the view direction.
+                // Anchor zoom to a plane through the current target and perpendicular to the view
+                // direction. A global Z=0 plane feels natural for flat plots, but CAD models can
+                // sit anywhere in model space; using the view target keeps close-range wheel zoom
+                // responsive and cursor-local.
                 let origin = camera.position;
                 let mut pivot = None;
-                if dir.z.abs() > 1e-6 {
-                    let t = (-origin.z) / dir.z;
-                    if t.is_finite() && t > 0.0 {
-                        pivot = Some(origin + dir * t);
-                    }
-                }
-                if pivot.is_none() {
-                    let forward = (camera.target - camera.position).normalize_or_zero();
+                let forward = (camera.target - camera.position).normalize_or_zero();
+                if forward.length_squared() > 1e-9 {
                     let denom = dir.dot(forward);
                     if denom.abs() > 1e-6 {
                         let t = (camera.target - origin).dot(forward) / denom;
@@ -744,10 +751,16 @@ impl CameraController {
                         }
                     }
                 }
+                if pivot.is_none() && dir.z.abs() > 1e-6 {
+                    let t = (-origin.z) / dir.z;
+                    if t.is_finite() && t > 0.0 {
+                        pivot = Some(origin + dir * t);
+                    }
+                }
                 let pivot = pivot.unwrap_or(camera.target);
 
                 let s = (pivot - origin).length().max(1e-3);
-                let new_s = (s * factor).clamp(0.05, 1.0e9);
+                let new_s = (s * factor).clamp(0.005, 1.0e9);
                 let delta_dist = s - new_s;
                 let translate = dir * delta_dist;
 

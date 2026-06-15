@@ -399,6 +399,35 @@ impl FigureScene {
         }
     }
 
+    pub fn from_geometry_scene(scene: &crate::geometry_scene::GeometryScene) -> Self {
+        let mut figure = Figure::new()
+            .with_grid(scene.show_grid)
+            .with_legend(false)
+            .with_axis_equal(scene.axis_equal);
+        figure.title = scene.title.clone();
+        figure.x_label = Some("X".to_string());
+        figure.y_label = Some("Y".to_string());
+        figure.z_label = Some("Z".to_string());
+        figure.set_axes_view(0, -38.0, 24.0);
+        let snapshot = FigureSnapshot::capture(&figure);
+        let plots = scene
+            .chunks
+            .iter()
+            .filter_map(scene_chunk_to_mesh_plot)
+            .collect::<Vec<_>>();
+
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            layout: FigureLayout {
+                axes_rows: 1,
+                axes_cols: 1,
+                axes_indices: vec![0; plots.len()],
+            },
+            metadata: snapshot.metadata,
+            plots,
+        }
+    }
+
     pub fn into_figure(self) -> Result<Figure, String> {
         self.validate_schema_version()?;
 
@@ -436,6 +465,30 @@ impl FigureScene {
         Ok(figure)
     }
 
+    pub fn into_geometry_scene(
+        self,
+        scene_id: impl Into<String>,
+        revision: u64,
+    ) -> Result<crate::GeometryScene, String> {
+        self.validate_schema_version()?;
+        let scene_id = scene_id.into();
+        let mut chunks = Vec::new();
+        for (plot_index, plot) in self.plots.into_iter().enumerate() {
+            append_geometry_scene_chunks(&scene_id, plot_index, plot, &mut chunks)?;
+        }
+        if chunks.is_empty() {
+            return Err("figure scene does not contain renderable mesh plots".to_string());
+        }
+        let mut scene = crate::GeometryScene::new(scene_id, revision, chunks).with_title(
+            self.metadata
+                .title
+                .unwrap_or_else(|| "Geometry Preview".to_string()),
+        );
+        scene.show_grid = self.metadata.grid_enabled;
+        scene.axis_equal = self.metadata.axis_equal;
+        Ok(scene)
+    }
+
     fn validate_schema_version(&self) -> Result<(), String> {
         if self.schema_version == 0 || self.schema_version > FigureScene::SCHEMA_VERSION {
             return Err(format!(
@@ -468,6 +521,177 @@ impl FigureScene {
         }
         Ok(())
     }
+}
+
+fn append_geometry_scene_chunks(
+    scene_id: &str,
+    plot_index: usize,
+    plot: ScenePlot,
+    chunks: &mut Vec<crate::GeometrySceneChunk>,
+) -> Result<(), String> {
+    let ScenePlot::Mesh {
+        vertices,
+        triangles,
+        mesh_id,
+        face_color_rgba,
+        edge_color_rgba,
+        face_alpha,
+        edge_alpha,
+        edge_width,
+        edge_mode,
+        feature_edge_groups,
+        vertex_colors_rgba,
+        triangle_colors_rgba,
+        axes_index: _,
+        label,
+        regions,
+        highlighted_region_id,
+        highlight_color_rgba,
+        scalar_field,
+        vector_field,
+        deformation,
+        visible,
+    } = plot
+    else {
+        return Ok(());
+    };
+
+    if !visible {
+        return Ok(());
+    }
+
+    let region_metadata = regions
+        .iter()
+        .cloned()
+        .map(crate::geometry_scene::GeometrySceneRegion::from)
+        .collect::<Vec<_>>();
+    let mesh_id_for_chunk = mesh_id
+        .clone()
+        .unwrap_or_else(|| format!("mesh_{}", plot_index + 1));
+    let mut mesh = MeshPlot::new(vertices.into_iter().map(xyz_to_vec3).collect(), triangles)?;
+    mesh.set_mesh_id(mesh_id.clone());
+    mesh.set_face_color(rgba_to_vec4(face_color_rgba));
+    mesh.set_edge_color(rgba_to_vec4(edge_color_rgba));
+    mesh.set_face_alpha(face_alpha);
+    mesh.set_edge_alpha(edge_alpha);
+    mesh.set_edge_width(edge_width);
+    mesh.set_edge_mode(parse_mesh_edge_mode(&edge_mode));
+    if !feature_edge_groups.is_empty() {
+        mesh.set_feature_edge_groups(Some(feature_edge_groups))?;
+    }
+    if !vertex_colors_rgba.is_empty() {
+        mesh.set_vertex_colors(Some(
+            vertex_colors_rgba.into_iter().map(rgba_to_vec4).collect(),
+        ))?;
+    }
+    if !triangle_colors_rgba.is_empty() {
+        mesh.set_triangle_colors(Some(
+            triangle_colors_rgba.into_iter().map(rgba_to_vec4).collect(),
+        ))?;
+    }
+    mesh.set_label(label.clone());
+    mesh.set_regions(regions.into_iter().map(Into::into).collect());
+    mesh.set_highlighted_region_id(highlighted_region_id);
+    if let Some(color) = highlight_color_rgba {
+        mesh.set_highlight_color(rgba_to_vec4(color));
+    }
+    if let Some(field) = scalar_field {
+        mesh.set_scalar_field(Some((*field).try_into()?))?;
+    }
+    if let Some(field) = vector_field {
+        mesh.set_vector_field(Some((*field).try_into()?))?;
+    }
+    if let Some(field) = deformation {
+        mesh.set_deformation(Some((*field).into()))?;
+    }
+
+    let face_render_data = mesh.render_data();
+    chunks.push(
+        crate::GeometrySceneChunk::from_render_data(
+            format!("{scene_id}:{mesh_id_for_chunk}:faces:{plot_index}"),
+            face_render_data,
+        )
+        .with_mesh_id(mesh_id_for_chunk.clone())
+        .with_label(label.clone().unwrap_or_else(|| mesh_id_for_chunk.clone()))
+        .with_regions(region_metadata),
+    );
+
+    if let Some(edge_render_data) = mesh.edge_render_data() {
+        chunks.push(
+            crate::GeometrySceneChunk::from_render_data(
+                format!("{scene_id}:{mesh_id_for_chunk}:edges:{plot_index}"),
+                edge_render_data,
+            )
+            .with_mesh_id(mesh_id_for_chunk.clone())
+            .with_label(format!(
+                "{} edges",
+                label.clone().unwrap_or_else(|| mesh_id_for_chunk.clone())
+            )),
+        );
+    }
+
+    if let Some(vector_render_data) = mesh.vector_render_data() {
+        chunks.push(
+            crate::GeometrySceneChunk::from_render_data(
+                format!("{scene_id}:{mesh_id_for_chunk}:vectors:{plot_index}"),
+                vector_render_data,
+            )
+            .with_mesh_id(mesh_id_for_chunk.clone())
+            .with_label(format!(
+                "{} vectors",
+                label.unwrap_or_else(|| mesh_id_for_chunk.clone())
+            )),
+        );
+    }
+
+    Ok(())
+}
+
+fn scene_chunk_to_mesh_plot(
+    chunk: &crate::geometry_scene::GeometrySceneChunk,
+) -> Option<ScenePlot> {
+    if chunk.render_data.pipeline_type != crate::core::PipelineType::Triangles {
+        return None;
+    }
+    let indices = chunk.indices.as_ref()?;
+    if indices.len() < 3 {
+        return None;
+    }
+    let triangles = indices
+        .chunks_exact(3)
+        .map(|item| [item[0], item[1], item[2]])
+        .collect::<Vec<_>>();
+    if triangles.is_empty() {
+        return None;
+    }
+    let vertices = chunk
+        .vertices
+        .iter()
+        .map(|vertex| vertex.position)
+        .collect::<Vec<_>>();
+    Some(ScenePlot::Mesh {
+        vertices,
+        triangles,
+        mesh_id: chunk.mesh_id.clone(),
+        face_color_rgba: chunk.material.albedo.to_array(),
+        edge_color_rgba: [0.08, 0.10, 0.13, 1.0],
+        face_alpha: chunk.material.albedo.w,
+        edge_alpha: 0.0,
+        edge_width: 0.0,
+        edge_mode: "none".to_string(),
+        feature_edge_groups: Vec::new(),
+        vertex_colors_rgba: Vec::new(),
+        triangle_colors_rgba: Vec::new(),
+        axes_index: 0,
+        label: chunk.label.clone(),
+        regions: chunk.regions.iter().map(Into::into).collect(),
+        highlighted_region_id: None,
+        highlight_color_rgba: Some([0.98, 0.78, 0.22, 1.0]),
+        scalar_field: None,
+        vector_field: None,
+        deformation: None,
+        visible: chunk.visible,
+    })
 }
 
 fn figure_axis_index(figure: &Figure, plot_index: usize) -> u32 {
@@ -882,6 +1106,22 @@ impl From<&MeshRegion> for SerializedMeshRegion {
     }
 }
 
+impl From<&crate::geometry_scene::GeometrySceneRegion> for SerializedMeshRegion {
+    fn from(value: &crate::geometry_scene::GeometrySceneRegion) -> Self {
+        Self {
+            region_id: value.region_id.clone(),
+            label: value.label.clone(),
+            tag: value.tag.clone(),
+            triangle_ranges: value
+                .triangle_ranges
+                .iter()
+                .copied()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
+
 impl From<SerializedMeshRegion> for MeshRegion {
     fn from(value: SerializedMeshRegion) -> Self {
         MeshRegion {
@@ -890,6 +1130,17 @@ impl From<SerializedMeshRegion> for MeshRegion {
             tag: value.tag,
             triangle_ranges: value.triangle_ranges.into_iter().map(Into::into).collect(),
         }
+    }
+}
+
+impl From<SerializedMeshRegion> for crate::geometry_scene::GeometrySceneRegion {
+    fn from(value: SerializedMeshRegion) -> Self {
+        crate::geometry_scene::GeometrySceneRegion::new(
+            value.region_id,
+            value.label,
+            value.tag,
+            value.triangle_ranges.into_iter().map(Into::into).collect(),
+        )
     }
 }
 
@@ -902,7 +1153,22 @@ impl From<MeshTriangleRange> for SerializedMeshTriangleRange {
     }
 }
 
+impl From<crate::geometry_scene::GeometrySceneTriangleRange> for SerializedMeshTriangleRange {
+    fn from(value: crate::geometry_scene::GeometrySceneTriangleRange) -> Self {
+        Self {
+            start: value.start,
+            count: value.count,
+        }
+    }
+}
+
 impl From<SerializedMeshTriangleRange> for MeshTriangleRange {
+    fn from(value: SerializedMeshTriangleRange) -> Self {
+        Self::new(value.start, value.count)
+    }
+}
+
+impl From<SerializedMeshTriangleRange> for crate::geometry_scene::GeometrySceneTriangleRange {
     fn from(value: SerializedMeshTriangleRange) -> Self {
         Self::new(value.start, value.count)
     }

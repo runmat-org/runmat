@@ -1,4 +1,4 @@
-mod cad;
+pub(crate) mod cad;
 mod gltf;
 mod obj;
 mod ply;

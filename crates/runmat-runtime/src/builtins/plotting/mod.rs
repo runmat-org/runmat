@@ -157,12 +157,16 @@ pub use state::{
     FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 use std::collections::HashMap;
+#[cfg(feature = "plot-core")]
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use web::present_figure_on_surface as web_present_figure_on_surface;
+use web::present_geometry_scene_on_surface as web_present_geometry_scene_on_surface;
 pub use web::{
     bind_surface_to_figure, clear_closed_figure_surfaces, detach_surface, fit_surface_extents,
-    get_surface_camera_state, install_surface, invalidate_surface_revisions, present_surface,
-    render_current_scene, reset_surface_camera, resize_surface, set_plot_theme_config,
+    get_surface_camera_state, install_surface, invalidate_surface_revisions,
+    pick_geometry_scene_region, present_surface, render_current_scene, reset_surface_camera,
+    resize_surface, set_geometry_scene_presentation, set_plot_theme_config,
     set_surface_camera_state, web_renderer_ready, PlotCameraProjection, PlotCameraState,
     PlotSurfaceCameraState,
 };
@@ -188,7 +192,7 @@ pub fn set_runtime_plotting_mode(mode: RuntimePlottingMode) {
 pub fn set_runtime_plotting_mode(_mode: RuntimePlottingMode) {}
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
-pub use web::handle_plot_surface_event;
+pub use web::{handle_plot_surface_event, take_surface_host_actions, PlotSurfaceHostAction};
 
 pub(crate) fn plotting_error(builtin: &str, message: impl Into<String>) -> crate::RuntimeError {
     crate::build_runtime_error(message)
@@ -232,6 +236,21 @@ pub fn import_figure_scene(bytes: &[u8]) -> crate::BuiltinResult<Option<FigureHa
 }
 
 #[cfg(feature = "plot-core")]
+pub fn import_geometry_scene_payload(bytes: &[u8]) -> crate::BuiltinResult<Option<u32>> {
+    let scene = crate::replay::import_figure_scene_payload(bytes)?;
+    let hash = geometry_scene_payload_hash(bytes);
+    let scene_id = format!("geometry-scene-payload:{hash:016x}");
+    let scene = scene.into_geometry_scene(scene_id, hash).map_err(|err| {
+        crate::replay_error_with_source(
+            crate::ReplayErrorKind::ImportRejected,
+            "invalid geometry scene content",
+            std::io::Error::new(std::io::ErrorKind::InvalidData, err),
+        )
+    })?;
+    import_geometry_scene(scene).map(Some)
+}
+
+#[cfg(feature = "plot-core")]
 pub async fn import_figure_scene_async(bytes: &[u8]) -> crate::BuiltinResult<Option<FigureHandle>> {
     let scene = crate::replay::import_figure_scene_payload_async(bytes).await?;
     let figure = scene.into_figure().map_err(|err| {
@@ -260,6 +279,84 @@ pub async fn import_figure_scene_from_path_async(
     import_figure_scene_async(&bytes).await
 }
 
+#[cfg(feature = "plot-core")]
+pub fn import_geometry_scene(scene: runmat_plot::GeometryScene) -> crate::BuiltinResult<u32> {
+    let handle = NEXT_GEOMETRY_SCENE_HANDLE.fetch_add(1, Ordering::Relaxed) as u32;
+    let mut guard = geometry_scene_registry().lock().map_err(|_| {
+        crate::build_runtime_error("geometry scene registry lock poisoned")
+            .with_builtin("plot")
+            .build()
+    })?;
+    guard.insert(handle, scene);
+    register_imported_geometry_scene(handle);
+    Ok(handle)
+}
+
+#[cfg(feature = "plot-core")]
+pub fn clone_geometry_scene(handle: u32) -> Option<runmat_plot::GeometryScene> {
+    geometry_scene_registry().lock().ok()?.get(&handle).cloned()
+}
+
+#[cfg(feature = "plot-core")]
+pub fn append_geometry_scene_chunks(
+    handle: u32,
+    chunks: Vec<runmat_plot::GeometrySceneChunk>,
+    overlay: Option<runmat_plot::GeometrySceneOverlay>,
+) -> crate::BuiltinResult<()> {
+    let mut guard = geometry_scene_registry().lock().map_err(|_| {
+        crate::build_runtime_error("geometry scene registry lock poisoned")
+            .with_builtin("plot")
+            .build()
+    })?;
+    let scene = guard.get_mut(&handle).ok_or_else(|| {
+        crate::build_runtime_error(format!("geometry scene handle {handle} does not exist"))
+            .with_builtin("plot")
+            .build()
+    })?;
+    if !chunks.is_empty() {
+        scene.append_chunks(chunks);
+    }
+    if let Some(overlay) = overlay {
+        let merged = merge_geometry_scene_overlay(scene, overlay);
+        scene.set_overlay(merged);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "plot-core")]
+pub fn close_geometry_scene(handle: u32) -> bool {
+    geometry_scene_registry()
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.remove(&handle))
+        .is_some()
+}
+
+#[cfg(feature = "plot-core")]
+pub fn export_geometry_scene(handle: u32) -> crate::BuiltinResult<Option<Vec<u8>>> {
+    let Some(scene) = clone_geometry_scene(handle) else {
+        return Ok(None);
+    };
+    let scene = runmat_plot::event::FigureScene::from_geometry_scene(&scene);
+    crate::replay::export_figure_scene_payload(&scene).map(Some)
+}
+
+#[cfg(feature = "plot-core")]
+pub fn present_geometry_scene_on_surface(surface_id: u32, handle: u32) -> crate::BuiltinResult<()> {
+    let Some(scene) = clone_geometry_scene(handle) else {
+        return Err(crate::build_runtime_error(format!(
+            "geometry scene handle {handle} does not exist"
+        ))
+        .with_builtin("plot")
+        .build());
+    };
+    web_present_geometry_scene_on_surface(surface_id, handle, scene)?;
+    if take_imported_geometry_scene(handle) {
+        let _ = reset_surface_camera(surface_id);
+    }
+    Ok(())
+}
+
 pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> crate::BuiltinResult<()> {
     web_present_figure_on_surface(surface_id, handle)?;
     if take_imported_figure(handle) {
@@ -269,6 +366,96 @@ pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> crate::Builtin
 }
 
 type ImportedFigureRegistry = Mutex<HashMap<u32, ()>>;
+#[cfg(feature = "plot-core")]
+type GeometrySceneRegistry = Mutex<HashMap<u32, runmat_plot::GeometryScene>>;
+#[cfg(feature = "plot-core")]
+type ImportedGeometrySceneRegistry = Mutex<HashMap<u32, ()>>;
+
+#[cfg(feature = "plot-core")]
+static NEXT_GEOMETRY_SCENE_HANDLE: AtomicU64 = AtomicU64::new(1);
+
+#[cfg(feature = "plot-core")]
+fn geometry_scene_registry() -> &'static GeometrySceneRegistry {
+    static REGISTRY: OnceLock<GeometrySceneRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(feature = "plot-core")]
+fn geometry_scene_payload_hash(bytes: &[u8]) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
+#[cfg(feature = "plot-core")]
+fn merge_geometry_scene_overlay(
+    scene: &runmat_plot::GeometryScene,
+    incoming: runmat_plot::GeometrySceneOverlay,
+) -> runmat_plot::GeometrySceneOverlay {
+    let Some(mut current) = scene.overlay.clone() else {
+        let mut overlay = incoming;
+        overlay.vertex_count = scene.vertex_count();
+        overlay.triangle_count = scene.triangle_count();
+        return overlay;
+    };
+
+    current.status = incoming.status;
+    current.quality_label = incoming.quality_label.or(current.quality_label);
+    current.format = incoming.format.or(current.format);
+    current.source_label = incoming.source_label.or(current.source_label);
+    current.allow_create_fea_study =
+        current.allow_create_fea_study || incoming.allow_create_fea_study;
+    current.byte_count = incoming.byte_count.or(current.byte_count);
+    current.mesh_count = current.mesh_count.max(incoming.mesh_count);
+    current.vertex_count = scene.vertex_count();
+    current.triangle_count = scene.triangle_count();
+    current.progress_percent = incoming.progress_percent;
+
+    if current.assembly_nodes.is_empty() {
+        current.assembly_nodes = incoming.assembly_nodes;
+    }
+
+    merge_region_summaries(&mut current.regions, incoming.regions);
+    current.region_count = current.regions.len();
+    current.mapped_region_count = current.region_count;
+    merge_warnings(&mut current.warnings, incoming.warnings);
+    current
+}
+
+#[cfg(feature = "plot-core")]
+fn merge_region_summaries(
+    current: &mut Vec<runmat_plot::GeometrySceneRegionSummary>,
+    incoming: Vec<runmat_plot::GeometrySceneRegionSummary>,
+) {
+    let mut positions = HashMap::<String, usize>::with_capacity(current.len() + incoming.len());
+    for (index, region) in current.iter().enumerate() {
+        positions.insert(region.region_id.clone(), index);
+    }
+    for region in incoming {
+        if let Some(index) = positions.get(&region.region_id).copied() {
+            current[index].triangle_count = current[index]
+                .triangle_count
+                .saturating_add(region.triangle_count);
+        } else {
+            positions.insert(region.region_id.clone(), current.len());
+            current.push(region);
+        }
+    }
+}
+
+#[cfg(feature = "plot-core")]
+fn merge_warnings(current: &mut Vec<String>, incoming: Vec<String>) {
+    for warning in incoming {
+        if !current.iter().any(|item| item == &warning) {
+            current.push(warning);
+        }
+    }
+}
 
 fn imported_figure_registry() -> &'static ImportedFigureRegistry {
     static REGISTRY: OnceLock<ImportedFigureRegistry> = OnceLock::new();
@@ -283,6 +470,28 @@ fn register_imported_figure(handle: u32) {
 
 fn take_imported_figure(handle: u32) -> bool {
     imported_figure_registry()
+        .lock()
+        .ok()
+        .and_then(|mut map| map.remove(&handle))
+        .is_some()
+}
+
+#[cfg(feature = "plot-core")]
+fn imported_geometry_scene_registry() -> &'static ImportedGeometrySceneRegistry {
+    static REGISTRY: OnceLock<ImportedGeometrySceneRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(feature = "plot-core")]
+pub fn register_imported_geometry_scene(handle: u32) {
+    if let Ok(mut map) = imported_geometry_scene_registry().lock() {
+        map.insert(handle, ());
+    }
+}
+
+#[cfg(feature = "plot-core")]
+fn take_imported_geometry_scene(handle: u32) -> bool {
+    imported_geometry_scene_registry()
         .lock()
         .ok()
         .and_then(|mut map| map.remove(&handle))

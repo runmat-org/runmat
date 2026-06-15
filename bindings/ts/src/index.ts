@@ -215,6 +215,10 @@ export type PlotSurfaceEvent =
       metaKey?: boolean;
     };
 
+export type PlotSurfaceHostAction = {
+  kind: "createFeaStudy";
+};
+
 export type StdoutStreamKind = "stdout" | "stderr" | "clear";
 
 export interface StdoutEntry {
@@ -581,6 +585,16 @@ export interface GeometryPreviewBudget {
   maxTriangles?: number;
   maxVertices?: number;
   timeoutMs?: number;
+  budgetPolicy?: "truncate" | "strict";
+  tessellationProfile?: GeometryPreviewTessellationProfile;
+  xray?: boolean;
+  allowCreateFeaStudy?: boolean;
+}
+
+export interface GeometryPreviewTessellationProfile {
+  profileId?: string;
+  chordTolerance?: number;
+  angleToleranceDeg?: number;
 }
 
 export interface GeometryStats {
@@ -694,6 +708,7 @@ export interface GeometryInspectResult {
 export interface GeometryPreviewResult extends GeometryInspectResult {
   sceneKind: "mesh" | "summary" | "unavailable";
   figureHandle: number | null;
+  geometrySceneHandle: number | null;
   truncated: boolean;
   previewMessage?: string | null;
 }
@@ -744,6 +759,10 @@ export interface RunMatSessionHandle {
   inspectDataFile(path: string): Promise<WorkspaceEntry[]>;
   inspectGeometry(path: string, budget?: GeometryPreviewBudget | null): Promise<GeometryInspectResult>;
   previewGeometry(path: string, budget?: GeometryPreviewBudget | null): Promise<GeometryPreviewResult>;
+  disposeGeometryPreview?(
+    figureHandle?: number | null,
+    geometrySceneHandle?: number | null,
+  ): Promise<void> | void;
   feaCapabilities(): Promise<FeaCapabilities>;
   checkFeaStudy(path: string): Promise<FeaCheckResult>;
   runFeaStudy(path: string, artifactRoot?: string | null): Promise<FeaRunResult>;
@@ -754,7 +773,9 @@ export interface RunMatSessionHandle {
     options?: MaterializeVariableOptions
   ): Promise<MaterializedVariable>;
   exportFigureScene?(handle: number): Promise<Uint8Array | null>;
+  exportGeometryScene?(handle: number): Promise<Uint8Array | null>;
   importFigureScene?(scene: Uint8Array): Promise<number | null>;
+  importGeometryScene?(scene: Uint8Array): Promise<number | null>;
   importFigureSceneFromPath?(path: string): Promise<number | null>;
   currentFigureHandle?(): Promise<number>;
   dispose(): void;
@@ -809,6 +830,10 @@ interface RunMatNativeSession {
   inspectDataFile?: (path: string) => WorkspaceEntry[] | Promise<WorkspaceEntry[]>;
   inspectGeometry?: (path: string, budget?: GeometryPreviewBudget | null) => GeometryInspectResult | Promise<GeometryInspectResult>;
   previewGeometry?: (path: string, budget?: GeometryPreviewBudget | null) => GeometryPreviewResult | Promise<GeometryPreviewResult>;
+  disposeGeometryPreview?: (
+    figureHandle?: number | null,
+    geometrySceneHandle?: number | null,
+  ) => void | Promise<void>;
   feaCapabilities?: () => FeaCapabilities | Promise<FeaCapabilities>;
   checkFeaStudy?: (path: string) => FeaCheckResult | Promise<FeaCheckResult>;
   runFeaStudy?: (path: string, artifactRoot?: string | null) => FeaRunResult | Promise<FeaRunResult>;
@@ -819,7 +844,9 @@ interface RunMatNativeSession {
     options?: MaterializeVariableOptionsWire
   ) => MaterializedVariable | Promise<MaterializedVariable>;
   exportFigureScene?: (handle: number) => Uint8Array | null;
+  exportGeometryScene?: (handle: number) => Uint8Array | null;
   importFigureScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
+  importGeometryScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
   importFigureSceneFromPath?: (path: string) => number | null | Promise<number | null>;
   currentFigureHandle?: () => number;
   dispose?: () => void;
@@ -886,6 +913,26 @@ export interface PlotSurfaceCameraState {
   axes: PlotCameraState[];
 }
 
+export type GeometrySceneDisplayMode = "shaded" | "edges" | "wireframe";
+
+export interface GeometryScenePresentationState {
+  selectedRegionId?: string | null;
+  hoveredRegionId?: string | null;
+  displayMode?: GeometrySceneDisplayMode;
+  edgeOverlayEnabled?: boolean;
+}
+
+export interface GeometryScenePickResult {
+  meshId: string | null;
+  chunkId: string;
+  triangleIndex: number;
+  regionId: string | null;
+  regionLabel: string | null;
+  regionTag: string | null;
+  distance: number;
+  position: [number, number, number];
+}
+
 
 interface RunMatNativeModule {
   default: (module?: WasmInitInput | Promise<WasmInitInput>) => Promise<unknown>;
@@ -893,7 +940,9 @@ interface RunMatNativeModule {
   plotRendererReady?: () => boolean;
   renderCurrentFigureScene?: (handle: number) => void;
   exportFigureScene?: (handle: number) => Uint8Array | null;
+  exportGeometryScene?: (handle: number) => Uint8Array | null;
   importFigureScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
+  importGeometryScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
   importFigureSceneFromPath?: (path: string) => number | null | Promise<number | null>;
   exportWorkspaceState?: (includeVariables?: string) => Promise<Uint8Array | null>;
   importWorkspaceState?: (state: Uint8Array) => boolean;
@@ -909,7 +958,11 @@ interface RunMatNativeModule {
   bindSurfaceToFigure?: (surfaceId: number, handle: number) => void;
   presentSurface?: (surfaceId: number) => void;
   presentFigureOnSurface?: (surfaceId: number, handle: number) => void;
+  presentGeometrySceneOnSurface?: (surfaceId: number, handle: number) => void;
+  setGeometryScenePresentation?: (surfaceId: number, presentation: GeometryScenePresentationState) => void;
+  pickGeometrySceneRegion?: (surfaceId: number, x: number, y: number) => GeometryScenePickResult | null;
   handlePlotSurfaceEvent?: (surfaceId: number, event: PlotSurfaceEvent) => void;
+  takePlotSurfaceHostActions?: (surfaceId: number) => unknown;
   fitPlotSurfaceExtents?: (surfaceId: number) => void;
   resetPlotSurfaceCamera?: (surfaceId: number) => void;
   getPlotSurfaceCameraState?: (surfaceId: number) => unknown;
@@ -1084,6 +1137,31 @@ export async function presentFigureOnSurface(surfaceId: number, handle: number):
   native.presentFigureOnSurface(surfaceId, handle);
 }
 
+export async function presentGeometrySceneOnSurface(surfaceId: number, handle: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "presentGeometrySceneOnSurface");
+  native.presentGeometrySceneOnSurface(surfaceId, handle);
+}
+
+export async function setGeometryScenePresentation(
+  surfaceId: number,
+  presentation: GeometryScenePresentationState,
+): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "setGeometryScenePresentation");
+  native.setGeometryScenePresentation(surfaceId, presentation);
+}
+
+export async function pickGeometrySceneRegion(
+  surfaceId: number,
+  x: number,
+  y: number,
+): Promise<GeometryScenePickResult | null> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "pickGeometrySceneRegion");
+  return native.pickGeometrySceneRegion(surfaceId, x, y) ?? null;
+}
+
 export async function renderCurrentFigureScene(handle: number): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "renderCurrentFigureScene");
@@ -1094,6 +1172,15 @@ export async function handlePlotSurfaceEvent(surfaceId: number, event: PlotSurfa
   const native = await loadNativeModule();
   requireNativeFunction(native, "handlePlotSurfaceEvent");
   native.handlePlotSurfaceEvent(surfaceId, event);
+}
+
+export async function takePlotSurfaceHostActions(surfaceId: number): Promise<PlotSurfaceHostAction[]> {
+  const native = await loadNativeModule();
+  if (typeof native.takePlotSurfaceHostActions !== "function") {
+    return [];
+  }
+  const actions = native.takePlotSurfaceHostActions(surfaceId);
+  return Array.isArray(actions) ? actions.filter(isPlotSurfaceHostAction) : [];
 }
 
 export async function fitPlotSurfaceExtents(surfaceId: number): Promise<void> {
@@ -1321,6 +1408,18 @@ export async function exportFigureScene(handle: number): Promise<Uint8Array | nu
   }
 }
 
+export async function exportGeometryScene(handle: number): Promise<Uint8Array | null> {
+  const native = await loadNativeModule();
+  if (typeof native.exportGeometryScene !== "function") {
+    return null;
+  }
+  try {
+    return native.exportGeometryScene(handle) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function importFigureScene(scene: Uint8Array): Promise<number | null> {
   const native = await loadNativeModule();
   if (typeof native.importFigureScene !== "function") {
@@ -1328,6 +1427,19 @@ export async function importFigureScene(scene: Uint8Array): Promise<number | nul
   }
   try {
     const handle = await native.importFigureScene(scene);
+    return typeof handle === "number" ? handle : null;
+  } catch (error) {
+    throw coerceFigureError(error);
+  }
+}
+
+export async function importGeometryScene(scene: Uint8Array): Promise<number | null> {
+  const native = await loadNativeModule();
+  if (typeof native.importGeometryScene !== "function") {
+    return null;
+  }
+  try {
+    const handle = await native.importGeometryScene(scene);
     return typeof handle === "number" ? handle : null;
   } catch (error) {
     throw coerceFigureError(error);
@@ -1459,6 +1571,23 @@ class WebRunMatSession implements RunMatSessionHandle {
     return this.native.previewGeometry(path, budget ?? null);
   }
 
+  async disposeGeometryPreview(
+    figureHandle?: number | null,
+    geometrySceneHandle?: number | null,
+  ): Promise<void> {
+    this.ensureActive();
+    if (typeof this.native.disposeGeometryPreview !== "function") {
+      if (typeof figureHandle === "number") {
+        await closeFigure(figureHandle);
+      }
+      return;
+    }
+    await this.native.disposeGeometryPreview(
+      typeof figureHandle === "number" ? figureHandle : null,
+      typeof geometrySceneHandle === "number" ? geometrySceneHandle : null,
+    );
+  }
+
   async feaCapabilities(): Promise<FeaCapabilities> {
     this.ensureActive();
     if (typeof this.native.feaCapabilities !== "function") {
@@ -1526,6 +1655,18 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
   }
 
+  async exportGeometryScene(handle: number): Promise<Uint8Array | null> {
+    this.ensureActive();
+    if (typeof this.native.exportGeometryScene !== "function") {
+      return null;
+    }
+    try {
+      return this.native.exportGeometryScene(handle) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async importFigureScene(scene: Uint8Array): Promise<number | null> {
     this.ensureActive();
     if (typeof this.native.importFigureScene !== "function") {
@@ -1536,6 +1677,19 @@ class WebRunMatSession implements RunMatSessionHandle {
       return typeof handle === "number" ? handle : null;
     } catch (error) {
       throw coerceFigureError(error);
+    }
+  }
+
+  async importGeometryScene(scene: Uint8Array): Promise<number | null> {
+    this.ensureActive();
+    if (typeof this.native.importGeometryScene !== "function") {
+      return null;
+    }
+    try {
+      const handle = await this.native.importGeometryScene(scene);
+      return typeof handle === "number" ? handle : null;
+    } catch {
+      return null;
     }
   }
 
@@ -1752,6 +1906,14 @@ function isFigureErrorPayload(value: unknown): value is FigureErrorPayload {
     value !== null &&
     "code" in value &&
     typeof (value as FigureErrorPayload).code === "string"
+  );
+}
+
+function isPlotSurfaceHostAction(value: unknown): value is PlotSurfaceHostAction {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === "createFeaStudy"
   );
 }
 

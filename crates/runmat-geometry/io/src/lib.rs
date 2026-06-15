@@ -3,6 +3,7 @@
 pub mod cad;
 pub mod import;
 pub mod normalize;
+pub mod preview;
 pub mod report;
 pub mod sniff;
 
@@ -11,6 +12,10 @@ mod occt;
 pub use import::{
     import_geometry, import_geometry_with_context, GeometryImportBudgetPolicy,
     GeometryImportContext, GeometryImportOptions,
+};
+pub use preview::{
+    close_cad_preview_session, read_cad_preview_session_chunk, start_cad_preview_session,
+    CadPreviewSessionChunk, CadPreviewSessionStart,
 };
 pub use report::{ImportDiagnostic, ImportDiagnosticSeverity, ImportReport, ImportResult};
 pub use sniff::{detect_geometry_format, GeometryFormat};
