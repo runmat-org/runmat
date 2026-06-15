@@ -257,22 +257,8 @@ async fn plot_root_locus_statement(first_sys: Value, rest: Vec<Value>) -> Builti
         ));
     }
 
-    struct HoldGuard {
-        hold_enabled: bool,
-    }
-
-    impl Drop for HoldGuard {
-        fn drop(&mut self) {
-            if self.hold_enabled {
-                let _ = futures::executor::block_on(
-                    crate::call_builtin_async("hold", &[Value::from("off")])
-                );
-            }
-        }
-    }
-
-    let mut hold_guard = HoldGuard { hold_enabled: false };
     let mut first = true;
+    let mut hold_guard = HoldOffGuard::new();
     for (system, style) in systems {
         let model = DynamicModel::from_value_async(system).await?;
         let eval = RootLocus::compute(&model.tf, gains.clone())?;
@@ -280,11 +266,32 @@ async fn plot_root_locus_statement(first_sys: Value, rest: Vec<Value>) -> Builti
         if first {
             first = false;
             let _ = crate::call_builtin_async("hold", &[Value::from("on")]).await;
-            hold_guard.hold_enabled = true;
+            hold_guard.arm();
         }
     }
-    drop(hold_guard);
     Ok(())
+}
+
+struct HoldOffGuard {
+    armed: bool,
+}
+
+impl HoldOffGuard {
+    fn new() -> Self {
+        Self { armed: false }
+    }
+
+    fn arm(&mut self) {
+        self.armed = true;
+    }
+}
+
+impl Drop for HoldOffGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            crate::builtins::plotting::set_hold(crate::builtins::plotting::HoldMode::Off);
+        }
+    }
 }
 
 fn is_dynamic_model_object(value: &Value) -> bool {
@@ -1348,6 +1355,22 @@ mod tests {
         let _guard = crate::output_count::push_output_count(Some(0));
         let result = run_rlocus(sys, Vec::new()).expect("rlocus");
         assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));
+    }
+
+    #[test]
+    fn statement_form_turns_hold_off_when_later_system_fails() {
+        let _plot_guard = crate::builtins::plotting::tests::lock_plot_registry();
+        crate::builtins::plotting::tests::ensure_plot_test_env();
+        crate::builtins::plotting::reset_hold_state_for_run();
+        let _ = crate::builtins::plotting::clear_figure(None);
+
+        let sys = tf(vec![1.0, 2.0], vec![1.0, 3.0, 4.0]);
+        let malformed_tf = Value::Object(ObjectInstance::new("tf".to_string()));
+        let _output_guard = crate::output_count::push_output_count(Some(0));
+
+        let err = run_rlocus(sys, vec![malformed_tf]).expect_err("second system should fail");
+        assert!(err.message().contains("missing"));
+        assert!(!crate::builtins::plotting::state::current_hold_enabled());
     }
 
     #[test]
