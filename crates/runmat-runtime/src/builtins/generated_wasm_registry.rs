@@ -126,6 +126,12 @@ __runmat_wasm_register_gpu_spec_GPU_SPEC();
 __runmat_wasm_register_fusion_spec_FUSION_SPEC();
     crate :: builtins :: array :: creation :: range ::
 __runmat_wasm_register_builtin_range_builtin();
+    crate :: builtins :: array :: creation :: sparse ::
+__runmat_wasm_register_gpu_spec_GPU_SPEC();
+    crate :: builtins :: array :: creation :: sparse ::
+__runmat_wasm_register_fusion_spec_FUSION_SPEC();
+    crate :: builtins :: array :: creation :: sparse ::
+__runmat_wasm_register_builtin_sparse_builtin();
     crate :: builtins :: array :: creation :: true_false ::
 __runmat_wasm_register_builtin_true_builtin();
     crate :: builtins :: array :: creation :: true_false ::

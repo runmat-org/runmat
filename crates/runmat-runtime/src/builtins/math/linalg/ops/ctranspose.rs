@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::linalg::ops::transpose_real_sparse_tensor;
 use crate::builtins::math::linalg::type_resolvers::transpose_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use log::warn;
@@ -180,6 +181,9 @@ async fn ctranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
         Value::Complex(re, im) => ctranspose_complex_scalar(re, im),
         Value::ComplexTensor(ct) => ctranspose_complex_tensor(ct),
         Value::Tensor(t) => Ok(tensor::tensor_into_value(ctranspose_tensor(t)?)),
+        Value::SparseTensor(s) => Ok(Value::SparseTensor(
+            transpose_real_sparse_tensor(s).map_err(|e| internal_error(format!("{NAME}: {e}")))?,
+        )),
         Value::LogicalArray(la) => Ok(Value::LogicalArray(ctranspose_logical_array(la)?)),
         Value::CharArray(ca) => Ok(Value::CharArray(ctranspose_char_array(ca)?)),
         Value::StringArray(sa) => Ok(Value::StringArray(ctranspose_string_array(sa)?)),

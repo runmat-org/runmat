@@ -6914,6 +6914,24 @@ y = x^[1 2; 3 4];\n",
     }
 
     #[test]
+    fn compile_rejects_workspace_first_bound_function_fallback() {
+        let ast = runmat_parser::parse("run(\"setup.m\"); y = remote_inc(2);").expect("parse");
+        let mut bound_functions = HashMap::new();
+        bound_functions.insert("remote_inc".to_string(), FunctionId(9001));
+        let context = LoweringContext::empty().with_bound_functions(&bound_functions);
+        let hir = lower(&ast, &context).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let err = compile(&hir.assembly, &mir, entrypoint)
+            .expect_err("workspace-first bound function fallback should be rejected");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirCallFallbackPolicyUnsupported")
+        );
+    }
+
+    #[test]
     fn compile_interprets_async_call_and_await_via_semantic_future_lane() {
         let source = "async function y = inc(x); y = x + 1; end; t = inc(2); z = await(t);";
         let ast = runmat_parser::parse(source).expect("parse");

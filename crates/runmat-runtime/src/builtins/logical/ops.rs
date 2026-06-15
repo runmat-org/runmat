@@ -160,6 +160,7 @@ async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
         Value::Int(i) => Ok(Value::Bool(!i.is_zero())),
         Value::Complex(re, im) => Ok(Value::Bool(!complex_is_zero(re, im))),
         Value::Tensor(tensor) => logical_from_tensor(tensor),
+        Value::SparseTensor(sparse) => logical_from_sparse_tensor(sparse),
         Value::ComplexTensor(tensor) => logical_from_complex_tensor(tensor),
         Value::CharArray(chars) => logical_from_char_array(chars),
         Value::StringArray(strings) => logical_from_string_array(strings),
@@ -188,6 +189,16 @@ async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
 fn logical_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let buffer = LogicalBuffer::from_real_tensor(&tensor);
     logical_buffer_to_host(buffer)
+}
+
+fn logical_from_sparse_tensor(sparse: runmat_builtins::SparseTensor) -> BuiltinResult<Value> {
+    let tensor = sparse.to_dense().map_err(|err| {
+        logical_error_with_message(
+            format!("logical: failed to densify sparse input: {err}"),
+            &LOGICAL_ERROR_INTERNAL,
+        )
+    })?;
+    logical_from_tensor(tensor)
 }
 
 fn logical_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
@@ -376,7 +387,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CellArray, IntValue, MException, ObjectInstance, StructValue, SymbolicExpr,
+        CellArray, IntValue, MException, ObjectInstance, StructValue, SymbolicExpr, SparseTensor,
     };
 
     fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -450,6 +461,20 @@ pub(crate) mod tests {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![2, 2]);
                 assert_eq!(array.data, vec![0, 1, 1, 0]);
+            }
+            other => panic!("expected logical array, got {:?}", other),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn logical_sparse_tensor_densifies() {
+        let sparse = SparseTensor::new(3, 2, vec![0, 1, 2], vec![1, 2], vec![4.0, -1.0]).unwrap();
+        let result = logical_builtin(Value::SparseTensor(sparse), Vec::new()).expect("logical");
+        match result {
+            Value::LogicalArray(array) => {
+                assert_eq!(array.shape, vec![3, 2]);
+                assert_eq!(array.data, vec![0, 1, 0, 0, 0, 1]);
             }
             other => panic!("expected logical array, got {:?}", other),
         }

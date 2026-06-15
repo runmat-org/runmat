@@ -137,6 +137,7 @@ fn isreal_host(value: Value) -> BuiltinResult<Value> {
     let flag = match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
         Value::Tensor(_) => true,
+        Value::SparseTensor(_) => true,
         Value::LogicalArray(_) => true,
         Value::CharArray(_) => true,
         Value::Symbolic(_) => true,

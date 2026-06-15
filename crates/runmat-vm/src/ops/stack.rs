@@ -122,6 +122,7 @@ where
         refresh_workspace_state(vars);
     }
     vars[index] = value;
+    refresh_workspace_state(vars);
     if let Some(name) = var_names.get(&index) {
         ensure_workspace_slot_name(index, name);
     }
@@ -163,6 +164,7 @@ where
         }
         before_var_overwrite(&vars[offset], &value);
         vars[offset] = value;
+        refresh_workspace_state(vars);
         let func_name = context
             .call_stack
             .last()

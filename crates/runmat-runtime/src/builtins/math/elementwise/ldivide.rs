@@ -361,6 +361,7 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         )),
         Value::String(_)
         | Value::StringArray(_)
+        | Value::SparseTensor(_)
         | Value::Cell(_)
         | Value::Struct(_)
         | Value::Symbolic(_) => Err(ldivide_error_with_detail(

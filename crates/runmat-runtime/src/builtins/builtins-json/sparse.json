@@ -1,0 +1,115 @@
+{
+  "title": "sparse",
+  "category": "array/creation",
+  "keywords": [
+    "sparse",
+    "matrix",
+    "triplet",
+    "csc",
+    "nonzero",
+    "gpu"
+  ],
+  "summary": "Create sparse double matrices from full arrays, sizes, or row/column/value triplets.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Sparse matrices are host-resident CSC values. GPU inputs are gathered before construction because RunMat's acceleration API currently exposes dense tensor handles."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 6,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::sparse::tests",
+    "integration": "builtins::array::creation::sparse::tests::sparse_gathers_gpu_input"
+  },
+  "description": "`sparse` creates a sparse double matrix. RunMat stores sparse matrices in compressed sparse column form and supports the common MATLAB construction forms: conversion from a full array, empty sparse allocation by size, and triplet assembly from row indices, column indices, and values.",
+  "behaviors": [
+    "`sparse(A)` converts a full numeric or logical array to a sparse double matrix, storing only nonzero values.",
+    "`sparse(m, n)` returns an `m x n` sparse double matrix with zero stored entries.",
+    "`sparse(i, j, v)` creates a sparse matrix whose size is inferred from the largest row and column subscripts.",
+    "`sparse(i, j, v, m, n)` creates an `m x n` sparse matrix and errors if any subscript falls outside those dimensions.",
+    "`sparse(i, j, v, m, n, nzmax)` accepts the MATLAB allocation hint for compatibility; RunMat's storage is still sized from the produced nonzero entries.",
+    "Duplicate `(i, j)` entries are summed. Entries whose final value is zero are not stored.",
+    "Row and column subscripts are one-based positive integers, matching MATLAB."
+  ],
+  "examples": [
+    {
+      "description": "Creating a sparse matrix from triplets",
+      "input": "S = sparse([1; 3; 2], [1; 2; 3], [10; 20; 30], 3, 3);\nnnz(S)",
+      "output": "ans = 3"
+    },
+    {
+      "description": "Summing duplicate row and column pairs",
+      "input": "S = sparse([1; 1; 2], [2; 2; 3], [4; 5; 6], 2, 3);\n[r, c, v] = find(S);\nv",
+      "output": "v = [9; 6]"
+    },
+    {
+      "description": "Converting a full matrix",
+      "input": "A = [0 5; 7 0];\nS = sparse(A);\nsize(S)",
+      "output": "ans = [2 2]"
+    },
+    {
+      "description": "Creating an empty sparse matrix",
+      "input": "S = sparse(4, 5);\nnnz(S)",
+      "output": "ans = 0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which sparse construction forms are supported?",
+      "answer": "RunMat supports `sparse(A)`, `sparse(m,n)`, `sparse(i,j,v)`, `sparse(i,j,v,m,n)`, and `sparse(i,j,v,m,n,nzmax)` for real double/logical data."
+    },
+    {
+      "question": "Does RunMat store sparse matrices densely?",
+      "answer": "No. The runtime uses compressed sparse column storage with column pointers, row indices, and stored values."
+    },
+    {
+      "question": "What happens to duplicate triplets?",
+      "answer": "Duplicate row/column pairs are summed, matching MATLAB sparse assembly semantics."
+    },
+    {
+      "question": "Can sparse matrices live on the GPU?",
+      "answer": "Not yet. If you pass a `gpuArray` to `sparse`, RunMat gathers it and builds a host sparse matrix. Native GPU sparse handles can be added once the acceleration API grows sparse storage."
+    },
+    {
+      "question": "Which operations interoperate with sparse matrices today?",
+      "answer": "Core introspection such as `size`, `numel`, `class`, `whos`, `nnz`, `find`, transpose, and conjugate transpose understand sparse values. Broader sparse linear algebra will build on this representation."
+    }
+  ],
+  "links": [
+    {
+      "label": "find",
+      "url": "./find"
+    },
+    {
+      "label": "nnz",
+      "url": "./nnz"
+    },
+    {
+      "label": "zeros",
+      "url": "./zeros"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/sparse.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse.rs"
+  },
+  "gpu_residency": "Sparse values are currently host-resident. Passing a GPU tensor to `sparse` triggers a gather, after which RunMat builds a compressed sparse column matrix on the host.",
+  "gpu_behavior": [
+    "The GPU metadata for `sparse` is intentionally marked as gather-immediate. This makes the representation transition explicit to the planner and prevents pretending that dense GPU buffers are native sparse matrices."
+  ]
+}

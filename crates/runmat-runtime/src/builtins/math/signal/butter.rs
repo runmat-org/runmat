@@ -382,10 +382,11 @@ fn butter_error_with_message(
     builtin_path = "crate::builtins::math::signal::butter"
 )]
 async fn butter_builtin(n: Value, wn: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let out_count = crate::output_count::current_output_count();
     let args = ButterArgs::parse(n, wn, &rest).await?;
     let design = design_butterworth(&args)?;
 
-    if let Some(out_count) = crate::output_count::current_output_count() {
+    if let Some(out_count) = out_count {
         return match out_count {
             0 => Ok(Value::OutputList(Vec::new())),
             1 => Ok(Value::OutputList(vec![design.numerator_value()?])),
@@ -906,6 +907,8 @@ fn normalize_transfer_function(
     mut numerator: Vec<Complex64>,
     mut denominator: Vec<Complex64>,
 ) -> BuiltinResult<(Vec<Complex64>, Vec<Complex64>)> {
+    ensure_finite_coefficients(&numerator, "numerator")?;
+    ensure_finite_coefficients(&denominator, "denominator")?;
     let Some(leading) = denominator.first().copied() else {
         return Err(butter_error_with_detail(
             &BUTTER_ERROR_INTERNAL,
@@ -931,7 +934,19 @@ fn normalize_transfer_function(
     }
     scrub_coefficients(&mut numerator);
     scrub_coefficients(&mut denominator);
+    ensure_finite_coefficients(&numerator, "numerator")?;
+    ensure_finite_coefficients(&denominator, "denominator")?;
     Ok((numerator, denominator))
+}
+
+fn ensure_finite_coefficients(coeffs: &[Complex64], label: &str) -> BuiltinResult<()> {
+    if coeffs.iter().any(|value| !complex_is_finite(*value)) {
+        return Err(butter_error_with_detail(
+            &BUTTER_ERROR_INTERNAL,
+            format!("filter design produced non-finite {label} coefficients"),
+        ));
+    }
+    Ok(())
 }
 
 fn scrub_coefficients(coeffs: &mut [Complex64]) {
@@ -1089,6 +1104,17 @@ mod tests {
             Value::Tensor(tensor) => tensor.data.clone(),
             other => panic!("expected real tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn butter_rejects_non_finite_transfer_coefficients() {
+        let err = normalize_transfer_function(
+            vec![Complex64::new(f64::INFINITY, 0.0)],
+            vec![Complex64::new(1.0, 0.0)],
+        )
+        .expect_err("non-finite numerator should fail");
+        assert_eq!(err.identifier(), BUTTER_ERROR_INTERNAL.identifier);
+        assert!(err.message().contains("non-finite numerator coefficients"));
     }
 
     fn complex_column(value: &Value) -> Vec<Complex64> {

@@ -81,6 +81,8 @@ pub enum Value {
     // Char array (single-quoted): 2-D character array (rows x cols)
     CharArray(CharArray),
     Tensor(Tensor),
+    /// Real double sparse matrix in compressed sparse column form.
+    SparseTensor(SparseTensor),
     /// Complex numeric array; same column-major shape semantics as `Tensor`
     ComplexTensor(ComplexTensor),
     /// Scalar symbolic expression used by `sym`, `syms`, and symbolic math builtins.
@@ -235,6 +237,17 @@ pub struct Tensor {
     pub cols: usize,       // Compatibility for 2D usage
     /// Logical numeric class of this tensor; host storage remains f64.
     pub dtype: NumericDType,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SparseTensor {
+    pub rows: usize,
+    pub cols: usize,
+    /// Column pointers into `row_indices`/`values`; length is `cols + 1`.
+    pub col_ptrs: Vec<usize>,
+    /// Zero-based row indices, sorted within each column.
+    pub row_indices: Vec<usize>,
+    pub values: Vec<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -497,6 +510,130 @@ impl Tensor {
     // No-compat constructors: prefer new/new_2d/zeros/zeros2/ones/ones2
 }
 
+impl SparseTensor {
+    pub fn new(
+        rows: usize,
+        cols: usize,
+        col_ptrs: Vec<usize>,
+        row_indices: Vec<usize>,
+        values: Vec<f64>,
+    ) -> Result<Self, String> {
+        if col_ptrs.len() != cols.saturating_add(1) {
+            return Err(format!(
+                "SparseTensor col_ptrs length {} doesn't match cols {}",
+                col_ptrs.len(),
+                cols
+            ));
+        }
+        if row_indices.len() != values.len() {
+            return Err(format!(
+                "SparseTensor row index length {} doesn't match value length {}",
+                row_indices.len(),
+                values.len()
+            ));
+        }
+        if col_ptrs.first().copied().unwrap_or(usize::MAX) != 0 {
+            return Err("SparseTensor col_ptrs must start at 0".to_string());
+        }
+        if col_ptrs.last().copied().unwrap_or(usize::MAX) != values.len() {
+            return Err("SparseTensor final col_ptr must equal nnz".to_string());
+        }
+        for window in col_ptrs.windows(2) {
+            if window[0] > window[1] {
+                return Err("SparseTensor col_ptrs must be nondecreasing".to_string());
+            }
+        }
+        for col in 0..cols {
+            let start = col_ptrs[col];
+            let end = col_ptrs[col + 1];
+            let mut prev: Option<usize> = None;
+            for &row in &row_indices[start..end] {
+                if row >= rows {
+                    return Err(format!("SparseTensor row index {row} exceeds rows {rows}"));
+                }
+                if prev.is_some_and(|p| p >= row) {
+                    return Err("SparseTensor row indices must be sorted and unique".to_string());
+                }
+                prev = Some(row);
+            }
+        }
+        Ok(Self {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            values,
+        })
+    }
+
+    pub fn zeros(rows: usize, cols: usize) -> Self {
+        Self {
+            rows,
+            cols,
+            col_ptrs: vec![0; cols.saturating_add(1)],
+            row_indices: Vec::new(),
+            values: Vec::new(),
+        }
+    }
+
+    pub fn nnz(&self) -> usize {
+        self.values.len()
+    }
+
+    pub fn shape(&self) -> Vec<usize> {
+        vec![self.rows, self.cols]
+    }
+
+    pub fn to_dense(&self) -> Result<Tensor, String> {
+        let len = self
+            .rows
+            .checked_mul(self.cols)
+            .ok_or_else(|| "SparseTensor dense dimensions overflow usize".to_string())?;
+        let mut data = Vec::new();
+        data.try_reserve_exact(len)
+            .map_err(|err| format!("SparseTensor dense allocation failed: {err}"))?;
+        data.resize(len, 0.0);
+        for col in 0..self.cols {
+            for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                let row = self.row_indices[idx];
+                data[row + col * self.rows] = self.values[idx];
+            }
+        }
+        Tensor::new(data, self.shape())
+    }
+
+    pub fn get(&self, row: usize, col: usize) -> Option<f64> {
+        if row >= self.rows || col >= self.cols {
+            return None;
+        }
+        let start = self.col_ptrs[col];
+        let end = self.col_ptrs[col + 1];
+        self.row_indices[start..end]
+            .binary_search(&row)
+            .ok()
+            .map(|offset| self.values[start + offset])
+    }
+}
+
+#[cfg(test)]
+mod sparse_tensor_tests {
+    use super::*;
+
+    #[test]
+    fn to_dense_rejects_overflowing_dimensions() {
+        let sparse = SparseTensor {
+            rows: usize::MAX,
+            cols: 2,
+            col_ptrs: vec![0, 0, 0],
+            row_indices: Vec::new(),
+            values: Vec::new(),
+        };
+
+        let err = sparse.to_dense().unwrap_err();
+        assert!(err.contains("overflow"));
+    }
+}
+
 impl ComplexTensor {
     pub fn new(data: Vec<(f64, f64)>, shape: Vec<usize>) -> Result<Self, String> {
         let expected: usize = shape.iter().product();
@@ -667,6 +804,34 @@ impl fmt::Display for Tensor {
                 }
             }
         }
+    }
+}
+
+impl fmt::Display for SparseTensor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "{}x{} sparse double matrix with {} nonzero entries",
+            self.rows,
+            self.cols,
+            self.nnz()
+        )?;
+        if self.nnz() == 0 {
+            return Ok(());
+        }
+        for col in 0..self.cols {
+            for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                let row = self.row_indices[idx];
+                writeln!(
+                    f,
+                    "  ({},{})  {}",
+                    row + 1,
+                    col + 1,
+                    format_number(self.values[idx])
+                )?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1155,6 +1320,9 @@ impl Type {
             }
             Value::Tensor(t) => Type::Tensor {
                 shape: Some(t.shape.iter().map(|&d| Some(d)).collect()),
+            },
+            Value::SparseTensor(t) => Type::Tensor {
+                shape: Some(vec![Some(t.rows), Some(t.cols)]),
             },
             Value::ComplexTensor(t) => Type::Tensor {
                 shape: Some(t.shape.iter().map(|&d| Some(d)).collect()),
@@ -2006,6 +2174,7 @@ impl fmt::Display for Value {
             Value::StringArray(sa) => write!(f, "{sa}"),
             Value::CharArray(ca) => write!(f, "{ca}"),
             Value::Tensor(m) => write!(f, "{m}"),
+            Value::SparseTensor(m) => write!(f, "{m}"),
             Value::ComplexTensor(m) => write!(f, "{m}"),
             Value::Symbolic(expr) => write!(f, "{expr}"),
             Value::Cell(ca) => ca.fmt(f),

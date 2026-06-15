@@ -176,7 +176,18 @@ fn is_tf_coefficient_type(ty: &Type) -> bool {
 }
 
 fn is_tf_or_scalar_type(ty: &Type) -> bool {
-    matches!(ty, Type::Struct { .. } | Type::Unknown) || is_tf_coefficient_type(ty)
+    is_tf_struct_type(ty) || matches!(ty, Type::Unknown) || is_tf_coefficient_type(ty)
+}
+
+fn is_tf_struct_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Struct {
+            known_fields: Some(fields),
+        } if fields.iter().any(|field| field == "Numerator")
+            && fields.iter().any(|field| field == "Denominator")
+            && fields.iter().any(|field| field == "Variable")
+    )
 }
 
 fn valid_tf_options(rest: &[Type]) -> bool {

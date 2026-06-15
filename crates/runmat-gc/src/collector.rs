@@ -186,7 +186,7 @@ impl MarkSweepCollector {
                     self.mark_object(cb, max_generation)?;
                 }
             }
-            Value::Tensor(_) | Value::ComplexTensor(_) => {
+            Value::Tensor(_) | Value::SparseTensor(_) | Value::ComplexTensor(_) => {
                 // Matrices don't contain references to other GC objects
                 // (their data is Vec<f64>)
             }
