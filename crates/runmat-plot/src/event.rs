@@ -536,6 +536,10 @@ fn is_true(value: &bool) -> bool {
     *value
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SerializedTextStyle {
@@ -671,6 +675,8 @@ pub struct SerializedAxesMetadata {
     pub grid_enabled: bool,
     #[serde(default)]
     pub minor_grid_enabled: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub minor_grid_explicit: bool,
     #[serde(default)]
     pub box_enabled: bool,
     #[serde(default)]
@@ -718,6 +724,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             view_elevation_deg: value.view_elevation_deg,
             grid_enabled: value.grid_enabled,
             minor_grid_enabled: value.minor_grid_enabled,
+            minor_grid_explicit: value.minor_grid_explicit,
             box_enabled: value.box_enabled,
             axis_equal: value.axis_equal,
             legend_enabled: value.legend_enabled,
@@ -758,6 +765,7 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             view_revision: 0,
             grid_enabled: value.grid_enabled,
             minor_grid_enabled: value.minor_grid_enabled,
+            minor_grid_explicit: value.minor_grid_explicit || value.minor_grid_enabled,
             box_enabled: value.box_enabled,
             axis_equal: value.axis_equal,
             legend_enabled: value.legend_enabled,
@@ -2341,6 +2349,7 @@ mod tests {
         assert_eq!(meta.z_limits, Some((5.0, 6.0)));
         assert!(!meta.grid_enabled);
         assert!(meta.minor_grid_enabled);
+        assert!(meta.minor_grid_explicit);
         assert!(!meta.box_enabled);
         assert!(meta.axis_equal);
         assert!(meta.colorbar_enabled);

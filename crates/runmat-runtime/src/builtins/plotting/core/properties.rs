@@ -1143,7 +1143,7 @@ fn apply_figure_property(
             let name = value_as_text_string(value)
                 .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Name must be text")))?;
             set_figure_name(figure_handle, name).map_err(|err| map_figure_error(builtin, err))?;
-            Ok(false)
+            Ok(true)
         }
         "numbertitle" => {
             let enabled = value_as_bool(value).ok_or_else(|| {
@@ -1151,15 +1151,15 @@ fn apply_figure_property(
             })?;
             set_figure_number_title(figure_handle, enabled)
                 .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(false)
+            Ok(true)
         }
         "visible" => {
             let visible = value_as_bool(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: Visible must be logical"))
             })?;
-            let (became_visible, _) = set_figure_visible(figure_handle, visible)
+            let _ = set_figure_visible(figure_handle, visible)
                 .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(became_visible)
+            Ok(true)
         }
         "color" => {
             let color = parse_color_value(&opts, value)?;
@@ -1183,11 +1183,11 @@ fn apply_figure_property(
             }
             select_axes_for_figure(figure_handle, axes_index)
                 .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(false)
+            Ok(true)
         }
         "sgtitle" => {
             apply_figure_text_alias(figure_handle, PlotObjectKind::SuperTitle, value, builtin)?;
-            Ok(false)
+            Ok(true)
         }
         other => Err(plotting_error(
             builtin,
@@ -1196,18 +1196,64 @@ fn apply_figure_property(
     }
 }
 
-pub(crate) fn validate_figure_property_name(
-    value: &Value,
+pub(crate) fn validate_figure_property_value(
+    key_value: &Value,
+    property_value: &Value,
+    target_figure: Option<FigureHandle>,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let key = property_name(value, builtin)?;
+    let key = property_name(key_value, builtin)?;
+    let opts = LineStyleParseOptions::generic(builtin);
     match key.as_str() {
-        "name" | "numbertitle" | "visible" | "color" | "currentaxes" | "sgtitle" => Ok(()),
-        other => Err(plotting_error(
-            builtin,
-            format!("{builtin}: unsupported figure property `{other}`"),
-        )),
+        "name" => {
+            value_as_text_string(property_value)
+                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Name must be text")))?;
+        }
+        "numbertitle" => {
+            value_as_bool(property_value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: NumberTitle must be logical"))
+            })?;
+        }
+        "visible" => {
+            value_as_bool(property_value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: Visible must be logical"))
+            })?;
+        }
+        "color" => {
+            let _ = parse_color_value(&opts, property_value)?;
+        }
+        "currentaxes" => {
+            let resolved = resolve_plot_handle(property_value, builtin)?;
+            let PlotHandle::Axes(fig, _) = resolved else {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: CurrentAxes must be an axes handle"),
+                ));
+            };
+            let Some(target) = target_figure else {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: CurrentAxes requires an existing target figure"),
+                ));
+            };
+            if fig != target {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: CurrentAxes must belong to the target figure"),
+                ));
+            }
+        }
+        "sgtitle" => {
+            validate_figure_text_alias(PlotObjectKind::SuperTitle, property_value, builtin)?
+        }
+        other => {
+            return Err(plotting_error(
+                builtin,
+                format!("{builtin}: unsupported figure property `{other}`"),
+            ));
+        }
     }
+    Ok(())
 }
 
 fn get_histogram_property(
@@ -3613,6 +3659,33 @@ fn apply_figure_text_alias(
     };
     set_sg_title_properties_for_figure(handle, text, Some(style))
         .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn validate_figure_text_alias(
+    kind: PlotObjectKind,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if value_as_text_string(value).is_some() {
+        return Ok(());
+    }
+
+    let scalar = handle_scalar(value, builtin)?;
+    let (src_handle, _src_axes, src_kind) =
+        decode_plot_object_handle(scalar).map_err(|err| map_figure_error(builtin, err))?;
+    if src_kind != kind {
+        return Err(plotting_error(
+            builtin,
+            format!(
+                "{builtin}: expected a matching text handle for `{}`",
+                key_name(kind)
+            ),
+        ));
+    }
+
+    super::state::clone_figure(src_handle)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure handle")))?;
     Ok(())
 }
 

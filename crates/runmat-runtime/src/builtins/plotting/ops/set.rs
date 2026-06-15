@@ -116,6 +116,33 @@ mod tests {
     use runmat_builtins::Value;
     use runmat_plot::plots::{Figure, LinePlot};
 
+    struct EnvRestoreGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvRestoreGuard {
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvRestoreGuard {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(previous) = self.previous.take() {
+                    std::env::set_var(self.key, previous);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+    }
+
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
         ensure_plot_test_env();
@@ -371,6 +398,59 @@ mod tests {
             get_builtin(vec![Value::Num(fig), Value::String("Name".into())]).unwrap(),
             Value::String("demo".into())
         );
+    }
+
+    #[test]
+    fn set_visible_figure_display_properties_request_presentation() {
+        let _guard = setup();
+        let fig =
+            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(8899.0)]).unwrap();
+        let ax = crate::builtins::plotting::subplot::subplot_builtin(
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(2.0),
+        )
+        .unwrap();
+
+        let _host_guard = EnvRestoreGuard::remove("RUNMAT_HOST_MANAGED_PLOTS");
+        for args in [
+            vec![
+                Value::Num(fig),
+                Value::String("Name".into()),
+                Value::String("demo".into()),
+            ],
+            vec![
+                Value::Num(fig),
+                Value::String("NumberTitle".into()),
+                Value::String("off".into()),
+            ],
+            vec![
+                Value::Num(fig),
+                Value::String("SGTitle".into()),
+                Value::String("Overview".into()),
+            ],
+            vec![
+                Value::Num(fig),
+                Value::String("CurrentAxes".into()),
+                Value::Num(ax),
+            ],
+        ] {
+            let err = set_builtin(args).expect_err("visible display property should present");
+            assert!(
+                err.message().contains("Plotting is unavailable"),
+                "unexpected error: {err:?}"
+            );
+        }
+
+        set_builtin(vec![
+            Value::Num(fig),
+            Value::String("Visible".into()),
+            Value::String("off".into()),
+        ])
+        .expect("visible off should present as an update without rendering");
+        let figure = clone_figure(crate::builtins::plotting::state::FigureHandle::from(8899))
+            .expect("figure should exist");
+        assert!(!figure.visible);
     }
 
     #[test]

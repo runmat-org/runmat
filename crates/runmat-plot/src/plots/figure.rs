@@ -145,6 +145,7 @@ pub struct AxesMetadata {
     pub view_revision: u64,
     pub grid_enabled: bool,
     pub minor_grid_enabled: bool,
+    pub minor_grid_explicit: bool,
     pub box_enabled: bool,
     pub axis_equal: bool,
     pub legend_enabled: bool,
@@ -704,11 +705,24 @@ impl Figure {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
             meta.minor_grid_enabled = enabled;
+            meta.minor_grid_explicit = true;
         }
         if axes_index == self.active_axes_index {
             self.sync_legacy_fields_from_active_axes();
         }
         self.dirty = true;
+    }
+
+    pub fn minor_grid_enabled_for_axes(&self, axes_index: usize) -> bool {
+        self.axes_metadata(axes_index)
+            .map(|meta| {
+                if meta.minor_grid_explicit {
+                    meta.minor_grid_enabled
+                } else {
+                    self.minor_grid_enabled
+                }
+            })
+            .unwrap_or(self.minor_grid_enabled)
     }
 
     /// Set background color
@@ -2406,8 +2420,10 @@ mod tests {
         assert_eq!(left.x_limits, None);
         assert_eq!(right.x_limits, Some((1.0, 2.0)));
         assert!(!left.minor_grid_enabled);
+        assert!(!left.minor_grid_explicit);
         assert!(!right.grid_enabled);
         assert!(right.minor_grid_enabled);
+        assert!(right.minor_grid_explicit);
         assert!(!right.box_enabled);
         assert!(right.axis_equal);
         assert!(right.colorbar_enabled);

@@ -477,15 +477,15 @@ fn filesystem_path_command_forms_stringify_path_words() {
 
 #[test]
 fn path_command_form_does_not_steal_trailing_binary_operator() {
-    let parsed = parse_with_options("mkdir ./out + 1", ParserOptions::new(CompatMode::Matlab));
-    if let Ok(program) = parsed {
-        assert!(
-            !matches!(
-                &program.body[0],
-                Stmt::ExprStmt(Expr::CommandCall(name, _, _), false, _) if name == "mkdir"
-            ),
-            "path command with trailing binary operator parsed as a truncated command call"
-        );
+    let program =
+        parse_with_options("mkdir ./out + 1", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::Binary(_, BinOp::Add, right, _), false, _) => {
+            assert!(matches!(&**right, Expr::Number(number, _) if number == "1"));
+        }
+        other => panic!(
+            "expected path command with trailing operator to parse as expression, got {other:?}"
+        ),
     }
 }
 

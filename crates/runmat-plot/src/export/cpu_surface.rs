@@ -711,7 +711,7 @@ fn get_axes_style_and_display_prefs(
         label_scale,
         tick_scale,
         meta.grid_enabled,
-        meta.minor_grid_enabled,
+        figure.minor_grid_enabled_for_axes(axes_index),
         meta.box_enabled,
     )
 }
@@ -1558,4 +1558,24 @@ pub async fn render_figure_png_bytes(
         render_figure_rgba_bytes(figure, width, height, theme, camera, axes_cameras, textmark)
             .await?;
     encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cpu_export_respects_explicit_axes_minor_grid_override() {
+        let mut figure = Figure::new();
+        figure.minor_grid_enabled = true;
+        figure.set_axes_minor_grid_enabled(0, false);
+
+        let (_, _, _, _, show_minor_grid, _) = get_axes_style_and_display_prefs(&figure, 0);
+        assert!(!show_minor_grid);
+
+        let mut inherited = Figure::new();
+        inherited.minor_grid_enabled = true;
+        let (_, _, _, _, inherited_minor_grid, _) = get_axes_style_and_display_prefs(&inherited, 0);
+        assert!(inherited_minor_grid);
+    }
 }

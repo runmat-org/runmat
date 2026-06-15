@@ -2922,8 +2922,7 @@ impl PlotRenderer {
         axes_index: usize,
     ) -> bool {
         last_figure
-            .and_then(|f| f.axes_metadata(axes_index))
-            .map(|m| m.minor_grid_enabled || figure_show_minor_grid)
+            .map(|f| f.minor_grid_enabled_for_axes(axes_index))
             .unwrap_or(figure_show_minor_grid)
     }
 
@@ -3442,6 +3441,22 @@ mod tests {
 
         assert!(!figure.axes_metadata(0).unwrap().minor_grid_enabled);
         assert!(PlotRenderer::minor_grid_for_axes(
+            Some(&figure),
+            figure.minor_grid_enabled,
+            0
+        ));
+    }
+
+    #[test]
+    fn explicit_axes_minor_grid_false_overrides_figure_level_minor_grid() {
+        let mut figure = Figure::new();
+        figure.minor_grid_enabled = true;
+        figure.set_axes_minor_grid_enabled(0, false);
+
+        let meta = figure.axes_metadata(0).unwrap();
+        assert!(!meta.minor_grid_enabled);
+        assert!(meta.minor_grid_explicit);
+        assert!(!PlotRenderer::minor_grid_for_axes(
             Some(&figure),
             figure.minor_grid_enabled,
             0

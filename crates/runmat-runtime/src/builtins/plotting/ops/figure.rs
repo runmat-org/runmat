@@ -8,7 +8,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use super::op_common::handles::parse_optional_figure_handle;
-use super::properties::{set_properties, validate_figure_property_name, PlotHandle};
+use super::properties::{set_properties, validate_figure_property_value, PlotHandle};
 use super::state::{new_figure_handle, select_figure};
 use crate::builtins::plotting::plotting_error;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
@@ -119,7 +119,10 @@ pub fn figure_builtin(rest: Vec<Value>) -> crate::BuiltinResult<f64> {
 
     // Validate properties before any state modifications
     if !property_args.is_empty() {
-        validate_figure_properties(property_args)?;
+        validate_figure_properties(
+            property_args,
+            target_info.as_ref().and_then(FigureTarget::target_figure),
+        )?;
     }
 
     // Now that validation passed, create/select the figure
@@ -143,7 +146,19 @@ enum FigureTarget {
     New,
 }
 
-fn validate_figure_properties(args: &[Value]) -> crate::BuiltinResult<()> {
+impl FigureTarget {
+    fn target_figure(&self) -> Option<super::state::FigureHandle> {
+        match self {
+            FigureTarget::Existing(handle) => Some(*handle),
+            FigureTarget::New => None,
+        }
+    }
+}
+
+fn validate_figure_properties(
+    args: &[Value],
+    target_figure: Option<super::state::FigureHandle>,
+) -> crate::BuiltinResult<()> {
     if !args.len().is_multiple_of(2) {
         return Err(crate::builtins::plotting::plotting_error(
             "figure",
@@ -151,7 +166,7 @@ fn validate_figure_properties(args: &[Value]) -> crate::BuiltinResult<()> {
         ));
     }
     for pair in args.chunks_exact(2) {
-        validate_figure_property_name(&pair[0], "figure")?;
+        validate_figure_property_value(&pair[0], &pair[1], target_figure, "figure")?;
     }
     Ok(())
 }
@@ -197,7 +212,7 @@ mod tests {
     use super::*;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{
-        clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
+        clear_figure, clone_figure, current_figure_handle, figure_handles, reset_hold_state_for_run,
     };
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
@@ -303,6 +318,8 @@ mod tests {
     #[test]
     fn figure_rejects_invalid_color_name() {
         let _guard = setup();
+        let first = figure_builtin(Vec::new()).unwrap();
+        let handles_before_error = figure_handles();
         let err = figure_builtin(vec![
             Value::String("Color".into()),
             Value::String("banana".into()),
@@ -311,6 +328,8 @@ mod tests {
         assert!(err
             .message()
             .contains("unsupported color specification `banana`"));
+        assert_eq!(current_figure_handle().as_u32() as f64, first);
+        assert_eq!(figure_handles(), handles_before_error);
     }
 
     #[test]

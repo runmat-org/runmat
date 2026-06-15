@@ -2495,6 +2495,7 @@ pub(crate) fn disable_rendering_for_tests() {
     static INIT: Once = Once::new();
     INIT.call_once(|| unsafe {
         std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
+        std::env::set_var("RUNMAT_HOST_MANAGED_PLOTS", "1");
     });
 }
 

@@ -94,6 +94,9 @@ fn js_error_text(value: &JsValue) -> String {
     if let Some(message) = value.as_string() {
         return message;
     }
+    if let Some(error) = value.dyn_ref::<js_sys::Error>() {
+        return String::from(error.message());
+    }
     js_sys::JSON::stringify(value)
         .ok()
         .and_then(|json| json.as_string())
