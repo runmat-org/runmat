@@ -419,7 +419,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{IntValue, ResolveContext, SymbolicExpr, SparseTensor, Type};
+    use runmat_builtins::{IntValue, ResolveContext, SparseTensor, SymbolicExpr, Type};
 
     fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::double_builtin(value, rest))

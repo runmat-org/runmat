@@ -1,6 +1,7 @@
 //! MATLAB-compatible `null` builtin for matrix null-space bases.
 
 use std::convert::TryFrom;
+use std::mem::size_of;
 
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
@@ -312,7 +313,7 @@ fn null_real_orthonormal_tensor(matrix: &Tensor, tol: Option<f64>) -> BuiltinRes
             .map_err(|e| internal_error(format!("{NAME}: {e}")));
     }
     if rows == 0 {
-        return Tensor::new(identity_basis_real(cols), vec![cols, cols])
+        return Tensor::new(identity_basis_real(cols)?, vec![cols, cols])
             .map_err(|e| internal_error(format!("{NAME}: {e}")));
     }
 
@@ -330,7 +331,7 @@ fn null_complex_orthonormal_tensor(
             .map_err(|e| internal_error(format!("{NAME}: {e}")));
     }
     if rows == 0 {
-        let data = identity_basis_complex(cols)
+        let data = identity_basis_complex(cols)?
             .into_iter()
             .map(|value| (value.re, value.im))
             .collect();
@@ -403,7 +404,7 @@ fn real_orthonormal_basis_from_svd(
     let target_nullity = cols.saturating_sub(row_space.len());
     complete_real_null_basis(&mut basis, &row_space, cols, target_nullity);
     let basis_cols = basis.len();
-    Ok((flatten_real_columns(basis, cols), basis_cols))
+    Ok((flatten_real_columns(basis, cols)?, basis_cols))
 }
 
 fn complex_orthonormal_basis_from_svd(
@@ -433,7 +434,7 @@ fn complex_orthonormal_basis_from_svd(
     let target_nullity = cols.saturating_sub(row_space.len());
     complete_complex_null_basis(&mut basis, &row_space, cols, target_nullity);
     let basis_cols = basis.len();
-    Ok((flatten_complex_columns(basis, cols), basis_cols))
+    Ok((flatten_complex_columns(basis, cols)?, basis_cols))
 }
 
 fn complete_real_null_basis(
@@ -556,36 +557,72 @@ fn is_rank_singular_value(singular_value: f64, tolerance: f64) -> bool {
     singular_value.is_infinite() || singular_value > tolerance
 }
 
-fn flatten_real_columns(columns: Vec<Vec<f64>>, rows: usize) -> Vec<f64> {
-    let mut data = Vec::with_capacity(rows * columns.len());
+fn checked_output_len(rows: usize, cols: usize, context: &str) -> BuiltinResult<usize> {
+    rows.checked_mul(cols)
+        .ok_or_else(|| input_error(format!("{NAME}: {context} dimension product overflow")))
+}
+
+fn zeroed_vec<T: Clone>(len: usize, value: T, context: &str) -> BuiltinResult<Vec<T>> {
+    let max_len = isize::MAX as usize / size_of::<T>();
+    if len > max_len {
+        return Err(input_error(format!(
+            "{NAME}: {context} allocation is too large"
+        )));
+    }
+    let mut data = Vec::new();
+    data.try_reserve_exact(len)
+        .map_err(|err| internal_error(format!("{NAME}: {context} allocation failed: {err}")))?;
+    data.resize(len, value);
+    Ok(data)
+}
+
+fn flatten_real_columns(columns: Vec<Vec<f64>>, rows: usize) -> BuiltinResult<Vec<f64>> {
+    let len = checked_output_len(rows, columns.len(), "orthonormal basis")?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(len).map_err(|err| {
+        internal_error(format!(
+            "{NAME}: orthonormal basis allocation failed: {err}"
+        ))
+    })?;
     for column in columns {
         data.extend(column);
     }
-    data
+    Ok(data)
 }
 
-fn flatten_complex_columns(columns: Vec<Vec<Complex64>>, rows: usize) -> Vec<Complex64> {
-    let mut data = Vec::with_capacity(rows * columns.len());
+fn flatten_complex_columns(
+    columns: Vec<Vec<Complex64>>,
+    rows: usize,
+) -> BuiltinResult<Vec<Complex64>> {
+    let len = checked_output_len(rows, columns.len(), "orthonormal basis")?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(len).map_err(|err| {
+        internal_error(format!(
+            "{NAME}: orthonormal basis allocation failed: {err}"
+        ))
+    })?;
     for column in columns {
         data.extend(column);
     }
-    data
+    Ok(data)
 }
 
-fn identity_basis_real(cols: usize) -> Vec<f64> {
-    let mut data = vec![0.0; cols * cols];
+fn identity_basis_real(cols: usize) -> BuiltinResult<Vec<f64>> {
+    let len = checked_output_len(cols, cols, "identity basis")?;
+    let mut data = zeroed_vec(len, 0.0, "identity basis")?;
     for idx in 0..cols {
         data[idx + idx * cols] = 1.0;
     }
-    data
+    Ok(data)
 }
 
-fn identity_basis_complex(cols: usize) -> Vec<Complex64> {
-    let mut data = vec![Complex64::new(0.0, 0.0); cols * cols];
+fn identity_basis_complex(cols: usize) -> BuiltinResult<Vec<Complex64>> {
+    let len = checked_output_len(cols, cols, "identity basis")?;
+    let mut data = zeroed_vec(len, Complex64::new(0.0, 0.0), "identity basis")?;
     for idx in 0..cols {
         data[idx + idx * cols] = Complex64::new(1.0, 0.0);
     }
-    data
+    Ok(data)
 }
 
 fn real_row_reduction_basis(
@@ -596,7 +633,7 @@ fn real_row_reduction_basis(
 ) -> BuiltinResult<(Vec<f64>, usize)> {
     let (reduced, pivots) = rref_real_impl(data, rows, cols, tolerance)
         .map_err(|err| internal_error(format!("{NAME}: row reduction failed ({err})")))?;
-    Ok(basis_from_real_rref(&reduced, rows, cols, &pivots))
+    basis_from_real_rref(&reduced, rows, cols, &pivots)
 }
 
 fn complex_row_reduction_basis(
@@ -607,7 +644,7 @@ fn complex_row_reduction_basis(
 ) -> BuiltinResult<(Vec<Complex64>, usize)> {
     let (reduced, pivots) = rref_complex_impl(data, rows, cols, tolerance)
         .map_err(|err| internal_error(format!("{NAME}: row reduction failed ({err})")))?;
-    Ok(basis_from_complex_rref(&reduced, rows, cols, &pivots))
+    basis_from_complex_rref(&reduced, rows, cols, &pivots)
 }
 
 fn basis_from_real_rref(
@@ -615,9 +652,12 @@ fn basis_from_real_rref(
     rows: usize,
     cols: usize,
     pivots: &[usize],
-) -> (Vec<f64>, usize) {
-    let free_cols = free_columns(cols, pivots);
-    let mut basis = vec![0.0; cols * free_cols.len()];
+) -> BuiltinResult<(Vec<f64>, usize)> {
+    let pivot_cols = normalized_pivot_columns(cols, pivots);
+    let free_len = cols.saturating_sub(pivot_cols.len());
+    let basis_len = checked_output_len(cols, free_len, "row-reduction basis")?;
+    let free_cols = free_columns(cols, &pivot_cols)?;
+    let mut basis = zeroed_vec(basis_len, 0.0, "row-reduction basis")?;
     for (basis_col, &free_col) in free_cols.iter().enumerate() {
         basis[free_col + basis_col * cols] = 1.0;
         for (pivot_row, &pivot_one_based) in pivots.iter().enumerate() {
@@ -625,7 +665,7 @@ fn basis_from_real_rref(
             basis[pivot_col + basis_col * cols] = -reduced[pivot_row + free_col * rows];
         }
     }
-    (basis, free_cols.len())
+    Ok((basis, free_cols.len()))
 }
 
 fn basis_from_complex_rref(
@@ -633,9 +673,12 @@ fn basis_from_complex_rref(
     rows: usize,
     cols: usize,
     pivots: &[usize],
-) -> (Vec<Complex64>, usize) {
-    let free_cols = free_columns(cols, pivots);
-    let mut basis = vec![Complex64::new(0.0, 0.0); cols * free_cols.len()];
+) -> BuiltinResult<(Vec<Complex64>, usize)> {
+    let pivot_cols = normalized_pivot_columns(cols, pivots);
+    let free_len = cols.saturating_sub(pivot_cols.len());
+    let basis_len = checked_output_len(cols, free_len, "row-reduction basis")?;
+    let free_cols = free_columns(cols, &pivot_cols)?;
+    let mut basis = zeroed_vec(basis_len, Complex64::new(0.0, 0.0), "row-reduction basis")?;
     for (basis_col, &free_col) in free_cols.iter().enumerate() {
         basis[free_col + basis_col * cols] = Complex64::new(1.0, 0.0);
         for (pivot_row, &pivot_one_based) in pivots.iter().enumerate() {
@@ -643,21 +686,36 @@ fn basis_from_complex_rref(
             basis[pivot_col + basis_col * cols] = -reduced[pivot_row + free_col * rows];
         }
     }
-    (basis, free_cols.len())
+    Ok((basis, free_cols.len()))
 }
 
-fn free_columns(cols: usize, pivots: &[usize]) -> Vec<usize> {
-    let mut pivot_marks = vec![false; cols];
+fn normalized_pivot_columns(cols: usize, pivots: &[usize]) -> Vec<usize> {
+    let mut pivot_cols = Vec::new();
     for &pivot in pivots {
         if (1..=cols).contains(&pivot) {
-            pivot_marks[pivot - 1] = true;
+            pivot_cols.push(pivot - 1);
         }
     }
-    pivot_marks
-        .into_iter()
-        .enumerate()
-        .filter_map(|(col, is_pivot)| (!is_pivot).then_some(col))
-        .collect()
+    pivot_cols.sort_unstable();
+    pivot_cols.dedup();
+    pivot_cols
+}
+
+fn free_columns(cols: usize, pivot_cols: &[usize]) -> BuiltinResult<Vec<usize>> {
+    let free_len = cols.saturating_sub(pivot_cols.len());
+    let mut free_cols = Vec::new();
+    free_cols.try_reserve_exact(free_len).map_err(|err| {
+        internal_error(format!("{NAME}: free-column list allocation failed: {err}"))
+    })?;
+    let mut pivot_idx = 0;
+    for col in 0..cols {
+        if pivot_idx < pivot_cols.len() && pivot_cols[pivot_idx] == col {
+            pivot_idx += 1;
+        } else {
+            free_cols.push(col);
+        }
+    }
+    Ok(free_cols)
 }
 
 #[cfg(test)]
@@ -1002,6 +1060,27 @@ pub(crate) mod tests {
             }
             other => panic!("expected 0x0 tensor basis, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn null_empty_wide_matrix_rejects_identity_basis_overflow() {
+        let tensor = Tensor::new(Vec::<f64>::new(), vec![0, usize::MAX]).unwrap();
+        let err = unwrap_error(null_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err());
+        assert!(err
+            .message()
+            .contains("identity basis dimension product overflow"));
+        assert_eq!(err.identifier(), NULL_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn null_rref_basis_rejects_output_size_overflow() {
+        let err = unwrap_error(basis_from_real_rref(&[], 0, usize::MAX, &[]).unwrap_err());
+        assert!(err
+            .message()
+            .contains("row-reduction basis dimension product overflow"));
+        assert_eq!(err.identifier(), NULL_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -387,7 +387,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CellArray, IntValue, MException, ObjectInstance, StructValue, SymbolicExpr, SparseTensor,
+        CellArray, IntValue, MException, ObjectInstance, SparseTensor, StructValue, SymbolicExpr,
     };
 
     fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
