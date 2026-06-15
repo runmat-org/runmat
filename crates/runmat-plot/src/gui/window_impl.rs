@@ -602,7 +602,7 @@ impl<'window> PlotWindow<'window> {
 
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
             // Use PlotOverlay for unified UI rendering - no more duplicate sidebar code!
-            let has_per_axes_grid = self.plot_renderer.last_figure.as_ref().map_or(false, |fig| {
+            let has_per_axes_grid = self.plot_renderer.last_figure.as_ref().is_some_and(|fig| {
                 let (rows, cols) = fig.axes_grid();
                 let axes_count = (rows * cols).max(1);
                 (0..axes_count).any(|idx| {

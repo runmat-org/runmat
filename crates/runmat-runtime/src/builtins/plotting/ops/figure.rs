@@ -8,7 +8,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use super::op_common::handles::parse_optional_figure_handle;
-use super::properties::{set_properties, PlotHandle};
+use super::properties::{set_properties, validate_figure_property_name, PlotHandle};
 use super::state::{new_figure_handle, select_figure};
 use crate::builtins::plotting::plotting_error;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
@@ -144,14 +144,14 @@ enum FigureTarget {
 }
 
 fn validate_figure_properties(args: &[Value]) -> crate::BuiltinResult<()> {
-    if args.len() % 2 != 0 {
+    if !args.len().is_multiple_of(2) {
         return Err(crate::builtins::plotting::plotting_error(
             "figure",
             "figure: property arguments must be name/value pairs",
         ));
     }
     for pair in args.chunks_exact(2) {
-        let _ = super::properties::property_name(&pair[0], "figure")?;
+        validate_figure_property_name(&pair[0], "figure")?;
     }
     Ok(())
 }

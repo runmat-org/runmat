@@ -274,11 +274,15 @@ async fn plot_root_locus_statement(first_sys: Value, rest: Vec<Value>) -> Builti
 
 struct HoldOffGuard {
     armed: bool,
+    previous_hold_enabled: bool,
 }
 
 impl HoldOffGuard {
     fn new() -> Self {
-        Self { armed: false }
+        Self {
+            armed: false,
+            previous_hold_enabled: crate::builtins::plotting::state::current_hold_enabled(),
+        }
     }
 
     fn arm(&mut self) {
@@ -289,7 +293,12 @@ impl HoldOffGuard {
 impl Drop for HoldOffGuard {
     fn drop(&mut self) {
         if self.armed {
-            crate::builtins::plotting::set_hold(crate::builtins::plotting::HoldMode::Off);
+            let mode = if self.previous_hold_enabled {
+                crate::builtins::plotting::HoldMode::On
+            } else {
+                crate::builtins::plotting::HoldMode::Off
+            };
+            crate::builtins::plotting::set_hold(mode);
         }
     }
 }
@@ -1371,6 +1380,24 @@ mod tests {
         let err = run_rlocus(sys, vec![malformed_tf]).expect_err("second system should fail");
         assert!(err.message().contains("missing"));
         assert!(!crate::builtins::plotting::state::current_hold_enabled());
+    }
+
+    #[test]
+    fn statement_form_restores_existing_hold_on_when_later_system_fails() {
+        let _plot_guard = crate::builtins::plotting::tests::lock_plot_registry();
+        crate::builtins::plotting::tests::ensure_plot_test_env();
+        crate::builtins::plotting::reset_hold_state_for_run();
+        let _ = crate::builtins::plotting::clear_figure(None);
+        crate::builtins::plotting::set_hold(crate::builtins::plotting::HoldMode::On);
+
+        let sys = tf(vec![1.0, 2.0], vec![1.0, 3.0, 4.0]);
+        let malformed_tf = Value::Object(ObjectInstance::new("tf".to_string()));
+        let _output_guard = crate::output_count::push_output_count(Some(0));
+
+        let err = run_rlocus(sys, vec![malformed_tf]).expect_err("second system should fail");
+        assert!(err.message().contains("missing"));
+        assert!(crate::builtins::plotting::state::current_hold_enabled());
+        crate::builtins::plotting::reset_hold_state_for_run();
     }
 
     #[test]

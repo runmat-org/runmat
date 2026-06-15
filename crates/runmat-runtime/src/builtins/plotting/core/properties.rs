@@ -95,13 +95,12 @@ pub fn set_properties(
     }
     match handle {
         PlotHandle::Figure(handle) => {
-            let mut property_changed = false;
+            let mut needs_present = false;
             for pair in args.chunks_exact(2) {
                 let key = property_name(&pair[0], builtin)?;
-                let _ = apply_figure_property(handle, &key, &pair[1], builtin)?;
-                property_changed = true;
+                needs_present |= apply_figure_property(handle, &key, &pair[1], builtin)?;
             }
-            if property_changed {
+            if needs_present {
                 let figure = super::state::clone_figure(handle)
                     .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure")))?;
                 let _ = present_figure_update(builtin, handle, figure)?;
@@ -1166,7 +1165,7 @@ fn apply_figure_property(
             let color = parse_color_value(&opts, value)?;
             set_figure_background_color(figure_handle, color)
                 .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(false)
+            Ok(true)
         }
         "currentaxes" => {
             let resolved = resolve_plot_handle(value, builtin)?;
@@ -1190,6 +1189,20 @@ fn apply_figure_property(
             apply_figure_text_alias(figure_handle, PlotObjectKind::SuperTitle, value, builtin)?;
             Ok(false)
         }
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported figure property `{other}`"),
+        )),
+    }
+}
+
+pub(crate) fn validate_figure_property_name(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let key = property_name(value, builtin)?;
+    match key.as_str() {
+        "name" | "numbertitle" | "visible" | "color" | "currentaxes" | "sgtitle" => Ok(()),
         other => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported figure property `{other}`"),

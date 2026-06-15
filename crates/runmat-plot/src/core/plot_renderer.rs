@@ -2909,11 +2909,22 @@ impl PlotRenderer {
             .unwrap_or(self.figure_show_grid)
     }
     pub fn overlay_show_minor_grid_for_axes(&self, axes_index: usize) -> bool {
-        self.last_figure
-            .as_ref()
+        Self::minor_grid_for_axes(
+            self.last_figure.as_ref(),
+            self.figure_show_minor_grid,
+            axes_index,
+        )
+    }
+
+    fn minor_grid_for_axes(
+        last_figure: Option<&crate::plots::Figure>,
+        figure_show_minor_grid: bool,
+        axes_index: usize,
+    ) -> bool {
+        last_figure
             .and_then(|f| f.axes_metadata(axes_index))
-            .map(|m| m.minor_grid_enabled)
-            .unwrap_or(self.figure_show_minor_grid)
+            .map(|m| m.minor_grid_enabled || figure_show_minor_grid)
+            .unwrap_or(figure_show_minor_grid)
     }
 
     fn push_vertical_grid_lines(
@@ -3354,7 +3365,7 @@ impl PlotRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plots::{figure::PlotElement, PatchPlot};
+    use crate::plots::{figure::PlotElement, Figure, PatchPlot};
 
     fn patch_element(vertices: Vec<Vec3>) -> PlotElement {
         PlotElement::Patch(PatchPlot::new(vertices, vec![vec![0, 1, 2]]).unwrap())
@@ -3422,6 +3433,19 @@ mod tests {
         assert_ne!(base_contract, limited_contract);
         assert_eq!(limited_contract.axes[0].x_limits, Some((0.0, 30.0)));
         assert_eq!(limited_contract.axes[1].x_limits, Some((200.0, 450.0)));
+    }
+
+    #[test]
+    fn figure_level_minor_grid_survives_default_axes_metadata() {
+        let mut figure = Figure::new();
+        figure.minor_grid_enabled = true;
+
+        assert!(!figure.axes_metadata(0).unwrap().minor_grid_enabled);
+        assert!(PlotRenderer::minor_grid_for_axes(
+            Some(&figure),
+            figure.minor_grid_enabled,
+            0
+        ));
     }
 }
 

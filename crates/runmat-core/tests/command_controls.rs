@@ -5,9 +5,19 @@
 
 use runmat_core::{ExecutionStreamKind, RunError, RunMatSession};
 use runmat_gc::gc_test_context;
+use std::sync::{Mutex, MutexGuard};
+
+static PLOT_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn isolate_plot_test() -> MutexGuard<'static, ()> {
+    let guard = PLOT_TEST_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+    runmat_runtime::builtins::plotting::reset_plot_state();
+    guard
+}
 
 #[test]
 fn close_all_command_form_executes_without_lowering_all_as_a_builtin() {
+    let _plot_guard = isolate_plot_test();
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     runmat_core::execute_text_request_for_testing(&mut engine, "figure(1);").unwrap();
@@ -396,6 +406,7 @@ fn clc_emits_clear_screen_control_stream() {
 
 #[test]
 fn plotting_command_gap_repros_execute() {
+    let _plot_guard = isolate_plot_test();
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     let result = runmat_core::execute_text_request_for_testing(
@@ -410,6 +421,7 @@ fn plotting_command_gap_repros_execute() {
 
 #[test]
 fn figure_name_property_pairs_execute_through_core() {
+    let _plot_guard = isolate_plot_test();
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     let result = runmat_core::execute_text_request_for_testing(

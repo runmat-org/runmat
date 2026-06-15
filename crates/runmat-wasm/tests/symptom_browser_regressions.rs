@@ -90,6 +90,20 @@ fn rendered_pixel_stats(canvas: &HtmlCanvasElement) -> (usize, usize) {
     (nonzero_pixels, sampled_colors.len())
 }
 
+fn js_error_text(value: &JsValue) -> String {
+    if let Some(message) = value.as_string() {
+        return message;
+    }
+    js_sys::JSON::stringify(value)
+        .ok()
+        .and_then(|json| json.as_string())
+        .unwrap_or_else(|| format!("{value:?}"))
+}
+
+fn is_canvas_webgpu_unavailable(message: &str) -> bool {
+    message.contains("no compatible WebGPU adapter was found")
+}
+
 #[wasm_bindgen_test(async)]
 async fn impedance_loop_executes_without_runtime_error() {
     shared::assert_impedance_loop_executes_without_runtime_error().await;
@@ -122,9 +136,22 @@ async fn surface_animation_loop_presents_without_runtime_error() {
         blank_colors, 1,
         "new canvas should have one transparent color"
     );
-    let surface_id = runmat_wasm::create_plot_surface(canvas.clone().into())
-        .await
-        .expect("create plot surface");
+    let surface_id = match runmat_wasm::create_plot_surface(canvas.clone().into()).await {
+        Ok(surface_id) => surface_id,
+        Err(err) => {
+            let message = js_error_text(&err);
+            if is_canvas_webgpu_unavailable(&message) {
+                web_sys::console::warn_1(
+                    &format!(
+                        "Skipping surface animation presentation check: browser has no canvas-compatible WebGPU adapter ({message})"
+                    )
+                    .into(),
+                );
+                return;
+            }
+            panic!("create plot surface: {message}");
+        }
+    };
 
     let script = r#"
 XRange = -2:0.02:2;

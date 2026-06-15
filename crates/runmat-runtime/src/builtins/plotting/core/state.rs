@@ -501,19 +501,6 @@ pub fn set_grid_enabled(enabled: bool) {
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 }
 
-pub fn set_minor_grid_enabled(enabled: bool) {
-    let (handle, figure_clone) = {
-        let mut reg = registry();
-        let handle = reg.current;
-        let state = get_state_mut(&mut reg, handle);
-        let axes = state.active_axes;
-        state.figure.set_axes_minor_grid_enabled(axes, enabled);
-        state.revision = state.revision.wrapping_add(1);
-        (handle, state.figure.clone())
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-}
-
 pub fn set_grid_and_minor_grid_enabled(grid_enabled: bool, minor_grid_enabled: Option<bool>) {
     let (handle, figure_clone) = {
         let mut reg = registry();
@@ -522,7 +509,9 @@ pub fn set_grid_and_minor_grid_enabled(grid_enabled: bool, minor_grid_enabled: O
         let axes = state.active_axes;
         state.figure.set_axes_grid_enabled(axes, grid_enabled);
         if let Some(minor_enabled) = minor_grid_enabled {
-            state.figure.set_axes_minor_grid_enabled(axes, minor_enabled);
+            state
+                .figure
+                .set_axes_minor_grid_enabled(axes, minor_enabled);
         }
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())

@@ -13,8 +13,7 @@ use super::op_common::cmd_parsing::{as_lower_str, parse_on_off};
 use super::state::{
     clear_current_axes, set_axis_equal, set_axis_equal_and_limits, set_axis_limits,
     set_box_enabled, set_colorbar_enabled, set_colormap, set_grid_and_minor_grid_enabled,
-    set_grid_enabled, set_minor_grid_enabled, set_surface_shading, set_z_limits, toggle_box,
-    toggle_colorbar, toggle_grid, toggle_minor_grid,
+    set_surface_shading, set_z_limits, toggle_box, toggle_colorbar, toggle_grid, toggle_minor_grid,
 };
 use crate::builtins::plotting::type_resolvers::bool_type;
 use crate::{build_runtime_error, RuntimeError};

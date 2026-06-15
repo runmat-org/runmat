@@ -342,16 +342,10 @@ impl Parser {
                 );
         }
 
-        match self.peek_token_at(i) {
-            Some(Token::LParen)
-            | Some(Token::Dot)
-            | Some(Token::LBracket)
-            | Some(Token::LBrace)
-            | Some(Token::Transpose) => false,
-            Some(Token::Assign) => false,
-            None | Some(Token::Semicolon) | Some(Token::Comma) | Some(Token::Newline) => true,
-            _ => true,
-        }
+        matches!(
+            self.peek_token_at(i),
+            None | Some(Token::Semicolon) | Some(Token::Comma) | Some(Token::Newline)
+        )
     }
 
     fn parse_command_args(&mut self, verb: &str) -> Vec<Expr> {
