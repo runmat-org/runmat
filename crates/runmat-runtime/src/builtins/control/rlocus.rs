@@ -13,9 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::control::tf_model::{
-    control_error, poly_eval, polynomial_roots, scalar_f64, TfModel, EPS,
-};
+use crate::builtins::control::tf_model::{poly_eval, polynomial_roots, scalar_f64, TfModel, EPS};
 use crate::builtins::control::type_resolvers::rlocus_type;
 use crate::{BuiltinResult, RuntimeError};
 
@@ -466,10 +464,9 @@ impl RootLocus {
         if self.roots.iter().all(|root| root.im.abs() <= EPS) {
             let data = self.roots.iter().map(|root| root.re).collect::<Vec<_>>();
             Tensor::new(data, shape).map(Value::Tensor).map_err(|err| {
-                control_error(
-                    BUILTIN_NAME,
-                    "RunMat:rlocus:Internal",
+                rlocus_error(
                     format!("rlocus: failed to build root matrix: {err}"),
+                    &RLOCUS_ERROR_INTERNAL,
                 )
             })
         } else {
@@ -481,10 +478,9 @@ impl RootLocus {
             ComplexTensor::new(data, shape)
                 .map(Value::ComplexTensor)
                 .map_err(|err| {
-                    control_error(
-                        BUILTIN_NAME,
-                        "RunMat:rlocus:Internal",
+                    rlocus_error(
                         format!("rlocus: failed to build complex root matrix: {err}"),
+                        &RLOCUS_ERROR_INTERNAL,
                     )
                 })
         }
@@ -494,10 +490,9 @@ impl RootLocus {
         Tensor::new(self.gains.clone(), vec![1, self.gains.len()])
             .map(Value::Tensor)
             .map_err(|err| {
-                control_error(
-                    BUILTIN_NAME,
-                    "RunMat:rlocus:Internal",
+                rlocus_error(
                     format!("rlocus: failed to build gain vector: {err}"),
+                    &RLOCUS_ERROR_INTERNAL,
                 )
             })
     }
@@ -1162,10 +1157,9 @@ fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
     Tensor::new(data, vec![rows, 1])
         .map(Value::Tensor)
         .map_err(|err| {
-            control_error(
-                BUILTIN_NAME,
-                "RunMat:rlocus:Internal",
+            rlocus_error(
                 format!("rlocus: failed to build plot vector: {err}"),
+                &RLOCUS_ERROR_INTERNAL,
             )
         })
 }
