@@ -95,12 +95,13 @@ pub fn set_properties(
     }
     match handle {
         PlotHandle::Figure(handle) => {
-            let mut present_after_update = false;
+            let mut property_changed = false;
             for pair in args.chunks_exact(2) {
                 let key = property_name(&pair[0], builtin)?;
-                present_after_update |= apply_figure_property(handle, &key, &pair[1], builtin)?;
+                let _ = apply_figure_property(handle, &key, &pair[1], builtin)?;
+                property_changed = true;
             }
-            if present_after_update {
+            if property_changed {
                 let figure = super::state::clone_figure(handle)
                     .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure")))?;
                 let _ = present_figure_update(builtin, handle, figure)?;

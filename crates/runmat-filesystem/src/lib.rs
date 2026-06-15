@@ -464,12 +464,26 @@ impl Seek for File {
     }
 }
 
-static PROVIDER: OnceCell<RwLock<Arc<dyn FsProvider>>> = OnceCell::new();
-static PROVIDER_OVERRIDE_LOCK: OnceCell<Mutex<()>> = OnceCell::new();
-static CURRENT_DIR_OVERRIDE: OnceCell<RwLock<Option<PathBuf>>> = OnceCell::new();
+struct ProviderState {
+    provider: Arc<dyn FsProvider>,
+    current_dir_override: Option<PathBuf>,
+}
 
-fn provider_lock() -> &'static RwLock<Arc<dyn FsProvider>> {
-    PROVIDER.get_or_init(|| RwLock::new(default_provider()))
+static PROVIDER_STATE: OnceCell<RwLock<ProviderState>> = OnceCell::new();
+static PROVIDER_OVERRIDE_LOCK: OnceCell<Mutex<()>> = OnceCell::new();
+
+fn provider_state_lock() -> &'static RwLock<ProviderState> {
+    PROVIDER_STATE.get_or_init(|| {
+        #[cfg(target_arch = "wasm32")]
+        let current_dir_override = Some(PathBuf::from("/"));
+        #[cfg(not(target_arch = "wasm32"))]
+        let current_dir_override = None;
+
+        RwLock::new(ProviderState {
+            provider: default_provider(),
+            current_dir_override,
+        })
+    })
 }
 
 /// Serializes tests and embedders that temporarily replace the process-wide
@@ -481,45 +495,36 @@ pub fn provider_override_lock() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn current_dir_override_lock() -> &'static RwLock<Option<PathBuf>> {
-    CURRENT_DIR_OVERRIDE.get_or_init(|| {
-        #[cfg(target_arch = "wasm32")]
-        {
-            RwLock::new(Some(PathBuf::from("/")))
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            RwLock::new(None)
-        }
-    })
-}
-
 fn current_dir_override() -> Option<PathBuf> {
-    current_dir_override_lock()
+    provider_state_lock()
         .read()
-        .expect("filesystem current dir lock poisoned")
+        .expect("filesystem provider lock poisoned")
+        .current_dir_override
         .clone()
 }
 
 fn replace_current_dir_override(value: Option<PathBuf>) -> Option<PathBuf> {
-    let mut guard = current_dir_override_lock()
+    let mut guard = provider_state_lock()
         .write()
-        .expect("filesystem current dir lock poisoned");
-    std::mem::replace(&mut *guard, value)
+        .expect("filesystem provider lock poisoned");
+    std::mem::replace(&mut guard.current_dir_override, value)
 }
 
 fn with_provider<T>(f: impl FnOnce(&dyn FsProvider) -> T) -> T {
-    let guard = provider_lock()
+    let guard = provider_state_lock()
         .read()
         .expect("filesystem provider lock poisoned");
-    f(&**guard)
+    f(&*guard.provider)
 }
 
 fn resolve_path(path: &Path) -> PathBuf {
     if path.is_absolute() {
         return path.to_path_buf();
     }
-    if let Some(base) = current_dir_override() {
+    let state = provider_state_lock()
+        .read()
+        .expect("filesystem provider lock poisoned");
+    if let Some(base) = &state.current_dir_override {
         return base.join(path);
     }
     path.to_path_buf()
@@ -527,11 +532,11 @@ fn resolve_path(path: &Path) -> PathBuf {
 
 pub fn set_provider(provider: Arc<dyn FsProvider>) {
     let current_dir_override = provider.current_dir_override();
-    let mut guard = provider_lock()
+    let mut guard = provider_state_lock()
         .write()
         .expect("filesystem provider lock poisoned");
-    *guard = provider;
-    replace_current_dir_override(current_dir_override);
+    guard.provider = provider;
+    guard.current_dir_override = current_dir_override;
 }
 
 /// Temporarily replace the active provider and return a guard that restores the
@@ -539,12 +544,13 @@ pub fn set_provider(provider: Arc<dyn FsProvider>) {
 /// filesystem without permanently mutating global state.
 pub fn replace_provider(provider: Arc<dyn FsProvider>) -> ProviderGuard {
     let current_dir_override = provider.current_dir_override();
-    let mut guard = provider_lock()
+    let mut guard = provider_state_lock()
         .write()
         .expect("filesystem provider lock poisoned");
-    let previous = guard.clone();
-    *guard = provider;
-    let previous_current_dir = replace_current_dir_override(current_dir_override);
+    let previous = guard.provider.clone();
+    let previous_current_dir = guard.current_dir_override.clone();
+    guard.provider = provider;
+    guard.current_dir_override = current_dir_override;
     ProviderGuard {
         previous,
         previous_current_dir,
@@ -562,9 +568,10 @@ pub fn with_provider_override<R>(provider: Arc<dyn FsProvider>, f: impl FnOnce()
 
 /// Returns the currently installed provider.
 pub fn current_provider() -> Arc<dyn FsProvider> {
-    provider_lock()
+    provider_state_lock()
         .read()
         .expect("filesystem provider lock poisoned")
+        .provider
         .clone()
 }
 
@@ -626,11 +633,11 @@ pub struct ProviderGuard {
 
 impl Drop for ProviderGuard {
     fn drop(&mut self) {
-        let mut guard = provider_lock()
+        let mut guard = provider_state_lock()
             .write()
             .expect("filesystem provider lock poisoned");
-        *guard = self.previous.clone();
-        replace_current_dir_override(self.previous_current_dir.clone());
+        guard.provider = self.previous.clone();
+        guard.current_dir_override = self.previous_current_dir.clone();
     }
 }
 
@@ -1073,6 +1080,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn native_provider_replacement_preserves_process_cwd_resolution() {
         let _guard = TEST_LOCK.lock().unwrap();
         let temp = tempdir().expect("tempdir");

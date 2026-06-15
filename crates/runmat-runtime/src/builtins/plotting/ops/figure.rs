@@ -107,22 +107,53 @@ pub const FIGURE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::plotting::figure"
 )]
 pub fn figure_builtin(rest: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let (handle, property_args) = if rest.is_empty() {
-        (new_figure_handle(), &rest[..])
+    let (target_info, property_args) = if rest.is_empty() {
+        (None, &rest[..])
     } else {
         match parse_optional_figure_target(&rest[0], rest.len())? {
-            Some(handle) => {
-                select_figure(handle);
-                (handle, &rest[1..])
-            }
-            None if is_next_selector(&rest[0]) => (new_figure_handle(), &rest[1..]),
-            None => (new_figure_handle(), &rest[..]),
+            Some(handle) => (Some(FigureTarget::Existing(handle)), &rest[1..]),
+            None if is_next_selector(&rest[0]) => (Some(FigureTarget::New), &rest[1..]),
+            None => (Some(FigureTarget::New), &rest[..]),
         }
     };
+
+    // Validate properties before any state modifications
+    if !property_args.is_empty() {
+        validate_figure_properties(property_args)?;
+    }
+
+    // Now that validation passed, create/select the figure
+    let handle = match target_info {
+        Some(FigureTarget::Existing(h)) => {
+            select_figure(h);
+            h
+        }
+        Some(FigureTarget::New) | None => new_figure_handle(),
+    };
+
+    // Apply properties after figure creation/selection
     if !property_args.is_empty() {
         set_properties(PlotHandle::Figure(handle), property_args, "figure")?;
     }
     Ok(handle.as_u32() as f64)
+}
+
+enum FigureTarget {
+    Existing(super::state::FigureHandle),
+    New,
+}
+
+fn validate_figure_properties(args: &[Value]) -> crate::BuiltinResult<()> {
+    if args.len() % 2 != 0 {
+        return Err(crate::builtins::plotting::plotting_error(
+            "figure",
+            "figure: property arguments must be name/value pairs",
+        ));
+    }
+    for pair in args.chunks_exact(2) {
+        let _ = super::properties::property_name(&pair[0], "figure")?;
+    }
+    Ok(())
 }
 
 fn parse_optional_figure_target(

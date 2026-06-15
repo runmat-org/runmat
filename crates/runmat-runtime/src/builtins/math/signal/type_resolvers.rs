@@ -140,7 +140,7 @@ fn sample_rate_type(args: &[Type], context: &ResolveContext, op: SampleRateOp) -
     let mut output_shape = canonical_sample_shape(shape);
     let dim = first_non_singleton_shape_dim(&output_shape);
     let factor = literal_positive_integer_at(context, 1);
-    let phase = literal_nonnegative_integer_at(context, 2).or(Some(0));
+    let phase = literal_nonnegative_integer_at(context, 2);
     output_shape[dim] = match op {
         SampleRateOp::Up => match (output_shape[dim], factor) {
             (Some(len), Some(n)) => len.checked_mul(n),

@@ -257,6 +257,21 @@ async fn plot_root_locus_statement(first_sys: Value, rest: Vec<Value>) -> Builti
         ));
     }
 
+    struct HoldGuard {
+        hold_enabled: bool,
+    }
+
+    impl Drop for HoldGuard {
+        fn drop(&mut self) {
+            if self.hold_enabled {
+                let _ = futures::executor::block_on(
+                    crate::call_builtin_async("hold", &[Value::from("off")])
+                );
+            }
+        }
+    }
+
+    let mut hold_guard = HoldGuard { hold_enabled: false };
     let mut first = true;
     for (system, style) in systems {
         let model = DynamicModel::from_value_async(system).await?;
@@ -265,9 +280,10 @@ async fn plot_root_locus_statement(first_sys: Value, rest: Vec<Value>) -> Builti
         if first {
             first = false;
             let _ = crate::call_builtin_async("hold", &[Value::from("on")]).await;
+            hold_guard.hold_enabled = true;
         }
     }
-    let _ = crate::call_builtin_async("hold", &[Value::from("off")]).await;
+    drop(hold_guard);
     Ok(())
 }
 

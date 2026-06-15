@@ -602,10 +602,19 @@ impl<'window> PlotWindow<'window> {
 
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
             // Use PlotOverlay for unified UI rendering - no more duplicate sidebar code!
+            let has_per_axes_grid = self.plot_renderer.last_figure.as_ref().map_or(false, |fig| {
+                let (rows, cols) = fig.axes_grid();
+                let axes_count = (rows * cols).max(1);
+                (0..axes_count).any(|idx| {
+                    self.plot_renderer.overlay_show_grid_for_axes(idx)
+                        || self.plot_renderer.overlay_show_minor_grid_for_axes(idx)
+                })
+            });
             let overlay_config = OverlayConfig {
                 // Grid drawn under data in WGPU; overlay handles axes/labels/titles only
                 show_grid: self.plot_renderer.overlay_show_grid()
-                    || self.plot_renderer.overlay_show_minor_grid(),
+                    || self.plot_renderer.overlay_show_minor_grid()
+                    || has_per_axes_grid,
                 show_axes: true,
                 show_title: true,
                 title: self

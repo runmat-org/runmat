@@ -455,6 +455,9 @@ mod remote_test_support {
     ) -> StatusCode {
         let source = harness.resolve(&payload.from);
         let target = harness.resolve(&payload.to);
+        if !source.exists() {
+            return StatusCode::NOT_FOUND;
+        }
         if let Some(parent) = target.parent() {
             if std::fs::create_dir_all(parent).is_err() {
                 return StatusCode::INTERNAL_SERVER_ERROR;

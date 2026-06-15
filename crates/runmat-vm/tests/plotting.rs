@@ -1,11 +1,16 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
+use once_cell::sync::Lazy;
 use runmat_builtins::Value;
+use std::sync::Mutex;
 use test_helpers::execute_source;
+
+static ENV_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 #[test]
 fn heatmap_dot_property_assignment_routes_to_graphics_set() {
+    let _lock = ENV_TEST_LOCK.lock().unwrap();
     unsafe {
         std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
     }
@@ -23,6 +28,7 @@ fn heatmap_dot_property_assignment_routes_to_graphics_set() {
 
 #[test]
 fn figure_dot_property_access_routes_to_graphics_get() {
+    let _lock = ENV_TEST_LOCK.lock().unwrap();
     unsafe {
         std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
     }
@@ -33,6 +39,7 @@ fn figure_dot_property_access_routes_to_graphics_get() {
 
 #[test]
 fn grid_minor_command_form_sets_minor_grid_property() {
+    let _lock = ENV_TEST_LOCK.lock().unwrap();
     unsafe {
         std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
     }
@@ -51,6 +58,7 @@ fn grid_minor_command_form_sets_minor_grid_property() {
 
 #[test]
 fn axis_image_command_form_enables_equal_aspect() {
+    let _lock = ENV_TEST_LOCK.lock().unwrap();
     unsafe {
         std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
     }
@@ -68,6 +76,7 @@ fn axis_image_command_form_enables_equal_aspect() {
 
 #[test]
 fn bare_gca_can_set_axes_font_size() {
+    let _lock = ENV_TEST_LOCK.lock().unwrap();
     unsafe {
         std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
     }
@@ -83,6 +92,7 @@ fn bare_gca_can_set_axes_font_size() {
 
 #[test]
 fn invalid_axes_shaped_handle_member_access_reports_non_object() {
+    let _lock = ENV_TEST_LOCK.lock().unwrap();
     unsafe {
         std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
     }

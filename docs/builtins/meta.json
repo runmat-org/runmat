@@ -21020,7 +21020,7 @@
           "inputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "Any",
               "arity": "Optional",
               "default": "\"next\"",
               "description": "Figure handle or 'next' to create/select the next figure."
@@ -50903,7 +50903,7 @@
             {
               "name": "k",
               "ty": "NumericArray",
-              "arity": "Optional",
+              "arity": "Required",
               "default": null,
               "description": "Finite nonnegative gain vector."
             }
@@ -50959,7 +50959,7 @@
             {
               "name": "k",
               "ty": "NumericArray",
-              "arity": "Optional",
+              "arity": "Required",
               "default": null,
               "description": "Finite nonnegative gain vector."
             }

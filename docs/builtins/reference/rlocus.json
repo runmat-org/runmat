@@ -8,7 +8,7 @@
     "transfer function",
     "tf"
   ],
-  "summary": "Compute or plot root loci of SISO transfer-function models.",
+  "summary": "Compute or plot root loci of SISO transfer-function or state-space models.",
   "references": [
     "title: \"MATLAB rlocus documentation\""
   ],
