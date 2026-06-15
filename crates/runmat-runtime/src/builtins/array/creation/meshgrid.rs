@@ -620,6 +620,7 @@ fn analyse_like_prototype(proto: &Value) -> crate::BuiltinResult<PrototypeSpec> 
             class: PrototypeClass::Complex,
         }),
         Value::Tensor(_)
+        | Value::SparseTensor(_)
         | Value::Num(_)
         | Value::Int(_)
         | Value::Bool(_)

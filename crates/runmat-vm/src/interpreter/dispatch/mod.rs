@@ -209,6 +209,7 @@ fn for_each_gpu_handle_in_value_with_visited(
         | Value::CharArray(_)
         | Value::Symbolic(_)
         | Value::Tensor(_)
+        | Value::SparseTensor(_)
         | Value::ComplexTensor(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
@@ -533,6 +534,7 @@ fn collect_spawn_task_ids_in_value_with_visited(
         | Value::CharArray(_)
         | Value::Symbolic(_)
         | Value::Tensor(_)
+        | Value::SparseTensor(_)
         | Value::ComplexTensor(_)
         | Value::GpuTensor(_)
         | Value::Listener(_)
@@ -592,6 +594,7 @@ fn value_contains_spawn_task_id_with_visited(
         | Value::CharArray(_)
         | Value::Symbolic(_)
         | Value::Tensor(_)
+        | Value::SparseTensor(_)
         | Value::ComplexTensor(_)
         | Value::GpuTensor(_)
         | Value::Listener(_)
@@ -865,6 +868,7 @@ pub async fn dispatch_instruction(
                         refresh_workspace_state(vars);
                     }
                     vars[*index] = global_value;
+                    refresh_workspace_state(vars);
                 }
             }
             if missing_input_slots.contains(index) {
@@ -907,6 +911,7 @@ pub async fn dispatch_instruction(
                         refresh_workspace_state(vars);
                     }
                     vars[*index] = global_value;
+                    refresh_workspace_state(vars);
                 }
             }
             if missing_input_slots.contains(index) {
@@ -1604,10 +1609,15 @@ pub async fn dispatch_instruction(
                     function_registry,
                 )
                 .await?;
+            let mut captures_updated = false;
             for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
                 if *slot < vars.len() {
                     vars[*slot] = value;
+                    captures_updated = true;
                 }
+            }
+            if captures_updated {
+                refresh_workspace_state(vars);
             }
             stack.push(calls::normalize_requested_outputs(result, *out_count));
             Ok(Some(DispatchHandled::Generic(
@@ -1641,10 +1651,15 @@ pub async fn dispatch_instruction(
                     function_registry,
                 )
                 .await?;
+            let mut captures_updated = false;
             for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
                 if *slot < vars.len() {
                     vars[*slot] = value;
+                    captures_updated = true;
                 }
+            }
+            if captures_updated {
+                refresh_workspace_state(vars);
             }
             stack.push(calls::normalize_requested_outputs(result, out_count));
             Ok(Some(DispatchHandled::Generic(
@@ -2066,10 +2081,15 @@ pub async fn dispatch_instruction(
                     function_registry,
                 )
                 .await?;
+            let mut captures_updated = false;
             for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
                 if *slot < vars.len() {
                     vars[*slot] = value;
+                    captures_updated = true;
                 }
+            }
+            if captures_updated {
+                refresh_workspace_state(vars);
             }
             stack.push(calls::normalize_requested_outputs(result, *out_count));
             Ok(Some(DispatchHandled::Generic(

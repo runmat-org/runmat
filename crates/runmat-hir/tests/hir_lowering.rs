@@ -667,6 +667,71 @@ fn nested_function_records_capture_of_parent_binding() {
 }
 
 #[test]
+fn nested_same_name_function_does_not_replace_top_level_output_arity() {
+    let assembly = lower_semantic(
+        r#"
+        function y = foo(x)
+            y = x + 1;
+        end
+
+        function y = outer(x)
+            function foo()
+            end
+            foo()
+            y = x;
+        end
+
+        foo(2)
+        "#,
+    );
+    let top_level_foo = assembly
+        .functions
+        .iter()
+        .find(|function| function.name.0 == "foo" && function.parent.is_none())
+        .unwrap();
+    let outer = assembly
+        .functions
+        .iter()
+        .find(|function| function.name.0 == "outer")
+        .unwrap();
+    let nested_foo = assembly
+        .functions
+        .iter()
+        .find(|function| function.name.0 == "foo" && function.parent == Some(outer.id))
+        .unwrap();
+
+    let HirStmtKind::ExprStmt(nested_expr, false) = &outer.body.statements[0].kind else {
+        panic!("expected unsuppressed nested call expression");
+    };
+    let HirExprKind::Call(nested_call) = &nested_expr.kind else {
+        panic!("expected nested function call");
+    };
+    assert!(matches!(
+        nested_call.callee,
+        HirCallableRef::Function(id) if id == nested_foo.id
+    ));
+    assert_eq!(nested_call.requested_outputs, RequestedOutputCount::Zero);
+
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let entry_function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::ExprStmt(entry_expr, false) = &entry_function.body.statements[0].kind else {
+        panic!("expected unsuppressed top-level call expression");
+    };
+    let HirExprKind::Call(entry_call) = &entry_expr.kind else {
+        panic!("expected top-level function call");
+    };
+    assert!(matches!(
+        entry_call.callee,
+        HirCallableRef::Function(id) if id == top_level_foo.id
+    ));
+    assert_eq!(entry_call.requested_outputs, RequestedOutputCount::One);
+}
+
+#[test]
 fn anonymous_function_lowers_to_real_function_with_capture() {
     let assembly = lower_semantic("function f = outer(a); f = @(x) x + a; end");
     let outer = assembly

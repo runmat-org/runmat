@@ -369,6 +369,7 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
         Value::Complex(_, _)
         | Value::ComplexTensor(_)
         | Value::Symbolic(_)
+        | Value::SparseTensor(_)
         | Value::Cell(_)
         | Value::Struct(_)
         | Value::Object(_)

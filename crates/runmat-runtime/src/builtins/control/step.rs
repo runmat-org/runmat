@@ -266,6 +266,7 @@ fn is_statement_form_call() -> bool {
 }
 
 async fn plot_multiple_step_responses(first_sys: Value, rest: Vec<Value>) -> BuiltinResult<()> {
+    let first_sys = crate::gather_if_needed_async(&first_sys).await?;
     let mut systems = vec![(first_sys, None)];
     let mut time_arg = None;
     for arg in rest {
@@ -311,18 +312,26 @@ async fn plot_multiple_step_responses(first_sys: Value, rest: Vec<Value>) -> Bui
     }
 
     let mut first = true;
-    for (system, style) in systems {
-        let model = TransferFunction::from_value(system)?;
-        let time = TimeSpec::parse(time_arg.as_ref(), model.sample_time)?;
-        let eval = evaluate_step(&model, time)?;
-        plot_response_with_style(&eval, style.as_ref()).await?;
-        if first {
-            first = false;
-            let _ = crate::call_builtin_async("hold", &[Value::from("on")]).await;
+    let mut hold_enabled = false;
+    let result: BuiltinResult<()> = async {
+        for (system, style) in systems {
+            let model = TransferFunction::from_value(system)?;
+            let time = TimeSpec::parse(time_arg.as_ref(), model.sample_time)?;
+            let eval = evaluate_step(&model, time)?;
+            plot_response_with_style(&eval, style.as_ref()).await?;
+            if first {
+                first = false;
+                let _ = crate::call_builtin_async("hold", &[Value::from("on")]).await;
+                hold_enabled = true;
+            }
         }
+        Ok(())
     }
-    let _ = crate::call_builtin_async("hold", &[Value::from("off")]).await;
-    Ok(())
+    .await;
+    if hold_enabled {
+        let _ = crate::call_builtin_async("hold", &[Value::from("off")]).await;
+    }
+    result
 }
 
 fn is_plot_style_arg(value: &Value) -> bool {

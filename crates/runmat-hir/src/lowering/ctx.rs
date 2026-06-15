@@ -69,6 +69,7 @@ struct LoweringCtx {
     runmat_extensions_enabled: bool,
     top_level_await_enabled: bool,
     function_names: HashMap<String, FunctionId>,
+    local_function_name_scopes: Vec<HashMap<String, FunctionId>>,
     class_names: HashMap<String, ClassId>,
     external_function_names: HashMap<String, FunctionId>,
     known_project_symbols: HashSet<String>,
@@ -235,6 +236,7 @@ impl LoweringCtx {
             runmat_extensions_enabled: context.runmat_extensions_enabled,
             top_level_await_enabled: context.top_level_await_enabled,
             function_names: HashMap::new(),
+            local_function_name_scopes: Vec::new(),
             class_names: HashMap::new(),
             external_function_names: context.bound_functions.clone(),
             known_project_symbols: context.known_project_symbols.clone(),
@@ -406,6 +408,38 @@ impl LoweringCtx {
         id
     }
 
+    fn reserve_local_function_name_with_outputs(
+        &mut self,
+        name: &str,
+        outputs: &[String],
+    ) -> FunctionId {
+        let id = if let Some(id) = self
+            .local_function_name_scopes
+            .last()
+            .and_then(|scope| scope.get(name))
+            .copied()
+        {
+            id
+        } else {
+            let id = self.take_function_id();
+            self.local_function_name_scopes
+                .last_mut()
+                .expect("local function scope must exist while lowering a function")
+                .insert(name.to_string(), id);
+            id
+        };
+        self.local_function_output_arities
+            .insert(id, FunctionOutputArity::from_declared_outputs(outputs));
+        id
+    }
+
+    fn local_function_id_in_current_scope(&self, name: &str) -> Option<FunctionId> {
+        self.local_function_name_scopes
+            .last()
+            .and_then(|scope| scope.get(name))
+            .copied()
+    }
+
     fn private_owner_scope_for_function_name(name: &str) -> String {
         if let Some((owner, _)) = name.split_once(".__private__.") {
             return owner.to_string();
@@ -448,6 +482,14 @@ impl LoweringCtx {
     }
 
     fn resolve_scoped_function_name(&self, name: &str) -> Option<FunctionId> {
+        if let Some(function) = self
+            .local_function_name_scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
+        {
+            return Some(function);
+        }
         if let Some(target_name) = self
             .private_alias_stack
             .last()
@@ -621,6 +663,9 @@ impl LoweringCtx {
     }
 
     fn stmt_expr_call_loads_external_bindings(&self, expr: &AstExpr) -> Result<bool, HirError> {
+        if self.current_scope().external_bindings_visible {
+            return Ok(false);
+        }
         let (call_name, lexical_bindings_apply, span) = match expr {
             AstExpr::Ident(name, span) | AstExpr::FuncCall(name, _, span) => {
                 (name.as_str(), true, *span)
@@ -870,7 +915,8 @@ impl LoweringCtx {
             enclosing_class,
         } = spec;
         self.with_private_alias_scope_for_function(name, |ctx| {
-            ctx.with_scope(
+            ctx.local_function_name_scopes.push(HashMap::new());
+            let result = ctx.with_scope(
                 id,
                 WorkspaceVisibility::Hidden,
                 modifiers.clone(),
@@ -878,7 +924,7 @@ impl LoweringCtx {
                 |ctx| {
                     for stmt in body {
                         if let AstStmt::Function { name, outputs, .. } = stmt {
-                            ctx.reserve_function_name_with_outputs(name, outputs);
+                            ctx.reserve_local_function_name_with_outputs(name, outputs);
                         }
                     }
                     let mut param_ids = Vec::new();
@@ -1014,7 +1060,14 @@ impl LoweringCtx {
                             span,
                         } = stmt
                         {
-                            let nested_id = ctx.function_names[name];
+                            let nested_id = ctx
+                                .local_function_id_in_current_scope(name)
+                                .ok_or_else(|| {
+                                    HirError::new(format!(
+                                        "internal error: missing nested function id for '{name}'"
+                                    ))
+                                    .with_span(*span)
+                                })?;
                             let nested = ctx.lower_function(LowerFunctionSpec {
                                 id: nested_id,
                                 name,
@@ -1081,7 +1134,9 @@ impl LoweringCtx {
                         span,
                     })
                 },
-            )
+            );
+            ctx.local_function_name_scopes.pop();
+            result
         })
     }
 

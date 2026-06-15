@@ -154,6 +154,7 @@ async fn uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::Int(i) => Ok(Value::Int(IntValue::U16(cast_scalar_to_uint16(i.to_f64())))),
         Value::Bool(flag) => Ok(Value::Int(IntValue::U16(if flag { 1 } else { 0 }))),
         Value::Tensor(tensor) => Ok(uint16_value_from_tensor(uint16_tensor_to_host(tensor))),
+        Value::SparseTensor(_) => Err(conversion_error("sparse")),
         Value::LogicalArray(array) => {
             let tensor = tensor::logical_to_tensor(&array)
                 .map_err(|e| uint16_error_with_detail(&UINT16_ERROR_INTERNAL, e))?;

@@ -217,6 +217,12 @@ pub fn build_string_rhs_view(
                 return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
         }
+        let expected = shape
+            .iter()
+            .try_fold(1usize, |acc, &len| acc.checked_mul(len));
+        if expected != Some(rt.data.len()) {
+            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+        }
         let mut rstrides = vec![0usize; dims];
         let mut racc = 1usize;
         for d in 0..dims {
@@ -268,6 +274,12 @@ pub fn build_string_rhs_view(
             if !(rhs_len == 1 || rhs_len == out_len) {
                 return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
+        }
+        let expected = shape
+            .iter()
+            .try_fold(1usize, |acc, &len| acc.checked_mul(len));
+        if expected != Some(data.len()) {
+            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
         }
         let mut rstrides = vec![0usize; dims];
         let mut racc = 1usize;
@@ -822,7 +834,8 @@ pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
 #[cfg(test)]
 mod tests {
     use super::{build_complex_rhs_view, build_string_rhs_view, map_acceleration_error};
-    use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
+    use runmat_builtins::{CellArray, ComplexTensor, StringArray, Tensor, Value};
+    use runmat_gc::GcPtr;
 
     #[test]
     fn complex_rhs_view_shape_mismatch_reports_identifier() {
@@ -858,6 +871,29 @@ mod tests {
         );
         let err = match build_string_rhs_view(&rhs, &[2, 2]) {
             Ok(_) => panic!("shape mismatch should fail"),
+            Err(err) => err,
+        };
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn string_cell_rhs_view_rejects_shape_data_length_mismatch() {
+        let handles = ["a", "b", "c"]
+            .into_iter()
+            .map(|text| unsafe {
+                // The test leaks boxed values for the duration of the process,
+                // which is sufficient for this short-lived GcPtr fixture.
+                GcPtr::from_raw(Box::into_raw(Box::new(Value::String(text.to_string()))))
+            })
+            .collect();
+        let rhs = Value::Cell(CellArray {
+            data: handles,
+            shape: vec![2, 2],
+            rows: 2,
+            cols: 2,
+        });
+        let err = match build_string_rhs_view(&rhs, &[2, 2]) {
+            Ok(_) => panic!("cell shape/data mismatch should fail"),
             Err(err) => err,
         };
         assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));

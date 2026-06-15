@@ -25,7 +25,7 @@ pub use telemetry::{
 };
 pub use value_metadata::{
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
-    value_shape,
+    sparse_tensor_memory_bytes, value_shape,
 };
 pub use workspace::*;
 

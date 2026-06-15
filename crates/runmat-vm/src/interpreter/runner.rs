@@ -224,7 +224,31 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
     bytecode.call_arg_spans = func.call_arg_spans.clone();
     bytecode.source_id = func.source_id;
     bytecode.var_names = func.var_names.clone();
-    bytecode.initially_unassigned_slots = func.initially_unassigned_slots.clone();
+    let mut initially_unassigned_slots = func.initially_unassigned_slots.clone();
+    for slot in &func.capture_slots {
+        initially_unassigned_slots.remove(slot);
+    }
+    for slot in func.input_slots.iter().take(runtime_arg_count) {
+        initially_unassigned_slots.remove(slot);
+    }
+    for slot in func.input_slots.iter().skip(runtime_arg_count) {
+        if default_values_by_slot.contains_key(slot) {
+            initially_unassigned_slots.remove(slot);
+        }
+    }
+    if let Some(slot) = func.varargin_slot {
+        initially_unassigned_slots.remove(&slot);
+    }
+    if let Some(slot) = func.varargout_slot {
+        initially_unassigned_slots.remove(&slot);
+    }
+    if let Some(slot) = func.implicit_nargin_slot {
+        initially_unassigned_slots.remove(&slot);
+    }
+    if let Some(slot) = func.implicit_nargout_slot {
+        initially_unassigned_slots.remove(&slot);
+    }
+    bytecode.initially_unassigned_slots = initially_unassigned_slots;
     bytecode.bound_functions = function_registry.functions.clone();
     bytecode.function_registry = function_registry.clone();
     let result_vars = interpret_function_with_counts(

@@ -1735,7 +1735,7 @@ fn shift_naive_datetime(
     let start = start_of_unit(value, unit, week_start);
     match boundary {
         DateShiftBoundary::Start => start,
-        DateShiftBoundary::End => next_unit_start(start, unit) - Duration::milliseconds(500),
+        DateShiftBoundary::End => next_unit_start(start, unit) - Duration::milliseconds(1),
         DateShiftBoundary::Nearest => {
             let next = next_unit_start(start, unit);
             if value - start <= next - value {
@@ -1786,6 +1786,11 @@ async fn dateshift_builtin(
 
     let mut out = Vec::with_capacity(serials.data.len());
     if boundary == DateShiftBoundary::DayOfWeek {
+        if !rest.is_empty() {
+            return Err(datetime_error(
+                "dateshift: dayofweek boundary does not accept extra arguments",
+            ));
+        }
         let weekday = parse_weekday(&unit)?;
         for serial in &serials.data {
             out.push(datenum_from_naive(shift_to_dayofweek(
@@ -1796,11 +1801,21 @@ async fn dateshift_builtin(
     } else {
         let unit = DateShiftUnit::parse(&unit)?;
         let week_start = if matches!(unit, DateShiftUnit::Week) {
+            if rest.len() > 1 {
+                return Err(datetime_error(
+                    "dateshift: week unit accepts at most one weekday argument",
+                ));
+            }
             rest.first()
                 .map(parse_weekday)
                 .transpose()?
                 .unwrap_or(Weekday::Mon)
         } else {
+            if !rest.is_empty() {
+                return Err(datetime_error(
+                    "dateshift: extra arguments are only supported for week units",
+                ));
+            }
             Weekday::Mon
         };
         for serial in &serials.data {
@@ -1996,6 +2011,39 @@ mod tests {
             .expect("string array")
             .expect("datetime strings");
         assert_eq!(rendered.data, vec!["2024-02-29 23:59:59".to_string()]);
+    }
+
+    #[test]
+    fn dateshift_rejects_unsupported_extra_arguments() {
+        let input = run_datetime(vec![Value::from("2024-03-14")]);
+        let err = futures::executor::block_on(dateshift_builtin(
+            input.clone(),
+            Value::from("dayofweek"),
+            Value::from("monday"),
+            vec![Value::from("extra")],
+        ))
+        .expect_err("dayofweek extra argument should fail");
+        assert!(err.message().contains("does not accept extra arguments"));
+
+        let err = futures::executor::block_on(dateshift_builtin(
+            input.clone(),
+            Value::from("start"),
+            Value::from("week"),
+            vec![Value::from("monday"), Value::from("extra")],
+        ))
+        .expect_err("week second extra argument should fail");
+        assert!(err.message().contains("at most one weekday argument"));
+
+        let err = futures::executor::block_on(dateshift_builtin(
+            input,
+            Value::from("start"),
+            Value::from("month"),
+            vec![Value::from("monday")],
+        ))
+        .expect_err("non-week extra argument should fail");
+        assert!(err
+            .message()
+            .contains("extra arguments are only supported for week units"));
     }
 
     #[test]

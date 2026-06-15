@@ -140,6 +140,7 @@ async fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::Int(_)
         | Value::Num(_)
         | Value::Tensor(_)
+        | Value::SparseTensor(_)
         | Value::Complex(_, _)
         | Value::ComplexTensor(_)
         | Value::Struct(_)

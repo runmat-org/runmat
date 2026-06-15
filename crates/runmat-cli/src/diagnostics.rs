@@ -1,6 +1,9 @@
 use miette::{SourceOffset, SourceSpan};
 use runmat_config::runtime::{self as config, RunMatRuntimeConfig};
-use runmat_core::{abi::RuntimeDiagnostic, RunError};
+use runmat_core::{
+    abi::{DiagnosticSeverity, RuntimeDiagnostic},
+    RunError,
+};
 use runmat_runtime::build_runtime_error;
 
 pub fn parser_compat(mode: config::LanguageCompatMode) -> runmat_parser::CompatMode {
@@ -94,9 +97,19 @@ pub fn format_runtime_diagnostic(
         builder = builder.with_span(span);
     }
 
-    let mut rendered = builder
+    let rendered = builder
         .build()
         .format_diagnostic_with_source(source_name, source);
+    let mut rendered = match diagnostic.severity {
+        DiagnosticSeverity::Error => rendered,
+        severity => {
+            let label = diagnostic_severity_label(severity);
+            rendered
+                .strip_prefix("error: ")
+                .map(|rest| format!("{label}: {rest}"))
+                .unwrap_or_else(|| format!("{label}: {rendered}"))
+        }
+    };
     if !diagnostic.callstack.is_empty() {
         rendered.push_str("\ncallstack:");
         if diagnostic.callstack_elided > 0 {
@@ -110,6 +123,15 @@ pub fn format_runtime_diagnostic(
         }
     }
     rendered
+}
+
+fn diagnostic_severity_label(severity: DiagnosticSeverity) -> &'static str {
+    match severity {
+        DiagnosticSeverity::Error => "error",
+        DiagnosticSeverity::Warning => "warning",
+        DiagnosticSeverity::Info => "info",
+        DiagnosticSeverity::Hint => "hint",
+    }
 }
 
 pub fn format_diagnostic(
@@ -177,5 +199,22 @@ mod compat_tests {
         assert!(rendered.contains("id: RunMat:UndefinedFunction"));
         assert!(rendered.contains("--> main.m:1:5"));
         assert!(rendered.contains("callstack:\n  main"));
+    }
+
+    #[test]
+    fn runtime_diagnostic_render_preserves_warning_severity() {
+        let diagnostic = RuntimeDiagnostic {
+            code: "RunMat:Warning".to_string(),
+            severity: DiagnosticSeverity::Warning,
+            message: "careful".to_string(),
+            span: None,
+            callstack: Vec::new(),
+            callstack_elided: 0,
+        };
+
+        let rendered = format_runtime_diagnostic(&diagnostic, None, None);
+
+        assert!(rendered.starts_with("warning: careful"));
+        assert!(!rendered.starts_with("error: careful"));
     }
 }
