@@ -10,8 +10,6 @@ use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::MutexGuard;
-#[cfg(test)]
-use std::sync::Once;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
@@ -343,33 +341,81 @@ impl Default for PlotRegistry {
 #[cfg(not(target_arch = "wasm32"))]
 static REGISTRY: OnceCell<Mutex<PlotRegistry>> = OnceCell::new();
 
-#[cfg(test)]
 static TEST_PLOT_REGISTRY_LOCK: Mutex<()> = Mutex::new(());
 
-#[cfg(test)]
 thread_local! {
     static TEST_PLOT_OUTER_LOCK_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-#[cfg(test)]
-pub(crate) struct PlotTestLockGuard {
+#[doc(hidden)]
+pub struct PlotTestLockGuard {
     _guard: std::sync::MutexGuard<'static, ()>,
+    disable_previous: Option<std::ffi::OsString>,
+    host_previous: Option<std::ffi::OsString>,
 }
 
-#[cfg(test)]
 impl Drop for PlotTestLockGuard {
     fn drop(&mut self) {
+        restore_env_var(
+            "RUNMAT_DISABLE_INTERACTIVE_PLOTS",
+            self.disable_previous.take(),
+        );
+        restore_env_var("RUNMAT_HOST_MANAGED_PLOTS", self.host_previous.take());
         TEST_PLOT_OUTER_LOCK_HELD.with(|flag| flag.set(false));
     }
 }
 
-#[cfg(test)]
-pub(crate) fn lock_plot_test_registry() -> PlotTestLockGuard {
+#[doc(hidden)]
+pub fn lock_plot_test_registry() -> PlotTestLockGuard {
     let guard = TEST_PLOT_REGISTRY_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     TEST_PLOT_OUTER_LOCK_HELD.with(|flag| flag.set(true));
-    PlotTestLockGuard { _guard: guard }
+    let disable_previous = std::env::var_os("RUNMAT_DISABLE_INTERACTIVE_PLOTS");
+    let host_previous = std::env::var_os("RUNMAT_HOST_MANAGED_PLOTS");
+    set_plot_test_env_vars();
+    PlotTestLockGuard {
+        _guard: guard,
+        disable_previous,
+        host_previous,
+    }
+}
+
+#[doc(hidden)]
+pub struct HostManagedPlotEnvGuard {
+    previous: Option<std::ffi::OsString>,
+}
+
+impl Drop for HostManagedPlotEnvGuard {
+    fn drop(&mut self) {
+        restore_env_var("RUNMAT_HOST_MANAGED_PLOTS", self.previous.take());
+    }
+}
+
+#[doc(hidden)]
+pub fn disable_host_managed_plot_env_for_tests() -> HostManagedPlotEnvGuard {
+    let previous = std::env::var_os("RUNMAT_HOST_MANAGED_PLOTS");
+    unsafe {
+        std::env::remove_var("RUNMAT_HOST_MANAGED_PLOTS");
+    }
+    HostManagedPlotEnvGuard { previous }
+}
+
+fn set_plot_test_env_vars() {
+    unsafe {
+        std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
+        std::env::set_var("RUNMAT_HOST_MANAGED_PLOTS", "1");
+    }
+}
+
+fn restore_env_var(key: &'static str, previous: Option<std::ffi::OsString>) {
+    unsafe {
+        if let Some(previous) = previous {
+            std::env::set_var(key, previous);
+        } else {
+            std::env::remove_var(key);
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -2492,11 +2538,7 @@ fn host_managed_rendering_enabled() -> bool {
 
 #[cfg(test)]
 pub(crate) fn disable_rendering_for_tests() {
-    static INIT: Once = Once::new();
-    INIT.call_once(|| unsafe {
-        std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
-        std::env::set_var("RUNMAT_HOST_MANAGED_PLOTS", "1");
-    });
+    set_plot_test_env_vars();
 }
 
 pub fn set_line_style_order_for_axes(axes_index: usize, order: &[LineStyle]) {

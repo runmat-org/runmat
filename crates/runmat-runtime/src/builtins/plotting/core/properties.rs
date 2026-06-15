@@ -97,6 +97,9 @@ pub fn set_properties(
         PlotHandle::Figure(handle) => {
             let mut needs_present = false;
             for pair in args.chunks_exact(2) {
+                validate_figure_property_value(&pair[0], &pair[1], Some(handle), builtin)?;
+            }
+            for pair in args.chunks_exact(2) {
                 let key = property_name(&pair[0], builtin)?;
                 needs_present |= apply_figure_property(handle, &key, &pair[1], builtin)?;
             }

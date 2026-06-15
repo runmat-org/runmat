@@ -848,9 +848,6 @@ mod tests {
     #[test]
     fn patch_registers_as_dispatch_builtin_and_returns_handle() {
         let _guard = setup_plot_test();
-        unsafe {
-            std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
-        }
         let handle = crate::call_builtin(
             "patch",
             &[
@@ -871,9 +868,6 @@ mod tests {
     #[test]
     fn patch_get_visible_tracks_set_visible() {
         let _guard = setup_plot_test();
-        unsafe {
-            std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
-        }
         let handle = crate::call_builtin(
             "patch",
             &[

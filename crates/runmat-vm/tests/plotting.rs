@@ -1,43 +1,18 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use once_cell::sync::Lazy;
 use runmat_builtins::Value;
-use std::sync::Mutex;
 use test_helpers::execute_source;
 
-static ENV_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
-struct EnvVarRestoreGuard {
-    key: &'static str,
-    previous: Option<std::ffi::OsString>,
-}
-
-impl Drop for EnvVarRestoreGuard {
-    fn drop(&mut self) {
-        unsafe {
-            if let Some(previous) = self.previous.take() {
-                std::env::set_var(self.key, previous);
-            } else {
-                std::env::remove_var(self.key);
-            }
-        }
-    }
-}
-
-fn disable_interactive_plots_for_test() -> EnvVarRestoreGuard {
-    let key = "RUNMAT_DISABLE_INTERACTIVE_PLOTS";
-    let previous = std::env::var_os(key);
-    unsafe {
-        std::env::set_var(key, "1");
-    }
-    EnvVarRestoreGuard { key, previous }
+fn disable_interactive_plots_for_test() -> runmat_runtime::builtins::plotting::PlotTestLockGuard {
+    let guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
+    runmat_runtime::builtins::plotting::reset_plot_state();
+    guard
 }
 
 #[test]
 fn heatmap_dot_property_assignment_routes_to_graphics_set() {
-    let _lock = ENV_TEST_LOCK.lock().unwrap();
-    let _env_guard = disable_interactive_plots_for_test();
+    let _guard = disable_interactive_plots_for_test();
     let input = "cdata = [45 60 32; 43 54 76; 32 94 68; 23 95 58]; \
         xvalues = {'Small','Medium','Large'}; \
         yvalues = {'Green','Red','Blue','Gray'}; \
@@ -52,8 +27,7 @@ fn heatmap_dot_property_assignment_routes_to_graphics_set() {
 
 #[test]
 fn figure_dot_property_access_routes_to_graphics_get() {
-    let _lock = ENV_TEST_LOCK.lock().unwrap();
-    let _env_guard = disable_interactive_plots_for_test();
+    let _guard = disable_interactive_plots_for_test();
     let input = "f = figure(); out = f.Type;";
     let vars = execute_source(input).expect("execute figure property script");
     assert_eq!(vars.last(), Some(&Value::String("figure".into())));
@@ -61,8 +35,7 @@ fn figure_dot_property_access_routes_to_graphics_get() {
 
 #[test]
 fn grid_minor_command_form_sets_minor_grid_property() {
-    let _lock = ENV_TEST_LOCK.lock().unwrap();
-    let _env_guard = disable_interactive_plots_for_test();
+    let _guard = disable_interactive_plots_for_test();
     let input = "\
         figure; \
         plot(1:3); \
@@ -78,8 +51,7 @@ fn grid_minor_command_form_sets_minor_grid_property() {
 
 #[test]
 fn axis_image_command_form_enables_equal_aspect() {
-    let _lock = ENV_TEST_LOCK.lock().unwrap();
-    let _env_guard = disable_interactive_plots_for_test();
+    let _guard = disable_interactive_plots_for_test();
     let input = "\
         figure; \
         imagesc([1 2; 3 4]); \
@@ -94,8 +66,7 @@ fn axis_image_command_form_enables_equal_aspect() {
 
 #[test]
 fn bare_gca_can_set_axes_font_size() {
-    let _lock = ENV_TEST_LOCK.lock().unwrap();
-    let _env_guard = disable_interactive_plots_for_test();
+    let _guard = disable_interactive_plots_for_test();
     let input = "\
         figure; \
         plot(1:3, [1 2 3]); \
@@ -108,8 +79,7 @@ fn bare_gca_can_set_axes_font_size() {
 
 #[test]
 fn invalid_axes_shaped_handle_member_access_reports_non_object() {
-    let _lock = ENV_TEST_LOCK.lock().unwrap();
-    let _env_guard = disable_interactive_plots_for_test();
+    let _guard = disable_interactive_plots_for_test();
     let input = "bad_axes_handle = 1049575; out = bad_axes_handle.Type;";
     let err = execute_source(input).expect_err("invalid axes handle should fail");
     assert!(

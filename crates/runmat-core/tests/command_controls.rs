@@ -5,47 +5,11 @@
 
 use runmat_core::{ExecutionStreamKind, RunError, RunMatSession};
 use runmat_gc::gc_test_context;
-use std::sync::Mutex;
 
-static PLOT_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-struct PlotTestGuard {
-    _guard: std::sync::MutexGuard<'static, ()>,
-    disable_previous: Option<std::ffi::OsString>,
-    host_previous: Option<std::ffi::OsString>,
-}
-
-impl Drop for PlotTestGuard {
-    fn drop(&mut self) {
-        unsafe {
-            if let Some(previous) = self.disable_previous.take() {
-                std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", previous);
-            } else {
-                std::env::remove_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS");
-            }
-            if let Some(previous) = self.host_previous.take() {
-                std::env::set_var("RUNMAT_HOST_MANAGED_PLOTS", previous);
-            } else {
-                std::env::remove_var("RUNMAT_HOST_MANAGED_PLOTS");
-            }
-        }
-    }
-}
-
-fn isolate_plot_test() -> PlotTestGuard {
-    let guard = PLOT_TEST_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-    let disable_previous = std::env::var_os("RUNMAT_DISABLE_INTERACTIVE_PLOTS");
-    let host_previous = std::env::var_os("RUNMAT_HOST_MANAGED_PLOTS");
-    unsafe {
-        std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
-        std::env::set_var("RUNMAT_HOST_MANAGED_PLOTS", "1");
-    }
+fn isolate_plot_test() -> runmat_runtime::builtins::plotting::PlotTestLockGuard {
+    let guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
     runmat_runtime::builtins::plotting::reset_plot_state();
-    PlotTestGuard {
-        _guard: guard,
-        disable_previous,
-        host_previous,
-    }
+    guard
 }
 
 #[test]
