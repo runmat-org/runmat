@@ -1,0 +1,104 @@
+{
+  "title": "null",
+  "category": "math/linalg/solve",
+  "keywords": [
+    "null",
+    "null space",
+    "kernel",
+    "rank",
+    "svd",
+    "rref",
+    "orthonormal"
+  ],
+  "summary": "Compute a basis for a matrix null space.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to the host null-space implementation. Real bases are re-uploaded when a provider is available; upload failures return the host result."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::solve::null::tests",
+    "integration": "core::tests::null_row_reduction_builtin_uses_semantic_vm"
+  },
+  "description": "`null(A)` returns an orthonormal basis for the null space of a real or complex numeric matrix. `null(A, tol)` uses a caller-provided finite, non-negative rank tolerance. `null(A, 'r')` returns a row-reduction basis useful for simple exact-looking dependencies.",
+  "behaviors": [
+    "Inputs must behave like 2-D matrices. Trailing singleton dimensions are accepted; other higher-rank inputs raise `RunMat:null:InvalidInput`.",
+    "`null(A)` computes the default rank tolerance from the singular values as `max(size(A)) * eps(max(svd(A)))`, then returns an orthonormal basis for singular directions at or below that cutoff.",
+    "`null(A, tol)` uses `tol` as the rank threshold and returns the corresponding orthonormal null-space basis.",
+    "`null(A, 'r')` accepts either char or string scalar options and returns the free-variable basis derived from reduced row echelon form.",
+    "Logical and integer inputs are promoted to double precision before null-space evaluation.",
+    "Real and complex orthonormal bases use SVD rank decisions and right singular vectors where available; wide matrices complete the orthogonal complement so the full nullity is returned even when the underlying SVD implementation is thin.",
+    "Complex inputs return complex null-space bases and use complex row reduction for the `'r'` option.",
+    "Full-rank matrices return an empty `n x 0` basis where `n` is the input column count. A `0 x n` matrix returns an `n x n` identity basis."
+  ],
+  "examples": [
+    {
+      "description": "Orthonormal null-space basis",
+      "input": "A = [1 2; 2 4];\nZ = null(A)",
+      "output": "Z is a 2-by-1 orthonormal vector and A*Z is approximately zero"
+    },
+    {
+      "description": "Row-reduction basis",
+      "input": "A = [1 2 3; 2 4 6];\nZ = null(A, 'r')",
+      "output": "Z = [-2 -3; 1 0; 0 1]"
+    },
+    {
+      "description": "Using a custom tolerance",
+      "input": "A = diag([1, 1e-8]);\nZ = null(A, 1e-6)",
+      "output": "Z = [0; 1]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What is the difference between `null(A)` and `null(A, 'r')`?",
+      "answer": "`null(A)` returns an orthonormal basis. `null(A, 'r')` returns a row-reduction basis where free variables are set to identity columns, so the result is often easier to read for simple dependent systems."
+    },
+    {
+      "question": "Does `null` preserve GPU residency?",
+      "answer": "When the input is a real gpuArray, RunMat gathers it to the host, computes the basis, and re-uploads the real result if a provider is available."
+    },
+    {
+      "question": "How is the default tolerance chosen?",
+      "answer": "RunMat follows the standard singular-value tolerance shape used by MATLAB-style rank decisions: `max(size(A)) * eps(max(svd(A)))`."
+    }
+  ],
+  "links": [
+    {
+      "label": "rref",
+      "url": "./rref"
+    },
+    {
+      "label": "rank",
+      "url": "./rank"
+    },
+    {
+      "label": "pinv",
+      "url": "./pinv"
+    },
+    {
+      "label": "svd",
+      "url": "./svd"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/solve/null.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/solve/null.rs"
+  },
+  "gpu_residency": "When the input is a real gpuArray, RunMat gathers it, computes the null-space basis on the host, and re-uploads the basis if a provider is available. If upload fails, the host tensor is returned.",
+  "gpu_behavior": [
+    "`null` is an eager solve-style operation. It terminates fusion plans and gathers GPU-resident inputs for null-space evaluation."
+  ]
+}

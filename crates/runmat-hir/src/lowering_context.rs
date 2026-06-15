@@ -2,9 +2,39 @@ use crate::FunctionId;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FunctionOutputArity {
+    pub fixed_outputs: usize,
+    pub has_varargout: bool,
+}
+
+impl FunctionOutputArity {
+    pub fn new(fixed_outputs: usize, has_varargout: bool) -> Self {
+        Self {
+            fixed_outputs,
+            has_varargout,
+        }
+    }
+
+    pub fn from_declared_outputs(outputs: &[String]) -> Self {
+        Self {
+            fixed_outputs: outputs
+                .iter()
+                .filter(|output| output.as_str() != "varargout")
+                .count(),
+            has_varargout: outputs.iter().any(|output| output.as_str() == "varargout"),
+        }
+    }
+
+    pub fn is_declared_zero_output(self) -> bool {
+        self.fixed_outputs == 0 && !self.has_varargout
+    }
+}
+
 pub struct LoweringContext<'a> {
     pub variables: &'a HashMap<String, usize>,
     pub bound_functions: &'a HashMap<String, FunctionId>,
+    pub function_output_arities: &'a HashMap<FunctionId, FunctionOutputArity>,
     pub known_project_symbols: &'a HashSet<String>,
     pub private_function_owners: &'a HashMap<String, String>,
     pub private_function_aliases: &'a HashMap<String, HashMap<String, String>>,
@@ -17,6 +47,7 @@ impl<'a> LoweringContext<'a> {
         Self {
             variables,
             bound_functions: empty_bound_functions(),
+            function_output_arities: empty_function_output_arities(),
             known_project_symbols: empty_project_symbols(),
             private_function_owners: empty_private_function_owners(),
             private_function_aliases: empty_private_function_aliases(),
@@ -30,6 +61,14 @@ impl<'a> LoweringContext<'a> {
         bound_functions: &'a HashMap<String, FunctionId>,
     ) -> Self {
         self.bound_functions = bound_functions;
+        self
+    }
+
+    pub fn with_function_output_arities(
+        mut self,
+        arities: &'a HashMap<FunctionId, FunctionOutputArity>,
+    ) -> Self {
+        self.function_output_arities = arities;
         self
     }
 
@@ -63,6 +102,7 @@ impl<'a> LoweringContext<'a> {
         Self {
             variables: EMPTY_VARS.get_or_init(HashMap::new),
             bound_functions: empty_bound_functions(),
+            function_output_arities: empty_function_output_arities(),
             known_project_symbols: empty_project_symbols(),
             private_function_owners: empty_private_function_owners(),
             private_function_aliases: empty_private_function_aliases(),
@@ -75,6 +115,12 @@ impl<'a> LoweringContext<'a> {
 fn empty_bound_functions() -> &'static HashMap<String, FunctionId> {
     static EMPTY_SEMANTIC_FUNCS: OnceLock<HashMap<String, FunctionId>> = OnceLock::new();
     EMPTY_SEMANTIC_FUNCS.get_or_init(HashMap::new)
+}
+
+fn empty_function_output_arities() -> &'static HashMap<FunctionId, FunctionOutputArity> {
+    static EMPTY_FUNCTION_OUTPUT_ARITIES: OnceLock<HashMap<FunctionId, FunctionOutputArity>> =
+        OnceLock::new();
+    EMPTY_FUNCTION_OUTPUT_ARITIES.get_or_init(HashMap::new)
 }
 
 fn empty_project_symbols() -> &'static HashSet<String> {

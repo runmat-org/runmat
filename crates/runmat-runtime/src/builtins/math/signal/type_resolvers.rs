@@ -41,6 +41,31 @@ pub fn butter_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
+pub fn pulse_train_type(args: &[Type], context: &ResolveContext) -> Type {
+    numeric_unary_shape_type(args, context)
+}
+
+pub fn numeric_unary_shape_type(args: &[Type], _context: &ResolveContext) -> Type {
+    let Some(arg) = args.first() else {
+        return Type::Unknown;
+    };
+    match arg {
+        Type::Num | Type::Int | Type::Bool => Type::Num,
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            if element_count_if_known(shape) == Some(1) {
+                Type::Num
+            } else {
+                Type::Tensor {
+                    shape: Some(shape.clone()),
+                }
+            }
+        }
+        Type::Tensor { shape: None } | Type::Logical { shape: None } => Type::tensor(),
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
 pub fn window_vector_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let Some(arg) = args.first() else {
         return Type::Unknown;

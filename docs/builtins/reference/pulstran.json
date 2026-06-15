@@ -1,0 +1,95 @@
+{
+  "title": "pulstran",
+  "category": "math/signal",
+  "keywords": [
+    "pulstran",
+    "pulse train",
+    "rectpuls",
+    "tripuls",
+    "gauspuls",
+    "signal processing"
+  ],
+  "summary": "Generate pulse trains from named pulse functions, function handles, or sampled prototype pulses.",
+  "references": [
+    "title: \"MATLAB pulstran documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "GPU numeric inputs are gathered to the host because `pulstran` combines multiple shifted pulse evaluations and may call arbitrary pulse functions."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline",
+    "notes": "`pulstran` materializes a full output vector and terminates fusion plans."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::pulstran::tests",
+    "integration": "runmat_vm::tests::basics::pulstran_rectpuls_builtin_executes_for_impulse_train_shape"
+  },
+  "description": "`pulstran(T, D, FUN, P1, ...)` evaluates a pulse function at `T - D(k)` for each delay and sums the results. `D` may be a delay vector or an N-by-2 delay/amplitude matrix. `pulstran(T, D, P, FS)` uses a sampled prototype pulse `P` with sample rate `FS` and linear interpolation.",
+  "behaviors": [
+    "The output shape matches `T`.",
+    "Character, string, and function-handle pulse names are accepted. Built-in fast paths cover `rectpuls`, `tripuls`, and `gauspuls`; other function handles are invoked through the normal `feval` path.",
+    "A delay vector uses unit amplitude for every pulse.",
+    "An N-by-2 delay matrix uses column one as delay and column two as amplitude.",
+    "Sampled prototype pulses are linearly interpolated at `FS`; samples outside the prototype support contribute zero.",
+    "Complex and text-valued numeric inputs are rejected with builtin-scoped errors."
+  ],
+  "examples": [
+    {
+      "description": "Generate a rectangular pulse train",
+      "input": "t = -1:0.5:1;\nd = [-0.5 0.5];\ny = pulstran(t, d, 'rectpuls', 0.25)",
+      "output": "y = [0 1 0 1 0]"
+    },
+    {
+      "description": "Use delay amplitudes",
+      "input": "t = [0 1];\nd = [0 2; 1 3];\ny = pulstran(t, d, 'rectpuls', 0.25)",
+      "output": "y = [2 3]"
+    },
+    {
+      "description": "Use a sampled prototype",
+      "input": "t = 0:0.5:2;\nd = [0 1];\np = [0 1 0];\ny = pulstran(t, d, p, 2)",
+      "output": "y = [0 1 0 1 0]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which pulse functions are recognized directly?",
+      "answer": "`rectpuls`, `tripuls`, and `gauspuls` have direct built-in paths. Other function handles are dispatched through RunMat's regular function-handle mechanism."
+    },
+    {
+      "question": "Does `pulstran` preserve the orientation of `T`?",
+      "answer": "Yes. The output tensor uses the same shape as `T`, including row-vector and column-vector orientation."
+    }
+  ],
+  "links": [
+    {
+      "label": "rectpuls",
+      "url": "./rectpuls"
+    },
+    {
+      "label": "tripuls",
+      "url": "./tripuls"
+    },
+    {
+      "label": "gauspuls",
+      "url": "./gauspuls"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/pulstran.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/pulstran.rs"
+  }
+}

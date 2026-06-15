@@ -25,12 +25,14 @@ pub fn create_compute_pipeline(
     layout: &wgpu::PipelineLayout,
     module: &wgpu::ShaderModule,
 ) -> wgpu::ComputePipeline {
-    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some(label),
-        layout: Some(layout),
-        module,
-        entry_point: "main",
-    })
+    device.create_compute_pipeline(
+        &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+            label: Some(label),
+            layout: Some(layout),
+            module: module,
+            entry_point: "main",
+        },
+    )
 }
 
 pub fn create_pipeline_layout_empty(device: &wgpu::Device, label: &str) -> wgpu::PipelineLayout {

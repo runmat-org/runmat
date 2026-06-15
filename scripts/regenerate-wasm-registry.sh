@@ -6,7 +6,8 @@ REGISTRY_PATH="${REPO_ROOT}/crates/runmat-runtime/src/builtins/generated_wasm_re
 TMP_DIR="${REPO_ROOT}/target/wasm-registry"
 
 mkdir -p "${TMP_DIR}"
-TMP_REGISTRY="$(mktemp "${TMP_DIR}/generated_wasm_registry.XXXXXX.rs")"
+TMP_REGISTRY="$(mktemp "${TMP_DIR}/generated_wasm_registry.XXXXXX")"
+rm -f "${TMP_REGISTRY}"
 
 cleanup() {
   rm -f "${TMP_REGISTRY}"
@@ -15,6 +16,7 @@ trap cleanup EXIT
 
 pushd "${REPO_ROOT}" >/dev/null
 echo "==> generating wasm builtin registry for runmat-runtime/plot-web"
+cargo clean -p runmat-runtime --target wasm32-unknown-unknown >/dev/null
 RUNMAT_GENERATE_WASM_REGISTRY=1 \
 RUNMAT_WASM_REGISTRY_OUT="${TMP_REGISTRY}" \
 cargo check -p runmat-runtime --target wasm32-unknown-unknown --no-default-features --features plot-web >/dev/null

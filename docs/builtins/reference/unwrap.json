@@ -1,0 +1,112 @@
+{
+  "title": "unwrap",
+  "category": "math/signal",
+  "keywords": [
+    "unwrap",
+    "phase",
+    "angle",
+    "signal processing",
+    "radians"
+  ],
+  "summary": "Correct phase-angle jumps by adding multiples of `2*pi`.",
+  "references": [
+    "title: \"MATLAB unwrap documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "GPU inputs are accepted through the active provider gather path. The host implementation performs stateful phase correction along the requested dimension."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::unwrap::tests",
+    "integration": "runmat-vm basics hilbert_builtin_executes_for_fm_demod_shape"
+  },
+  "description": "`Q = unwrap(P)` adjusts phase angles in radians by adding integer multiples of `2*pi` whenever adjacent samples jump by more than the tolerance.",
+  "behaviors": [
+    "Accepts real numeric, logical, integer, vector, matrix, and N-D tensor inputs.",
+    "Operates along the first non-singleton dimension by default.",
+    "`unwrap(P, tol)` uses `max(tol, pi)` as the discontinuity threshold, matching MATLAB behavior for tolerances below `pi`.",
+    "`unwrap(P, [], dim)` keeps the default tolerance and unwraps along `dim`.",
+    "Preserves the input shape and numeric dtype metadata.",
+    "Complex inputs are rejected because `unwrap` expects real phase angles."
+  ],
+  "examples": [
+    {
+      "description": "Correct a wrapped phase vector",
+      "input": "p = [0 1 2 2-2*pi 3-2*pi];\nq = unwrap(p)",
+      "output": "q = [0 1 2 2 3]"
+    },
+    {
+      "description": "Use a custom tolerance",
+      "input": "p = [0 1 1-2*pi];\nq = unwrap(p, 10)",
+      "output": "q = [0 1 -5.2832]"
+    },
+    {
+      "description": "Unwrap across matrix rows",
+      "input": "P = [0 1 1-2*pi; 0 -1 -1+2*pi];\nQ = unwrap(P, [], 2)",
+      "output": "Q =\n     0     1     1\n     0    -1    -1"
+    },
+    {
+      "description": "Recover continuous phase from an analytic signal",
+      "input": "x = cos(0:0.1:10);\nz = hilbert(x);\nphase = unwrap(angle(z));"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What tolerance does `unwrap` use by default?",
+      "answer": "The default tolerance is `pi`. If you pass a tolerance below `pi`, RunMat uses `pi`, matching MATLAB's documented behavior."
+    },
+    {
+      "question": "Which dimension is unwrapped?",
+      "answer": "The first non-singleton dimension is used unless you pass `dim`."
+    },
+    {
+      "question": "Does `unwrap` change the shape?",
+      "answer": "No. The output has the same shape as the input."
+    },
+    {
+      "question": "Can I pass complex input?",
+      "answer": "No. Use `angle(z)` first to convert complex samples to real phase angles, then call `unwrap`."
+    }
+  ],
+  "links": [
+    {
+      "label": "angle",
+      "url": "./angle"
+    },
+    {
+      "label": "hilbert",
+      "url": "./hilbert"
+    },
+    {
+      "label": "diff",
+      "url": "./diff"
+    },
+    {
+      "label": "fft",
+      "url": "./fft"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/unwrap.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/unwrap.rs"
+  },
+  "gpu_residency": "`unwrap` accepts GPU tensors through the normal gather path. Because phase unwrapping is stateful along a dimension and currently materialized on the host, downstream GPU residency resumes only after an explicit `gpuArray` or another operation that uploads the result.",
+  "gpu_behavior": [
+    "GPU inputs are downloaded through the active provider with dtype normalization.",
+    "The host implementation performs MATLAB-compatible phase correction.",
+    "The output is a host tensor with the same shape as the input."
+  ]
+}

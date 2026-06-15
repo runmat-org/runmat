@@ -70,7 +70,7 @@ impl<'window> PlotWindow<'window> {
             let surface = ctx.instance.create_surface(window.clone())?;
             (ctx.instance.clone(), surface, Some(ctx))
         } else {
-            let instance = Arc::new(wgpu::Instance::new(wgpu::InstanceDescriptor {
+            let instance = Arc::new(crate::wgpu_compat::instance_new(wgpu::InstanceDescriptor {
                 backends: wgpu::Backends::all(),
                 ..Default::default()
             }));
@@ -92,11 +92,11 @@ impl<'window> PlotWindow<'window> {
 
             let (device, queue) = adapter
                 .request_device(
-                    &wgpu::DeviceDescriptor {
-                        label: Some("RunMat Plot Device"),
-                        required_features: wgpu::Features::empty(),
-                        required_limits: wgpu::Limits::default(),
-                    },
+                    &crate::wgpu_compat::device_descriptor(
+                        Some("RunMat Plot Device"),
+                        wgpu::Features::empty(),
+                        wgpu::Limits::default(),
+                    ),
                     None,
                 )
                 .await?;
@@ -167,7 +167,7 @@ impl<'window> PlotWindow<'window> {
             None,
         );
 
-        let egui_renderer = egui_wgpu::Renderer::new(
+        let egui_renderer = crate::wgpu_compat::egui_renderer_new(
             &device,
             surface_format,
             None, // egui doesn't need depth buffer

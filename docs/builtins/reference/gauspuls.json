@@ -1,0 +1,83 @@
+{
+  "title": "gauspuls",
+  "category": "math/signal",
+  "keywords": [
+    "gauspuls",
+    "gaussian pulse",
+    "pulse train",
+    "signal processing",
+    "cutoff"
+  ],
+  "summary": "Generate Gaussian-modulated sinusoidal pulses.",
+  "references": [
+    "title: \"MATLAB gauspuls documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to the host and evaluated with the scalar reference implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline",
+    "notes": "Fusion is disabled because parameter validation and cutoff mode are handled by the host builtin."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::gauspuls::tests",
+    "integration": null
+  },
+  "description": "`gauspuls(T)` evaluates a Gaussian-modulated cosine pulse. Optional `FC`, `BW`, and `BWR` arguments control carrier frequency, fractional bandwidth, and bandwidth reference level. `[YI, YQ, YE] = gauspuls(T, FC, BW, BWR)` also returns quadrature samples and the Gaussian envelope. `gauspuls('cutoff', FC, BW, BWR, TPE)` returns the cutoff time where the envelope reaches `TPE` dB.",
+  "behaviors": [
+    "Operates element-wise on real numeric scalars, vectors, matrices, and N-D tensors; preserves input shape.",
+    "One output returns the in-phase cosine component; three requested outputs return in-phase, quadrature, and envelope arrays.",
+    "Defaults are `FC = 1000`, `BW = 0.5`, and `BWR = -6`.",
+    "Carrier frequency and bandwidth must be positive finite scalars.",
+    "Bandwidth reference and cutoff envelope levels must be negative finite scalars.",
+    "Complex inputs are rejected with a builtin-scoped error."
+  ],
+  "examples": [
+    {
+      "description": "Evaluate a Gaussian pulse",
+      "input": "t = -0.001:0.001:0.001;\ny = gauspuls(t, 1000, 0.5, -6)"
+    },
+    {
+      "description": "Return in-phase, quadrature, and envelope samples",
+      "input": "t = 0:0.00025:0.001;\n[yi, yq, ye] = gauspuls(t, 1000, 0.5, -6)"
+    },
+    {
+      "description": "Compute cutoff time",
+      "input": "tc = gauspuls('cutoff', 1000, 0.5, -6, -60)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can `gauspuls` be used inside `pulstran`?",
+      "answer": "Yes. `pulstran(T, D, 'gauspuls', FC, BW, BWR)` evaluates Gaussian pulses centered at each delay."
+    }
+  ],
+  "links": [
+    {
+      "label": "pulstran",
+      "url": "./pulstran"
+    },
+    {
+      "label": "rectpuls",
+      "url": "./rectpuls"
+    },
+    {
+      "label": "tripuls",
+      "url": "./tripuls"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/gauspuls.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/gauspuls.rs"
+  }
+}

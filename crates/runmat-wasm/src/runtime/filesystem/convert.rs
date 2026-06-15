@@ -1,5 +1,7 @@
-use js_sys::{Array, ArrayBuffer, Uint8Array};
-use runmat_filesystem::{DirEntry, FsFileType, FsMetadata};
+use js_sys::{Array, ArrayBuffer, Object, Reflect, Uint8Array};
+use runmat_filesystem::{
+    DirEntry, FsFileType, FsMetadata, OpenFileDialogRequest, OpenFileDialogSelection,
+};
 use std::ffi::OsString;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -125,6 +127,88 @@ pub(super) fn parse_dir_entries(value: JsValue) -> io::Result<Vec<DirEntry>> {
     Ok(entries)
 }
 
+pub(super) fn open_file_request_to_js(request: &OpenFileDialogRequest) -> io::Result<JsValue> {
+    let object = Object::new();
+    if let Some(title) = &request.title {
+        set_js_prop(&object, "title", &JsValue::from_str(title))?;
+    }
+    if let Some(default_path) = &request.default_path {
+        set_js_prop(
+            &object,
+            "defaultPath",
+            &JsValue::from_str(&path_to_string(default_path)),
+        )?;
+    }
+    set_js_prop(
+        &object,
+        "multiselect",
+        &JsValue::from_bool(request.multiselect),
+    )?;
+
+    let filters = Array::new();
+    for filter in &request.filters {
+        let filter_object = Object::new();
+        let patterns = Array::new();
+        for pattern in &filter.patterns {
+            patterns.push(&JsValue::from_str(pattern));
+        }
+        set_js_prop(&filter_object, "patterns", &patterns.into())?;
+        if let Some(description) = &filter.description {
+            set_js_prop(
+                &filter_object,
+                "description",
+                &JsValue::from_str(description),
+            )?;
+        }
+        filters.push(&filter_object.into());
+    }
+    set_js_prop(&object, "filters", &filters.into())?;
+    Ok(object.into())
+}
+
+pub(super) fn parse_open_file_selection(
+    value: JsValue,
+) -> io::Result<Option<OpenFileDialogSelection>> {
+    if value.is_null() || value.is_undefined() || value.as_bool() == Some(false) {
+        return Ok(None);
+    }
+    if let Some(path) = value.as_string() {
+        return Ok(Some(selection_from_paths(vec![path], None)?));
+    }
+    if Array::is_array(&value) {
+        let paths = parse_string_array(&value, "selectFileOpen")?;
+        return Ok(Some(selection_from_paths(paths, None)?));
+    }
+    if value.is_object() {
+        let filter_index = optional_number_property(&value, "filterIndex")?;
+        let paths = Reflect::get(&value, &JsValue::from_str("paths"))
+            .ok()
+            .filter(|paths| !paths.is_undefined() && !paths.is_null());
+        if let Some(paths) = paths {
+            if Array::is_array(&paths) {
+                return Ok(Some(selection_from_paths(
+                    parse_string_array(&paths, "selectFileOpen.paths")?,
+                    filter_index,
+                )?));
+            }
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "selectFileOpen.paths must be an array of strings",
+            ));
+        }
+        let path = Reflect::get(&value, &JsValue::from_str("path"))
+            .ok()
+            .and_then(|path| path.as_string());
+        if let Some(path) = path {
+            return Ok(Some(selection_from_paths(vec![path], filter_index)?));
+        }
+    }
+    Err(io::Error::new(
+        ErrorKind::InvalidData,
+        "selectFileOpen must return null, false, a string path, an array of paths, or a selection object",
+    ))
+}
+
 fn map_file_type(text: String) -> Option<FsFileType> {
     match text.as_str() {
         "file" => Some(FsFileType::File),
@@ -137,4 +221,68 @@ fn map_file_type(text: String) -> Option<FsFileType> {
 
 pub(super) fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn set_js_prop(object: &Object, key: &str, value: &JsValue) -> io::Result<()> {
+    let did_set = Reflect::set(object, &JsValue::from_str(key), value)
+        .map_err(|err| map_js_error("selectFileOpen", err))?;
+    if did_set {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "selectFileOpen: failed to set request property {key}"
+        )))
+    }
+}
+
+fn parse_string_array(value: &JsValue, context: &str) -> io::Result<Vec<String>> {
+    let array = Array::from(value);
+    let mut paths = Vec::with_capacity(array.length() as usize);
+    for item in array.iter() {
+        let Some(path) = item.as_string() else {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("{context} must contain only strings"),
+            ));
+        };
+        paths.push(path);
+    }
+    Ok(paths)
+}
+
+fn optional_number_property(value: &JsValue, key: &str) -> io::Result<Option<usize>> {
+    let property = Reflect::get(value, &JsValue::from_str(key))
+        .map_err(|err| map_js_error("selectFileOpen", err))?;
+    if property.is_undefined() || property.is_null() {
+        return Ok(None);
+    }
+    let Some(number) = property.as_f64() else {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            format!("selectFileOpen.{key} must be a positive integer"),
+        ));
+    };
+    if !number.is_finite() || number.fract() != 0.0 || number < 1.0 {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            format!("selectFileOpen.{key} must be a positive integer"),
+        ));
+    }
+    Ok(Some(number as usize))
+}
+
+fn selection_from_paths(
+    paths: Vec<String>,
+    filter_index: Option<usize>,
+) -> io::Result<OpenFileDialogSelection> {
+    if paths.is_empty() {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "selectFileOpen selection must include at least one path",
+        ));
+    }
+    Ok(OpenFileDialogSelection {
+        paths: paths.into_iter().map(PathBuf::from).collect(),
+        filter_index,
+    })
 }

@@ -127,12 +127,13 @@ pub fn pack_vertices_from_values(
         push_constant_ranges: &[],
     });
 
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("bar-pack-pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: "main",
-    });
+    let pipeline =
+        device.create_compute_pipeline(&crate::wgpu_compat::wgpu_compute_pipeline_descriptor! {
+            label: Some("bar-pack-pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "main",
+        });
 
     let vertex_count = inputs.row_count as u64 * VERTICES_PER_BAR as u64;
     let output_size = vertex_count * std::mem::size_of::<Vertex>() as u64;

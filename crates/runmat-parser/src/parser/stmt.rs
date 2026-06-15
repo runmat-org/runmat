@@ -160,21 +160,11 @@ impl Parser {
                 self.error_with_expected("expected '(' after superclass constructor name", "'('")
             );
         }
-        let mut args = Vec::new();
-        if !self.consume(&Token::RParen) {
-            loop {
-                args.push(self.parse_expr()?);
-                if self.consume(&Token::Comma) {
-                    continue;
-                }
-                if self.consume(&Token::RParen) {
-                    break;
-                }
-                return Err(
-                    self.error_with_expected("expected ',' or ')' in argument list", "',' or ')'")
-                );
-            }
-        }
+        let args = self.parse_call_arguments_until(
+            Token::RParen,
+            "expected ',' or ')' in argument list",
+            "',' or ')'",
+        )?;
         let end = self.last_token_end();
         let span = self.span_from(start, end);
         let class_name = self.current_classdef_name.clone().ok_or_else(|| {

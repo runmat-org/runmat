@@ -50,6 +50,48 @@ fn bare_random_builtin_identifiers_execute_as_zero_arg_calls() {
 }
 
 #[test]
+fn hilbert_builtin_executes_for_fm_demod_shape() {
+    let input = r#"
+        t = 0:0.001:0.01;
+        signal = cos(2*pi*100*t);
+        analytic = hilbert(signal);
+        phase = unwrap(angle(analytic));
+        demod = [diff(phase) 0];
+        [b, a] = butter(4, 0.05);
+        filtered = filter(b, a, demod);
+        out = [numel(analytic), numel(phase), numel(demod), numel(filtered)];
+    "#;
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected output tensor");
+    assert_eq!(out.data, vec![11.0, 11.0, 11.0, 11.0]);
+}
+
+#[test]
+fn pulstran_rectpuls_builtin_executes_for_impulse_train_shape() {
+    let input = r#"
+        t = -1:0.5:1;
+        d = [-0.5 0.5];
+        x = pulstran(t, d, 'rectpuls', 0.25);
+        out = [numel(x), x(1), x(2), x(3), x(4), x(5)];
+    "#;
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 6] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected pulse train summary tensor");
+    assert_eq!(out.data, vec![5.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+}
+
+#[test]
 fn struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates() {
     let bytecode = compile_source("s = struct{version = 1, version = 2};").expect("compile source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(

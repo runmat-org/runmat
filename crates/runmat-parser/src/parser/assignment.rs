@@ -13,16 +13,11 @@ impl Parser {
         let mut base = Expr::Ident(base_token.lexeme, base_span);
         loop {
             if self.consume(&Token::LParen) {
-                let mut args = Vec::new();
-                if !self.consume(&Token::RParen) {
-                    args.push(self.parse_expr()?);
-                    while self.consume(&Token::Comma) {
-                        args.push(self.parse_expr()?);
-                    }
-                    if !self.consume(&Token::RParen) {
-                        return Err(self.error_with_expected("expected ')' after indices", ")"));
-                    }
-                }
+                let args = self.parse_call_arguments_until(
+                    Token::RParen,
+                    "expected ')' after indices",
+                    ")",
+                )?;
                 let end = self.last_token_end();
                 let span = self.span_from(base.span().start, end);
                 base = Expr::Index(Box::new(base), args, span);

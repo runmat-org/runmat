@@ -207,6 +207,7 @@ fn for_each_gpu_handle_in_value_with_visited(
         | Value::String(_)
         | Value::StringArray(_)
         | Value::CharArray(_)
+        | Value::Symbolic(_)
         | Value::Tensor(_)
         | Value::SparseTensor(_)
         | Value::ComplexTensor(_)
@@ -531,6 +532,7 @@ fn collect_spawn_task_ids_in_value_with_visited(
         | Value::String(_)
         | Value::StringArray(_)
         | Value::CharArray(_)
+        | Value::Symbolic(_)
         | Value::Tensor(_)
         | Value::SparseTensor(_)
         | Value::ComplexTensor(_)
@@ -590,6 +592,7 @@ fn value_contains_spawn_task_id_with_visited(
         | Value::String(_)
         | Value::StringArray(_)
         | Value::CharArray(_)
+        | Value::Symbolic(_)
         | Value::Tensor(_)
         | Value::SparseTensor(_)
         | Value::ComplexTensor(_)
@@ -2167,7 +2170,8 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CreateBoundFunctionHandle(function, name) => {
+        Instr::CreateBoundFunctionHandle(function, name)
+        | Instr::CreateExternalBoundFunctionHandle(function, name) => {
             stack.push(Value::BoundFunctionHandle {
                 name: name.clone(),
                 function: function.0,

@@ -19,5 +19,8 @@ export type {
   RunMatFsFileType,
   RunMatFilesystemDirEntry,
   RunMatFilesystemMetadata,
-  RunMatFilesystemProvider
+  RunMatFilesystemProvider,
+  RunMatOpenFileDialogFilter,
+  RunMatOpenFileDialogRequest,
+  RunMatOpenFileDialogSelection
 } from "./provider-types.js";

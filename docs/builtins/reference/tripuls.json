@@ -1,0 +1,80 @@
+{
+  "title": "tripuls",
+  "category": "math/signal",
+  "keywords": [
+    "tripuls",
+    "triangular pulse",
+    "pulse train",
+    "signal processing",
+    "skew"
+  ],
+  "summary": "Generate sampled triangular pulses.",
+  "references": [
+    "title: \"MATLAB tripuls documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to the host and evaluated with the scalar reference implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline",
+    "notes": "Fusion is disabled because width and skew validation are handled by the host builtin."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::tripuls::tests",
+    "integration": null
+  },
+  "description": "`tripuls(T)` returns samples of a unit-width triangular pulse centered at zero. `tripuls(T, W, S)` uses width `W` and skew `S` in `[-1, 1]`.",
+  "behaviors": [
+    "Operates element-wise on real numeric scalars, vectors, matrices, and N-D tensors; preserves input shape.",
+    "The pulse is zero outside `[-W/2, W/2]` and reaches one at `S*W/2`.",
+    "The width must be positive and finite.",
+    "The skew must be finite and in `[-1, 1]`.",
+    "Complex and text inputs are rejected with a builtin-scoped error."
+  ],
+  "examples": [
+    {
+      "description": "Default centered triangle",
+      "input": "t = -0.5:0.25:0.5;\ny = tripuls(t)",
+      "output": "y = [0 0.5 1 0.5 0]"
+    },
+    {
+      "description": "Skewed triangle",
+      "input": "t = -1:1;\ny = tripuls(t, 2, 1)",
+      "output": "y = [0 0.5 1]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can `tripuls` be used inside `pulstran`?",
+      "answer": "Yes. `pulstran(T, D, 'tripuls', W, S)` evaluates triangular pulses centered at each delay."
+    }
+  ],
+  "links": [
+    {
+      "label": "pulstran",
+      "url": "./pulstran"
+    },
+    {
+      "label": "rectpuls",
+      "url": "./rectpuls"
+    },
+    {
+      "label": "gauspuls",
+      "url": "./gauspuls"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/tripuls.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/tripuls.rs"
+  }
+}

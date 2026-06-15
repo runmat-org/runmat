@@ -172,6 +172,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Bool(_) => "logical scalar",
         Value::Complex(_, _) => "complex scalar",
         Value::String(_) => "string scalar",
+        Value::Symbolic(_) => "symbolic scalar",
         Value::Object(_) => "object",
         Value::HandleObject(_) => "handle object",
         Value::Listener(_) => "listener",

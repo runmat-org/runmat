@@ -359,6 +359,10 @@ pub struct HirCall {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirCallableRef {
     Function(FunctionId),
+    ExternalFunction {
+        function: FunctionId,
+        display_name: String,
+    },
     Builtin(BuiltinId),
     Imported(DefPath),
     SuperConstructor {
@@ -388,6 +392,13 @@ impl HirCallableRef {
     pub fn identity(&self) -> Option<CallableIdentity> {
         match self {
             HirCallableRef::Function(function) => Some(CallableIdentity::BoundFunction(*function)),
+            HirCallableRef::ExternalFunction {
+                function,
+                display_name,
+            } => Some(CallableIdentity::ExternalFunction {
+                function: *function,
+                display_name: display_name.clone(),
+            }),
             HirCallableRef::Builtin(builtin) => Some(CallableIdentity::Builtin(builtin.clone())),
             HirCallableRef::Imported(path) => Some(CallableIdentity::Imported(path.clone())),
             HirCallableRef::SuperConstructor { .. } | HirCallableRef::SuperMethod { .. } => None,
@@ -406,6 +417,10 @@ impl HirCallableRef {
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub enum CallableIdentity {
     BoundFunction(FunctionId),
+    ExternalFunction {
+        function: FunctionId,
+        display_name: String,
+    },
     Builtin(BuiltinId),
     Imported(DefPath),
     Method(MethodId),
@@ -418,6 +433,9 @@ impl CallableIdentity {
     pub fn display_name(&self) -> Option<String> {
         match self {
             CallableIdentity::BoundFunction(_) | CallableIdentity::AnonymousFunction(_) => None,
+            CallableIdentity::ExternalFunction { display_name, .. } => {
+                (!display_name.is_empty()).then_some(display_name.clone())
+            }
             CallableIdentity::Builtin(id) => (!id.0.is_empty()).then_some(id.0.clone()),
             CallableIdentity::Imported(path) => path.module.display_name(),
             CallableIdentity::Method(id) => (!id.0.is_empty()).then_some(id.0.clone()),
@@ -766,6 +784,10 @@ pub enum IndexResultContext {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum FunctionHandleTarget {
     Function(FunctionId),
+    ExternalFunction {
+        function: FunctionId,
+        display_name: String,
+    },
     Builtin(BuiltinId),
     Anonymous(FunctionId),
     DefPath(DefPath),
@@ -776,6 +798,13 @@ impl FunctionHandleTarget {
     pub fn identity(&self) -> CallableIdentity {
         match self {
             FunctionHandleTarget::Function(function) => CallableIdentity::BoundFunction(*function),
+            FunctionHandleTarget::ExternalFunction {
+                function,
+                display_name,
+            } => CallableIdentity::ExternalFunction {
+                function: *function,
+                display_name: display_name.clone(),
+            },
             FunctionHandleTarget::Builtin(builtin) => CallableIdentity::Builtin(builtin.clone()),
             FunctionHandleTarget::Anonymous(function) => {
                 CallableIdentity::AnonymousFunction(*function)

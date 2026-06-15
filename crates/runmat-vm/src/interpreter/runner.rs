@@ -1242,6 +1242,7 @@ async fn run_interpreter_inner(
             | Instr::CreateExternalFunctionHandle(_)
             | Instr::CreateMethodFunctionHandle(_)
             | Instr::CreateBoundFunctionHandle(_, _)
+            | Instr::CreateExternalBoundFunctionHandle(_, _)
             | Instr::CreateClosure(_, _)
             | Instr::CreateSemanticClosure(_, _, _)
             | Instr::LoadStaticProperty(_, _)

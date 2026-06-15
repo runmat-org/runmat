@@ -8,6 +8,7 @@ pub(crate) mod exp;
 pub(crate) mod expm1;
 pub(crate) mod factorial;
 pub(crate) mod gamma;
+pub(crate) mod heaviside;
 pub(crate) mod hypot;
 pub(crate) mod imag;
 pub(crate) mod int32;

@@ -38,6 +38,7 @@
   "description": "`power(A, B)` (or `A .^ B`) raises each element of `A` to the corresponding element of `B`. Implicit expansion, complex results, and domain behavior follow MATLAB semantics.",
   "behaviors": [
     "Supports scalars, vectors, matrices, and N-D tensors with the same shape or compatible singleton dimensions. Size mismatches raise the standard MATLAB error.",
+    "When either operand is a scalar symbolic expression, `power` and scalar `^` construct a symbolic power expression that can participate in symbolic functions such as `limit`.",
     "Logical and character inputs are promoted to double precision before powering (`'A'.^2` uses the Unicode code points of the characters).",
     "Complex bases and/or exponents follow the analytic identity `z.^w = exp(w * log(z))`, so negative bases with fractional exponents return complex results instead of `NaN`.",
     "Empty tensors propagate emptiness; the result uses the broadcasted size.",

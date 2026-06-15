@@ -262,6 +262,26 @@ impl ReadManyEntry {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenFileDialogFilter {
+    pub patterns: Vec<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OpenFileDialogRequest {
+    pub title: Option<String>,
+    pub default_path: Option<PathBuf>,
+    pub filters: Vec<OpenFileDialogFilter>,
+    pub multiselect: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenFileDialogSelection {
+    pub paths: Vec<PathBuf>,
+    pub filter_index: Option<usize>,
+}
+
 impl DirEntry {
     pub fn new(path: PathBuf, file_name: OsString, file_type: FsFileType) -> Self {
         Self {
@@ -360,6 +380,13 @@ pub trait FsProvider: Send + Sync + 'static {
             ErrorKind::Unsupported,
             "data chunk upload is unsupported by this provider",
         ))
+    }
+
+    async fn select_file_open(
+        &self,
+        _request: &OpenFileDialogRequest,
+    ) -> io::Result<Option<OpenFileDialogSelection>> {
+        Ok(None)
     }
 }
 
@@ -660,6 +687,17 @@ pub async fn set_readonly_async(path: impl AsRef<Path>, readonly: bool) -> io::R
     let resolved = resolve_path(path.as_ref());
     let provider = current_provider();
     provider.set_readonly(&resolved, readonly).await
+}
+
+pub async fn select_file_open_async(
+    request: &OpenFileDialogRequest,
+) -> io::Result<Option<OpenFileDialogSelection>> {
+    let mut resolved = request.clone();
+    if let Some(default_path) = resolved.default_path.as_mut() {
+        *default_path = resolve_path(default_path);
+    }
+    let provider = current_provider();
+    provider.select_file_open(&resolved).await
 }
 
 pub async fn data_manifest_descriptor_async(
@@ -1007,6 +1045,27 @@ mod tests {
         assert_eq!(contents, "async contents");
         assert!(*opened_async.lock().unwrap());
         assert!(*flushed_async.lock().unwrap());
+    }
+
+    #[test]
+    fn select_file_open_defaults_to_cancelled_selection() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let provider: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
+        let _provider_guard = replace_provider(provider);
+        let request = OpenFileDialogRequest {
+            title: Some("Open".to_string()),
+            default_path: Some(PathBuf::from("data")),
+            filters: vec![OpenFileDialogFilter {
+                patterns: vec!["*.csv".to_string()],
+                description: Some("CSV files".to_string()),
+            }],
+            multiselect: false,
+        };
+
+        let selection =
+            futures::executor::block_on(select_file_open_async(&request)).expect("select file");
+
+        assert_eq!(selection, None);
     }
 
     #[test]

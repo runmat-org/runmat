@@ -279,6 +279,50 @@ fn clearvars_except_stringifies_dash_option_and_names() {
 }
 
 #[test]
+fn syms_command_form_accepts_symbolic_function_declarations() {
+    let program = parse_with_options(
+        "syms Y(X); cond = Y(0) == 0;",
+        ParserOptions::new(CompatMode::Matlab),
+    )
+    .unwrap();
+    assert_eq!(program.body.len(), 2);
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), true, _) => {
+            assert_eq!(name, "syms");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"Y(X)\""));
+        }
+        other => panic!("expected syms command call, got {other:?}"),
+    }
+}
+
+#[test]
+fn syms_command_form_accepts_multiple_function_parameters() {
+    let program =
+        parse_with_options("syms f(x,y) z real", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "syms");
+            assert_eq!(args.len(), 3);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"f(x,y)\""));
+            assert!(matches!(args[1], Expr::String(ref s, _) if s == "\"z\""));
+            assert!(matches!(args[2], Expr::String(ref s, _) if s == "\"real\""));
+        }
+        other => panic!("expected syms command call, got {other:?}"),
+    }
+}
+
+#[test]
+fn syms_command_form_rejects_malformed_function_declarations() {
+    for source in ["syms f(x,)", "syms Y("] {
+        assert!(
+            parse_with_options(source, ParserOptions::new(CompatMode::Matlab)).is_err(),
+            "expected parse error for {source}"
+        );
+    }
+}
+
+#[test]
 fn print_command_form_stringifies_dash_options_and_dotted_filename() {
     let program = parse_with_options(
         "print -dpng -r300 command_style_plot.png",

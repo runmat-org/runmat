@@ -631,6 +631,9 @@ fn analyse_like_prototype(proto: &Value) -> crate::BuiltinResult<PrototypeSpec> 
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => Err(builtin_error(
             "meshgrid: prototypes must be numeric or gpuArray values",
         )),
+        Value::Symbolic(_) => Err(builtin_error(
+            "meshgrid: prototypes must be numeric or gpuArray values",
+        )),
         Value::Cell(_)
         | Value::Struct(_)
         | Value::Object(_)
