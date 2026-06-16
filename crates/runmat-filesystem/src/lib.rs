@@ -819,6 +819,24 @@ mod tests {
 
     static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
+    fn comparable_path(path: impl AsRef<Path>) -> PathBuf {
+        #[cfg(windows)]
+        {
+            let text = path.as_ref().to_string_lossy();
+            if let Some(stripped) = text.strip_prefix(r"\\?\UNC\") {
+                return PathBuf::from(format!(r"\\{stripped}"));
+            }
+            if let Some(stripped) = text.strip_prefix(r"\\?\") {
+                return PathBuf::from(stripped);
+            }
+            PathBuf::from(text.as_ref())
+        }
+        #[cfg(not(windows))]
+        {
+            path.as_ref().to_path_buf()
+        }
+    }
+
     struct UnsupportedProvider;
 
     struct AsyncOpenProvider {
@@ -1264,7 +1282,7 @@ mod tests {
         let _provider_guard = replace_provider(Arc::new(NativeFsProvider));
         let current = current_dir().expect("vfs current dir");
         let expected = std::fs::canonicalize(temp.path()).expect("canonical temp");
-        assert_eq!(current, expected);
+        assert_eq!(comparable_path(&current), comparable_path(&expected));
 
         futures::executor::block_on(write_async("native-relative.txt", b"native"))
             .expect("write relative path");
@@ -1360,7 +1378,10 @@ mod tests {
         {
             let _native_guard = replace_provider(Arc::new(NativeFsProvider));
             let expected = std::fs::canonicalize(temp.path()).expect("canonical temp");
-            assert_eq!(current_dir().expect("native cwd"), expected);
+            assert_eq!(
+                comparable_path(current_dir().expect("native cwd")),
+                comparable_path(&expected)
+            );
 
             futures::executor::block_on(write_async("native.txt", b"native"))
                 .expect("write native relative");
