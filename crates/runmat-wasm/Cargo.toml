@@ -1,6 +1,6 @@
 [package]
 name = "runmat-wasm"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -39,7 +39,7 @@ console_error_panic_hook = "0.1"
 async-trait = "0.1"
 getrandom = { version = "0.2", features = ["js"] }
 uuid = { version = "1", features = ["v4", "js"], default-features = false }
-runmat-logging = { path = "../runmat-logging", version = "=0.5.2" }
+runmat-logging = { path = "../runmat-logging", version = "=0.5.3" }
 tracing = "0.1"
 runmat-telemetry = { workspace = true }
 
