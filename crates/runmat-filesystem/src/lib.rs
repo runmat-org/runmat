@@ -310,6 +310,10 @@ impl DirEntry {
 
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
+    fn current_dir_override(&self) -> Option<PathBuf> {
+        None
+    }
+
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>>;
     async fn open_async(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         self.open(path, flags)
@@ -460,13 +464,26 @@ impl Seek for File {
     }
 }
 
-static PROVIDER: OnceCell<RwLock<Arc<dyn FsProvider>>> = OnceCell::new();
-static PROVIDER_OVERRIDE_LOCK: OnceCell<Mutex<()>> = OnceCell::new();
-#[cfg(target_arch = "wasm32")]
-static CURRENT_DIR: OnceCell<RwLock<PathBuf>> = OnceCell::new();
+struct ProviderState {
+    provider: Arc<dyn FsProvider>,
+    current_dir_override: Option<PathBuf>,
+}
 
-fn provider_lock() -> &'static RwLock<Arc<dyn FsProvider>> {
-    PROVIDER.get_or_init(|| RwLock::new(default_provider()))
+static PROVIDER_STATE: OnceCell<RwLock<ProviderState>> = OnceCell::new();
+static PROVIDER_OVERRIDE_LOCK: OnceCell<Mutex<()>> = OnceCell::new();
+
+fn provider_state_lock() -> &'static RwLock<ProviderState> {
+    PROVIDER_STATE.get_or_init(|| {
+        #[cfg(target_arch = "wasm32")]
+        let current_dir_override = Some(PathBuf::from("/"));
+        #[cfg(not(target_arch = "wasm32"))]
+        let current_dir_override = None;
+
+        RwLock::new(ProviderState {
+            provider: default_provider(),
+            current_dir_override,
+        })
+    })
 }
 
 /// Serializes tests and embedders that temporarily replace the process-wide
@@ -478,52 +495,66 @@ pub fn provider_override_lock() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-#[cfg(target_arch = "wasm32")]
-fn current_dir_lock() -> &'static RwLock<PathBuf> {
-    CURRENT_DIR.get_or_init(|| RwLock::new(PathBuf::from("/")))
+fn current_dir_override() -> Option<PathBuf> {
+    provider_state_lock()
+        .read()
+        .expect("filesystem provider lock poisoned")
+        .current_dir_override
+        .clone()
+}
+
+fn replace_current_dir_override(value: Option<PathBuf>) -> Option<PathBuf> {
+    let mut guard = provider_state_lock()
+        .write()
+        .expect("filesystem provider lock poisoned");
+    std::mem::replace(&mut guard.current_dir_override, value)
 }
 
 fn with_provider<T>(f: impl FnOnce(&dyn FsProvider) -> T) -> T {
-    let guard = provider_lock()
+    let guard = provider_state_lock()
         .read()
         .expect("filesystem provider lock poisoned");
-    f(&**guard)
+    f(&*guard.provider)
 }
 
 fn resolve_path(path: &Path) -> PathBuf {
-    #[cfg(target_arch = "wasm32")]
-    {
-        if path.is_absolute() {
-            return path.to_path_buf();
-        }
-        if let Ok(base) = current_dir() {
-            return base.join(path);
-        }
-        PathBuf::from("/").join(path)
+    if path.is_absolute() {
+        return path.to_path_buf();
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        path.to_path_buf()
+    let state = provider_state_lock()
+        .read()
+        .expect("filesystem provider lock poisoned");
+    if let Some(base) = &state.current_dir_override {
+        return base.join(path);
     }
+    path.to_path_buf()
 }
 
 pub fn set_provider(provider: Arc<dyn FsProvider>) {
-    let mut guard = provider_lock()
+    let current_dir_override = provider.current_dir_override();
+    let mut guard = provider_state_lock()
         .write()
         .expect("filesystem provider lock poisoned");
-    *guard = provider;
+    guard.provider = provider;
+    guard.current_dir_override = current_dir_override;
 }
 
 /// Temporarily replace the active provider and return a guard that restores the
 /// previous provider when dropped. Useful for tests that need to install a mock
 /// filesystem without permanently mutating global state.
 pub fn replace_provider(provider: Arc<dyn FsProvider>) -> ProviderGuard {
-    let mut guard = provider_lock()
+    let current_dir_override = provider.current_dir_override();
+    let mut guard = provider_state_lock()
         .write()
         .expect("filesystem provider lock poisoned");
-    let previous = guard.clone();
-    *guard = provider;
-    ProviderGuard { previous }
+    let previous = guard.provider.clone();
+    let previous_current_dir = guard.current_dir_override.clone();
+    guard.provider = provider;
+    guard.current_dir_override = current_dir_override;
+    ProviderGuard {
+        previous,
+        previous_current_dir,
+    }
 }
 
 /// Run a closure with the supplied provider installed, restoring the previous
@@ -537,62 +568,76 @@ pub fn with_provider_override<R>(provider: Arc<dyn FsProvider>, f: impl FnOnce()
 
 /// Returns the currently installed provider.
 pub fn current_provider() -> Arc<dyn FsProvider> {
-    provider_lock()
+    provider_state_lock()
         .read()
         .expect("filesystem provider lock poisoned")
+        .provider
         .clone()
 }
 
 pub fn current_dir() -> io::Result<PathBuf> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        return Ok(current_dir_lock()
-            .read()
-            .expect("filesystem current dir lock poisoned")
-            .clone());
+    if let Some(current) = current_dir_override() {
+        return Ok(current);
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
         std::env::current_dir()
     }
+    #[cfg(target_arch = "wasm32")]
+    {
+        Ok(PathBuf::from("/"))
+    }
 }
 
 pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
-    #[cfg(target_arch = "wasm32")]
-    {
+    if current_dir_override().is_some() {
+        futures::executor::block_on(set_current_dir_async(path.as_ref().to_path_buf()))
+    } else {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            std::env::set_current_dir(path)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Ok(())
+        }
+    }
+}
+
+pub async fn set_current_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
+    if current_dir_override().is_some() {
         let mut target = PathBuf::from(path.as_ref());
         if !target.is_absolute() {
             let base = current_dir()?;
             target = base.join(target);
         }
-        let canonical =
-            futures::executor::block_on(canonicalize_async(&target)).unwrap_or(target.clone());
-        let metadata = futures::executor::block_on(metadata_async(&canonical))?;
+        let canonical = canonicalize_async(&target).await.unwrap_or(target.clone());
+        let metadata = metadata_async(&canonical).await?;
         if !metadata.is_dir() {
             return Err(io::Error::new(
                 ErrorKind::NotFound,
                 format!("Not a directory: {}", canonical.display()),
             ));
         }
-        let mut guard = current_dir_lock()
-            .write()
-            .expect("filesystem current dir lock poisoned");
-        *guard = canonical;
+        replace_current_dir_override(Some(canonical));
         Ok(())
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::env::set_current_dir(path)
+    } else {
+        set_current_dir(path)
     }
 }
 
 pub struct ProviderGuard {
     previous: Arc<dyn FsProvider>,
+    previous_current_dir: Option<PathBuf>,
 }
 
 impl Drop for ProviderGuard {
     fn drop(&mut self) {
-        set_provider(self.previous.clone());
+        let mut guard = provider_state_lock()
+            .write()
+            .expect("filesystem provider lock poisoned");
+        guard.provider = self.previous.clone();
+        guard.current_dir_override = self.previous_current_dir.clone();
     }
 }
 
@@ -760,6 +805,16 @@ mod tests {
     struct AsyncOpenProvider {
         opened_async: Arc<Mutex<bool>>,
         flushed_async: Arc<Mutex<bool>>,
+    }
+
+    struct ProcessCwdGuard {
+        previous: PathBuf,
+    }
+
+    impl Drop for ProcessCwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.previous);
+        }
     }
 
     struct AsyncTestHandle {
@@ -1022,6 +1077,35 @@ mod tests {
         }
         let final_provider = current_provider();
         assert!(Arc::ptr_eq(&final_provider, &original));
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_provider_replacement_preserves_process_cwd_resolution() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let temp = tempdir().expect("tempdir");
+        let previous = std::env::current_dir().expect("current dir");
+        let _cwd_guard = ProcessCwdGuard { previous };
+        std::env::set_current_dir(temp.path()).expect("set temp cwd");
+
+        let _provider_guard = replace_provider(Arc::new(NativeFsProvider));
+        let current = current_dir().expect("vfs current dir");
+        let expected = std::fs::canonicalize(temp.path()).expect("canonical temp");
+        assert_eq!(current, expected);
+
+        futures::executor::block_on(write_async("native-relative.txt", b"native"))
+            .expect("write relative path");
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("native-relative.txt")).expect("read file"),
+            "native"
+        );
+
+        std::fs::create_dir(temp.path().join("child")).expect("create child");
+        set_current_dir("child").expect("set child cwd");
+        assert_eq!(
+            std::env::current_dir().expect("process cwd"),
+            expected.join("child")
+        );
     }
 
     #[test]

@@ -300,7 +300,12 @@ impl NativeSurfaceRenderContext {
             BackgroundPolicy::Explicit(bg)
         };
         self.apply_background_policy();
-        self.config.show_grid = figure.grid_enabled;
+        self.config.show_grid = figure.grid_enabled
+            || figure.minor_grid_enabled
+            || figure
+                .axes_metadata
+                .iter()
+                .any(|meta| meta.grid_enabled || meta.minor_grid_enabled);
         self.config.show_title = figure.has_any_titles();
 
         self.renderer.set_figure(figure.clone());

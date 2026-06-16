@@ -82,32 +82,31 @@ impl Parser {
                     if self.looks_like_super_constructor_stmt() {
                         return self.parse_super_constructor_stmt();
                     }
+                    if self.can_start_command_form() {
+                        return self.parse_command_stmt();
+                    }
                     if let Some(lv) = self.try_parse_lvalue_assign()? {
                         return Ok(lv);
                     }
-                    if self.can_start_command_form() {
-                        self.parse_command_stmt()
-                    } else {
-                        if matches!(self.peek_token_at(1), Some(Token::Ident))
-                            && matches!(
-                                self.peek_token_at(2),
-                                Some(
-                                    Token::LParen
-                                        | Token::Dot
-                                        | Token::LBracket
-                                        | Token::LBrace
-                                        | Token::Transpose
-                                )
+                    if matches!(self.peek_token_at(1), Some(Token::Ident))
+                        && matches!(
+                            self.peek_token_at(2),
+                            Some(
+                                Token::LParen
+                                    | Token::Dot
+                                    | Token::LBracket
+                                    | Token::LBrace
+                                    | Token::Transpose
                             )
-                        {
-                            return Err(self.error(
-                                "Unexpected adjacency: interpret as function call? Use parentheses (e.g., foo(b(1))).",
-                            ));
-                        }
-                        let expr = self.parse_expr()?;
-                        let span = expr.span();
-                        Ok(Stmt::ExprStmt(expr, false, span))
+                        )
+                    {
+                        return Err(self.error(
+                            "Unexpected adjacency: interpret as function call? Use parentheses (e.g., foo(b(1))).",
+                        ));
                     }
+                    let expr = self.parse_expr()?;
+                    let span = expr.span();
+                    Ok(Stmt::ExprStmt(expr, false, span))
                 } else {
                     let expr = self.parse_expr()?;
                     let span = expr.span();

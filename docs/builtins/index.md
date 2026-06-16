@@ -142,7 +142,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 
 | Status | Path | Names | GPU | Fusion | Backend | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| done | `io/repl-fs` | `cd`, `pwd`, `ls`, `dir`, `mkdir`, `rmdir`, `movefile`, `copyfile`, `delete`, `exist`, `which`, `path`, `addpath`, `rmpath`, `run`, `genpath`, `savepath`, `tempdir`, `tempname`, `getenv`, `setenv` | host | - | - | REPL filesystem and environment helpers. |
+| done | `io/repl-fs` | `cd`, `pwd`, `ls`, `dir`, `mkdir`, `rmdir`, `movefile`, `copyfile`, `delete`, `exist`, `which`, `path`, `addpath`, `rmpath`, `run`, `genpath`, `savepath`, `tempdir`, `tempname`, `getenv`, `setenv` | host | - | - | REPL filesystem and environment helpers; MATLAB command syntax accepts literal path words such as `cd ..`, `addpath ./src`, and `copyfile ./a.m ./b.m`. |
 | done | `io/filetext` | `fileread`, `filewrite`, `fopen`, `fclose`, `fread`, `fwrite`, `feof`, `fgetl`, `fgets`, `fprintf` | host | - | - | Text and binary file I/O. |
 | done | `io/core` | `disp` | host | - | - | Display output sink. |
 | done | `io/interactive` | `input` | host | - | - | Prompted input, including text mode. |

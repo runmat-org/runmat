@@ -74,14 +74,9 @@
       "url": "./readmatrix"
     }
   ],
-  "implementation": {
-    "summary": "`spreadsheetImportOptions` builds a validated struct in `crates/runmat-runtime/src/builtins/table/mod.rs`. `readtable` parses the struct, applies spreadsheet ranges and sheet selectors, and coerces imported columns according to `VariableTypes`.",
-    "source": [
-      {
-        "label": "`crates/runmat-runtime/src/builtins/table/mod.rs`",
-        "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"
-      }
-    ]
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/table/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"
   },
   "gpu_residency": "No GPU work is performed. Options are host metadata, and later `readtable` imports create host table variables."
 }

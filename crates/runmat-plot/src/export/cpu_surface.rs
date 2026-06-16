@@ -20,6 +20,7 @@ struct AxesView {
     label_scale: u32,
     tick_scale: u32,
     show_grid: bool,
+    show_minor_grid: bool,
     show_box: bool,
 }
 
@@ -684,9 +685,16 @@ fn text_scale_from_font_size(font_size: Option<f32>, default_scale: u32) -> u32 
 fn get_axes_style_and_display_prefs(
     figure: &Figure,
     axes_index: usize,
-) -> (u32, u32, u32, bool, bool) {
+) -> (u32, u32, u32, bool, bool, bool) {
     let Some(meta) = figure.axes_metadata(axes_index) else {
-        return (2, 2, 1, figure.grid_enabled, figure.box_enabled);
+        return (
+            2,
+            2,
+            1,
+            figure.grid_enabled,
+            figure.minor_grid_enabled,
+            figure.box_enabled,
+        );
     };
 
     let title_scale = text_scale_from_font_size(meta.title_style.font_size, 2);
@@ -696,13 +704,14 @@ fn get_axes_style_and_display_prefs(
         .or(meta.y_label_style.font_size)
         .or(meta.z_label_style.font_size);
     let label_scale = text_scale_from_font_size(label_font, 2);
-    let tick_scale = text_scale_from_font_size(label_font.map(|s| (s - 2.0).max(8.0)), 1);
+    let tick_scale = text_scale_from_font_size(meta.axes_style.font_size, 1);
 
     (
         title_scale,
         label_scale,
         tick_scale,
         meta.grid_enabled,
+        figure.minor_grid_enabled_for_axes(axes_index),
         meta.box_enabled,
     )
 }
@@ -780,6 +789,7 @@ fn format_tick(v: f32) -> String {
 fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
     let frame_color = [162, 170, 184, 255];
     let grid_color = [104, 114, 130, 110];
+    let minor_grid_color = [104, 114, 130, 56];
     let text_color = [212, 220, 234, 255];
 
     let (px, py, pw, ph) = axes.plot_rect;
@@ -787,6 +797,53 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
     let right = (px + pw.saturating_sub(1)) as i32;
     let top = py as i32;
     let bottom = (py + ph.saturating_sub(1)) as i32;
+
+    if axes.show_minor_grid {
+        let subdivisions = 5;
+        for i in 0..=(6 * subdivisions) {
+            if i % subdivisions == 0 {
+                continue;
+            }
+            let t = i as f32 / (6 * subdivisions) as f32;
+            let x = (left as f32 + t * (right - left) as f32).round() as i32;
+            let y = (top as f32 + t * (bottom - top) as f32).round() as i32;
+
+            canvas.draw_line(
+                ScreenVertex {
+                    x: x as f32,
+                    y: top as f32,
+                    z: 0.0,
+                    color: minor_grid_color,
+                },
+                ScreenVertex {
+                    x: x as f32,
+                    y: bottom as f32,
+                    z: 0.0,
+                    color: minor_grid_color,
+                },
+                0.8,
+                0,
+                false,
+            );
+            canvas.draw_line(
+                ScreenVertex {
+                    x: left as f32,
+                    y: y as f32,
+                    z: 0.0,
+                    color: minor_grid_color,
+                },
+                ScreenVertex {
+                    x: right as f32,
+                    y: y as f32,
+                    z: 0.0,
+                    color: minor_grid_color,
+                },
+                0.8,
+                0,
+                false,
+            );
+        }
+    }
 
     if axes.show_grid {
         for i in 0..=6 {
@@ -940,9 +997,12 @@ fn draw_3d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
     let oz = origin_component(bmin.z, bmax.z);
     let floor_z = oz;
 
-    if axes.show_grid {
+    if axes.show_minor_grid {
         let divisions = 28usize;
         for i in 0..=divisions {
+            if i % 4 == 0 {
+                continue;
+            }
             let t = i as f32 / divisions as f32;
             let x = bmin.x + t * (bmax.x - bmin.x);
             let y = bmin.y + t * (bmax.y - bmin.y);
@@ -967,6 +1027,37 @@ fn draw_3d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
                 continue;
             };
             canvas.draw_line(b0, b1, 0.9, 0, false);
+        }
+    }
+
+    if axes.show_grid {
+        let divisions = 7usize;
+        let floor_grid_major = [74, 86, 106, 116];
+        for i in 0..=divisions {
+            let t = i as f32 / divisions as f32;
+            let x = bmin.x + t * (bmax.x - bmin.x);
+            let y = bmin.y + t * (bmax.y - bmin.y);
+
+            let gx0 = Vec3::new(x, bmin.y, floor_z);
+            let gx1 = Vec3::new(x, bmax.y, floor_z);
+            let gy0 = Vec3::new(bmin.x, y, floor_z);
+            let gy1 = Vec3::new(bmax.x, y, floor_z);
+
+            let Some(a0) = project_3d(gx0, axes.plot_rect, cam, floor_grid_major) else {
+                continue;
+            };
+            let Some(a1) = project_3d(gx1, axes.plot_rect, cam, floor_grid_major) else {
+                continue;
+            };
+            canvas.draw_line(a0, a1, 1.1, 0, false);
+
+            let Some(b0) = project_3d(gy0, axes.plot_rect, cam, floor_grid_major) else {
+                continue;
+            };
+            let Some(b1) = project_3d(gy1, axes.plot_rect, cam, floor_grid_major) else {
+                continue;
+            };
+            canvas.draw_line(b0, b1, 1.1, 0, false);
         }
     }
 
@@ -1308,7 +1399,7 @@ pub async fn render_figure_rgba_bytes(
         };
 
         let (title, x_label, y_label, z_label) = get_axes_title_and_labels(&figure, axes_index);
-        let (title_scale, label_scale, tick_scale, show_grid, show_box) =
+        let (title_scale, label_scale, tick_scale, show_grid, show_minor_grid, show_box) =
             get_axes_style_and_display_prefs(&figure, axes_index);
 
         axes_views.push(AxesView {
@@ -1326,6 +1417,7 @@ pub async fn render_figure_rgba_bytes(
             label_scale,
             tick_scale,
             show_grid,
+            show_minor_grid,
             show_box,
         });
     }
@@ -1466,4 +1558,24 @@ pub async fn render_figure_png_bytes(
         render_figure_rgba_bytes(figure, width, height, theme, camera, axes_cameras, textmark)
             .await?;
     encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cpu_export_respects_explicit_axes_minor_grid_override() {
+        let mut figure = Figure::new();
+        figure.minor_grid_enabled = true;
+        figure.set_axes_minor_grid_enabled(0, false);
+
+        let (_, _, _, _, show_minor_grid, _) = get_axes_style_and_display_prefs(&figure, 0);
+        assert!(!show_minor_grid);
+
+        let mut inherited = Figure::new();
+        inherited.minor_grid_enabled = true;
+        let (_, _, _, _, inherited_minor_grid, _) = get_axes_style_and_display_prefs(&inherited, 0);
+        assert!(inherited_minor_grid);
+    }
 }

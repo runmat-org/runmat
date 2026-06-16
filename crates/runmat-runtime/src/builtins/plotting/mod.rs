@@ -167,6 +167,14 @@ pub use web::{
     PlotSurfaceCameraState,
 };
 
+#[doc(hidden)]
+pub use state::PlotTestLockGuard;
+
+#[doc(hidden)]
+pub fn lock_plot_test_context() -> PlotTestLockGuard {
+    state::lock_plot_test_registry()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimePlottingMode {
     Auto,
@@ -304,13 +312,9 @@ pub mod ops {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::state;
-    use std::sync::Once;
 
     pub(crate) fn ensure_plot_test_env() {
-        static INIT: Once = Once::new();
-        INIT.call_once(|| {
-            state::disable_rendering_for_tests();
-        });
+        state::disable_rendering_for_tests();
     }
 
     pub(crate) fn lock_plot_registry() -> state::PlotTestLockGuard {

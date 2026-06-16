@@ -1,0 +1,93 @@
+{
+  "title": "downsample",
+  "category": "math/signal",
+  "keywords": [
+    "downsample",
+    "sample rate",
+    "decimation",
+    "signal processing"
+  ],
+  "summary": "Decrease a signal's sample rate by keeping every Nth sample.",
+  "references": [
+    "title: \"MATLAB downsample documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "GPU inputs are accepted through the active provider gather path. The current implementation performs sample-rate conversion on the host and returns a host tensor."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::sample_rate::tests",
+    "integration": "runmat-vm basics upsample_downsample_builtin_executes_for_discrete_signal_workflow"
+  },
+  "description": "`y = downsample(x, n)` keeps every `n`th sample of `x`, starting at the first sample, along the first non-singleton dimension. `y = downsample(x, n, phase)` starts at the zero-based `phase` offset.",
+  "behaviors": [
+    "Accepts numeric, logical, integer, complex, vector, matrix, N-D tensor, and GPU tensor inputs.",
+    "Operates along the first non-singleton dimension, matching MATLAB's column-wise behavior for matrices and row-wise behavior for row vectors.",
+    "`n` must be a finite positive integer scalar.",
+    "`phase` is optional, defaults to 0, and must be an integer scalar in the range `0 <= phase < n`.",
+    "The output keeps samples at zero-based positions `phase`, `phase + n`, `phase + 2*n`, and so on.",
+    "No anti-aliasing filter is applied; use filtering operations separately when decimating sampled signals."
+  ],
+  "examples": [
+    {
+      "description": "Keep every second row-vector sample",
+      "input": "x = [1 2 3 4 5];\ny = downsample(x, 2)",
+      "output": "y = [1 3 5]"
+    },
+    {
+      "description": "Start at the second sample with phase 1",
+      "input": "x = [1 2 3 4 5];\ny = downsample(x, 2, 1)",
+      "output": "y = [2 4]"
+    },
+    {
+      "description": "Downsample matrix columns",
+      "input": "X = [1 3; 2 4; 5 7];\nY = downsample(X, 2)",
+      "output": "Y = [1 3; 5 7]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which dimension does `downsample` use?",
+      "answer": "RunMat follows MATLAB's default and operates along the first non-singleton dimension."
+    },
+    {
+      "question": "Does `downsample` apply an anti-aliasing filter?",
+      "answer": "No. `downsample` only selects samples. Apply a low-pass filter first when anti-aliasing is required."
+    },
+    {
+      "question": "Can I pass GPU tensors?",
+      "answer": "Yes. GPU inputs are gathered through the active provider, converted on the host, and returned as host tensors."
+    }
+  ],
+  "links": [
+    {
+      "label": "upsample",
+      "url": "./upsample"
+    },
+    {
+      "label": "filter",
+      "url": "./filter"
+    },
+    {
+      "label": "stem",
+      "url": "./stem"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/sample_rate.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/sample_rate.rs"
+  }
+}

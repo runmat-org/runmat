@@ -82,6 +82,12 @@ pub fn handle_from_scalar(value: f64, ctx: &str) -> BuiltinResult<FigureHandle> 
             format!("{ctx}: figure handle must be positive"),
         ));
     }
+    if rounded > u32::MAX as i64 {
+        return Err(plotting_error(
+            ctx,
+            format!("{ctx}: figure handle is too large"),
+        ));
+    }
     Ok(FigureHandle::from(rounded as u32))
 }
 

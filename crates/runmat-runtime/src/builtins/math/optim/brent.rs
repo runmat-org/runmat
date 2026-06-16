@@ -26,6 +26,16 @@ pub(crate) struct BrentMinResult {
     pub converged: bool,
 }
 
+/// Result of a scalar root-finding run.
+#[derive(Debug, Clone)]
+pub(crate) struct BrentZeroResult {
+    pub x: f64,
+    pub fval: f64,
+    pub iterations: usize,
+    pub func_count: usize,
+    pub converged: bool,
+}
+
 /// Tuning parameters shared by both Brent variants.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BrentParams {
@@ -34,7 +44,7 @@ pub(crate) struct BrentParams {
     pub max_fun_evals: usize,
 }
 
-/// Per-iteration hook used for `Display = 'iter'` output.
+/// Per-iteration hook used for bounded minimization `Display = 'iter'` output.
 pub(crate) trait BrentMinObserver {
     fn on_iteration(
         &mut self,
@@ -46,6 +56,18 @@ pub(crate) trait BrentMinObserver {
     );
 }
 
+/// Per-iteration hook used for scalar root-finding `Display = 'iter'` output.
+pub(crate) trait BrentZeroObserver {
+    fn on_iteration(
+        &mut self,
+        iter: usize,
+        func_count: usize,
+        x: f64,
+        fx: f64,
+        step_kind: BrentZeroStepKind,
+    );
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum BrentStepKind {
     Initial,
@@ -53,23 +75,42 @@ pub(crate) enum BrentStepKind {
     Parabolic,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum BrentZeroStepKind {
+    Initial,
+    Bisection,
+    Interpolation,
+}
+
 /// Find a zero of a scalar function on a sign-changing bracket using Brent's method.
 ///
 /// `bracket` must satisfy `fa * fb < 0` unless either endpoint is already zero
 /// the function returns an error).  The function evaluation counter
-/// (`initial_evals`) tracks calls performed by the caller while constructing the
-/// bracket; the returned tuple's second element is the total invocations.
+/// tracks calls performed by the caller while constructing the bracket.
 pub(crate) async fn brent_zero(
     name: &str,
     function: &Value,
     bracket: BrentZeroBracket,
     params: BrentParams,
-) -> BuiltinResult<f64> {
+    mut observer: Option<&mut dyn BrentZeroObserver>,
+) -> BuiltinResult<BrentZeroResult> {
     if bracket.fa == 0.0 {
-        return Ok(bracket.a);
+        return Ok(BrentZeroResult {
+            x: bracket.a,
+            fval: bracket.fa,
+            iterations: 0,
+            func_count: bracket.evals,
+            converged: true,
+        });
     }
     if bracket.fb == 0.0 {
-        return Ok(bracket.b);
+        return Ok(BrentZeroResult {
+            x: bracket.b,
+            fval: bracket.fb,
+            iterations: 0,
+            func_count: bracket.evals,
+            converged: true,
+        });
     }
     if bracket.fa * bracket.fb >= 0.0 {
         return Err(optim_error(
@@ -88,7 +129,11 @@ pub(crate) async fn brent_zero(
     let mut e = d;
     let mut evals = bracket.evals;
 
-    for _ in 0..params.max_iter {
+    if let Some(observer) = observer.as_deref_mut() {
+        observer.on_iteration(0, evals, b, fb, BrentZeroStepKind::Initial);
+    }
+
+    for iter in 1..=params.max_iter {
         if fb.signum() == fc.signum() {
             c = a;
             fc = fa;
@@ -109,15 +154,25 @@ pub(crate) async fn brent_zero(
         let tol = 2.0 * f64::EPSILON * b.abs() + 0.5 * params.tol_x;
         let midpoint = 0.5 * (c - b);
         if midpoint.abs() <= tol || fb == 0.0 {
-            return Ok(b);
+            return Ok(BrentZeroResult {
+                x: b,
+                fval: fb,
+                iterations: iter - 1,
+                func_count: evals,
+                converged: true,
+            });
         }
         if evals >= params.max_fun_evals {
-            return Err(optim_error(
-                name,
-                format!("{name}: exceeded maximum function evaluations"),
-            ));
+            return Ok(BrentZeroResult {
+                x: b,
+                fval: fb,
+                iterations: iter - 1,
+                func_count: evals,
+                converged: false,
+            });
         }
 
+        let mut step_kind = BrentZeroStepKind::Bisection;
         if e.abs() >= tol && fa.abs() > fb.abs() {
             let s = fb / fa;
             let (mut p, mut q) = if a == c {
@@ -137,6 +192,7 @@ pub(crate) async fn brent_zero(
             if interpolation_step_accepted(p, q, midpoint, tol, e) {
                 e = d;
                 d = p / q;
+                step_kind = BrentZeroStepKind::Interpolation;
             } else {
                 d = midpoint;
                 e = d;
@@ -157,12 +213,28 @@ pub(crate) async fn brent_zero(
         };
         fb = call_scalar_function(name, function, b).await?;
         evals += 1;
+
+        if let Some(observer) = observer.as_deref_mut() {
+            observer.on_iteration(iter, evals, b, fb, step_kind);
+        }
+        if fb == 0.0 {
+            return Ok(BrentZeroResult {
+                x: b,
+                fval: fb,
+                iterations: iter,
+                func_count: evals,
+                converged: true,
+            });
+        }
     }
 
-    Err(optim_error(
-        name,
-        format!("{name}: exceeded maximum iterations"),
-    ))
+    Ok(BrentZeroResult {
+        x: b,
+        fval: fb,
+        iterations: params.max_iter,
+        func_count: evals,
+        converged: false,
+    })
 }
 
 /// Bracket consumed by [`brent_zero`].
@@ -377,6 +449,7 @@ mod tests {
                 max_iter: 10,
                 max_fun_evals: 10,
             },
+            None,
         ))
         .unwrap_err();
         assert!(err.message().contains("invalid bracket"));

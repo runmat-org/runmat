@@ -244,6 +244,14 @@ pub(crate) mod wasm {
             if entry.last_revision != current_rev {
                 let figure = clone_figure(FigureHandle::from(handle))
                     .ok_or_else(|| web_error(format!("figure handle {handle} does not exist")))?;
+                if !figure.visible {
+                    entry
+                        .renderer
+                        .clear_surface()
+                        .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+                    entry.last_revision = current_rev;
+                    return Ok(());
+                }
                 entry
                     .renderer
                     .render_figure(figure)

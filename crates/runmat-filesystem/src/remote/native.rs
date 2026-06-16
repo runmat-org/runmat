@@ -999,6 +999,10 @@ struct UploadTask {
 
 #[async_trait(?Send)]
 impl FsProvider for RemoteFsProvider {
+    fn current_dir_override(&self) -> Option<PathBuf> {
+        Some(PathBuf::from("/"))
+    }
+
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let normalized = self.normalize(path);
         let mut data = Vec::new();

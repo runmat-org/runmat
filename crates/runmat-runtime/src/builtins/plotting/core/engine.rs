@@ -547,10 +547,18 @@ pub(crate) mod native {
     fn ensure_figure_event_bridge() {
         FIGURE_EVENT_BRIDGE.get_or_init(|| {
             let observer: Arc<dyn for<'a> Fn(FigureEventView<'a>) + Send + Sync> =
-                Arc::new(|event: FigureEventView<'_>| {
-                    if let FigureEventKind::Closed = event.kind {
+                Arc::new(|event: FigureEventView<'_>| match event.kind {
+                    FigureEventKind::Closed => {
                         runmat_plot::gui::lifecycle::request_close(event.handle.as_u32());
                     }
+                    FigureEventKind::Updated
+                        if event.figure.is_some_and(|figure| !figure.visible) =>
+                    {
+                        runmat_plot::gui::lifecycle::request_close(event.handle.as_u32());
+                    }
+                    FigureEventKind::Created
+                    | FigureEventKind::Updated
+                    | FigureEventKind::Cleared => {}
                 });
             let _ = install_figure_observer(observer);
         });

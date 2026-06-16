@@ -13,6 +13,7 @@ pub(crate) mod hann;
 pub(crate) mod hilbert;
 pub(crate) mod pulstran;
 pub(crate) mod rectpuls;
+pub(crate) mod sample_rate;
 pub(crate) mod sawtooth;
 pub(crate) mod sinc;
 pub(crate) mod square;
