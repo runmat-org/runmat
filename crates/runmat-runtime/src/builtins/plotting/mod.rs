@@ -175,11 +175,6 @@ pub fn lock_plot_test_context() -> PlotTestLockGuard {
     state::lock_plot_test_registry()
 }
 
-#[doc(hidden)]
-pub fn disable_host_managed_plot_env_for_tests() -> state::HostManagedPlotEnvGuard {
-    state::disable_host_managed_plot_env_for_tests()
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimePlottingMode {
     Auto,

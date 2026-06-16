@@ -408,7 +408,7 @@ mod tests {
         )
         .unwrap();
 
-        let _host_guard = crate::builtins::plotting::disable_host_managed_plot_env_for_tests();
+        let _host_guard = _guard.disable_host_managed_plot_env();
         for args in [
             vec![
                 Value::Num(fig),

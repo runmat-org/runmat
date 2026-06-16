@@ -365,6 +365,22 @@ impl Drop for PlotTestLockGuard {
     }
 }
 
+impl PlotTestLockGuard {
+    #[doc(hidden)]
+    pub fn disable_host_managed_plot_env(&self) -> HostManagedPlotEnvGuard<'_> {
+        // The returned guard borrows `self`, so TEST_PLOT_REGISTRY_LOCK stays held
+        // for the full duration of this process-env override.
+        let previous = std::env::var_os("RUNMAT_HOST_MANAGED_PLOTS");
+        unsafe {
+            std::env::remove_var("RUNMAT_HOST_MANAGED_PLOTS");
+        }
+        HostManagedPlotEnvGuard {
+            _plot_guard: self,
+            previous,
+        }
+    }
+}
+
 #[doc(hidden)]
 pub fn lock_plot_test_registry() -> PlotTestLockGuard {
     let guard = TEST_PLOT_REGISTRY_LOCK
@@ -382,23 +398,15 @@ pub fn lock_plot_test_registry() -> PlotTestLockGuard {
 }
 
 #[doc(hidden)]
-pub struct HostManagedPlotEnvGuard {
+pub struct HostManagedPlotEnvGuard<'a> {
+    _plot_guard: &'a PlotTestLockGuard,
     previous: Option<std::ffi::OsString>,
 }
 
-impl Drop for HostManagedPlotEnvGuard {
+impl Drop for HostManagedPlotEnvGuard<'_> {
     fn drop(&mut self) {
         restore_env_var("RUNMAT_HOST_MANAGED_PLOTS", self.previous.take());
     }
-}
-
-#[doc(hidden)]
-pub fn disable_host_managed_plot_env_for_tests() -> HostManagedPlotEnvGuard {
-    let previous = std::env::var_os("RUNMAT_HOST_MANAGED_PLOTS");
-    unsafe {
-        std::env::remove_var("RUNMAT_HOST_MANAGED_PLOTS");
-    }
-    HostManagedPlotEnvGuard { previous }
 }
 
 fn set_plot_test_env_vars() {

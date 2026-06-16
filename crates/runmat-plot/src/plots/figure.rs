@@ -307,7 +307,6 @@ impl Figure {
             self.x_log = meta.x_log;
             self.y_log = meta.y_log;
             self.grid_enabled = meta.grid_enabled;
-            self.minor_grid_enabled = meta.minor_grid_enabled;
             self.box_enabled = meta.box_enabled;
             self.axis_equal = meta.axis_equal;
             self.legend_enabled = meta.legend_enabled;
@@ -2429,5 +2428,27 @@ mod tests {
         assert!(right.colorbar_enabled);
         assert_eq!(format!("{:?}", right.colormap), "Hot");
         assert_eq!(right.color_limits, Some((0.0, 10.0)));
+    }
+
+    #[test]
+    fn active_axes_sync_does_not_clobber_figure_minor_grid_default() {
+        let mut figure = Figure::new();
+        figure.set_subplot_grid(1, 2);
+        figure.minor_grid_enabled = true;
+
+        assert!(figure.minor_grid_enabled_for_axes(0));
+        assert!(figure.minor_grid_enabled_for_axes(1));
+
+        figure.set_active_axes_index(1);
+
+        assert!(figure.minor_grid_enabled);
+        assert!(figure.minor_grid_enabled_for_axes(0));
+        assert!(figure.minor_grid_enabled_for_axes(1));
+
+        figure.set_axes_minor_grid_enabled(1, false);
+
+        assert!(figure.minor_grid_enabled);
+        assert!(figure.minor_grid_enabled_for_axes(0));
+        assert!(!figure.minor_grid_enabled_for_axes(1));
     }
 }
