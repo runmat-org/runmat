@@ -36,6 +36,7 @@
     "Real scalars, vectors, matrices, and higher-dimensional tensors are evaluated elementwise.",
     "Both `0.0` and `-0.0` map to `0.5`.",
     "`Inf` maps to `1`, `-Inf` maps to `0`, and `NaN` remains `NaN`.",
+    "CPU, provider, WGPU, and fusion paths all use the same real scalar mapping.",
     "Logical inputs are promoted to doubles, so `heaviside(false)` returns `0.5` and `heaviside(true)` returns `1`.",
     "Character arrays are treated as their numeric code points and return doubles of the same shape.",
     "Symbolic scalar inputs return symbolic `heaviside(...)` expressions.",
@@ -123,10 +124,5 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/heaviside.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/heaviside.rs"
   },
-  "gpu_residency": "`heaviside` keeps real GPU tensors resident when the active provider exposes `unary_heaviside`. If that hook is unavailable, RunMat gathers the tensor and evaluates the same scalar mapping on the host.",
-  "implementation_notes": [
-    "CPU, provider, WGPU, and fusion paths all use the same real scalar mapping: negative values to `0`, zero to `0.5`, positive values to `1`, and NaN to NaN.",
-    "Symbolic scalar inputs are represented with RunMat's symbolic function model.",
-    "Complex inputs are intentionally rejected because the current runtime does not model complex Heaviside branch choices."
-  ]
+  "gpu_residency": "`heaviside` keeps real GPU tensors resident when the active provider exposes `unary_heaviside`. If that hook is unavailable, RunMat gathers the tensor and evaluates the same scalar mapping on the host."
 }
