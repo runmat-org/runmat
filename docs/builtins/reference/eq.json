@@ -6,6 +6,7 @@
     "==",
     "equality",
     "logical comparison",
+    "symbolic equation",
     "gpuArray equality"
   ],
   "summary": "Compute element-wise equality in MATLAB and RunMat.",
@@ -32,12 +33,13 @@
     "integration": "builtins::logical::rel::eq::tests::eq_gpu_provider_roundtrip",
     "gpu": "builtins::logical::rel::eq::tests::eq_wgpu_matches_host"
   },
-  "description": "`eq(A, B)` (or `A == B`) compares inputs element-wise for equality. Scalar expansion and output-shape behavior follow MATLAB and RunMat logical comparison semantics.",
+  "description": "`eq(A, B)` (or `A == B`) compares inputs element-wise for equality. Scalar expansion and output-shape behavior follow MATLAB and RunMat logical comparison semantics. When either operand is symbolic, equality constructs a symbolic equation.",
   "behaviors": [
     "Numeric, logical, and character inputs are compared element-wise using MATLAB's implicit expansion rules.",
     "Complex numbers are equal only when both their real and imaginary parts match.",
     "Character arrays compare by Unicode code point; you can mix them with numeric arrays (`'A' == 65`) or strings.",
     "String scalars and string arrays compare lexically; implicit expansion works across the string dimensions.",
+    "Symbolic scalar operands return symbolic equations, for example `Y(0) == 0`, instead of logical truth values.",
     "Handle objects compare by identity rather than by structural equality.",
     "Mixed numeric/string inputs raise MATLAB-compatible type errors."
   ],
@@ -71,6 +73,11 @@
       "description": "Run `eq` Directly On `gpuArray` Inputs",
       "input": "G1 = gpuArray([1 2 3]);\nG2 = gpuArray([1 0 3]);\ndeviceResult = eq(G1, G2)\nhostResult = gather(deviceResult)",
       "output": "deviceResult =\n  1  0  1\nhostResult =\n  1  0  1"
+    },
+    {
+      "description": "Create a symbolic equation",
+      "input": "syms Y(X)\ncond = Y(0) == 0",
+      "output": "cond = Y(0) == 0"
     }
   ],
   "faqs": [
@@ -105,6 +112,10 @@
     {
       "question": "Can I chain `eq` inside fused GPU expressions?",
       "answer": "Yes. The builtin registers element-wise fusion metadata so the planner can fuse comparisons with surrounding GPU-friendly operations."
+    },
+    {
+      "question": "What happens when one operand is symbolic?",
+      "answer": "`eq` returns a scalar symbolic equation. It does not try to decide whether the equation is true unless both operands are handled by the ordinary numeric or logical comparison paths."
     }
   ],
   "links": [

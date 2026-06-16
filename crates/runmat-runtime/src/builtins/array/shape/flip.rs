@@ -259,6 +259,7 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Symbolic(_)
         | Value::OutputList(_) => Err(flip_error(&FLIP_ERROR_UNSUPPORTED_INPUT)),
     }
 }

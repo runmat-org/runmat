@@ -41,6 +41,24 @@ fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
     discover_known_project_symbols_from_source_name(Some(source_name), &cwd)
 }
 
+fn function_output_arities(
+    registry: &runmat_vm::FunctionRegistry,
+) -> HashMap<runmat_hir::FunctionId, runmat_hir::FunctionOutputArity> {
+    registry
+        .functions
+        .iter()
+        .map(|(id, function)| {
+            (
+                *id,
+                runmat_hir::FunctionOutputArity::new(
+                    function.output_slots.len(),
+                    function.varargout_slot.is_some(),
+                ),
+            )
+        })
+        .collect()
+}
+
 fn source_lookup_cwd(source_name: &str) -> Option<PathBuf> {
     let source_path = PathBuf::from(source_name);
     if source_path.is_absolute() {
@@ -681,12 +699,14 @@ impl RunMatSession {
         let lowering = {
             let _span = info_span!("runtime.lower").entered();
             let function_names = self.function_registry.names.clone();
+            let function_output_arities = function_output_arities(&self.function_registry);
             let workspace_bindings = self.lowering_workspace_bindings();
             let known_project_symbols = discover_known_project_symbols(&source_name);
             runmat_hir::lower(
                 &ast,
                 &LoweringContext::new(&workspace_bindings)
                     .with_bound_functions(&function_names)
+                    .with_function_output_arities(&function_output_arities)
                     .with_known_project_symbols(&known_project_symbols)
                     .with_private_functions(
                         &private_companion_function_owners,

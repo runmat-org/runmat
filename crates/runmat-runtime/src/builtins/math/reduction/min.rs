@@ -907,8 +907,9 @@ fn materialize_for_min(name: &str, value: Value) -> BuiltinResult<InputData> {
         | Value::StringArray(_)
         | Value::CharArray(_)
         | Value::SparseTensor(_)
+        | Value::Symbolic(_)
         | Value::Cell(_) => Err(min_invalid_input(format!(
-            "{name}: expected numeric or logical dense input"
+            "{name}: expected numeric or logical input, received non-numeric value"
         ))),
         Value::GpuTensor(_) => Err(min_internal_error(format!(
             "{name}: internal error – GPU tensors must be gathered before host execution"

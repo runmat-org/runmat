@@ -1606,18 +1606,20 @@ pub fn create_pipeline(
         source: wgpu::ShaderSource::Wgsl(patched),
     });
 
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some(pipeline_label),
-        layout: Some(
-            &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(&(pipeline_label.to_string() + "-layout")),
-                bind_group_layouts: &[&layout],
-                push_constant_ranges: &[],
-            }),
-        ),
-        module: &module,
-        entry_point: "main",
-    });
+    let pipeline = device.create_compute_pipeline(
+        &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+            label: Some(pipeline_label),
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some(&(pipeline_label.to_string() + "-layout")),
+                    bind_group_layouts: &[&layout],
+                    push_constant_ranges: &[],
+                }),
+            ),
+            module: &module,
+            entry_point: "main",
+        },
+    );
 
     PipelineBundle { pipeline, layout }
 }

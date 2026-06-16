@@ -20993,6 +20993,55 @@
               "description": "Figure handle."
             }
           ]
+        },
+        {
+          "label": "fig = figure(property, value, ...)",
+          "inputs": [
+            {
+              "name": "properties",
+              "ty": "PropertyName",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Figure property/value pairs such as 'Name', 'NumberTitle', 'Visible', or 'Color'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "fig",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure handle."
+            }
+          ]
+        },
+        {
+          "label": "fig = figure(h, property, value, ...)",
+          "inputs": [
+            {
+              "name": "h",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"next\"",
+              "description": "Figure handle or 'next' to create/select the next figure."
+            },
+            {
+              "name": "properties",
+              "ty": "PropertyName",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Figure property/value pairs to apply after selecting or creating the figure."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "fig",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure handle."
+            }
+          ]
         }
       ],
       "errors": [
@@ -26845,6 +26894,54 @@
       ]
     },
     {
+      "name": "heaviside",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = heaviside(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real numeric, logical, or character input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Elementwise Heaviside step result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.HEAVISIDE.INVALID_INPUT",
+          "identifier": "RunMat:heaviside:InvalidInput",
+          "when": "Input is not a supported real numeric/logical/character value.",
+          "message": "heaviside: invalid input"
+        },
+        {
+          "code": "RM.HEAVISIDE.PROVIDER_FAILED",
+          "identifier": "RunMat:heaviside:ProviderFailed",
+          "when": "Provider unary_heaviside dispatch fails with a non-unsupported error.",
+          "message": "heaviside: GPU provider unary_heaviside failed"
+        },
+        {
+          "code": "RM.HEAVISIDE.INTERNAL",
+          "identifier": "RunMat:heaviside:Internal",
+          "when": "Internal gather/provider/tensor construction failed.",
+          "message": "heaviside: internal error"
+        }
+      ]
+    },
+    {
       "name": "height",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -26901,6 +26998,88 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
+      "name": "hilbert",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "z = hilbert(x)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real-valued signal vector, matrix, or N-D array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analytic signal with real part equal to the input signal."
+            }
+          ]
+        },
+        {
+          "label": "z = hilbert(x, N)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real-valued signal vector, matrix, or N-D array."
+            },
+            {
+              "name": "N",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "FFT length along the first non-singleton dimension."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analytic signal with real part equal to the input signal."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.HILBERT.ARG_COUNT",
+          "identifier": "RunMat:hilbert:ArgCount",
+          "when": "More than two input arguments are supplied.",
+          "message": "hilbert: expected hilbert(X) or hilbert(X, N)"
+        },
+        {
+          "code": "RM.HILBERT.INVALID_LENGTH",
+          "identifier": "RunMat:hilbert:InvalidLength",
+          "when": "Length argument N is non-scalar, negative, non-finite, or fractional.",
+          "message": "hilbert: invalid length argument"
+        },
+        {
+          "code": "RM.HILBERT.INVALID_INPUT",
+          "identifier": "RunMat:hilbert:InvalidInput",
+          "when": "Input cannot be converted to a real numeric/logical signal.",
+          "message": "hilbert: expected real numeric input"
+        },
+        {
+          "code": "RM.HILBERT.INTERNAL",
+          "identifier": "RunMat:hilbert:Internal",
+          "when": "FFT execution or tensor shaping fails internally.",
+          "message": "hilbert: internal error"
         }
       ]
     },
@@ -34381,6 +34560,93 @@
       "errors": []
     },
     {
+      "name": "limit",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "L = limit(expr, var, point, direction)",
+          "inputs": [
+            {
+              "name": "expr",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar symbolic expression."
+            },
+            {
+              "name": "var",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Limit variable. Inferred when omitted and the expression has one variable."
+            },
+            {
+              "name": "point",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Numeric point approached by the limit variable."
+            },
+            {
+              "name": "direction",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional left or right direction."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "L",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar symbolic or numeric limit result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LIMIT.INVALID_EXPR",
+          "identifier": "RunMat:limit:InvalidExpression",
+          "when": "The expression cannot be represented as a scalar symbolic expression.",
+          "message": "limit: expected a scalar symbolic or numeric expression"
+        },
+        {
+          "code": "RM.LIMIT.INVALID_VARIABLE",
+          "identifier": "RunMat:limit:InvalidVariable",
+          "when": "The limit variable cannot be inferred or is not a symbolic variable/text scalar.",
+          "message": "limit: invalid or ambiguous symbolic variable"
+        },
+        {
+          "code": "RM.LIMIT.INVALID_POINT",
+          "identifier": "RunMat:limit:InvalidPoint",
+          "when": "The limit point is not a finite scalar numeric value.",
+          "message": "limit: expected a finite scalar numeric point"
+        },
+        {
+          "code": "RM.LIMIT.INVALID_DIRECTION",
+          "identifier": "RunMat:limit:InvalidDirection",
+          "when": "The optional direction is not left, right, +, or -.",
+          "message": "limit: invalid direction"
+        },
+        {
+          "code": "RM.LIMIT.UNSUPPORTED",
+          "identifier": "RunMat:limit:Unsupported",
+          "when": "The scalar symbolic limit cannot be resolved by substitution or L'Hopital reduction.",
+          "message": "limit: unable to resolve symbolic limit"
+        },
+        {
+          "code": "RM.LIMIT.ARG_COUNT",
+          "identifier": "RunMat:limit:ArgCount",
+          "when": "Too many arguments were supplied.",
+          "message": "limit: too many input arguments"
+        }
+      ]
+    },
+    {
       "name": "linprog",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -41331,6 +41597,110 @@
           "identifier": "RunMat:NotifyTargetInvalid",
           "when": "Target is not an object or handle object.",
           "message": "notify: target must be handle or object"
+        }
+      ]
+    },
+    {
+      "name": "null",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Z = null(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Basis for the null space of A."
+            }
+          ]
+        },
+        {
+          "label": "Z = null(A, tol)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Rank tolerance."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Basis for the null space of A."
+            }
+          ]
+        },
+        {
+          "label": "Z = null(A, \"r\")",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "`\"r\"` requests a row-reduction basis."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Basis for the null space of A."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NULL.INVALID_ARGUMENT",
+          "identifier": "RunMat:null:InvalidArgument",
+          "when": "Optional tolerance or basis option is malformed or outside accepted bounds.",
+          "message": "null: invalid argument"
+        },
+        {
+          "code": "RM.NULL.INVALID_INPUT",
+          "identifier": "RunMat:null:InvalidInput",
+          "when": "Input shape/type cannot be processed for null-space evaluation.",
+          "message": "null: invalid input"
+        },
+        {
+          "code": "RM.NULL.INTERNAL",
+          "identifier": "RunMat:null:Internal",
+          "when": "Runtime fails while computing the null space or executing fallback/upload paths.",
+          "message": "null: internal runtime failure"
         }
       ]
     },
@@ -50495,6 +50865,157 @@
       ]
     },
     {
+      "name": "rlocus",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "r = rlocus(sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf or ss model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop pole locations as a branches-by-gains matrix."
+            }
+          ]
+        },
+        {
+          "label": "r = rlocus(sys, k)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf or ss model."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite nonnegative gain vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop pole locations as a branches-by-gains matrix."
+            }
+          ]
+        },
+        {
+          "label": "[r,k] = rlocus(sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf or ss model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop pole locations as a branches-by-gains matrix."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Gain vector used to compute the root locus."
+            }
+          ]
+        },
+        {
+          "label": "[r,k] = rlocus(sys, k)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf or ss model."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite nonnegative gain vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop pole locations as a branches-by-gains matrix."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Gain vector used to compute the root locus."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.RLOCUS.INVALID_ARGUMENT",
+          "identifier": "RunMat:rlocus:InvalidArgument",
+          "when": "Inputs do not match supported rlocus invocation forms.",
+          "message": "rlocus: invalid argument"
+        },
+        {
+          "code": "RM.RLOCUS.INVALID_MODEL",
+          "identifier": "RunMat:rlocus:InvalidModel",
+          "when": "Input system is not a valid SISO tf or ss object.",
+          "message": "rlocus: invalid model"
+        },
+        {
+          "code": "RM.RLOCUS.UNSUPPORTED_MODEL",
+          "identifier": "RunMat:rlocus:UnsupportedModel",
+          "when": "Model form is not supported by the current implementation.",
+          "message": "rlocus: unsupported model"
+        },
+        {
+          "code": "RM.RLOCUS.PLOT_FAILED",
+          "identifier": "RunMat:rlocus:PlotFailed",
+          "when": "Statement-form plotting failed for reasons other than known nonfatal setup conditions.",
+          "message": "rlocus: plotting failed"
+        },
+        {
+          "code": "RM.RLOCUS.INTERNAL",
+          "identifier": "RunMat:rlocus:Internal",
+          "when": "Root-locus computation or output construction failed.",
+          "message": "rlocus: internal error"
+        }
+      ]
+    },
+    {
       "name": "rmdir",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -55678,6 +56199,79 @@
           "identifier": "RunMat:split:InternalError",
           "when": "Internal output container construction failed.",
           "message": "split: internal error"
+        }
+      ]
+    },
+    {
+      "name": "spreadsheetImportOptions",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "opts = spreadsheetImportOptions()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "opts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Spreadsheet import options struct."
+            }
+          ]
+        },
+        {
+          "label": "opts = spreadsheetImportOptions(nameValuePairs...)",
+          "inputs": [
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value option pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "opts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Spreadsheet import options struct."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TABLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:table:InvalidArgument",
+          "when": "Arguments or table metadata are invalid.",
+          "message": "table: invalid argument"
+        },
+        {
+          "code": "RM.TABLE.INVALID_INDEX",
+          "identifier": "RunMat:table:InvalidIndex",
+          "when": "Table indexing is invalid.",
+          "message": "table: invalid index"
+        },
+        {
+          "code": "RM.TABLE.INVALID_VARIABLE",
+          "identifier": "RunMat:table:InvalidVariable",
+          "when": "A table variable name or value is invalid.",
+          "message": "table: invalid variable"
+        },
+        {
+          "code": "RM.READTABLE.IO",
+          "identifier": "RunMat:readtable:IOError",
+          "when": "readtable cannot open or read the requested file.",
+          "message": "readtable: file read failed"
+        },
+        {
+          "code": "RM.READTABLE.UNSUPPORTED_FILE",
+          "identifier": "RunMat:readtable:UnsupportedFileType",
+          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
+          "message": "readtable: unsupported file type"
         }
       ]
     },
@@ -60913,6 +61507,61 @@
       ]
     },
     {
+      "name": "sym",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "S = sym(value)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Variable name, numeric scalar, or existing symbolic scalar."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Reserved symbolic options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar symbolic variable or constant."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SYM.ARG_COUNT",
+          "identifier": "RunMat:sym:ArgCount",
+          "when": "Options beyond the scalar input are supplied.",
+          "message": "sym: unsupported options"
+        },
+        {
+          "code": "RM.SYM.INVALID_TEXT",
+          "identifier": "RunMat:sym:InvalidText",
+          "when": "Text input is neither a valid identifier nor a numeric scalar literal.",
+          "message": "sym: invalid symbolic text"
+        },
+        {
+          "code": "RM.SYM.INVALID_INPUT",
+          "identifier": "RunMat:sym:InvalidInput",
+          "when": "Input cannot be represented as a scalar symbolic value.",
+          "message": "sym: expected a scalar text, numeric, logical, or symbolic input"
+        }
+      ]
+    },
+    {
       "name": "symrcm",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -60951,6 +61600,54 @@
           "identifier": "RunMat:symrcm:Internal",
           "when": "Runtime fails while constructing intermediate tensors or adjacency structures.",
           "message": "symrcm: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "syms",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "syms name ...",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Symbol names and optional assumption keywords."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ans",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty return value for command declarations."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SYMS.EMPTY",
+          "identifier": "RunMat:syms:EmptyDeclaration",
+          "when": "No symbol names were supplied.",
+          "message": "syms: expected at least one symbolic variable name"
+        },
+        {
+          "code": "RM.SYMS.INVALID_NAME",
+          "identifier": "RunMat:syms:InvalidName",
+          "when": "A declaration token is not a valid MATLAB identifier or assumption keyword.",
+          "message": "syms: invalid symbolic variable name"
+        },
+        {
+          "code": "RM.SYMS.WORKSPACE",
+          "identifier": "RunMat:syms:WorkspaceUnavailable",
+          "when": "The active runtime cannot assign to the caller workspace.",
+          "message": "syms: workspace assignment unavailable"
         }
       ]
     },
@@ -63067,6 +63764,220 @@
       ]
     },
     {
+      "name": "uigetfile",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "file = uigetfile()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "file",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected filename, cell array of filenames for multiple selections, or 0 when cancelled."
+            }
+          ]
+        },
+        {
+          "label": "file = uigetfile(filter)",
+          "inputs": [
+            {
+              "name": "filter",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"*.*\"",
+              "description": "File extension pattern, semicolon-delimited patterns, or an N-by-1/N-by-2 cell array of patterns and descriptions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "file",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected filename, cell array of filenames for multiple selections, or 0 when cancelled."
+            }
+          ]
+        },
+        {
+          "label": "[file, path] = uigetfile(filter, title)",
+          "inputs": [
+            {
+              "name": "filter",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"*.*\"",
+              "description": "File extension pattern, semicolon-delimited patterns, or an N-by-1/N-by-2 cell array of patterns and descriptions."
+            },
+            {
+              "name": "title",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dialog title."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "file",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected filename, cell array of filenames for multiple selections, or 0 when cancelled."
+            },
+            {
+              "name": "path",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Directory containing the selected file, including a trailing separator, or 0 when cancelled."
+            }
+          ]
+        },
+        {
+          "label": "[file, path, index] = uigetfile(filter, title, defaultName)",
+          "inputs": [
+            {
+              "name": "filter",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"*.*\"",
+              "description": "File extension pattern, semicolon-delimited patterns, or an N-by-1/N-by-2 cell array of patterns and descriptions."
+            },
+            {
+              "name": "title",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dialog title."
+            },
+            {
+              "name": "defaultName",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Initial file or directory path for the dialog."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "file",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected filename, cell array of filenames for multiple selections, or 0 when cancelled."
+            },
+            {
+              "name": "path",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Directory containing the selected file, including a trailing separator, or 0 when cancelled."
+            },
+            {
+              "name": "index",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based selected filter index, or 0 when cancelled."
+            }
+          ]
+        },
+        {
+          "label": "[file, path, index] = uigetfile(filter, title, defaultName, \"MultiSelect\", value)",
+          "inputs": [
+            {
+              "name": "filter",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"*.*\"",
+              "description": "File extension pattern, semicolon-delimited patterns, or an N-by-1/N-by-2 cell array of patterns and descriptions."
+            },
+            {
+              "name": "title",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dialog title."
+            },
+            {
+              "name": "defaultName",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Initial file or directory path for the dialog."
+            },
+            {
+              "name": "optionName",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"MultiSelect\"",
+              "description": "Name-value option name. `MultiSelect` is supported."
+            },
+            {
+              "name": "optionValue",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"off\"",
+              "description": "`\"on\"`, `\"off\"`, or a scalar logical/numeric value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "file",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected filename, cell array of filenames for multiple selections, or 0 when cancelled."
+            },
+            {
+              "name": "path",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Directory containing the selected file, including a trailing separator, or 0 when cancelled."
+            },
+            {
+              "name": "index",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based selected filter index, or 0 when cancelled."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.UIGETFILE.INVALID_ARGUMENT",
+          "identifier": "RunMat:uigetfile:InvalidArgument",
+          "when": "A filter, title, default path, or name-value option has an unsupported type or shape.",
+          "message": "uigetfile: invalid argument"
+        },
+        {
+          "code": "RM.UIGETFILE.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:uigetfile:TooManyOutputs",
+          "when": "More than three output arguments are requested.",
+          "message": "uigetfile: too many output arguments"
+        },
+        {
+          "code": "RM.UIGETFILE.HOST",
+          "identifier": "RunMat:uigetfile:HostError",
+          "when": "The active filesystem provider fails while opening the host file-selection UI.",
+          "message": "uigetfile: file selection failed"
+        },
+        {
+          "code": "RM.UIGETFILE.INVALID_SELECTION",
+          "identifier": "RunMat:uigetfile:InvalidSelection",
+          "when": "The active filesystem provider returns a malformed or internally inconsistent file selection.",
+          "message": "uigetfile: invalid file selection"
+        }
+      ]
+    },
+    {
       "name": "uint16",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -63812,6 +64723,129 @@
           "identifier": "RunMat:unique:Internal",
           "when": "Internal conversion/allocation/provider decode fails.",
           "message": "unique: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "unwrap",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Q = unwrap(P)",
+          "inputs": [
+            {
+              "name": "P",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Wrapped phase angles in radians."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Phase values with jumps larger than the tolerance corrected by multiples of 2*pi."
+            }
+          ]
+        },
+        {
+          "label": "Q = unwrap(P, tol)",
+          "inputs": [
+            {
+              "name": "P",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Wrapped phase angles in radians."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "pi",
+              "description": "Jump tolerance. Values below pi are treated as pi."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Phase values with jumps larger than the tolerance corrected by multiples of 2*pi."
+            }
+          ]
+        },
+        {
+          "label": "Q = unwrap(P, tol, dim)",
+          "inputs": [
+            {
+              "name": "P",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Wrapped phase angles in radians."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "pi",
+              "description": "Jump tolerance. Use [] to keep the default."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "first non-singleton dimension",
+              "description": "Dimension along which to unwrap."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Phase values with jumps larger than the tolerance corrected by multiples of 2*pi."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.UNWRAP.ARG_COUNT",
+          "identifier": "RunMat:unwrap:ArgCount",
+          "when": "More than three input arguments are supplied.",
+          "message": "unwrap: expected unwrap(P), unwrap(P, tol), or unwrap(P, tol, dim)"
+        },
+        {
+          "code": "RM.UNWRAP.INVALID_INPUT",
+          "identifier": "RunMat:unwrap:InvalidInput",
+          "when": "Input cannot be converted to a real numeric/logical phase array.",
+          "message": "unwrap: expected real numeric input"
+        },
+        {
+          "code": "RM.UNWRAP.INVALID_TOLERANCE",
+          "identifier": "RunMat:unwrap:InvalidTolerance",
+          "when": "Tolerance is not a finite, nonnegative scalar.",
+          "message": "unwrap: tolerance must be a finite nonnegative scalar"
+        },
+        {
+          "code": "RM.UNWRAP.INVALID_DIMENSION",
+          "identifier": "RunMat:unwrap:InvalidDimension",
+          "when": "Dimension argument is missing, non-numeric, non-integer, or less than one.",
+          "message": "unwrap: dimension must be a positive integer scalar"
+        },
+        {
+          "code": "RM.UNWRAP.INTERNAL",
+          "identifier": "RunMat:unwrap:Internal",
+          "when": "Internal gather, tensor conversion, or allocation fails.",
+          "message": "unwrap: internal error"
         }
       ]
     },

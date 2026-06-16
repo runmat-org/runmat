@@ -39,5 +39,5 @@ pub use hir::{
 };
 pub use ids::{BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, SourceId, StmtId};
 pub use lowering::lower;
-pub use lowering_context::LoweringContext;
+pub use lowering_context::{FunctionOutputArity, LoweringContext};
 pub use span::{merge_span, Span};

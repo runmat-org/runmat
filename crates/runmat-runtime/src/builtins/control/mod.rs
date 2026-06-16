@@ -9,6 +9,7 @@ pub mod impulse;
 pub mod isstable;
 pub mod nyquist;
 pub mod pole;
+pub mod rlocus;
 pub mod ss;
 pub mod step;
 pub mod stepinfo;

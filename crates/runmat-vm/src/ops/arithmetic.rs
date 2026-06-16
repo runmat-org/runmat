@@ -203,7 +203,11 @@ where
 
 pub fn is_scalarish_for_division(value: &Value) -> bool {
     match value {
-        Value::Int(_) | Value::Num(_) | Value::Complex(_, _) | Value::Bool(_) => true,
+        Value::Int(_)
+        | Value::Num(_)
+        | Value::Complex(_, _)
+        | Value::Bool(_)
+        | Value::Symbolic(_) => true,
         Value::LogicalArray(arr) => is_scalar_shape(&arr.shape),
         Value::Tensor(tensor) => is_scalar_shape(&tensor.shape),
         Value::ComplexTensor(tensor) => is_scalar_shape(&tensor.shape),

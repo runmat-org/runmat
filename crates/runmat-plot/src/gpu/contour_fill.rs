@@ -229,12 +229,13 @@ pub fn pack_contour_fill_vertices(
         push_constant_ranges: &[],
     });
 
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("contourf-pack-pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: "main",
-    });
+    let pipeline =
+        device.create_compute_pipeline(&crate::wgpu_compat::wgpu_compute_pipeline_descriptor! {
+            label: Some("contourf-pack-pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "main",
+        });
 
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("contourf-bind-group"),

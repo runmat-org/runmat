@@ -10,11 +10,6 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 # Interactive GPU-accelerated plotting
-wgpu = "0.19.1"
-winit = { version = "0.29.11", optional = true }
-egui = { version = "0.27.2", optional = true }
-egui-wgpu = { version = "0.27.2", optional = true }
-egui-winit = { version = "0.27.2", optional = true }
 bytemuck = { version = "1.0", features = ["derive"] }
 
 # Math and geometry
@@ -49,6 +44,9 @@ runmat-time = { workspace = true }
 runmat-thread-local = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = "24.0.0"
+egui = { version = "0.31.1", optional = true }
+egui-wgpu = { version = "0.31.1", optional = true }
 web-sys = { version = "0.3", features = [
     "HtmlCanvasElement",
     "OffscreenCanvas",
@@ -59,6 +57,11 @@ web-sys = { version = "0.3", features = [
 tokio = { version = "1.0", default-features = false, features = ["sync", "time"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = "0.19.1"
+winit = { version = "0.29.11", optional = true }
+egui = { version = "0.27.2", optional = true }
+egui-wgpu = { version = "0.27.2", optional = true }
+egui-winit = { version = "0.27.2", optional = true }
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -69,7 +72,7 @@ default = ["static", "gui"]
 static = []  # Static image export (always enabled)
 # Lightweight egui overlay renderer (usable on wasm without winit).
 egui-overlay = ["egui", "egui-wgpu"]
-# Interactive GUI (native windowing + egui integration).
+# Interactive GUI (native windowing + egui integration; compiled only on non-wasm targets).
 gui = ["winit", "egui-overlay", "egui-winit", "rfd"]
 web = []  # WebGL backend for web
 

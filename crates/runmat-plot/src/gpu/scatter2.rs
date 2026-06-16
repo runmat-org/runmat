@@ -181,12 +181,13 @@ pub fn pack_vertices_from_xy(
         push_constant_ranges: &[],
     });
 
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("scatter2-pack-pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: "main",
-    });
+    let pipeline =
+        device.create_compute_pipeline(&crate::wgpu_compat::wgpu_compute_pipeline_descriptor! {
+            label: Some("scatter2-pack-pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "main",
+        });
 
     let output_size = max_points as u64 * 6 * std::mem::size_of::<Vertex>() as u64;
     let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
@@ -428,11 +429,11 @@ mod stress_tests {
         let limits = adapter.limits();
         let (device, queue) = adapter
             .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("runmat-plot-scatter-test-device"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: limits,
-                },
+                &crate::wgpu_compat::device_descriptor(
+                    Some("runmat-plot-scatter-test-device"),
+                    wgpu::Features::empty(),
+                    limits,
+                ),
                 None,
             )
             .block_on()

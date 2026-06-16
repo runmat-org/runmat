@@ -436,6 +436,7 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
         Value::Complex(re, im) => complex_scalar_to_json(*re, *im, options),
         Value::ComplexTensor(ct) => complex_tensor_to_json(ct, options),
         Value::String(s) => Ok(JsonValue::String(s.clone())),
+        Value::Symbolic(expr) => Ok(JsonValue::String(expr.to_string())),
         Value::StringArray(sa) => string_array_to_json(sa, options),
         Value::CharArray(ca) => char_array_to_json(ca, options),
         Value::Struct(sv) => struct_to_json(sv, options),
@@ -954,7 +955,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, StructValue, Tensor,
+        CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, StructValue, SymbolicExpr,
+        Tensor,
     };
 
     fn as_string(value: Value) -> String {
@@ -989,6 +991,22 @@ pub(crate) mod tests {
         let encoded =
             block_on(jsonencode_builtin(Value::Num(5.0), Vec::new())).expect("jsonencode");
         assert_eq!(as_string(encoded), "5");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn jsonencode_symbolic_value_as_text() {
+        let expr = SymbolicExpr::div_expr(
+            SymbolicExpr::function(
+                runmat_builtins::symbolic::SymbolicFunction::Sin,
+                SymbolicExpr::variable("x"),
+            ),
+            SymbolicExpr::variable("x"),
+        );
+        let encoded =
+            block_on(jsonencode_builtin(Value::Symbolic(expr), Vec::new())).expect("jsonencode");
+
+        assert_eq!(as_string(encoded), "\"sin(x)/x\"");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

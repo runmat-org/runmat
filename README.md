@@ -26,18 +26,19 @@
   <a href="benchmarks/README.md">Benchmarks</a>
 </p>
 
-RunMat is an open-source, high-performance runtime designed for numerical computing using MATLAB-style syntax. It is built in Rust and provides a multi-tiered execution model that targets both CPU and GPU hardware without requiring manual device management.
+RunMat is an open-source, high-performance runtime designed for numerical computing using MATLAB-style syntax. It is built in Rust and provides a multi-tiered execution model that targets both CPU and GPU hardware without requiring manual management of tensor allocations and movement.
 
-The system is designed to be a drop-in runtime for .m files, offering automatic operation fusion, a generational garbage collector, and a cross-platform GPU backend powered by wgpu
+The system is designed to be a drop-in runtime for .m files, offering automatic operation fusion, a high performance compiler, and a cross-platform GPU backend powered by wgpu.
 
 Key Capabilities:
 
 - MATLAB Compatibility: Supports standard .m file syntax, including arrays, complex control flow, and over 400 built-in functions 
 - Automatic Fusion: Builds an internal graph of array operations to fuse elementwise math and reductions into optimized kernels 
-- Tiered Execution: Combines a fast-startup VM interpreter with the Turbine JIT (based on Cranelift) for hot code paths 
-- Cross-Platform GPU: Transparently offloads workloads to Metal, DirectX 12, Vulkan, or WebGPU using the runmat-accelerate crate 
-- Async Runtime: Built on Rust futures, allowing non-blocking execution in web environments and CLI tools 
-- Integrated Plotting: Features a GPU-accelerated 2D/3D plotting engine supporting 30+ plot types
+- Tiered Execution: Combines a fast-startup VM interpreter with a JIT (based on Cranelift) for hot code paths 
+- Cross-Platform GPU: Transparently offloads workloads to Metal, DirectX 12, Vulkan, or WebGPU 
+- Strong Static Analysis: Type/shape inference, definite assignment, and other static analysis passes are run before execution to optimize the execution plan.
+- Async Runtime: Built on Rust futures, allowing non-blocking execution in web environments, CLI tools and headless pipelines
+- Integrated Plotting: Features an interactive GPU-accelerated 2D/3D plotting engine supporting 30+ plot types
 
 > [!NOTE]
 > RunMat is pre-1.0 software. The core runtime, CLI, GPU engine, and TypeScript bindings are usable today, but compatibility coverage is still expanding.
@@ -88,14 +89,14 @@ cargo build -p runmat --release --features gui
 
 ## CLI
 
-The CLI runs local scripts, named project entrypoints, benchmarks, snapshots, and remote project filesystems.
+The CLI can run local scripts or named project entrypoints - on local or remote projects.
 
 ```bash
 runmat analysis.m
+
+# which is shorthand for:
+
 runmat run analysis.m
-runmat repl
-runmat info
-runmat accel-info
 ```
 
 Projects can define named entrypoints in `runmat.toml`:
@@ -114,6 +115,26 @@ Run the entrypoint:
 runmat run main
 ```
 
+To run a script in a remote project backend, ensure you are authenticated and have selected a project:
+
+```bash
+runmat login
+
+# or explicitly specify the server URL
+
+runmat login --server https://api.runmat.com
+
+runmat project select <project-id>
+```
+
+And then run the script:
+
+```bash
+runmat remote run /scripts/analysis.m
+```
+
+The script is executed locally with the remote filesystem provider mounted into the runtime's filesystem abstraction. This means that mutations to the filesystem are persisted to the remote project, but the script runs locally.
+
 For the full command surface, see [Command Line Interface](docs/getting-started/cli.md).
 
 ## TypeScript And WebAssembly
@@ -127,10 +148,7 @@ npm install runmat
 ```ts
 import { initRunMat } from "runmat";
 
-const session = await initRunMat({
-  telemetryConsent: false,
-  language: { compat: "matlab" }
-});
+const session = await initRunMat();
 
 const result = await session.executeRequest({
   source: {
@@ -291,4 +309,4 @@ Useful docs:
 
 RunMat is licensed under the [Apache License 2.0](LICENSE.md).
 
-MATLAB is a registered trademark of The MathWorks, Inc. RunMat is not affiliated with, endorsed by, or sponsored by The MathWorks, Inc.
+RunMat is a registered trademark of Dystr Inc. MATLAB is a registered trademark of The MathWorks, Inc. RunMat is not affiliated with, endorsed by, or sponsored by The MathWorks, Inc.

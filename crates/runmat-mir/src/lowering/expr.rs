@@ -625,7 +625,9 @@ fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {
         | MirCallee::SuperConstructor { .. }
         | MirCallee::SuperMethod { .. }
         | MirCallee::Dynamic(_) => BuiltinSemantics::unknown(),
-        MirCallee::Static(CallableIdentity::BoundFunction(_)) => BuiltinSemantics {
+        MirCallee::Static(
+            CallableIdentity::BoundFunction(_) | CallableIdentity::ExternalFunction { .. },
+        ) => BuiltinSemantics {
             compatibility: runmat_builtins::BuiltinCompatibility::Matlab,
             async_behavior: BuiltinAsyncBehavior::NeverSuspends,
             effects: runmat_builtins::BuiltinEffects::none(),
@@ -646,13 +648,18 @@ fn call_fallback_policy(
         runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
     ) && !matches!(
         callee,
-        MirCallee::Static(runmat_hir::CallableIdentity::BoundFunction(_))
-            | MirCallee::SuperMethod { .. }
+        MirCallee::Static(
+            runmat_hir::CallableIdentity::BoundFunction(_)
+                | runmat_hir::CallableIdentity::ExternalFunction { .. },
+        ) | MirCallee::SuperMethod { .. }
     ) {
         return runmat_hir::CallableFallbackPolicy::ObjectDispatch;
     }
     match callee {
-        MirCallee::Static(runmat_hir::CallableIdentity::BoundFunction(_))
+        MirCallee::Static(
+            runmat_hir::CallableIdentity::BoundFunction(_)
+            | runmat_hir::CallableIdentity::ExternalFunction { .. },
+        )
         | MirCallee::Static(runmat_hir::CallableIdentity::Builtin(_))
         | MirCallee::SuperConstructor { .. }
         | MirCallee::SuperMethod { .. } => runmat_hir::CallableFallbackPolicy::None,

@@ -1,5 +1,8 @@
 use async_trait::async_trait;
-use runmat_filesystem::{DirEntry, FileHandle, FsMetadata, FsProvider, OpenFlags, ReadManyEntry};
+use runmat_filesystem::{
+    DirEntry, FileHandle, FsMetadata, FsProvider, OpenFileDialogRequest, OpenFileDialogSelection,
+    OpenFlags, ReadManyEntry,
+};
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -24,6 +27,10 @@ unsafe impl Sync for JsFsProvider {}
 
 #[async_trait(?Send)]
 impl FsProvider for JsFsProvider {
+    fn current_dir_override(&self) -> Option<PathBuf> {
+        Some(PathBuf::from("/"))
+    }
+
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let read_result = if should_load_initial(flags) {
             Some(self.funcs.read_file(path))
@@ -96,6 +103,13 @@ impl FsProvider for JsFsProvider {
 
     async fn read_many(&self, paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
         self.funcs.read_many(paths).await
+    }
+
+    async fn select_file_open(
+        &self,
+        request: &OpenFileDialogRequest,
+    ) -> io::Result<Option<OpenFileDialogSelection>> {
+        self.funcs.select_file_open_async(request).await
     }
 }
 

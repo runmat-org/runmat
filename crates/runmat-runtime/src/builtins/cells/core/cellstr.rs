@@ -133,6 +133,7 @@ async fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::CharArray(ca) => cellstr_from_char_array(ca),
         Value::StringArray(sa) => cellstr_from_string_array(sa),
         Value::String(text) => cellstr_from_string(text),
+        Value::Symbolic(expr) => cellstr_from_string(expr.to_string()),
         Value::Cell(cell) => cellstr_from_cell(cell).await,
         Value::LogicalArray(_)
         | Value::Bool(_)

@@ -1327,6 +1327,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::CharArray(_) => "CharArray",
         Value::String(_) => "String",
         Value::StringArray(_) => "StringArray",
+        Value::Symbolic(_) => "Symbolic",
         Value::Cell(_) => "Cell",
         Value::Struct(_) => "Struct",
         Value::Object(_) => "Object",

@@ -488,6 +488,7 @@ fn empty_value_like(proto: Option<&Value>) -> BuiltinResult<Value> {
             Value::Object(_)
             | Value::HandleObject(_)
             | Value::Listener(_)
+            | Value::Symbolic(_)
             | Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)

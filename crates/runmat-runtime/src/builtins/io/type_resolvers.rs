@@ -205,6 +205,11 @@ pub fn fullfile_type(args: &[Type], ctx: &ResolveContext) -> Type {
     string_type(args, ctx)
 }
 
+pub fn uigetfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Union(vec![Type::String, Type::Num, Type::cell_of(Type::String)])
+}
+
 pub fn getenv_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return struct_type(args, _ctx);
@@ -471,6 +476,12 @@ mod tests {
     assert_resolver!(exist_type_resolver, exist_type, &[], Type::Num);
     assert_resolver!(genpath_type_resolver, genpath_type, &[], Type::String);
     assert_resolver!(fullfile_type_resolver, fullfile_type, &[], Type::String);
+    assert_resolver!(
+        uigetfile_type_resolver,
+        uigetfile_type,
+        &[],
+        Type::Union(vec![Type::String, Type::Num, Type::cell_of(Type::String)])
+    );
     assert_resolver!(
         getenv_type_resolver,
         getenv_type,

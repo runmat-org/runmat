@@ -24,6 +24,9 @@ pub struct Figure {
     plots: Vec<PlotElement>,
 
     /// Figure-level settings
+    pub name: Option<String>,
+    pub number_title: bool,
+    pub visible: bool,
     pub title: Option<String>,
     pub sg_title: Option<String>,
     pub x_label: Option<String>,
@@ -31,6 +34,7 @@ pub struct Figure {
     pub z_label: Option<String>,
     pub legend_enabled: bool,
     pub grid_enabled: bool,
+    pub minor_grid_enabled: bool,
     pub box_enabled: bool,
     pub background_color: Vec4,
 
@@ -140,12 +144,15 @@ pub struct AxesMetadata {
     pub view_elevation_deg: Option<f32>,
     pub view_revision: u64,
     pub grid_enabled: bool,
+    pub minor_grid_enabled: bool,
+    pub minor_grid_explicit: bool,
     pub box_enabled: bool,
     pub axis_equal: bool,
     pub legend_enabled: bool,
     pub colorbar_enabled: bool,
     pub colormap: ColorMap,
     pub color_limits: Option<(f64, f64)>,
+    pub axes_style: TextStyle,
     pub title_style: TextStyle,
     pub x_label_style: TextStyle,
     pub y_label_style: TextStyle,
@@ -222,6 +229,9 @@ impl Figure {
     pub fn new() -> Self {
         Self {
             plots: Vec::new(),
+            name: None,
+            number_title: true,
+            visible: true,
             title: None,
             sg_title: None,
             x_label: None,
@@ -229,6 +239,7 @@ impl Figure {
             z_label: None,
             legend_enabled: true,
             grid_enabled: true,
+            minor_grid_enabled: false,
             box_enabled: true,
             background_color: Vec4::new(1.0, 1.0, 1.0, 1.0), // White background
             x_limits: None,
@@ -251,6 +262,7 @@ impl Figure {
                 y_limits: None,
                 z_limits: None,
                 grid_enabled: true,
+                minor_grid_enabled: false,
                 box_enabled: true,
                 axis_equal: false,
                 legend_enabled: true,
@@ -270,6 +282,7 @@ impl Figure {
                 y_limits: None,
                 z_limits: None,
                 grid_enabled: true,
+                minor_grid_enabled: false,
                 box_enabled: true,
                 axis_equal: false,
                 legend_enabled: true,
@@ -336,6 +349,36 @@ impl Figure {
     pub fn set_sg_title_style(&mut self, style: TextStyle) {
         self.sg_title_style = style;
         self.dirty = true;
+    }
+
+    pub fn set_name<S: Into<String>>(&mut self, name: S) {
+        self.name = Some(name.into());
+        self.dirty = true;
+    }
+
+    pub fn set_number_title(&mut self, enabled: bool) {
+        self.number_title = enabled;
+        self.dirty = true;
+    }
+
+    pub fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+        self.dirty = true;
+    }
+
+    pub fn window_title(&self, handle: Option<u32>) -> String {
+        let name = self.name.as_deref().map(str::trim).unwrap_or_default();
+        let numbered = if self.number_title {
+            handle.filter(|h| *h > 0).map(|h| format!("Figure {h}"))
+        } else {
+            None
+        };
+        match (numbered, name.is_empty()) {
+            (Some(numbered), false) => format!("{numbered}: {name}"),
+            (Some(numbered), true) => numbered,
+            (None, false) => name.to_string(),
+            (None, true) => "RunMat Plot".to_string(),
+        }
     }
 
     pub fn has_any_titles(&self) -> bool {
@@ -526,6 +569,14 @@ impl Figure {
         self.dirty = true;
     }
 
+    pub fn set_axes_style(&mut self, axes_index: usize, style: TextStyle) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.axes_style = style;
+        }
+        self.dirty = true;
+    }
+
     pub fn set_axes_title_style(&mut self, axes_index: usize, style: TextStyle) {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
@@ -639,10 +690,49 @@ impl Figure {
         self.dirty = true;
     }
 
+    pub fn with_minor_grid(mut self, enabled: bool) -> Self {
+        self.set_minor_grid(enabled);
+        self
+    }
+
+    pub fn set_minor_grid(&mut self, enabled: bool) {
+        self.set_axes_minor_grid_enabled(self.active_axes_index, enabled);
+        self.dirty = true;
+    }
+
+    pub fn set_axes_minor_grid_enabled(&mut self, axes_index: usize, enabled: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.minor_grid_enabled = enabled;
+            meta.minor_grid_explicit = true;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn minor_grid_enabled_for_axes(&self, axes_index: usize) -> bool {
+        self.axes_metadata(axes_index)
+            .map(|meta| {
+                if meta.minor_grid_explicit {
+                    meta.minor_grid_enabled
+                } else {
+                    self.minor_grid_enabled
+                }
+            })
+            .unwrap_or(self.minor_grid_enabled)
+    }
+
     /// Set background color
     pub fn with_background_color(mut self, color: Vec4) -> Self {
-        self.background_color = color;
+        self.set_background_color(color);
         self
+    }
+
+    pub fn set_background_color(&mut self, color: Vec4) {
+        self.background_color = color;
+        self.dirty = true;
     }
 
     /// Set log scale flags
@@ -1865,6 +1955,21 @@ mod tests {
     }
 
     #[test]
+    fn test_window_title_follows_name_and_number_title() {
+        let mut figure = Figure::new();
+        assert_eq!(figure.window_title(Some(7)), "Figure 7");
+
+        figure.set_name("demo");
+        assert_eq!(figure.window_title(Some(7)), "Figure 7: demo");
+
+        figure.set_number_title(false);
+        assert_eq!(figure.window_title(Some(7)), "demo");
+
+        figure.set_name("   ");
+        assert_eq!(figure.window_title(Some(7)), "RunMat Plot");
+    }
+
+    #[test]
     fn test_has_any_titles_tracks_super_and_axes_titles() {
         let mut figure = Figure::new();
         assert!(!figure.has_any_titles());
@@ -2076,6 +2181,13 @@ mod tests {
         figure.set_axes_xlabel(0, "Left X");
         figure.set_axes_ylabel(0, "Left Y");
         figure.set_axes_title(1, "Right Title");
+        figure.set_axes_style(
+            1,
+            TextStyle {
+                font_size: Some(14.0),
+                ..Default::default()
+            },
+        );
         figure.set_axes_legend_enabled(0, false);
         figure.set_axes_legend_style(
             1,
@@ -2110,6 +2222,11 @@ mod tests {
                 .location
                 .as_deref(),
             Some("southwest")
+        );
+        assert_eq!(figure.axes_metadata(0).unwrap().axes_style.font_size, None);
+        assert_eq!(
+            figure.axes_metadata(1).unwrap().axes_style.font_size,
+            Some(14.0)
         );
     }
 
@@ -2290,6 +2407,7 @@ mod tests {
         figure.set_axes_limits(1, Some((1.0, 2.0)), Some((3.0, 4.0)));
         figure.set_axes_z_limits(1, Some((5.0, 6.0)));
         figure.set_axes_grid_enabled(1, false);
+        figure.set_axes_minor_grid_enabled(1, true);
         figure.set_axes_box_enabled(1, false);
         figure.set_axes_axis_equal(1, true);
         figure.set_axes_colorbar_enabled(1, true);
@@ -2300,11 +2418,37 @@ mod tests {
         let right = figure.axes_metadata(1).unwrap();
         assert_eq!(left.x_limits, None);
         assert_eq!(right.x_limits, Some((1.0, 2.0)));
+        assert!(!left.minor_grid_enabled);
+        assert!(!left.minor_grid_explicit);
         assert!(!right.grid_enabled);
+        assert!(right.minor_grid_enabled);
+        assert!(right.minor_grid_explicit);
         assert!(!right.box_enabled);
         assert!(right.axis_equal);
         assert!(right.colorbar_enabled);
         assert_eq!(format!("{:?}", right.colormap), "Hot");
         assert_eq!(right.color_limits, Some((0.0, 10.0)));
+    }
+
+    #[test]
+    fn active_axes_sync_does_not_clobber_figure_minor_grid_default() {
+        let mut figure = Figure::new();
+        figure.set_subplot_grid(1, 2);
+        figure.minor_grid_enabled = true;
+
+        assert!(figure.minor_grid_enabled_for_axes(0));
+        assert!(figure.minor_grid_enabled_for_axes(1));
+
+        figure.set_active_axes_index(1);
+
+        assert!(figure.minor_grid_enabled);
+        assert!(figure.minor_grid_enabled_for_axes(0));
+        assert!(figure.minor_grid_enabled_for_axes(1));
+
+        figure.set_axes_minor_grid_enabled(1, false);
+
+        assert!(figure.minor_grid_enabled);
+        assert!(figure.minor_grid_enabled_for_axes(0));
+        assert!(!figure.minor_grid_enabled_for_axes(1));
     }
 }

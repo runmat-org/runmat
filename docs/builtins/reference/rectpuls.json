@@ -1,0 +1,84 @@
+{
+  "title": "rectpuls",
+  "category": "math/signal",
+  "keywords": [
+    "rectpuls",
+    "rectangular pulse",
+    "pulse train",
+    "signal processing",
+    "elementwise"
+  ],
+  "summary": "Generate sampled rectangular pulses.",
+  "references": [
+    "title: \"MATLAB rectpuls documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to the host and evaluated with the scalar reference implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline",
+    "notes": "Fusion is disabled because width validation and boundary half-amplitude semantics are handled by the host builtin."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::rectpuls::tests",
+    "integration": null
+  },
+  "description": "`rectpuls(T)` returns samples of a unit-width rectangular pulse centered at zero. `rectpuls(T, W)` uses pulse width `W`.",
+  "behaviors": [
+    "Operates element-wise on real numeric scalars, vectors, matrices, and N-D tensors; preserves input shape.",
+    "Returns `1` for `abs(T) < W/2`, `0.5` at `abs(T) == W/2`, and `0` outside the pulse.",
+    "The width must be positive and finite.",
+    "Integer and logical inputs are promoted to double precision before evaluation.",
+    "Complex and text inputs are rejected with a builtin-scoped error."
+  ],
+  "examples": [
+    {
+      "description": "Default unit-width rectangular pulse",
+      "input": "t = -0.5:0.25:0.5;\ny = rectpuls(t)",
+      "output": "y = [0.5 1 1 1 0.5]"
+    },
+    {
+      "description": "Custom pulse width",
+      "input": "t = -1:0.5:1;\ny = rectpuls(t, 0.5)",
+      "output": "y = [0 0 1 0 0]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What happens at the exact pulse edge?",
+      "answer": "RunMat returns `0.5` at `abs(T) == W/2`, matching the standard sampled rectangular pulse convention."
+    },
+    {
+      "question": "Can `rectpuls` be used inside `pulstran`?",
+      "answer": "Yes. `pulstran(T, D, 'rectpuls', W)` evaluates rectangular pulses centered at each delay."
+    }
+  ],
+  "links": [
+    {
+      "label": "pulstran",
+      "url": "./pulstran"
+    },
+    {
+      "label": "tripuls",
+      "url": "./tripuls"
+    },
+    {
+      "label": "gauspuls",
+      "url": "./gauspuls"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/rectpuls.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/rectpuls.rs"
+  }
+}

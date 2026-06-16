@@ -1,6 +1,6 @@
 #![cfg(target_arch = "wasm32")]
 
-use runmat_wasm::init_runmat;
+use runmat_wasm::{init_runmat, RunMatWasm};
 use serde::Deserialize;
 use wasm_bindgen::JsValue;
 
@@ -35,10 +35,7 @@ fn init_options(enable_gpu: bool) -> JsValue {
     options.into()
 }
 
-async fn execute_script(script: &str) -> ExecPayload {
-    let runtime = init_runmat(init_options(false))
-        .await
-        .expect("initialize wasm runtime");
+pub(crate) async fn execute_script_with_runtime(runtime: &RunMatWasm, script: &str) -> ExecPayload {
     let request = text_execute_request("symptom_regression.m", script);
     serde_wasm_bindgen::from_value(
         runtime
@@ -47,6 +44,13 @@ async fn execute_script(script: &str) -> ExecPayload {
             .expect("execute script"),
     )
     .expect("deserialize execution payload")
+}
+
+async fn execute_script(script: &str) -> ExecPayload {
+    let runtime = init_runmat(init_options(false))
+        .await
+        .expect("initialize wasm runtime");
+    execute_script_with_runtime(&runtime, script).await
 }
 
 fn text_execute_request(name: &str, script: &str) -> JsValue {
@@ -76,7 +80,7 @@ fn text_execute_request(name: &str, script: &str) -> JsValue {
     request.into()
 }
 
-fn stdout_text(payload: &ExecPayload) -> String {
+pub(crate) fn stdout_text(payload: &ExecPayload) -> String {
     payload
         .stdout
         .iter()
@@ -220,5 +224,30 @@ disp(elapsedHandle);
     assert!(
         elapsed_values.iter().take(3).all(|value| *value >= 0.0),
         "tic/toc loop produced negative elapsed values: {elapsed_values:?}"
+    );
+}
+
+pub(crate) async fn assert_symbolic_limit_workflow_executes_without_runtime_error() {
+    let script = r#"
+syms x h
+f1 = limit(sin(x)/x, x, 0);
+f2 = limit((cos(x+h) - cos(x))/h, h, 0);
+
+disp(f1);
+disp(f2);
+"#;
+
+    let payload = execute_script(script).await;
+    if let Some(err) = payload.error {
+        panic!("symbolic limit wasm execution failed: {}", err.message);
+    }
+    let stdout_text = stdout_text(&payload);
+    assert!(
+        stdout_text.split_whitespace().any(|token| token == "1"),
+        "symbolic limit workflow did not print sinc limit: {stdout_text:?}"
+    );
+    assert!(
+        stdout_text.contains("-sin(x)"),
+        "symbolic limit workflow did not print derivative limit: {stdout_text:?}"
     );
 }

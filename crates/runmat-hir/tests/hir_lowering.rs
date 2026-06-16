@@ -272,6 +272,86 @@ fn local_function_call_resolves_to_function_id() {
 }
 
 #[test]
+fn name_value_call_arguments_lower_to_name_value_pairs() {
+    let assembly =
+        lower_semantic(r#"x = f(1, Mode="fast", Count=2); function y = f(varargin); y = 0; end"#);
+    let function_id = assembly.modules[0].top_level_functions[0];
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let entry_function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+
+    let HirStmtKind::Assign(_, expr, _) = &entry_function.body.statements[0].kind else {
+        panic!("expected assignment");
+    };
+    let HirExprKind::Call(call) = &expr.kind else {
+        panic!("expected call expression");
+    };
+    assert!(matches!(call.callee, HirCallableRef::Function(id) if id == function_id));
+    assert_eq!(call.args.len(), 5);
+    assert!(matches!(call.args[0].kind, HirExprKind::Number(ref value) if value == "1"));
+    assert!(matches!(call.args[1].kind, HirExprKind::String(ref value) if value.0 == "Mode"));
+    assert!(matches!(call.args[2].kind, HirExprKind::String(ref value) if value.0 == "\"fast\""));
+    assert!(matches!(call.args[3].kind, HirExprKind::String(ref value) if value.0 == "Count"));
+    assert!(matches!(call.args[4].kind, HirExprKind::Number(ref value) if value == "2"));
+}
+
+#[test]
+fn name_value_binding_call_lowers_to_dynamic_dispatch_not_indexing() {
+    let assembly = lower_semantic("h = @sin; y = h(Name=1);");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let entry_function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+
+    let HirStmtKind::Assign(_, expr, _) = &entry_function.body.statements[1].kind else {
+        panic!("expected assignment");
+    };
+    let HirExprKind::Call(call) = &expr.kind else {
+        panic!("name-value binding call should dispatch dynamically, not lower as indexing");
+    };
+    assert!(matches!(call.callee, HirCallableRef::DynamicExpr(_)));
+    assert_eq!(call.args.len(), 2);
+    assert!(matches!(call.args[0].kind, HirExprKind::String(ref value) if value.0 == "Name"));
+    assert!(matches!(call.args[1].kind, HirExprKind::Number(ref value) if value == "1"));
+}
+
+#[test]
+fn name_value_brace_value_lowers_as_single_value_not_argument_expansion() {
+    let assembly =
+        lower_semantic(r#"C = {7}; x = f(Name=C{:}); function y = f(varargin); y = 0; end"#);
+    let function_id = assembly.modules[0].top_level_functions[0];
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let entry_function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+
+    let HirStmtKind::Assign(_, expr, _) = &entry_function.body.statements[1].kind else {
+        panic!("expected assignment");
+    };
+    let HirExprKind::Call(call) = &expr.kind else {
+        panic!("expected call expression");
+    };
+    assert!(matches!(call.callee, HirCallableRef::Function(id) if id == function_id));
+    assert_eq!(call.args.len(), 2);
+    assert!(matches!(call.args[0].kind, HirExprKind::String(ref value) if value.0 == "Name"));
+    let HirExprKind::Index(_, indexing) = &call.args[1].kind else {
+        panic!("expected brace-index value expression");
+    };
+    assert!(matches!(indexing.kind, IndexKind::Brace));
+    assert!(matches!(
+        indexing.result_context,
+        IndexResultContext::ReadCommaList
+    ));
+}
+
+#[test]
 fn unbound_builtin_identifier_lowers_to_zero_arg_builtin_call() {
     let assembly = lower_semantic("x = rand;");
     let entry = assembly.modules[0].synthetic_entry_function.unwrap();
@@ -584,6 +664,71 @@ fn nested_function_records_capture_of_parent_binding() {
         .captures
         .iter()
         .any(|capture| capture.binding == acc.id && capture.from_function == outer.id));
+}
+
+#[test]
+fn nested_same_name_function_does_not_replace_top_level_output_arity() {
+    let assembly = lower_semantic(
+        r#"
+        function y = foo(x)
+            y = x + 1;
+        end
+
+        function y = outer(x)
+            function foo()
+            end
+            foo()
+            y = x;
+        end
+
+        foo(2)
+        "#,
+    );
+    let top_level_foo = assembly
+        .functions
+        .iter()
+        .find(|function| function.name.0 == "foo" && function.parent.is_none())
+        .unwrap();
+    let outer = assembly
+        .functions
+        .iter()
+        .find(|function| function.name.0 == "outer")
+        .unwrap();
+    let nested_foo = assembly
+        .functions
+        .iter()
+        .find(|function| function.name.0 == "foo" && function.parent == Some(outer.id))
+        .unwrap();
+
+    let HirStmtKind::ExprStmt(nested_expr, false) = &outer.body.statements[0].kind else {
+        panic!("expected unsuppressed nested call expression");
+    };
+    let HirExprKind::Call(nested_call) = &nested_expr.kind else {
+        panic!("expected nested function call");
+    };
+    assert!(matches!(
+        nested_call.callee,
+        HirCallableRef::Function(id) if id == nested_foo.id
+    ));
+    assert_eq!(nested_call.requested_outputs, RequestedOutputCount::Zero);
+
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let entry_function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::ExprStmt(entry_expr, false) = &entry_function.body.statements[0].kind else {
+        panic!("expected unsuppressed top-level call expression");
+    };
+    let HirExprKind::Call(entry_call) = &entry_expr.kind else {
+        panic!("expected top-level function call");
+    };
+    assert!(matches!(
+        entry_call.callee,
+        HirCallableRef::Function(id) if id == top_level_foo.id
+    ));
+    assert_eq!(entry_call.requested_outputs, RequestedOutputCount::One);
 }
 
 #[test]

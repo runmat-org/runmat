@@ -93,12 +93,13 @@ pub fn pack_vertices_from_xy(
         push_constant_ranges: &[],
     });
 
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("stairs-pack-pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: "main",
-    });
+    let pipeline =
+        device.create_compute_pipeline(&crate::wgpu_compat::wgpu_compute_pipeline_descriptor! {
+            label: Some("stairs-pack-pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "main",
+        });
 
     let vertex_count = segments as u64 * 4;
     let output_size = vertex_count * std::mem::size_of::<Vertex>() as u64;

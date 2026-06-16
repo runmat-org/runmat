@@ -58,7 +58,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `math/linalg/ops` | `mtimes`, `mrdivide`, `mldivide`, `transpose`, `ctranspose`, `trace` | yes | M/T | BLAS | Core matrix operations. |
 | done | `math/linalg/ops` | `dot`, `mpower` | yes | M | BLAS | Dot product and matrix power. |
 | done | `math/linalg/factor` | `lu`, `qr`, `chol`, `svd`, `eig` | yes | - | LAPACK | Factorizations and eigensolvers. |
-| done | `math/linalg/solve` | `linsolve`, `pinv`, `inv`, `det`, `rank`, `rref`, `rcond`, `cond`, `norm` | yes | - | LAPACK/BLAS/- | Solves, row reduction, and matrix metrics. |
+| done | `math/linalg/solve` | `linsolve`, `pinv`, `inv`, `det`, `rank`, `null`, `rref`, `rcond`, `cond`, `norm` | yes | - | LAPACK/BLAS/- | Solves, null spaces, row reduction, and matrix metrics. |
 | done | `math/linalg/structure` | `bandwidth`, `issymmetric`, `ishermitian`, `symrcm` | host | - | - | Structure queries and diagnostics. |
 
 ## FFT, Signal, and Image Processing
@@ -142,11 +142,11 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 
 | Status | Path | Names | GPU | Fusion | Backend | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| done | `io/repl-fs` | `cd`, `pwd`, `ls`, `dir`, `mkdir`, `rmdir`, `movefile`, `copyfile`, `delete`, `exist`, `which`, `path`, `addpath`, `rmpath`, `run`, `genpath`, `savepath`, `tempdir`, `tempname`, `getenv`, `setenv` | host | - | - | REPL filesystem and environment helpers. |
+| done | `io/repl-fs` | `cd`, `pwd`, `ls`, `dir`, `mkdir`, `rmdir`, `movefile`, `copyfile`, `delete`, `exist`, `which`, `path`, `addpath`, `rmpath`, `run`, `genpath`, `savepath`, `tempdir`, `tempname`, `getenv`, `setenv` | host | - | - | REPL filesystem and environment helpers; MATLAB command syntax accepts literal path words such as `cd ..`, `addpath ./src`, and `copyfile ./a.m ./b.m`. |
 | done | `io/filetext` | `fileread`, `filewrite`, `fopen`, `fclose`, `fread`, `fwrite`, `feof`, `fgetl`, `fgets`, `fprintf` | host | - | - | Text and binary file I/O. |
 | done | `io/core` | `disp` | host | - | - | Display output sink. |
 | done | `io/interactive` | `input` | host | - | - | Prompted input, including text mode. |
-| done | `io/tabular` | `readtable`, `readmatrix`, `writematrix`, `csvread`, `csvwrite`, `dlmread`, `dlmwrite` | host | - | - | Tabular I/O; `readtable` imports delimited text and spreadsheet files as table variables with sheet/range/name options. |
+| done | `io/tabular` | `readtable`, `spreadsheetImportOptions`, `readmatrix`, `writematrix`, `csvread`, `csvwrite`, `dlmread`, `dlmwrite` | host | - | - | Tabular I/O; `readtable` imports delimited text and spreadsheet files as table variables with sheet/range/name/type options. |
 | done | `io/mat` | `save`, `load` | host | - | - | MAT-like persistence. |
 
 ## I/O - JSON, Networking, and Images

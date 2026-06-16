@@ -37,6 +37,7 @@
     "`status = copyfile(source, destination)` copies a file or folder and returns `1` on success and `0` on failure.",
     "`[status, message, messageID] = copyfile(...)` adds MATLAB-style diagnostics. Successful copies return empty `1x0` character arrays.",
     "`copyfile(source, destination, 'f')` forces overwrites, matching MATLAB's `'f'` flag. Without the flag, existing destination files or folders prevent the copy.",
+    "MATLAB command form is supported for literal path arguments, including `copyfile ./source.m ./archive/source.m` and `copyfile ./source.m ./archive/source.m f`.",
     "Wildcards in `source` (for example, `*.m`) copy every match. When the pattern expands to multiple items, `destination` must be an existing folder; each match is copied into that folder.",
     "Folder copies replicate the entire directory tree, including nested files and subfolders, honoring read-only attributes where possible.",
     "Inputs accept character vectors or string scalars. Other types raise MATLAB-compatible errors before any filesystem work occurs.",

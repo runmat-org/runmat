@@ -1,4 +1,5 @@
 pub use inventory;
+pub mod symbolic;
 use runmat_gc_api::GcPtr;
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
@@ -8,6 +9,7 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
+pub use symbolic::{SymbolicExpr, SymbolicFunction};
 
 use indexmap::IndexMap;
 use std::sync::OnceLock;
@@ -83,6 +85,8 @@ pub enum Value {
     SparseTensor(SparseTensor),
     /// Complex numeric array; same column-major shape semantics as `Tensor`
     ComplexTensor(ComplexTensor),
+    /// Scalar symbolic expression used by `sym`, `syms`, and symbolic math builtins.
+    Symbolic(SymbolicExpr),
     Cell(CellArray),
     // Struct (scalar or nested). Struct arrays are represented in higher layers;
     // this variant holds a single struct's fields.
@@ -1125,6 +1129,8 @@ pub enum Type {
         /// Optional full shape; None means unknown/dynamic; individual dims can be omitted by using None
         shape: Option<Vec<Option<usize>>>,
     },
+    /// Scalar symbolic expression type.
+    Symbolic,
     /// Cell array type with optional element type information
     Cell {
         /// Optional element type (None means mixed/unknown)
@@ -1321,6 +1327,7 @@ impl Type {
             Value::ComplexTensor(t) => Type::Tensor {
                 shape: Some(t.shape.iter().map(|&d| Some(d)).collect()),
             },
+            Value::Symbolic(_) => Type::Symbolic,
             Value::Cell(cells) => {
                 if cells.data.is_empty() {
                     Type::cell()
@@ -2169,6 +2176,7 @@ impl fmt::Display for Value {
             Value::Tensor(m) => write!(f, "{m}"),
             Value::SparseTensor(m) => write!(f, "{m}"),
             Value::ComplexTensor(m) => write!(f, "{m}"),
+            Value::Symbolic(expr) => write!(f, "{expr}"),
             Value::Cell(ca) => ca.fmt(f),
 
             Value::GpuTensor(h) => write!(

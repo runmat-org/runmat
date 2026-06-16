@@ -330,3 +330,41 @@ fn nyquist_statement_form_plots_without_error() {
     "#;
     execute_source(program).unwrap();
 }
+
+#[test]
+fn rlocus_returns_roots_through_vm_dispatch() {
+    let program = r#"
+        H = tf(1, [1 1]);
+        [r, k] = rlocus(H, [0 1 3]);
+        assert(r(1, 1) == -1);
+        assert(r(1, 2) == -2);
+        assert(r(1, 3) == -4);
+        assert(k(1) == 0);
+        assert(k(3) == 3);
+    "#;
+    execute_source(program).unwrap();
+}
+
+#[test]
+fn rlocus_statement_form_accepts_control_workflow() {
+    let program = r#"
+        s = tf('s');
+        H = (s + 2) / (s^2 + 3*s + 4);
+        rlocus(H);
+        step(feedback(H, 1));
+    "#;
+    execute_source(program).unwrap();
+}
+
+#[test]
+fn rlocus_accepts_siso_state_space_models() {
+    let program = r#"
+        H = ss(-1, 1, 1, 0);
+        [r, k] = rlocus(H, [0 1 3]);
+        assert(abs(r(1, 1) + 1) < 1e-8);
+        assert(abs(r(1, 2) + 2) < 1e-8);
+        assert(abs(r(1, 3) + 4) < 1e-8);
+        assert(k(3) == 3);
+    "#;
+    execute_source(program).unwrap();
+}

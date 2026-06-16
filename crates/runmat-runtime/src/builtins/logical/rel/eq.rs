@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::logical::type_resolvers::logical_binary_type;
+use crate::builtins::math::symbolic::{symbolic_expr_to_value, value_to_symbolic_scalar};
 use crate::{build_runtime_error, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::rel::eq")]
@@ -161,6 +162,19 @@ async fn try_eq_gpu(
 async fn eq_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     if let Some(value) = eq_identity(&lhs, &rhs) {
         return Ok(value);
+    }
+
+    if matches!(
+        (&lhs, &rhs),
+        (Value::Symbolic(_), _) | (_, Value::Symbolic(_))
+    ) {
+        let lhs =
+            value_to_symbolic_scalar(&lhs).ok_or_else(|| eq_error(&EQ_ERROR_INVALID_INPUT))?;
+        let rhs =
+            value_to_symbolic_scalar(&rhs).ok_or_else(|| eq_error(&EQ_ERROR_INVALID_INPUT))?;
+        return Ok(symbolic_expr_to_value(
+            runmat_builtins::SymbolicExpr::equation(lhs, rhs),
+        ));
     }
 
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
@@ -546,7 +560,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::HandleRef;
+    use runmat_builtins::{HandleRef, SymbolicExpr};
 
     fn run_eq(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         block_on(super::eq_builtin(lhs, rhs))
@@ -612,6 +626,15 @@ pub(crate) mod tests {
             }
             other => panic!("expected logical array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn eq_symbolic_scalar_builds_equation() {
+        let applied = SymbolicExpr::function_call("Y", vec![SymbolicExpr::constant(0.0)]);
+
+        let result = run_eq(Value::Symbolic(applied), Value::Num(0.0)).expect("eq");
+
+        assert_eq!(result.to_string(), "Y(0) == 0");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

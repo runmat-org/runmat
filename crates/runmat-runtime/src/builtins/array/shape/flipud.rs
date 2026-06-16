@@ -231,6 +231,7 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Symbolic(_)
         | Value::OutputList(_) => Err(flipud_error_descriptor(&FLIPUD_ERROR_UNSUPPORTED_INPUT)),
     }
 }

@@ -1,0 +1,128 @@
+{
+  "title": "heaviside",
+  "category": "math/elementwise",
+  "keywords": [
+    "heaviside",
+    "unit step",
+    "step function",
+    "elementwise",
+    "gpu"
+  ],
+  "summary": "Compute the element-wise Heaviside step function.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Keeps real GPU tensors resident when the active provider implements unary_heaviside; otherwise RunMat gathers and evaluates the host implementation."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::heaviside::tests",
+    "integration": "builtins::math::elementwise::heaviside::tests::heaviside_gpu_provider_roundtrip"
+  },
+  "description": "`Y = heaviside(X)` returns the Heaviside step function applied element by element. Negative real values map to `0`, zero maps to `0.5`, and positive values map to `1`.",
+  "behaviors": [
+    "Real scalars, vectors, matrices, and higher-dimensional tensors are evaluated elementwise.",
+    "Both `0.0` and `-0.0` map to `0.5`.",
+    "`Inf` maps to `1`, `-Inf` maps to `0`, and `NaN` remains `NaN`.",
+    "CPU, provider, WGPU, and fusion paths all use the same real scalar mapping.",
+    "Logical inputs are promoted to doubles, so `heaviside(false)` returns `0.5` and `heaviside(true)` returns `1`.",
+    "Character arrays are treated as their numeric code points and return doubles of the same shape.",
+    "Symbolic scalar inputs return symbolic `heaviside(...)` expressions.",
+    "Complex and string inputs are rejected with a stable invalid-input identifier."
+  ],
+  "examples": [
+    {
+      "description": "Evaluate the step at representative scalar values",
+      "input": "values = heaviside([-2 0 3])",
+      "output": "values = [0 0.5 1]"
+    },
+    {
+      "description": "Gate a sinusoid using a unit step",
+      "input": "t = -1:0.01:1;\nx = sin(2*pi*t).*heaviside(t)"
+    },
+    {
+      "description": "Preserve shape for matrix inputs",
+      "input": "A = [-1 0; 2 NaN];\nY = heaviside(A)",
+      "output": "Y = [0 0.5; 1 NaN]"
+    },
+    {
+      "description": "Use logical inputs",
+      "input": "mask = [false true];\ny = heaviside(mask)",
+      "output": "y = [0.5 1]"
+    },
+    {
+      "description": "Preserve symbolic expressions",
+      "input": "syms x;\ny = heaviside(x)",
+      "output": "y = heaviside(x)"
+    },
+    {
+      "description": "Execute on a GPU-resident tensor",
+      "input": "G = gpuArray([-1 0 1]);\nY = heaviside(G);\nhost = gather(Y)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What value does RunMat use at zero?",
+      "answer": "RunMat returns `0.5` for both positive and negative zero, matching MATLAB's convention for numeric Heaviside step values."
+    },
+    {
+      "question": "Does `heaviside` support complex numbers?",
+      "answer": "No. RunMat implements the real-valued Heaviside step function. Complex inputs raise `RunMat:heaviside:InvalidInput` instead of silently choosing a branch."
+    },
+    {
+      "question": "Does `heaviside` support symbolic expressions?",
+      "answer": "Yes. Symbolic scalar inputs remain symbolic and format as `heaviside(expr)`."
+    },
+    {
+      "question": "Does `heaviside` preserve NaN values?",
+      "answer": "Yes. NaN inputs remain NaN on CPU, GPU provider, and fused elementwise paths."
+    },
+    {
+      "question": "Will `heaviside(gpuArray(...))` stay on the GPU?",
+      "answer": "Yes when the active provider implements `unary_heaviside`. Providers without that hook fall back to host evaluation for correctness."
+    },
+    {
+      "question": "Can `heaviside` participate in fusion?",
+      "answer": "Yes. The fusion planner emits an elementwise step expression with explicit zero and NaN handling."
+    }
+  ],
+  "links": [
+    {
+      "label": "sign",
+      "url": "./sign"
+    },
+    {
+      "label": "times",
+      "url": "./times"
+    },
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/heaviside.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/heaviside.rs"
+  },
+  "gpu_residency": "`heaviside` keeps real GPU tensors resident when the active provider exposes `unary_heaviside`. If that hook is unavailable, RunMat gathers the tensor and evaluates the same scalar mapping on the host."
+}

@@ -31,6 +31,7 @@
     "`gca()` returns a scalar numeric axes handle.",
     "`gca('struct')` returns a struct with fields `handle`, `figure`, `rows`, `cols`, and `index`.",
     "The current axes reflect the active subplot when `subplot` has been used.",
+    "The numeric axes handle can be passed to `get` and `set`, including common axes styling such as `FontSize`.",
     "Unsupported arguments raise `gca` plotting errors."
   ],
   "examples": [
@@ -43,6 +44,10 @@
       "description": "Inspect the active subplot layout",
       "input": "subplot(2, 2, 3);\ninfo = gca(\"struct\")",
       "output": "info =\n  struct with fields:\n    handle\n    figure\n    rows\n    cols\n    index"
+    },
+    {
+      "description": "Style the current axes",
+      "input": "plot(1:3, [1 2 3]);\nset(gca, 'FontSize', 10);"
     }
   ],
   "faqs": [

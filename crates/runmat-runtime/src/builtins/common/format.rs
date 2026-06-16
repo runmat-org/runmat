@@ -1069,7 +1069,8 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         | Value::Int(_)
         | Value::Bool(_)
         | Value::String(_)
-        | Value::Complex(_, _) => {
+        | Value::Complex(_, _)
+        | Value::Symbolic(_) => {
             output.push(value);
         }
         Value::Tensor(tensor) => {

@@ -18,6 +18,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -362,7 +363,8 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         | Value::StringArray(_)
         | Value::SparseTensor(_)
         | Value::Cell(_)
-        | Value::Struct(_) => Err(rdivide_error_with_detail(
+        | Value::Struct(_)
+        | Value::Symbolic(_) => Err(rdivide_error_with_detail(
             &RDIVIDE_ERROR_INVALID_ARGUMENT,
             "unsupported prototype conversion to GPU output",
         )),
@@ -590,6 +592,9 @@ async fn rdivide_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResu
 }
 
 fn rdivide_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if let Some(result) = symbolic_binary(&lhs, &rhs, SymbolicBinaryOp::Div) {
+        return Ok(result);
+    }
     if let Some(result) = scalar_divide_value(&lhs, &rhs) {
         return Ok(result);
     }

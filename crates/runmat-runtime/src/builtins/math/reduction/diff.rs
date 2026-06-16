@@ -15,6 +15,9 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::reduction::type_resolvers::diff_numeric_type;
+use crate::builtins::math::symbolic::{
+    symbolic_expr_to_value, symbolic_variable_name_from_value, value_to_symbolic_scalar,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "diff";
@@ -200,6 +203,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::reduction::diff"
 )]
 async fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if let Value::Symbolic(expr) = value {
+        return diff_symbolic(expr, &rest);
+    }
+
     let (order, dim) = parse_arguments(&rest)?;
     if order == 0 {
         return Ok(value);
@@ -237,6 +244,81 @@ async fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             other
         ))),
     }
+}
+
+fn diff_symbolic(expr: runmat_builtins::SymbolicExpr, args: &[Value]) -> BuiltinResult<Value> {
+    let (variable, order) = parse_symbolic_diff_args(&expr, args)?;
+    Ok(symbolic_expr_to_value(
+        runmat_builtins::SymbolicExpr::derivative_expr(expr, variable, order),
+    ))
+}
+
+fn parse_symbolic_diff_args(
+    expr: &runmat_builtins::SymbolicExpr,
+    args: &[Value],
+) -> BuiltinResult<(String, u32)> {
+    match args.len() {
+        0 => Ok((infer_symbolic_diff_variable(expr)?, 1)),
+        1 => {
+            if let Some(variable) = symbolic_variable_name_from_value(&args[0]) {
+                Ok((variable, 1))
+            } else {
+                Ok((
+                    infer_symbolic_diff_variable(expr)?,
+                    parse_symbolic_order(&args[0])?,
+                ))
+            }
+        }
+        2 => {
+            if let Some(variable) = symbolic_variable_name_from_value(&args[0]) {
+                Ok((variable, parse_symbolic_order(&args[1])?))
+            } else if let Some(variable) = symbolic_variable_name_from_value(&args[1]) {
+                Ok((variable, parse_symbolic_order(&args[0])?))
+            } else {
+                Err(diff_invalid_argument(
+                    "diff: symbolic differentiation expects a variable and optional order",
+                ))
+            }
+        }
+        _ => Err(diff_invalid_argument(
+            "diff: symbolic differentiation supports at most two trailing arguments",
+        )),
+    }
+}
+
+fn infer_symbolic_diff_variable(expr: &runmat_builtins::SymbolicExpr) -> BuiltinResult<String> {
+    let variables = expr.variables();
+    if variables.len() == 1 {
+        Ok(variables.into_iter().next().unwrap_or_default())
+    } else if variables.is_empty() {
+        Ok(String::new())
+    } else {
+        Err(diff_invalid_argument(
+            "diff: symbolic differentiation variable is ambiguous",
+        ))
+    }
+}
+
+fn parse_symbolic_order(value: &Value) -> BuiltinResult<u32> {
+    let expr = value_to_symbolic_scalar(value).ok_or_else(|| {
+        diff_invalid_argument("diff: symbolic differentiation order must be a scalar integer")
+    })?;
+    let Some(order) = expr.constant_value() else {
+        return Err(diff_invalid_argument(
+            "diff: symbolic differentiation order must be numeric",
+        ));
+    };
+    if !order.is_finite() || order < 0.0 || (order.round() - order).abs() > 1.0e-12 {
+        return Err(diff_invalid_argument(
+            "diff: symbolic differentiation order must be a nonnegative integer",
+        ));
+    }
+    if order > u32::MAX as f64 {
+        return Err(diff_invalid_argument(
+            "diff: symbolic differentiation order is too large",
+        ));
+    }
+    Ok(order as u32)
 }
 
 fn parse_arguments(args: &[Value]) -> BuiltinResult<(usize, Option<usize>)> {
@@ -488,7 +570,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, SymbolicExpr, Tensor};
 
     fn diff_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::diff_builtin(value, rest))
@@ -536,6 +618,35 @@ pub(crate) mod tests {
             .errors
             .iter()
             .any(|error| error.code == DIFF_ERROR_INTERNAL.code));
+    }
+
+    #[test]
+    fn diff_symbolic_function_with_explicit_variable() {
+        let y = SymbolicExpr::function_reference("Y", vec!["X".to_string()]);
+
+        let result = diff_builtin(
+            Value::Symbolic(y),
+            vec![Value::Symbolic(SymbolicExpr::variable("X"))],
+        )
+        .expect("diff");
+
+        assert_eq!(result.to_string(), "diff(Y(X), X)");
+    }
+
+    #[test]
+    fn diff_symbolic_function_accepts_order_before_variable() {
+        let y = SymbolicExpr::function_reference("Y", vec!["X".to_string()]);
+
+        let result = diff_builtin(
+            Value::Symbolic(y),
+            vec![
+                Value::Int(IntValue::I32(2)),
+                Value::Symbolic(SymbolicExpr::variable("X")),
+            ],
+        )
+        .expect("diff");
+
+        assert_eq!(result.to_string(), "diff(Y(X), X, 2)");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

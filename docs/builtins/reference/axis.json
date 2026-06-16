@@ -5,6 +5,7 @@
     "axis",
     "axis limits",
     "axis equal",
+    "axis image",
     "axis tight",
     "matlab axis"
   ],
@@ -13,10 +14,11 @@
   "tested": {
     "unit": "builtins::plotting::cmds"
   },
-  "description": "`axis` configures limits and aspect behavior for the active axes. It supports numeric limit vectors and command forms such as `axis equal`, `axis auto`, and `axis tight`, matching MATLAB and RunMat plotting semantics.",
+  "description": "`axis` configures limits and aspect behavior for the active axes. It supports numeric limit vectors and command forms such as `axis equal`, `axis image`, `axis auto`, and `axis tight`, matching MATLAB and RunMat plotting semantics.",
   "behaviors": [
     "Passing a four-element numeric vector sets `[xmin xmax ymin ymax]` directly.",
     "`axis equal` enables equal aspect behavior on the current axes.",
+    "`axis image` enables equal aspect behavior and returns limits to data-fitted bounds, matching MATLAB's `axis equal` plus `axis tight` behavior.",
     "`axis auto` clears explicit limits and returns to automatic fitting.",
     "`axis tight` uses data-driven fitting behavior while leaving figure-local plot contents unchanged.",
     "Axis settings are subplot-local because they act on the active axes state."
@@ -29,6 +31,10 @@
     {
       "description": "Force equal axis scaling",
       "input": "t = linspace(0, 2*pi, 200);\nplot(cos(t), sin(t));\naxis equal;"
+    },
+    {
+      "description": "Display image data with square pixels",
+      "input": "imagesc([1 2; 3 4]);\naxis image;"
     },
     {
       "description": "Return to automatic fitting inside a subplot",
@@ -47,6 +53,10 @@
     {
       "question": "What does axis tight actually do?",
       "answer": "`axis tight` fits the axes limits snugly around the plotted data with no padding. Compare to `axis auto`, which may add margin for readability. Use `tight` when you want the data to fill the entire axes area — useful for image-like plots or when whitespace is wasted space."
+    },
+    {
+      "question": "What does axis image do?",
+      "answer": "`axis image` combines equal aspect behavior with data-fitted limits. It is intended for image displays where pixels should appear square and the axes should fit the image data."
     }
   ],
   "links": [

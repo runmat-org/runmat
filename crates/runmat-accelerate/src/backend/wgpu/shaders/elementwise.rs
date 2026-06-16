@@ -337,7 +337,9 @@ fn is_non_positive_integer(x: f64) -> bool {
 }
 
 fn is_nan64(x: f64) -> bool {
-    return x != x;
+    let bits = bitcast<u64>(x);
+    return (bits & 0x7ff0000000000000u) == 0x7ff0000000000000u &&
+        (bits & 0x000fffffffffffffu) != 0u;
 }
 
 fn pos_inf_f64() -> f64 {
@@ -440,6 +442,19 @@ fn sinc_real(a: f64) -> f64 {
     return sin(scaled) / scaled;
 }
 
+fn heaviside_real(a: f64) -> f64 {
+    if (is_nan64(a)) {
+        return a;
+    }
+    if (a > 0.0) {
+        return 1.0;
+    }
+    if (a < 0.0) {
+        return 0.0;
+    }
+    return 0.5;
+}
+
 fn apply(a: f64) -> f64 {
     switch params.op {
         case 0u: { return sin(a); }
@@ -499,6 +514,7 @@ fn apply(a: f64) -> f64 {
             return ceil(log2(aa));
         }
         case 33u: { return sinc_real(a); }
+        case 34u: { return heaviside_real(a); }
         default: { return a; }
     }
 }
@@ -587,7 +603,9 @@ fn is_non_positive_integer(x: f32) -> bool {
 }
 
 fn is_nan32(x: f32) -> bool {
-    return x != x;
+    let bits = bitcast<u32>(x);
+    return (bits & 0x7f800000u) == 0x7f800000u &&
+        (bits & 0x007fffffu) != 0u;
 }
 
 fn pos_inf_f32() -> f32 {
@@ -690,6 +708,19 @@ fn sinc_real(a: f32) -> f32 {
     return sin(scaled) / scaled;
 }
 
+fn heaviside_real(a: f32) -> f32 {
+    if (is_nan32(a)) {
+        return a;
+    }
+    if (a > 0.0) {
+        return 1.0;
+    }
+    if (a < 0.0) {
+        return 0.0;
+    }
+    return 0.5;
+}
+
 fn apply(a: f32) -> f32 {
     switch params.op {
         case 0u: { return sin(a); }
@@ -749,6 +780,7 @@ fn apply(a: f32) -> f32 {
             return ceil(log2(aa));
         }
         case 33u: { return sinc_real(a); }
+        case 34u: { return heaviside_real(a); }
         default: { return a; }
     }
 }

@@ -82,6 +82,12 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                 "text": s,
             })
         }
+        Value::Symbolic(expr) => json!({
+            "kind": "symbolic",
+            "className": "sym",
+            "shape": scalar_shape(),
+            "value": expr.to_string(),
+        }),
         Value::Tensor(t) => {
             let (preview, truncated) = preview_slice(&t.data, MAX_DATA_PREVIEW);
             json!({

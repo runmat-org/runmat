@@ -145,12 +145,13 @@ pub fn pack_vertices_from_xyz(
         push_constant_ranges: &[],
     });
 
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("scatter3-pack-pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: "main",
-    });
+    let pipeline =
+        device.create_compute_pipeline(&crate::wgpu_compat::wgpu_compute_pipeline_descriptor! {
+            label: Some("scatter3-pack-pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "main",
+        });
 
     let lod_stride = params.lod_stride.max(1);
     let max_points = inputs.len.div_ceil(lod_stride);
@@ -398,11 +399,11 @@ mod stress_tests {
             .block_on()?;
         let (device, queue) = adapter
             .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("scatter3-test-device"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: adapter.limits(),
-                },
+                &crate::wgpu_compat::device_descriptor(
+                    Some("scatter3-test-device"),
+                    wgpu::Features::empty(),
+                    adapter.limits(),
+                ),
                 None,
             )
             .block_on()

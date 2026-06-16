@@ -1547,7 +1547,7 @@ impl FusionGroupPlan {
         // Guard against Inf inputs: Inf/Inf = NaN, so return hi early when
         // it is already infinite (IEEE 754 requires hypot(Inf,*) = Inf).
         if scalar_ty == "f32" {
-            shader.push_str("fn isNan(x: f32) -> bool { return x != x; }\n");
+            shader.push_str("fn isNan(x: f32) -> bool { let bits = bitcast<u32>(x); return (bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0u; }\n");
             shader.push_str("fn isFinite(x: f32) -> bool { return (x == x) && (abs(x) < 3.4028234663852886e38); }\n");
             shader.push_str("fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }\n");
             shader.push_str(concat!(
@@ -1561,7 +1561,7 @@ impl FusionGroupPlan {
                 "}\n\n",
             ));
         } else {
-            shader.push_str("fn isNan(x: f64) -> bool { return x != x; }\n");
+            shader.push_str("fn isNan(x: f64) -> bool { let bits = bitcast<u64>(x); return (bits & 0x7ff0000000000000u) == 0x7ff0000000000000u && (bits & 0x000fffffffffffffu) != 0u; }\n");
             shader.push_str("fn isFinite(x: f64) -> bool { return (x == x) && (abs(x) < f64(1.7976931348623157e308)); }\n");
             shader.push_str("fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }\n");
             shader.push_str(concat!(
@@ -2917,6 +2917,15 @@ fn builtin_expr(
         "single" | "double" | "gpuarray" => return builtin_identity(inputs, exprs),
         "fix" => return builtin_unary_call("trunc", inputs, exprs),
         "sign" => return builtin_unary_call("sign", inputs, exprs),
+        "heaviside" => {
+            let arg = exprs.get(inputs.first()?).cloned()?;
+            let zero = cast_literal(scalar_ty, "0.0");
+            let half = cast_literal(scalar_ty, "0.5");
+            let one = cast_literal(scalar_ty, "1.0");
+            return Some(format!(
+                "select(select(select({zero}, {one}, ({arg} > {zero})), {half}, ({arg} == {zero})), {arg}, isNan({arg}))"
+            ));
+        }
         "mod" => {
             let lhs = exprs.get(inputs.first()?).cloned()?;
             let rhs = exprs.get(inputs.get(1)?).cloned()?;
@@ -3775,6 +3784,10 @@ mod tests {
 
         let sign = super::builtin_expr("sign", &[0], &exprs, "f32");
         assert_eq!(sign.unwrap(), "sign(v0)");
+
+        let heaviside = super::builtin_expr("heaviside", &[0], &exprs, "f32").unwrap();
+        assert!(heaviside.contains("0.5"));
+        assert!(heaviside.contains("isNan(v0)"));
 
         let fix = super::builtin_expr("fix", &[0], &exprs, "f32");
         assert_eq!(fix.unwrap(), "trunc(v0)");

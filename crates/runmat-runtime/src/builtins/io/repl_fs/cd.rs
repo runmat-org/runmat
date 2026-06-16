@@ -161,7 +161,7 @@ async fn cd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(&args).await?;
     match gathered.len() {
         0 => current_directory_value(),
-        1 => change_directory(&gathered[0]),
+        1 => change_directory(&gathered[0]).await,
         _ => Err(cd_error(CD_ERROR_TOO_MANY_INPUTS.message)),
     }
 }
@@ -176,7 +176,7 @@ fn current_directory_value() -> BuiltinResult<Value> {
     Ok(path_to_value(&current))
 }
 
-fn change_directory(value: &Value) -> BuiltinResult<Value> {
+async fn change_directory(value: &Value) -> BuiltinResult<Value> {
     let target_raw = extract_path(value)?;
     let target = expand_path(&target_raw)?;
     let previous = vfs::current_dir().map_err(|err| {
@@ -186,7 +186,7 @@ fn change_directory(value: &Value) -> BuiltinResult<Value> {
         )
     })?;
 
-    vfs::set_current_dir(&target).map_err(|err| {
+    vfs::set_current_dir_async(&target).await.map_err(|err| {
         cd_error_with_detail(
             &CD_ERROR_CHANGE_FAILED,
             format!("cd: unable to change directory to '{target_raw}' ({err})"),

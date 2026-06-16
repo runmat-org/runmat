@@ -21,6 +21,7 @@ pub mod savepath;
 pub mod setenv;
 pub mod tempdir;
 pub mod tempname;
+pub mod uigetfile;
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 

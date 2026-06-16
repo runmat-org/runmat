@@ -211,6 +211,10 @@ async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::CharArray(chars) => single_from_char_array(chars),
         Value::GpuTensor(handle) => single_from_gpu(handle).await,
         Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
+        Value::Symbolic(expr) => expr
+            .numeric_constant_value()
+            .map(|value| Value::Num(cast_f64_to_single(value)))
+            .ok_or_else(|| conversion_error("sym")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),
@@ -434,7 +438,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, SymbolicExpr, Type};
 
     fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::single_builtin(value, rest))
@@ -487,6 +491,28 @@ pub(crate) mod tests {
             Value::Num(n) => assert_eq!(n, (std::f64::consts::PI as f32) as f64),
             other => panic!("expected scalar Num, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn single_converts_symbolic_constants() {
+        let result = single_builtin(
+            Value::Symbolic(SymbolicExpr::constant(std::f64::consts::PI)),
+            Vec::new(),
+        )
+        .expect("single");
+
+        assert_eq!(result, Value::Num((std::f64::consts::PI as f32) as f64));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn single_rejects_symbolic_variables() {
+        let err = single_builtin(Value::Symbolic(SymbolicExpr::variable("x")), Vec::new())
+            .expect_err("symbolic variable should not convert");
+
+        assert_eq!(err.identifier(), SINGLE_ERROR_INVALID_INPUT.identifier);
+        assert!(err.message().contains("conversion to single from sym"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

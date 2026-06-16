@@ -1360,7 +1360,9 @@ impl Compiler {
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
             match &call.callee {
-                MirCallee::Static(CallableIdentity::BoundFunction(_)) => {}
+                MirCallee::Static(
+                    CallableIdentity::BoundFunction(_) | CallableIdentity::ExternalFunction { .. },
+                ) => {}
                 MirCallee::SuperMethod { .. } => {}
                 MirCallee::SuperConstructor { .. } => {
                     return Err(self
@@ -1415,6 +1417,39 @@ impl Compiler {
             return Ok(());
         }
         match &call.callee {
+            MirCallee::Static(CallableIdentity::ExternalFunction {
+                function,
+                display_name,
+            }) => {
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
+                let identity = CallableIdentity::ExternalFunction {
+                    function: *function,
+                    display_name: display_name.clone(),
+                };
+                if has_expansion {
+                    self.emit_call(
+                        Instr::CallFunctionExpandMultiOutput {
+                            identity,
+                            fallback_policy: call.fallback_policy,
+                            specs,
+                            out_count: output_count,
+                        },
+                        call,
+                    );
+                    return Ok(());
+                }
+                self.emit_call(
+                    Instr::CallFunctionMulti {
+                        identity,
+                        fallback_policy: call.fallback_policy,
+                        arg_count: call.args.len(),
+                        out_count: output_count,
+                    },
+                    call,
+                );
+            }
             MirCallee::Static(CallableIdentity::BoundFunction(function)) => {
                 // Session-resolved semantic calls can target functions compiled in prior
                 // submissions; those do not exist in the current assembly layout and should
@@ -2327,7 +2362,9 @@ impl Compiler {
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
             match &call.callee {
-                MirCallee::Static(CallableIdentity::BoundFunction(_)) => {}
+                MirCallee::Static(
+                    CallableIdentity::BoundFunction(_) | CallableIdentity::ExternalFunction { .. },
+                ) => {}
                 MirCallee::SuperMethod { .. } => {}
                 MirCallee::SuperConstructor { .. } => {
                     return Err(self
@@ -2416,6 +2453,58 @@ impl Compiler {
             return Ok(());
         }
         match &call.callee {
+            MirCallee::Static(CallableIdentity::ExternalFunction {
+                function,
+                display_name,
+            }) => {
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
+                let identity = CallableIdentity::ExternalFunction {
+                    function: *function,
+                    display_name: display_name.clone(),
+                };
+                if has_expansion {
+                    let out_count = requested_outputs.require_fixed(
+                        self,
+                        "dynamic output count is not supported for expanded semantic calls",
+                    )?;
+                    self.emit_call(
+                        Instr::CallFunctionExpandMultiOutput {
+                            identity,
+                            fallback_policy: call.fallback_policy,
+                            specs,
+                            out_count,
+                        },
+                        call,
+                    );
+                } else {
+                    match requested_outputs {
+                        ResolvedCallOutputCount::Fixed(out_count) => {
+                            self.emit_call(
+                                Instr::CallFunctionMulti {
+                                    identity,
+                                    fallback_policy: call.fallback_policy,
+                                    arg_count: call.args.len(),
+                                    out_count,
+                                },
+                                call,
+                            );
+                        }
+                        ResolvedCallOutputCount::FromSlot(out_count_slot) => {
+                            self.emit_call(
+                                Instr::CallFunctionMultiUsingOutputSlot {
+                                    identity,
+                                    fallback_policy: call.fallback_policy,
+                                    arg_count: call.args.len(),
+                                    out_count_slot,
+                                },
+                                call,
+                            );
+                        }
+                    }
+                }
+            }
             MirCallee::Static(CallableIdentity::BoundFunction(function)) => {
                 // Session-resolved semantic calls can target functions compiled in prior
                 // submissions; those do not exist in the current assembly layout and should
@@ -3761,6 +3850,16 @@ impl Compiler {
                     *function,
                     display_name,
                     captures.len(),
+                ));
+                Ok(())
+            }
+            CallableIdentity::ExternalFunction {
+                function,
+                display_name,
+            } => {
+                self.emit(Instr::CreateExternalBoundFunctionHandle(
+                    *function,
+                    display_name.clone(),
                 ));
                 Ok(())
             }

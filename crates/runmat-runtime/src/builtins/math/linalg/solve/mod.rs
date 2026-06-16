@@ -3,6 +3,7 @@ pub mod det;
 pub mod inv;
 pub mod linsolve;
 pub mod norm;
+pub mod null;
 pub mod pinv;
 pub mod rank;
 pub mod rcond;

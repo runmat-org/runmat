@@ -6,8 +6,15 @@
 use runmat_core::{ExecutionStreamKind, RunError, RunMatSession};
 use runmat_gc::gc_test_context;
 
+fn isolate_plot_test() -> runmat_runtime::builtins::plotting::PlotTestLockGuard {
+    let guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
+    runmat_runtime::builtins::plotting::reset_plot_state();
+    guard
+}
+
 #[test]
 fn close_all_command_form_executes_without_lowering_all_as_a_builtin() {
+    let _plot_guard = isolate_plot_test();
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     runmat_core::execute_text_request_for_testing(&mut engine, "figure(1);").unwrap();
@@ -396,6 +403,7 @@ fn clc_emits_clear_screen_control_stream() {
 
 #[test]
 fn plotting_command_gap_repros_execute() {
+    let _plot_guard = isolate_plot_test();
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     let result = runmat_core::execute_text_request_for_testing(
@@ -406,6 +414,23 @@ fn plotting_command_gap_repros_execute() {
     if let Some(error) = result.error {
         assert_eq!(error.identifier(), Some("RunMat:plot:EngineError"));
     }
+}
+
+#[test]
+fn figure_name_property_pairs_execute_through_core() {
+    let _plot_guard = isolate_plot_test();
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut engine,
+        "f = figure('Name', 'demo', 'NumberTitle', 'off'); assert(strcmp(get(f, 'Name'), 'demo')); assert(~get(f, 'NumberTitle'));",
+    )
+    .unwrap();
+    assert!(
+        result.error.is_none(),
+        "unexpected execution error: {:?}",
+        result.error
+    );
 }
 
 #[test]

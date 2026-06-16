@@ -18,7 +18,13 @@ enum CommandArgKind {
     },
     Any,
     StringifyWords,
+    PathWords {
+        optional: bool,
+    },
 }
+
+const REQUIRED_PATH_WORDS: CommandArgKind = CommandArgKind::PathWords { optional: false };
+const OPTIONAL_PATH_WORDS: CommandArgKind = CommandArgKind::PathWords { optional: true };
 
 const COMMAND_VERBS: &[CommandVerb] = &[
     CommandVerb {
@@ -31,8 +37,8 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     CommandVerb {
         name: "grid",
         arg_kind: CommandArgKind::Keyword {
-            allowed: &["on", "off"],
-            optional: false,
+            allowed: &["on", "off", "minor"],
+            optional: true,
         },
     },
     CommandVerb {
@@ -45,7 +51,9 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     CommandVerb {
         name: "axis",
         arg_kind: CommandArgKind::Keyword {
-            allowed: &["auto", "manual", "tight", "equal", "ij", "xy", "on", "off"],
+            allowed: &[
+                "auto", "manual", "tight", "equal", "image", "ij", "xy", "on", "off",
+            ],
             optional: false,
         },
     },
@@ -102,6 +110,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: CommandArgKind::Any,
     },
     CommandVerb {
+        name: "syms",
+        arg_kind: CommandArgKind::StringifyWords,
+    },
+    CommandVerb {
         name: "close",
         arg_kind: CommandArgKind::StringifyWords,
     },
@@ -119,7 +131,115 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     },
     CommandVerb {
         name: "print",
-        arg_kind: CommandArgKind::StringifyWords,
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "addpath",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "cd",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "copyfile",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "delete",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "dir",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "exist",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "fullfile",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "genpath",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "getenv",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "load",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "ls",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "mkdir",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "movefile",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "path",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "pwd",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
+        name: "rmdir",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "rmpath",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "run",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "save",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "savepath",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "setenv",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "tempdir",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
+        name: "tempname",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "uigetfile",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "which",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "who",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "whos",
+        arg_kind: OPTIONAL_PATH_WORDS,
     },
     CommandVerb {
         name: "format",
@@ -178,53 +298,54 @@ impl Parser {
                 arg_kind: CommandArgKind::StringifyWords,
                 ..
             })
+        ) || matches!(
+            command,
+            Some(CommandVerb {
+                arg_kind: CommandArgKind::PathWords { optional: true },
+                ..
+            })
         );
 
         let mut i = 1;
         let mut saw_arg = false;
         self.skip_command_continuations(&mut i);
-
-        if self.try_skip_dash_option(verb, &mut i) {
-            saw_arg = true;
-        } else if !matches!(
-            self.peek_token_at(i),
-            Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End)
-        ) {
-            if !zero_arg_allowed {
-                return false;
-            }
-        } else {
-            saw_arg = true;
-        }
-
-        loop {
-            match self.peek_token_at(i) {
-                Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End) => {
-                    saw_arg = true;
-                    i += 1;
-                    self.skip_dotted_word_suffix(verb, &mut i);
-                }
-                Some(Token::Minus) if self.try_skip_dash_option(verb, &mut i) => {
-                    saw_arg = true;
-                }
-                Some(Token::Ellipsis) => self.skip_command_continuations(&mut i),
-                _ => break,
-            }
-        }
-        if !saw_arg && !zero_arg_allowed {
+        if !self.command_arg_has_required_separator(i) {
             return false;
         }
 
-        match self.peek_token_at(i) {
-            Some(Token::LParen)
-            | Some(Token::Dot)
-            | Some(Token::LBracket)
-            | Some(Token::LBrace)
-            | Some(Token::Transpose) => false,
-            Some(Token::Assign) => false,
-            None | Some(Token::Semicolon) | Some(Token::Comma) | Some(Token::Newline) => true,
-            _ => true,
+        if self.has_malformed_syms_parameter_suffix(verb, i) {
+            return false;
         }
+        if self.try_skip_command_arg(verb, &mut i) {
+            saw_arg = true;
+        } else if !matches!(self.peek_token_at(i), Some(Token::Ellipsis)) && !zero_arg_allowed {
+            return false;
+        }
+
+        loop {
+            if self.has_malformed_syms_parameter_suffix(verb, i) {
+                return false;
+            }
+            if self.try_skip_command_arg(verb, &mut i) {
+                saw_arg = true;
+            } else if matches!(self.peek_token_at(i), Some(Token::Ellipsis)) {
+                self.skip_command_continuations(&mut i);
+            } else {
+                break;
+            }
+        }
+        if !saw_arg {
+            return zero_arg_allowed
+                && matches!(
+                    self.peek_token_at(i),
+                    None | Some(Token::Semicolon) | Some(Token::Comma) | Some(Token::Newline)
+                );
+        }
+
+        matches!(
+            self.peek_token_at(i),
+            None | Some(Token::Semicolon) | Some(Token::Comma) | Some(Token::Newline)
+        )
     }
 
     fn parse_command_args(&mut self, verb: &str) -> Vec<Expr> {
@@ -238,12 +359,29 @@ impl Parser {
                 while self.consume(&Token::Newline) {}
                 continue;
             }
+            if self.can_parse_path_word_arg(verb) {
+                if let Some(arg) = self.parse_path_word_arg() {
+                    args.push(arg);
+                    continue;
+                }
+            }
             match self.peek_token() {
                 Some(Token::Ident) => {
                     let token = self.next().unwrap();
                     let start = token.position;
                     let mut end = token.end;
                     let mut word = token.lexeme;
+                    if self.can_parse_syms_function_arg(verb)
+                        && matches!(self.peek_token(), Some(Token::LParen))
+                    {
+                        if self.skip_syms_parameter_suffix(0).is_none() {
+                            break;
+                        }
+                        if let Some((suffix, suffix_end)) = self.parse_syms_parameter_suffix() {
+                            word.push_str(&suffix);
+                            end = suffix_end;
+                        }
+                    }
                     if self.can_parse_dotted_word_arg(verb) {
                         while matches!(self.peek_token(), Some(Token::Dot))
                             && matches!(self.peek_token_at(1), Some(Token::Ident | Token::Integer))
@@ -303,12 +441,43 @@ impl Parser {
         args
     }
 
+    fn try_skip_command_arg(&self, verb: &str, offset: &mut usize) -> bool {
+        if self.try_skip_path_word_arg(verb, offset) {
+            return true;
+        }
+        if self.try_skip_dash_option(verb, offset) {
+            return true;
+        }
+        match self.peek_token_at(*offset) {
+            Some(Token::Ident) => {
+                if self.can_parse_syms_function_arg(verb)
+                    && matches!(self.peek_token_at(*offset + 1), Some(Token::LParen))
+                {
+                    let Some(after_suffix) = self.skip_syms_parameter_suffix(*offset + 1) else {
+                        return false;
+                    };
+                    *offset = after_suffix;
+                } else {
+                    *offset += 1;
+                    self.skip_dotted_word_suffix(verb, offset);
+                }
+                true
+            }
+            Some(Token::Integer | Token::Float | Token::Str | Token::End) => {
+                *offset += 1;
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn try_skip_dash_option(&self, verb: &str, offset: &mut usize) -> bool {
         if !self.can_parse_dash_option_arg(verb) {
             return false;
         }
         if !matches!(self.peek_token_at(*offset), Some(Token::Minus))
             || !matches!(self.peek_token_at(*offset + 1), Some(Token::Ident))
+            || !self.tokens_adjacent(self.pos + *offset, self.pos + *offset + 1)
         {
             return false;
         }
@@ -317,11 +486,166 @@ impl Parser {
     }
 
     fn can_parse_dash_option_arg(&self, verb: &str) -> bool {
-        verb.eq_ignore_ascii_case("clearvars") || verb.eq_ignore_ascii_case("print")
+        verb.eq_ignore_ascii_case("clearvars")
+            || verb.eq_ignore_ascii_case("print")
+            || self.can_parse_path_word_arg(verb)
     }
 
     fn can_parse_dotted_word_arg(&self, verb: &str) -> bool {
         verb.eq_ignore_ascii_case("print")
+    }
+
+    fn can_parse_path_word_arg(&self, verb: &str) -> bool {
+        matches!(
+            self.lookup_command(verb),
+            Some(CommandVerb {
+                arg_kind: CommandArgKind::PathWords { .. },
+                ..
+            })
+        )
+    }
+
+    fn parse_path_word_arg(&mut self) -> Option<Expr> {
+        let start_index = self.pos;
+        if !self.can_start_path_word_arg_at(start_index) {
+            return None;
+        }
+        let start = self.tokens.get(start_index)?.position;
+        let mut text = String::new();
+        let mut end = start;
+
+        loop {
+            let index = self.pos;
+            let Some(token) = self.tokens.get(index) else {
+                break;
+            };
+            if index > start_index && !self.tokens_adjacent(index - 1, index) {
+                break;
+            }
+            if !is_path_word_token(&token.token) {
+                break;
+            }
+            text.push_str(&token.lexeme);
+            end = token.end;
+            self.pos += 1;
+        }
+
+        if self.pos == start_index {
+            None
+        } else {
+            Some(Expr::String(
+                quote_command_string(&text),
+                self.span_from(start, end),
+            ))
+        }
+    }
+
+    fn try_skip_path_word_arg(&self, verb: &str, offset: &mut usize) -> bool {
+        if !self.can_parse_path_word_arg(verb) {
+            return false;
+        }
+
+        let start = self.pos + *offset;
+        if !self.can_start_path_word_arg_at(start) {
+            return false;
+        }
+        let mut index = start;
+        while let Some(token) = self.tokens.get(index) {
+            if index > start && !self.tokens_adjacent(index - 1, index) {
+                break;
+            }
+            if !is_path_word_token(&token.token) {
+                break;
+            }
+            index += 1;
+        }
+
+        if index == start {
+            false
+        } else {
+            *offset += index - start;
+            true
+        }
+    }
+
+    fn command_arg_has_required_separator(&self, offset: usize) -> bool {
+        match self.peek_token_at(offset) {
+            None | Some(Token::Semicolon) | Some(Token::Comma) | Some(Token::Newline) => true,
+            _ => !self.tokens_adjacent(self.pos, self.pos + offset),
+        }
+    }
+
+    fn can_start_path_word_arg_at(&self, index: usize) -> bool {
+        let Some(token) = self.tokens.get(index) else {
+            return false;
+        };
+        match token.token {
+            Token::Plus | Token::Minus | Token::At => self
+                .tokens
+                .get(index + 1)
+                .is_some_and(|_| self.tokens_adjacent(index, index + 1)),
+            Token::DotStar | Token::DotSlash | Token::DotBackslash => true,
+            _ => is_path_word_token(&token.token),
+        }
+    }
+
+    fn can_parse_syms_function_arg(&self, verb: &str) -> bool {
+        verb.eq_ignore_ascii_case("syms")
+    }
+
+    fn has_malformed_syms_parameter_suffix(&self, verb: &str, offset: usize) -> bool {
+        self.can_parse_syms_function_arg(verb)
+            && matches!(self.peek_token_at(offset), Some(Token::Ident))
+            && matches!(self.peek_token_at(offset + 1), Some(Token::LParen))
+            && self.skip_syms_parameter_suffix(offset + 1).is_none()
+    }
+
+    fn skip_syms_parameter_suffix(&self, offset: usize) -> Option<usize> {
+        if !matches!(self.peek_token_at(offset), Some(Token::LParen)) {
+            return None;
+        }
+        let mut i = offset + 1;
+        loop {
+            match self.peek_token_at(i) {
+                Some(Token::Ident) => {
+                    i += 1;
+                    match self.peek_token_at(i) {
+                        Some(Token::Comma) => i += 1,
+                        Some(Token::RParen) => return Some(i + 1),
+                        _ => return None,
+                    }
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    fn parse_syms_parameter_suffix(&mut self) -> Option<(String, usize)> {
+        self.skip_syms_parameter_suffix(0)?;
+        let open = self.next()?;
+        if !matches!(open.token, Token::LParen) {
+            return None;
+        }
+        let mut suffix = String::from("(");
+        loop {
+            let parameter = self.next()?;
+            if !matches!(parameter.token, Token::Ident) {
+                return None;
+            }
+            suffix.push_str(&parameter.lexeme);
+
+            if self.consume(&Token::Comma) {
+                suffix.push(',');
+                continue;
+            }
+
+            let close = self.next()?;
+            if !matches!(close.token, Token::RParen) {
+                return None;
+            }
+            suffix.push(')');
+            return Some((suffix, close.end));
+        }
     }
 
     fn skip_dotted_word_suffix(&self, verb: &str, offset: &mut usize) {
@@ -395,12 +719,12 @@ impl Parser {
                 }
             }
             CommandArgKind::Any => {}
-            CommandArgKind::StringifyWords => {
+            CommandArgKind::StringifyWords | CommandArgKind::PathWords { .. } => {
                 for arg in args {
                     let span = arg.span();
                     match arg {
                         Expr::Ident(word, _) => {
-                            *arg = Expr::String(format!("\"{}\"", word), span);
+                            *arg = Expr::String(quote_command_string(word), span);
                         }
                         Expr::EndKeyword(_) => {
                             *arg = Expr::String("\"end\"".to_string(), span);
@@ -412,6 +736,33 @@ impl Parser {
         }
         Ok(())
     }
+}
+
+fn is_path_word_token(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::Ident
+            | Token::Integer
+            | Token::Float
+            | Token::End
+            | Token::Dot
+            | Token::DotStar
+            | Token::DotSlash
+            | Token::DotBackslash
+            | Token::Slash
+            | Token::Backslash
+            | Token::Colon
+            | Token::Tilde
+            | Token::At
+            | Token::Plus
+            | Token::Minus
+            | Token::Star
+            | Token::Question
+    )
+}
+
+fn quote_command_string(text: &str) -> String {
+    format!("\"{}\"", text.replace('"', "\"\""))
 }
 
 fn extract_keyword(expr: &Expr) -> Option<String> {
