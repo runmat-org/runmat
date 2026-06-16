@@ -624,11 +624,7 @@ pub fn toggle_minor_grid() -> bool {
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
         let axes = state.active_axes;
-        let next = !state
-            .figure
-            .axes_metadata(axes)
-            .map(|m| m.minor_grid_enabled)
-            .unwrap_or(false);
+        let next = !state.figure.minor_grid_enabled_for_axes(axes);
         state.figure.set_axes_minor_grid_enabled(axes, next);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone(), next)
@@ -2497,6 +2493,14 @@ fn present_figure_update_with_options(
 ) -> BuiltinResult<String> {
     let updated = || format!("Figure {} updated", handle.as_u32());
     if !figure_clone.visible {
+        #[cfg(feature = "gui")]
+        {
+            if !rendering_disabled && !host_managed_rendering {
+                let rendered = render_figure(handle, figure_clone)
+                    .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
+                return Ok(format!("{}: {rendered}", updated()));
+            }
+        }
         return Ok(updated());
     }
 
@@ -2627,5 +2631,73 @@ mod tests {
         let result = present_figure_update_with_options("plot", handle, figure, true, false)
             .expect("hidden figure should not try to present");
         assert_eq!(result, format!("Figure {} updated", handle.as_u32()));
+    }
+
+    #[cfg(feature = "gui")]
+    #[test]
+    fn hidden_figure_update_uses_native_close_path_when_rendering_available() {
+        let _guard = lock_plot_test_registry();
+        ensure_plot_test_env();
+        reset_for_tests();
+
+        let handle = new_figure_handle();
+        let mut figure = clone_figure(handle).expect("figure exists");
+        figure.set_visible(false);
+
+        let result = present_figure_update_with_options("plot", handle, figure, false, false)
+            .expect("hidden figure should request native close");
+        assert_eq!(
+            result,
+            format!(
+                "Figure {} updated: Figure {} is hidden",
+                handle.as_u32(),
+                handle.as_u32()
+            )
+        );
+    }
+
+    #[test]
+    fn hidden_figure_update_does_not_render_when_host_managed() {
+        let _guard = lock_plot_test_registry();
+        ensure_plot_test_env();
+        reset_for_tests();
+
+        let handle = new_figure_handle();
+        let mut figure = clone_figure(handle).expect("figure exists");
+        figure.set_visible(false);
+
+        let result = present_figure_update_with_options("plot", handle, figure, false, true)
+            .expect("hidden host-managed figure should not render directly");
+        assert_eq!(result, format!("Figure {} updated", handle.as_u32()));
+    }
+
+    #[test]
+    fn toggle_minor_grid_uses_effective_inherited_state() {
+        let _guard = lock_plot_test_registry();
+        ensure_plot_test_env();
+        reset_for_tests();
+
+        let handle = new_figure_handle();
+        {
+            let mut reg = registry();
+            let state = get_state_mut(&mut reg, handle);
+            state.figure.minor_grid_enabled = true;
+            assert!(state.figure.minor_grid_enabled_for_axes(state.active_axes));
+            assert!(
+                !state
+                    .figure
+                    .axes_metadata(state.active_axes)
+                    .expect("active axes metadata")
+                    .minor_grid_explicit
+            );
+        }
+
+        assert!(!toggle_minor_grid());
+
+        let figure = clone_figure(handle).expect("figure exists");
+        assert!(!figure.minor_grid_enabled_for_axes(0));
+        let meta = figure.axes_metadata(0).expect("active axes metadata");
+        assert!(meta.minor_grid_explicit);
+        assert!(!meta.minor_grid_enabled);
     }
 }
