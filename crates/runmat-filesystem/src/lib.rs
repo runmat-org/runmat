@@ -819,6 +819,12 @@ mod tests {
 
     static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
+    fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+        TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn comparable_path(path: impl AsRef<Path>) -> PathBuf {
         #[cfg(windows)]
         {
@@ -835,6 +841,10 @@ mod tests {
         {
             path.as_ref().to_path_buf()
         }
+    }
+
+    fn assert_same_path(left: impl AsRef<Path>, right: impl AsRef<Path>) {
+        assert_eq!(comparable_path(left), comparable_path(right));
     }
 
     struct UnsupportedProvider;
@@ -1222,7 +1232,7 @@ mod tests {
 
     #[test]
     fn copy_file_round_trip() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = test_lock();
         let dir = tempdir().expect("tempdir");
         let src = dir.path().join("src.bin");
         let dst = dir.path().join("dst.bin");
@@ -1242,7 +1252,7 @@ mod tests {
 
     #[test]
     fn set_readonly_flips_metadata_flag() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = test_lock();
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("flag.txt");
         futures::executor::block_on(write_async(&path, b"flag")).expect("write");
@@ -1258,7 +1268,7 @@ mod tests {
 
     #[test]
     fn replace_provider_restores_previous() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = test_lock();
         let original = current_provider();
         let custom: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
         {
@@ -1273,7 +1283,7 @@ mod tests {
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn native_provider_replacement_preserves_process_cwd_resolution() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = test_lock();
         let temp = tempdir().expect("tempdir");
         let previous = std::env::current_dir().expect("current dir");
         let _cwd_guard = ProcessCwdGuard { previous };
@@ -1282,7 +1292,7 @@ mod tests {
         let _provider_guard = replace_provider(Arc::new(NativeFsProvider));
         let current = current_dir().expect("vfs current dir");
         let expected = std::fs::canonicalize(temp.path()).expect("canonical temp");
-        assert_eq!(comparable_path(&current), comparable_path(&expected));
+        assert_same_path(&current, &expected);
 
         futures::executor::block_on(write_async("native-relative.txt", b"native"))
             .expect("write relative path");
@@ -1293,15 +1303,15 @@ mod tests {
 
         std::fs::create_dir(temp.path().join("child")).expect("create child");
         set_current_dir("child").expect("set child cwd");
-        assert_eq!(
+        assert_same_path(
             std::env::current_dir().expect("process cwd"),
-            expected.join("child")
+            expected.join("child"),
         );
     }
 
     #[test]
     fn set_provider_initializes_virtual_cwd_from_provider_default() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = test_lock();
         let _state_guard = TestProviderStateGuard::capture();
         replace_current_dir_override(None);
 
@@ -1315,7 +1325,7 @@ mod tests {
 
     #[test]
     fn set_provider_preserves_existing_virtual_cwd() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = test_lock();
         let _state_guard = TestProviderStateGuard::capture();
         let initial = Arc::new(VirtualFsProvider::new("/", &["/workspace"]));
         set_provider(initial);
@@ -1338,7 +1348,7 @@ mod tests {
 
     #[test]
     fn replace_provider_preserves_existing_virtual_cwd() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = test_lock();
         let initial = Arc::new(VirtualFsProvider::new("/", &["/workspace"]));
         let _initial_guard = replace_provider(initial);
         set_current_dir("/workspace").expect("set virtual cwd");
@@ -1365,7 +1375,7 @@ mod tests {
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn native_provider_replacement_clears_virtual_cwd_override() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = test_lock();
         let temp = tempdir().expect("tempdir");
         let previous = std::env::current_dir().expect("current dir");
         let _cwd_guard = ProcessCwdGuard { previous };
@@ -1378,10 +1388,7 @@ mod tests {
         {
             let _native_guard = replace_provider(Arc::new(NativeFsProvider));
             let expected = std::fs::canonicalize(temp.path()).expect("canonical temp");
-            assert_eq!(
-                comparable_path(current_dir().expect("native cwd")),
-                comparable_path(&expected)
-            );
+            assert_same_path(current_dir().expect("native cwd"), &expected);
 
             futures::executor::block_on(write_async("native.txt", b"native"))
                 .expect("write native relative");
@@ -1394,7 +1401,7 @@ mod tests {
 
     #[test]
     fn open_async_and_flush_async_use_provider_async_paths() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = test_lock();
         let opened_async = Arc::new(Mutex::new(false));
         let flushed_async = Arc::new(Mutex::new(false));
         let provider = Arc::new(AsyncOpenProvider {
@@ -1417,7 +1424,7 @@ mod tests {
 
     #[test]
     fn select_file_open_defaults_to_cancelled_selection() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = test_lock();
         let provider: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
         let _provider_guard = replace_provider(provider);
         let request = OpenFileDialogRequest {
@@ -1438,7 +1445,7 @@ mod tests {
 
     #[test]
     fn with_provider_restores_even_on_panic() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = test_lock();
         let original = current_provider();
         let custom: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
