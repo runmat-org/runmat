@@ -67,33 +67,13 @@ impl SandboxFsProvider {
 
     fn virtualize(&self, real: &Path) -> PathBuf {
         let relative = real.strip_prefix(&self.root).unwrap_or(Path::new(""));
-        let mut virt = PathBuf::new();
-        #[cfg(windows)]
-        {
-            let prefix = self
-                .root
-                .components()
-                .next()
-                .and_then(|component| match component {
-                    Component::Prefix(prefix) => Some(prefix.as_os_str()),
-                    _ => None,
-                });
-            if let Some(prefix) = prefix {
-                let mut root = OsString::from(prefix);
-                root.push(std::path::MAIN_SEPARATOR.to_string());
-                virt.push(root);
-            } else {
-                virt.push(std::path::MAIN_SEPARATOR.to_string());
-            }
+        if relative.as_os_str().is_empty() {
+            return PathBuf::from("/");
         }
-        #[cfg(not(windows))]
-        {
-            virt.push(std::path::MAIN_SEPARATOR.to_string());
-        }
-        if !relative.as_os_str().is_empty() {
-            virt.push(relative);
-        }
-        virt
+
+        let mut path = String::from("/");
+        path.push_str(&relative.to_string_lossy().replace('\\', "/"));
+        PathBuf::from(path)
     }
 
     fn make_dir_entry(&self, real_path: PathBuf, file_name: OsString) -> DirEntry {
@@ -329,6 +309,10 @@ mod tests {
     use std::path::Path;
     use tempfile::tempdir;
 
+    fn virtual_path(path: &Path) -> String {
+        path.to_string_lossy().replace('\\', "/")
+    }
+
     #[test]
     fn sandbox_prevents_root_escape_and_virtualizes_paths() {
         let temp = tempdir().expect("tempdir");
@@ -345,9 +329,10 @@ mod tests {
 
         let listing =
             executor::block_on(provider.read_dir(Path::new("nested"))).expect("list nested");
-        assert!(listing
-            .iter()
-            .any(|entry| entry.path().ends_with(Path::new("nested/sub"))));
+        assert!(listing.iter().any(|entry| {
+            let path = virtual_path(entry.path());
+            path == "/nested/sub"
+        }));
 
         let sandbox_read =
             executor::block_on(provider.read(Path::new("/nested/sub/file.txt"))).expect("vfs read");
@@ -362,7 +347,6 @@ mod tests {
         executor::block_on(provider.write(Path::new("data/file.bin"), b"bytes")).expect("write");
         let canonical = executor::block_on(provider.canonicalize(Path::new("./data/./file.bin")))
             .expect("canonicalize");
-        assert!(canonical.ends_with(Path::new("data/file.bin")));
-        assert!(canonical.is_absolute());
+        assert_eq!(virtual_path(&canonical), "/data/file.bin");
     }
 }
