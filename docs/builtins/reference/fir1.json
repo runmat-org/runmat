@@ -1,0 +1,94 @@
+{
+  "title": "fir1",
+  "category": "math/signal",
+  "keywords": [
+    "fir1",
+    "FIR",
+    "windowed sinc",
+    "lowpass",
+    "highpass",
+    "bandpass",
+    "bandstop"
+  ],
+  "summary": "Design windowed-sinc FIR filters.",
+  "references": [
+    "title: \"MATLAB fir1 documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Coefficient design runs on the host. The returned coefficients can be passed to GPU-aware filtering functions."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 5,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::fir1::tests"
+  },
+  "description": "`fir1(n, Wn)` designs an order-`n` FIR filter using a Hamming-windowed sinc response. Scalar `Wn` creates a low-pass filter by default; a two-element `Wn` creates a band-pass filter by default. Add a filter type string for high-pass or stop-band designs.",
+  "behaviors": [
+    "Returns a row vector with `n + 1` coefficients.",
+    "`Wn` uses MATLAB's normalized digital convention where `1` is Nyquist.",
+    "Supported filter types are `low`, `high`, `bandpass`, and `stop`.",
+    "A custom window vector of length `n + 1` may be supplied.",
+    "Filters are scaled by default; pass `noscale` to skip passband normalization."
+  ],
+  "examples": [
+    {
+      "description": "Design a low-pass FIR filter",
+      "input": "b = fir1(4, 0.5);\nfprintf('%d %.4f\\n', length(b), sum(b));",
+      "output": "5 1.0000"
+    },
+    {
+      "description": "Design coefficients for a FIR low-pass response plot",
+      "input": "fs = 1000;\nfc = 100;\nN = 51;\nwn = fc / (fs/2);\nb = fir1(N-1, wn, 'low');\n[H, w] = freqz(b, 1, 512, fs);\nfprintf('%d %.1f %.1f\\n', length(b), w(1), w(end));",
+      "output": "51 0.0 499.0"
+    },
+    {
+      "description": "Use a custom rectangular window without scaling",
+      "input": "w = ones(1, 11);\nb = fir1(10, 0.3, w, 'noscale');"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What window does `fir1` use by default?",
+      "answer": "RunMat uses a symmetric Hamming window, matching MATLAB's default FIR design workflow."
+    },
+    {
+      "question": "Can the coefficients be used with `filtfilt`?",
+      "answer": "Yes. Use `filtfilt(b, 1, x)` for zero-phase FIR filtering."
+    },
+    {
+      "question": "Does `fir1` run on the GPU?",
+      "answer": "No. It generates a small coefficient vector on the host. GPU acceleration applies when those coefficients are used by filtering builtins with gpuArray signals."
+    }
+  ],
+  "links": [
+    {
+      "label": "filtfilt",
+      "url": "./filtfilt"
+    },
+    {
+      "label": "freqz",
+      "url": "./freqz"
+    },
+    {
+      "label": "hamming",
+      "url": "./hamming"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/fir1.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/fir1.rs"
+  },
+  "gpu_behavior": [
+    "Host-side coefficient design only.",
+    "The resulting coefficient vector can be passed to `filter` or `filtfilt` with gpuArray signal data."
+  ]
+}
