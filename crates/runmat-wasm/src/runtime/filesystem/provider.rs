@@ -27,6 +27,10 @@ unsafe impl Sync for JsFsProvider {}
 
 #[async_trait(?Send)]
 impl FsProvider for JsFsProvider {
+    fn current_dir_override(&self) -> Option<PathBuf> {
+        Some(PathBuf::from("/"))
+    }
+
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let read_result = if should_load_initial(flags) {
             Some(self.funcs.read_file(path))

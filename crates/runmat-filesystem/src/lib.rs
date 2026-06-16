@@ -530,11 +530,25 @@ fn resolve_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
+fn next_current_dir_override(
+    current: Option<&PathBuf>,
+    provider_default: Option<PathBuf>,
+) -> Option<PathBuf> {
+    match provider_default {
+        Some(default) => current.cloned().or(Some(default)),
+        None => None,
+    }
+}
+
 pub fn set_provider(provider: Arc<dyn FsProvider>) {
-    let current_dir_override = provider.current_dir_override();
+    let provider_default_current_dir = provider.current_dir_override();
     let mut guard = provider_state_lock()
         .write()
         .expect("filesystem provider lock poisoned");
+    let current_dir_override = next_current_dir_override(
+        guard.current_dir_override.as_ref(),
+        provider_default_current_dir,
+    );
     guard.provider = provider;
     guard.current_dir_override = current_dir_override;
 }
@@ -543,12 +557,16 @@ pub fn set_provider(provider: Arc<dyn FsProvider>) {
 /// previous provider when dropped. Useful for tests that need to install a mock
 /// filesystem without permanently mutating global state.
 pub fn replace_provider(provider: Arc<dyn FsProvider>) -> ProviderGuard {
-    let current_dir_override = provider.current_dir_override();
+    let provider_default_current_dir = provider.current_dir_override();
     let mut guard = provider_state_lock()
         .write()
         .expect("filesystem provider lock poisoned");
     let previous = guard.provider.clone();
     let previous_current_dir = guard.current_dir_override.clone();
+    let current_dir_override = next_current_dir_override(
+        guard.current_dir_override.as_ref(),
+        provider_default_current_dir,
+    );
     guard.provider = provider;
     guard.current_dir_override = current_dir_override;
     ProviderGuard {
@@ -794,6 +812,7 @@ fn default_provider() -> Arc<dyn FsProvider> {
 mod tests {
     use super::*;
     use once_cell::sync::Lazy;
+    use std::collections::{HashMap, HashSet};
     use std::io::{Read, Seek, SeekFrom, Write};
     use std::sync::Mutex;
     use tempfile::tempdir;
@@ -807,13 +826,65 @@ mod tests {
         flushed_async: Arc<Mutex<bool>>,
     }
 
+    struct TestProviderStateGuard {
+        previous_provider: Arc<dyn FsProvider>,
+        previous_current_dir: Option<PathBuf>,
+    }
+
     struct ProcessCwdGuard {
         previous: PathBuf,
+    }
+
+    struct VirtualFsProvider {
+        default_current_dir: PathBuf,
+        dirs: Mutex<HashSet<PathBuf>>,
+        files: Mutex<HashMap<PathBuf, Vec<u8>>>,
     }
 
     impl Drop for ProcessCwdGuard {
         fn drop(&mut self) {
             let _ = std::env::set_current_dir(&self.previous);
+        }
+    }
+
+    impl TestProviderStateGuard {
+        fn capture() -> Self {
+            let guard = provider_state_lock()
+                .read()
+                .expect("filesystem provider lock poisoned");
+            Self {
+                previous_provider: guard.provider.clone(),
+                previous_current_dir: guard.current_dir_override.clone(),
+            }
+        }
+    }
+
+    impl Drop for TestProviderStateGuard {
+        fn drop(&mut self) {
+            let mut guard = provider_state_lock()
+                .write()
+                .expect("filesystem provider lock poisoned");
+            guard.provider = self.previous_provider.clone();
+            guard.current_dir_override = self.previous_current_dir.clone();
+        }
+    }
+
+    impl VirtualFsProvider {
+        fn new(default_current_dir: impl Into<PathBuf>, dirs: &[&str]) -> Self {
+            let default_current_dir = default_current_dir.into();
+            let mut all_dirs = HashSet::from([default_current_dir.clone()]);
+            for dir in dirs {
+                all_dirs.insert(PathBuf::from(dir));
+            }
+            Self {
+                default_current_dir,
+                dirs: Mutex::new(all_dirs),
+                files: Mutex::new(HashMap::new()),
+            }
+        }
+
+        fn file_bytes(&self, path: impl AsRef<Path>) -> Option<Vec<u8>> {
+            self.files.lock().unwrap().get(path.as_ref()).cloned()
         }
     }
 
@@ -950,6 +1021,108 @@ mod tests {
             _data: &[u8],
         ) -> io::Result<()> {
             Err(unsupported())
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl FsProvider for VirtualFsProvider {
+        fn current_dir_override(&self) -> Option<PathBuf> {
+            Some(self.default_current_dir.clone())
+        }
+
+        fn open(&self, _path: &Path, _flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
+            Err(unsupported())
+        }
+
+        async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+            self.files
+                .lock()
+                .unwrap()
+                .get(path)
+                .cloned()
+                .ok_or_else(|| io::Error::new(ErrorKind::NotFound, path.display().to_string()))
+        }
+
+        async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+            self.files
+                .lock()
+                .unwrap()
+                .insert(path.to_path_buf(), data.to_vec());
+            Ok(())
+        }
+
+        async fn remove_file(&self, path: &Path) -> io::Result<()> {
+            self.files.lock().unwrap().remove(path);
+            Ok(())
+        }
+
+        async fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+            if self.dirs.lock().unwrap().contains(path) {
+                return Ok(FsMetadata::new(FsFileType::Directory, 0, None, false));
+            }
+            if let Some(bytes) = self.files.lock().unwrap().get(path) {
+                return Ok(FsMetadata::new(
+                    FsFileType::File,
+                    bytes.len() as u64,
+                    None,
+                    false,
+                ));
+            }
+            Err(io::Error::new(
+                ErrorKind::NotFound,
+                path.display().to_string(),
+            ))
+        }
+
+        async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+            self.metadata(path).await
+        }
+
+        async fn read_dir(&self, _path: &Path) -> io::Result<Vec<DirEntry>> {
+            Ok(Vec::new())
+        }
+
+        async fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+            Ok(path.to_path_buf())
+        }
+
+        async fn create_dir(&self, path: &Path) -> io::Result<()> {
+            self.dirs.lock().unwrap().insert(path.to_path_buf());
+            Ok(())
+        }
+
+        async fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+            let mut dirs = self.dirs.lock().unwrap();
+            for ancestor in path.ancestors() {
+                dirs.insert(ancestor.to_path_buf());
+            }
+            Ok(())
+        }
+
+        async fn remove_dir(&self, path: &Path) -> io::Result<()> {
+            self.dirs.lock().unwrap().remove(path);
+            Ok(())
+        }
+
+        async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+            self.dirs
+                .lock()
+                .unwrap()
+                .retain(|dir| !dir.starts_with(path));
+            Ok(())
+        }
+
+        async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+            let mut files = self.files.lock().unwrap();
+            let data = files
+                .remove(from)
+                .ok_or_else(|| io::Error::new(ErrorKind::NotFound, from.display().to_string()))?;
+            files.insert(to.to_path_buf(), data);
+            Ok(())
+        }
+
+        async fn set_readonly(&self, _path: &Path, _readonly: bool) -> io::Result<()> {
+            Ok(())
         }
     }
 
@@ -1106,6 +1279,96 @@ mod tests {
             std::env::current_dir().expect("process cwd"),
             expected.join("child")
         );
+    }
+
+    #[test]
+    fn set_provider_initializes_virtual_cwd_from_provider_default() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let _state_guard = TestProviderStateGuard::capture();
+        replace_current_dir_override(None);
+
+        set_provider(Arc::new(VirtualFsProvider::new("/sandbox", &[])));
+
+        assert_eq!(
+            current_dir().expect("virtual cwd"),
+            PathBuf::from("/sandbox")
+        );
+    }
+
+    #[test]
+    fn set_provider_preserves_existing_virtual_cwd() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let _state_guard = TestProviderStateGuard::capture();
+        let initial = Arc::new(VirtualFsProvider::new("/", &["/workspace"]));
+        set_provider(initial);
+        set_current_dir("/workspace").expect("set virtual cwd");
+
+        let replacement = Arc::new(VirtualFsProvider::new("/", &["/workspace"]));
+        set_provider(replacement.clone());
+
+        assert_eq!(
+            current_dir().expect("virtual cwd"),
+            PathBuf::from("/workspace")
+        );
+        futures::executor::block_on(write_async("data.txt", b"virtual")).expect("write relative");
+        assert_eq!(
+            replacement.file_bytes("/workspace/data.txt").as_deref(),
+            Some(&b"virtual"[..])
+        );
+        assert_eq!(replacement.file_bytes("data.txt"), None);
+    }
+
+    #[test]
+    fn replace_provider_preserves_existing_virtual_cwd() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let initial = Arc::new(VirtualFsProvider::new("/", &["/workspace"]));
+        let _initial_guard = replace_provider(initial);
+        set_current_dir("/workspace").expect("set virtual cwd");
+
+        let replacement = Arc::new(VirtualFsProvider::new("/", &["/workspace"]));
+        {
+            let _replacement_guard = replace_provider(replacement.clone());
+
+            assert_eq!(
+                current_dir().expect("virtual cwd"),
+                PathBuf::from("/workspace")
+            );
+            futures::executor::block_on(write_async("nested.txt", b"replacement"))
+                .expect("write relative");
+        }
+
+        assert_eq!(
+            replacement.file_bytes("/workspace/nested.txt").as_deref(),
+            Some(&b"replacement"[..])
+        );
+        assert_eq!(replacement.file_bytes("nested.txt"), None);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_provider_replacement_clears_virtual_cwd_override() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let temp = tempdir().expect("tempdir");
+        let previous = std::env::current_dir().expect("current dir");
+        let _cwd_guard = ProcessCwdGuard { previous };
+        std::env::set_current_dir(temp.path()).expect("set temp cwd");
+
+        let virtual_provider = Arc::new(VirtualFsProvider::new("/", &["/workspace"]));
+        let _virtual_guard = replace_provider(virtual_provider);
+        set_current_dir("/workspace").expect("set virtual cwd");
+
+        {
+            let _native_guard = replace_provider(Arc::new(NativeFsProvider));
+            let expected = std::fs::canonicalize(temp.path()).expect("canonical temp");
+            assert_eq!(current_dir().expect("native cwd"), expected);
+
+            futures::executor::block_on(write_async("native.txt", b"native"))
+                .expect("write native relative");
+            assert_eq!(
+                std::fs::read_to_string(temp.path().join("native.txt")).expect("read native file"),
+                "native"
+            );
+        }
     }
 
     #[test]
