@@ -525,6 +525,9 @@ fn resolve_path(path: &Path) -> PathBuf {
         .read()
         .expect("filesystem provider lock poisoned");
     if let Some(base) = &state.current_dir_override {
+        if path.has_root() {
+            return path.to_path_buf();
+        }
         return base.join(path);
     }
     path.to_path_buf()
@@ -625,7 +628,7 @@ pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
 pub async fn set_current_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
     if current_dir_override().is_some() {
         let mut target = PathBuf::from(path.as_ref());
-        if !target.is_absolute() {
+        if !target.has_root() {
             let base = current_dir()?;
             target = base.join(target);
         }
@@ -1370,6 +1373,22 @@ mod tests {
             Some(&b"replacement"[..])
         );
         assert_eq!(replacement.file_bytes("nested.txt"), None);
+    }
+
+    #[test]
+    fn virtual_root_paths_do_not_resolve_relative_to_virtual_cwd() {
+        let _guard = test_lock();
+        let provider = Arc::new(VirtualFsProvider::new("/", &["/workspace"]));
+        let _provider_guard = replace_provider(provider.clone());
+        set_current_dir("/workspace").expect("set virtual cwd");
+
+        futures::executor::block_on(write_async("/root.txt", b"root")).expect("write absolute");
+
+        assert_eq!(
+            provider.file_bytes("/root.txt").as_deref(),
+            Some(&b"root"[..])
+        );
+        assert_eq!(provider.file_bytes("/workspace/root.txt"), None);
     }
 
     #[test]

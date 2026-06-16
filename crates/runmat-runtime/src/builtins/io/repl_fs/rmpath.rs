@@ -338,7 +338,7 @@ async fn remove_directory(segments: &mut Vec<String>, raw: &str) -> BuiltinResul
     let expanded = expand_user_path(raw, "rmpath")
         .map_err(|err| rmpath_error_with_detail(&RMPATH_ERROR_FOLDER_NOT_FOUND, err))?;
     let path = Path::new(&expanded);
-    let joined = if path.is_absolute() {
+    let joined = if super::is_rooted_path(path) {
         path.to_path_buf()
     } else {
         vfs::current_dir()

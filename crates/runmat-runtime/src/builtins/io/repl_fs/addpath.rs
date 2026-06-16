@@ -512,7 +512,7 @@ async fn normalize_directory(raw: &str) -> BuiltinResult<String> {
     let expanded = expand_user_path(trimmed, "addpath")
         .map_err(|err| addpath_error_with_detail(&ADDPATH_ERROR_FOLDER_NOT_FOUND, err))?;
     let path = Path::new(&expanded);
-    let joined = if path.is_absolute() {
+    let joined = if super::is_rooted_path(path) {
         path.to_path_buf()
     } else {
         vfs::current_dir()

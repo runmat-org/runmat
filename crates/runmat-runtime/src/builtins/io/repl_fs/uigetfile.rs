@@ -697,6 +697,14 @@ mod tests {
         io::Error::new(ErrorKind::Unsupported, "unsupported")
     }
 
+    fn rooted_tmp_dir_text() -> String {
+        format!(
+            "{}tmp{}",
+            std::path::MAIN_SEPARATOR,
+            std::path::MAIN_SEPARATOR
+        )
+    }
+
     fn with_dialog_provider(
         selection: Option<OpenFileDialogSelection>,
         body: impl FnOnce(Arc<Mutex<Option<OpenFileDialogRequest>>>),
@@ -738,7 +746,7 @@ mod tests {
                 .expect("uigetfile"),
             );
             assert_eq!(text(&outputs[0]), "scores.xlsx");
-            assert_eq!(text(&outputs[1]), "/tmp/");
+            assert_eq!(text(&outputs[1]), rooted_tmp_dir_text());
             assert_eq!(outputs[2], Value::Num(1.0));
 
             let request = request.lock().unwrap().clone().expect("request");
@@ -778,7 +786,7 @@ mod tests {
                 }
                 other => panic!("expected cell array, got {other:?}"),
             }
-            assert_eq!(text(&outputs[1]), "/tmp/");
+            assert_eq!(text(&outputs[1]), rooted_tmp_dir_text());
             assert_eq!(outputs[2], Value::Num(1.0));
         });
     }

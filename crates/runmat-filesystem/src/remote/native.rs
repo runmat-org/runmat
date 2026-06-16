@@ -1590,6 +1590,15 @@ mod tests {
             let trimmed = remote_path.trim_start_matches('/');
             self.root.join(trimmed)
         }
+
+        fn virtualize(&self, path: &Path) -> String {
+            let rel = path.strip_prefix(&*self.root).unwrap_or(path);
+            if rel.as_os_str().is_empty() {
+                "/".to_string()
+            } else {
+                format!("/{}", rel.to_string_lossy().replace('\\', "/"))
+            }
+        }
     }
 
     #[derive(Clone)]
@@ -1662,7 +1671,7 @@ mod tests {
                 "other"
             };
             entries.push(serde_json::json!({
-                "path": format!("/{}", entry.path().strip_prefix(&*harness.root).unwrap().display()),
+                "path": harness.virtualize(&entry.path()),
                 "fileName": entry.file_name().to_string_lossy(),
                 "fileType": kind
             }));
@@ -1676,9 +1685,8 @@ mod tests {
     ) -> Result<Json<serde_json::Value>, StatusCode> {
         let path = harness.resolve(&params.path);
         let canonical = std::fs::canonicalize(path).map_err(|_| StatusCode::NOT_FOUND)?;
-        let rel = canonical.strip_prefix(&*harness.root).unwrap_or(&canonical);
         Ok(Json(serde_json::json!({
-            "path": format!("/{}", rel.display())
+            "path": harness.virtualize(&canonical)
         })))
     }
 

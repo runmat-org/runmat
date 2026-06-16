@@ -23,6 +23,11 @@ pub mod tempdir;
 pub mod tempname;
 pub mod uigetfile;
 use once_cell::sync::Lazy;
+use std::path::Path;
 use std::sync::Mutex;
 
 pub static REPL_FS_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+pub(crate) fn is_rooted_path(path: &Path) -> bool {
+    path.is_absolute() || path.has_root()
+}
