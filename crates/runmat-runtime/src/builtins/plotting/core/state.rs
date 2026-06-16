@@ -2493,7 +2493,10 @@ fn present_figure_update_with_options(
 ) -> BuiltinResult<String> {
     let updated = || format!("Figure {} updated", handle.as_u32());
     if !figure_clone.visible {
-        #[cfg(feature = "gui")]
+        #[cfg(all(
+            feature = "gui",
+            not(all(target_arch = "wasm32", feature = "plot-web"))
+        ))]
         {
             if !rendering_disabled && !host_managed_rendering {
                 let rendered = render_figure(handle, figure_clone)
@@ -2633,7 +2636,10 @@ mod tests {
         assert_eq!(result, format!("Figure {} updated", handle.as_u32()));
     }
 
-    #[cfg(feature = "gui")]
+    #[cfg(all(
+        feature = "gui",
+        not(all(target_arch = "wasm32", feature = "plot-web"))
+    ))]
     #[test]
     fn hidden_figure_update_uses_native_close_path_when_rendering_available() {
         let _guard = lock_plot_test_registry();
