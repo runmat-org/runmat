@@ -724,6 +724,7 @@ impl<'a> GraphBuilder<'a> {
                 category: AccelOpCategory::Other,
                 tags: Vec::new(),
             });
+        let category = self.call_category(name, &inputs, info.category.clone());
         let node_id = self.nodes.len() as NodeId;
         let span = InstrSpan { start: pc, end: pc };
         let mut node = AccelNode {
@@ -731,13 +732,13 @@ impl<'a> GraphBuilder<'a> {
             label: AccelNodeLabel::Builtin {
                 name: name.to_string(),
             },
-            category: info.category.clone(),
+            category: category.clone(),
             inputs: inputs.clone(),
             outputs: Vec::new(),
             span,
             tags: info.tags.clone(),
         };
-        let mut out_type = match info.category {
+        let mut out_type = match category {
             AccelOpCategory::Elementwise => self.infer_elementwise_shape(&inputs).to_type(),
             AccelOpCategory::Reduction => Type::Num,
             AccelOpCategory::MatMul => self.infer_matmul_type(&inputs),
@@ -789,6 +790,37 @@ impl<'a> GraphBuilder<'a> {
         self.nodes.push(node);
         self.stack.push(out_value);
         self.maybe_fold_builtin_constant(name, &inputs, out_value);
+    }
+
+    fn call_category(
+        &self,
+        name: &str,
+        inputs: &[ValueId],
+        default_category: AccelOpCategory,
+    ) -> AccelOpCategory {
+        if matches!(default_category, AccelOpCategory::Reduction)
+            && (name.eq_ignore_ascii_case("max") || name.eq_ignore_ascii_case("min"))
+            && inputs.len() >= 2
+            && !self.value_is_empty_placeholder(inputs[1])
+        {
+            return AccelOpCategory::Elementwise;
+        }
+        default_category
+    }
+
+    fn value_is_empty_placeholder(&self, value_id: ValueId) -> bool {
+        let Some(info) = self.values.get(value_id as usize) else {
+            return false;
+        };
+        match info.constant.as_ref() {
+            Some(Value::Tensor(t)) => t.data.is_empty(),
+            Some(Value::LogicalArray(l)) => l.data.is_empty(),
+            Some(Value::String(s)) => s.is_empty(),
+            Some(Value::StringArray(sa)) => sa.data.is_empty(),
+            Some(Value::CharArray(ca)) => ca.data.is_empty(),
+            Some(Value::Cell(cell)) => cell.data.is_empty(),
+            _ => false,
+        }
     }
 
     fn infer_array_constructor_from_tags(&self, inputs: &[ValueId]) -> Option<Type> {
@@ -1192,5 +1224,40 @@ mod tests {
             .tags
             .iter()
             .any(|tag| matches!(tag, AccelGraphTag::Reduction)));
+    }
+
+    #[test]
+    fn accel_graph_max_with_scalar_second_arg_is_elementwise() {
+        let instructions = vec![
+            Instr::LoadVar(0),
+            Instr::LoadConst(0.0),
+            Instr::CallBuiltinMulti("single".into(), 1, 1),
+            Instr::CallBuiltinMulti("max".into(), 2, 1),
+        ];
+        let var_types = vec![Type::Tensor {
+            shape: Some(vec![Some(2), Some(4), Some(5)]),
+        }];
+        let graph = build_accel_graph(&instructions, &var_types);
+
+        let node = graph
+            .nodes
+            .iter()
+            .find(|node| {
+                matches!(
+                    &node.label,
+                    AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("max")
+                )
+            })
+            .expect("max node");
+
+        assert_eq!(node.category, AccelOpCategory::Elementwise);
+        let out_id = node.outputs.first().copied().expect("max output");
+        let out = graph.value(out_id).expect("max output value");
+        assert_eq!(
+            out.ty,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(4), Some(5)])
+            }
+        );
     }
 }

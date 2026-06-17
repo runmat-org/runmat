@@ -29,24 +29,16 @@ if ~exist('bias','var'), bias = bias_default; else bias = single(bias); end
 if ~exist('gamma','var'), gamma = gamma_default; else gamma = single(gamma); end
 if ~exist('eps0','var'), eps0 = eps0_default; else eps0 = single(eps0); end
 
-% Deterministic, pseudo-random field (LCG-based) - parity: compute in double, then cast
-bid = reshape(0:B-1, [B 1 1]);
-yid = reshape(0:H-1, [1 H 1]);
-xid = reshape(0:W-1, [1 1 W]);
-strideHW = H * W;
-strideW = W;
-seed32 = double(seed);
-idx = bid .* strideHW + yid .* strideW + xid + seed32;
-state = mod(1664525 .* idx + 1013904223, 4294967296.0);
 use_gpu = exist('gpuArray', 'builtin') || exist('gpuArray', 'file');
 if use_gpu
-  imgs = gpuArray(single(state) ./ single(4294967296.0));
+  zero_proto = gpuArray(single(0));
+  imgs = rand(B, H, W, 'like', zero_proto);
   gain = gpuArray(gain);
   bias = gpuArray(bias);
   gamma = gpuArray(gamma);
   eps0 = gpuArray(eps0);
 else
-  imgs = single(state) ./ single(4294967296.0);
+  imgs = rand(B, H, W, 'single');
 end
 
 % Reduce over dims 2 and 3 in a single call, keeping native precision
@@ -62,10 +54,11 @@ else
 end
 out = max(out, zero_scalar);
 out = single(out .^ gamma);
+err = out - imgs;
 if use_gpu
-  mse = gather(mean((out - imgs).^2, 'all'));
+  mse = gather(mean(err .* err, 'all'));
 else
-  mse = mean((out - imgs).^2, 'all');
+  mse = mean(err .* err, 'all');
 end
 
 fprintf('RESULT_ok MSE=%.6e\n', double(mse));

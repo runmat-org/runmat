@@ -106,6 +106,7 @@ async fn image_normalize_matches_cpu() {
         gain,
         bias,
         gamma,
+        clamp_zero: true,
     };
 
     let gpu = p

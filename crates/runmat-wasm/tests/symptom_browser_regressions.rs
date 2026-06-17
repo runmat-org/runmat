@@ -1,5 +1,6 @@
 #![cfg(target_arch = "wasm32")]
 
+use serde::Deserialize;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{Clamped, JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -10,6 +11,14 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 mod shared;
 
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GpuStatusPayload {
+    requested: bool,
+    active: bool,
+    error: Option<String>,
+}
 
 fn init_options(enable_gpu: bool) -> JsValue {
     let options = js_sys::Object::new();
@@ -125,6 +134,106 @@ async fn tic_toc_loop_executes_without_runtime_error() {
 #[wasm_bindgen_test(async)]
 async fn symbolic_limit_workflow_executes_without_runtime_error() {
     shared::assert_symbolic_limit_workflow_executes_without_runtime_error().await;
+}
+
+#[wasm_bindgen_test(async)]
+async fn image_normalize_vecdim_workload_completes_with_webgpu() {
+    let runtime = runmat_wasm::init_runmat(init_options(true))
+        .await
+        .expect("initialize wasm runtime");
+    let gpu_status: GpuStatusPayload =
+        serde_wasm_bindgen::from_value(runtime.gpu_status().expect("gpu status"))
+            .expect("deserialize gpu status");
+    if !gpu_status.active {
+        web_sys::console::warn_1(
+            &format!(
+                "Skipping image normalize vecdim WebGPU check: requested={}, active={}, error={:?}",
+                gpu_status.requested, gpu_status.active, gpu_status.error
+            )
+            .into(),
+        );
+        return;
+    }
+
+    let script = r#"
+rng(0); B=2; H=4; W=5;
+gain=single(1.0123); bias=single(-0.02); gamma=single(1.8); eps0=single(1e-6);
+
+imgs = rand(B, H, W, 'single');
+mu = mean(imgs, [2 3]);
+sigma = sqrt(mean((imgs - mu).^2, [2 3]) + eps0);
+out = ((imgs - mu) ./ sigma) * gain + bias;
+out = out .^ gamma;
+mse = mean((out - imgs).^2, 'all');
+
+fprintf('RESULT_ok MSE=%.6e\n', double(mse));
+"#;
+
+    let payload = shared::execute_script_with_runtime(&runtime, script).await;
+    if let Some(err) = payload.error {
+        panic!(
+            "image normalize vecdim wasm execution failed: {} (gpu requested={}, active={}, gpu error={:?})",
+            err.message, gpu_status.requested, gpu_status.active, gpu_status.error
+        );
+    }
+    let stdout_text = shared::stdout_text(&payload);
+    assert!(
+        stdout_text.contains("RESULT_ok MSE="),
+        "image normalize vecdim workload produced unexpected stdout: {stdout_text:?}"
+    );
+}
+
+#[wasm_bindgen_test(async)]
+async fn image_normalize_vecdim_clamped_benchmark_shape_completes_with_webgpu() {
+    let runtime = runmat_wasm::init_runmat(init_options(true))
+        .await
+        .expect("initialize wasm runtime");
+    let gpu_status: GpuStatusPayload =
+        serde_wasm_bindgen::from_value(runtime.gpu_status().expect("gpu status"))
+            .expect("deserialize gpu status");
+    if !gpu_status.active {
+        web_sys::console::warn_1(
+            &format!(
+                "Skipping clamped image normalize vecdim WebGPU check: requested={}, active={}, error={:?}",
+                gpu_status.requested, gpu_status.active, gpu_status.error
+            )
+            .into(),
+        );
+        return;
+    }
+
+    let script = r#"
+rng(0); B=2; H=4; W=5;
+gain=single(1.0123); bias=single(-0.02); gamma=single(1.8); eps0=single(1e-6);
+
+imgs = rand(B, H, W, 'single');
+mu = single(mean(imgs, [2 3], 'native'));
+sigma = single(sqrt(mean((imgs - mu).^2, [2 3], 'native') + eps0));
+out = single(((imgs - mu) ./ sigma) * gain + bias);
+out = max(out, single(0));
+out = single(out .^ gamma);
+err = out - imgs;
+mse = mean(err .* err, 'all');
+
+fprintf('RESULT_ok MSE=%.6e\n', double(mse));
+"#;
+
+    let payload = shared::execute_script_with_runtime(&runtime, script).await;
+    if let Some(err) = payload.error {
+        panic!(
+            "clamped image normalize vecdim wasm execution failed: {} (gpu requested={}, active={}, gpu error={:?})",
+            err.message, gpu_status.requested, gpu_status.active, gpu_status.error
+        );
+    }
+    let stdout_text = shared::stdout_text(&payload);
+    assert!(
+        stdout_text.contains("RESULT_ok MSE="),
+        "clamped image normalize vecdim workload produced unexpected stdout: {stdout_text:?}"
+    );
+    assert!(
+        !stdout_text.contains("MSE=NaN"),
+        "clamped image normalize vecdim workload should produce finite stdout: {stdout_text:?}"
+    );
 }
 
 #[wasm_bindgen_test(async)]

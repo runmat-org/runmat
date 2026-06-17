@@ -5429,7 +5429,9 @@ impl AccelProvider for InProcessProvider {
                         if desc.bias.is_some() {
                             value += bias;
                         }
-                        value = value.max(0.0);
+                        if desc.clamp_zero {
+                            value = value.max(0.0);
+                        }
                         if let Some(gamma) = gamma {
                             value = value.powf(gamma);
                         }

@@ -2842,6 +2842,8 @@ pub struct ImageNormalizeDescriptor {
     pub bias: Option<f64>,
     #[serde(default)]
     pub gamma: Option<f64>,
+    #[serde(default)]
+    pub clamp_zero: bool,
 }
 
 #[cfg(test)]

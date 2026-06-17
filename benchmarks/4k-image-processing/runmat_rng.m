@@ -69,10 +69,11 @@ else
 end
 out = max(out, zero_scalar);
 out = single(out .^ gamma);
+err = out - imgs;
 if use_gpu
-  mse = gather(mean((out - imgs).^2, 'all'));
+  mse = gather(mean(err .* err, 'all'));
 else
-  mse = mean((out - imgs).^2, 'all');
+  mse = mean(err .* err, 'all');
 end
 
 fprintf('RESULT_ok MSE=%.6e\n', double(mse));

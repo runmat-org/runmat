@@ -674,6 +674,7 @@ pub struct ImageNormalizeUniforms {
 pub const IMAGE_NORMALIZE_FLAG_GAIN: u32 = 1 << 0;
 pub const IMAGE_NORMALIZE_FLAG_BIAS: u32 = 1 << 1;
 pub const IMAGE_NORMALIZE_FLAG_GAMMA: u32 = 1 << 2;
+pub const IMAGE_NORMALIZE_FLAG_CLAMP_ZERO: u32 = 1 << 3;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
