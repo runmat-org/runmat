@@ -14,6 +14,9 @@ pub fn gca_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Num;
     }
+    if matches!(args.first(), Some(Type::Num | Type::Int)) {
+        return Type::Num;
+    }
     Type::Struct {
         known_fields: Some(vec![
             "handle".to_string(),
