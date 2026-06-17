@@ -719,6 +719,7 @@ mod tests {
 
     #[test]
     fn peaks_one_is_scalar() {
+        let _guard = test_support::accel_test_lock();
         // At n=1 the single grid point maps to the stop endpoint (x=3, y=3).
         // tensor_into_value may collapse a 1×1 tensor to Value::Num.
         let expected = peaks_at(3.0, 3.0);
