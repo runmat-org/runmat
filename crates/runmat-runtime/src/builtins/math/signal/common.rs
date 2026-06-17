@@ -262,7 +262,11 @@ pub(crate) fn scalar_length_arg(value: Value) -> Result<usize, WindowArgError> {
     if !scalar.is_finite() || scalar < 0.0 {
         return Err(WindowArgError::InvalidLength);
     }
-    Ok(scalar.round() as usize)
+    let rounded = scalar.round();
+    if rounded > usize::MAX as f64 {
+        return Err(WindowArgError::InvalidLength);
+    }
+    Ok(rounded as usize)
 }
 
 pub(crate) fn window_tensor(
@@ -379,5 +383,20 @@ mod tests {
             .expect_err("out-of-range integer should fail");
 
         assert!(err.message().contains("exceeds maximum supported size"));
+    }
+
+    #[test]
+    fn scalar_length_arg_rejects_values_outside_usize_range() {
+        let err = scalar_length_arg(Value::Num((usize::MAX as f64) * 2.0))
+            .expect_err("out-of-range length should fail");
+
+        assert_eq!(err, WindowArgError::InvalidLength);
+    }
+
+    #[test]
+    fn scalar_length_arg_accepts_valid_scalar_length() {
+        let len = scalar_length_arg(Value::Num(4.0)).expect("valid length");
+
+        assert_eq!(len, 4);
     }
 }
