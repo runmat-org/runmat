@@ -5,6 +5,8 @@ use runmat_builtins::{ComplexTensor, NumericDType, Tensor, Value};
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+const EPS: f64 = 1.0e-12;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WindowSampling {
     Symmetric,
@@ -174,7 +176,7 @@ pub(crate) fn complex_vector_to_value(
     shape: Vec<usize>,
     force_complex: bool,
 ) -> BuiltinResult<Value> {
-    let has_imag = force_complex || data.iter().any(|z| z.im != 0.0);
+    let has_imag = force_complex || data.iter().any(|z| z.im.abs() > EPS);
     if has_imag {
         let tensor = ComplexTensor::new(data.into_iter().map(|z| (z.re, z.im)).collect(), shape)
             .map_err(|e| signal_error("signal", None, format!("signal: {e}")))?;
@@ -233,6 +235,13 @@ pub(crate) fn parse_nonnegative_integer(
             builtin,
             None,
             format!("{builtin}: {label} must be a nonnegative integer"),
+        ));
+    }
+    if rounded > usize::MAX as f64 {
+        return Err(signal_error(
+            builtin,
+            None,
+            format!("{builtin}: {label} exceeds maximum supported size"),
         ));
     }
     Ok(rounded as usize)
@@ -341,5 +350,34 @@ fn string_keyword(value: &Value) -> Option<String> {
         Value::String(s) => Some(s.to_ascii_lowercase()),
         Value::CharArray(chars) => Some(chars.data.iter().collect::<String>().to_ascii_lowercase()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn complex_vector_to_value_treats_near_zero_imaginary_as_real() {
+        let value = complex_vector_to_value(
+            vec![Complex::new(1.0, EPS / 2.0), Complex::new(2.0, -EPS / 2.0)],
+            vec![1, 2],
+            false,
+        )
+        .expect("value");
+
+        let Value::Tensor(tensor) = value else {
+            panic!("expected real tensor");
+        };
+        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.data, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn parse_nonnegative_integer_rejects_values_outside_usize_range() {
+        let err = parse_nonnegative_integer("test", "n", &Value::Num((usize::MAX as f64) * 2.0))
+            .expect_err("out-of-range integer should fail");
+
+        assert!(err.message().contains("exceeds maximum supported size"));
     }
 }

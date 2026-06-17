@@ -435,13 +435,19 @@ async fn try_filtfilt_gpu(
     let extended = odd_reflect(&input.data, nfact);
     let first_pass = match gpu_filter_pass(coeffs, &extended, &input.shape, &zi).await {
         Ok(value) => value,
-        Err(_) => return Ok(None),
+        Err(err) => {
+            log::debug!("filtfilt: first GPU pass failed ({err:?}), falling back to host");
+            return Ok(None);
+        }
     };
     let mut reversed = first_pass;
     reversed.reverse();
     let second_pass = match gpu_filter_pass(coeffs, &reversed, &input.shape, &zi).await {
         Ok(value) => value,
-        Err(_) => return Ok(None),
+        Err(err) => {
+            log::debug!("filtfilt: second GPU pass failed ({err:?}), falling back to host");
+            return Ok(None);
+        }
     };
     let mut restored = second_pass;
     restored.reverse();
@@ -460,6 +466,35 @@ async fn try_filtfilt_gpu(
         )
     })?;
     Ok(Some(Value::GpuTensor(handle)))
+}
+
+struct OwnedGpuHandle<'a> {
+    provider: &'a dyn runmat_accelerate_api::AccelProvider,
+    handle: Option<runmat_accelerate_api::GpuTensorHandle>,
+}
+
+impl<'a> OwnedGpuHandle<'a> {
+    fn new(
+        provider: &'a dyn runmat_accelerate_api::AccelProvider,
+        handle: runmat_accelerate_api::GpuTensorHandle,
+    ) -> Self {
+        Self {
+            provider,
+            handle: Some(handle),
+        }
+    }
+
+    fn handle(&self) -> &runmat_accelerate_api::GpuTensorHandle {
+        self.handle.as_ref().expect("owned GPU handle")
+    }
+}
+
+impl Drop for OwnedGpuHandle<'_> {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            let _ = self.provider.free(&handle);
+        }
+    }
 }
 
 async fn gpu_filter_pass(
@@ -490,6 +525,7 @@ async fn gpu_filter_pass(
                 format!("provider signal upload failed: {e}"),
             )
         })?;
+    let signal_handle = OwnedGpuHandle::new(provider, signal_handle);
     let b = Tensor::new(
         coeffs.b.iter().map(|z| z.re).collect(),
         vec![1, coeffs.b.len()],
@@ -515,14 +551,15 @@ async fn gpu_filter_pass(
     let eval = filter::evaluate(
         Value::Tensor(b),
         Value::Tensor(a),
-        Value::GpuTensor(signal_handle.clone()),
+        Value::GpuTensor(signal_handle.handle().clone()),
         &[zi_value, Value::Num(dim)],
     )
     .await?;
     let (output, _) = eval.into_pair();
     let tensor = match output {
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_tensor_async(&handle)
+            let output_handle = OwnedGpuHandle::new(provider, handle);
+            gpu_helpers::gather_tensor_async(output_handle.handle())
                 .await
                 .map_err(|flow| {
                     signal_error(
@@ -530,14 +567,11 @@ async fn gpu_filter_pass(
                         FILTFILT_ERROR_INTERNAL.identifier,
                         format!("filtfilt: provider result gather failed: {flow:?}"),
                     )
-                })?;
-            let _ = provider.free(&handle);
-            gathered
+                })?
         }
         other => tensor::value_to_tensor(&other)
             .map_err(|e| filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, e))?,
     };
-    let _ = provider.free(&signal_handle);
     Ok(tensor
         .data
         .into_iter()
@@ -550,8 +584,12 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::{handle_precision, provider_for_handle, ProviderPrecision};
+    use runmat_accelerate_api::{
+        handle_precision, provider_for_handle, AccelDownloadFuture, AccelProvider, GpuTensorHandle,
+        HostTensorView, ProviderPrecision,
+    };
     use runmat_builtins::{builtin_function_by_name, ComplexTensor};
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     fn call(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
         block_on(evaluate(b, a, x))
@@ -581,6 +619,58 @@ mod tests {
             _ => 1e-8,
         }
     }
+
+    struct DownloadFailProvider {
+        next_buffer_id: AtomicU64,
+        frees: AtomicU64,
+    }
+
+    impl DownloadFailProvider {
+        const fn new() -> Self {
+            Self {
+                next_buffer_id: AtomicU64::new(1),
+                frees: AtomicU64::new(0),
+            }
+        }
+
+        fn reset(&self) {
+            self.next_buffer_id.store(1, Ordering::SeqCst);
+            self.frees.store(0, Ordering::SeqCst);
+        }
+
+        fn free_count(&self) -> u64 {
+            self.frees.load(Ordering::SeqCst)
+        }
+    }
+
+    impl AccelProvider for DownloadFailProvider {
+        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Ok(GpuTensorHandle {
+                shape: host.shape.to_vec(),
+                device_id: self.device_id(),
+                buffer_id: self.next_buffer_id.fetch_add(1, Ordering::SeqCst),
+            })
+        }
+
+        fn download<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async { Err(anyhow::anyhow!("forced download failure")) })
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            self.frees.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "download-fail-provider".to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            10_001
+        }
+    }
+
+    static DOWNLOAD_FAIL_PROVIDER: DownloadFailProvider = DownloadFailProvider::new();
 
     #[test]
     fn descriptor_is_registered() {
@@ -647,6 +737,27 @@ mod tests {
         };
         assert_eq!(out.shape, vec![1, 2]);
         assert_eq!(out.data, vec![(1.0, 1.0), (2.0, -1.0)]);
+    }
+
+    #[test]
+    fn gpu_filter_pass_frees_signal_handle_when_filter_evaluation_fails() {
+        let _guard = test_support::accel_test_lock();
+        DOWNLOAD_FAIL_PROVIDER.reset();
+        let _provider_guard =
+            runmat_accelerate_api::ThreadProviderGuard::set(Some(&DOWNLOAD_FAIL_PROVIDER));
+
+        let b = vec![Complex::new(0.5, 0.0), Complex::new(0.5, 0.0)];
+        let a = vec![Complex::new(1.0, 0.0)];
+        let coeffs = NormalizedCoefficients::new(&b, &a).expect("coefficients");
+        let signal = (1..=8)
+            .map(|value| Complex::new(value as f64, 0.0))
+            .collect::<Vec<_>>();
+        let zi = vec![Complex::new(0.0, 0.0)];
+
+        let result = block_on(gpu_filter_pass(&coeffs, &signal, &[1, 8], &zi));
+
+        assert!(result.is_err());
+        assert_eq!(DOWNLOAD_FAIL_PROVIDER.free_count(), 1);
     }
 
     #[test]

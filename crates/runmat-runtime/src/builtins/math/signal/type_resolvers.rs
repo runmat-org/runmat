@@ -41,6 +41,9 @@ pub fn filtfilt_type(args: &[Type], _context: &ResolveContext) -> Type {
 }
 
 pub fn fir1_type(args: &[Type], context: &ResolveContext) -> Type {
+    if args.len() < 2 {
+        return Type::Unknown;
+    }
     if let Some(order) = literal_nonnegative_integer_at(context, 0) {
         let Some(width) = fir1_width_for_literal_order(order, args, context) else {
             return Type::Tensor {
@@ -57,6 +60,9 @@ pub fn fir1_type(args: &[Type], context: &ResolveContext) -> Type {
 }
 
 pub fn freqz_type(args: &[Type], context: &ResolveContext) -> Type {
+    if args.len() < 2 {
+        return Type::Unknown;
+    }
     let n = if args.len() >= 3 {
         literal_positive_integer_at(context, 2)
     } else {
@@ -491,6 +497,25 @@ fn is_numeric_scalar(ty: &Type) -> bool {
 mod tests {
     use super::*;
     use runmat_builtins::LiteralValue;
+
+    #[test]
+    fn fir1_type_requires_order_and_cutoff_arguments() {
+        let ctx = ResolveContext::default();
+
+        assert_eq!(fir1_type(&[], &ctx), Type::Unknown);
+        assert_eq!(fir1_type(&[Type::Num], &ctx), Type::Unknown);
+    }
+
+    #[test]
+    fn freqz_type_requires_numerator_and_denominator_arguments() {
+        let ctx = ResolveContext::default();
+
+        assert_eq!(freqz_type(&[], &ctx), Type::Unknown);
+        assert_eq!(
+            freqz_type(&[Type::Tensor { shape: None }], &ctx),
+            Type::Unknown
+        );
+    }
 
     #[test]
     fn conv_full_uses_length_sum() {
