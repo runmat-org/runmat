@@ -47,13 +47,35 @@ if ~exist('eps0','var'), eps0 = eps0_default; else eps0 = single(eps0); end
 use_gpu = exist('gpuArray', 'builtin') || exist('gpuArray', 'file');
 if use_gpu
   zero_proto = gpuArray(single(0));
-  imgs = rand(B, H, W, 'like', zero_proto);
+  imgs = zeros(B, H, W, 'like', zero_proto);
   gain = gpuArray(gain);
   bias = gpuArray(bias);
   gamma = gpuArray(gamma);
   eps0 = gpuArray(eps0);
 else
-  imgs = rand(B, H, W, 'single');
+  imgs = zeros(B, H, W, 'single');
+end
+
+plane = H * W;
+row_block = 16;
+x_idx = reshape(0:(W - 1), [1 1 W]);
+for b = 1:B
+  batch_offset = (b - 1) * plane + seed;
+  row_start = 1;
+  while row_start <= H
+    row_count = min(row_block, H - row_start + 1);
+    rows = row_start:(row_start + row_count - 1);
+    y_idx = reshape((row_start - 1):(row_start + row_count - 2), [1 row_count 1]);
+    idx = batch_offset + y_idx * W + x_idx;
+    state = mod(1664525 .* idx + 1013904223, 4294967296);
+    chunk = single(state ./ 4294967296);
+    if use_gpu
+      imgs(b, rows, :) = gpuArray(chunk);
+    else
+      imgs(b, rows, :) = chunk;
+    end
+    row_start = row_start + row_count;
+  end
 end
 
 % Reduce over dims 2 and 3 in a single call, keeping native precision
