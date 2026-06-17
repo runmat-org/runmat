@@ -697,12 +697,28 @@ mod tests {
         io::Error::new(ErrorKind::Unsupported, "unsupported")
     }
 
+    fn rooted_tmp_path() -> PathBuf {
+        let mut path = PathBuf::from(std::path::MAIN_SEPARATOR.to_string());
+        path.push("tmp");
+        path
+    }
+
+    fn rooted_tmp_path_text() -> String {
+        rooted_tmp_path().to_string_lossy().into_owned()
+    }
+
     fn rooted_tmp_dir_text() -> String {
-        format!(
-            "{}tmp{}",
-            std::path::MAIN_SEPARATOR,
-            std::path::MAIN_SEPARATOR
-        )
+        let mut text = rooted_tmp_path_text();
+        if !text.ends_with(std::path::MAIN_SEPARATOR) {
+            text.push(std::path::MAIN_SEPARATOR);
+        }
+        text
+    }
+
+    fn rooted_tmp_file(file_name: &str) -> PathBuf {
+        let mut path = rooted_tmp_path();
+        path.push(file_name);
+        path
     }
 
     fn with_dialog_provider(
@@ -730,7 +746,7 @@ mod tests {
     #[test]
     fn parses_filter_title_default_and_selection_outputs() {
         let selection = OpenFileDialogSelection {
-            paths: vec![PathBuf::from("/tmp/scores.xlsx")],
+            paths: vec![rooted_tmp_file("scores.xlsx")],
             filter_index: Some(1),
         };
         with_dialog_provider(Some(selection), |request| {
@@ -739,7 +755,7 @@ mod tests {
                     vec![
                         Value::CharArray(CharArray::new_row("*.xlsx;*.xls")),
                         Value::CharArray(CharArray::new_row("Select spreadsheet")),
-                        Value::CharArray(CharArray::new_row("/tmp")),
+                        Value::CharArray(CharArray::new_row(&rooted_tmp_path_text())),
                     ],
                     Some(3),
                 )
@@ -751,7 +767,7 @@ mod tests {
 
             let request = request.lock().unwrap().clone().expect("request");
             assert_eq!(request.title.as_deref(), Some("Select spreadsheet"));
-            assert_eq!(request.default_path, Some(PathBuf::from("/tmp")));
+            assert_eq!(request.default_path, Some(rooted_tmp_path()));
             assert!(!request.multiselect);
             assert_eq!(request.filters[0].patterns, vec!["*.xlsx", "*.xls"]);
         });
@@ -760,7 +776,7 @@ mod tests {
     #[test]
     fn multiselect_returns_cell_array_for_multiple_files() {
         let selection = OpenFileDialogSelection {
-            paths: vec![PathBuf::from("/tmp/a.m"), PathBuf::from("/tmp/b.m")],
+            paths: vec![rooted_tmp_file("a.m"), rooted_tmp_file("b.m")],
             filter_index: Some(1),
         };
         with_dialog_provider(Some(selection), |_| {
@@ -769,7 +785,7 @@ mod tests {
                     vec![
                         Value::CharArray(CharArray::new_row("*.m")),
                         Value::CharArray(CharArray::new_row("Open")),
-                        Value::CharArray(CharArray::new_row("/tmp")),
+                        Value::CharArray(CharArray::new_row(&rooted_tmp_path_text())),
                         Value::CharArray(CharArray::new_row("MultiSelect")),
                         Value::CharArray(CharArray::new_row("on")),
                     ],
@@ -794,7 +810,7 @@ mod tests {
     #[test]
     fn rejects_multiple_single_select_provider_paths() {
         let selection = OpenFileDialogSelection {
-            paths: vec![PathBuf::from("/tmp/a.m"), PathBuf::from("/tmp/b.m")],
+            paths: vec![rooted_tmp_file("a.m"), rooted_tmp_file("b.m")],
             filter_index: Some(1),
         };
         with_dialog_provider(Some(selection), |_| {
