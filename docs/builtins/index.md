@@ -66,7 +66,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | Status | Path | Names | GPU | Fusion | Backend | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | done | `math/fft` | `fft`, `ifft`, `fft2`, `ifft2`, `fftshift`, `ifftshift` | yes | P | FFT | Fourier transforms through host or device FFT providers. |
-| done | `math/signal` | `conv`, `conv2`, `deconv`, `filter`, `butter` | yes | S | - | Convolution, Butterworth design, and filtering; large convolution may use FFT paths. |
+| done | `math/signal` | `conv`, `conv2`, `deconv`, `filter`, `filtfilt`, `butter`, `fir1`, `freqz` | yes | S | - | Convolution, filter design/analysis, causal and zero-phase filtering; large convolution may use FFT paths. |
 | done | `image/filters` | `fspecial` | host | - | - | Filter kernel generation. |
 | done | `image/filters` | `imfilter`, `filter2` | yes | S | - | Linear image filters and padding modes. |
 | done | `image/color` | `rgb2gray`, `gray2rgb`, `ind2rgb`, `im2double`, `im2uint8`, `im2uint16`, `rgb2hsv`, `hsv2rgb`, `rgb2lab`, `lab2rgb` | host | - | - | Image color and class conversions. |

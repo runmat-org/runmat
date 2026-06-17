@@ -979,9 +979,11 @@ fn is_empty_placeholder(value: &Value) -> bool {
 async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluation>> {
     #[cfg(all(test, feature = "wgpu"))]
     {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        if runmat_accelerate_api::provider().is_none() {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
     }
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,

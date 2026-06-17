@@ -476,7 +476,7 @@ fn scalar_text(value: &Value, error: &'static BuiltinErrorDescriptor) -> Builtin
 }
 
 async fn absolute_folder_string(path: &Path) -> BuiltinResult<String> {
-    let joined = if path.is_absolute() {
+    let joined = if super::is_rooted_path(path) {
         path.to_path_buf()
     } else {
         vfs::current_dir()

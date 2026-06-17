@@ -347,7 +347,7 @@ async fn create_from_parent_child(parent: &Value, child: &Value) -> BuiltinResul
     let child_expanded = expand_user_path(&child_raw, "mkdir").map_err(mkdir_error)?;
     let child_path = PathBuf::from(&child_expanded);
 
-    if child_path.is_absolute() {
+    if super::is_rooted_path(&child_path) {
         return Ok(create_directory(&child_path).await);
     }
 

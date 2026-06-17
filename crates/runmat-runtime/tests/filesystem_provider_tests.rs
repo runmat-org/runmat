@@ -24,6 +24,16 @@ fn assert_path_value(value: Value, expected: &str, label: &str) {
     assert_eq!(actual.replace('\\', "/"), expected, "{label}");
 }
 
+fn assert_string_contains(value: Value, expected: &str, label: &str) {
+    let actual = String::try_from(&value).unwrap_or_else(|_| {
+        panic!("{label} should return a string, got {value:?}");
+    });
+    assert!(
+        actual.replace('\\', "/").contains(expected),
+        "{label} should contain {expected:?}, got {actual:?}"
+    );
+}
+
 fn exercise_repl_filesystem_builtins_through_provider() {
     assert_path_value(
         call_builtin("pwd", &[]).expect("pwd succeeds"),
@@ -64,6 +74,39 @@ fn exercise_repl_filesystem_builtins_through_provider() {
         call_builtin("pwd", &[]).expect("pwd after cd parent succeeds"),
         "/",
         "pwd after cd parent",
+    );
+
+    assert_status_one(
+        call_builtin("mkdir", &[Value::from("/rooted")]).expect("mkdir rooted succeeds"),
+        "mkdir rooted",
+    );
+    assert_path_value(
+        call_builtin("cd", &[Value::from("/rooted")]).expect("cd rooted succeeds"),
+        "/",
+        "cd rooted should return previous directory",
+    );
+    assert_path_value(
+        call_builtin("pwd", &[]).expect("pwd after rooted cd succeeds"),
+        "/rooted",
+        "pwd after rooted cd",
+    );
+    block_on(vfs::write_async("/rooted/file.txt", b"rooted path"))
+        .expect("write rooted file through provider");
+    let rooted = block_on(vfs::read_to_string_async("/rooted/file.txt"))
+        .expect("read rooted file through provider");
+    assert_eq!(rooted, "rooted path");
+    call_builtin("dir", &[Value::from("/rooted")]).expect("dir rooted succeeds");
+    assert_string_contains(
+        call_builtin("genpath", &[Value::from("/rooted")]).expect("genpath rooted succeeds"),
+        "/rooted",
+        "genpath rooted",
+    );
+    call_builtin("addpath", &[Value::from("/rooted")]).expect("addpath rooted succeeds");
+    call_builtin("rmpath", &[Value::from("/rooted")]).expect("rmpath rooted succeeds");
+    assert_path_value(
+        call_builtin("cd", &[Value::from("/")]).expect("cd root succeeds"),
+        "/rooted",
+        "cd root should return previous directory",
     );
 
     block_on(vfs::write_async("workspace/source.txt", b"provider text"))
