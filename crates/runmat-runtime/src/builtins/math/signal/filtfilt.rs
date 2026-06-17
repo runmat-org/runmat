@@ -550,6 +550,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::{handle_precision, provider_for_handle, ProviderPrecision};
     use runmat_builtins::{builtin_function_by_name, ComplexTensor};
 
     fn call(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
@@ -565,6 +566,19 @@ mod tests {
         assert_eq!(lhs.len(), rhs.len());
         for (idx, (a, b)) in lhs.iter().zip(rhs.iter()).enumerate() {
             assert!((a - b).abs() <= tol, "mismatch at {idx}: got {a}, want {b}");
+        }
+    }
+
+    fn value_tolerance(value: &Value) -> f64 {
+        match value {
+            Value::GpuTensor(handle) => match handle_precision(handle)
+                .or_else(|| provider_for_handle(handle).map(|provider| provider.precision()))
+                .unwrap_or(ProviderPrecision::F64)
+            {
+                ProviderPrecision::F64 => 1e-8,
+                ProviderPrecision::F32 => 1e-6,
+            },
+            _ => 1e-8,
         }
     }
 
@@ -655,9 +669,10 @@ mod tests {
                 })
                 .expect("upload");
             let gpu = call(Value::Tensor(b), Value::Tensor(a), Value::GpuTensor(handle)).unwrap();
+            let tol = value_tolerance(&gpu);
             let (gpu_data, shape) = tensor_data(gpu);
             assert_eq!(shape, vec![1, 20]);
-            approx(&gpu_data, &cpu_data, 1e-8);
+            approx(&gpu_data, &cpu_data, tol);
         });
     }
 
