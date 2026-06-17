@@ -1,7 +1,6 @@
 #[cfg(feature = "wgpu")]
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
-#[cfg(feature = "wgpu")]
-use runmat_accelerate_api::{HostTensorView, ImageNormalizeDescriptor};
+use runmat_accelerate_api::{AccelProvider, HostTensorView, ImageNormalizeDescriptor};
 
 #[cfg(feature = "wgpu")]
 #[allow(clippy::too_many_arguments)]
@@ -127,6 +126,82 @@ async fn image_normalize_matches_cpu() {
             got,
             want,
             diff
+        );
+    }
+}
+
+#[cfg(feature = "wgpu")]
+#[tokio::test]
+async fn wgpu_cpu_fallback_image_normalize_rejects_invalid_epsilon() {
+    let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
+    let p = runmat_accelerate_api::provider().expect("provider");
+
+    let handle = p
+        .upload(&HostTensorView {
+            data: &[],
+            shape: &[1, 0, 2],
+        })
+        .expect("upload empty input");
+
+    for (epsilon, expected) in [
+        (f64::NAN, "image_normalize: epsilon must be finite"),
+        (-1.0, "image_normalize: epsilon must be non-negative"),
+    ] {
+        let desc = ImageNormalizeDescriptor {
+            batch: 1,
+            height: 0,
+            width: 2,
+            epsilon,
+            gain: None,
+            bias: None,
+            gamma: None,
+            clamp_zero: true,
+        };
+
+        let err = p
+            .image_normalize(&handle, &desc)
+            .await
+            .expect_err("invalid epsilon should be rejected by fallback path");
+        assert!(
+            err.to_string().contains(expected),
+            "unexpected error for epsilon {epsilon:?}: {err}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn simple_provider_image_normalize_rejects_invalid_epsilon() {
+    let provider = runmat_accelerate::simple_provider::InProcessProvider::new();
+    let data = [1.0, 2.0, 3.0, 4.0];
+    let handle = provider
+        .upload(&HostTensorView {
+            data: &data,
+            shape: &[1, 2, 2],
+        })
+        .expect("upload input");
+
+    for (epsilon, expected) in [
+        (f64::NAN, "image_normalize: epsilon must be finite"),
+        (-1.0, "image_normalize: epsilon must be non-negative"),
+    ] {
+        let desc = ImageNormalizeDescriptor {
+            batch: 1,
+            height: 2,
+            width: 2,
+            epsilon,
+            gain: None,
+            bias: None,
+            gamma: None,
+            clamp_zero: true,
+        };
+
+        let err = provider
+            .image_normalize(&handle, &desc)
+            .await
+            .expect_err("invalid epsilon should be rejected");
+        assert!(
+            err.to_string().contains(expected),
+            "unexpected error for epsilon {epsilon:?}: {err}"
         );
     }
 }

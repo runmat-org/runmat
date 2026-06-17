@@ -2842,8 +2842,12 @@ pub struct ImageNormalizeDescriptor {
     pub bias: Option<f64>,
     #[serde(default)]
     pub gamma: Option<f64>,
-    #[serde(default)]
+    #[serde(default = "default_image_normalize_clamp_zero")]
     pub clamp_zero: bool,
+}
+
+fn default_image_normalize_clamp_zero() -> bool {
+    true
 }
 
 #[cfg(test)]
@@ -2990,5 +2994,42 @@ mod tests {
         assert_eq!(own_device.device_info(), PROVIDER_C.name);
         assert_eq!(fallback.device_info(), PROVIDER_A.name);
         clear_provider();
+    }
+
+    #[test]
+    fn image_normalize_descriptor_omitted_clamp_zero_defaults_true() {
+        let payload = r#"{
+            "batch": 2,
+            "height": 4,
+            "width": 5,
+            "epsilon": 0.000001
+        }"#;
+
+        let desc: ImageNormalizeDescriptor =
+            serde_json::from_str(payload).expect("deserialize descriptor");
+
+        assert!(
+            desc.clamp_zero,
+            "legacy serialized descriptors should default to clamped image normalize"
+        );
+    }
+
+    #[test]
+    fn image_normalize_descriptor_explicit_false_preserves_unclamped() {
+        let payload = r#"{
+            "batch": 2,
+            "height": 4,
+            "width": 5,
+            "epsilon": 0.000001,
+            "clamp_zero": false
+        }"#;
+
+        let desc: ImageNormalizeDescriptor =
+            serde_json::from_str(payload).expect("deserialize descriptor");
+
+        assert!(
+            !desc.clamp_zero,
+            "explicit clamp_zero=false should preserve unclamped semantics"
+        );
     }
 }

@@ -116,6 +116,14 @@ fn is_canvas_webgpu_unavailable(message: &str) -> bool {
     message.contains("no compatible WebGPU adapter was found")
 }
 
+fn is_runtime_webgpu_adapter_unavailable(status: &GpuStatusPayload) -> bool {
+    status
+        .error
+        .as_deref()
+        .map(is_canvas_webgpu_unavailable)
+        .unwrap_or(false)
+}
+
 #[wasm_bindgen_test(async)]
 async fn impedance_loop_executes_without_runtime_error() {
     shared::assert_impedance_loop_executes_without_runtime_error().await;
@@ -145,14 +153,20 @@ async fn image_normalize_vecdim_workload_completes_with_webgpu() {
         serde_wasm_bindgen::from_value(runtime.gpu_status().expect("gpu status"))
             .expect("deserialize gpu status");
     if !gpu_status.active {
-        web_sys::console::warn_1(
-            &format!(
-                "Skipping image normalize vecdim WebGPU check: requested={}, active={}, error={:?}",
-                gpu_status.requested, gpu_status.active, gpu_status.error
-            )
-            .into(),
+        if is_runtime_webgpu_adapter_unavailable(&gpu_status) {
+            web_sys::console::warn_1(
+                &format!(
+                    "Skipping image normalize vecdim WebGPU check: requested={}, active={}, error={:?}",
+                    gpu_status.requested, gpu_status.active, gpu_status.error
+                )
+                .into(),
+            );
+            return;
+        }
+        panic!(
+            "image normalize vecdim WebGPU check expected active GPU: requested={}, active={}, error={:?}",
+            gpu_status.requested, gpu_status.active, gpu_status.error
         );
-        return;
     }
 
     let script = r#"
@@ -192,14 +206,20 @@ async fn image_normalize_vecdim_clamped_benchmark_shape_completes_with_webgpu() 
         serde_wasm_bindgen::from_value(runtime.gpu_status().expect("gpu status"))
             .expect("deserialize gpu status");
     if !gpu_status.active {
-        web_sys::console::warn_1(
-            &format!(
-                "Skipping clamped image normalize vecdim WebGPU check: requested={}, active={}, error={:?}",
-                gpu_status.requested, gpu_status.active, gpu_status.error
-            )
-            .into(),
+        if is_runtime_webgpu_adapter_unavailable(&gpu_status) {
+            web_sys::console::warn_1(
+                &format!(
+                    "Skipping clamped image normalize vecdim WebGPU check: requested={}, active={}, error={:?}",
+                    gpu_status.requested, gpu_status.active, gpu_status.error
+                )
+                .into(),
+            );
+            return;
+        }
+        panic!(
+            "clamped image normalize vecdim WebGPU check expected active GPU: requested={}, active={}, error={:?}",
+            gpu_status.requested, gpu_status.active, gpu_status.error
         );
-        return;
     }
 
     let script = r#"

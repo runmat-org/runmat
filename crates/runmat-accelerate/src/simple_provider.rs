@@ -5356,6 +5356,14 @@ impl AccelProvider for InProcessProvider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             ensure!(
+                desc.epsilon.is_finite(),
+                "image_normalize: epsilon must be finite"
+            );
+            ensure!(
+                desc.epsilon >= 0.0,
+                "image_normalize: epsilon must be non-negative"
+            );
+            ensure!(
                 input.shape.len() == 3,
                 "image_normalize: expected 3-D tensor, got {:?}",
                 input.shape

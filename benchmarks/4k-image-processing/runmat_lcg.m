@@ -10,15 +10,30 @@ rng(seed);
 
 env_B = getenv('IMG_B');
 if numel(env_B)
-  B_default = str2double(env_B);
+  B_override = str2double(env_B);
+  if isfinite(B_override) && B_override > 0 && B_override == floor(B_override)
+    B_default = B_override;
+  else
+    error('IMG_B must be a finite positive integer');
+  end
 end
 env_H = getenv('IMG_H');
 if numel(env_H)
-  H_default = str2double(env_H);
+  H_override = str2double(env_H);
+  if isfinite(H_override) && H_override > 0 && H_override == floor(H_override)
+    H_default = H_override;
+  else
+    error('IMG_H must be a finite positive integer');
+  end
 end
 env_W = getenv('IMG_W');
 if numel(env_W)
-  W_default = str2double(env_W);
+  W_override = str2double(env_W);
+  if isfinite(W_override) && W_override > 0 && W_override == floor(W_override)
+    W_default = W_override;
+  else
+    error('IMG_W must be a finite positive integer');
+  end
 end
 
 if ~exist('B','var'), B = B_default; end
@@ -47,12 +62,7 @@ sigma = single(sqrt(mean((imgs - mu).^2, [2 3], 'native') + eps0));
 
 out = single(((imgs - mu) ./ sigma) * gain + bias);
 % Clamp to avoid NaNs from fractional power on negatives
-if use_gpu
-  zero_scalar = gpuArray(single(0));
-else
-  zero_scalar = single(0);
-end
-out = max(out, zero_scalar);
+out = max(out, single(0));
 out = single(out .^ gamma);
 err = out - imgs;
 if use_gpu

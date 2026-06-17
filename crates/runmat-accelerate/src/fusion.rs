@@ -3296,8 +3296,9 @@ fn analyze_image_normalize(
     };
 
     let mut clamp_nodes = Vec::new();
+    let pow_base_vid = peel_numeric_casts(graph, pow_node.inputs[0], assigned, &mut clamp_nodes)?;
     let (clamp_input_vid, clamp_zero) = if let Some((clamp_node_id, clamp_input_vid)) =
-        split_max_with_zero_scalar(graph, pow_node.inputs[0], assigned, &mut clamp_nodes)
+        split_max_with_zero_scalar(graph, pow_base_vid, assigned, &mut clamp_nodes)
     {
         if assigned.contains(&clamp_node_id) {
             img_norm_fail!("clamp node already assigned");
@@ -3306,7 +3307,8 @@ fn analyze_image_normalize(
         nodes.push(clamp_node_id);
         (clamp_input_vid, true)
     } else {
-        (pow_node.inputs[0], false)
+        nodes.extend(clamp_nodes);
+        (pow_base_vid, false)
     };
 
     let pre_bias_vid = peel_numeric_casts(graph, clamp_input_vid, assigned, &mut nodes)?;

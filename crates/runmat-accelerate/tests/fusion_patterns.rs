@@ -325,6 +325,38 @@ fn detects_image_normalize_group_with_vecdim_and_clamp() {
 }
 
 #[test]
+fn detects_image_normalize_group_with_cast_wrapped_clamp() {
+    let source = r#"
+    rng(0); B=2; H=4; W=5;
+    gain=single(1.0123); bias=single(-0.02); gamma=single(1.8); eps0=single(1e-6);
+
+    imgs = rand(B, H, W, 'single');
+    mu = single(mean(imgs, [2 3], 'native'));
+    sigma = single(sqrt(mean((imgs - mu).^2, [2 3], 'native') + eps0));
+    out = single(((imgs - mu) ./ sigma) * gain + bias);
+    out = single(max(out, single(0)));
+    out = out .^ gamma;
+    "#;
+    let graph = compile_graph(source);
+    let groups = detect_fusion_groups(&graph);
+    let plan = FusionPlan::from_graph(&graph, &groups);
+    let image_group = plan
+        .groups
+        .iter()
+        .find(|g| matches!(g.group.kind, FusionKind::ImageNormalize))
+        .expect("image normalize group not found for cast-wrapped clamp");
+    match image_group.pattern.as_ref() {
+        Some(runmat_accelerate::fusion::FusionPattern::ImageNormalize(pattern)) => {
+            assert!(
+                pattern.clamp_zero,
+                "cast-wrapped max clamp should set clamp_zero"
+            );
+        }
+        _ => panic!("missing image normalize pattern"),
+    }
+}
+
+#[test]
 fn detects_image_normalize_group_with_vecdim_without_clamp() {
     let source = r#"
     rng(0); B=2; H=4; W=5;

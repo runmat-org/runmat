@@ -3607,12 +3607,11 @@ fn image_normalize_matches_cpu() {
 
         let bytecode = compile_semantic(source);
 
-        if let Some(graph) = graph_for_fusion_test(&bytecode) {
-            let groups = graph.detect_fusion_groups();
-            assert!(groups
-                .iter()
-                .any(|group| matches!(group.kind, FusionKind::ImageNormalize)));
-        }
+        let graph = graph_for_fusion_test(&bytecode).expect("image normalize accel graph");
+        let groups = graph.detect_fusion_groups();
+        assert!(groups
+            .iter()
+            .any(|group| matches!(group.kind, FusionKind::ImageNormalize)));
 
         let out_index = bytecode
             .instructions
@@ -3634,7 +3633,7 @@ fn image_normalize_matches_cpu() {
         };
 
         ensure_provider_registered();
-        let vars_gpu = interpret_function(&bytecode, vars_cpu.clone()).expect("gpu interpret");
+        let vars_gpu = interpret_function(&bytecode, vars.clone()).expect("gpu interpret");
         let out_gpu = vars_gpu.get(out_index).expect("gpu out");
         assert!(
             matches!(out_gpu, Value::GpuTensor(_)),
@@ -3659,7 +3658,7 @@ fn image_normalize_matches_cpu() {
 }
 
 #[test]
-fn image_normalize_vecdim_matches_cpu() {
+fn image_normalize_vecdim_unclamped_detects_fusion() {
     gc_test_context(|| {
         use runmat_accelerate::{FusionKind, FusionPattern};
         let source = r#"
@@ -3678,21 +3677,60 @@ fn image_normalize_vecdim_matches_cpu() {
 
         let bytecode = compile_semantic(source);
 
-        if let Some(graph) = graph_for_fusion_test(&bytecode) {
-            let groups = graph.detect_fusion_groups();
-            let group = groups
-                .iter()
-                .find(|group| matches!(group.kind, FusionKind::ImageNormalize))
-                .expect("image normalize group not detected for vecdim form");
-            match group.pattern.as_ref() {
-                Some(FusionPattern::ImageNormalize(pattern)) => {
-                    assert!(
-                        !pattern.clamp_zero,
-                        "exact unclamped script should not set clamp_zero"
-                    );
-                }
-                other => panic!("missing image normalize pattern, got {other:?}"),
+        let graph = graph_for_fusion_test(&bytecode).expect("vecdim image normalize accel graph");
+        let groups = graph.detect_fusion_groups();
+        let group = groups
+            .iter()
+            .find(|group| matches!(group.kind, FusionKind::ImageNormalize))
+            .expect("image normalize group not detected for vecdim form");
+        match group.pattern.as_ref() {
+            Some(FusionPattern::ImageNormalize(pattern)) => {
+                assert!(
+                    !pattern.clamp_zero,
+                    "exact unclamped script should not set clamp_zero"
+                );
             }
+            other => panic!("missing image normalize pattern, got {other:?}"),
+        }
+    });
+}
+
+#[test]
+fn image_normalize_vecdim_matches_cpu() {
+    gc_test_context(|| {
+        use runmat_accelerate::{FusionKind, FusionPattern};
+        let source = r#"
+        rng(0); B=2; H=4; W=5;
+        gain=single(1.0123); bias=single(-0.02); gamma=single(1.8); eps0=single(1e-6);
+
+        imgs = rand(B, H, W, 'single');
+        mu = single(mean(imgs, [2 3], 'native'));
+        sigma = single(sqrt(mean((imgs - mu).^2, [2 3], 'native') + eps0));
+        out = single(((imgs - mu) ./ sigma) * gain + bias);
+        out = max(out, single(0));
+        out = single(out .^ gamma);
+        err = out - imgs;
+        mse = mean(err .* err, 'all');
+
+        fprintf('RESULT_ok MSE=%.6e\n', double(mse));
+        "#;
+
+        let bytecode = compile_semantic(source);
+
+        let graph = graph_for_fusion_test(&bytecode).expect("vecdim image normalize accel graph");
+        let groups = graph.detect_fusion_groups();
+        let group = groups
+            .iter()
+            .find(|group| matches!(group.kind, FusionKind::ImageNormalize))
+            .expect("image normalize group not detected for vecdim clamped form");
+        match group.pattern.as_ref() {
+            Some(FusionPattern::ImageNormalize(pattern)) => {
+                assert!(
+                    pattern.clamp_zero,
+                    "clamped vecdim script should set clamp_zero"
+                );
+            }
+            other => panic!("missing image normalize pattern, got {other:?}"),
         }
 
         let out_index = bytecode
@@ -3711,7 +3749,7 @@ fn image_normalize_vecdim_matches_cpu() {
         };
 
         ensure_provider_registered();
-        let vars_gpu = interpret_function(&bytecode, vars_cpu.clone()).expect("gpu interpret");
+        let vars_gpu = interpret_function(&bytecode, vars.clone()).expect("gpu interpret");
         let out_gpu = vars_gpu.get(out_index).expect("gpu out");
         assert!(
             matches!(out_gpu, Value::GpuTensor(_)),
