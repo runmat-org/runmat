@@ -78,6 +78,52 @@ fn bare_gca_can_set_axes_font_size() {
 }
 
 #[test]
+fn gca_returns_active_subplot_axes_handle() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        figure; \
+        ax = subplot(2, 2, 3); \
+        current = gca(); \
+        if current ~= ax; \
+            error('gca did not return active subplot axes'); \
+        end;";
+    execute_source(input).expect("execute gca subplot handle script");
+}
+
+#[test]
+fn gca_with_figure_handle_returns_that_figures_current_axes() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        f1 = figure(1); \
+        ax1 = subplot(2, 2, 3); \
+        f2 = figure(2); \
+        ax2 = subplot(1, 2, 2); \
+        current_f1_axes = gca(f1); \
+        current_f2_axes = gca(); \
+        if current_f1_axes ~= ax1; \
+            error('gca(fig) did not return target figure axes'); \
+        end; \
+        if current_f2_axes ~= ax2; \
+            error('plain gca did not keep current figure axes'); \
+        end;";
+    execute_source(input).expect("execute gca figure-handle script");
+}
+
+#[test]
+fn gca_rejects_axes_handle_argument() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        figure; \
+        ax = subplot(2, 2, 3); \
+        out = gca(ax);";
+    let err = execute_source(input).expect_err("gca(ax) should reject axes handles");
+    assert!(
+        err.to_string().contains("expected a figure handle"),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
 fn invalid_axes_shaped_handle_member_access_reports_non_object() {
     let _guard = disable_interactive_plots_for_test();
     let input = "bad_axes_handle = 1049575; out = bad_axes_handle.Type;";
