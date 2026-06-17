@@ -9,7 +9,7 @@ use runmat_macros::runtime_builtin;
 
 use super::op_common::handles::handle_from_scalar;
 use super::plotting_error;
-use super::properties::map_figure_error;
+use super::properties::{map_figure_error, resolve_plot_handle, PlotHandle};
 use super::state::{
     current_axes_handle_for_figure, current_axes_state, encode_axes_handle, FigureAxesState,
     FigureHandle,
@@ -120,7 +120,7 @@ pub fn gca_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     Err(plotting_error(
         "gca",
-        "gca: unsupported arguments (pass no inputs or 'struct')",
+        "gca: unsupported arguments (pass no inputs, a figure handle, or 'struct')",
     ))
 }
 
@@ -138,6 +138,19 @@ fn axes_struct_response(state: FigureAxesState) -> Value {
 }
 
 fn figure_handle_arg(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>> {
+    if let Ok(handle) = resolve_plot_handle(value, "gca") {
+        return match handle {
+            PlotHandle::Figure(handle) => Ok(Some(handle)),
+            PlotHandle::Axes(_, _)
+            | PlotHandle::Text(_, _, _)
+            | PlotHandle::Legend(_, _)
+            | PlotHandle::PlotChild(_) => Err(plotting_error(
+                "gca",
+                "gca: expected a figure handle, got a non-figure graphics handle",
+            )),
+        };
+    }
+
     match value {
         Value::Num(v) => Ok(Some(handle_from_scalar(*v, "gca")?)),
         Value::Int(i) => Ok(Some(handle_from_scalar(i.to_f64(), "gca")?)),
@@ -151,7 +164,7 @@ fn figure_handle_arg(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
@@ -208,6 +221,26 @@ pub(crate) mod tests {
             text.contains("gca: unsupported arguments"),
             "unexpected error: {text}"
         );
+        assert!(
+            text.contains("pass no inputs, a figure handle, or 'struct'"),
+            "unexpected error: {text}"
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn axes_handle_argument_is_rejected() {
+        let _guard = lock_plot_registry();
+        setup_plot_tests();
+        crate::builtins::plotting::reset_plot_state();
+
+        let axes = gca_builtin(Vec::new()).unwrap();
+        let err = gca_builtin(vec![axes]).expect_err("axes handle should not be accepted");
+        let text = err.to_string();
+        assert!(
+            text.contains("expected a figure handle"),
+            "unexpected error: {text}"
+        );
     }
 
     #[test]
@@ -216,7 +249,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn gca_type_with_args_returns_struct() {
+    fn gca_type_with_string_arg_returns_struct() {
         let out = gca_type(&[Type::String], &ResolveContext::new(Vec::new()));
         assert!(matches!(out, Type::Struct { .. }));
     }
@@ -226,6 +259,40 @@ pub(crate) mod tests {
         assert_eq!(
             gca_type(&[Type::Num], &ResolveContext::new(Vec::new())),
             Type::Num
+        );
+    }
+
+    #[test]
+    fn gca_type_with_multi_args_returns_unknown() {
+        assert_eq!(
+            gca_type(&[Type::Num, Type::String], &ResolveContext::new(Vec::new())),
+            Type::Unknown
+        );
+    }
+
+    #[test]
+    fn gca_type_with_scalar_tensor_arg_returns_num() {
+        assert_eq!(
+            gca_type(
+                &[Type::Tensor {
+                    shape: Some(vec![Some(1), Some(1)])
+                }],
+                &ResolveContext::new(Vec::new())
+            ),
+            Type::Num
+        );
+    }
+
+    #[test]
+    fn gca_type_with_non_scalar_tensor_arg_returns_unknown() {
+        assert_eq!(
+            gca_type(
+                &[Type::Tensor {
+                    shape: Some(vec![Some(1), Some(2)])
+                }],
+                &ResolveContext::new(Vec::new())
+            ),
+            Type::Unknown
         );
     }
 }

@@ -110,6 +110,20 @@ fn gca_with_figure_handle_returns_that_figures_current_axes() {
 }
 
 #[test]
+fn gca_rejects_axes_handle_argument() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        figure; \
+        ax = subplot(2, 2, 3); \
+        out = gca(ax);";
+    let err = execute_source(input).expect_err("gca(ax) should reject axes handles");
+    assert!(
+        err.to_string().contains("expected a figure handle"),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
 fn invalid_axes_shaped_handle_member_access_reports_non_object() {
     let _guard = disable_interactive_plots_for_test();
     let input = "bad_axes_handle = 1049575; out = bad_axes_handle.Type;";
