@@ -6,8 +6,8 @@ use wgpu::util::DeviceExt;
 
 use super::WgpuProvider;
 use crate::backend::wgpu::params::{
-    ImageNormalizeUniforms, IMAGE_NORMALIZE_FLAG_BIAS, IMAGE_NORMALIZE_FLAG_GAIN,
-    IMAGE_NORMALIZE_FLAG_GAMMA,
+    ImageNormalizeUniforms, IMAGE_NORMALIZE_FLAG_BIAS, IMAGE_NORMALIZE_FLAG_CLAMP_ZERO,
+    IMAGE_NORMALIZE_FLAG_GAIN, IMAGE_NORMALIZE_FLAG_GAMMA,
 };
 use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::resources::UniformBufferKey;
@@ -396,6 +396,9 @@ impl WgpuProvider {
                 }
                 if desc.gamma.is_some() {
                     flags |= IMAGE_NORMALIZE_FLAG_GAMMA;
+                }
+                if desc.clamp_zero {
+                    flags |= IMAGE_NORMALIZE_FLAG_CLAMP_ZERO;
                 }
 
                 let mut uniforms = ImageNormalizeUniforms {
