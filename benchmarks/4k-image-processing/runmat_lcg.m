@@ -68,7 +68,7 @@ for b = 1:B
     y_idx = reshape((row_start - 1):(row_start + row_count - 2), [1 row_count 1]);
     idx = batch_offset + y_idx * W + x_idx;
     state = mod(1664525 .* idx + 1013904223, 4294967296);
-    chunk = single(state ./ 4294967296);
+    chunk = single(state) ./ single(4294967296);
     if use_gpu
       imgs(b, rows, :) = gpuArray(chunk);
     else
