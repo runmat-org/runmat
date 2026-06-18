@@ -38,7 +38,7 @@ impl CadOverlayActions {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct CadOverlayState {
     show_tree: bool,
     show_details: bool,
@@ -52,21 +52,14 @@ pub(crate) struct CadOverlayState {
     capture_regions: Vec<egui::Rect>,
 }
 
-impl Default for CadOverlayState {
-    fn default() -> Self {
-        Self {
-            show_tree: false,
-            show_details: false,
-            show_diagnostics: false,
-            selected_node_id: None,
-            selected_region_id: None,
-            expanded_nodes: BTreeSet::new(),
-            show_view_menu: false,
-            view_menu_anchor: None,
-            pointer_captured: false,
-            capture_regions: Vec::new(),
-        }
-    }
+pub(crate) struct CadOverlayRenderInput<'a> {
+    pub ctx: &'a egui::Context,
+    pub plot_rect: egui::Rect,
+    pub overlay: &'a GeometrySceneOverlay,
+    pub grid_enabled: bool,
+    pub xray_enabled: bool,
+    pub owner_visible: &'a dyn Fn(&str) -> bool,
+    pub font_scale: f32,
 }
 
 impl CadOverlayState {
@@ -78,16 +71,16 @@ impl CadOverlayState {
         &self.capture_regions
     }
 
-    pub fn render(
-        &mut self,
-        ctx: &egui::Context,
-        plot_rect: egui::Rect,
-        overlay: &GeometrySceneOverlay,
-        grid_enabled: bool,
-        xray_enabled: bool,
-        owner_visible: &dyn Fn(&str) -> bool,
-        font_scale: f32,
-    ) -> CadOverlayActions {
+    pub fn render(&mut self, input: CadOverlayRenderInput<'_>) -> CadOverlayActions {
+        let CadOverlayRenderInput {
+            ctx,
+            plot_rect,
+            overlay,
+            grid_enabled,
+            xray_enabled,
+            owner_visible,
+            font_scale,
+        } = input;
         let scale = font_scale.clamp(0.9, 1.0);
         let theme = CadOverlayTheme::from_context(ctx);
         let mut actions = CadOverlayActions::default();

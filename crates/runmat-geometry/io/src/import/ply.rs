@@ -4,7 +4,8 @@ use runmat_geometry_core::SurfaceMesh;
 use super::{
     build_asset, build_result, capacity_guard, check_cancelled_periodic, is_degenerate_triangle,
     parse_f64, push_mesh_count_diagnostics, push_utf8_bom_stripped_diagnostic,
-    strip_utf8_bom_bytes, GeometryImportContext, GeometryImportError, GeometryImportOptions,
+    strip_utf8_bom_bytes, BuildAssetInput, GeometryImportContext, GeometryImportError,
+    GeometryImportOptions,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,16 +91,16 @@ pub(super) fn import_ply(
         vertices.len() as u64,
         triangle_count,
     );
-    let asset = build_asset(
+    let asset = build_asset(BuildAssetInput {
         path,
-        "ply/v1",
-        options.units,
-        options.tessellation_profile.clone(),
-        vertices.len() as u64,
-        triangle_count,
-        vec![SurfaceMesh::new("mesh_1", vertices, triangles)],
-        diagnostics.clone(),
-    );
+        importer_version: "ply/v1",
+        units: options.units,
+        tessellation_profile: options.tessellation_profile.clone(),
+        vertex_count: vertices.len() as u64,
+        element_count: triangle_count,
+        surface_meshes: vec![SurfaceMesh::new("mesh_1", vertices, triangles)],
+        diagnostics: diagnostics.clone(),
+    });
     Ok(build_result(asset, diagnostics))
 }
 

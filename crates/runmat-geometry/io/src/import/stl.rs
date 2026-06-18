@@ -3,8 +3,8 @@ use runmat_geometry_core::SurfaceMesh;
 
 use super::{
     build_asset, build_result, capacity_guard, check_cancelled_periodic, is_degenerate_triangle,
-    parse_f64, push_mesh_count_diagnostics, GeometryImportContext, GeometryImportError,
-    GeometryImportOptions,
+    parse_f64, push_mesh_count_diagnostics, BuildAssetInput, GeometryImportContext,
+    GeometryImportError, GeometryImportOptions,
 };
 
 pub(super) fn import_stl(
@@ -82,16 +82,16 @@ fn import_ascii_stl(
         vertices.len() as u64,
         triangle_count,
     );
-    let asset = build_asset(
+    let asset = build_asset(BuildAssetInput {
         path,
-        "stl/v1",
-        options.units,
-        options.tessellation_profile.clone(),
-        vertices.len() as u64,
-        triangle_count,
-        vec![SurfaceMesh::new("mesh_1", vertices, triangles)],
-        diagnostics.clone(),
-    );
+        importer_version: "stl/v1",
+        units: options.units,
+        tessellation_profile: options.tessellation_profile.clone(),
+        vertex_count: vertices.len() as u64,
+        element_count: triangle_count,
+        surface_meshes: vec![SurfaceMesh::new("mesh_1", vertices, triangles)],
+        diagnostics: diagnostics.clone(),
+    });
     Ok(build_result(asset, diagnostics))
 }
 
@@ -156,16 +156,16 @@ fn import_binary_stl(
         vertices.len() as u64,
         accepted_triangles,
     );
-    let asset = build_asset(
+    let asset = build_asset(BuildAssetInput {
         path,
-        "stl/v1",
-        options.units,
-        options.tessellation_profile.clone(),
-        vertices.len() as u64,
-        accepted_triangles,
-        vec![SurfaceMesh::new("mesh_1", vertices, triangles)],
-        diagnostics.clone(),
-    );
+        importer_version: "stl/v1",
+        units: options.units,
+        tessellation_profile: options.tessellation_profile.clone(),
+        vertex_count: vertices.len() as u64,
+        element_count: accepted_triangles,
+        surface_meshes: vec![SurfaceMesh::new("mesh_1", vertices, triangles)],
+        diagnostics: diagnostics.clone(),
+    });
     Ok(build_result(asset, diagnostics))
 }
 

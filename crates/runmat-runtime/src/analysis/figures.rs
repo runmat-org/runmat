@@ -873,7 +873,7 @@ fn append_deformed_mesh_overlay(
             ));
             continue;
         }
-        figure.add_mesh_plot(plot);
+        figure.add_mesh_plot(*plot);
     }
 }
 

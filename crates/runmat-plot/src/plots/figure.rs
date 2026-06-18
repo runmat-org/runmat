@@ -174,14 +174,14 @@ pub enum PlotElement {
     Line(LinePlot),
     Scatter(ScatterPlot),
     Bar(BarChart),
-    ErrorBar(ErrorBar),
+    ErrorBar(Box<ErrorBar>),
     Stairs(StairsPlot),
     Stem(StemPlot),
     Area(AreaPlot),
     Quiver(QuiverPlot),
     Pie(PieChart),
     Surface(SurfacePlot),
-    Mesh(MeshPlot),
+    Mesh(Box<MeshPlot>),
     Patch(PatchPlot),
     Line3(Line3Plot),
     Scatter3(Scatter3Plot),
@@ -978,7 +978,7 @@ impl Figure {
     }
 
     pub fn add_errorbar_on_axes(&mut self, plot: ErrorBar, axes_index: usize) -> usize {
-        self.push_plot(PlotElement::ErrorBar(plot), axes_index)
+        self.push_plot(PlotElement::ErrorBar(Box::new(plot)), axes_index)
     }
 
     /// Add a stairs plot
@@ -1046,7 +1046,7 @@ impl Figure {
     }
 
     pub fn add_mesh_plot_on_axes(&mut self, plot: MeshPlot, axes_index: usize) -> usize {
-        self.push_plot(PlotElement::Mesh(plot), axes_index)
+        self.push_plot(PlotElement::Mesh(Box::new(plot)), axes_index)
     }
 
     pub fn add_line3_plot(&mut self, plot: Line3Plot) -> usize {

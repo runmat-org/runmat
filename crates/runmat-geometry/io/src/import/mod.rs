@@ -149,16 +149,28 @@ pub(crate) fn check_cancelled_periodic(
     Ok(())
 }
 
-pub(crate) fn build_asset(
-    path: &str,
-    importer_version: &str,
-    units: UnitSystem,
-    tessellation_profile: TessellationProfile,
-    vertex_count: u64,
-    element_count: u64,
-    surface_meshes: Vec<SurfaceMesh>,
-    diagnostics: Vec<ImportDiagnostic>,
-) -> GeometryAsset {
+pub(crate) struct BuildAssetInput<'a> {
+    pub path: &'a str,
+    pub importer_version: &'a str,
+    pub units: UnitSystem,
+    pub tessellation_profile: TessellationProfile,
+    pub vertex_count: u64,
+    pub element_count: u64,
+    pub surface_meshes: Vec<SurfaceMesh>,
+    pub diagnostics: Vec<ImportDiagnostic>,
+}
+
+pub(crate) fn build_asset(input: BuildAssetInput<'_>) -> GeometryAsset {
+    let BuildAssetInput {
+        path,
+        importer_version,
+        units,
+        tessellation_profile,
+        vertex_count,
+        element_count,
+        surface_meshes,
+        diagnostics,
+    } = input;
     let (regions, region_entity_mappings) = default_surface_regions(&surface_meshes);
 
     GeometryAsset {

@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     build_asset, build_result, capacity_guard, push_entity_range, push_mesh_count_diagnostics,
-    GeometryImportContext, GeometryImportError, GeometryImportOptions,
+    BuildAssetInput, GeometryImportContext, GeometryImportError, GeometryImportOptions,
 };
 
 pub(super) fn import_cad(
@@ -83,16 +83,16 @@ fn build_step_metadata_result(
             .to_string(),
     });
 
-    let mut asset = build_asset(
+    let mut asset = build_asset(BuildAssetInput {
         path,
-        "step/v1",
-        options.units,
-        options.tessellation_profile.clone(),
-        0,
-        0,
-        Vec::new(),
-        diagnostics.clone(),
-    );
+        importer_version: "step/v1",
+        units: options.units,
+        tessellation_profile: options.tessellation_profile.clone(),
+        vertex_count: 0,
+        element_count: 0,
+        surface_meshes: Vec::new(),
+        diagnostics: diagnostics.clone(),
+    });
     asset.source_geometry.kind = summary.source_kind;
     asset.source_geometry.assembly = summary.assembly;
     asset.source_geometry.material_evidence = summary.material_evidence;
@@ -165,14 +165,15 @@ pub(crate) fn build_topology_result(
     let vertex_count = topology.vertices.len() as u64;
     let triangle_count = topology.triangles.len() as u64;
     let (regions, mappings) = topology_regions(&topology);
-    let mut asset = build_asset(
+    let importer_version = format!("cad/occt/{}/v1", format.as_str());
+    let mut asset = build_asset(BuildAssetInput {
         path,
-        &format!("cad/occt/{}/v1", format.as_str()),
-        options.units,
-        options.tessellation_profile.clone(),
+        importer_version: &importer_version,
+        units: options.units,
+        tessellation_profile: options.tessellation_profile.clone(),
         vertex_count,
-        triangle_count,
-        if topology.triangles.is_empty() {
+        element_count: triangle_count,
+        surface_meshes: if topology.triangles.is_empty() {
             Vec::new()
         } else {
             vec![SurfaceMesh::new(
@@ -181,8 +182,8 @@ pub(crate) fn build_topology_result(
                 topology.triangles,
             )]
         },
-        diagnostics.clone(),
-    );
+        diagnostics: diagnostics.clone(),
+    });
 
     asset.source_geometry.kind = SourceGeometryKind::Cad;
     asset.source_geometry.assembly = topology

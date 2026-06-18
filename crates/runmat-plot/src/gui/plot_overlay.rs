@@ -4,7 +4,7 @@
 //! plot content, providing controls, axis labels, grid lines, and titles.
 
 use crate::core::{plot_utils, PlotRenderer};
-use crate::overlay::cad_overlay::{CadOverlayActions, CadOverlayState};
+use crate::overlay::cad_overlay::{CadOverlayActions, CadOverlayRenderInput, CadOverlayState};
 use crate::plots::TextStyle;
 use crate::styling::{ModernDarkTheme, PlotThemeConfig, ThemeVariant};
 use egui::{Align2, Color32, Context, FontId, Pos2, Rect, Stroke};
@@ -1475,15 +1475,15 @@ impl PlotOverlay {
         }
 
         if let Some(overlay) = plot_renderer.geometry_overlay() {
-            let actions = self.cad_overlay.render(
-                ui.ctx(),
-                centered_plot_rect,
+            let actions = self.cad_overlay.render(CadOverlayRenderInput {
+                ctx: ui.ctx(),
+                plot_rect: centered_plot_rect,
                 overlay,
-                plot_renderer.overlay_show_grid(),
-                plot_renderer.geometry_xray_enabled(),
-                &|owner_id| plot_renderer.geometry_owner_visible(owner_id),
-                config.font_scale,
-            );
+                grid_enabled: plot_renderer.overlay_show_grid(),
+                xray_enabled: plot_renderer.geometry_xray_enabled(),
+                owner_visible: &|owner_id| plot_renderer.geometry_owner_visible(owner_id),
+                font_scale: config.font_scale,
+            });
             self.cad_actions.merge(actions);
         }
 

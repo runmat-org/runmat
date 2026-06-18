@@ -177,11 +177,10 @@ impl NativeSurfaceRenderContext {
     pub fn overlay_wants_pointer_input(&self) -> bool {
         #[cfg(feature = "egui-overlay")]
         {
-            return self
-                .overlay
+            self.overlay
                 .as_ref()
                 .map(|overlay| overlay.wants_pointer_input)
-                .unwrap_or(false);
+                .unwrap_or(false)
         }
 
         #[cfg(not(feature = "egui-overlay"))]
@@ -193,11 +192,10 @@ impl NativeSurfaceRenderContext {
     pub fn overlay_capture_regions_px(&self) -> Vec<[f32; 4]> {
         #[cfg(feature = "egui-overlay")]
         {
-            return self
-                .overlay
+            self.overlay
                 .as_ref()
                 .map(|overlay| overlay.capture_regions_px.clone())
-                .unwrap_or_default();
+                .unwrap_or_default()
         }
 
         #[cfg(not(feature = "egui-overlay"))]
@@ -209,7 +207,7 @@ impl NativeSurfaceRenderContext {
     pub fn take_host_actions(&mut self) -> Vec<NativeSurfaceHostAction> {
         #[cfg(feature = "egui-overlay")]
         {
-            return std::mem::take(&mut self.host_actions);
+            std::mem::take(&mut self.host_actions)
         }
 
         #[cfg(not(feature = "egui-overlay"))]

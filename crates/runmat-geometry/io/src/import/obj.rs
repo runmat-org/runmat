@@ -5,7 +5,8 @@ use std::collections::BTreeMap;
 use super::{
     build_asset, build_result, capacity_guard, check_cancelled_periodic, is_degenerate_triangle,
     parse_f64, push_entity_range, push_mesh_count_diagnostics, push_utf8_bom_stripped_diagnostic,
-    strip_utf8_bom_text, GeometryImportContext, GeometryImportError, GeometryImportOptions,
+    strip_utf8_bom_text, BuildAssetInput, GeometryImportContext, GeometryImportError,
+    GeometryImportOptions,
 };
 
 pub(super) fn import_obj(
@@ -141,16 +142,16 @@ pub(super) fn import_obj(
         vertex_pool.len() as u64,
         triangle_count,
     );
-    let mut asset = build_asset(
+    let mut asset = build_asset(BuildAssetInput {
         path,
-        "obj/v1",
-        options.units,
-        options.tessellation_profile.clone(),
-        vertex_pool.len() as u64,
-        triangle_count,
-        vec![SurfaceMesh::new("mesh_1", vertex_pool, triangles)],
-        diagnostics.clone(),
-    );
+        importer_version: "obj/v1",
+        units: options.units,
+        tessellation_profile: options.tessellation_profile.clone(),
+        vertex_count: vertex_pool.len() as u64,
+        element_count: triangle_count,
+        surface_meshes: vec![SurfaceMesh::new("mesh_1", vertex_pool, triangles)],
+        diagnostics: diagnostics.clone(),
+    });
     if let Some((mapped_regions, mapped_entities)) = regions.into_geometry_regions("mesh_1") {
         asset.regions = mapped_regions;
         asset.region_entity_mappings = mapped_entities;

@@ -9,7 +9,8 @@ use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
 use super::{
     build_asset, build_result, capacity_guard, check_cancelled_periodic, is_degenerate_triangle,
     push_entity_range, push_mesh_count_diagnostics, push_utf8_bom_stripped_diagnostic,
-    strip_utf8_bom_bytes, GeometryImportContext, GeometryImportError, GeometryImportOptions,
+    strip_utf8_bom_bytes, BuildAssetInput, GeometryImportContext, GeometryImportError,
+    GeometryImportOptions,
 };
 
 pub(super) fn import_gltf(
@@ -159,16 +160,16 @@ pub(super) fn import_gltf(
         all_positions.len() as u64,
         triangle_count,
     );
-    let mut asset = build_asset(
+    let mut asset = build_asset(BuildAssetInput {
         path,
-        "gltf/v1",
-        options.units,
-        options.tessellation_profile.clone(),
-        all_positions.len() as u64,
-        triangle_count,
-        vec![SurfaceMesh::new("mesh_1", all_positions, triangles)],
-        diagnostics.clone(),
-    );
+        importer_version: "gltf/v1",
+        units: options.units,
+        tessellation_profile: options.tessellation_profile.clone(),
+        vertex_count: all_positions.len() as u64,
+        element_count: triangle_count,
+        surface_meshes: vec![SurfaceMesh::new("mesh_1", all_positions, triangles)],
+        diagnostics: diagnostics.clone(),
+    });
     if let Some((regions, mappings)) = region_tracker.into_geometry_regions("mesh_1") {
         asset.regions = regions;
         asset.region_entity_mappings = mappings;
