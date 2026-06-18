@@ -1,0 +1,101 @@
+{
+  "title": "butter",
+  "category": "math/signal",
+  "keywords": [
+    "butter",
+    "Butterworth",
+    "IIR",
+    "lowpass",
+    "highpass",
+    "bandpass",
+    "bandstop",
+    "signal processing"
+  ],
+  "summary": "Design Butterworth IIR filters.",
+  "references": [
+    "title: \"MATLAB butter documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Filter design is host-side coefficient generation. The resulting coefficients can be passed to `filter`, which uses the provider `iir_filter` hook for real gpuArray signals when available."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::butter::tests",
+    "integration": "bytecode::compile::tests::compile_interprets_butter_filter_workflow"
+  },
+  "description": "`butter(n, Wn)` designs an order-`n` Butterworth filter. Digital designs use MATLAB's normalized convention where `Wn = 1` is Nyquist. Scalar `Wn` produces a lowpass filter by default; a two-element `Wn` produces a bandpass filter by default. Add an `ftype` string for `low`, `high`, `bandpass`, or `stop`, and add `'s'` for analog transfer functions.",
+  "behaviors": [
+    "`b = butter(n, Wn)` returns numerator coefficients as a row vector.",
+    "`[b, a] = butter(...)` returns numerator and denominator coefficient row vectors suitable for `filter(b, a, x)` in digital mode.",
+    "`[z, p, k] = butter(...)` returns zero-pole-gain form.",
+    "`[A, B, C, D] = butter(...)` returns a controllable-canonical state-space realization.",
+    "Digital cutoff frequencies must be finite, greater than 0, and less than 1. Analog cutoff frequencies must be finite and greater than 0.",
+    "Bandpass and bandstop designs require a strictly increasing two-element `Wn` vector."
+  ],
+  "examples": [
+    {
+      "description": "Low-pass filtering a noisy signal",
+      "input": "fs = 1000;\nt = (0:999) / fs;\nx = sin(2*pi*25*t) + 0.2*sin(2*pi*200*t);\n[b, a] = butter(4, 80/(fs/2), 'low');\ny = filter(b, a, x);",
+      "output": "y contains the low-pass filtered signal."
+    },
+    {
+      "description": "High-pass filter coefficients",
+      "input": "[b, a] = butter(2, 0.25, 'high')",
+      "output": "b and a are row-vector IIR coefficients."
+    },
+    {
+      "description": "Band-pass filter coefficients",
+      "input": "[b, a] = butter(3, [0.2 0.4], 'bandpass')",
+      "output": "b and a each contain 7 coefficients."
+    },
+    {
+      "description": "Analog low-pass prototype",
+      "input": "[b, a] = butter(1, 2, 's')",
+      "output": "b = [0 2]\na = [1 2]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does `Wn` mean for digital filters?",
+      "answer": "RunMat follows MATLAB's normalized digital convention: `Wn = 1` is the Nyquist frequency, so a 600 Hz low-pass filter at a 4800 Hz sample rate uses `butter(n, 600/(4800/2))`."
+    },
+    {
+      "question": "Can I use the result directly with `filter`?",
+      "answer": "Yes. Digital `[b, a]` outputs are ordinary row vectors and can be passed directly to `filter(b, a, x)`."
+    },
+    {
+      "question": "Does `butter` execute on the GPU?",
+      "answer": "No. It generates small coefficient arrays on the host. GPU acceleration applies when those coefficients are used by `filter` with a real gpuArray signal and a provider that implements `iir_filter`."
+    }
+  ],
+  "links": [
+    {
+      "label": "filter",
+      "url": "./filter"
+    },
+    {
+      "label": "conv",
+      "url": "./conv"
+    },
+    {
+      "label": "fft",
+      "url": "./fft"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/butter.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/butter.rs"
+  }
+}

@@ -1087,6 +1087,23 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
             implicit_class_argument: None,
         },
     );
+    for name in [
+        "plus", "times", "mtimes", "lt", "gt", "eq", "uplus", "rdivide", "mrdivide", "ldivide",
+        "mldivide", "and", "or", "xor",
+    ] {
+        overidx_methods.insert(
+            name.to_string(),
+            MethodDef {
+                name: name.to_string(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: format!("OverIdx.{name}"),
+                implicit_class_argument: None,
+            },
+        );
+    }
     runmat_builtins::register_class(ClassDef {
         name: "OverIdx".to_string(),
         parent: None,

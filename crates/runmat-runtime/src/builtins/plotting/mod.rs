@@ -152,10 +152,12 @@ pub use properties::resolve_plot_handle;
 pub use state::{
     clear_figure, clone_figure, close_figure, configure_subplot, current_axes_state,
     current_figure_handle, figure_handles, import_figure, install_figure_observer,
-    new_figure_handle, reset_hold_state_for_run, reset_plot_state, reset_recent_figures,
-    select_axes_for_figure, select_figure, set_hold, take_recent_figures, FigureAxesState,
-    FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
+    new_figure_handle, record_recent_figure, reset_hold_state_for_run, reset_plot_state,
+    reset_recent_figures, select_axes_for_figure, select_figure, set_hold, take_recent_figures,
+    FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
+#[cfg(all(feature = "plot-core", target_arch = "wasm32"))]
+use std::cell::RefCell;
 use std::collections::HashMap;
 #[cfg(feature = "plot-core")]
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -170,6 +172,14 @@ pub use web::{
     set_surface_camera_state, web_renderer_ready, PlotCameraProjection, PlotCameraState,
     PlotSurfaceCameraState,
 };
+
+#[doc(hidden)]
+pub use state::PlotTestLockGuard;
+
+#[doc(hidden)]
+pub fn lock_plot_test_context() -> PlotTestLockGuard {
+    state::lock_plot_test_registry()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimePlottingMode {
@@ -282,19 +292,14 @@ pub async fn import_figure_scene_from_path_async(
 #[cfg(feature = "plot-core")]
 pub fn import_geometry_scene(scene: runmat_plot::GeometryScene) -> crate::BuiltinResult<u32> {
     let handle = NEXT_GEOMETRY_SCENE_HANDLE.fetch_add(1, Ordering::Relaxed) as u32;
-    let mut guard = geometry_scene_registry().lock().map_err(|_| {
-        crate::build_runtime_error("geometry scene registry lock poisoned")
-            .with_builtin("plot")
-            .build()
-    })?;
-    guard.insert(handle, scene);
+    insert_geometry_scene(handle, scene)?;
     register_imported_geometry_scene(handle);
     Ok(handle)
 }
 
 #[cfg(feature = "plot-core")]
 pub fn clone_geometry_scene(handle: u32) -> Option<runmat_plot::GeometryScene> {
-    geometry_scene_registry().lock().ok()?.get(&handle).cloned()
+    get_geometry_scene(handle)
 }
 
 #[cfg(feature = "plot-core")]
@@ -303,33 +308,20 @@ pub fn append_geometry_scene_chunks(
     chunks: Vec<runmat_plot::GeometrySceneChunk>,
     overlay: Option<runmat_plot::GeometrySceneOverlay>,
 ) -> crate::BuiltinResult<()> {
-    let mut guard = geometry_scene_registry().lock().map_err(|_| {
-        crate::build_runtime_error("geometry scene registry lock poisoned")
-            .with_builtin("plot")
-            .build()
-    })?;
-    let scene = guard.get_mut(&handle).ok_or_else(|| {
-        crate::build_runtime_error(format!("geometry scene handle {handle} does not exist"))
-            .with_builtin("plot")
-            .build()
-    })?;
-    if !chunks.is_empty() {
-        scene.append_chunks(chunks);
-    }
-    if let Some(overlay) = overlay {
-        let merged = merge_geometry_scene_overlay(scene, overlay);
-        scene.set_overlay(merged);
-    }
-    Ok(())
+    with_geometry_scene_mut(handle, |scene| {
+        if !chunks.is_empty() {
+            scene.append_chunks(chunks);
+        }
+        if let Some(overlay) = overlay {
+            let merged = merge_geometry_scene_overlay(scene, overlay);
+            scene.set_overlay(merged);
+        }
+    })
 }
 
 #[cfg(feature = "plot-core")]
 pub fn close_geometry_scene(handle: u32) -> bool {
-    geometry_scene_registry()
-        .lock()
-        .ok()
-        .and_then(|mut guard| guard.remove(&handle))
-        .is_some()
+    remove_geometry_scene(handle)
 }
 
 #[cfg(feature = "plot-core")]
@@ -366,7 +358,7 @@ pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> crate::Builtin
 }
 
 type ImportedFigureRegistry = Mutex<HashMap<u32, ()>>;
-#[cfg(feature = "plot-core")]
+#[cfg(all(feature = "plot-core", not(target_arch = "wasm32")))]
 type GeometrySceneRegistry = Mutex<HashMap<u32, runmat_plot::GeometryScene>>;
 #[cfg(feature = "plot-core")]
 type ImportedGeometrySceneRegistry = Mutex<HashMap<u32, ()>>;
@@ -374,10 +366,101 @@ type ImportedGeometrySceneRegistry = Mutex<HashMap<u32, ()>>;
 #[cfg(feature = "plot-core")]
 static NEXT_GEOMETRY_SCENE_HANDLE: AtomicU64 = AtomicU64::new(1);
 
-#[cfg(feature = "plot-core")]
+#[cfg(all(feature = "plot-core", target_arch = "wasm32"))]
+thread_local! {
+    static GEOMETRY_SCENE_REGISTRY: RefCell<HashMap<u32, runmat_plot::GeometryScene>> =
+        RefCell::new(HashMap::new());
+}
+
+#[cfg(all(feature = "plot-core", not(target_arch = "wasm32")))]
 fn geometry_scene_registry() -> &'static GeometrySceneRegistry {
     static REGISTRY: OnceLock<GeometrySceneRegistry> = OnceLock::new();
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(all(feature = "plot-core", not(target_arch = "wasm32")))]
+fn insert_geometry_scene(
+    handle: u32,
+    scene: runmat_plot::GeometryScene,
+) -> crate::BuiltinResult<()> {
+    let mut guard = geometry_scene_registry().lock().map_err(|_| {
+        crate::build_runtime_error("geometry scene registry lock poisoned")
+            .with_builtin("plot")
+            .build()
+    })?;
+    guard.insert(handle, scene);
+    Ok(())
+}
+
+#[cfg(all(feature = "plot-core", target_arch = "wasm32"))]
+fn insert_geometry_scene(
+    handle: u32,
+    scene: runmat_plot::GeometryScene,
+) -> crate::BuiltinResult<()> {
+    GEOMETRY_SCENE_REGISTRY.with(|registry| {
+        registry.borrow_mut().insert(handle, scene);
+    });
+    Ok(())
+}
+
+#[cfg(all(feature = "plot-core", not(target_arch = "wasm32")))]
+fn get_geometry_scene(handle: u32) -> Option<runmat_plot::GeometryScene> {
+    geometry_scene_registry().lock().ok()?.get(&handle).cloned()
+}
+
+#[cfg(all(feature = "plot-core", target_arch = "wasm32"))]
+fn get_geometry_scene(handle: u32) -> Option<runmat_plot::GeometryScene> {
+    GEOMETRY_SCENE_REGISTRY.with(|registry| registry.borrow().get(&handle).cloned())
+}
+
+#[cfg(all(feature = "plot-core", not(target_arch = "wasm32")))]
+fn with_geometry_scene_mut(
+    handle: u32,
+    update: impl FnOnce(&mut runmat_plot::GeometryScene),
+) -> crate::BuiltinResult<()> {
+    let mut guard = geometry_scene_registry().lock().map_err(|_| {
+        crate::build_runtime_error("geometry scene registry lock poisoned")
+            .with_builtin("plot")
+            .build()
+    })?;
+    let scene = guard.get_mut(&handle).ok_or_else(|| {
+        crate::build_runtime_error(format!("geometry scene handle {handle} does not exist"))
+            .with_builtin("plot")
+            .build()
+    })?;
+    update(scene);
+    Ok(())
+}
+
+#[cfg(all(feature = "plot-core", target_arch = "wasm32"))]
+fn with_geometry_scene_mut(
+    handle: u32,
+    update: impl FnOnce(&mut runmat_plot::GeometryScene),
+) -> crate::BuiltinResult<()> {
+    GEOMETRY_SCENE_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let scene = registry.get_mut(&handle).ok_or_else(|| {
+            crate::build_runtime_error(format!("geometry scene handle {handle} does not exist"))
+                .with_builtin("plot")
+                .build()
+        })?;
+        update(scene);
+        Ok(())
+    })
+}
+
+#[cfg(all(feature = "plot-core", not(target_arch = "wasm32")))]
+fn remove_geometry_scene(handle: u32) -> bool {
+    geometry_scene_registry()
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.remove(&handle))
+        .is_some()
+}
+
+#[cfg(all(feature = "plot-core", target_arch = "wasm32"))]
+fn remove_geometry_scene(handle: u32) -> bool {
+    GEOMETRY_SCENE_REGISTRY.with(|registry| registry.borrow_mut().remove(&handle).is_some())
 }
 
 #[cfg(feature = "plot-core")]
@@ -514,13 +597,9 @@ pub mod ops {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::state;
-    use std::sync::Once;
 
     pub(crate) fn ensure_plot_test_env() {
-        static INIT: Once = Once::new();
-        INIT.call_once(|| {
-            state::disable_rendering_for_tests();
-        });
+        state::disable_rendering_for_tests();
     }
 
     pub(crate) fn lock_plot_registry() -> state::PlotTestLockGuard {

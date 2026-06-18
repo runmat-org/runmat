@@ -26,11 +26,13 @@
   "tested": {
     "unit": "builtins::plotting::gca::tests"
   },
-  "description": "`gca` returns the handle for the current axes in the active figure. Optional struct mode returns a snapshot of current axes context for diagnostics and tooling.",
+  "description": "`gca` returns the handle for the current axes in the active figure, or in a specific figure when a figure handle is supplied. Optional struct mode returns a snapshot of current axes context for diagnostics and tooling.",
   "behaviors": [
     "`gca()` returns a scalar numeric axes handle.",
+    "`gca(fig)` returns the current axes handle for the specified figure handle.",
     "`gca('struct')` returns a struct with fields `handle`, `figure`, `rows`, `cols`, and `index`.",
     "The current axes reflect the active subplot when `subplot` has been used.",
+    "The numeric axes handle can be passed to `get` and `set`, including common axes styling such as `FontSize`.",
     "Unsupported arguments raise `gca` plotting errors."
   ],
   "examples": [
@@ -43,6 +45,15 @@
       "description": "Inspect the active subplot layout",
       "input": "subplot(2, 2, 3);\ninfo = gca(\"struct\")",
       "output": "info =\n  struct with fields:\n    handle\n    figure\n    rows\n    cols\n    index"
+    },
+    {
+      "description": "Read the current axes of a specific figure",
+      "input": "f1 = figure(1);\nsubplot(2, 2, 3);\nf2 = figure(2);\nax1 = gca(f1)",
+      "output": "% ax1 is the current axes handle for figure 1"
+    },
+    {
+      "description": "Style the current axes",
+      "input": "plot(1:3, [1 2 3]);\nset(gca, 'FontSize', 10);"
     }
   ],
   "faqs": [
@@ -53,6 +64,10 @@
     {
       "question": "Does `gca` reflect `subplot` selection?",
       "answer": "Yes. When a subplot is active, `gca` reports that subplot's axes handle and metadata."
+    },
+    {
+      "question": "Can `gca` inspect a non-current figure?",
+      "answer": "Yes. Pass a figure handle, for example `gca(fig)`, to read that figure's current axes without changing the active figure."
     },
     {
       "question": "Does `gca` run on the GPU?",

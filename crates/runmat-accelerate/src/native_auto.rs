@@ -1319,6 +1319,7 @@ fn value_kind(value: &Value) -> &'static str {
     match value {
         Value::GpuTensor(_) => "GpuTensor",
         Value::Tensor(_) => "Tensor",
+        Value::SparseTensor(_) => "SparseTensor",
         Value::Num(_) => "Num",
         Value::Int(_) => "Int",
         Value::Bool(_) => "Bool",
@@ -1326,6 +1327,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::CharArray(_) => "CharArray",
         Value::String(_) => "String",
         Value::StringArray(_) => "StringArray",
+        Value::Symbolic(_) => "Symbolic",
         Value::Cell(_) => "Cell",
         Value::Struct(_) => "Struct",
         Value::Object(_) => "Object",

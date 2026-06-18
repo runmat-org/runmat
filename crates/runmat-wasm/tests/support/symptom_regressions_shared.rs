@@ -1,20 +1,8 @@
 #![cfg(target_arch = "wasm32")]
 
-use runmat_wasm::init_runmat;
-use serde::{Deserialize, Serialize};
+use runmat_wasm::{init_runmat, RunMatWasm};
+use serde::Deserialize;
 use wasm_bindgen::JsValue;
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExecuteRequest<'a> {
-    source: ExecuteSource<'a>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-enum ExecuteSource<'a> {
-    Text { name: &'a str, text: &'a str },
-}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,17 +35,8 @@ fn init_options(enable_gpu: bool) -> JsValue {
     options.into()
 }
 
-async fn execute_script(script: &str) -> ExecPayload {
-    let runtime = init_runmat(init_options(false))
-        .await
-        .expect("initialize wasm runtime");
-    let request = serde_wasm_bindgen::to_value(&ExecuteRequest {
-        source: ExecuteSource::Text {
-            name: "symptom_regression.m",
-            text: script,
-        },
-    })
-    .expect("serialize executeRequest payload");
+pub(crate) async fn execute_script_with_runtime(runtime: &RunMatWasm, script: &str) -> ExecPayload {
+    let request = text_execute_request("symptom_regression.m", script);
     serde_wasm_bindgen::from_value(
         runtime
             .execute_request_js(request)
@@ -65,6 +44,64 @@ async fn execute_script(script: &str) -> ExecPayload {
             .expect("execute script"),
     )
     .expect("deserialize execution payload")
+}
+
+async fn execute_script(script: &str) -> ExecPayload {
+    let runtime = init_runmat(init_options(false))
+        .await
+        .expect("initialize wasm runtime");
+    execute_script_with_runtime(&runtime, script).await
+}
+
+fn text_execute_request(name: &str, script: &str) -> JsValue {
+    let source = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &source,
+        &JsValue::from_str("kind"),
+        &JsValue::from_str("text"),
+    )
+    .expect("set source kind");
+    js_sys::Reflect::set(
+        &source,
+        &JsValue::from_str("name"),
+        &JsValue::from_str(name),
+    )
+    .expect("set source name");
+    js_sys::Reflect::set(
+        &source,
+        &JsValue::from_str("text"),
+        &JsValue::from_str(script),
+    )
+    .expect("set source text");
+
+    let request = js_sys::Object::new();
+    js_sys::Reflect::set(&request, &JsValue::from_str("source"), source.as_ref())
+        .expect("set request source");
+    request.into()
+}
+
+pub(crate) fn stdout_text(payload: &ExecPayload) -> String {
+    payload
+        .stdout
+        .iter()
+        .filter(|entry| entry.stream == "stdout")
+        .map(|entry| entry.text.as_str())
+        .collect::<String>()
+}
+
+fn finite_stdout_numbers(stdout_text: &str) -> Vec<f64> {
+    stdout_text
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, '[' | ']' | ',' | ';'))
+        .filter_map(|part| {
+            let trimmed = part.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                trimmed.parse::<f64>().ok()
+            }
+        })
+        .filter(|value| value.is_finite())
+        .collect()
 }
 
 pub(crate) async fn assert_impedance_loop_executes_without_runtime_error() {
@@ -106,12 +143,7 @@ disp(Vc);
     if let Some(err) = payload.error {
         panic!("impedance loop wasm execution failed: {}", err.message);
     }
-    let stdout_text = payload
-        .stdout
-        .iter()
-        .filter(|entry| entry.stream == "stdout")
-        .map(|entry| entry.text.as_str())
-        .collect::<String>();
+    let stdout_text = stdout_text(&payload);
     assert!(
         stdout_text.contains("500000"),
         "unexpected impedance loop stdout: {stdout_text:?}"
@@ -147,14 +179,75 @@ disp(probe);
     if let Some(err) = payload.error {
         panic!("slice arithmetic wasm execution failed: {}", err.message);
     }
-    let stdout_text = payload
-        .stdout
-        .iter()
-        .filter(|entry| entry.stream == "stdout")
-        .map(|entry| entry.text.as_str())
-        .collect::<String>();
+    let stdout_text = stdout_text(&payload);
     assert!(
         !stdout_text.trim().is_empty(),
         "slice arithmetic produced empty stdout unexpectedly"
+    );
+}
+
+pub(crate) async fn assert_tic_toc_loop_executes_without_runtime_error() {
+    let script = r#"
+tic();
+for k = 1:1e5
+    sqrt(k);
+end
+elapsedStack = toc();
+
+tic
+for k = 1:1e5
+    sqrt(k);
+end
+elapsedBare = toc;
+
+timerVal = tic();
+for k = 1:1e5
+    sqrt(k);
+end
+elapsedHandle = toc(timerVal);
+
+disp(elapsedStack);
+disp(elapsedBare);
+disp(elapsedHandle);
+"#;
+
+    let payload = execute_script(script).await;
+    if let Some(err) = payload.error {
+        panic!("tic/toc loop wasm execution failed: {}", err.message);
+    }
+    let stdout_text = stdout_text(&payload);
+    let elapsed_values = finite_stdout_numbers(&stdout_text);
+    assert!(
+        elapsed_values.len() >= 3,
+        "tic/toc loop produced unexpected stdout: {stdout_text:?}"
+    );
+    assert!(
+        elapsed_values.iter().take(3).all(|value| *value >= 0.0),
+        "tic/toc loop produced negative elapsed values: {elapsed_values:?}"
+    );
+}
+
+pub(crate) async fn assert_symbolic_limit_workflow_executes_without_runtime_error() {
+    let script = r#"
+syms x h
+f1 = limit(sin(x)/x, x, 0);
+f2 = limit((cos(x+h) - cos(x))/h, h, 0);
+
+disp(f1);
+disp(f2);
+"#;
+
+    let payload = execute_script(script).await;
+    if let Some(err) = payload.error {
+        panic!("symbolic limit wasm execution failed: {}", err.message);
+    }
+    let stdout_text = stdout_text(&payload);
+    assert!(
+        stdout_text.split_whitespace().any(|token| token == "1"),
+        "symbolic limit workflow did not print sinc limit: {stdout_text:?}"
+    );
+    assert!(
+        stdout_text.contains("-sin(x)"),
+        "symbolic limit workflow did not print derivative limit: {stdout_text:?}"
     );
 }

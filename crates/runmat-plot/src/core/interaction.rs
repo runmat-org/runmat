@@ -139,6 +139,13 @@ pub fn egui_raw_input_from_plot_events(
                 modifiers,
             } => {
                 egui_events.push(egui::Event::PointerMoved(egui_pos(position, ppp)));
+                #[cfg(target_arch = "wasm32")]
+                egui_events.push(egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(delta.x * 80.0, delta.y * 80.0),
+                    modifiers: egui_modifiers(modifiers),
+                });
+                #[cfg(not(target_arch = "wasm32"))]
                 egui_events.push(egui::Event::Scroll(egui::vec2(
                     delta.x * 80.0,
                     delta.y * 80.0,

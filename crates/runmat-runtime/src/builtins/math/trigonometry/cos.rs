@@ -15,8 +15,10 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::symbolic::symbolic_function;
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_builtins::SymbolicFunction;
 
 const BUILTIN_NAME: &str = "cos";
 
@@ -197,6 +199,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
+    if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Cos) {
+        return apply_output_template(symbolic, &template).await;
+    }
     let base = match value {
         Value::GpuTensor(handle) => cos_gpu(handle).await?,
         Value::Complex(re, im) => Value::Complex(cos_complex_re(re, im), cos_complex_im(re, im)),

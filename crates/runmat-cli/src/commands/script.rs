@@ -4,8 +4,8 @@ use runmat_config::project::{resolve_project_source_input_from, ResolveProjectSo
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_core::{
     abi::{
-        DiagnosticSeverity, ExecutionOutcome, ExecutionRequest, HostExecutionPolicy, RuntimeFlow,
-        SourceInput,
+        DiagnosticSeverity, ExecutionOutcome, ExecutionRequest, ExecutionSourceContext,
+        HostExecutionPolicy, RuntimeDiagnostic, RuntimeFlow, SourceInput,
     },
     TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
 };
@@ -20,7 +20,7 @@ use crate::commands::bytecode::{emit_bytecode, write_bytecode_output};
 use crate::commands::fea::execute_fea_path;
 use crate::commands::session::create_session;
 use crate::commands::streams::emit_execution_streams;
-use crate::diagnostics::format_frontend_error;
+use crate::diagnostics::{format_frontend_error, format_runtime_diagnostic};
 use crate::telemetry::{capture_provider_snapshot, TelemetryRunKind};
 use crate::AlreadyReportedCliError;
 
@@ -144,6 +144,7 @@ async fn execute_script_request(
         engine.workspace_handle(),
     );
     let response = engine.execute_request(request).await;
+    let source_context = response.source_context;
     let outcome = match response.result {
         Ok(outcome) => outcome,
         Err(err) => {
@@ -160,8 +161,8 @@ async fn execute_script_request(
                     provider: capture_provider_snapshot(),
                 });
             }
-            if let Some(diag) = response.source_context.source_text().and_then(|source| {
-                format_frontend_error(&err, response.source_context.source_name(), source)
+            if let Some(diag) = source_context.source_text().and_then(|source| {
+                format_frontend_error(&err, source_context.source_name(), source)
             }) {
                 eprintln!("{diag}");
             } else {
@@ -183,6 +184,7 @@ async fn execute_script_request(
             &artifacts_plan,
             &script,
             &outcome,
+            &source_context,
             execution_time,
             success,
             error_payload.as_deref(),
@@ -207,8 +209,11 @@ async fn execute_script_request(
         });
     }
 
-    if let Some(error) = error_payload {
-        eprintln!("{error}");
+    if let Some(diagnostic) = outcome_error_diagnostic(&outcome) {
+        eprintln!(
+            "{}",
+            format_script_runtime_diagnostic(diagnostic, &source_context)
+        );
         return Err(AlreadyReportedCliError.into());
     } else {
         if outcome.used_jit {
@@ -273,10 +278,54 @@ fn normalize_manifest_parent(parent: &Path) -> PathBuf {
     }
 }
 
+fn format_script_runtime_diagnostic(
+    diagnostic: &RuntimeDiagnostic,
+    source_context: &ExecutionSourceContext,
+) -> String {
+    format_runtime_diagnostic(
+        diagnostic,
+        Some(source_context.source_name()),
+        source_context.source_text(),
+    )
+}
+
+fn diagnostics_json(
+    outcome: &ExecutionOutcome,
+    source_context: &ExecutionSourceContext,
+) -> Vec<serde_json::Value> {
+    outcome
+        .diagnostics
+        .iter()
+        .map(|diagnostic| {
+            let span = diagnostic.span.as_ref().map(|span| {
+                serde_json::json!({
+                    "start": span.start,
+                    "end": span.end,
+                })
+            });
+            let rendered = if diagnostic.severity == DiagnosticSeverity::Error {
+                Some(format_script_runtime_diagnostic(diagnostic, source_context))
+            } else {
+                None
+            };
+            serde_json::json!({
+                "code": &diagnostic.code,
+                "severity": format!("{:?}", diagnostic.severity).to_lowercase(),
+                "message": &diagnostic.message,
+                "span": span,
+                "callstack": &diagnostic.callstack,
+                "callstack_elided": diagnostic.callstack_elided,
+                "rendered": rendered,
+            })
+        })
+        .collect()
+}
+
 async fn write_script_artifacts(
     plan: &ScriptArtifactsPlan,
     script: &Path,
     outcome: &ExecutionOutcome,
+    source_context: &ExecutionSourceContext,
     execution_time: Duration,
     success: bool,
     error_identifier: Option<&str>,
@@ -307,6 +356,7 @@ async fn write_script_artifacts(
         "execution_time_ms": execution_time.as_millis() as u64,
         "used_jit": outcome.used_jit,
         "error_identifier": error_identifier,
+        "diagnostics": diagnostics_json(outcome, source_context),
         "figures_touched": outcome.figures_touched,
         "figure_exports": figure_exports,
         "stream_summary": {
@@ -420,11 +470,14 @@ async fn export_touched_figures(
 }
 
 fn outcome_error_code(outcome: &ExecutionOutcome) -> Option<String> {
+    outcome_error_diagnostic(outcome).map(|diagnostic| diagnostic.code.clone())
+}
+
+fn outcome_error_diagnostic(outcome: &ExecutionOutcome) -> Option<&RuntimeDiagnostic> {
     outcome
         .diagnostics
         .iter()
         .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
-        .map(|diagnostic| diagnostic.code.clone())
 }
 
 #[cfg(test)]

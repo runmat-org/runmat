@@ -262,7 +262,7 @@ async fn normalize_root(text: &str) -> BuiltinResult<RootInfo> {
     let expanded = expand_user_path(text, "genpath")
         .map_err(|err| genpath_error_with_detail(&GENPATH_ERROR_FOLDER_NOT_FOUND, err))?;
     let raw_path = PathBuf::from(&expanded);
-    let absolute = if raw_path.is_absolute() {
+    let absolute = if super::is_rooted_path(&raw_path) {
         raw_path
     } else {
         let cwd = vfs::current_dir().map_err(|err| {
@@ -469,7 +469,7 @@ async fn build_exclude_set(excludes: Option<&str>, root: &RootInfo) -> BuiltinRe
             };
 
             let mut candidate = PathBuf::from(&expanded);
-            if !candidate.is_absolute() {
+            if !super::is_rooted_path(&candidate) {
                 candidate = root.path.join(candidate);
             }
 
@@ -480,7 +480,7 @@ async fn build_exclude_set(excludes: Option<&str>, root: &RootInfo) -> BuiltinRe
 
             // Fallback: try relative to the current working directory
             if let Ok(cwd) = vfs::current_dir() {
-                let alt = if Path::new(trimmed).is_absolute() {
+                let alt = if super::is_rooted_path(Path::new(trimmed)) {
                     PathBuf::from(trimmed)
                 } else {
                     cwd.join(trimmed)

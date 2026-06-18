@@ -82,32 +82,31 @@ impl Parser {
                     if self.looks_like_super_constructor_stmt() {
                         return self.parse_super_constructor_stmt();
                     }
+                    if self.can_start_command_form() {
+                        return self.parse_command_stmt();
+                    }
                     if let Some(lv) = self.try_parse_lvalue_assign()? {
                         return Ok(lv);
                     }
-                    if self.can_start_command_form() {
-                        self.parse_command_stmt()
-                    } else {
-                        if matches!(self.peek_token_at(1), Some(Token::Ident))
-                            && matches!(
-                                self.peek_token_at(2),
-                                Some(
-                                    Token::LParen
-                                        | Token::Dot
-                                        | Token::LBracket
-                                        | Token::LBrace
-                                        | Token::Transpose
-                                )
+                    if matches!(self.peek_token_at(1), Some(Token::Ident))
+                        && matches!(
+                            self.peek_token_at(2),
+                            Some(
+                                Token::LParen
+                                    | Token::Dot
+                                    | Token::LBracket
+                                    | Token::LBrace
+                                    | Token::Transpose
                             )
-                        {
-                            return Err(self.error(
-                                "Unexpected adjacency: interpret as function call? Use parentheses (e.g., foo(b(1))).",
-                            ));
-                        }
-                        let expr = self.parse_expr()?;
-                        let span = expr.span();
-                        Ok(Stmt::ExprStmt(expr, false, span))
+                        )
+                    {
+                        return Err(self.error(
+                            "Unexpected adjacency: interpret as function call? Use parentheses (e.g., foo(b(1))).",
+                        ));
                     }
+                    let expr = self.parse_expr()?;
+                    let span = expr.span();
+                    Ok(Stmt::ExprStmt(expr, false, span))
                 } else {
                     let expr = self.parse_expr()?;
                     let span = expr.span();
@@ -160,21 +159,11 @@ impl Parser {
                 self.error_with_expected("expected '(' after superclass constructor name", "'('")
             );
         }
-        let mut args = Vec::new();
-        if !self.consume(&Token::RParen) {
-            loop {
-                args.push(self.parse_expr()?);
-                if self.consume(&Token::Comma) {
-                    continue;
-                }
-                if self.consume(&Token::RParen) {
-                    break;
-                }
-                return Err(
-                    self.error_with_expected("expected ',' or ')' in argument list", "',' or ')'")
-                );
-            }
-        }
+        let args = self.parse_call_arguments_until(
+            Token::RParen,
+            "expected ',' or ')' in argument list",
+            "',' or ')'",
+        )?;
         let end = self.last_token_end();
         let span = self.span_from(start, end);
         let class_name = self.current_classdef_name.clone().ok_or_else(|| {

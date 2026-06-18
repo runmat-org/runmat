@@ -82,6 +82,12 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                 "text": s,
             })
         }
+        Value::Symbolic(expr) => json!({
+            "kind": "symbolic",
+            "className": "sym",
+            "shape": scalar_shape(),
+            "value": expr.to_string(),
+        }),
         Value::Tensor(t) => {
             let (preview, truncated) = preview_slice(&t.data, MAX_DATA_PREVIEW);
             json!({
@@ -114,6 +120,37 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                 "preview": preview,
                 "length": t.data.len(),
                 "truncated": truncated,
+            })
+        }
+        Value::SparseTensor(st) => {
+            let (entry_preview, entry_preview_truncated) =
+                sparse_entry_preview(st, MAX_DATA_PREVIEW);
+            let (col_ptrs_preview, col_ptrs_truncated) =
+                preview_slice(&st.col_ptrs, MAX_DATA_PREVIEW);
+            let (row_indices_preview, row_indices_truncated) =
+                preview_slice(&st.row_indices, MAX_DATA_PREVIEW);
+            let (values_preview, values_truncated) = preview_slice(&st.values, MAX_DATA_PREVIEW);
+            json!({
+                "kind": "sparse-tensor",
+                "shape": vec![st.rows, st.cols],
+                "rows": st.rows,
+                "cols": st.cols,
+                "nnz": st.nnz(),
+                "colPtrsPreview": col_ptrs_preview,
+                "colPtrsLength": st.col_ptrs.len(),
+                "colPtrsTruncated": col_ptrs_truncated,
+                "rowIndicesPreview": row_indices_preview,
+                "rowIndicesLength": st.row_indices.len(),
+                "rowIndicesTruncated": row_indices_truncated,
+                "valuesPreview": values_preview,
+                "valuesLength": st.values.len(),
+                "valuesTruncated": values_truncated,
+                "preview": entry_preview,
+                "entryPreviewTruncated": entry_preview_truncated,
+                "truncated": entry_preview_truncated
+                    || col_ptrs_truncated
+                    || row_indices_truncated
+                    || values_truncated,
             })
         }
         Value::Cell(ca) => json!({
@@ -254,10 +291,67 @@ fn rows_cols_from_shape(shape: &[usize]) -> (usize, usize) {
     (rows, cols)
 }
 
+fn sparse_entry_preview(
+    st: &runmat_builtins::SparseTensor,
+    limit: usize,
+) -> (Vec<JsonValue>, bool) {
+    let mut entries = Vec::with_capacity(st.nnz().min(limit));
+    for col in 0..st.cols {
+        let start = st.col_ptrs[col];
+        let end = st.col_ptrs[col + 1];
+        for idx in start..end {
+            if entries.len() >= limit {
+                return (entries, true);
+            }
+            entries.push(json!({
+                "row": st.row_indices[idx] + 1,
+                "col": col + 1,
+                "value": st.values[idx],
+            }));
+        }
+    }
+    (entries, false)
+}
+
 fn preview_slice<T: Clone>(data: &[T], limit: usize) -> (Vec<T>, bool) {
     if data.len() > limit {
         (data[..limit].to_vec(), true)
     } else {
         (data.to_vec(), false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::SparseTensor;
+
+    #[test]
+    fn sparse_tensor_json_uses_bounded_storage_previews() {
+        let rows = MAX_DATA_PREVIEW + 2;
+        let cols = 1;
+        let col_ptrs = vec![0, rows];
+        let row_indices = (0..rows).collect::<Vec<_>>();
+        let values = (0..rows).map(|idx| idx as f64).collect::<Vec<_>>();
+        let sparse = SparseTensor::new(rows, cols, col_ptrs, row_indices, values).unwrap();
+
+        let json = value_to_json(&Value::SparseTensor(sparse), 0);
+
+        assert!(json.get("colPtrs").is_none());
+        assert!(json.get("rowIndices").is_none());
+        assert!(json.get("values").is_none());
+        assert_eq!(json["rowIndicesLength"], rows);
+        assert_eq!(json["valuesLength"], rows);
+        assert_eq!(
+            json["rowIndicesPreview"].as_array().unwrap().len(),
+            MAX_DATA_PREVIEW
+        );
+        assert_eq!(
+            json["valuesPreview"].as_array().unwrap().len(),
+            MAX_DATA_PREVIEW
+        );
+        assert_eq!(json["rowIndicesTruncated"], true);
+        assert_eq!(json["valuesTruncated"], true);
+        assert_eq!(json["truncated"], true);
     }
 }

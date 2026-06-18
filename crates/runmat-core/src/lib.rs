@@ -25,7 +25,7 @@ pub use telemetry::{
 };
 pub use value_metadata::{
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
-    value_shape,
+    sparse_tensor_memory_bytes, value_shape,
 };
 pub use workspace::*;
 
@@ -59,11 +59,22 @@ pub fn execute_text_request_for_testing(
             message: diag.message.clone(),
         })
         .collect();
+    let error = outcome
+        .diagnostics
+        .iter()
+        .find(|diag| diag.severity == abi::DiagnosticSeverity::Error)
+        .map(|diag| {
+            runmat_runtime::build_runtime_error(diag.message.clone())
+                .with_identifier(diag.code.clone())
+                .with_call_stack(diag.callstack.clone())
+                .with_call_frames_elided(diag.callstack_elided)
+                .build()
+        });
     Ok(SessionExecutionResult {
         value: outcome.flow.durable_workspace_value().cloned(),
         execution_time_ms: outcome.execution_time_ms,
         used_jit: outcome.used_jit,
-        error: None,
+        error,
         type_info: outcome.type_info,
         streams: outcome.streams,
         workspace,

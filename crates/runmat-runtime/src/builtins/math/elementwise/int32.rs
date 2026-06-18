@@ -155,6 +155,7 @@ async fn int32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::Int(i) => Ok(Value::Int(IntValue::I32(cast_scalar_to_int32(i.to_f64())))),
         Value::Bool(flag) => Ok(Value::Int(IntValue::I32(if flag { 1 } else { 0 }))),
         Value::Tensor(tensor) => Ok(int32_value_from_tensor(int32_tensor_to_host(tensor))),
+        Value::SparseTensor(_) => Err(conversion_error("sparse")),
         Value::LogicalArray(array) => {
             let tensor = tensor::logical_to_tensor(&array)
                 .map_err(|e| int32_error_with_detail(&INT32_ERROR_INTERNAL, e))?;
@@ -164,6 +165,10 @@ async fn int32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::GpuTensor(handle) => int32_from_gpu(handle).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(conversion_error("complex")),
         Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
+        Value::Symbolic(expr) => expr
+            .numeric_constant_value()
+            .map(|value| Value::Int(IntValue::I32(cast_scalar_to_int32(value))))
+            .ok_or_else(|| conversion_error("sym")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),
@@ -248,7 +253,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, SymbolicExpr, Type};
 
     fn int32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::int32_builtin(value, rest))
@@ -303,6 +308,25 @@ pub(crate) mod tests {
             int32_builtin(Value::Num(f64::NAN), Vec::new()).expect("int32"),
             Value::Int(IntValue::I32(0))
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn int32_converts_symbolic_constants() {
+        let result =
+            int32_builtin(Value::Symbolic(SymbolicExpr::constant(3.5)), Vec::new()).expect("int32");
+
+        assert_eq!(result, Value::Int(IntValue::I32(4)));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn int32_rejects_symbolic_variables() {
+        let err = int32_builtin(Value::Symbolic(SymbolicExpr::variable("x")), Vec::new())
+            .expect_err("symbolic variable should not convert");
+
+        assert_eq!(err.identifier(), INT32_ERROR_INVALID_INPUT.identifier);
+        assert!(err.message().contains("conversion to int32 from sym"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

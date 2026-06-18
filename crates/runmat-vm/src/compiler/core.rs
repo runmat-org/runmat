@@ -5,8 +5,8 @@ use crate::instr::{ArgSpec, EndExpr, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
 use runmat_hir::{
-    BindingId, CallSyntax, CallableIdentity, EntrypointId, FunctionId, HirAssembly, IndexKind,
-    IndexResultContext, OperatorKind, RequestedOutputCount,
+    BindingId, CallSyntax, CallableFallbackPolicy, CallableIdentity, EntrypointId, FunctionId,
+    HirAssembly, IndexKind, IndexResultContext, OperatorKind, RequestedOutputCount,
 };
 use runmat_mir::{
     BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirCallee,
@@ -1360,7 +1360,9 @@ impl Compiler {
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
             match &call.callee {
-                MirCallee::Static(CallableIdentity::BoundFunction(_)) => {}
+                MirCallee::Static(
+                    CallableIdentity::BoundFunction(_) | CallableIdentity::ExternalFunction { .. },
+                ) => {}
                 MirCallee::SuperMethod { .. } => {}
                 MirCallee::SuperConstructor { .. } => {
                     return Err(self
@@ -1377,7 +1379,77 @@ impl Compiler {
                 MirCallee::Static(_) => return self.compile_mir_method_call(call, has_expansion),
             }
         }
+        if let Some(name) = call.workspace_first_name.as_ref() {
+            let MirCallee::Static(identity) = &call.callee else {
+                return Err(self
+                    .compile_error("workspace-first call lowering expected a static callee")
+                    .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
+            };
+            self.validate_workspace_first_static_call_callee(identity, call.fallback_policy)?;
+            for arg in &call.args {
+                self.compile_mir_call_arg(arg)?;
+            }
+            if has_expansion {
+                self.emit_call(
+                    Instr::CallWorkspaceFirstExpandMultiOutput {
+                        name: name.0.clone(),
+                        identity: identity.clone(),
+                        fallback_policy: call.fallback_policy,
+                        bare_identifier: call.bare_identifier,
+                        specs,
+                        out_count: output_count,
+                    },
+                    call,
+                );
+            } else {
+                self.emit_call(
+                    Instr::CallWorkspaceFirstMulti {
+                        name: name.0.clone(),
+                        identity: identity.clone(),
+                        fallback_policy: call.fallback_policy,
+                        bare_identifier: call.bare_identifier,
+                        arg_count: call.args.len(),
+                        out_count: output_count,
+                    },
+                    call,
+                );
+            }
+            return Ok(());
+        }
         match &call.callee {
+            MirCallee::Static(CallableIdentity::ExternalFunction {
+                function,
+                display_name,
+            }) => {
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
+                let identity = CallableIdentity::ExternalFunction {
+                    function: *function,
+                    display_name: display_name.clone(),
+                };
+                if has_expansion {
+                    self.emit_call(
+                        Instr::CallFunctionExpandMultiOutput {
+                            identity,
+                            fallback_policy: call.fallback_policy,
+                            specs,
+                            out_count: output_count,
+                        },
+                        call,
+                    );
+                    return Ok(());
+                }
+                self.emit_call(
+                    Instr::CallFunctionMulti {
+                        identity,
+                        fallback_policy: call.fallback_policy,
+                        arg_count: call.args.len(),
+                        out_count: output_count,
+                    },
+                    call,
+                );
+            }
             MirCallee::Static(CallableIdentity::BoundFunction(function)) => {
                 // Session-resolved semantic calls can target functions compiled in prior
                 // submissions; those do not exist in the current assembly layout and should
@@ -1530,22 +1602,7 @@ impl Compiler {
             }
             MirCallee::Static(identity) => {
                 let fallback_policy = call.fallback_policy;
-                if !fallback_policy.supports_vm_static_call() {
-                    return Err(self
-                        .compile_error(format!(
-                            "MIR call fallback policy {:?} is not supported for static callee {:?}",
-                            fallback_policy, identity
-                        ))
-                        .with_identifier(IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED));
-                }
-                if self.mir_runtime_name_callee(identity).is_none() {
-                    return Err(self
-                        .compile_error(format!(
-                            "MIR static call callee identity {:?} is missing a valid runtime name shape",
-                            identity
-                        ))
-                        .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
-                }
+                self.validate_static_call_callee(identity, fallback_policy)?;
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -2185,6 +2242,18 @@ impl Compiler {
                 self.emit(Instr::LoadMemberDynamic);
                 Ok(())
             }
+            MirRvalue::WorkspaceFirstStaticProperty {
+                workspace_name,
+                class_name,
+                property,
+            } => {
+                self.emit(Instr::LoadWorkspaceFirstStaticProperty {
+                    name: workspace_name.0.clone(),
+                    class_name: class_name.clone(),
+                    property: property.0.clone(),
+                });
+                Ok(())
+            }
             MirRvalue::MetaClass(name) => {
                 self.emit(Instr::LoadString(
                     name.0
@@ -2293,7 +2362,9 @@ impl Compiler {
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
             match &call.callee {
-                MirCallee::Static(CallableIdentity::BoundFunction(_)) => {}
+                MirCallee::Static(
+                    CallableIdentity::BoundFunction(_) | CallableIdentity::ExternalFunction { .. },
+                ) => {}
                 MirCallee::SuperMethod { .. } => {}
                 MirCallee::SuperConstructor { .. } => {
                     return Err(self
@@ -2310,7 +2381,130 @@ impl Compiler {
                 MirCallee::Static(_) => return self.compile_mir_method_call(call, has_expansion),
             }
         }
+        if let Some(name) = call.workspace_first_name.as_ref() {
+            let MirCallee::Static(identity) = &call.callee else {
+                return Err(self
+                    .compile_error("workspace-first call lowering expected a static callee")
+                    .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
+            };
+            self.validate_workspace_first_static_call_callee(identity, call.fallback_policy)?;
+            for arg in &call.args {
+                self.compile_mir_call_arg(arg)?;
+            }
+            if has_expansion {
+                match requested_outputs {
+                    ResolvedCallOutputCount::Fixed(out_count) => {
+                        self.emit_call(
+                            Instr::CallWorkspaceFirstExpandMultiOutput {
+                                name: name.0.clone(),
+                                identity: identity.clone(),
+                                fallback_policy: call.fallback_policy,
+                                bare_identifier: call.bare_identifier,
+                                specs,
+                                out_count,
+                            },
+                            call,
+                        );
+                    }
+                    ResolvedCallOutputCount::FromSlot(out_count_slot) => {
+                        self.emit_call(
+                            Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot {
+                                name: name.0.clone(),
+                                identity: identity.clone(),
+                                fallback_policy: call.fallback_policy,
+                                bare_identifier: call.bare_identifier,
+                                specs,
+                                out_count_slot,
+                            },
+                            call,
+                        );
+                    }
+                }
+            } else {
+                match requested_outputs {
+                    ResolvedCallOutputCount::Fixed(out_count) => {
+                        self.emit_call(
+                            Instr::CallWorkspaceFirstMulti {
+                                name: name.0.clone(),
+                                identity: identity.clone(),
+                                fallback_policy: call.fallback_policy,
+                                bare_identifier: call.bare_identifier,
+                                arg_count: call.args.len(),
+                                out_count,
+                            },
+                            call,
+                        );
+                    }
+                    ResolvedCallOutputCount::FromSlot(out_count_slot) => {
+                        self.emit_call(
+                            Instr::CallWorkspaceFirstMultiUsingOutputSlot {
+                                name: name.0.clone(),
+                                identity: identity.clone(),
+                                fallback_policy: call.fallback_policy,
+                                bare_identifier: call.bare_identifier,
+                                arg_count: call.args.len(),
+                                out_count_slot,
+                            },
+                            call,
+                        );
+                    }
+                }
+            }
+            return Ok(());
+        }
         match &call.callee {
+            MirCallee::Static(CallableIdentity::ExternalFunction {
+                function,
+                display_name,
+            }) => {
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
+                let identity = CallableIdentity::ExternalFunction {
+                    function: *function,
+                    display_name: display_name.clone(),
+                };
+                if has_expansion {
+                    let out_count = requested_outputs.require_fixed(
+                        self,
+                        "dynamic output count is not supported for expanded semantic calls",
+                    )?;
+                    self.emit_call(
+                        Instr::CallFunctionExpandMultiOutput {
+                            identity,
+                            fallback_policy: call.fallback_policy,
+                            specs,
+                            out_count,
+                        },
+                        call,
+                    );
+                } else {
+                    match requested_outputs {
+                        ResolvedCallOutputCount::Fixed(out_count) => {
+                            self.emit_call(
+                                Instr::CallFunctionMulti {
+                                    identity,
+                                    fallback_policy: call.fallback_policy,
+                                    arg_count: call.args.len(),
+                                    out_count,
+                                },
+                                call,
+                            );
+                        }
+                        ResolvedCallOutputCount::FromSlot(out_count_slot) => {
+                            self.emit_call(
+                                Instr::CallFunctionMultiUsingOutputSlot {
+                                    identity,
+                                    fallback_policy: call.fallback_policy,
+                                    arg_count: call.args.len(),
+                                    out_count_slot,
+                                },
+                                call,
+                            );
+                        }
+                    }
+                }
+            }
             MirCallee::Static(CallableIdentity::BoundFunction(function)) => {
                 // Session-resolved semantic calls can target functions compiled in prior
                 // submissions; those do not exist in the current assembly layout and should
@@ -2552,22 +2746,7 @@ impl Compiler {
             }
             MirCallee::Static(identity) => {
                 let fallback_policy = call.fallback_policy;
-                if !fallback_policy.supports_vm_static_call() {
-                    return Err(self
-                        .compile_error(format!(
-                            "MIR call fallback policy {:?} is not supported for static callee {:?}",
-                            fallback_policy, identity
-                        ))
-                        .with_identifier(IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED));
-                }
-                if self.mir_runtime_name_callee(identity).is_none() {
-                    return Err(self
-                        .compile_error(format!(
-                            "MIR static call callee identity {:?} is missing a valid runtime name shape",
-                            identity
-                        ))
-                        .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
-                }
+                self.validate_static_call_callee(identity, fallback_policy)?;
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -2664,6 +2843,51 @@ impl Compiler {
         targets
             .validate_fixed_arity("MIR multi-assign")
             .map_err(|message| self.compile_error(message))
+    }
+
+    fn validate_static_call_callee(
+        &self,
+        identity: &CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+    ) -> Result<(), CompileError> {
+        if !fallback_policy.supports_vm_static_call() {
+            return Err(self
+                .compile_error(format!(
+                    "MIR call fallback policy {:?} is not supported for static callee {:?}",
+                    fallback_policy, identity
+                ))
+                .with_identifier(IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED));
+        }
+        if self.mir_runtime_name_callee(identity).is_none() {
+            return Err(self
+                .compile_error(format!(
+                    "MIR static call callee identity {:?} is missing a valid runtime name shape",
+                    identity
+                ))
+                .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
+        }
+        Ok(())
+    }
+
+    fn validate_workspace_first_static_call_callee(
+        &self,
+        identity: &CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+    ) -> Result<(), CompileError> {
+        if matches!(fallback_policy, CallableFallbackPolicy::None) {
+            return match identity {
+                CallableIdentity::Builtin(runmat_hir::BuiltinId(name)) if !name.trim().is_empty() => {
+                    Ok(())
+                }
+                _ => Err(self
+                    .compile_error(format!(
+                        "MIR workspace-first call fallback policy {:?} is not supported for static callee {:?}",
+                        fallback_policy, identity
+                    ))
+                    .with_identifier(IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED)),
+            };
+        }
+        self.validate_static_call_callee(identity, fallback_policy)
     }
 
     fn mir_runtime_name_callee(&self, callee: &CallableIdentity) -> Option<String> {
@@ -2956,6 +3180,7 @@ impl Compiler {
                 | MirRvalue::Index { .. }
                 | MirRvalue::Member { .. }
                 | MirRvalue::DynamicMember { .. }
+                | MirRvalue::WorkspaceFirstStaticProperty { .. }
         )
     }
 
@@ -3625,6 +3850,16 @@ impl Compiler {
                     *function,
                     display_name,
                     captures.len(),
+                ));
+                Ok(())
+            }
+            CallableIdentity::ExternalFunction {
+                function,
+                display_name,
+            } => {
+                self.emit(Instr::CreateExternalBoundFunctionHandle(
+                    *function,
+                    display_name.clone(),
                 ));
                 Ok(())
             }

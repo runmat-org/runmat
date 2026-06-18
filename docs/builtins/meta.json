@@ -3947,6 +3947,48 @@
       ]
     },
     {
+      "name": "assignin",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "assignin(workspace, name, value)",
+          "inputs": [
+            {
+              "name": "workspace",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "`base` or `caller` workspace selector."
+            },
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Workspace variable name."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Value to assign into the selected workspace."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DYNAMIC_WORKSPACE.REQUIRES_VM",
+          "identifier": "RunMat:DynamicWorkspaceRequiresVm",
+          "when": "A dynamic workspace builtin is dispatched outside the VM workspace frame.",
+          "message": "dynamic workspace builtin requires VM workspace context"
+        }
+      ]
+    },
+    {
       "name": "atan",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -4683,6 +4725,815 @@
           "identifier": "RunMat:box:InvalidArgument",
           "when": "Box mode argument is unsupported.",
           "message": "box: invalid argument"
+        }
+      ]
+    },
+    {
+      "name": "builtin",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[out] = builtin(name, varargin)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Builtin function name."
+            },
+            {
+              "name": "varargin",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Builtin function arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result from the builtin implementation."
+            }
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "butter",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "b = butter(n, Wn)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "b = butter(n, Wn, ftype)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "b = butter(n, Wn, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "b = butter(n, Wn, ftype, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "[b, a] = butter(n, Wn)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            },
+            {
+              "name": "a",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Denominator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "[b, a] = butter(n, Wn, ftype)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            },
+            {
+              "name": "a",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Denominator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "[b, a] = butter(n, Wn, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            },
+            {
+              "name": "a",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Denominator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "[b, a] = butter(n, Wn, ftype, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerator coefficient vector."
+            },
+            {
+              "name": "a",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Denominator coefficient vector."
+            }
+          ]
+        },
+        {
+          "label": "[z, p, k] = butter(n, Wn)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter zeros."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter poles."
+            },
+            {
+              "name": "k",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter gain."
+            }
+          ]
+        },
+        {
+          "label": "[z, p, k] = butter(n, Wn, ftype)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter zeros."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter poles."
+            },
+            {
+              "name": "k",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter gain."
+            }
+          ]
+        },
+        {
+          "label": "[z, p, k] = butter(n, Wn, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter zeros."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter poles."
+            },
+            {
+              "name": "k",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter gain."
+            }
+          ]
+        },
+        {
+          "label": "[z, p, k] = butter(n, Wn, ftype, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter zeros."
+            },
+            {
+              "name": "p",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter poles."
+            },
+            {
+              "name": "k",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter gain."
+            }
+          ]
+        },
+        {
+          "label": "[A, B, C, D] = butter(n, Wn)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "State matrix."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Output matrix."
+            },
+            {
+              "name": "D",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Feedthrough term."
+            }
+          ]
+        },
+        {
+          "label": "[A, B, C, D] = butter(n, Wn, ftype)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Normalized digital cutoff frequency or analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "State matrix."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Output matrix."
+            },
+            {
+              "name": "D",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Feedthrough term."
+            }
+          ]
+        },
+        {
+          "label": "[A, B, C, D] = butter(n, Wn, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "State matrix."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Output matrix."
+            },
+            {
+              "name": "D",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Feedthrough term."
+            }
+          ]
+        },
+        {
+          "label": "[A, B, C, D] = butter(n, Wn, ftype, 's')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter order."
+            },
+            {
+              "name": "Wn",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog cutoff frequency."
+            },
+            {
+              "name": "ftype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"low\" for scalar Wn, \"bandpass\" for two-element Wn",
+              "description": "Filter type: low, high, bandpass, or stop."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Analog filter-design flag."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "State matrix."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Output matrix."
+            },
+            {
+              "name": "D",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Feedthrough term."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.BUTTER.ARG_COUNT",
+          "identifier": "RunMat:butter:ArgCount",
+          "when": "The argument count is outside butter's supported forms.",
+          "message": "butter: expected two to four input arguments"
+        },
+        {
+          "code": "RM.BUTTER.INVALID_ORDER",
+          "identifier": "RunMat:butter:InvalidOrder",
+          "when": "Filter order is missing, non-finite, non-integer, less than one, or too large.",
+          "message": "butter: order must be a positive integer"
+        },
+        {
+          "code": "RM.BUTTER.INVALID_FREQUENCY",
+          "identifier": "RunMat:butter:InvalidFrequency",
+          "when": "Cutoff frequencies are malformed or outside the valid range.",
+          "message": "butter: invalid cutoff frequency"
+        },
+        {
+          "code": "RM.BUTTER.INVALID_OPTION",
+          "identifier": "RunMat:butter:InvalidOption",
+          "when": "Filter type or analog flag is malformed or unknown.",
+          "message": "butter: invalid option"
+        },
+        {
+          "code": "RM.BUTTER.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:butter:TooManyOutputs",
+          "when": "More than four outputs are requested.",
+          "message": "butter: too many output arguments"
+        },
+        {
+          "code": "RM.BUTTER.INTERNAL",
+          "identifier": "RunMat:butter:Internal",
+          "when": "Filter design or output materialization fails internally.",
+          "message": "butter: internal error"
         }
       ]
     },
@@ -14469,6 +15320,159 @@
       ]
     },
     {
+      "name": "dateshift",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "t2 = dateshift(t, boundary, unit)",
+          "inputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime input."
+            },
+            {
+              "name": "boundary",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Shift boundary: 'start', 'end', or 'nearest'."
+            },
+            {
+              "name": "unit",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Calendar/time unit."
+            },
+            {
+              "name": "weekdayOrOption",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional weekday for week-based shifts."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime object result."
+            }
+          ]
+        },
+        {
+          "label": "t2 = dateshift(t, boundary, \"week\", weekday)",
+          "inputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime input."
+            },
+            {
+              "name": "boundary",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Shift boundary: 'start', 'end', or 'nearest'."
+            },
+            {
+              "name": "unit",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Calendar/time unit."
+            },
+            {
+              "name": "weekdayOrOption",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional weekday for week-based shifts."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime object result."
+            }
+          ]
+        },
+        {
+          "label": "t2 = dateshift(t, \"dayofweek\", weekday)",
+          "inputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime input."
+            },
+            {
+              "name": "boundary",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Shift boundary: 'start', 'end', or 'nearest'."
+            },
+            {
+              "name": "unit",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Calendar/time unit."
+            },
+            {
+              "name": "weekdayOrOption",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional weekday for week-based shifts."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime object result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DATETIME.INVALID_ARGUMENT",
+          "identifier": "RunMat:datetime:InvalidArgument",
+          "when": "Arguments or option grammar do not match supported datetime forms.",
+          "message": "datetime: invalid argument"
+        },
+        {
+          "code": "RM.DATETIME.INVALID_INPUT",
+          "identifier": "RunMat:datetime:InvalidInput",
+          "when": "Input values cannot be parsed/converted/broadcast to a valid datetime result.",
+          "message": "datetime: invalid input"
+        },
+        {
+          "code": "RM.DATETIME.INTERNAL",
+          "identifier": "RunMat:datetime:Internal",
+          "when": "Internal datetime state or indexing/evaluation failed unexpectedly.",
+          "message": "datetime: internal operation failed"
+        }
+      ]
+    },
+    {
       "name": "datetime",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -14753,6 +15757,27 @@
           ]
         },
         {
+          "label": "t = datetime(textOrArray, \"InputFormat\", inputFormat)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Datetime constructor arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime object result."
+            }
+          ]
+        },
+        {
           "label": "t = datetime(___, Name, Value, ...)",
           "inputs": [
             {
@@ -14990,6 +16015,60 @@
           "identifier": "RunMat:db:Internal",
           "when": "Internal tensor conversion or allocation failed.",
           "message": "db: internal error"
+        }
+      ]
+    },
+    {
+      "name": "dcgain",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "gain = dcgain(sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "gain",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Steady-state gain evaluated at s=0 for continuous-time or z=1 for discrete-time."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DCGAIN.INVALID_ARGUMENT",
+          "identifier": "RunMat:dcgain:InvalidArgument",
+          "when": "Input does not match supported invocation forms.",
+          "message": "dcgain: invalid argument"
+        },
+        {
+          "code": "RM.DCGAIN.INVALID_MODEL",
+          "identifier": "RunMat:dcgain:InvalidModel",
+          "when": "Input system is not a valid SISO tf object.",
+          "message": "dcgain: invalid model"
+        },
+        {
+          "code": "RM.DCGAIN.UNSUPPORTED_MODEL",
+          "identifier": "RunMat:dcgain:UnsupportedModel",
+          "when": "Model form is not supported by the current implementation.",
+          "message": "dcgain: unsupported model"
+        },
+        {
+          "code": "RM.DCGAIN.INTERNAL",
+          "identifier": "RunMat:dcgain:Internal",
+          "when": "Gain evaluation failed internally.",
+          "message": "dcgain: internal error"
         }
       ]
     },
@@ -17905,6 +18984,85 @@
       ]
     },
     {
+      "name": "eval",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[varargout] = eval(source)",
+          "inputs": [
+            {
+              "name": "source",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Source text to evaluate in the current workspace."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "varargout",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Value(s) produced by evaluated source text."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DYNAMIC_WORKSPACE.REQUIRES_VM",
+          "identifier": "RunMat:DynamicWorkspaceRequiresVm",
+          "when": "A dynamic workspace builtin is dispatched outside the VM workspace frame.",
+          "message": "dynamic workspace builtin requires VM workspace context"
+        }
+      ]
+    },
+    {
+      "name": "evalin",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[varargout] = evalin(workspace, source)",
+          "inputs": [
+            {
+              "name": "workspace",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "`base` or `caller` workspace selector."
+            },
+            {
+              "name": "source",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Source text to evaluate in the selected workspace."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "varargout",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Value(s) produced by evaluated source text."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DYNAMIC_WORKSPACE.REQUIRES_VM",
+          "identifier": "RunMat:DynamicWorkspaceRequiresVm",
+          "when": "A dynamic workspace builtin is dispatched outside the VM workspace frame.",
+          "message": "dynamic workspace builtin requires VM workspace context"
+        }
+      ]
+    },
+    {
       "name": "exist",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -18919,6 +20077,129 @@
       ]
     },
     {
+      "name": "feedback",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "sys = feedback(sys1)",
+          "inputs": [
+            {
+              "name": "sys1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Forward-path SISO transfer-function model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop SISO transfer-function object."
+            }
+          ]
+        },
+        {
+          "label": "sys = feedback(sys1, sys2)",
+          "inputs": [
+            {
+              "name": "sys1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Forward-path SISO transfer-function model."
+            },
+            {
+              "name": "sys2",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Feedback-path SISO transfer function or scalar gain."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop SISO transfer-function object."
+            }
+          ]
+        },
+        {
+          "label": "sys = feedback(sys1, sys2, sign)",
+          "inputs": [
+            {
+              "name": "sys1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Forward-path SISO transfer-function model."
+            },
+            {
+              "name": "sys2",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "Feedback-path SISO transfer function or scalar gain."
+            },
+            {
+              "name": "sign",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "-1",
+              "description": "-1 for negative feedback or +1 for positive feedback."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop SISO transfer-function object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEEDBACK.INVALID_ARGUMENT",
+          "identifier": "RunMat:feedback:InvalidArgument",
+          "when": "Inputs do not match supported feedback invocation forms.",
+          "message": "feedback: invalid argument"
+        },
+        {
+          "code": "RM.FEEDBACK.INVALID_MODEL",
+          "identifier": "RunMat:feedback:InvalidModel",
+          "when": "Input systems are not supported SISO transfer-function models.",
+          "message": "feedback: invalid model"
+        },
+        {
+          "code": "RM.FEEDBACK.INVALID_SIGN",
+          "identifier": "RunMat:feedback:InvalidSign",
+          "when": "Feedback sign is not -1 or +1.",
+          "message": "feedback: sign must be -1 or +1"
+        },
+        {
+          "code": "RM.FEEDBACK.UNSUPPORTED_MODEL",
+          "identifier": "RunMat:feedback:UnsupportedModel",
+          "when": "A supported-looking model uses unsupported delays or incompatible sample times.",
+          "message": "feedback: unsupported model"
+        },
+        {
+          "code": "RM.FEEDBACK.INTERNAL",
+          "identifier": "RunMat:feedback:Internal",
+          "when": "Closed-loop transfer-function assembly failed.",
+          "message": "feedback: internal error"
+        }
+      ]
+    },
+    {
       "name": "feof",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -19701,6 +20982,55 @@
               "arity": "Optional",
               "default": "\"next\"",
               "description": "Figure handle or 'next' to create/select the next figure."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "fig",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure handle."
+            }
+          ]
+        },
+        {
+          "label": "fig = figure(property, value, ...)",
+          "inputs": [
+            {
+              "name": "properties",
+              "ty": "PropertyName",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Figure property/value pairs such as 'Name', 'NumberTitle', 'Visible', or 'Color'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "fig",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure handle."
+            }
+          ]
+        },
+        {
+          "label": "fig = figure(h, property, value, ...)",
+          "inputs": [
+            {
+              "name": "h",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"next\"",
+              "description": "Figure handle or 'next' to create/select the next figure."
+            },
+            {
+              "name": "properties",
+              "ty": "PropertyName",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Figure property/value pairs to apply after selecting or creating the figure."
             }
           ],
           "outputs": [
@@ -23398,6 +24728,42 @@
       ]
     },
     {
+      "name": "functions",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "info = functions(fh)",
+          "inputs": [
+            {
+              "name": "fh",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "info",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Function handle metadata struct."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FUNCTIONS.HANDLE_UNSUPPORTED",
+          "identifier": "RunMat:FunctionsHandleUnsupported",
+          "when": "The input is not a supported function handle value.",
+          "message": "functions: expected a function handle"
+        }
+      ]
+    },
+    {
       "name": "fwrite",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -23895,6 +25261,27 @@
         {
           "label": "ax = gca()",
           "inputs": [],
+          "outputs": [
+            {
+              "name": "ax",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current axes handle."
+            }
+          ]
+        },
+        {
+          "label": "ax = gca(fig)",
+          "inputs": [
+            {
+              "name": "fig",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure handle whose current axes should be returned."
+            }
+          ],
           "outputs": [
             {
               "name": "ax",
@@ -24474,6 +25861,12 @@
           "identifier": "RunMat:GetMethodReceiverUnsupported",
           "when": "Receiver is neither object nor class reference.",
           "message": "getmethod: unsupported receiver"
+        },
+        {
+          "code": "RM.GETMETHOD.METHOD_PRIVATE",
+          "identifier": "RunMat:MethodPrivate",
+          "when": "Resolved method exists but is inaccessible from the current class scope.",
+          "message": "getmethod: method is not accessible from current scope"
         }
       ]
     },
@@ -25040,6 +26433,87 @@
       ]
     },
     {
+      "name": "groupsummary",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "G = groupsummary(T, groupvars, method, datavars)",
+          "inputs": [
+            {
+              "name": "T",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input table."
+            },
+            {
+              "name": "groupvars",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grouping variable name or names."
+            },
+            {
+              "name": "method",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Summary method name or names."
+            },
+            {
+              "name": "datavars",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Data variable name or names."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TABLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:table:InvalidArgument",
+          "when": "Arguments or table metadata are invalid.",
+          "message": "table: invalid argument"
+        },
+        {
+          "code": "RM.TABLE.INVALID_INDEX",
+          "identifier": "RunMat:table:InvalidIndex",
+          "when": "Table indexing is invalid.",
+          "message": "table: invalid index"
+        },
+        {
+          "code": "RM.TABLE.INVALID_VARIABLE",
+          "identifier": "RunMat:table:InvalidVariable",
+          "when": "A table variable name or value is invalid.",
+          "message": "table: invalid variable"
+        },
+        {
+          "code": "RM.READTABLE.IO",
+          "identifier": "RunMat:readtable:IOError",
+          "when": "readtable cannot open or read the requested file.",
+          "message": "readtable: file read failed"
+        },
+        {
+          "code": "RM.READTABLE.UNSUPPORTED_FILE",
+          "identifier": "RunMat:readtable:UnsupportedFileType",
+          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
+          "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
       "name": "gt",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -25437,6 +26911,196 @@
           "identifier": "RunMat:heatmap:Internal",
           "when": "Internal render/surface construction fails.",
           "message": "heatmap: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "heaviside",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = heaviside(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Real numeric, logical, or character input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Elementwise Heaviside step result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.HEAVISIDE.INVALID_INPUT",
+          "identifier": "RunMat:heaviside:InvalidInput",
+          "when": "Input is not a supported real numeric/logical/character value.",
+          "message": "heaviside: invalid input"
+        },
+        {
+          "code": "RM.HEAVISIDE.PROVIDER_FAILED",
+          "identifier": "RunMat:heaviside:ProviderFailed",
+          "when": "Provider unary_heaviside dispatch fails with a non-unsupported error.",
+          "message": "heaviside: GPU provider unary_heaviside failed"
+        },
+        {
+          "code": "RM.HEAVISIDE.INTERNAL",
+          "identifier": "RunMat:heaviside:Internal",
+          "when": "Internal gather/provider/tensor construction failed.",
+          "message": "heaviside: internal error"
+        }
+      ]
+    },
+    {
+      "name": "height",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "n = height(T)",
+          "inputs": [
+            {
+              "name": "T",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Table input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Count."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TABLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:table:InvalidArgument",
+          "when": "Arguments or table metadata are invalid.",
+          "message": "table: invalid argument"
+        },
+        {
+          "code": "RM.TABLE.INVALID_INDEX",
+          "identifier": "RunMat:table:InvalidIndex",
+          "when": "Table indexing is invalid.",
+          "message": "table: invalid index"
+        },
+        {
+          "code": "RM.TABLE.INVALID_VARIABLE",
+          "identifier": "RunMat:table:InvalidVariable",
+          "when": "A table variable name or value is invalid.",
+          "message": "table: invalid variable"
+        },
+        {
+          "code": "RM.READTABLE.IO",
+          "identifier": "RunMat:readtable:IOError",
+          "when": "readtable cannot open or read the requested file.",
+          "message": "readtable: file read failed"
+        },
+        {
+          "code": "RM.READTABLE.UNSUPPORTED_FILE",
+          "identifier": "RunMat:readtable:UnsupportedFileType",
+          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
+          "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
+      "name": "hilbert",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "z = hilbert(x)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real-valued signal vector, matrix, or N-D array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analytic signal with real part equal to the input signal."
+            }
+          ]
+        },
+        {
+          "label": "z = hilbert(x, N)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real-valued signal vector, matrix, or N-D array."
+            },
+            {
+              "name": "N",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "FFT length along the first non-singleton dimension."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analytic signal with real part equal to the input signal."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.HILBERT.ARG_COUNT",
+          "identifier": "RunMat:hilbert:ArgCount",
+          "when": "More than two input arguments are supplied.",
+          "message": "hilbert: expected hilbert(X) or hilbert(X, N)"
+        },
+        {
+          "code": "RM.HILBERT.INVALID_LENGTH",
+          "identifier": "RunMat:hilbert:InvalidLength",
+          "when": "Length argument N is non-scalar, negative, non-finite, or fractional.",
+          "message": "hilbert: invalid length argument"
+        },
+        {
+          "code": "RM.HILBERT.INVALID_INPUT",
+          "identifier": "RunMat:hilbert:InvalidInput",
+          "when": "Input cannot be converted to a real numeric/logical signal.",
+          "message": "hilbert: expected real numeric input"
+        },
+        {
+          "code": "RM.HILBERT.INTERNAL",
+          "identifier": "RunMat:hilbert:Internal",
+          "when": "FFT execution or tensor shaping fails internally.",
+          "message": "hilbert: internal error"
         }
       ]
     },
@@ -28114,6 +29778,220 @@
       ]
     },
     {
+      "name": "imhist",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "counts = imhist(I)",
+          "inputs": [
+            {
+              "name": "I",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grayscale intensity image."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "counts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin counts as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "counts = imhist(I, n)",
+          "inputs": [
+            {
+              "name": "I",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grayscale intensity image."
+            },
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "256",
+              "description": "Number of bins."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "counts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin counts as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "[counts, binLocations] = imhist(I)",
+          "inputs": [
+            {
+              "name": "I",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grayscale intensity image."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "counts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin counts as a column vector."
+            },
+            {
+              "name": "binLocations",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Intensity or colormap-index bin locations as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "[counts, binLocations] = imhist(I, n)",
+          "inputs": [
+            {
+              "name": "I",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Grayscale intensity image."
+            },
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": "256",
+              "description": "Number of bins."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "counts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin counts as a column vector."
+            },
+            {
+              "name": "binLocations",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Intensity or colormap-index bin locations as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "counts = imhist(X, map)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexed image matrix."
+            },
+            {
+              "name": "map",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Colormap with one RGB row per indexed-image bin."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "counts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin counts as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "[counts, binLocations] = imhist(X, map)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexed image matrix."
+            },
+            {
+              "name": "map",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Colormap with one RGB row per indexed-image bin."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "counts",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin counts as a column vector."
+            },
+            {
+              "name": "binLocations",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Intensity or colormap-index bin locations as a column vector."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.IMHIST.INVALID_ARGUMENT",
+          "identifier": "RunMat:imhist:InvalidArgument",
+          "when": "Image input, bin count, or colormap arguments are malformed or unsupported.",
+          "message": "imhist: invalid argument"
+        },
+        {
+          "code": "RM.IMHIST.UNSUPPORTED_IMAGE",
+          "identifier": "RunMat:imhist:UnsupportedImage",
+          "when": "Input cannot be interpreted as a grayscale or indexed image.",
+          "message": "imhist: unsupported image input"
+        },
+        {
+          "code": "RM.IMHIST.PLOT_FAILED",
+          "identifier": "RunMat:imhist:PlotFailed",
+          "when": "Statement-form histogram rendering fails.",
+          "message": "imhist: plotting failed"
+        },
+        {
+          "code": "RM.IMHIST.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:imhist:TooManyOutputs",
+          "when": "More than two outputs are requested.",
+          "message": "imhist: too many output arguments"
+        },
+        {
+          "code": "RM.IMHIST.INTERNAL",
+          "identifier": "RunMat:imhist:Internal",
+          "when": "Internal histogram assembly fails.",
+          "message": "imhist: internal error"
+        }
+      ]
+    },
+    {
       "name": "impulse",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -28997,6 +30875,54 @@
           "identifier": "RunMat:input:InvalidNumericExpression",
           "when": "Numeric fallback parser rejects the input expression.",
           "message": "input: invalid numeric expression"
+        }
+      ]
+    },
+    {
+      "name": "inputname",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "name = inputname(argNumber)",
+          "inputs": [
+            {
+              "name": "argNumber",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based caller argument index."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Caller argument variable name, or empty text when unavailable."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.INPUTNAME.NOT_ENOUGH_INPUTS",
+          "identifier": "RunMat:NotEnoughInputs",
+          "when": "No argument index is provided.",
+          "message": "inputname: not enough input arguments"
+        },
+        {
+          "code": "RM.INPUTNAME.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "More than one argument index is provided.",
+          "message": "inputname: too many input arguments"
+        },
+        {
+          "code": "RM.INPUTNAME.ARGUMENT_INVALID",
+          "identifier": "RunMat:InputnameArgumentInvalid",
+          "when": "The argument index is not a positive integer scalar.",
+          "message": "inputname: argument index must be a positive integer scalar"
         }
       ]
     },
@@ -31504,6 +33430,54 @@
       ]
     },
     {
+      "name": "isstable",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isstable(sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "True when all continuous poles are in the open left-half plane or all discrete poles are inside the unit circle."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ISSTABLE.INVALID_MODEL",
+          "identifier": "RunMat:isstable:InvalidModel",
+          "when": "Input system is not a valid SISO tf object.",
+          "message": "isstable: invalid model"
+        },
+        {
+          "code": "RM.ISSTABLE.UNSUPPORTED_MODEL",
+          "identifier": "RunMat:isstable:UnsupportedModel",
+          "when": "Model form is unsupported.",
+          "message": "isstable: unsupported model"
+        },
+        {
+          "code": "RM.ISSTABLE.INTERNAL",
+          "identifier": "RunMat:isstable:Internal",
+          "when": "Pole calculation failed.",
+          "message": "isstable: internal error"
+        }
+      ]
+    },
+    {
       "name": "isstring",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -32607,6 +34581,828 @@
       "errors": []
     },
     {
+      "name": "limit",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "L = limit(expr, var, point, direction)",
+          "inputs": [
+            {
+              "name": "expr",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar symbolic expression."
+            },
+            {
+              "name": "var",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Limit variable. Inferred when omitted and the expression has one variable."
+            },
+            {
+              "name": "point",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "0",
+              "description": "Numeric point approached by the limit variable."
+            },
+            {
+              "name": "direction",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional left or right direction."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "L",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar symbolic or numeric limit result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LIMIT.INVALID_EXPR",
+          "identifier": "RunMat:limit:InvalidExpression",
+          "when": "The expression cannot be represented as a scalar symbolic expression.",
+          "message": "limit: expected a scalar symbolic or numeric expression"
+        },
+        {
+          "code": "RM.LIMIT.INVALID_VARIABLE",
+          "identifier": "RunMat:limit:InvalidVariable",
+          "when": "The limit variable cannot be inferred or is not a symbolic variable/text scalar.",
+          "message": "limit: invalid or ambiguous symbolic variable"
+        },
+        {
+          "code": "RM.LIMIT.INVALID_POINT",
+          "identifier": "RunMat:limit:InvalidPoint",
+          "when": "The limit point is not a finite scalar numeric value.",
+          "message": "limit: expected a finite scalar numeric point"
+        },
+        {
+          "code": "RM.LIMIT.INVALID_DIRECTION",
+          "identifier": "RunMat:limit:InvalidDirection",
+          "when": "The optional direction is not left, right, +, or -.",
+          "message": "limit: invalid direction"
+        },
+        {
+          "code": "RM.LIMIT.UNSUPPORTED",
+          "identifier": "RunMat:limit:Unsupported",
+          "when": "The scalar symbolic limit cannot be resolved by substitution or L'Hopital reduction.",
+          "message": "limit: unable to resolve symbolic limit"
+        },
+        {
+          "code": "RM.LIMIT.ARG_COUNT",
+          "identifier": "RunMat:limit:ArgCount",
+          "when": "Too many arguments were supplied.",
+          "message": "limit: too many input arguments"
+        }
+      ]
+    },
+    {
+      "name": "linprog",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "x = linprog(f, A, b)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            }
+          ]
+        },
+        {
+          "label": "x = linprog(f, A, b, Aeq, beq)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            }
+          ]
+        },
+        {
+          "label": "x = linprog(f, A, b, Aeq, beq, lb, ub)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower bounds."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper bounds."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval] = linprog(f, A, b)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval] = linprog(f, A, b, Aeq, beq)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval] = linprog(f, A, b, Aeq, beq, lb, ub)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower bounds."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper bounds."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag] = linprog(f, A, b)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag] = linprog(f, A, b, Aeq, beq)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag] = linprog(f, A, b, Aeq, beq, lb, ub)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower bounds."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper bounds."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag, output] = linprog(f, A, b)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagnostic metadata struct."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag, output] = linprog(f, A, b, Aeq, beq)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagnostic metadata struct."
+            }
+          ]
+        },
+        {
+          "label": "[x, fval, exitflag, output] = linprog(f, A, b, Aeq, beq, lb, ub)",
+          "inputs": [
+            {
+              "name": "f",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Linear objective vector."
+            },
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint matrix."
+            },
+            {
+              "name": "b",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Inequality constraint right-hand side."
+            },
+            {
+              "name": "Aeq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint matrix."
+            },
+            {
+              "name": "beq",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Equality constraint right-hand side."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower bounds."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper bounds."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Optimal decision vector."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Objective value f'*x at the solution."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver status code."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagnostic metadata struct."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LINPROG.INVALID_ARGUMENT",
+          "identifier": "RunMat:linprog:InvalidArgument",
+          "when": "The argument count or optional argument grammar is invalid.",
+          "message": "linprog: invalid argument"
+        },
+        {
+          "code": "RM.LINPROG.INVALID_INPUT",
+          "identifier": "RunMat:linprog:InvalidInput",
+          "when": "Objective, constraint, or bound dimensions/types are invalid.",
+          "message": "linprog: invalid input"
+        }
+      ]
+    },
+    {
       "name": "linsolve",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -33054,6 +35850,34 @@
           "identifier": "RunMat:load:Workspace",
           "when": "Statement-form load cannot assign values into workspace.",
           "message": "load: workspace assignment failed"
+        }
+      ]
+    },
+    {
+      "name": "localfunctions",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "handles = localfunctions()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "handles",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell array of visible local function handles."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LOCALFUNCTIONS.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "Any input argument is provided.",
+          "message": "localfunctions: too many input arguments"
         }
       ]
     },
@@ -36111,6 +38935,55 @@
       ]
     },
     {
+      "name": "mfilename",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "name = mfilename()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current file name."
+            }
+          ]
+        },
+        {
+          "label": "name = mfilename(option)",
+          "inputs": [
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "`fullpath` for full source path or `class` for current method class."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current file name."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.MFILENAME.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "More than one option argument is provided.",
+          "message": "mfilename: too many input arguments"
+        }
+      ]
+    },
+    {
       "name": "min",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -38119,6 +40992,124 @@
       ]
     },
     {
+      "name": "narginchk",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "narginchk(minArgs, maxArgs)",
+          "inputs": [
+            {
+              "name": "minArgs",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum allowed argument count."
+            },
+            {
+              "name": "maxArgs",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum allowed argument count."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NARGINCHK.NOT_ENOUGH_INPUTS",
+          "identifier": "RunMat:NotEnoughInputs",
+          "when": "The current function was called with fewer inputs than the lower bound.",
+          "message": "narginchk: not enough input arguments"
+        },
+        {
+          "code": "RM.NARGINCHK.TOO_MANY_INPUTS",
+          "identifier": "RunMat:TooManyInputs",
+          "when": "The current function was called with more inputs than the upper bound.",
+          "message": "narginchk: too many input arguments"
+        },
+        {
+          "code": "RM.NARGINCHK.ARGUMENT_INVALID",
+          "identifier": "RunMat:NarginchkArgumentInvalid",
+          "when": "A bound argument is not a nonnegative integer scalar or valid Inf upper bound.",
+          "message": "narginchk: bounds must be nonnegative integer scalars"
+        },
+        {
+          "code": "RM.NARGINCHK.BOUNDS_INVALID",
+          "identifier": "RunMat:NarginchkBoundsInvalid",
+          "when": "The minimum bound is greater than the maximum bound.",
+          "message": "narginchk: minArgs must be less than or equal to maxArgs"
+        },
+        {
+          "code": "RM.NARGINCHK.CONTEXT_UNAVAILABLE",
+          "identifier": "RunMat:NarginchkContextUnavailable",
+          "when": "The runtime dispatcher is invoked without VM function-call context.",
+          "message": "narginchk: function call context is unavailable"
+        }
+      ]
+    },
+    {
+      "name": "nargoutchk",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "nargoutchk(minArgs, maxArgs)",
+          "inputs": [
+            {
+              "name": "minArgs",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum allowed argument count."
+            },
+            {
+              "name": "maxArgs",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum allowed argument count."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NARGOUTCHK.NOT_ENOUGH_OUTPUTS",
+          "identifier": "RunMat:NotEnoughOutputs",
+          "when": "The current function was called with fewer requested outputs than the lower bound.",
+          "message": "nargoutchk: not enough output arguments"
+        },
+        {
+          "code": "RM.NARGOUTCHK.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:TooManyOutputs",
+          "when": "The current function was called with more requested outputs than the upper bound.",
+          "message": "nargoutchk: too many output arguments"
+        },
+        {
+          "code": "RM.NARGOUTCHK.ARGUMENT_INVALID",
+          "identifier": "RunMat:NargoutchkArgumentInvalid",
+          "when": "A bound argument is not a nonnegative integer scalar or valid Inf upper bound.",
+          "message": "nargoutchk: bounds must be nonnegative integer scalars"
+        },
+        {
+          "code": "RM.NARGOUTCHK.BOUNDS_INVALID",
+          "identifier": "RunMat:NargoutchkBoundsInvalid",
+          "when": "The minimum bound is greater than the maximum bound.",
+          "message": "nargoutchk: minArgs must be less than or equal to maxArgs"
+        },
+        {
+          "code": "RM.NARGOUTCHK.CONTEXT_UNAVAILABLE",
+          "identifier": "RunMat:NargoutchkContextUnavailable",
+          "when": "The runtime dispatcher is invoked without VM function-call context.",
+          "message": "nargoutchk: function call context is unavailable"
+        }
+      ]
+    },
+    {
       "name": "ndims",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -38195,6 +41186,35 @@
           "message": "ne: array sizes are not compatible for broadcasting"
         }
       ]
+    },
+    {
+      "name": "new_object",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "obj = new_object(class_name)",
+          "inputs": [
+            {
+              "name": "class_name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Class name for the object to create."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "obj",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Created class object value."
+            }
+          ]
+        }
+      ],
+      "errors": []
     },
     {
       "name": "nextpow2",
@@ -38598,6 +41618,110 @@
           "identifier": "RunMat:NotifyTargetInvalid",
           "when": "Target is not an object or handle object.",
           "message": "notify: target must be handle or object"
+        }
+      ]
+    },
+    {
+      "name": "null",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Z = null(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Basis for the null space of A."
+            }
+          ]
+        },
+        {
+          "label": "Z = null(A, tol)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Rank tolerance."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Basis for the null space of A."
+            }
+          ]
+        },
+        {
+          "label": "Z = null(A, \"r\")",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "`\"r\"` requests a row-reduction basis."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Z",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Basis for the null space of A."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NULL.INVALID_ARGUMENT",
+          "identifier": "RunMat:null:InvalidArgument",
+          "when": "Optional tolerance or basis option is malformed or outside accepted bounds.",
+          "message": "null: invalid argument"
+        },
+        {
+          "code": "RM.NULL.INVALID_INPUT",
+          "identifier": "RunMat:null:InvalidInput",
+          "when": "Input shape/type cannot be processed for null-space evaluation.",
+          "message": "null: invalid input"
+        },
+        {
+          "code": "RM.NULL.INTERNAL",
+          "identifier": "RunMat:null:Internal",
+          "when": "Runtime fails while computing the null space or executing fallback/upload paths.",
+          "message": "null: internal runtime failure"
         }
       ]
     },
@@ -39627,6 +42751,148 @@
           "identifier": null,
           "when": "The 'like' keyword is specified more than once.",
           "message": "ones: multiple 'like' specifications are not supported"
+        }
+      ]
+    },
+    {
+      "name": "optimoptions",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "options = optimoptions(solver)",
+          "inputs": [
+            {
+              "name": "solver",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver name, such as fminbnd, fzero, or fsolve."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Options struct for optimization solvers."
+            }
+          ]
+        },
+        {
+          "label": "options = optimoptions(solver, name, value, ...)",
+          "inputs": [
+            {
+              "name": "solver",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver name, such as fminbnd, fzero, or fsolve."
+            },
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Option field name."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Option value(s) and additional name/value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Options struct for optimization solvers."
+            }
+          ]
+        },
+        {
+          "label": "options = optimoptions(oldopts, name, value, ...)",
+          "inputs": [
+            {
+              "name": "oldopts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing options struct to update."
+            },
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Option field name."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Option value(s), additional name/value pairs, or another options struct."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Options struct for optimization solvers."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.OPTIMOPTIONS.INVALID_ARGUMENT",
+          "identifier": "RunMat:optimoptions:InvalidArgument",
+          "when": "Argument grammar does not match supported optimoptions forms.",
+          "message": "optimoptions: invalid argument"
+        },
+        {
+          "code": "RM.OPTIMOPTIONS.INVALID_SOLVER",
+          "identifier": "RunMat:optimoptions:InvalidSolver",
+          "when": "The solver argument is not one of the supported optimization builtins.",
+          "message": "optimoptions: invalid solver"
+        },
+        {
+          "code": "RM.OPTIMOPTIONS.INVALID_OPTION_NAME",
+          "identifier": "RunMat:optimoptions:InvalidOptionName",
+          "when": "An option name is not a text scalar.",
+          "message": "optimoptions: invalid option name"
+        },
+        {
+          "code": "RM.OPTIMOPTIONS.MISSING_OPTION_VALUE",
+          "identifier": "RunMat:optimoptions:MissingOptionValue",
+          "when": "A name-value option key is not followed by a value.",
+          "message": "optimoptions: missing option value"
+        },
+        {
+          "code": "RM.OPTIMOPTIONS.UNKNOWN_OPTION",
+          "identifier": "RunMat:optimoptions:UnknownOption",
+          "when": "An option name is not supported by the selected solver.",
+          "message": "optimoptions: unknown option"
+        },
+        {
+          "code": "RM.OPTIMOPTIONS.INVALID_OPTION_VALUE",
+          "identifier": "RunMat:optimoptions:InvalidOptionValue",
+          "when": "An option value fails type or domain validation.",
+          "message": "optimoptions: invalid option value"
+        },
+        {
+          "code": "RM.OPTIMOPTIONS.FLOW",
+          "identifier": "RunMat:optimoptions:Flow",
+          "when": "Nested flow fails while gathering input values.",
+          "message": "optimoptions: flow failure"
         }
       ]
     },
@@ -42314,6 +45580,54 @@
           "identifier": "RunMat:plus:Internal",
           "when": "Provider interaction, gather/upload, or internal tensor construction failed.",
           "message": "plus: internal error"
+        }
+      ]
+    },
+    {
+      "name": "pole",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "p = pole(sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Poles of the SISO tf model as a column vector."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.POLE.INVALID_MODEL",
+          "identifier": "RunMat:pole:InvalidModel",
+          "when": "Input system is not a valid SISO tf object.",
+          "message": "pole: invalid model"
+        },
+        {
+          "code": "RM.POLE.UNSUPPORTED_MODEL",
+          "identifier": "RunMat:pole:UnsupportedModel",
+          "when": "Model form is unsupported.",
+          "message": "pole: unsupported model"
+        },
+        {
+          "code": "RM.POLE.INTERNAL",
+          "identifier": "RunMat:pole:Internal",
+          "when": "Root calculation or output construction failed.",
+          "message": "pole: internal error"
         }
       ]
     },
@@ -46361,6 +49675,94 @@
       ]
     },
     {
+      "name": "readtable",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "T = readtable(filename)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Text or spreadsheet file path."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        },
+        {
+          "label": "T = readtable(filename, nameValuePairs...)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Text or spreadsheet file path."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value import options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TABLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:table:InvalidArgument",
+          "when": "Arguments or table metadata are invalid.",
+          "message": "table: invalid argument"
+        },
+        {
+          "code": "RM.TABLE.INVALID_INDEX",
+          "identifier": "RunMat:table:InvalidIndex",
+          "when": "Table indexing is invalid.",
+          "message": "table: invalid index"
+        },
+        {
+          "code": "RM.TABLE.INVALID_VARIABLE",
+          "identifier": "RunMat:table:InvalidVariable",
+          "when": "A table variable name or value is invalid.",
+          "message": "table: invalid variable"
+        },
+        {
+          "code": "RM.READTABLE.IO",
+          "identifier": "RunMat:readtable:IOError",
+          "when": "readtable cannot open or read the requested file.",
+          "message": "readtable: file read failed"
+        },
+        {
+          "code": "RM.READTABLE.UNSUPPORTED_FILE",
+          "identifier": "RunMat:readtable:UnsupportedFileType",
+          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
+          "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
       "name": "real",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -47484,6 +50886,157 @@
       ]
     },
     {
+      "name": "rlocus",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "r = rlocus(sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf or ss model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop pole locations as a branches-by-gains matrix."
+            }
+          ]
+        },
+        {
+          "label": "r = rlocus(sys, k)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf or ss model."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite nonnegative gain vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop pole locations as a branches-by-gains matrix."
+            }
+          ]
+        },
+        {
+          "label": "[r,k] = rlocus(sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf or ss model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop pole locations as a branches-by-gains matrix."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Gain vector used to compute the root locus."
+            }
+          ]
+        },
+        {
+          "label": "[r,k] = rlocus(sys, k)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf or ss model."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite nonnegative gain vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "r",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Closed-loop pole locations as a branches-by-gains matrix."
+            },
+            {
+              "name": "k",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Gain vector used to compute the root locus."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.RLOCUS.INVALID_ARGUMENT",
+          "identifier": "RunMat:rlocus:InvalidArgument",
+          "when": "Inputs do not match supported rlocus invocation forms.",
+          "message": "rlocus: invalid argument"
+        },
+        {
+          "code": "RM.RLOCUS.INVALID_MODEL",
+          "identifier": "RunMat:rlocus:InvalidModel",
+          "when": "Input system is not a valid SISO tf or ss object.",
+          "message": "rlocus: invalid model"
+        },
+        {
+          "code": "RM.RLOCUS.UNSUPPORTED_MODEL",
+          "identifier": "RunMat:rlocus:UnsupportedModel",
+          "when": "Model form is not supported by the current implementation.",
+          "message": "rlocus: unsupported model"
+        },
+        {
+          "code": "RM.RLOCUS.PLOT_FAILED",
+          "identifier": "RunMat:rlocus:PlotFailed",
+          "when": "Statement-form plotting failed for reasons other than known nonfatal setup conditions.",
+          "message": "rlocus: plotting failed"
+        },
+        {
+          "code": "RM.RLOCUS.INTERNAL",
+          "identifier": "RunMat:rlocus:Internal",
+          "when": "Root-locus computation or output construction failed.",
+          "message": "rlocus: internal error"
+        }
+      ]
+    },
+    {
       "name": "rmdir",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -48323,6 +51876,215 @@
           "identifier": "RunMat:round:Internal",
           "when": "Internal tensor conversion/allocation failed.",
           "message": "round: internal error"
+        }
+      ]
+    },
+    {
+      "name": "rref",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "R = rref(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reduced row echelon form of A."
+            }
+          ]
+        },
+        {
+          "label": "R = rref(A, tol)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Pivot tolerance."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reduced row echelon form of A."
+            }
+          ]
+        },
+        {
+          "label": "[R, pivots] = rref(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reduced row echelon form of A."
+            },
+            {
+              "name": "pivots",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based pivot column indices."
+            }
+          ]
+        },
+        {
+          "label": "[R, pivots] = rref(A, tol)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input matrix."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Pivot tolerance."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Reduced row echelon form of A."
+            },
+            {
+              "name": "pivots",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based pivot column indices."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.RREF.INVALID_ARGUMENT",
+          "identifier": "RunMat:rref:InvalidArgument",
+          "when": "Optional tolerance argument is malformed or outside accepted bounds.",
+          "message": "rref: invalid argument"
+        },
+        {
+          "code": "RM.RREF.INVALID_INPUT",
+          "identifier": "RunMat:rref:InvalidInput",
+          "when": "Input shape/type cannot be processed for row reduction.",
+          "message": "rref: invalid input"
+        },
+        {
+          "code": "RM.RREF.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:rref:TooManyOutputs",
+          "when": "More than two output arguments are requested.",
+          "message": "rref: too many output arguments"
+        },
+        {
+          "code": "RM.RREF.INTERNAL",
+          "identifier": "RunMat:rref:Internal",
+          "when": "Runtime fails while computing row reduction or executing gather/upload paths.",
+          "message": "rref: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "run(script)",
+          "inputs": [
+            {
+              "name": "script",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Script name or path to execute in the caller workspace."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.RUN.REQUIRES_VM",
+          "identifier": "RunMat:run:RequiresVm",
+          "when": "`run` is dispatched outside an active VM workspace frame.",
+          "message": "run: requires VM workspace context"
+        },
+        {
+          "code": "RM.RUN.ARG_TYPE",
+          "identifier": "RunMat:run:InvalidScriptArgument",
+          "when": "The script argument is not a character row, string scalar, or scalar string array.",
+          "message": "run: script must be a character vector or string scalar"
+        },
+        {
+          "code": "RM.RUN.EMPTY_SCRIPT",
+          "identifier": "RunMat:run:EmptyScript",
+          "when": "The script argument is an empty path.",
+          "message": "run: script path must not be empty"
+        },
+        {
+          "code": "RM.RUN.PATH_RESOLVE",
+          "identifier": "RunMat:run:PathResolveFailed",
+          "when": "RunMat cannot resolve the current directory, home directory, or search path.",
+          "message": "run: failed to resolve script path"
+        },
+        {
+          "code": "RM.RUN.FILE_NOT_FOUND",
+          "identifier": "RunMat:run:FileNotFound",
+          "when": "No matching script file exists in the current directory or RunMat search path.",
+          "message": "run: script file not found"
+        },
+        {
+          "code": "RM.RUN.FILE_READ",
+          "identifier": "RunMat:run:FileReadFailed",
+          "when": "The matched script file cannot be read as source text.",
+          "message": "run: failed to read script file"
+        },
+        {
+          "code": "RM.RUN.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:run:TooManyOutputs",
+          "when": "`run` is called with one or more requested output arguments.",
+          "message": "run: too many output arguments"
         }
       ]
     },
@@ -50562,6 +54324,12 @@
           "message": "setfield: private property access denied"
         },
         {
+          "code": "RM.SETFIELD.PROPERTY_STATIC_ACCESS",
+          "identifier": "RunMat:PropertyStaticAccess",
+          "when": "Property exists but is static and cannot be assigned through an instance.",
+          "message": "setfield: static property access denied"
+        },
+        {
           "code": "RM.SETFIELD.OBJECT_PROPERTY",
           "identifier": "RunMat:setfield:ObjectProperty",
           "when": "Object property operation is invalid (static, non-public, or malformed setter result).",
@@ -52452,6 +56220,79 @@
           "identifier": "RunMat:split:InternalError",
           "when": "Internal output container construction failed.",
           "message": "split: internal error"
+        }
+      ]
+    },
+    {
+      "name": "spreadsheetImportOptions",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "opts = spreadsheetImportOptions()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "opts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Spreadsheet import options struct."
+            }
+          ]
+        },
+        {
+          "label": "opts = spreadsheetImportOptions(nameValuePairs...)",
+          "inputs": [
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value option pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "opts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Spreadsheet import options struct."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TABLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:table:InvalidArgument",
+          "when": "Arguments or table metadata are invalid.",
+          "message": "table: invalid argument"
+        },
+        {
+          "code": "RM.TABLE.INVALID_INDEX",
+          "identifier": "RunMat:table:InvalidIndex",
+          "when": "Table indexing is invalid.",
+          "message": "table: invalid index"
+        },
+        {
+          "code": "RM.TABLE.INVALID_VARIABLE",
+          "identifier": "RunMat:table:InvalidVariable",
+          "when": "A table variable name or value is invalid.",
+          "message": "table: invalid variable"
+        },
+        {
+          "code": "RM.READTABLE.IO",
+          "identifier": "RunMat:readtable:IOError",
+          "when": "readtable cannot open or read the requested file.",
+          "message": "readtable: file read failed"
+        },
+        {
+          "code": "RM.READTABLE.UNSUPPORTED_FILE",
+          "identifier": "RunMat:readtable:UnsupportedFileType",
+          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
+          "message": "readtable: unsupported file type"
         }
       ]
     },
@@ -54770,6 +58611,129 @@
       ]
     },
     {
+      "name": "stepinfo",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "info = stepinfo(sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO tf model."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "info",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Step-response metrics struct."
+            }
+          ]
+        },
+        {
+          "label": "info = stepinfo(y, t)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response samples."
+            },
+            {
+              "name": "t",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Time samples."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "info",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Step-response metrics struct."
+            }
+          ]
+        },
+        {
+          "label": "info = stepinfo(y, t, yfinal)",
+          "inputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Response samples."
+            },
+            {
+              "name": "t",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Time samples."
+            },
+            {
+              "name": "yfinal",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Steady-state value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "info",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Step-response metrics struct."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.STEPINFO.INVALID_ARGUMENT",
+          "identifier": "RunMat:stepinfo:InvalidArgument",
+          "when": "Inputs do not match supported stepinfo invocation forms.",
+          "message": "stepinfo: invalid argument"
+        },
+        {
+          "code": "RM.STEPINFO.INVALID_DATA",
+          "identifier": "RunMat:stepinfo:InvalidData",
+          "when": "Response, time, or final-value data is malformed.",
+          "message": "stepinfo: invalid response data"
+        },
+        {
+          "code": "RM.STEPINFO.INVALID_SYSTEM",
+          "identifier": "RunMat:stepinfo:InvalidSystem",
+          "when": "System input is not a supported SISO tf object.",
+          "message": "stepinfo: invalid system"
+        },
+        {
+          "code": "RM.STEPINFO.UNSUPPORTED_MODEL",
+          "identifier": "RunMat:stepinfo:UnsupportedModel",
+          "when": "System model form is unsupported.",
+          "message": "stepinfo: unsupported model"
+        },
+        {
+          "code": "RM.STEPINFO.INTERNAL",
+          "identifier": "RunMat:stepinfo:Internal",
+          "when": "Response simulation or metric assembly failed.",
+          "message": "stepinfo: internal error"
+        }
+      ]
+    },
+    {
       "name": "str2double",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -56383,6 +60347,125 @@
       ]
     },
     {
+      "name": "subsasgn",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "obj = subsasgn(obj, kind, payload, rhs)",
+          "inputs": [
+            {
+              "name": "obj",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Object receiver."
+            },
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexing kind token ('()', '{}', '.')."
+            },
+            {
+              "name": "payload",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexing payload."
+            },
+            {
+              "name": "rhs",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Assigned value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "obj",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Updated object value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SUBSASGN.RECEIVER_INVALID",
+          "identifier": "RunMat:InvalidObjectDispatch",
+          "when": "Receiver is not an object or handle object.",
+          "message": "subsasgn: requires object receiver"
+        },
+        {
+          "code": "RM.SUBSASGN.METHOD_MISSING",
+          "identifier": "RunMat:MissingSubsasgn",
+          "when": "Target class does not implement subsasgn.",
+          "message": "subsasgn: class does not define subsasgn for indexed assignment"
+        }
+      ]
+    },
+    {
+      "name": "subsref",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = subsref(obj, kind, payload)",
+          "inputs": [
+            {
+              "name": "obj",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Object receiver."
+            },
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexing kind token ('()', '{}', '.')."
+            },
+            {
+              "name": "payload",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexing payload."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexed value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SUBSREF.RECEIVER_INVALID",
+          "identifier": "RunMat:InvalidObjectDispatch",
+          "when": "Receiver is not an object or handle object.",
+          "message": "subsref: requires object receiver"
+        },
+        {
+          "code": "RM.SUBSREF.METHOD_MISSING",
+          "identifier": "RunMat:MissingSubsref",
+          "when": "Target class does not implement subsref.",
+          "message": "subsref: class does not define subsref for indexing operation"
+        }
+      ]
+    },
+    {
       "name": "sum",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -57445,6 +61528,61 @@
       ]
     },
     {
+      "name": "sym",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "S = sym(value)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Variable name, numeric scalar, or existing symbolic scalar."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Reserved symbolic options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "S",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar symbolic variable or constant."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SYM.ARG_COUNT",
+          "identifier": "RunMat:sym:ArgCount",
+          "when": "Options beyond the scalar input are supplied.",
+          "message": "sym: unsupported options"
+        },
+        {
+          "code": "RM.SYM.INVALID_TEXT",
+          "identifier": "RunMat:sym:InvalidText",
+          "when": "Text input is neither a valid identifier nor a numeric scalar literal.",
+          "message": "sym: invalid symbolic text"
+        },
+        {
+          "code": "RM.SYM.INVALID_INPUT",
+          "identifier": "RunMat:sym:InvalidInput",
+          "when": "Input cannot be represented as a scalar symbolic value.",
+          "message": "sym: expected a scalar text, numeric, logical, or symbolic input"
+        }
+      ]
+    },
+    {
       "name": "symrcm",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -57483,6 +61621,114 @@
           "identifier": "RunMat:symrcm:Internal",
           "when": "Runtime fails while constructing intermediate tensors or adjacency structures.",
           "message": "symrcm: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "syms",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "syms name ...",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Symbol names and optional assumption keywords."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ans",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty return value for command declarations."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.SYMS.EMPTY",
+          "identifier": "RunMat:syms:EmptyDeclaration",
+          "when": "No symbol names were supplied.",
+          "message": "syms: expected at least one symbolic variable name"
+        },
+        {
+          "code": "RM.SYMS.INVALID_NAME",
+          "identifier": "RunMat:syms:InvalidName",
+          "when": "A declaration token is not a valid MATLAB identifier or assumption keyword.",
+          "message": "syms: invalid symbolic variable name"
+        },
+        {
+          "code": "RM.SYMS.WORKSPACE",
+          "identifier": "RunMat:syms:WorkspaceUnavailable",
+          "when": "The active runtime cannot assign to the caller workspace.",
+          "message": "syms: workspace assignment unavailable"
+        }
+      ]
+    },
+    {
+      "name": "table",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "T = table(variables...)",
+          "inputs": [
+            {
+              "name": "variables",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Variables to assemble as table columns."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TABLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:table:InvalidArgument",
+          "when": "Arguments or table metadata are invalid.",
+          "message": "table: invalid argument"
+        },
+        {
+          "code": "RM.TABLE.INVALID_INDEX",
+          "identifier": "RunMat:table:InvalidIndex",
+          "when": "Table indexing is invalid.",
+          "message": "table: invalid index"
+        },
+        {
+          "code": "RM.TABLE.INVALID_VARIABLE",
+          "identifier": "RunMat:table:InvalidVariable",
+          "when": "A table variable name or value is invalid.",
+          "message": "table: invalid variable"
+        },
+        {
+          "code": "RM.READTABLE.IO",
+          "identifier": "RunMat:readtable:IOError",
+          "when": "readtable cannot open or read the requested file.",
+          "message": "readtable: file read failed"
+        },
+        {
+          "code": "RM.READTABLE.UNSUPPORTED_FILE",
+          "identifier": "RunMat:readtable:UnsupportedFileType",
+          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
+          "message": "readtable: unsupported file type"
         }
       ]
     },
@@ -58273,6 +62519,55 @@
       "output_mode": "Fixed",
       "completion_policy": "Public",
       "signatures": [
+        {
+          "label": "s = tf('s')",
+          "inputs": [
+            {
+              "name": "variable",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Transfer-function indeterminate ('s', 'p', 'z', 'q', 'z^-1', or 'q^-1')."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO transfer-function object."
+            }
+          ]
+        },
+        {
+          "label": "z = tf('z', Ts)",
+          "inputs": [
+            {
+              "name": "variable",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Transfer-function indeterminate ('s', 'p', 'z', 'q', 'z^-1', or 'q^-1')."
+            },
+            {
+              "name": "Ts",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "0.0",
+              "description": "Sample time (0 for continuous-time model)."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "sys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "SISO transfer-function object."
+            }
+          ]
+        },
         {
           "label": "sys = tf(numerator, denominator)",
           "inputs": [
@@ -59490,6 +63785,220 @@
       ]
     },
     {
+      "name": "uigetfile",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "file = uigetfile()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "file",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected filename, cell array of filenames for multiple selections, or 0 when cancelled."
+            }
+          ]
+        },
+        {
+          "label": "file = uigetfile(filter)",
+          "inputs": [
+            {
+              "name": "filter",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"*.*\"",
+              "description": "File extension pattern, semicolon-delimited patterns, or an N-by-1/N-by-2 cell array of patterns and descriptions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "file",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected filename, cell array of filenames for multiple selections, or 0 when cancelled."
+            }
+          ]
+        },
+        {
+          "label": "[file, path] = uigetfile(filter, title)",
+          "inputs": [
+            {
+              "name": "filter",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"*.*\"",
+              "description": "File extension pattern, semicolon-delimited patterns, or an N-by-1/N-by-2 cell array of patterns and descriptions."
+            },
+            {
+              "name": "title",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dialog title."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "file",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected filename, cell array of filenames for multiple selections, or 0 when cancelled."
+            },
+            {
+              "name": "path",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Directory containing the selected file, including a trailing separator, or 0 when cancelled."
+            }
+          ]
+        },
+        {
+          "label": "[file, path, index] = uigetfile(filter, title, defaultName)",
+          "inputs": [
+            {
+              "name": "filter",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"*.*\"",
+              "description": "File extension pattern, semicolon-delimited patterns, or an N-by-1/N-by-2 cell array of patterns and descriptions."
+            },
+            {
+              "name": "title",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dialog title."
+            },
+            {
+              "name": "defaultName",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Initial file or directory path for the dialog."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "file",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected filename, cell array of filenames for multiple selections, or 0 when cancelled."
+            },
+            {
+              "name": "path",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Directory containing the selected file, including a trailing separator, or 0 when cancelled."
+            },
+            {
+              "name": "index",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based selected filter index, or 0 when cancelled."
+            }
+          ]
+        },
+        {
+          "label": "[file, path, index] = uigetfile(filter, title, defaultName, \"MultiSelect\", value)",
+          "inputs": [
+            {
+              "name": "filter",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"*.*\"",
+              "description": "File extension pattern, semicolon-delimited patterns, or an N-by-1/N-by-2 cell array of patterns and descriptions."
+            },
+            {
+              "name": "title",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Dialog title."
+            },
+            {
+              "name": "defaultName",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Initial file or directory path for the dialog."
+            },
+            {
+              "name": "optionName",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"MultiSelect\"",
+              "description": "Name-value option name. `MultiSelect` is supported."
+            },
+            {
+              "name": "optionValue",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "\"off\"",
+              "description": "`\"on\"`, `\"off\"`, or a scalar logical/numeric value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "file",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected filename, cell array of filenames for multiple selections, or 0 when cancelled."
+            },
+            {
+              "name": "path",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Directory containing the selected file, including a trailing separator, or 0 when cancelled."
+            },
+            {
+              "name": "index",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based selected filter index, or 0 when cancelled."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.UIGETFILE.INVALID_ARGUMENT",
+          "identifier": "RunMat:uigetfile:InvalidArgument",
+          "when": "A filter, title, default path, or name-value option has an unsupported type or shape.",
+          "message": "uigetfile: invalid argument"
+        },
+        {
+          "code": "RM.UIGETFILE.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:uigetfile:TooManyOutputs",
+          "when": "More than three output arguments are requested.",
+          "message": "uigetfile: too many output arguments"
+        },
+        {
+          "code": "RM.UIGETFILE.HOST",
+          "identifier": "RunMat:uigetfile:HostError",
+          "when": "The active filesystem provider fails while opening the host file-selection UI.",
+          "message": "uigetfile: file selection failed"
+        },
+        {
+          "code": "RM.UIGETFILE.INVALID_SELECTION",
+          "identifier": "RunMat:uigetfile:InvalidSelection",
+          "when": "The active filesystem provider returns a malformed or internally inconsistent file selection.",
+          "message": "uigetfile: invalid file selection"
+        }
+      ]
+    },
+    {
       "name": "uint16",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -60235,6 +64744,129 @@
           "identifier": "RunMat:unique:Internal",
           "when": "Internal conversion/allocation/provider decode fails.",
           "message": "unique: internal operation failed"
+        }
+      ]
+    },
+    {
+      "name": "unwrap",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Q = unwrap(P)",
+          "inputs": [
+            {
+              "name": "P",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Wrapped phase angles in radians."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Phase values with jumps larger than the tolerance corrected by multiples of 2*pi."
+            }
+          ]
+        },
+        {
+          "label": "Q = unwrap(P, tol)",
+          "inputs": [
+            {
+              "name": "P",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Wrapped phase angles in radians."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "pi",
+              "description": "Jump tolerance. Values below pi are treated as pi."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Phase values with jumps larger than the tolerance corrected by multiples of 2*pi."
+            }
+          ]
+        },
+        {
+          "label": "Q = unwrap(P, tol, dim)",
+          "inputs": [
+            {
+              "name": "P",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Wrapped phase angles in radians."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "pi",
+              "description": "Jump tolerance. Use [] to keep the default."
+            },
+            {
+              "name": "dim",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "first non-singleton dimension",
+              "description": "Dimension along which to unwrap."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Q",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Phase values with jumps larger than the tolerance corrected by multiples of 2*pi."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.UNWRAP.ARG_COUNT",
+          "identifier": "RunMat:unwrap:ArgCount",
+          "when": "More than three input arguments are supplied.",
+          "message": "unwrap: expected unwrap(P), unwrap(P, tol), or unwrap(P, tol, dim)"
+        },
+        {
+          "code": "RM.UNWRAP.INVALID_INPUT",
+          "identifier": "RunMat:unwrap:InvalidInput",
+          "when": "Input cannot be converted to a real numeric/logical phase array.",
+          "message": "unwrap: expected real numeric input"
+        },
+        {
+          "code": "RM.UNWRAP.INVALID_TOLERANCE",
+          "identifier": "RunMat:unwrap:InvalidTolerance",
+          "when": "Tolerance is not a finite, nonnegative scalar.",
+          "message": "unwrap: tolerance must be a finite nonnegative scalar"
+        },
+        {
+          "code": "RM.UNWRAP.INVALID_DIMENSION",
+          "identifier": "RunMat:unwrap:InvalidDimension",
+          "when": "Dimension argument is missing, non-numeric, non-integer, or less than one.",
+          "message": "unwrap: dimension must be a positive integer scalar"
+        },
+        {
+          "code": "RM.UNWRAP.INTERNAL",
+          "identifier": "RunMat:unwrap:Internal",
+          "when": "Internal gather, tensor conversion, or allocation fails.",
+          "message": "unwrap: internal error"
         }
       ]
     },
@@ -62453,6 +67085,66 @@
           "identifier": null,
           "when": "Wildcard selector pattern fails to parse.",
           "message": "whos: invalid pattern"
+        }
+      ]
+    },
+    {
+      "name": "width",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "n = width(T)",
+          "inputs": [
+            {
+              "name": "T",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Table input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Count."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TABLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:table:InvalidArgument",
+          "when": "Arguments or table metadata are invalid.",
+          "message": "table: invalid argument"
+        },
+        {
+          "code": "RM.TABLE.INVALID_INDEX",
+          "identifier": "RunMat:table:InvalidIndex",
+          "when": "Table indexing is invalid.",
+          "message": "table: invalid index"
+        },
+        {
+          "code": "RM.TABLE.INVALID_VARIABLE",
+          "identifier": "RunMat:table:InvalidVariable",
+          "when": "A table variable name or value is invalid.",
+          "message": "table: invalid variable"
+        },
+        {
+          "code": "RM.READTABLE.IO",
+          "identifier": "RunMat:readtable:IOError",
+          "when": "readtable cannot open or read the requested file.",
+          "message": "readtable: file read failed"
+        },
+        {
+          "code": "RM.READTABLE.UNSUPPORTED_FILE",
+          "identifier": "RunMat:readtable:UnsupportedFileType",
+          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
+          "message": "readtable: unsupported file type"
         }
       ]
     },

@@ -5,10 +5,11 @@ use super::point::{marker_area_points2_to_diameter_px, marker_diameter_px_to_are
 use super::state::{
     axes_handle_exists, axes_handles_for_figure, axes_metadata_snapshot, axes_state_snapshot,
     current_axes_handle_for_figure, decode_axes_handle, decode_plot_object_handle,
-    figure_handle_exists, figure_has_sg_title, legend_entries_snapshot, select_axes_for_figure,
-    set_legend_for_axes, set_sg_title_properties_for_figure,
-    set_text_annotation_properties_for_axes, set_text_properties_for_axes, FigureHandle,
-    PlotObjectKind,
+    figure_handle_exists, figure_has_sg_title, legend_entries_snapshot, present_figure_update,
+    select_axes_for_figure, set_axes_style_for_axes, set_figure_background_color, set_figure_name,
+    set_figure_number_title, set_figure_visible, set_legend_for_axes,
+    set_sg_title_properties_for_figure, set_text_annotation_properties_for_axes,
+    set_text_properties_for_axes, FigureHandle, PlotObjectKind,
 };
 use super::style::{
     parse_color_value, value_as_bool, value_as_f64, value_as_string, LineStyleParseOptions,
@@ -17,6 +18,8 @@ use super::{plotting_error, plotting_error_with_source};
 use crate::builtins::plotting::op_common::limits::limit_value;
 use crate::builtins::plotting::op_common::value_as_text_string;
 use crate::BuiltinResult;
+
+const MAX_AXES_FONT_SIZE_POINTS: f64 = 512.0;
 
 #[derive(Clone, Debug)]
 pub enum PlotHandle {
@@ -92,9 +95,18 @@ pub fn set_properties(
     }
     match handle {
         PlotHandle::Figure(handle) => {
+            let mut needs_present = false;
+            for pair in args.chunks_exact(2) {
+                validate_figure_property_value(&pair[0], &pair[1], Some(handle), builtin)?;
+            }
             for pair in args.chunks_exact(2) {
                 let key = property_name(&pair[0], builtin)?;
-                apply_figure_property(handle, &key, &pair[1], builtin)?;
+                needs_present |= apply_figure_property(handle, &key, &pair[1], builtin)?;
+            }
+            if needs_present {
+                let figure = super::state::clone_figure(handle)
+                    .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure")))?;
+                let _ = present_figure_update(builtin, handle, figure)?;
             }
             Ok(())
         }
@@ -295,6 +307,8 @@ fn get_figure_property(
     property: Option<&str>,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
+    let figure = super::state::clone_figure(handle)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure")))?;
     let axes = axes_handles_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
     let current_axes =
         current_axes_handle_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
@@ -314,7 +328,16 @@ fn get_figure_property(
             }
             st.insert("Children", handles_value(children));
             st.insert("Parent", Value::Num(f64::NAN));
-            st.insert("Name", Value::String(format!("Figure {}", handle.as_u32())));
+            st.insert(
+                "Name",
+                Value::String(figure.name.clone().unwrap_or_default()),
+            );
+            st.insert("NumberTitle", Value::Bool(figure.number_title));
+            st.insert("Visible", Value::Bool(figure.visible));
+            st.insert(
+                "Color",
+                Value::String(color_to_short_name(figure.background_color)),
+            );
             st.insert("SGTitle", Value::Num(sg_title_handle));
             Ok(Value::Struct(st))
         }
@@ -329,7 +352,10 @@ fn get_figure_property(
             children
         })),
         Some("parent") => Ok(Value::Num(f64::NAN)),
-        Some("name") => Ok(Value::String(format!("Figure {}", handle.as_u32()))),
+        Some("name") => Ok(Value::String(figure.name.unwrap_or_default())),
+        Some("numbertitle") => Ok(Value::Bool(figure.number_title)),
+        Some("visible") => Ok(Value::Bool(figure.visible)),
+        Some("color") => Ok(Value::String(color_to_short_name(figure.background_color))),
         Some("sgtitle") => Ok(Value::Num(sg_title_handle)),
         Some(other) => Err(plotting_error(
             builtin,
@@ -433,6 +459,7 @@ fn get_axes_property(
                 ]),
             );
             st.insert("Grid", Value::Bool(meta.grid_enabled));
+            st.insert("MinorGrid", Value::Bool(meta.minor_grid_enabled));
             st.insert("Box", Value::Bool(meta.box_enabled));
             st.insert("AxisEqual", Value::Bool(meta.axis_equal));
             st.insert("Colorbar", Value::Bool(meta.colorbar_enabled));
@@ -444,6 +471,10 @@ fn get_axes_property(
             st.insert("YLim", limit_value(meta.y_limits));
             st.insert("ZLim", limit_value(meta.z_limits));
             st.insert("CLim", limit_value(meta.color_limits));
+            st.insert(
+                "FontSize",
+                Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64),
+            );
             st.insert(
                 "XScale",
                 Value::String(if meta.x_log { "log" } else { "linear" }.into()),
@@ -491,6 +522,7 @@ fn get_axes_property(
             }))
         }
         Some("grid") => Ok(Value::Bool(meta.grid_enabled)),
+        Some("minorgrid") => Ok(Value::Bool(meta.minor_grid_enabled)),
         Some("box") => Ok(Value::Bool(meta.box_enabled)),
         Some("axisequal") => Ok(Value::Bool(meta.axis_equal)),
         Some("colorbar") => Ok(Value::Bool(meta.colorbar_enabled)),
@@ -501,6 +533,7 @@ fn get_axes_property(
         Some("ylim") => Ok(limit_value(meta.y_limits)),
         Some("zlim") => Ok(limit_value(meta.z_limits)),
         Some("clim") => Ok(limit_value(meta.color_limits)),
+        Some("fontsize") => Ok(Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64)),
         Some("xscale") => Ok(Value::String(
             if meta.x_log { "log" } else { "linear" }.into(),
         )),
@@ -740,7 +773,7 @@ fn property_name(value: &Value, builtin: &'static str) -> BuiltinResult<String> 
 fn canonical_property_name(name: &str) -> &str {
     match name.to_ascii_lowercase().as_str() {
         "textcolor" => "textcolor",
-        "color" => "color",
+        "color" | "backgroundcolor" => "color",
         "fontsize" => "fontsize",
         "fontweight" => "fontweight",
         "fontangle" => "fontangle",
@@ -755,7 +788,8 @@ fn canonical_property_name(name: &str) -> &str {
         "ylabel" => "ylabel",
         "zlabel" => "zlabel",
         "view" => "view",
-        "grid" => "grid",
+        "grid" | "xgrid" | "ygrid" | "zgrid" => "grid",
+        "minorgrid" | "xminorgrid" | "yminorgrid" | "zminorgrid" => "minorgrid",
         "axisequal" => "axisequal",
         "colorbar" => "colorbar",
         "colorbarvisible" => "colorbarvisible",
@@ -777,6 +811,7 @@ fn canonical_property_name(name: &str) -> &str {
         "type" => "type",
         "number" => "number",
         "name" => "name",
+        "numbertitle" => "numbertitle",
         "legend" => "legend",
         "legendvisible" => "legendvisible",
         other => Box::leak(other.to_string().into_boxed_str()),
@@ -959,6 +994,16 @@ fn apply_axes_property(
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
+        "minorgrid" => {
+            let enabled = value_as_bool(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: MinorGrid must be logical"))
+            })?;
+            crate::builtins::plotting::state::set_minor_grid_enabled_for_axes(
+                handle, axes_index, enabled,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
         "box" => {
             let enabled = value_as_bool(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: Box must be logical"))
@@ -991,6 +1036,26 @@ fn apply_axes_property(
             })?;
             let cmap = parse_colormap_name(&name, builtin)?;
             crate::builtins::plotting::state::set_colormap_for_axes(handle, axes_index, cmap)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "fontsize" => {
+            let font_size = value_as_f64(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: FontSize must be numeric"))
+            })?;
+            if !font_size.is_finite() || font_size <= 0.0 || font_size > MAX_AXES_FONT_SIZE_POINTS {
+                return Err(plotting_error(
+                    builtin,
+                    format!(
+                        "{builtin}: FontSize must be a positive finite value no larger than {MAX_AXES_FONT_SIZE_POINTS}"
+                    ),
+                ));
+            }
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let mut style = meta.axes_style;
+            style.font_size = Some(font_size as f32);
+            set_axes_style_for_axes(handle, axes_index, style)
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
@@ -1074,8 +1139,37 @@ fn apply_figure_property(
     key: &str,
     value: &Value,
     builtin: &'static str,
-) -> BuiltinResult<()> {
+) -> BuiltinResult<bool> {
+    let opts = LineStyleParseOptions::generic(builtin);
     match key {
+        "name" => {
+            let name = value_as_text_string(value)
+                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Name must be text")))?;
+            set_figure_name(figure_handle, name).map_err(|err| map_figure_error(builtin, err))?;
+            Ok(true)
+        }
+        "numbertitle" => {
+            let enabled = value_as_bool(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: NumberTitle must be logical"))
+            })?;
+            set_figure_number_title(figure_handle, enabled)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(true)
+        }
+        "visible" => {
+            let visible = value_as_bool(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: Visible must be logical"))
+            })?;
+            let _ = set_figure_visible(figure_handle, visible)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(true)
+        }
+        "color" => {
+            let color = parse_color_value(&opts, value)?;
+            set_figure_background_color(figure_handle, color)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(true)
+        }
         "currentaxes" => {
             let resolved = resolve_plot_handle(value, builtin)?;
             let PlotHandle::Axes(fig, axes_index) = resolved else {
@@ -1092,16 +1186,77 @@ fn apply_figure_property(
             }
             select_axes_for_figure(figure_handle, axes_index)
                 .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(())
+            Ok(true)
         }
         "sgtitle" => {
-            apply_figure_text_alias(figure_handle, PlotObjectKind::SuperTitle, value, builtin)
+            apply_figure_text_alias(figure_handle, PlotObjectKind::SuperTitle, value, builtin)?;
+            Ok(true)
         }
         other => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported figure property `{other}`"),
         )),
     }
+}
+
+pub(crate) fn validate_figure_property_value(
+    key_value: &Value,
+    property_value: &Value,
+    target_figure: Option<FigureHandle>,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let key = property_name(key_value, builtin)?;
+    let opts = LineStyleParseOptions::generic(builtin);
+    match key.as_str() {
+        "name" => {
+            value_as_text_string(property_value)
+                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Name must be text")))?;
+        }
+        "numbertitle" => {
+            value_as_bool(property_value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: NumberTitle must be logical"))
+            })?;
+        }
+        "visible" => {
+            value_as_bool(property_value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: Visible must be logical"))
+            })?;
+        }
+        "color" => {
+            let _ = parse_color_value(&opts, property_value)?;
+        }
+        "currentaxes" => {
+            let resolved = resolve_plot_handle(property_value, builtin)?;
+            let PlotHandle::Axes(fig, _) = resolved else {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: CurrentAxes must be an axes handle"),
+                ));
+            };
+            let Some(target) = target_figure else {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: CurrentAxes requires an existing target figure"),
+                ));
+            };
+            if fig != target {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: CurrentAxes must belong to the target figure"),
+                ));
+            }
+        }
+        "sgtitle" => {
+            validate_figure_text_alias(PlotObjectKind::SuperTitle, property_value, builtin)?
+        }
+        other => {
+            return Err(plotting_error(
+                builtin,
+                format!("{builtin}: unsupported figure property `{other}`"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn get_histogram_property(
@@ -3507,6 +3662,33 @@ fn apply_figure_text_alias(
     };
     set_sg_title_properties_for_figure(handle, text, Some(style))
         .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn validate_figure_text_alias(
+    kind: PlotObjectKind,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if value_as_text_string(value).is_some() {
+        return Ok(());
+    }
+
+    let scalar = handle_scalar(value, builtin)?;
+    let (src_handle, _src_axes, src_kind) =
+        decode_plot_object_handle(scalar).map_err(|err| map_figure_error(builtin, err))?;
+    if src_kind != kind {
+        return Err(plotting_error(
+            builtin,
+            format!(
+                "{builtin}: expected a matching text handle for `{}`",
+                key_name(kind)
+            ),
+        ));
+    }
+
+    super::state::clone_figure(src_handle)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure handle")))?;
     Ok(())
 }
 

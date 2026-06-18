@@ -228,7 +228,7 @@ fn join_parts(parts: &[String]) -> String {
         match combined.as_mut() {
             None => combined = Some(PathBuf::from(path)),
             Some(buf) => {
-                if path.is_absolute() {
+                if super::is_rooted_path(path) {
                     *buf = PathBuf::from(path);
                 } else {
                     buf.push(path);

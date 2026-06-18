@@ -30,6 +30,7 @@ pub struct InterpreterState {
     pub missing_input_slots: HashSet<usize>,
     pub current_function_name: String,
     pub call_counts: Vec<(usize, usize)>,
+    pub initial_assigned_var_count: usize,
     #[cfg(feature = "native-accel")]
     pub fusion_plan: Option<Arc<FusionPlan>>,
     #[cfg(feature = "native-accel")]
@@ -43,6 +44,7 @@ impl InterpreterState {
         current_function_name: Option<&str>,
         call_counts: Vec<(usize, usize)>,
     ) -> Self {
+        let initial_assigned_var_count = initial_vars.len();
         let mut vars = initial_vars.to_vec();
         if vars.len() < bytecode.var_count {
             vars.resize(bytecode.var_count, Value::Num(0.0));
@@ -93,6 +95,7 @@ impl InterpreterState {
             vars,
             pc: 0,
             call_counts,
+            initial_assigned_var_count,
             current_function_name: current_function_name
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "<main>".to_string()),

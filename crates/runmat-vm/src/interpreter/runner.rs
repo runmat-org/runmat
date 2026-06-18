@@ -224,6 +224,31 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
     bytecode.call_arg_spans = func.call_arg_spans.clone();
     bytecode.source_id = func.source_id;
     bytecode.var_names = func.var_names.clone();
+    let mut initially_unassigned_slots = func.initially_unassigned_slots.clone();
+    for slot in &func.capture_slots {
+        initially_unassigned_slots.remove(slot);
+    }
+    for slot in func.input_slots.iter().take(runtime_arg_count) {
+        initially_unassigned_slots.remove(slot);
+    }
+    for slot in func.input_slots.iter().skip(runtime_arg_count) {
+        if default_values_by_slot.contains_key(slot) {
+            initially_unassigned_slots.remove(slot);
+        }
+    }
+    if let Some(slot) = func.varargin_slot {
+        initially_unassigned_slots.remove(&slot);
+    }
+    if let Some(slot) = func.varargout_slot {
+        initially_unassigned_slots.remove(&slot);
+    }
+    if let Some(slot) = func.implicit_nargin_slot {
+        initially_unassigned_slots.remove(&slot);
+    }
+    if let Some(slot) = func.implicit_nargout_slot {
+        initially_unassigned_slots.remove(&slot);
+    }
+    bytecode.initially_unassigned_slots = initially_unassigned_slots;
     bytecode.bound_functions = function_registry.functions.clone();
     bytecode.function_registry = function_registry.clone();
     let result_vars = interpret_function_with_counts(
@@ -876,6 +901,7 @@ async fn run_interpreter_inner(
         mut missing_input_slots,
         current_function_name,
         call_counts,
+        initial_assigned_var_count,
         #[cfg(feature = "native-accel")]
             fusion_plan: _,
         #[cfg(feature = "native-accel")]
@@ -957,7 +983,12 @@ async fn run_interpreter_inner(
     CALL_COUNTS.with(|cc| {
         *cc.borrow_mut() = call_counts.clone();
     });
-    let _workspace_guard = interp_engine::prepare_workspace_guard(&bytecode.var_names, &mut vars);
+    let _workspace_guard = interp_engine::prepare_workspace_guard(
+        &bytecode.var_names,
+        &mut vars,
+        initial_assigned_var_count,
+        &bytecode.initially_unassigned_slots,
+    );
     let thread_roots: Vec<Value> = runtime_globals::collect_thread_roots();
     let mut _gc_context = interp_engine::create_gc_context(&stack, &vars, thread_roots)?;
     let debug_stack = interp_engine::debug_stack_enabled();
@@ -1211,9 +1242,11 @@ async fn run_interpreter_inner(
             | Instr::CreateExternalFunctionHandle(_)
             | Instr::CreateMethodFunctionHandle(_)
             | Instr::CreateBoundFunctionHandle(_, _)
+            | Instr::CreateExternalBoundFunctionHandle(_, _)
             | Instr::CreateClosure(_, _)
             | Instr::CreateSemanticClosure(_, _, _)
             | Instr::LoadStaticProperty(_, _)
+            | Instr::LoadWorkspaceFirstStaticProperty { .. }
             | Instr::RegisterClass { .. }
             | Instr::CallFevalMulti(_, _)
             | Instr::CallFevalMultiUsingOutputSlot(_, _)
@@ -1234,6 +1267,10 @@ async fn run_interpreter_inner(
             | Instr::CallFunctionMulti { .. }
             | Instr::CallFunctionMultiUsingOutputSlot { .. }
             | Instr::CallFunctionExpandMultiOutput { .. }
+            | Instr::CallWorkspaceFirstMulti { .. }
+            | Instr::CallWorkspaceFirstMultiUsingOutputSlot { .. }
+            | Instr::CallWorkspaceFirstExpandMultiOutput { .. }
+            | Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { .. }
             | Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
             | Instr::CallSemanticNestedFunctionExpandMultiOutput { .. }
             | Instr::CallBuiltinExpandMultiOutput(_, _, _)
@@ -1380,7 +1417,7 @@ mod tests {
         CellArray, Closure, HandleRef, ObjectInstance, StructValue, Tensor, Value,
     };
     use runmat_hir::FunctionId;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::sync::{atomic::AtomicBool, Arc};
     #[cfg(feature = "native-accel")]
     use {
@@ -1423,6 +1460,7 @@ mod tests {
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
             var_names: HashMap::new(),
+            initially_unassigned_slots: HashSet::new(),
             argument_validations: Vec::new(),
         }
     }

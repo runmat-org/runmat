@@ -494,6 +494,23 @@ fn string_payload(data: &Value) -> BuiltinResult<Payload> {
 fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(t) => Ok(t.data.clone()),
+        Value::SparseTensor(s) => {
+            let total_elements = s.rows.checked_mul(s.cols).ok_or_else(|| {
+                write_error_with_message(
+                    "write: sparse matrix dimensions overflow",
+                    &WRITE_ERROR_INTERNAL,
+                )
+            })?;
+            if total_elements > 10_000_000 {
+                return Err(write_error_with_message(
+                    format!("write: cannot densify sparse tensor {}x{} ({} elements exceeds safe threshold)", s.rows, s.cols, total_elements),
+                    &WRITE_ERROR_INTERNAL,
+                ));
+            }
+            s.to_dense().map(|dense| dense.data).map_err(|err| {
+                write_error_with_message(format!("write: {err}"), &WRITE_ERROR_INTERNAL)
+            })
+        }
         Value::Num(n) => Ok(vec![*n]),
         Value::Int(iv) => Ok(vec![iv.to_f64()]),
         Value::Bool(b) => Ok(vec![if *b { 1.0 } else { 0.0 }]),
@@ -520,6 +537,10 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(write_flow(
             &WRITE_ERROR_INVALID_DATA,
             "write: complex data is not supported",
+        )),
+        Value::Symbolic(_) => Err(write_flow(
+            &WRITE_ERROR_INVALID_DATA,
+            "write: symbolic data is not supported",
         )),
         Value::Cell(_)
         | Value::Struct(_)

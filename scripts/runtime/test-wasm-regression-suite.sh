@@ -11,7 +11,7 @@ Usage:
   scripts/runtime/test-wasm-regression-suite.sh <suite>
 
 Suites:
-  symptom-closure   Run RM-295/RM-302 closure proofs (node + browser)
+  symptom-closure   Run focused wasm symptom closure proofs (node + browser)
   replay-smoke      Run replay smoke browser tests
   runtime           Run runtime browser tests behind RUNMAT_WASM_INCLUDE_RUNTIME
 USAGE
@@ -28,6 +28,11 @@ resolve_chromedriver_args() {
   else
     echo "==> using wasm-pack default chromedriver resolution"
   fi
+}
+
+regenerate_wasm_registry() {
+  echo "==> regenerating wasm builtin registry"
+  "${REPO_ROOT}/scripts/regenerate-wasm-registry.sh"
 }
 
 run_symptom_closure_suite() {
@@ -60,8 +65,11 @@ main() {
   export CHROME_BIN="${CHROME_BIN:-${CHROME_WRAPPER}}"
   export CHROMEDRIVER_ARGS="${CHROMEDRIVER_ARGS:---log-level=SEVERE}"
   export WASM_BINDGEN_TEST_TIMEOUT="${WASM_BINDGEN_TEST_TIMEOUT:-300}"
+  export RUSTFLAGS="${RUSTFLAGS:--Copt-level=1}"
 
   resolve_chromedriver_args
+
+  regenerate_wasm_registry
 
   pushd "${REPO_ROOT}/crates/runmat-wasm" >/dev/null
   case "${suite}" in

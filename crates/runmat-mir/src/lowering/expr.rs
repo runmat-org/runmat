@@ -163,6 +163,15 @@ pub(crate) fn lower_expr_with_replacements(
             base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
             member: lower_operand_with_replacements(ctx, member, temps, await_replacements)?,
         },
+        HirExprKind::WorkspaceFirstStaticProperty {
+            workspace_name,
+            class_name,
+            property,
+        } => MirRvalue::WorkspaceFirstStaticProperty {
+            workspace_name: workspace_name.clone(),
+            class_name: class_name.clone(),
+            property: property.clone(),
+        },
         HirExprKind::MetaClass(name) => MirRvalue::MetaClass(name.clone()),
         HirExprKind::Colon => MirRvalue::Colon,
         HirExprKind::End => MirRvalue::End,
@@ -417,6 +426,7 @@ fn hir_expr_needs_slice_expr(expr: &HirExpr) -> bool {
         HirExprKind::MemberDynamic(base, member) => {
             hir_expr_needs_slice_expr(base) || hir_expr_needs_slice_expr(member)
         }
+        HirExprKind::WorkspaceFirstStaticProperty { .. } => false,
         HirExprKind::Spawn(inner) => hir_expr_needs_slice_expr(inner),
         HirExprKind::Await(inner) => hir_expr_needs_slice_expr(inner),
         _ => false,
@@ -494,6 +504,8 @@ fn lower_command_call(call: &HirCommandCall) -> Result<MirRvalue, HirError> {
         syntax: runmat_hir::CallSyntax::Command,
         requested_outputs: RequestedOutputCount::Zero,
         fallback_policy,
+        workspace_first_name: None,
+        bare_identifier: false,
         async_behavior: map_async_behavior(semantics.async_behavior),
         effects: semantics.effects,
         workspace_effect: semantics.workspace_effect,
@@ -553,6 +565,8 @@ fn call_rvalue(
         syntax: call.syntax.clone(),
         requested_outputs: call.requested_outputs.clone(),
         fallback_policy,
+        workspace_first_name: call.workspace_first_name.clone(),
+        bare_identifier: call.bare_identifier,
         async_behavior: map_async_behavior(semantics.async_behavior),
         effects: semantics.effects,
         workspace_effect: semantics.workspace_effect,
@@ -578,6 +592,8 @@ fn dynamic_call_rvalue(
         syntax: call.syntax.clone(),
         requested_outputs: call.requested_outputs.clone(),
         fallback_policy,
+        workspace_first_name: call.workspace_first_name.clone(),
+        bare_identifier: call.bare_identifier,
         async_behavior: map_async_behavior(semantics.async_behavior),
         effects: semantics.effects,
         workspace_effect: semantics.workspace_effect,
@@ -609,7 +625,9 @@ fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {
         | MirCallee::SuperConstructor { .. }
         | MirCallee::SuperMethod { .. }
         | MirCallee::Dynamic(_) => BuiltinSemantics::unknown(),
-        MirCallee::Static(CallableIdentity::BoundFunction(_)) => BuiltinSemantics {
+        MirCallee::Static(
+            CallableIdentity::BoundFunction(_) | CallableIdentity::ExternalFunction { .. },
+        ) => BuiltinSemantics {
             compatibility: runmat_builtins::BuiltinCompatibility::Matlab,
             async_behavior: BuiltinAsyncBehavior::NeverSuspends,
             effects: runmat_builtins::BuiltinEffects::none(),
@@ -630,13 +648,18 @@ fn call_fallback_policy(
         runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
     ) && !matches!(
         callee,
-        MirCallee::Static(runmat_hir::CallableIdentity::BoundFunction(_))
-            | MirCallee::SuperMethod { .. }
+        MirCallee::Static(
+            runmat_hir::CallableIdentity::BoundFunction(_)
+                | runmat_hir::CallableIdentity::ExternalFunction { .. },
+        ) | MirCallee::SuperMethod { .. }
     ) {
         return runmat_hir::CallableFallbackPolicy::ObjectDispatch;
     }
     match callee {
-        MirCallee::Static(runmat_hir::CallableIdentity::BoundFunction(_))
+        MirCallee::Static(
+            runmat_hir::CallableIdentity::BoundFunction(_)
+            | runmat_hir::CallableIdentity::ExternalFunction { .. },
+        )
         | MirCallee::Static(runmat_hir::CallableIdentity::Builtin(_))
         | MirCallee::SuperConstructor { .. }
         | MirCallee::SuperMethod { .. } => runmat_hir::CallableFallbackPolicy::None,

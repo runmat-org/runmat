@@ -78,11 +78,12 @@ WASM CI builds the runtime for `wasm32-unknown-unknown`, then runs the headless 
 
 ```bash
 rustup target add wasm32-unknown-unknown
-RUNMAT_GENERATE_WASM_REGISTRY=1 cargo build -p runmat-wasm --target wasm32-unknown-unknown
+scripts/regenerate-wasm-registry.sh
+cargo build -p runmat-wasm --target wasm32-unknown-unknown
 scripts/test-wasm-headless.sh
 ```
 
-`scripts/test-wasm-headless.sh` regenerates the WASM registry, checks `runmat-core` for wasm compatibility, and runs browser-based WASM tests. To include runtime browser tests:
+`scripts/test-wasm-headless.sh` regenerates the WASM registry with the atomic production `plot-web` flow, checks `runmat-core` for wasm compatibility, and runs browser-based WASM tests. To include runtime browser tests:
 
 ```bash
 RUNMAT_WASM_INCLUDE_RUNTIME=1 scripts/test-wasm-headless.sh
@@ -95,7 +96,9 @@ scripts/runtime/test-wasm-regression-suite.sh symptom-closure
 scripts/runtime/test-wasm-regression-suite.sh replay-smoke
 ```
 
-Those commands run the appropriate `wasm-pack test --node` and `wasm-pack test --chrome --headless` targets under `crates/runmat-wasm/tests`.
+Those wrappers run the appropriate `wasm-pack test --node` and `wasm-pack test --chrome --headless` targets under `crates/runmat-wasm/tests`.
+They also regenerate the WASM builtin registry before running tests, so focused
+regressions exercise the same builtin catalog as packaged browser builds.
 
 ## FEA Script Tests
 

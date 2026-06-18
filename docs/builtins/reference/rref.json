@@ -1,0 +1,100 @@
+{
+  "title": "rref",
+  "category": "math/linalg/solve",
+  "keywords": [
+    "rref",
+    "reduced row echelon form",
+    "row reduction",
+    "pivot columns",
+    "rank"
+  ],
+  "summary": "Compute reduced row echelon form and pivot columns.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to the shared host row-reduction implementation. Real reduced matrices are re-uploaded when a provider is available; upload failures surface as `RunMat:rref:Internal`."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::solve::rref::tests",
+    "integration": "bytecode::compile::tests::compile_interprets_rref_rank_workflow"
+  },
+  "description": "`rref(A)` returns the reduced row echelon form of a real or complex numeric matrix. `[R, pivots] = rref(A)` also returns the one-based pivot column indices. An optional tolerance controls which entries are considered zero during pivot selection.",
+  "behaviors": [
+    "Inputs must behave like 2-D matrices. Trailing singleton dimensions are accepted; other higher-rank inputs raise `RunMat:rref:InvalidInput`.",
+    "The default tolerance is `max(size(A)) * eps(norm(A, inf))`, matching MATLAB row-reduction conventions.",
+    "`rref(A, tol)` uses a caller-provided finite, non-negative scalar pivot tolerance.",
+    "Logical and integer inputs are promoted to double precision before row reduction.",
+    "Complex inputs use complex Gauss-Jordan elimination with pivot selection by complex magnitude.",
+    "The second output is a row vector of one-based pivot column indices.",
+    "Non-finite values are accepted. The default tolerance still follows `max(size(A)) * eps(norm(A, inf))`; `Inf` and `NaN` therefore follow the runtime's IEEE floating-point tolerance and pivot arithmetic."
+  ],
+  "examples": [
+    {
+      "description": "Finding dependent columns",
+      "input": "A = [1 2 3; 2 4 6; 1 1 1];\n[R, pivots] = rref(A)",
+      "output": "R = [1 0 -1; 0 1 2; 0 0 0]\npivots = [1 2]"
+    },
+    {
+      "description": "Using a custom tolerance",
+      "input": "A = diag([1, 1e-12]);\nR = rref(A, 1e-6)",
+      "output": "R = [1 0; 0 0]"
+    },
+    {
+      "description": "Row-reducing an augmented system",
+      "input": "A = [2 -1 3; 4 -2 6; 1 0 1];\nb = [5; 10; 2];\nRAug = rref([A b])"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How does `rref` choose pivots?",
+      "answer": "RunMat scans columns left to right, picks the largest available pivot by magnitude below the current pivot row, normalizes the pivot row, and eliminates the pivot column above and below the pivot."
+    },
+    {
+      "question": "Is the pivot vector one-based?",
+      "answer": "Yes. The second output uses MATLAB's one-based column indices."
+    },
+    {
+      "question": "Does `rref` use the same tolerance as `rank`?",
+      "answer": "No. `rank` uses an SVD tolerance. `rref` uses the MATLAB row-reduction tolerance based on the matrix infinity norm."
+    }
+  ],
+  "links": [
+    {
+      "label": "rank",
+      "url": "./rank"
+    },
+    {
+      "label": "pinv",
+      "url": "./pinv"
+    },
+    {
+      "label": "linsolve",
+      "url": "./linsolve"
+    },
+    {
+      "label": "mldivide",
+      "url": "./mldivide"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/solve/rref.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/solve/rref.rs"
+  },
+  "gpu_residency": "When the input is a real gpuArray, RunMat gathers it, computes the row-reduced matrix on the host, and re-uploads the reduced matrix if a provider is available. If that re-upload fails, the builtin raises `RunMat:rref:Internal` rather than silently changing residency. Pivot-column metadata is returned as a host vector.",
+  "gpu_behavior": [
+    "`rref` is an eager solve-style operation. It terminates fusion plans, gathers GPU-resident inputs for numerical row reduction, and returns ordinary MATLAB-compatible values."
+  ]
+}

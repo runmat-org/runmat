@@ -127,6 +127,7 @@ pub async fn tic_builtin() -> crate::BuiltinResult<f64> {
 
 /// Record a `tic` start time and return the encoded handle.
 pub(crate) fn record_tic(builtin: &str) -> Result<f64, crate::RuntimeError> {
+    let _origin = *MONOTONIC_ORIGIN;
     let now = Instant::now();
     {
         let mut guard = STOPWATCH.lock().map_err(|_| {
@@ -151,7 +152,10 @@ pub(crate) fn take_latest_start(builtin: &str) -> Result<Option<Instant>, crate:
 
 /// Encode an `Instant` into the scalar handle returned by `tic`.
 pub(crate) fn encode_instant(instant: Instant) -> f64 {
-    instant.duration_since(*MONOTONIC_ORIGIN).as_secs_f64()
+    instant
+        .checked_duration_since(*MONOTONIC_ORIGIN)
+        .unwrap_or(Duration::ZERO)
+        .as_secs_f64()
 }
 
 /// Decode a scalar handle into an `Instant`.
@@ -163,8 +167,19 @@ pub(crate) fn decode_handle(
     if !handle.is_finite() || handle.is_sign_negative() {
         return Err(stopwatch_error_with_message(builtin, error.message, error));
     }
-    let duration = Duration::from_secs_f64(handle);
-    Ok((*MONOTONIC_ORIGIN) + duration)
+    let duration = Duration::try_from_secs_f64(handle)
+        .map_err(|_| stopwatch_error_with_message(builtin, error.message, error))?;
+    (*MONOTONIC_ORIGIN)
+        .checked_add(duration)
+        .ok_or_else(|| stopwatch_error_with_message(builtin, error.message, error))
+}
+
+/// Return elapsed time since `start`, saturating to zero if the host clock reports
+/// a slightly earlier current instant on wasm.
+pub(crate) fn elapsed_since(start: Instant) -> Duration {
+    Instant::now()
+        .checked_duration_since(start)
+        .unwrap_or(Duration::ZERO)
 }
 
 #[cfg(test)]
@@ -237,5 +252,6 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         assert!(decode_handle(f64::NAN, "toc", &TEST_INVALID_HANDLE_ERROR).is_err());
         assert!(decode_handle(-1.0, "toc", &TEST_INVALID_HANDLE_ERROR).is_err());
+        assert!(decode_handle(f64::MAX, "toc", &TEST_INVALID_HANDLE_ERROR).is_err());
     }
 }

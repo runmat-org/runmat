@@ -1,17 +1,22 @@
 use crate::accel::auto_promote::{
     accel_promote_binary, accel_promote_unary, AutoBinaryOp, AutoUnaryOp,
 };
-use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
-use crate::call::shared::external_qualified_identity;
 use crate::interpreter::dispatch::logical_truth_from_value;
 use crate::ops::arithmetic as arithmetic_ops;
 use crate::ops::comparison as comparison_ops;
 use runmat_builtins::Value;
-use runmat_hir::CallableFallbackPolicy;
 use runmat_runtime::RuntimeError;
 
 async fn call_operator_method(obj: Value, method: &str, arg: Value) -> Result<Value, RuntimeError> {
     crate::call::shared::call_object_operator_method(obj, method, arg).await
+}
+
+async fn call_right_operator_method_ordered(
+    lhs: Value,
+    rhs: Value,
+    method: &str,
+) -> Result<Value, RuntimeError> {
+    crate::call::shared::call_rhs_object_operator_method_ordered(lhs, rhs, method).await
 }
 
 pub async fn dispatch_arithmetic(
@@ -20,11 +25,16 @@ pub async fn dispatch_arithmetic(
 ) -> Result<bool, RuntimeError> {
     match instr {
         crate::bytecode::Instr::Add => {
-            arithmetic_ops::add(stack, call_operator_method, |a, b| async move {
-                let (a_acc, b_acc) =
-                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                runmat_runtime::call_builtin_async("plus", &[a_acc, b_acc]).await
-            })
+            arithmetic_ops::add(
+                stack,
+                call_operator_method,
+                call_right_operator_method_ordered,
+                |a, b| async move {
+                    let (a_acc, b_acc) =
+                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
+                    runmat_runtime::call_builtin_async("plus", &[a_acc, b_acc]).await
+                },
+            )
             .await?;
             Ok(true)
         }
@@ -32,21 +42,7 @@ pub async fn dispatch_arithmetic(
             arithmetic_ops::sub(
                 stack,
                 call_operator_method,
-                |obj, lhs| async move {
-                    let class_name = match &obj {
-                        Value::Object(o) => o.class_name.clone(),
-                        _ => String::new(),
-                    };
-                    let identity = external_qualified_identity(&class_name, "minus");
-                    let descriptor = CallableDescriptor::resolved(
-                        identity,
-                        vec![lhs, obj],
-                        1,
-                        CallableFallbackPolicy::RuntimeNameResolution,
-                        CallableCallKind::Direct,
-                    );
-                    execute_callable_descriptor(descriptor).await
-                },
+                call_right_operator_method_ordered,
                 |a, b| async move {
                     let (a_acc, b_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
@@ -57,18 +53,24 @@ pub async fn dispatch_arithmetic(
             Ok(true)
         }
         crate::bytecode::Instr::Mul => {
-            arithmetic_ops::mul(stack, call_operator_method, |a, b| async move {
-                let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
-                runmat_runtime::value_matmul(&a_acc, &b_acc).await
-            })
+            arithmetic_ops::mul(
+                stack,
+                call_operator_method,
+                call_right_operator_method_ordered,
+                |a, b| async move {
+                    let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
+                    runmat_runtime::value_matmul(&a_acc, &b_acc).await
+                },
+            )
             .await?;
             Ok(true)
         }
         crate::bytecode::Instr::ElemMul => {
-            arithmetic_ops::binary_method(
+            arithmetic_ops::binary_method_ordered(
                 stack,
                 "times",
                 call_operator_method,
+                call_right_operator_method_ordered,
                 |a, b| async move {
                     let (a_acc, b_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
@@ -79,10 +81,11 @@ pub async fn dispatch_arithmetic(
             Ok(true)
         }
         crate::bytecode::Instr::ElemDiv => {
-            arithmetic_ops::binary_method(
+            arithmetic_ops::binary_method_ordered(
                 stack,
                 "rdivide",
                 call_operator_method,
+                call_right_operator_method_ordered,
                 |a, b| async move {
                     let (a_acc, b_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
@@ -98,6 +101,7 @@ pub async fn dispatch_arithmetic(
                 |obj, _method, arg| async move {
                     runmat_runtime::call_builtin_async("power", &[obj, arg]).await
                 },
+                call_right_operator_method_ordered,
                 |a, b| async move {
                     let (a_acc, b_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
@@ -108,10 +112,11 @@ pub async fn dispatch_arithmetic(
             Ok(true)
         }
         crate::bytecode::Instr::ElemLeftDiv => {
-            arithmetic_ops::binary_method(
+            arithmetic_ops::binary_method_ordered(
                 stack,
                 "ldivide",
                 call_operator_method,
+                call_right_operator_method_ordered,
                 |a, b| async move {
                     let (b_acc, a_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a).await?;
@@ -127,6 +132,7 @@ pub async fn dispatch_arithmetic(
                     &a,
                     &b,
                     call_operator_method,
+                    call_right_operator_method_ordered,
                     |lhs, rhs| async move {
                         let (lhs_acc, rhs_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &lhs, &rhs).await?;
@@ -147,6 +153,7 @@ pub async fn dispatch_arithmetic(
                     &a,
                     &b,
                     call_operator_method,
+                    call_right_operator_method_ordered,
                     |lhs, rhs| async move {
                         let (rhs_acc, lhs_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &rhs, &lhs).await?;
@@ -190,11 +197,20 @@ pub async fn dispatch_arithmetic(
             Ok(true)
         }
         crate::bytecode::Instr::Pow => {
-            arithmetic_ops::power(stack, call_operator_method, |a, b| async move {
-                let (a_acc, b_acc) =
-                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                runmat_runtime::power(&a_acc, &b_acc).map_err(RuntimeError::from)
-            })
+            arithmetic_ops::power(
+                stack,
+                call_operator_method,
+                call_right_operator_method_ordered,
+                |a, b| async move {
+                    if matches!((&a, &b), (Value::Symbolic(_), _) | (_, Value::Symbolic(_))) {
+                        let args = [a, b];
+                        return runmat_runtime::call_builtin_async("power", &args).await;
+                    }
+                    let (a_acc, b_acc) =
+                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
+                    runmat_runtime::power(&a_acc, &b_acc).map_err(RuntimeError::from)
+                },
+            )
             .await?;
             Ok(true)
         }

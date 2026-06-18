@@ -577,6 +577,8 @@ fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usi
         Value::String(_)
         | Value::StringArray(_)
         | Value::CharArray(_)
+        | Value::Symbolic(_)
+        | Value::SparseTensor(_)
         | Value::Cell(_)
         | Value::Struct(_)
         | Value::FunctionHandle(_)

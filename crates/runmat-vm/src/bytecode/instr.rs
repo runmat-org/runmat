@@ -219,9 +219,15 @@ pub enum Instr {
     CreateExternalFunctionHandle(String),
     CreateMethodFunctionHandle(String),
     CreateBoundFunctionHandle(FunctionId, String),
+    CreateExternalBoundFunctionHandle(FunctionId, String),
     CreateClosure(String, usize),
     CreateSemanticClosure(FunctionId, String, usize),
     LoadStaticProperty(String, String),
+    LoadWorkspaceFirstStaticProperty {
+        name: String,
+        class_name: String,
+        property: String,
+    },
 
     // Registers a runtime class definition produced by `classdef` lowering.
     RegisterClass {
@@ -291,6 +297,22 @@ pub enum Instr {
         arg_count: usize,
         out_count_slot: usize,
     },
+    CallWorkspaceFirstMulti {
+        name: String,
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        bare_identifier: bool,
+        arg_count: usize,
+        out_count: usize,
+    },
+    CallWorkspaceFirstMultiUsingOutputSlot {
+        name: String,
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        bare_identifier: bool,
+        arg_count: usize,
+        out_count_slot: usize,
+    },
     CallSemanticFunctionMulti(FunctionId, usize, usize),
     CallSemanticFunctionMultiUsingOutputSlot(FunctionId, usize, usize),
     CallSemanticNestedFunctionMulti {
@@ -311,6 +333,22 @@ pub enum Instr {
         fallback_policy: CallableFallbackPolicy,
         specs: Vec<ArgSpec>,
         out_count: usize,
+    },
+    CallWorkspaceFirstExpandMultiOutput {
+        name: String,
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        bare_identifier: bool,
+        specs: Vec<ArgSpec>,
+        out_count: usize,
+    },
+    CallWorkspaceFirstExpandMultiOutputUsingOutputSlot {
+        name: String,
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        bare_identifier: bool,
+        specs: Vec<ArgSpec>,
+        out_count_slot: usize,
     },
     CallSemanticFunctionExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
     CallSemanticNestedFunctionExpandMultiOutput {
@@ -389,6 +427,7 @@ impl Instr {
             | Instr::CreateExternalFunctionHandle(_)
             | Instr::CreateMethodFunctionHandle(_)
             | Instr::CreateBoundFunctionHandle(_, _)
+            | Instr::CreateExternalBoundFunctionHandle(_, _)
             | Instr::LoadVar(_)
             | Instr::LoadVarForIndexAssignment(_)
             | Instr::LoadLocal(_) => effect(0, 1),
@@ -435,6 +474,14 @@ impl Instr {
                 ..
             } => effect(*arg_count, *out_count),
             Instr::CallFunctionMultiUsingOutputSlot { arg_count, .. } => effect(*arg_count, 1),
+            Instr::CallWorkspaceFirstMulti {
+                arg_count,
+                out_count,
+                ..
+            } => effect(*arg_count, *out_count),
+            Instr::CallWorkspaceFirstMultiUsingOutputSlot { arg_count, .. } => {
+                effect(*arg_count, 1)
+            }
             Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
             Instr::CallSemanticFunctionMultiUsingOutputSlot(_, argc, _) => effect(*argc, 1),
             Instr::CallSemanticNestedFunctionMulti {
@@ -506,12 +553,16 @@ impl Instr {
             Instr::LoadMemberDynamic | Instr::LoadMemberDynamicOrInit => effect(2, 1),
             Instr::CreateClosure(_, capture_count)
             | Instr::CreateSemanticClosure(_, _, capture_count) => effect(*capture_count, 1),
-            Instr::LoadStaticProperty(_, _) => effect(0, 1),
+            Instr::LoadStaticProperty(_, _) | Instr::LoadWorkspaceFirstStaticProperty { .. } => {
+                effect(0, 1)
+            }
             Instr::RegisterClass { .. } => effect(0, 0),
             Instr::CallFevalExpandMultiOutput(specs, _)
             | Instr::CallFevalExpandMultiOutputUsingOutputSlot(specs, _)
             | Instr::CreateSemanticFutureExpandMultiOutput(_, specs, _)
             | Instr::CallFunctionExpandMultiOutput { specs, .. }
+            | Instr::CallWorkspaceFirstExpandMultiOutput { specs, .. }
+            | Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { specs, .. }
             | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
             | Instr::CallSemanticNestedFunctionExpandMultiOutput { specs, .. }
             | Instr::CallBuiltinExpandMultiOutput(_, specs, _)

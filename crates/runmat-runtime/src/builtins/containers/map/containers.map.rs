@@ -1587,6 +1587,7 @@ fn normalize_numeric_value(value: Value, builtin: &'static str) -> BuiltinResult
             Ok(Value::Tensor(tensor))
         }
         Value::Cell(_)
+        | Value::SparseTensor(_)
         | Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -1596,6 +1597,7 @@ fn normalize_numeric_value(value: Value, builtin: &'static str) -> BuiltinResult
         | Value::CharArray(_)
         | Value::Complex(_, _)
         | Value::ComplexTensor(_)
+        | Value::Symbolic(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
@@ -1627,6 +1629,7 @@ fn normalize_logical_value(value: Value, builtin: &'static str) -> BuiltinResult
             Ok(Value::LogicalArray(logical))
         }
         Value::CharArray(_)
+        | Value::SparseTensor(_)
         | Value::String(_)
         | Value::StringArray(_)
         | Value::Struct(_)
@@ -1636,6 +1639,7 @@ fn normalize_logical_value(value: Value, builtin: &'static str) -> BuiltinResult
         | Value::Listener(_)
         | Value::Complex(_, _)
         | Value::ComplexTensor(_)
+        | Value::Symbolic(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

@@ -15,6 +15,23 @@ export interface RunMatFilesystemDirEntry {
 
 export type RunMatMaybePromise<T> = T | Promise<T>;
 
+export interface RunMatOpenFileDialogFilter {
+  patterns: string[];
+  description?: string;
+}
+
+export interface RunMatOpenFileDialogRequest {
+  title?: string;
+  defaultPath?: string;
+  filters: RunMatOpenFileDialogFilter[];
+  multiselect: boolean;
+}
+
+export interface RunMatOpenFileDialogSelection {
+  paths: string[];
+  filterIndex?: number;
+}
+
 export interface RunMatFilesystemProvider {
   readFile(path: string): RunMatMaybePromise<Uint8Array | ArrayBuffer>;
   readMany?(paths: string[]): RunMatMaybePromise<Array<Uint8Array | ArrayBuffer | null>>;
@@ -30,4 +47,7 @@ export interface RunMatFilesystemProvider {
   removeDirAll?(path: string): RunMatMaybePromise<void>;
   rename?(from: string, to: string): RunMatMaybePromise<void>;
   setReadonly?(path: string, readonly: boolean): RunMatMaybePromise<void>;
+  selectFileOpen?(
+    request: RunMatOpenFileDialogRequest,
+  ): RunMatMaybePromise<RunMatOpenFileDialogSelection | string | string[] | null | undefined | false>;
 }

@@ -154,6 +154,7 @@ async fn uint8_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::Int(i) => Ok(Value::Int(IntValue::U8(cast_scalar_to_uint8(i.to_f64())))),
         Value::Bool(flag) => Ok(Value::Int(IntValue::U8(if flag { 1 } else { 0 }))),
         Value::Tensor(tensor) => Ok(uint8_value_from_tensor(uint8_tensor_to_host(tensor))),
+        Value::SparseTensor(_) => Err(conversion_error("sparse")),
         Value::LogicalArray(array) => {
             let tensor = tensor::logical_to_tensor(&array)
                 .map_err(|e| uint8_error_with_detail(&UINT8_ERROR_INTERNAL, e))?;
@@ -163,6 +164,10 @@ async fn uint8_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::GpuTensor(handle) => uint8_from_gpu(handle).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(conversion_error("complex")),
         Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
+        Value::Symbolic(expr) => expr
+            .numeric_constant_value()
+            .map(|value| Value::Int(IntValue::U8(cast_scalar_to_uint8(value))))
+            .ok_or_else(|| conversion_error("sym")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),
@@ -244,7 +249,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, SymbolicExpr, Type};
 
     fn uint8_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::uint8_builtin(value, rest))
@@ -295,6 +300,25 @@ pub(crate) mod tests {
             uint8_builtin(Value::Num(f64::NAN), Vec::new()).expect("uint8"),
             Value::Int(IntValue::U8(0))
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn uint8_converts_symbolic_constants() {
+        let result =
+            uint8_builtin(Value::Symbolic(SymbolicExpr::constant(3.5)), Vec::new()).expect("uint8");
+
+        assert_eq!(result, Value::Int(IntValue::U8(4)));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn uint8_rejects_symbolic_variables() {
+        let err = uint8_builtin(Value::Symbolic(SymbolicExpr::variable("x")), Vec::new())
+            .expect_err("symbolic variable should not convert");
+
+        assert_eq!(err.identifier(), UINT8_ERROR_INVALID_INPUT.identifier);
+        assert!(err.message().contains("conversion to uint8 from sym"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

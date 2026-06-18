@@ -11,6 +11,10 @@ pub struct PlaceholderFsProvider;
 
 #[async_trait(?Send)]
 impl FsProvider for PlaceholderFsProvider {
+    fn current_dir_override(&self) -> Option<std::path::PathBuf> {
+        Some(std::path::PathBuf::from("/"))
+    }
+
     fn open(&self, _path: &Path, _flags: &OpenFlags) -> io::Result<Box<dyn crate::FileHandle>> {
         Err(unsupported())
     }

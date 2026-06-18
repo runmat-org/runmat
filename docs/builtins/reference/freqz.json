@@ -1,0 +1,83 @@
+{
+  "title": "freqz",
+  "category": "math/signal",
+  "keywords": [
+    "freqz",
+    "frequency response",
+    "filter",
+    "FIR",
+    "IIR"
+  ],
+  "summary": "Evaluate digital filter frequency response.",
+  "references": [
+    "title: \"MATLAB freqz documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Frequency-response analysis is host-side. GPU coefficient inputs are gathered automatically."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::freqz::tests"
+  },
+  "description": "`freqz(b, a, n)` evaluates the complex frequency response of a digital filter at `n` points between 0 and Nyquist. With `fs`, returned frequencies are in Hz instead of radians/sample.",
+  "behaviors": [
+    "Default response length is 512 samples.",
+    "`[H, w] = freqz(...)` returns complex response `H` and frequency vector `w` as column vectors.",
+    "Without `fs`, `w` is in radians/sample over `[0, pi)`.",
+    "With `fs`, `w` is in Hz over `[0, fs/2)`."
+  ],
+  "examples": [
+    {
+      "description": "Evaluate a simple FIR response",
+      "input": "[H, w] = freqz([1 1], 1, 4);\nfprintf('%.1f %.1f %.4f\\n', real(H(1)), imag(H(3)), w(3));",
+      "output": "2.0 -1.0 1.5708"
+    },
+    {
+      "description": "Evaluate a response in Hz",
+      "input": "b = fir1(20, 0.25);\n[H, f] = freqz(b, 1, 8, 1000);\nfprintf('%.1f %.1f\\n', f(1), f(end));",
+      "output": "0.0 437.5"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `freqz` include the Nyquist point?",
+      "answer": "The supported numeric `n` form samples `n` points over `[0, pi)`, matching the common one-sided response grid used by MATLAB's `freqz(b,a,n)` form."
+    },
+    {
+      "question": "Can `freqz` analyze IIR filters?",
+      "answer": "Yes. Pass numerator `b` and denominator `a`; `freqz` evaluates the transfer function directly on the unit circle."
+    }
+  ],
+  "links": [
+    {
+      "label": "filter",
+      "url": "./filter"
+    },
+    {
+      "label": "fir1",
+      "url": "./fir1"
+    },
+    {
+      "label": "filtfilt",
+      "url": "./filtfilt"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/freqz.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/freqz.rs"
+  },
+  "gpu_behavior": [
+    "Host-side analysis only.",
+    "GPU coefficient inputs are gathered before evaluation."
+  ]
+}

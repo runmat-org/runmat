@@ -3,9 +3,11 @@ pub mod det;
 pub mod inv;
 pub mod linsolve;
 pub mod norm;
+pub mod null;
 pub mod pinv;
 pub mod rank;
 pub mod rcond;
+pub mod rref;
 
 pub use cond::cond_host_real_for_provider;
 pub use inv::inv_host_real_for_provider;

@@ -245,6 +245,7 @@ async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
+        | Value::SparseTensor(_)
         | Value::Struct(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
@@ -253,6 +254,7 @@ async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Symbolic(_)
         | Value::OutputList(_) => Err(triu_error(&TRIU_ERROR_UNSUPPORTED_INPUT)),
     }
 }

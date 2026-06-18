@@ -17,6 +17,7 @@ use crate::builtins::common::{
     broadcast::BroadcastPlan, gpu_helpers, map_control_flow_with_builtin,
     random_args::complex_tensor_into_value, random_args::keyword_of, tensor,
 };
+use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -309,6 +310,9 @@ fn scalar_power_value(lhs: &Value, rhs: &Value) -> Option<Value> {
 }
 
 fn power_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if let Some(result) = symbolic_binary(&lhs, &rhs, SymbolicBinaryOp::Pow) {
+        return Ok(result);
+    }
     if let Some(result) = scalar_power_value(&lhs, &rhs) {
         return Ok(result);
     }

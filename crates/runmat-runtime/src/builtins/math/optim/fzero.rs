@@ -1,4 +1,13 @@
 //! MATLAB-compatible `fzero` builtin for scalar nonlinear root finding.
+//!
+//! `fzero` searches for a scalar zero from either a two-point bracket or a
+//! scalar initial guess.  It supports MATLAB's four output arities:
+//!
+//! * `x = fzero(fun, x0)`
+//! * `x = fzero(fun, x0, options)`
+//! * `[x, fval] = fzero(...)`
+//! * `[x, fval, exitflag] = fzero(...)`
+//! * `[x, fval, exitflag, output] = fzero(...)`
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -11,7 +20,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::math::optim::brent::{brent_zero, BrentParams, BrentZeroBracket};
+use crate::builtins::math::optim::brent::{
+    brent_zero, BrentParams, BrentZeroBracket, BrentZeroObserver, BrentZeroResult,
+    BrentZeroStepKind,
+};
 use crate::builtins::math::optim::common::{
     call_scalar_function, option_f64, option_string, option_usize,
 };
@@ -19,17 +31,90 @@ use crate::builtins::math::optim::type_resolvers::scalar_root_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "fzero";
+const ALGORITHM: &str = "bisection, interpolation";
 const DEFAULT_TOL_X: f64 = 1.0e-6;
 const DEFAULT_MAX_ITER: usize = 400;
 const DEFAULT_MAX_FUN_EVALS: usize = 500;
 
-const FZERO_OUTPUT_ROOT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+const FZERO_OUTPUT_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "x",
     ty: BuiltinParamType::NumericScalar,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Estimated root location.",
 }];
+
+const FZERO_OUTPUT_X_FVAL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Estimated root location.",
+    },
+    BuiltinParamDescriptor {
+        name: "fval",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function value at x.",
+    },
+];
+
+const FZERO_OUTPUT_X_FVAL_EXITFLAG: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Estimated root location.",
+    },
+    BuiltinParamDescriptor {
+        name: "fval",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function value at x.",
+    },
+    BuiltinParamDescriptor {
+        name: "exitflag",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Convergence status code.",
+    },
+];
+
+const FZERO_OUTPUT_ALL: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Estimated root location.",
+    },
+    BuiltinParamDescriptor {
+        name: "fval",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function value at x.",
+    },
+    BuiltinParamDescriptor {
+        name: "exitflag",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Convergence status code.",
+    },
+    BuiltinParamDescriptor {
+        name: "output",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Iteration/function-count metadata struct.",
+    },
+];
 
 const FZERO_INPUTS_CORE: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
@@ -72,16 +157,46 @@ const FZERO_INPUTS_WITH_OPTIONS: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const FZERO_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const FZERO_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
     BuiltinSignatureDescriptor {
         label: "x = fzero(fun, x0)",
         inputs: &FZERO_INPUTS_CORE,
-        outputs: &FZERO_OUTPUT_ROOT,
+        outputs: &FZERO_OUTPUT_X,
     },
     BuiltinSignatureDescriptor {
         label: "x = fzero(fun, x0, options)",
         inputs: &FZERO_INPUTS_WITH_OPTIONS,
-        outputs: &FZERO_OUTPUT_ROOT,
+        outputs: &FZERO_OUTPUT_X,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval] = fzero(fun, x0)",
+        inputs: &FZERO_INPUTS_CORE,
+        outputs: &FZERO_OUTPUT_X_FVAL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval] = fzero(fun, x0, options)",
+        inputs: &FZERO_INPUTS_WITH_OPTIONS,
+        outputs: &FZERO_OUTPUT_X_FVAL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval, exitflag] = fzero(fun, x0)",
+        inputs: &FZERO_INPUTS_CORE,
+        outputs: &FZERO_OUTPUT_X_FVAL_EXITFLAG,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval, exitflag] = fzero(fun, x0, options)",
+        inputs: &FZERO_INPUTS_WITH_OPTIONS,
+        outputs: &FZERO_OUTPUT_X_FVAL_EXITFLAG,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval, exitflag, output] = fzero(fun, x0)",
+        inputs: &FZERO_INPUTS_CORE,
+        outputs: &FZERO_OUTPUT_ALL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval, exitflag, output] = fzero(fun, x0, options)",
+        inputs: &FZERO_INPUTS_WITH_OPTIONS,
+        outputs: &FZERO_OUTPUT_ALL,
     },
 ];
 
@@ -99,12 +214,22 @@ const FZERO_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor
     message: "fzero: invalid input",
 };
 
-const FZERO_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [FZERO_ERROR_INVALID_ARGUMENT, FZERO_ERROR_INVALID_INPUT];
+const FZERO_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FZERO.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:fzero:TooManyOutputs"),
+    when: "`fzero` is called with more than four requested output arguments.",
+    message: "fzero: too many output arguments",
+};
+
+const FZERO_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    FZERO_ERROR_INVALID_ARGUMENT,
+    FZERO_ERROR_INVALID_INPUT,
+    FZERO_ERROR_TOO_MANY_OUTPUTS,
+];
 
 pub const FZERO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &FZERO_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &FZERO_ERRORS,
 };
@@ -132,6 +257,20 @@ fn fzero_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor)
     } else {
         fzero_error_with_detail(fallback, err.message())
     }
+}
+
+fn validate_requested_outputs() -> BuiltinResult<()> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 4) {
+        return Err(fzero_too_many_outputs_error());
+    }
+    Ok(())
+}
+
+fn fzero_too_many_outputs_error() -> RuntimeError {
+    fzero_error_with_detail(
+        &FZERO_ERROR_TOO_MANY_OUTPUTS,
+        "fzero: too many output arguments; maximum is 4",
+    )
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::optim::fzero")]
@@ -178,6 +317,7 @@ async fn fzero_builtin(function: Value, x: Value, rest: Vec<Value>) -> BuiltinRe
             "too many input arguments",
         ));
     }
+    validate_requested_outputs()?;
     let options = parse_options(rest.first())
         .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_ARGUMENT))?;
     let opts = FzeroOptions::from_struct(options.as_ref())
@@ -185,7 +325,14 @@ async fn fzero_builtin(function: Value, x: Value, rest: Vec<Value>) -> BuiltinRe
     let bracket = initial_bracket(&function, x, &opts)
         .await
         .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_INPUT))?;
-    let root = brent_zero(
+    let mut iter_log = IterDisplay::new(opts.display);
+    let observer: Option<&mut dyn BrentZeroObserver> = if matches!(opts.display, DisplayMode::Iter)
+    {
+        Some(&mut iter_log)
+    } else {
+        None
+    };
+    let result = brent_zero(
         NAME,
         &function,
         BrentZeroBracket {
@@ -200,10 +347,11 @@ async fn fzero_builtin(function: Value, x: Value, rest: Vec<Value>) -> BuiltinRe
             max_iter: opts.max_iter,
             max_fun_evals: opts.max_fun_evals,
         },
+        observer,
     )
     .await
     .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_INPUT))?;
-    Ok(Value::Num(root))
+    finalize(result, &opts)
 }
 
 fn parse_options(value: Option<&Value>) -> BuiltinResult<Option<StructValue>> {
@@ -222,17 +370,12 @@ struct FzeroOptions {
     tol_x: f64,
     max_iter: usize,
     max_fun_evals: usize,
+    display: DisplayMode,
 }
 
 impl FzeroOptions {
     fn from_struct(options: Option<&StructValue>) -> BuiltinResult<Self> {
-        let display = option_string(options, "Display", "off")?;
-        if !matches!(display.as_str(), "off" | "none" | "final" | "iter") {
-            return Err(fzero_error_with_detail(
-                &FZERO_ERROR_INVALID_ARGUMENT,
-                "option Display must be 'off', 'none', 'final', or 'iter'",
-            ));
-        }
+        let display = DisplayMode::parse(&option_string(options, "Display", "off")?)?;
         let tol_x = option_f64(NAME, options, "TolX", DEFAULT_TOL_X)?;
         if tol_x <= 0.0 {
             return Err(fzero_error_with_detail(
@@ -246,7 +389,29 @@ impl FzeroOptions {
             tol_x,
             max_iter: max_iter.max(1),
             max_fun_evals: max_fun_evals.max(1),
+            display,
         })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DisplayMode {
+    Off,
+    Iter,
+    Final,
+}
+
+impl DisplayMode {
+    fn parse(text: &str) -> BuiltinResult<Self> {
+        match text.to_ascii_lowercase().as_str() {
+            "off" | "none" => Ok(Self::Off),
+            "iter" => Ok(Self::Iter),
+            "final" => Ok(Self::Final),
+            other => Err(fzero_error_with_detail(
+                &FZERO_ERROR_INVALID_ARGUMENT,
+                format!("option Display must be 'off', 'none', 'final', or 'iter', got '{other}'"),
+            )),
+        }
     }
 }
 
@@ -393,6 +558,117 @@ async fn expand_bracket(
     ))
 }
 
+fn finalize(result: BrentZeroResult, options: &FzeroOptions) -> BuiltinResult<Value> {
+    let exit_flag = if result.converged { 1 } else { 0 };
+    let message = build_message(&result);
+    emit_summary(&result, exit_flag, &message, options);
+
+    let x = Value::Num(result.x);
+    let fval = Value::Num(result.fval);
+    let exitflag = Value::Num(exit_flag as f64);
+    let output_struct = Value::Struct(build_output_struct(&result, &message));
+
+    match crate::output_count::current_output_count() {
+        None => Ok(x),
+        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(1) => Ok(crate::output_count::output_list_with_padding(1, vec![x])),
+        Some(2) => Ok(crate::output_count::output_list_with_padding(
+            2,
+            vec![x, fval],
+        )),
+        Some(3) => Ok(crate::output_count::output_list_with_padding(
+            3,
+            vec![x, fval, exitflag],
+        )),
+        Some(4) => Ok(crate::output_count::output_list_with_padding(
+            4,
+            vec![x, fval, exitflag, output_struct],
+        )),
+        Some(_) => Err(fzero_too_many_outputs_error()),
+    }
+}
+
+fn build_output_struct(result: &BrentZeroResult, message: &str) -> StructValue {
+    let mut fields = StructValue::new();
+    fields.insert("iterations", Value::Num(result.iterations as f64));
+    fields.insert("funcCount", Value::Num(result.func_count as f64));
+    fields.insert("algorithm", Value::from(ALGORITHM));
+    fields.insert("message", Value::from(message.to_string()));
+    fields
+}
+
+fn build_message(result: &BrentZeroResult) -> String {
+    if result.converged {
+        format!(
+            "Zero found within OPTIONS.TolX. Iterations: {}, FuncCount: {}.",
+            result.iterations, result.func_count
+        )
+    } else {
+        format!(
+            "Exiting: Maximum number of function evaluations or iterations has been exceeded - increase MaxFunEvals or MaxIter. Iterations: {}, FuncCount: {}.",
+            result.iterations, result.func_count
+        )
+    }
+}
+
+fn emit_summary(result: &BrentZeroResult, exit_flag: i32, message: &str, options: &FzeroOptions) {
+    if !matches!(options.display, DisplayMode::Final | DisplayMode::Iter) {
+        return;
+    }
+    crate::console::record_console_line(
+        crate::console::ConsoleStream::Stdout,
+        format!(
+            "fzero: x = {x:.6}, fval = {fval:.6}, exitflag = {exit_flag}. {message}",
+            x = result.x,
+            fval = result.fval,
+        ),
+    );
+}
+
+struct IterDisplay {
+    mode: DisplayMode,
+    printed_header: bool,
+}
+
+impl IterDisplay {
+    fn new(mode: DisplayMode) -> Self {
+        Self {
+            mode,
+            printed_header: false,
+        }
+    }
+}
+
+impl BrentZeroObserver for IterDisplay {
+    fn on_iteration(
+        &mut self,
+        iter: usize,
+        func_count: usize,
+        x: f64,
+        fx: f64,
+        step_kind: BrentZeroStepKind,
+    ) {
+        if !matches!(self.mode, DisplayMode::Iter) {
+            return;
+        }
+        if !self.printed_header {
+            crate::console::record_console_line(
+                crate::console::ConsoleStream::Stdout,
+                " Func-count        x          f(x)          Procedure",
+            );
+            self.printed_header = true;
+        }
+        let procedure = match step_kind {
+            BrentZeroStepKind::Initial => "initial",
+            BrentZeroStepKind::Bisection => "bisection",
+            BrentZeroStepKind::Interpolation => "interpolation",
+        };
+        let line =
+            format!("    {func_count:>5}    {x:13.6e} {fx:13.6e}    {procedure}    (iter {iter})");
+        crate::console::record_console_line(crate::console::ConsoleStream::Stdout, line);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -473,6 +749,158 @@ mod tests {
     }
 
     #[test]
+    fn fzero_multi_output_two_returns_root_and_fval() {
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let bracket = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        let result = block_on(fzero_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Tensor(bracket),
+            Vec::new(),
+        ))
+        .expect("fzero");
+        match result {
+            Value::OutputList(outputs) => {
+                assert_eq!(outputs.len(), 2);
+                match (&outputs[0], &outputs[1]) {
+                    (Value::Num(x), Value::Num(fval)) => {
+                        assert!((x - std::f64::consts::PI).abs() < 1.0e-6);
+                        assert!(fval.abs() < 1.0e-6);
+                    }
+                    other => panic!("unexpected outputs {other:?}"),
+                }
+            }
+            other => panic!("unexpected value {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fzero_multi_output_four_includes_output_struct() {
+        let _guard = crate::output_count::push_output_count(Some(4));
+        let bracket = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        let result = block_on(fzero_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Tensor(bracket),
+            Vec::new(),
+        ))
+        .expect("fzero");
+        match result {
+            Value::OutputList(outputs) => {
+                assert_eq!(outputs.len(), 4);
+                assert!(matches!(&outputs[2], Value::Num(flag) if *flag == 1.0));
+                match &outputs[3] {
+                    Value::Struct(output) => {
+                        assert!(matches!(
+                            output.fields.get("iterations"),
+                            Some(Value::Num(_))
+                        ));
+                        assert!(matches!(
+                            output.fields.get("funcCount"),
+                            Some(Value::Num(_))
+                        ));
+                        match output.fields.get("algorithm") {
+                            Some(Value::String(text)) => assert!(text.contains("bisection")),
+                            other => panic!("unexpected algorithm field {other:?}"),
+                        }
+                        match output.fields.get("message") {
+                            Some(Value::String(text)) => assert!(text.contains("Zero found")),
+                            other => panic!("unexpected message field {other:?}"),
+                        }
+                    }
+                    other => panic!("unexpected output struct {other:?}"),
+                }
+            }
+            other => panic!("unexpected value {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fzero_reports_zero_exitflag_when_iteration_budget_exhausted() {
+        let mut opts = StructValue::new();
+        opts.insert("MaxIter", Value::Num(1.0));
+        opts.insert("MaxFunEvals", Value::Num(2.0));
+        opts.insert("Display", Value::from("off"));
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let bracket = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        let result = block_on(fzero_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Tensor(bracket),
+            vec![Value::Struct(opts)],
+        ))
+        .expect("fzero");
+        match result {
+            Value::OutputList(outputs) => match &outputs[2] {
+                Value::Num(flag) => assert_eq!(*flag, 0.0),
+                other => panic!("unexpected exitflag {other:?}"),
+            },
+            other => panic!("unexpected value {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fzero_reports_convergence_when_final_step_hits_root() {
+        let mut opts = StructValue::new();
+        opts.insert("MaxIter", Value::Num(1.0));
+        opts.insert("Display", Value::from("off"));
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let bracket = Tensor::new(vec![-1.0, 1.0], vec![1, 2]).unwrap();
+        let result = block_on(fzero_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Tensor(bracket),
+            vec![Value::Struct(opts)],
+        ))
+        .expect("fzero");
+        match result {
+            Value::OutputList(outputs) => {
+                assert!(matches!(&outputs[0], Value::Num(x) if x.abs() < 1.0e-12));
+                assert!(matches!(&outputs[1], Value::Num(fval) if fval.abs() < 1.0e-12));
+                assert!(matches!(&outputs[2], Value::Num(flag) if *flag == 1.0));
+            }
+            other => panic!("unexpected value {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fzero_rejects_more_than_four_outputs() {
+        let _guard = crate::output_count::push_output_count(Some(5));
+        let bracket = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        let err = block_on(fzero_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Tensor(bracket),
+            Vec::new(),
+        ))
+        .expect_err("too many outputs should fail");
+        assert_eq!(err.identifier(), Some("RunMat:fzero:TooManyOutputs"));
+        assert!(err.message().contains("maximum is 4"));
+    }
+
+    #[test]
+    fn fzero_iter_display_records_iteration_rows() {
+        crate::console::reset_thread_buffer();
+        let mut opts = StructValue::new();
+        opts.insert("Display", Value::from("iter"));
+        let bracket = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        let result = block_on(fzero_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Tensor(bracket),
+            vec![Value::Struct(opts)],
+        ))
+        .expect("fzero");
+        assert!(matches!(result, Value::Num(_)));
+
+        let joined = crate::console::take_thread_buffer()
+            .into_iter()
+            .map(|entry| entry.text)
+            .collect::<String>();
+        assert!(joined.contains("Func-count"), "{joined}");
+        assert!(joined.contains("initial"), "{joined}");
+        assert!(
+            joined.contains("interpolation") || joined.contains("bisection"),
+            "{joined}"
+        );
+        assert!(joined.contains("exitflag = 1"), "{joined}");
+    }
+
+    #[test]
     fn brent_interpolation_acceptance_uses_signed_q() {
         assert!(!interpolation_step_accepted(1.0, -2.0, 1.0, 0.1, 10.0));
         assert!(interpolation_step_accepted(1.0, -2.0, -1.0, 0.1, 10.0));
@@ -487,7 +915,16 @@ mod tests {
             .collect();
         assert_eq!(
             labels,
-            vec!["x = fzero(fun, x0)", "x = fzero(fun, x0, options)"]
+            vec![
+                "x = fzero(fun, x0)",
+                "x = fzero(fun, x0, options)",
+                "[x, fval] = fzero(fun, x0)",
+                "[x, fval] = fzero(fun, x0, options)",
+                "[x, fval, exitflag] = fzero(fun, x0)",
+                "[x, fval, exitflag] = fzero(fun, x0, options)",
+                "[x, fval, exitflag, output] = fzero(fun, x0)",
+                "[x, fval, exitflag, output] = fzero(fun, x0, options)",
+            ]
         );
 
         let codes: Vec<&str> = FZERO_DESCRIPTOR
@@ -497,7 +934,11 @@ mod tests {
             .collect();
         assert_eq!(
             codes,
-            vec!["RM.FZERO.INVALID_ARGUMENT", "RM.FZERO.INVALID_INPUT"]
+            vec![
+                "RM.FZERO.INVALID_ARGUMENT",
+                "RM.FZERO.INVALID_INPUT",
+                "RM.FZERO.TOO_MANY_OUTPUTS",
+            ]
         );
     }
 

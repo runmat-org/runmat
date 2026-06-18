@@ -58,7 +58,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `math/linalg/ops` | `mtimes`, `mrdivide`, `mldivide`, `transpose`, `ctranspose`, `trace` | yes | M/T | BLAS | Core matrix operations. |
 | done | `math/linalg/ops` | `dot`, `mpower` | yes | M | BLAS | Dot product and matrix power. |
 | done | `math/linalg/factor` | `lu`, `qr`, `chol`, `svd`, `eig` | yes | - | LAPACK | Factorizations and eigensolvers. |
-| done | `math/linalg/solve` | `linsolve`, `pinv`, `inv`, `det`, `rank`, `rcond`, `cond`, `norm` | yes | - | LAPACK/BLAS | Solves and matrix metrics. |
+| done | `math/linalg/solve` | `linsolve`, `pinv`, `inv`, `det`, `rank`, `null`, `rref`, `rcond`, `cond`, `norm` | yes | - | LAPACK/BLAS/- | Solves, null spaces, row reduction, and matrix metrics. |
 | done | `math/linalg/structure` | `bandwidth`, `issymmetric`, `ishermitian`, `symrcm` | host | - | - | Structure queries and diagnostics. |
 
 ## FFT, Signal, and Image Processing
@@ -66,7 +66,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | Status | Path | Names | GPU | Fusion | Backend | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | done | `math/fft` | `fft`, `ifft`, `fft2`, `ifft2`, `fftshift`, `ifftshift` | yes | P | FFT | Fourier transforms through host or device FFT providers. |
-| done | `math/signal` | `conv`, `conv2`, `deconv`, `filter` | yes | S | - | Convolution and filtering; large convolution may use FFT paths. |
+| done | `math/signal` | `conv`, `conv2`, `deconv`, `filter`, `filtfilt`, `butter`, `fir1`, `freqz` | yes | S | - | Convolution, filter design/analysis, causal and zero-phase filtering; large convolution may use FFT paths. |
 | done | `image/filters` | `fspecial` | host | - | - | Filter kernel generation. |
 | done | `image/filters` | `imfilter`, `filter2` | yes | S | - | Linear image filters and padding modes. |
 | done | `image/color` | `rgb2gray`, `gray2rgb`, `ind2rgb`, `im2double`, `im2uint8`, `im2uint16`, `rgb2hsv`, `hsv2rgb`, `rgb2lab`, `lab2rgb` | host | - | - | Image color and class conversions. |
@@ -81,8 +81,8 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 
 | Status | Path | Names | GPU | Fusion | Backend | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| done | `control` | `tf` | host | - | - | Transfer-function model construction. |
-| done | `control` | `step`, `impulse`, `nyquist` | host | - | - | Time and frequency response evaluation. |
+| done | `control` | `tf`, `feedback` | host | - | - | Transfer-function construction, variable shorthand, arithmetic, and closed-loop interconnection. |
+| done | `control` | `step`, `impulse`, `nyquist`, `stepinfo`, `dcgain`, `pole`, `isstable` | host | - | - | Time response, frequency response, and SISO model analysis. |
 
 ## Statistics
 
@@ -91,6 +91,13 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `stats/summary` | `corrcoef`, `cov` | yes | R | BLAS | Correlation and covariance. |
 | done | `stats/hist` | `histcounts`, `histcounts2` | yes | P | - | Binning and histogram counts. |
 | done | `stats/random` | `rng` | N/A | - | - | Host and device RNG state. |
+
+## Dates and Times
+
+| Status | Path | Names | GPU | Fusion | Backend | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| done | `datetime` | `datetime`, `dateshift`, `year`, `month`, `day`, `hour`, `minute`, `second` | host | - | - | Date/time construction, formatting, component extraction, arithmetic, and calendar boundary shifting. |
+| done | `duration` | `duration`, `seconds`, `minutes`, `hours`, `days`, `milliseconds` | host | - | - | Duration construction, display, arithmetic, and datetime interop. |
 
 ## Logical and Comparisons
 
@@ -120,6 +127,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `cells/core` | `cell`, `cell2mat`, `mat2cell`, `cellfun` | host | P | - | Cell arrays and mapping helpers. |
 | done | `cells/core` | `cellstr` | host | - | - | Cell/string conversion. |
 | done | `containers/map` | `containers.Map` | host | - | - | String-to-value map support. |
+| done | `table` | `table`, `height`, `width`, `groupsummary` | host | - | - | Table containers, properties, dot/paren/brace indexing, grouping summaries, display, and row sorting through `sortrows`. |
 
 ## Introspection, Environment, and Diagnostics
 
@@ -134,11 +142,11 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 
 | Status | Path | Names | GPU | Fusion | Backend | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| done | `io/repl-fs` | `cd`, `pwd`, `ls`, `dir`, `mkdir`, `rmdir`, `movefile`, `copyfile`, `delete`, `exist`, `which`, `path`, `addpath`, `rmpath`, `genpath`, `savepath`, `tempdir`, `tempname`, `getenv`, `setenv` | host | - | - | REPL filesystem and environment helpers. |
+| done | `io/repl-fs` | `cd`, `pwd`, `ls`, `dir`, `mkdir`, `rmdir`, `movefile`, `copyfile`, `delete`, `exist`, `which`, `path`, `addpath`, `rmpath`, `run`, `genpath`, `savepath`, `tempdir`, `tempname`, `getenv`, `setenv` | host | - | - | REPL filesystem and environment helpers; MATLAB command syntax accepts literal path words such as `cd ..`, `addpath ./src`, and `copyfile ./a.m ./b.m`. |
 | done | `io/filetext` | `fileread`, `filewrite`, `fopen`, `fclose`, `fread`, `fwrite`, `feof`, `fgetl`, `fgets`, `fprintf` | host | - | - | Text and binary file I/O. |
 | done | `io/core` | `disp` | host | - | - | Display output sink. |
 | done | `io/interactive` | `input` | host | - | - | Prompted input, including text mode. |
-| done | `io/tabular` | `readmatrix`, `writematrix`, `csvread`, `csvwrite`, `dlmread`, `dlmwrite` | host | - | - | Simple tabular I/O. |
+| done | `io/tabular` | `readtable`, `spreadsheetImportOptions`, `readmatrix`, `writematrix`, `csvread`, `csvwrite`, `dlmread`, `dlmwrite` | host | - | - | Tabular I/O; `readtable` imports delimited text and spreadsheet files as table variables with sheet/range/name/type options. |
 | done | `io/mat` | `save`, `load` | host | - | - | MAT-like persistence. |
 
 ## I/O - JSON, Networking, and Images
@@ -149,6 +157,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `io/net` | `tcpserver`, `accept`, `tcpclient`, `read`, `readline`, `write`, `close` | host | - | - | TCP client/server operations, TLS, and Unix sockets. |
 | done | `io/http` | `webread`, `webwrite`, `weboptions` | host | - | - | HTTP client operations. |
 | done | `io/image` | `imread`, `imwrite`, `imfinfo` | host | - | - | Image file I/O. |
+| done | `image` | `imhist` | host | - | - | Grayscale and indexed-image intensity histograms, with statement-form plotting. |
 | done | `plot/images` | `image`, `imshow`, `imagesc` | host | - | - | Image display through plotting features. |
 
 ## Plotting and Visualization

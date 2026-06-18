@@ -1,0 +1,116 @@
+{
+  "title": "rlocus",
+  "category": "control",
+  "keywords": [
+    "rlocus",
+    "root locus",
+    "control system",
+    "transfer function",
+    "tf"
+  ],
+  "summary": "Compute or plot root loci of SISO transfer-function or state-space models.",
+  "references": [
+    "title: \"MATLAB rlocus documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`rlocus` computes host-side polynomial roots from transfer-function metadata. GPU-resident coefficient inputs are gathered by `tf` before model construction."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`rlocus` performs model analysis and plotting, so it terminates numeric fusion chains."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::rlocus::tests",
+    "integration": "crates/runmat-vm/tests/control.rs"
+  },
+  "description": "`rlocus(sys, ...)` plots or returns closed-loop pole locations for supported SISO `tf` and `ss` models. Roots are computed from the characteristic polynomial `den(sys) + k*num(sys)` for each gain value.",
+  "behaviors": [
+    "Supports SISO `tf` objects with real or complex coefficients.",
+    "Supports SISO `ss` objects by converting state-space metadata to equivalent numerator and denominator polynomials.",
+    "Accepts an explicit finite nonnegative gain vector `k`.",
+    "Chooses a deterministic logarithmic gain grid when `k` is omitted and adds samples around real positive breakaway candidates.",
+    "Returns `r` as a branches-by-gains matrix, using complex output when any branch has a nonzero imaginary component.",
+    "Returns `[r, k]` for two-output calls, where `k` is a row vector.",
+    "Plots branch trajectories for no-output calls and marks open-loop poles and zeros.",
+    "Supports continuous-time and discrete-time `tf` models.",
+    "Input/output delays raise clear unsupported-model diagnostics."
+  ],
+  "examples": [
+    {
+      "description": "Return roots for explicit gains",
+      "input": "H = tf(1, [1 1]);\n[r, k] = rlocus(H, [0 1 3]);\nfprintf(\"%.0f %.0f %.0f %.0f\\n\", r(1,1), r(1,2), r(1,3), k(3));",
+      "output": "-1 -2 -4 3"
+    },
+    {
+      "description": "Plot a root locus",
+      "input": "s = tf('s');\nH = (s + 2) / (s^2 + 3*s + 4);\nrlocus(H);\nfprintf(\"ok\\n\");",
+      "output": "ok"
+    },
+    {
+      "description": "Use a discrete-time transfer function",
+      "input": "H = tf(1, [1 -0.5], 0.1);\nr = rlocus(H, 0.5);\nfprintf(\"%.1f\\n\", r(1));",
+      "output": "0.0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What equation does `rlocus` solve?",
+      "answer": "For each gain `k`, it computes roots of `den(sys) + k*num(sys)`, matching unity negative-feedback root-locus convention."
+    },
+    {
+      "question": "Does `rlocus` support state-space or MIMO models?",
+      "answer": "`rlocus` supports SISO `ss` models. MIMO model arrays remain unsupported by the current RunMat control-model path."
+    },
+    {
+      "question": "Does `rlocus` run on the GPU?",
+      "answer": "No. It is a model-analysis operation and returns host-resident tensors."
+    }
+  ],
+  "links": [
+    {
+      "label": "tf",
+      "url": "./tf"
+    },
+    {
+      "label": "feedback",
+      "url": "./feedback"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/rlocus.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/rlocus.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "rlocus(sys)\nrlocus(sys, k)\nr = rlocus(sys)\nr = rlocus(sys, k)\n[r, k] = rlocus(sys)\n[r, k] = rlocus(sys, k)",
+      "output": "Root-locus data is returned when outputs are requested; otherwise a plot is rendered."
+    },
+    "points": [
+      "`sys` must be a SISO `tf` or `ss` object.",
+      "`k` must be a finite, nonnegative numeric vector.",
+      "`r` has one row per root-locus branch and one column per gain value.",
+      "`k` is returned as a `1 x N` row vector."
+    ]
+  },
+  "validation": {
+    "summary": "`rlocus` validates object class, delay properties, gain-vector type/shape/range, output shapes, continuous and discrete characteristic polynomials, complex roots, plotting smoke, and VM dispatch.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/control/rlocus.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/rlocus.rs"
+    }
+  },
+  "gpu_residency": "`rlocus` returns host-resident root and gain tensors."
+}

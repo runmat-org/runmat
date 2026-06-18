@@ -262,12 +262,12 @@ impl SnapshotValidator {
         }
 
         // Validate version
-        if header.version > SNAPSHOT_VERSION {
+        if !(MIN_SUPPORTED_SNAPSHOT_VERSION..=SNAPSHOT_VERSION).contains(&header.version) {
             errors.push(ValidationError {
                 error_type: ValidationErrorType::FormatError,
                 message: format!(
-                    "Unsupported snapshot version: {} > {}",
-                    header.version, SNAPSHOT_VERSION
+                    "Unsupported snapshot version: {} is outside supported range {}..={}",
+                    header.version, MIN_SUPPORTED_SNAPSHOT_VERSION, SNAPSHOT_VERSION
                 ),
                 location: Some("header.version".to_string()),
                 severity: ErrorSeverity::High,

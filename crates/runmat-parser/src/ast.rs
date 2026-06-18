@@ -18,6 +18,7 @@ pub enum Expr {
     IndexCell(Box<Expr>, Vec<Expr>, Span),
     Range(Box<Expr>, Option<Box<Expr>>, Box<Expr>, Span),
     Colon(Span),
+    NameValueArg(String, Box<Expr>, Span),
     FuncCall(String, Vec<Expr>, Span),
     SuperConstructorCall {
         current_class: String,
@@ -64,6 +65,7 @@ impl Expr {
             | Expr::IndexCell(_, _, span)
             | Expr::Range(_, _, _, span)
             | Expr::Colon(span)
+            | Expr::NameValueArg(_, _, span)
             | Expr::FuncCall(_, _, span)
             | Expr::SuperConstructorCall { span, .. }
             | Expr::SuperMethodCall { span, .. }
@@ -96,6 +98,7 @@ impl Expr {
             Expr::IndexCell(base, indices, _) => Expr::IndexCell(base, indices, span),
             Expr::Range(start, step, end, _) => Expr::Range(start, step, end, span),
             Expr::Colon(_) => Expr::Colon(span),
+            Expr::NameValueArg(name, value, _) => Expr::NameValueArg(name, value, span),
             Expr::FuncCall(name, args, _) => Expr::FuncCall(name, args, span),
             Expr::SuperConstructorCall {
                 current_class,

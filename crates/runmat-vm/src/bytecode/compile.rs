@@ -13,9 +13,7 @@ use runmat_builtins::{builtin_functions, AccelTag, BuiltinSemanticKind};
 use runmat_hir::{EntrypointId, FunctionId, HirAssembly};
 use runmat_mir::MirAssembly;
 use runmat_mir::{MirRvalue, MirStmtKind, MirTerminatorKind};
-use std::collections::HashMap;
-#[cfg(feature = "native-accel")]
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub fn compile(
     hir: &HirAssembly,
@@ -29,16 +27,20 @@ pub fn compile(
     let bound_functions =
         compile_semantic_functions(hir, mir, c.layout.as_ref().unwrap(), Some(entrypoint))?;
     let function_registry = FunctionRegistry::new(bound_functions.clone());
-    let var_names = c
+    let (var_names, initially_unassigned_slots) = c
         .layout
         .as_ref()
-        .and_then(|layout| layout.entrypoints.get(&entrypoint))
-        .map(|entrypoint_layout| {
-            entrypoint_layout
-                .exports
-                .iter()
-                .map(|export| (export.slot.0, export.name.clone()))
-                .collect()
+        .and_then(|layout| {
+            let entrypoint_layout = layout.entrypoints.get(&entrypoint)?;
+            let function_layout = layout.functions.get(&entrypoint_layout.target)?;
+            Some((
+                entrypoint_layout
+                    .exports
+                    .iter()
+                    .map(|export| (export.slot.0, export.name.clone()))
+                    .collect(),
+                function_layout_initially_unassigned_slots(hir, function_layout),
+            ))
         })
         .unwrap_or_default();
     let entrypoint_target = hir
@@ -106,6 +108,7 @@ pub fn compile(
         function_registry,
         var_types: c.var_types,
         var_names,
+        initially_unassigned_slots,
         layout: c.layout,
         async_metadata,
         #[cfg(feature = "native-accel")]
@@ -743,6 +746,7 @@ fn rvalue_has_fusion_signal(value: &MirRvalue) -> bool {
         | MirRvalue::Index { .. }
         | MirRvalue::Member { .. }
         | MirRvalue::DynamicMember { .. }
+        | MirRvalue::WorkspaceFirstStaticProperty { .. }
         | MirRvalue::MetaClass(_)
         | MirRvalue::Colon
         | MirRvalue::End
@@ -821,6 +825,10 @@ fn compile_semantic_functions(
                     .map(|capture| capture.slot.0)
                     .collect(),
                 var_names: function_layout_var_names(hir, function_layout)?,
+                initially_unassigned_slots: function_layout_initially_unassigned_slots(
+                    hir,
+                    function_layout,
+                ),
                 argument_validations: function
                     .argument_validations
                     .iter()
@@ -942,6 +950,24 @@ fn function_layout_var_names(
         names.insert(slot.0, hir_binding.name.0.clone());
     }
     Ok(names)
+}
+
+fn function_layout_initially_unassigned_slots(
+    hir: &HirAssembly,
+    function_layout: &crate::layout::VmFunctionLayout,
+) -> HashSet<usize> {
+    function_layout
+        .binding_slots
+        .iter()
+        .filter_map(|(binding, slot)| {
+            hir.bindings
+                .get(binding.0)
+                .is_some_and(|hir_binding| {
+                    matches!(hir_binding.role, runmat_hir::BindingRole::ExternalWorkspace)
+                })
+                .then_some(slot.0)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -2704,6 +2730,32 @@ mod tests {
     }
 
     #[test]
+    fn compile_interprets_uigetfile_cancel_destructuring() {
+        let ast =
+            runmat_parser::parse("[file, path] = uigetfile('*.xlsx', 'Select a spreadsheet');")
+                .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let file_slot = bytecode
+            .var_names
+            .iter()
+            .find_map(|(slot, name)| (name == "file").then_some(*slot))
+            .expect("file slot");
+        let path_slot = bytecode
+            .var_names
+            .iter()
+            .find_map(|(slot, name)| (name == "path").then_some(*slot))
+            .expect("path slot");
+
+        assert_eq!(vars[file_slot], Value::Num(0.0));
+        assert_eq!(vars[path_slot], Value::Num(0.0));
+    }
+
+    #[test]
     fn compile_interprets_matrix_literal_assignment() {
         let ast = runmat_parser::parse("x = [1 2; 3 4];").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -3560,6 +3612,357 @@ mod tests {
 
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         assert_eq!(vars[y_export.slot.0], Value::Num(9.0));
+    }
+
+    #[test]
+    fn compile_interprets_readtable_weekly_groupsummary_workflow() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "runmat_readtable_weekly_{}_{}.csv",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::write(
+            &path,
+            "Date,Orders,Revenue\n2024-03-11,10,100\n2024-03-12,20,300\n2024-03-18,6,90\n",
+        )
+        .expect("write csv");
+        let source = format!(
+            "\
+T = readtable('{}');\n\
+T.Date = datetime(T.Date, 'InputFormat', 'yyyy-MM-dd');\n\
+T.Week = dateshift(T.Date, 'start', 'week');\n\
+weekly = groupsummary(T, 'Week', 'mean', {{'Orders', 'Revenue'}});\n\
+weekly.Properties.VariableNames(end-1:end) = {{'AvgOrders', 'AvgRevenue'}};\n\
+weekly = sortrows(weekly, 'Week');\n\
+out = weekly.AvgRevenue;\n",
+            path.to_string_lossy()
+        );
+        let ast = runmat_parser::parse(&source).expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let out_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "out")
+            .expect("out export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[out_export.slot.0] else {
+            panic!(
+                "expected numeric AvgRevenue tensor, got {:?}",
+                vars[out_export.slot.0]
+            );
+        };
+        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.data, vec![200.0, 90.0]);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn compile_interprets_imhist_uint8_workflow() {
+        let ast = runmat_parser::parse(
+            "\
+img = uint8([0 1 1; 2 2 2]);\n\
+[counts, bins] = imhist(img);\n\
+[peak, idx] = max(counts);\n\
+dominant = bins(idx);\n\
+total = sum(counts);\n\
+summary = [peak; dominant; total];\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let summary_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "summary")
+            .expect("summary export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[summary_export.slot.0] else {
+            panic!(
+                "expected numeric summary tensor, got {:?}",
+                vars[summary_export.slot.0]
+            );
+        };
+        assert_eq!(tensor.shape, vec![3, 1]);
+        assert_eq!(tensor.data, vec![3.0, 2.0, 6.0]);
+    }
+
+    #[test]
+    fn compile_interprets_butter_filter_workflow() {
+        let ast = runmat_parser::parse(
+            "\
+[b, a] = butter(2, 0.25, 'low');\n\
+x = [1 zeros(1, 5)];\n\
+y = filter(b, a, x);\n\
+expected = [0.0976310729378175 0.2873096041807672 0.3359654745135361];\n\
+err = max(abs(y(1:3) - expected));\n\
+summary = [numel(b); numel(a); all(isfinite(y)); err < 1e-12];\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let summary_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "summary")
+            .expect("summary export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[summary_export.slot.0] else {
+            panic!(
+                "expected numeric summary tensor, got {:?}",
+                vars[summary_export.slot.0]
+            );
+        };
+        assert_eq!(tensor.shape, vec![4, 1]);
+        assert_eq!(tensor.data, vec![3.0, 3.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn compile_interprets_rref_rank_workflow() {
+        let ast = runmat_parser::parse(
+            "\
+A = [1 2 3; 2 4 6; 1 1 1];\n\
+rankA = rank(A);\n\
+[R, p] = rref(A);\n\
+expected = [1 0 -1; 0 1 2; 0 0 0];\n\
+expected_p = [1 2];\n\
+err = max(max(abs(R - expected)));\n\
+pivot_ok = all(p == expected_p);\n\
+summary = [rankA; double(err < 1e-12); numel(p); double(pivot_ok)];\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let summary_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "summary")
+            .expect("summary export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[summary_export.slot.0] else {
+            panic!(
+                "expected numeric summary tensor, got {:?}",
+                vars[summary_export.slot.0]
+            );
+        };
+        assert_eq!(tensor.shape, vec![4, 1]);
+        assert_eq!(tensor.data, vec![2.0, 1.0, 2.0, 1.0]);
+    }
+
+    #[test]
+    fn compile_interprets_symbolic_limit_workflow() {
+        let ast = runmat_parser::parse(
+            "\
+syms x h\n\
+syms('z')\n\
+f1 = limit(sin(x)/x, x, 0);\n\
+f2 = limit((cos(x+h) - cos(x))/h, h, 0);\n\
+f3 = limit(sin(z)/z + 1, z, 0);\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let entry_layout = &layout.entrypoints[&entrypoint];
+        let f1_export = entry_layout
+            .exports
+            .iter()
+            .find(|export| export.name == "f1")
+            .expect("f1 export");
+        let f2_export = entry_layout
+            .exports
+            .iter()
+            .find(|export| export.name == "f2")
+            .expect("f2 export");
+        let f3_export = entry_layout
+            .exports
+            .iter()
+            .find(|export| export.name == "f3")
+            .expect("f3 export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert!(matches!(&vars[f1_export.slot.0], Value::Symbolic(_)));
+        assert_eq!(vars[f1_export.slot.0].to_string(), "1");
+        assert_eq!(vars[f2_export.slot.0].to_string(), "-sin(x)");
+        assert_eq!(vars[f3_export.slot.0].to_string(), "2");
+    }
+
+    #[test]
+    fn compile_interprets_symbolic_function_declaration_workflow() {
+        let ast = runmat_parser::parse(
+            "\
+syms Y(X);\n\
+a = 0;\n\
+z = 0;\n\
+applied = Y(a);\n\
+reapplied = applied(1);\n\
+cond = applied == z;\n\
+dydx = diff(Y, X);\n\
+eqn = diff(Y, X) == 2*Y + X;\n\
+syms('F(P, Q)');\n\
+probe = F(1, 2);\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let entry_layout = &layout.entrypoints[&entrypoint];
+        let export = |name: &str| {
+            entry_layout
+                .exports
+                .iter()
+                .find(|export| export.name == name)
+                .unwrap_or_else(|| panic!("{name} export"))
+                .slot
+                .0
+        };
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[export("Y")].to_string(), "Y(X)");
+        assert_eq!(vars[export("X")].to_string(), "X");
+        assert_eq!(vars[export("applied")].to_string(), "Y(0)");
+        assert_eq!(vars[export("reapplied")].to_string(), "Y(0)");
+        assert_eq!(vars[export("cond")].to_string(), "Y(0) == 0");
+        assert_eq!(vars[export("dydx")].to_string(), "diff(Y(X), X)");
+        assert_eq!(
+            vars[export("eqn")].to_string(),
+            "diff(Y(X), X) == 2*Y(X) + X"
+        );
+        assert_eq!(vars[export("F")].to_string(), "F(P, Q)");
+        assert_eq!(vars[export("P")].to_string(), "P");
+        assert_eq!(vars[export("Q")].to_string(), "Q");
+        assert_eq!(vars[export("probe")].to_string(), "F(1, 2)");
+    }
+
+    #[test]
+    fn compile_rejects_symbolic_function_arity_mismatch() {
+        let ast = runmat_parser::parse(
+            "\
+syms Y(X);\n\
+bad = Y(1, 2);\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let err = block_on(crate::interpret(&bytecode)).expect_err("arity mismatch should fail");
+
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:SymbolicFunctionArity")
+        );
+    }
+
+    #[test]
+    fn compile_interprets_symbolic_fractional_power_limit() {
+        let ast = runmat_parser::parse(
+            "\
+syms x\n\
+f = (cos(x)^(1/3) - 1) / x^2;\n\
+L = limit(f, x, 0);\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let l_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "L")
+            .expect("L export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Symbolic(expr) = &vars[l_export.slot.0] else {
+            panic!(
+                "expected symbolic limit result, got {:?}",
+                vars[l_export.slot.0]
+            );
+        };
+        let result = expr.constant_value().expect("constant limit result");
+        assert!((result + 1.0 / 6.0).abs() < 1e-12, "{result}");
+    }
+
+    #[test]
+    fn compile_interprets_scalar_symbolic_power() {
+        let ast = runmat_parser::parse(
+            "\
+syms x\n\
+a = x^2;\n\
+b = 2^x;\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let entry_layout = &layout.entrypoints[&entrypoint];
+        let a_export = entry_layout
+            .exports
+            .iter()
+            .find(|export| export.name == "a")
+            .expect("a export");
+        let b_export = entry_layout
+            .exports
+            .iter()
+            .find(|export| export.name == "b")
+            .expect("b export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert!(matches!(&vars[a_export.slot.0], Value::Symbolic(_)));
+        assert!(matches!(&vars[b_export.slot.0], Value::Symbolic(_)));
+        assert_eq!(vars[a_export.slot.0].to_string(), "x^2");
+        assert_eq!(vars[b_export.slot.0].to_string(), "2^x");
+    }
+
+    #[test]
+    fn compile_rejects_nonscalar_symbolic_power_operand() {
+        let ast = runmat_parser::parse(
+            "\
+syms x\n\
+y = x^[1 2; 3 4];\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        block_on(crate::interpret(&bytecode))
+            .expect_err("symbolic power with a non-scalar operand should fail");
     }
 
     #[test]
@@ -6432,10 +6835,11 @@ mod tests {
         let entrypoint = hir.assembly.entrypoints[0].id;
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
-        assert!(bytecode
-            .instructions
-            .iter()
-            .any(|instr| matches!(instr, Instr::CreateBoundFunctionHandle(FunctionId(9001), _))));
+        assert!(bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            Instr::CreateExternalBoundFunctionHandle(FunctionId(9001), name)
+                if name == "remote_inc"
+        )));
 
         let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
             Some(Arc::new(|name| {
@@ -6474,7 +6878,15 @@ mod tests {
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
         assert!(bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            Instr::CallSemanticFunctionMulti(FunctionId(9001), 1, 1)
+            Instr::CallFunctionMulti {
+                identity: CallableIdentity::ExternalFunction {
+                    function: FunctionId(9001),
+                    ..
+                },
+                arg_count: 1,
+                out_count: 1,
+                ..
+            }
         )));
 
         let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
@@ -6499,6 +6911,24 @@ mod tests {
         assert!(vars
             .iter()
             .any(|value| matches!(value, Value::Num(n) if (*n - 3.0).abs() < 1e-12)));
+    }
+
+    #[test]
+    fn compile_rejects_workspace_first_bound_function_fallback() {
+        let ast = runmat_parser::parse("run(\"setup.m\"); y = remote_inc(2);").expect("parse");
+        let mut bound_functions = HashMap::new();
+        bound_functions.insert("remote_inc".to_string(), FunctionId(9001));
+        let context = LoweringContext::empty().with_bound_functions(&bound_functions);
+        let hir = lower(&ast, &context).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let err = compile(&hir.assembly, &mir, entrypoint)
+            .expect_err("workspace-first bound function fallback should be rejected");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirCallFallbackPolicyUnsupported")
+        );
     }
 
     #[test]

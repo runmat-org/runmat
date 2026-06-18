@@ -722,6 +722,15 @@ fn visibility_checkbox(
     let size = egui::vec2(14.0 * scale, 14.0 * scale);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     let stroke = egui::Stroke::new(1.0, theme.checkbox_border);
+    #[cfg(target_arch = "wasm32")]
+    ui.painter().rect(
+        rect,
+        scaled_corner_radius(PANEL_CORNER_RADIUS * scale),
+        theme.checkbox_bg,
+        stroke,
+        egui::StrokeKind::Inside,
+    );
+    #[cfg(not(target_arch = "wasm32"))]
     ui.painter()
         .rect(rect, PANEL_CORNER_RADIUS * scale, theme.checkbox_bg, stroke);
     match state {
@@ -840,8 +849,28 @@ fn panel_frame(theme: &CadOverlayTheme, scale: f32) -> egui::Frame {
     egui::Frame::none()
         .fill(theme.panel_bg)
         .stroke(egui::Stroke::new(1.0, theme.panel_border))
-        .rounding(egui::Rounding::same(PANEL_CORNER_RADIUS * scale))
-        .inner_margin(egui::Margin::same(10.0 * scale))
+        .rounding(scaled_corner_radius(PANEL_CORNER_RADIUS * scale))
+        .inner_margin(scaled_margin_same(10.0 * scale))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn scaled_corner_radius(radius: f32) -> egui::CornerRadius {
+    egui::CornerRadius::same(radius.round().clamp(0.0, u8::MAX as f32) as u8)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn scaled_corner_radius(radius: f32) -> egui::Rounding {
+    egui::Rounding::same(radius)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn scaled_margin_same(margin: f32) -> egui::Margin {
+    egui::Margin::same(margin.round().clamp(i8::MIN as f32, i8::MAX as f32) as i8)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn scaled_margin_same(margin: f32) -> egui::Margin {
+    egui::Margin::same(margin)
 }
 
 fn panel_header(

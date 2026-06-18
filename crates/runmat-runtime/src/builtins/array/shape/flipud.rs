@@ -224,12 +224,14 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
+        | Value::SparseTensor(_)
         | Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Symbolic(_)
         | Value::OutputList(_) => Err(flipud_error_descriptor(&FLIPUD_ERROR_UNSUPPORTED_INPUT)),
     }
 }

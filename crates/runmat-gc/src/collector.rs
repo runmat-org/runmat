@@ -186,7 +186,7 @@ impl MarkSweepCollector {
                     self.mark_object(cb, max_generation)?;
                 }
             }
-            Value::Tensor(_) | Value::ComplexTensor(_) => {
+            Value::Tensor(_) | Value::SparseTensor(_) | Value::ComplexTensor(_) => {
                 // Matrices don't contain references to other GC objects
                 // (their data is Vec<f64>)
             }
@@ -203,7 +203,8 @@ impl MarkSweepCollector {
             | Value::Num(_)
             | Value::Complex(_, _)
             | Value::Bool(_)
-            | Value::LogicalArray(_) => {
+            | Value::LogicalArray(_)
+            | Value::Symbolic(_) => {
                 // Primitive values don't contain references
             }
             Value::FunctionHandle(_)

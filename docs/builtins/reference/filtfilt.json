@@ -1,0 +1,95 @@
+{
+  "title": "filtfilt",
+  "category": "math/signal",
+  "keywords": [
+    "filtfilt",
+    "filter",
+    "zero phase",
+    "FIR",
+    "IIR",
+    "gpu"
+  ],
+  "summary": "Apply zero-phase forward-backward digital filtering.",
+  "references": [
+    "title: \"MATLAB filtfilt documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "RunMat uses the provider `iir_filter` hook for real gpuArray inputs when available, with transparent host fallback for complex values or unavailable providers."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::filtfilt::tests",
+    "gpu": "builtins::math::signal::filtfilt::tests::gpu_matches_cpu"
+  },
+  "description": "`filtfilt(b, a, x)` filters a vector forward and backward to remove phase delay. Coefficients follow the same digital-filter convention as `filter`: `b` is the numerator, `a` is the denominator, and `a(1)` is normalized internally.",
+  "behaviors": [
+    "The v1 implementation supports vector signals and preserves row or column orientation.",
+    "RunMat uses odd reflection at both signal edges with `3 * (max(numel(a), numel(b)) - 1)` samples, matching the common MATLAB-compatible zero-phase filtering path.",
+    "Input length must be greater than the reflection length unless the filter has zero state.",
+    "Real gpuArray inputs use provider-backed filter passes when available; complex inputs fall back to the host reference path."
+  ],
+  "examples": [
+    {
+      "description": "Compare causal filtering with zero-phase filtering",
+      "input": "b = ones(1, 3) / 3;\na = 1;\nx = 1:20;\ny_causal = filter(b, a, x);\ny_zero = filtfilt(b, a, x);\nfprintf('%.4f %.4f\\n', y_causal(8), y_zero(8));",
+      "output": "7.0000 8.0000"
+    },
+    {
+      "description": "Filter with FIR coefficients from fir1",
+      "input": "b = fir1(10, 0.25, 'low');\nx = 1:40;\ny = filtfilt(b, 1, x);"
+    },
+    {
+      "description": "Run zero-phase filtering on a gpuArray",
+      "input": "g = gpuArray(1:40);\nb = ones(1, 3) / 3;\ny_gpu = filtfilt(b, 1, g);\ny = gather(y_gpu);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `filtfilt` different from `filter`?",
+      "answer": "`filter` is causal and introduces phase delay. `filtfilt` applies the filter forward and backward, cancelling that phase delay while doubling the magnitude response order."
+    },
+    {
+      "question": "Does `filtfilt` support matrices?",
+      "answer": "This initial implementation supports vector inputs. Matrix and explicit-dimension support should be added as a separate compatibility expansion."
+    },
+    {
+      "question": "Can I use Butterworth or FIR coefficients?",
+      "answer": "Yes. Coefficients from `butter`, `fir1`, or hand-written digital filters can be used as long as `a(1)` is non-zero."
+    }
+  ],
+  "links": [
+    {
+      "label": "filter",
+      "url": "./filter"
+    },
+    {
+      "label": "fir1",
+      "url": "./fir1"
+    },
+    {
+      "label": "butter",
+      "url": "./butter"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/filtfilt.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/filtfilt.rs"
+  },
+  "gpu_behavior": [
+    "Real gpuArray signal inputs are eligible for provider-backed forward and reverse filter passes through the existing `iir_filter` hook.",
+    "If provider execution is unavailable or inputs are complex, RunMat gathers to the host and evaluates the MATLAB-compatible reference path."
+  ]
+}

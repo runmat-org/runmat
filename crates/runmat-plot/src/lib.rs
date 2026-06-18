@@ -13,6 +13,7 @@ pub mod event;
 pub mod geometry;
 pub mod geometry_scene;
 pub mod gpu;
+pub(crate) mod wgpu_compat;
 
 // High-level plot types and figures
 pub mod plots;
@@ -22,8 +23,8 @@ pub mod export;
 
 pub use context::{install_shared_wgpu_context, shared_wgpu_context, SharedWgpuContext};
 
-// GUI system (when enabled)
-#[cfg(feature = "gui")]
+// Native GUI system (when enabled on desktop targets)
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
 pub mod gui;
 
 // Egui overlay rendering (usable without winit, including wasm)
@@ -62,15 +63,15 @@ pub use plots::{
 };
 
 // High-level API
-#[cfg(feature = "gui")]
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
 pub use gui::{PlotWindow, WindowConfig};
 
 // Sequential window manager (V8-caliber EventLoop management)
-#[cfg(feature = "gui")]
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
 pub use gui::{is_window_available, show_plot_sequential};
 
 // Robust GUI thread management
-#[cfg(feature = "gui")]
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
 pub use gui::{
     get_gui_manager, health_check_global, initialize_gui_manager, is_main_thread,
     register_main_thread, show_plot_global, GuiErrorCode, GuiOperationResult, GuiThreadManager,
@@ -117,8 +118,11 @@ pub fn show_plot_unified(
         }
         None => {
             // Interactive mode: Show GPU-accelerated window
-            #[cfg(feature = "gui")]
+            #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
             {
+                if !figure.visible {
+                    return Ok("Figure is hidden".to_string());
+                }
                 #[cfg(target_os = "macos")]
                 {
                     if !is_main_thread() {
@@ -127,7 +131,7 @@ pub fn show_plot_unified(
                 }
                 show_plot_sequential(figure)
             }
-            #[cfg(not(feature = "gui"))]
+            #[cfg(any(not(feature = "gui"), target_arch = "wasm32"))]
             {
                 Err(
                     "GUI feature not enabled. Build with --features gui for interactive plotting."
@@ -322,8 +326,15 @@ pub fn render_interactive_with_handle(
     handle: u32,
     figure: plots::Figure,
 ) -> Result<String, String> {
-    #[cfg(feature = "gui")]
+    #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
     {
+        if !figure.visible {
+            if handle == 0 {
+                return Ok("Figure is hidden".to_string());
+            }
+            gui::lifecycle::request_close(handle);
+            return Ok(format!("Figure {handle} is hidden"));
+        }
         if std::env::var_os("RUNMAT_DISABLE_INTERACTIVE_PLOTS").is_some() {
             return Err(
                 "Plotting is unavailable in this environment (interactive rendering disabled)."
@@ -342,7 +353,7 @@ pub fn render_interactive_with_handle(
             gui::lifecycle::render_figure(handle, figure)
         }
     }
-    #[cfg(not(feature = "gui"))]
+    #[cfg(any(not(feature = "gui"), target_arch = "wasm32"))]
     {
         let _ = handle;
         let _ = figure;

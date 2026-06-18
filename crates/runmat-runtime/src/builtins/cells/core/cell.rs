@@ -480,12 +480,15 @@ fn empty_value_like(proto: Option<&Value>) -> BuiltinResult<Value> {
             Value::Cell(_) => make_cell_with_shape(Vec::new(), vec![0, 0])
                 .map_err(|e| cell_error_with_message(format!("cell: {e}"), &CELL_ERROR_INTERNAL)),
             Value::Struct(_) => Ok(Value::Struct(StructValue::new())),
-            Value::Tensor(_) | Value::Num(_) | Value::Int(_) | Value::GpuTensor(_) => {
-                default_empty_double()
-            }
+            Value::Tensor(_)
+            | Value::SparseTensor(_)
+            | Value::Num(_)
+            | Value::Int(_)
+            | Value::GpuTensor(_) => default_empty_double(),
             Value::Object(_)
             | Value::HandleObject(_)
             | Value::Listener(_)
+            | Value::Symbolic(_)
             | Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)

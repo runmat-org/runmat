@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, Timelike};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, Timelike, Weekday};
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -100,6 +100,36 @@ const DATETIME_BINARY_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Right datetime/numeric/duration operand.",
     },
 ];
+const DATESHIFT_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "t",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Datetime input.",
+    },
+    BuiltinParamDescriptor {
+        name: "boundary",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Shift boundary: 'start', 'end', or 'nearest'.",
+    },
+    BuiltinParamDescriptor {
+        name: "unit",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Calendar/time unit.",
+    },
+    BuiltinParamDescriptor {
+        name: "weekdayOrOption",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional weekday for week-based shifts.",
+    },
+];
 const DATETIME_SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "obj",
@@ -154,7 +184,7 @@ const DATETIME_SUBSASGN_INPUTS: [BuiltinParamDescriptor; 4] = [
     },
 ];
 
-const DATETIME_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+const DATETIME_SIGNATURES: [BuiltinSignatureDescriptor; 11] = [
     BuiltinSignatureDescriptor {
         label: "t = datetime()",
         inputs: &[],
@@ -349,6 +379,11 @@ const DATETIME_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
         outputs: &OUT_DATETIME,
     },
     BuiltinSignatureDescriptor {
+        label: "t = datetime(textOrArray, \"InputFormat\", inputFormat)",
+        inputs: &DATETIME_ARGS_ONLY,
+        outputs: &OUT_DATETIME,
+    },
+    BuiltinSignatureDescriptor {
         label: "t = datetime(___, Name, Value, ...)",
         inputs: &DATETIME_ARGS_ONLY,
         outputs: &OUT_DATETIME,
@@ -401,6 +436,23 @@ const DATETIME_BINARY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSign
     inputs: &DATETIME_BINARY_INPUTS,
     outputs: &OUT_ANY,
 }];
+const DATESHIFT_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "t2 = dateshift(t, boundary, unit)",
+        inputs: &DATESHIFT_INPUTS,
+        outputs: &OUT_DATETIME,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t2 = dateshift(t, boundary, \"week\", weekday)",
+        inputs: &DATESHIFT_INPUTS,
+        outputs: &OUT_DATETIME,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t2 = dateshift(t, \"dayofweek\", weekday)",
+        inputs: &DATESHIFT_INPUTS,
+        outputs: &OUT_DATETIME,
+    },
+];
 
 pub const DATETIME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DATETIME_SIGNATURES,
@@ -460,6 +512,12 @@ pub const DATETIME_BINARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DATETIME_BINARY_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &DATETIME_ERRORS,
+};
+pub const DATESHIFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DATESHIFT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
     errors: &DATETIME_ERRORS,
 };
 
@@ -544,12 +602,16 @@ fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
     }
 }
 
-fn parse_trailing_options(
-    args: &[Value],
-) -> BuiltinResult<(usize, Option<String>, Option<String>)> {
+#[derive(Default)]
+struct DatetimeOptions {
+    format: Option<String>,
+    convert_from: Option<String>,
+    input_format: Option<String>,
+}
+
+fn parse_trailing_options(args: &[Value]) -> BuiltinResult<(usize, DatetimeOptions)> {
     let mut positional_end = args.len();
-    let mut format = None;
-    let mut convert_from = None;
+    let mut options = DatetimeOptions::default();
 
     while positional_end >= 2 {
         let name = match scalar_text(&args[positional_end - 2], "option name") {
@@ -559,14 +621,15 @@ fn parse_trailing_options(
         let lowered = name.trim().to_ascii_lowercase();
         let value = scalar_text(&args[positional_end - 1], &format!("{name} option"))?;
         match lowered.as_str() {
-            "format" => format = Some(value),
-            "convertfrom" => convert_from = Some(value),
+            "format" => options.format = Some(value),
+            "convertfrom" => options.convert_from = Some(value),
+            "inputformat" => options.input_format = Some(value),
             _ => break,
         }
         positional_end -= 2;
     }
 
-    Ok((positional_end, format, convert_from))
+    Ok((positional_end, options))
 }
 
 fn tensor_from_numeric(value: Value, context: &str) -> BuiltinResult<Tensor> {
@@ -645,7 +708,7 @@ fn format_token_to_strftime(format: &str) -> String {
     out
 }
 
-fn datenum_from_naive(datetime: NaiveDateTime) -> f64 {
+pub(crate) fn datenum_from_naive(datetime: NaiveDateTime) -> f64 {
     let base = NaiveDate::from_ymd_opt(1970, 1, 1)
         .unwrap()
         .and_hms_opt(0, 0, 0)
@@ -665,14 +728,9 @@ fn naive_from_datenum(serial: f64) -> BuiltinResult<NaiveDateTime> {
             "datetime: serial date numbers must be finite",
         ));
     }
-    let total_seconds = (serial - UNIX_DATENUM) * SECONDS_PER_DAY;
-    let whole_seconds = total_seconds.floor();
-    let mut nanos = ((total_seconds - whole_seconds) * 1_000_000_000.0).round() as i64;
-    let mut seconds = whole_seconds as i64;
-    if nanos == 1_000_000_000 {
-        seconds += 1;
-        nanos = 0;
-    }
+    let total_nanos = ((serial - UNIX_DATENUM) * SECONDS_PER_DAY * 1_000_000_000.0).round() as i128;
+    let seconds = total_nanos.div_euclid(1_000_000_000) as i64;
+    let nanos = total_nanos.rem_euclid(1_000_000_000) as i64;
     let base = NaiveDate::from_ymd_opt(1970, 1, 1)
         .unwrap()
         .and_hms_opt(0, 0, 0)
@@ -716,7 +774,31 @@ fn parse_datetime_text(text: &str) -> Option<(NaiveDateTime, bool)> {
     None
 }
 
-fn parse_text_input(value: Value) -> BuiltinResult<(Vec<f64>, Vec<usize>, String)> {
+fn parse_datetime_text_with_input_format(
+    text: &str,
+    input_format: Option<&str>,
+) -> Option<(NaiveDateTime, bool)> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let Some(input_format) = input_format else {
+        return parse_datetime_text(trimmed);
+    };
+    let chrono_format = format_token_to_strftime(input_format);
+    if let Ok(value) = NaiveDateTime::parse_from_str(trimmed, &chrono_format) {
+        return Some((value, true));
+    }
+    if let Ok(value) = NaiveDate::parse_from_str(trimmed, &chrono_format) {
+        return Some((value.and_hms_opt(0, 0, 0).unwrap(), false));
+    }
+    None
+}
+
+fn parse_text_input(
+    value: Value,
+    input_format: Option<&str>,
+) -> BuiltinResult<(Vec<f64>, Vec<usize>, String)> {
     match value {
         Value::String(text) => {
             if text.trim().eq_ignore_ascii_case("now") {
@@ -727,9 +809,10 @@ fn parse_text_input(value: Value) -> BuiltinResult<(Vec<f64>, Vec<usize>, String
                     DEFAULT_DATETIME_FORMAT.to_string(),
                 ));
             }
-            let (naive, has_time) = parse_datetime_text(&text).ok_or_else(|| {
-                datetime_error(format!("datetime: unable to parse date/time text '{text}'"))
-            })?;
+            let (naive, has_time) = parse_datetime_text_with_input_format(&text, input_format)
+                .ok_or_else(|| {
+                    datetime_error(format!("datetime: unable to parse date/time text '{text}'"))
+                })?;
             Ok((
                 vec![datenum_from_naive(naive)],
                 vec![1, 1],
@@ -744,9 +827,10 @@ fn parse_text_input(value: Value) -> BuiltinResult<(Vec<f64>, Vec<usize>, String
             let mut serials = Vec::with_capacity(array.data.len());
             let mut has_time = false;
             for text in &array.data {
-                let (naive, parsed_has_time) = parse_datetime_text(text).ok_or_else(|| {
-                    datetime_error(format!("datetime: unable to parse date/time text '{text}'"))
-                })?;
+                let (naive, parsed_has_time) =
+                    parse_datetime_text_with_input_format(text, input_format).ok_or_else(|| {
+                        datetime_error(format!("datetime: unable to parse date/time text '{text}'"))
+                    })?;
                 serials.push(datenum_from_naive(naive));
                 has_time |= parsed_has_time;
             }
@@ -773,10 +857,13 @@ fn parse_text_input(value: Value) -> BuiltinResult<(Vec<f64>, Vec<usize>, String
                         .to_string(),
                 );
             }
-            parse_text_input(Value::StringArray(
-                StringArray::new(texts, vec![array.rows, 1])
-                    .map_err(|err| datetime_error(format!("datetime: {err}")))?,
-            ))
+            parse_text_input(
+                Value::StringArray(
+                    StringArray::new(texts, vec![array.rows, 1])
+                        .map_err(|err| datetime_error(format!("datetime: {err}")))?,
+                ),
+                input_format,
+            )
         }
         _ => Err(datetime_error(
             "datetime: text input must be a string scalar, string array, or character array",
@@ -1128,10 +1215,10 @@ async fn datetime_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
 async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     ensure_datetime_class_registered();
     let args = gather_args(&args).await?;
-    let (positional_end, format, convert_from) = parse_trailing_options(&args)?;
+    let (positional_end, options) = parse_trailing_options(&args)?;
     let positional = args[..positional_end].to_vec();
 
-    if let Some(convert_from) = convert_from {
+    if let Some(convert_from) = options.convert_from {
         if !convert_from.eq_ignore_ascii_case("datenum") {
             return Err(datetime_error(format!(
                 "datetime: unsupported ConvertFrom value '{convert_from}'"
@@ -1142,7 +1229,7 @@ async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                 "datetime: ConvertFrom='datenum' expects exactly one numeric input",
             ));
         }
-        return numeric_value_to_datetime(positional[0].clone(), format);
+        return numeric_value_to_datetime(positional[0].clone(), options.format);
     }
 
     match positional.len() {
@@ -1151,17 +1238,31 @@ async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             datetime_object_from_serials(
                 vec![datenum_from_naive(now)],
                 vec![1, 1],
-                format.unwrap_or_else(|| DEFAULT_DATETIME_FORMAT.to_string()),
+                options
+                    .format
+                    .unwrap_or_else(|| DEFAULT_DATETIME_FORMAT.to_string()),
             )
         }
         1 => match &positional[0] {
-            Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-                let (serials, shape, inferred_format) = parse_text_input(positional[0].clone())?;
-                datetime_object_from_serials(serials, shape, format.unwrap_or(inferred_format))
+            Value::Object(obj) if obj.is_class(DATETIME_CLASS) => {
+                let serials = serials_from_datetime_value(&positional[0])?;
+                let format = options
+                    .format
+                    .unwrap_or_else(|| datetime_format_from_value(&positional[0]));
+                datetime_object_from_serial_tensor(serials, format)
             }
-            _ => numeric_value_to_datetime(positional[0].clone(), format),
+            Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
+                let (serials, shape, inferred_format) =
+                    parse_text_input(positional[0].clone(), options.input_format.as_deref())?;
+                datetime_object_from_serials(
+                    serials,
+                    shape,
+                    options.format.unwrap_or(inferred_format),
+                )
+            }
+            _ => numeric_value_to_datetime(positional[0].clone(), options.format),
         },
-        3..=6 => build_from_components(positional, format),
+        3..=6 => build_from_components(positional, options.format),
         _ => Err(datetime_error(
             "datetime: unsupported argument pattern; use text, serial dates, or Y/M/D component inputs",
         )),
@@ -1468,6 +1569,269 @@ async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DateShiftBoundary {
+    Start,
+    End,
+    Nearest,
+    DayOfWeek,
+}
+
+impl DateShiftBoundary {
+    fn parse(value: &Value) -> BuiltinResult<Self> {
+        let text = scalar_text(value, "dateshift boundary")?;
+        match text.trim().to_ascii_lowercase().as_str() {
+            "start" => Ok(Self::Start),
+            "end" => Ok(Self::End),
+            "nearest" => Ok(Self::Nearest),
+            "dayofweek" => Ok(Self::DayOfWeek),
+            other => Err(datetime_error(format!(
+                "dateshift: unsupported boundary '{other}'"
+            ))),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum DateShiftUnit {
+    Year,
+    Quarter,
+    Month,
+    Week,
+    Day,
+    Hour,
+    Minute,
+    Second,
+}
+
+impl DateShiftUnit {
+    fn parse(value: &Value) -> BuiltinResult<Self> {
+        let text = scalar_text(value, "dateshift unit")?;
+        match text.trim().to_ascii_lowercase().as_str() {
+            "year" | "years" => Ok(Self::Year),
+            "quarter" | "quarters" => Ok(Self::Quarter),
+            "month" | "months" => Ok(Self::Month),
+            "week" | "weeks" => Ok(Self::Week),
+            "day" | "days" => Ok(Self::Day),
+            "hour" | "hours" => Ok(Self::Hour),
+            "minute" | "minutes" => Ok(Self::Minute),
+            "second" | "seconds" => Ok(Self::Second),
+            other => Err(datetime_error(format!(
+                "dateshift: unsupported unit '{other}'"
+            ))),
+        }
+    }
+}
+
+fn parse_weekday(value: &Value) -> BuiltinResult<Weekday> {
+    match value {
+        Value::Num(n) if n.is_finite() && (*n - n.round()).abs() <= f64::EPSILON => {
+            weekday_from_matlab_index(n.round() as i64)
+        }
+        Value::Int(i) => weekday_from_matlab_index(i.to_i64()),
+        _ => {
+            let text = scalar_text(value, "weekday")?;
+            match text.trim().to_ascii_lowercase().as_str() {
+                "sun" | "sunday" => Ok(Weekday::Sun),
+                "mon" | "monday" => Ok(Weekday::Mon),
+                "tue" | "tues" | "tuesday" => Ok(Weekday::Tue),
+                "wed" | "wednesday" => Ok(Weekday::Wed),
+                "thu" | "thur" | "thurs" | "thursday" => Ok(Weekday::Thu),
+                "fri" | "friday" => Ok(Weekday::Fri),
+                "sat" | "saturday" => Ok(Weekday::Sat),
+                other => Err(datetime_error(format!(
+                    "dateshift: unsupported weekday '{other}'"
+                ))),
+            }
+        }
+    }
+}
+
+fn weekday_from_matlab_index(index: i64) -> BuiltinResult<Weekday> {
+    match index {
+        1 => Ok(Weekday::Sun),
+        2 => Ok(Weekday::Mon),
+        3 => Ok(Weekday::Tue),
+        4 => Ok(Weekday::Wed),
+        5 => Ok(Weekday::Thu),
+        6 => Ok(Weekday::Fri),
+        7 => Ok(Weekday::Sat),
+        _ => Err(datetime_error(
+            "dateshift: numeric weekdays must be in the range 1..7",
+        )),
+    }
+}
+
+fn midnight(date: NaiveDate) -> NaiveDateTime {
+    date.and_hms_opt(0, 0, 0).unwrap()
+}
+
+fn start_of_week(value: NaiveDateTime, week_start: Weekday) -> NaiveDateTime {
+    let current = value.weekday().num_days_from_monday() as i64;
+    let start = week_start.num_days_from_monday() as i64;
+    let delta = (current - start).rem_euclid(7);
+    midnight(value.date() - Duration::days(delta))
+}
+
+fn start_of_unit(value: NaiveDateTime, unit: DateShiftUnit, week_start: Weekday) -> NaiveDateTime {
+    match unit {
+        DateShiftUnit::Year => midnight(NaiveDate::from_ymd_opt(value.year(), 1, 1).unwrap()),
+        DateShiftUnit::Quarter => {
+            let month = ((value.month() - 1) / 3) * 3 + 1;
+            midnight(NaiveDate::from_ymd_opt(value.year(), month, 1).unwrap())
+        }
+        DateShiftUnit::Month => {
+            midnight(NaiveDate::from_ymd_opt(value.year(), value.month(), 1).unwrap())
+        }
+        DateShiftUnit::Week => start_of_week(value, week_start),
+        DateShiftUnit::Day => midnight(value.date()),
+        DateShiftUnit::Hour => value
+            .date()
+            .and_hms_nano_opt(value.hour(), 0, 0, 0)
+            .unwrap(),
+        DateShiftUnit::Minute => value
+            .date()
+            .and_hms_nano_opt(value.hour(), value.minute(), 0, 0)
+            .unwrap(),
+        DateShiftUnit::Second => value
+            .date()
+            .and_hms_nano_opt(value.hour(), value.minute(), value.second(), 0)
+            .unwrap(),
+    }
+}
+
+fn add_months(year: i32, month: u32, delta: u32) -> (i32, u32) {
+    let zero_based = year as i64 * 12 + i64::from(month - 1) + i64::from(delta);
+    let out_year = zero_based.div_euclid(12) as i32;
+    let out_month = zero_based.rem_euclid(12) as u32 + 1;
+    (out_year, out_month)
+}
+
+fn next_unit_start(start: NaiveDateTime, unit: DateShiftUnit) -> NaiveDateTime {
+    match unit {
+        DateShiftUnit::Year => midnight(NaiveDate::from_ymd_opt(start.year() + 1, 1, 1).unwrap()),
+        DateShiftUnit::Quarter => {
+            let (year, month) = add_months(start.year(), start.month(), 3);
+            midnight(NaiveDate::from_ymd_opt(year, month, 1).unwrap())
+        }
+        DateShiftUnit::Month => {
+            let (year, month) = add_months(start.year(), start.month(), 1);
+            midnight(NaiveDate::from_ymd_opt(year, month, 1).unwrap())
+        }
+        DateShiftUnit::Week => start + Duration::days(7),
+        DateShiftUnit::Day => start + Duration::days(1),
+        DateShiftUnit::Hour => start + Duration::hours(1),
+        DateShiftUnit::Minute => start + Duration::minutes(1),
+        DateShiftUnit::Second => start + Duration::seconds(1),
+    }
+}
+
+fn shift_naive_datetime(
+    value: NaiveDateTime,
+    boundary: DateShiftBoundary,
+    unit: DateShiftUnit,
+    week_start: Weekday,
+) -> NaiveDateTime {
+    let start = start_of_unit(value, unit, week_start);
+    match boundary {
+        DateShiftBoundary::Start => start,
+        DateShiftBoundary::End => next_unit_start(start, unit) - Duration::milliseconds(1),
+        DateShiftBoundary::Nearest => {
+            let next = next_unit_start(start, unit);
+            if value - start <= next - value {
+                start
+            } else {
+                next
+            }
+        }
+        DateShiftBoundary::DayOfWeek => value,
+    }
+}
+
+fn shift_to_dayofweek(value: NaiveDateTime, weekday: Weekday) -> NaiveDateTime {
+    let current = value.weekday().num_days_from_monday() as i64;
+    let target = weekday.num_days_from_monday() as i64;
+    let delta = (target - current).rem_euclid(7);
+    midnight(value.date() + Duration::days(delta))
+}
+
+#[runmat_macros::runtime_builtin(
+    name = "dateshift",
+    descriptor(crate::builtins::datetime::DATESHIFT_DESCRIPTOR),
+    builtin_path = "crate::builtins::datetime",
+    category = "datetime",
+    summary = "Shift datetime values to calendar or clock boundaries.",
+    keywords = "dateshift,datetime,start,end,nearest,week,month,year",
+    related = "datetime,year,month,day"
+)]
+async fn dateshift_builtin(
+    value: Value,
+    boundary: Value,
+    unit: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(|err| datetime_error(format!("dateshift: {}", err.message())))?;
+    let boundary = gather_if_needed_async(&boundary)
+        .await
+        .map_err(|err| datetime_error(format!("dateshift: {}", err.message())))?;
+    let unit = gather_if_needed_async(&unit)
+        .await
+        .map_err(|err| datetime_error(format!("dateshift: {}", err.message())))?;
+    let rest = gather_args(&rest).await?;
+    let serials = serials_from_datetime_value(&value)?;
+    let format = datetime_format_from_value(&value);
+    let boundary = DateShiftBoundary::parse(&boundary)?;
+
+    let mut out = Vec::with_capacity(serials.data.len());
+    if boundary == DateShiftBoundary::DayOfWeek {
+        if !rest.is_empty() {
+            return Err(datetime_error(
+                "dateshift: dayofweek boundary does not accept extra arguments",
+            ));
+        }
+        let weekday = parse_weekday(&unit)?;
+        for serial in &serials.data {
+            out.push(datenum_from_naive(shift_to_dayofweek(
+                naive_from_datenum(*serial)?,
+                weekday,
+            )));
+        }
+    } else {
+        let unit = DateShiftUnit::parse(&unit)?;
+        let week_start = if matches!(unit, DateShiftUnit::Week) {
+            if rest.len() > 1 {
+                return Err(datetime_error(
+                    "dateshift: week unit accepts at most one weekday argument",
+                ));
+            }
+            rest.first()
+                .map(parse_weekday)
+                .transpose()?
+                .unwrap_or(Weekday::Mon)
+        } else {
+            if !rest.is_empty() {
+                return Err(datetime_error(
+                    "dateshift: extra arguments are only supported for week units",
+                ));
+            }
+            Weekday::Mon
+        };
+        for serial in &serials.data {
+            out.push(datenum_from_naive(shift_naive_datetime(
+                naive_from_datenum(*serial)?,
+                boundary,
+                unit,
+                week_start,
+            )));
+        }
+    }
+
+    let shape = tensor::default_shape_for(&serials.shape, serials.data.len());
+    datetime_object_from_serials(out, shape, format)
+}
+
 pub fn datetime_char_array(value: &Value) -> BuiltinResult<Option<CharArray>> {
     let Some(array) = datetime_string_array(value)? else {
         return Ok(None);
@@ -1563,6 +1927,123 @@ mod tests {
             .expect("string array")
             .expect("datetime strings");
         assert_eq!(rendered.data, vec!["14-Mar-2024 09:26:53".to_string()]);
+    }
+
+    #[test]
+    fn datetime_accepts_existing_datetime_input() {
+        let value = run_datetime(vec![Value::String("2024-03-14".to_string())]);
+        let converted = run_datetime(vec![
+            value.clone(),
+            Value::from("InputFormat"),
+            Value::from("yyyy-MM-dd"),
+        ]);
+        assert_eq!(
+            serials_from_datetime_value(&converted).unwrap().data,
+            serials_from_datetime_value(&value).unwrap().data
+        );
+    }
+
+    #[test]
+    fn datetime_parses_text_with_input_format() {
+        let input = Value::StringArray(
+            StringArray::new(
+                vec!["2024/03/14".to_string(), "2024/03/15".to_string()],
+                vec![2, 1],
+            )
+            .unwrap(),
+        );
+        let value = run_datetime(vec![
+            input,
+            Value::from("InputFormat"),
+            Value::from("yyyy/MM/dd"),
+            Value::from("Format"),
+            Value::from("yyyy-MM-dd"),
+        ]);
+        let rendered = datetime_string_array(&value)
+            .expect("string array")
+            .expect("datetime strings");
+        assert_eq!(
+            rendered.data,
+            vec!["2024-03-14".to_string(), "2024-03-15".to_string()]
+        );
+    }
+
+    #[test]
+    fn dateshift_supports_start_of_week_and_month_end() {
+        let input = run_datetime(vec![
+            Value::StringArray(
+                StringArray::new(
+                    vec!["2024-03-14".to_string(), "2024-03-18".to_string()],
+                    vec![2, 1],
+                )
+                .unwrap(),
+            ),
+            Value::from("Format"),
+            Value::from("yyyy-MM-dd"),
+        ]);
+        let shifted = futures::executor::block_on(dateshift_builtin(
+            input,
+            Value::from("start"),
+            Value::from("week"),
+            Vec::new(),
+        ))
+        .expect("dateshift start week");
+        let rendered = datetime_string_array(&shifted)
+            .expect("string array")
+            .expect("datetime strings");
+        assert_eq!(
+            rendered.data,
+            vec!["2024-03-11".to_string(), "2024-03-18".to_string()]
+        );
+
+        let month_end = futures::executor::block_on(dateshift_builtin(
+            run_datetime(vec![
+                Value::from("2024-02-10"),
+                Value::from("Format"),
+                Value::from("yyyy-MM-dd HH:mm:ss"),
+            ]),
+            Value::from("end"),
+            Value::from("month"),
+            Vec::new(),
+        ))
+        .expect("dateshift end month");
+        let rendered = datetime_string_array(&month_end)
+            .expect("string array")
+            .expect("datetime strings");
+        assert_eq!(rendered.data, vec!["2024-02-29 23:59:59".to_string()]);
+    }
+
+    #[test]
+    fn dateshift_rejects_unsupported_extra_arguments() {
+        let input = run_datetime(vec![Value::from("2024-03-14")]);
+        let err = futures::executor::block_on(dateshift_builtin(
+            input.clone(),
+            Value::from("dayofweek"),
+            Value::from("monday"),
+            vec![Value::from("extra")],
+        ))
+        .expect_err("dayofweek extra argument should fail");
+        assert!(err.message().contains("does not accept extra arguments"));
+
+        let err = futures::executor::block_on(dateshift_builtin(
+            input.clone(),
+            Value::from("start"),
+            Value::from("week"),
+            vec![Value::from("monday"), Value::from("extra")],
+        ))
+        .expect_err("week second extra argument should fail");
+        assert!(err.message().contains("at most one weekday argument"));
+
+        let err = futures::executor::block_on(dateshift_builtin(
+            input,
+            Value::from("start"),
+            Value::from("month"),
+            vec![Value::from("monday")],
+        ))
+        .expect_err("non-week extra argument should fail");
+        assert!(err
+            .message()
+            .contains("extra arguments are only supported for week units"));
     }
 
     #[test]

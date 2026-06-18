@@ -207,6 +207,7 @@ pub enum BindingRole {
     Parameter,
     Output,
     Local,
+    ExternalWorkspace,
     ModuleBinding,
     ImplicitAns,
 }
@@ -316,6 +317,11 @@ pub enum HirExprKind {
     Index(Box<HirExpr>, IndexingSemantics),
     Member(Box<HirExpr>, MemberName),
     MemberDynamic(Box<HirExpr>, Box<HirExpr>),
+    WorkspaceFirstStaticProperty {
+        workspace_name: SymbolName,
+        class_name: String,
+        property: MemberName,
+    },
     Call(HirCall),
     CommandCall(HirCommandCall),
     FunctionHandle(FunctionHandleTarget),
@@ -344,11 +350,19 @@ pub struct HirCall {
     pub args: Vec<HirExpr>,
     pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
+    #[serde(default)]
+    pub workspace_first_name: Option<SymbolName>,
+    #[serde(default)]
+    pub bare_identifier: bool,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirCallableRef {
     Function(FunctionId),
+    ExternalFunction {
+        function: FunctionId,
+        display_name: String,
+    },
     Builtin(BuiltinId),
     Imported(DefPath),
     SuperConstructor {
@@ -378,6 +392,13 @@ impl HirCallableRef {
     pub fn identity(&self) -> Option<CallableIdentity> {
         match self {
             HirCallableRef::Function(function) => Some(CallableIdentity::BoundFunction(*function)),
+            HirCallableRef::ExternalFunction {
+                function,
+                display_name,
+            } => Some(CallableIdentity::ExternalFunction {
+                function: *function,
+                display_name: display_name.clone(),
+            }),
             HirCallableRef::Builtin(builtin) => Some(CallableIdentity::Builtin(builtin.clone())),
             HirCallableRef::Imported(path) => Some(CallableIdentity::Imported(path.clone())),
             HirCallableRef::SuperConstructor { .. } | HirCallableRef::SuperMethod { .. } => None,
@@ -396,6 +417,10 @@ impl HirCallableRef {
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub enum CallableIdentity {
     BoundFunction(FunctionId),
+    ExternalFunction {
+        function: FunctionId,
+        display_name: String,
+    },
     Builtin(BuiltinId),
     Imported(DefPath),
     Method(MethodId),
@@ -408,6 +433,9 @@ impl CallableIdentity {
     pub fn display_name(&self) -> Option<String> {
         match self {
             CallableIdentity::BoundFunction(_) | CallableIdentity::AnonymousFunction(_) => None,
+            CallableIdentity::ExternalFunction { display_name, .. } => {
+                (!display_name.is_empty()).then_some(display_name.clone())
+            }
             CallableIdentity::Builtin(id) => (!id.0.is_empty()).then_some(id.0.clone()),
             CallableIdentity::Imported(path) => path.module.display_name(),
             CallableIdentity::Method(id) => (!id.0.is_empty()).then_some(id.0.clone()),
@@ -566,6 +594,7 @@ pub const FEVAL_BUILTIN_NAME: &str = "feval";
 pub const EVAL_BUILTIN_NAME: &str = "eval";
 pub const EVALIN_BUILTIN_NAME: &str = "evalin";
 pub const ASSIGNIN_BUILTIN_NAME: &str = "assignin";
+pub const RUN_BUILTIN_NAME: &str = "run";
 pub const NARGIN_BUILTIN_NAME: &str = "nargin";
 pub const NARGOUT_BUILTIN_NAME: &str = "nargout";
 pub const NARGINCHK_BUILTIN_NAME: &str = "narginchk";
@@ -755,6 +784,10 @@ pub enum IndexResultContext {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum FunctionHandleTarget {
     Function(FunctionId),
+    ExternalFunction {
+        function: FunctionId,
+        display_name: String,
+    },
     Builtin(BuiltinId),
     Anonymous(FunctionId),
     DefPath(DefPath),
@@ -765,6 +798,13 @@ impl FunctionHandleTarget {
     pub fn identity(&self) -> CallableIdentity {
         match self {
             FunctionHandleTarget::Function(function) => CallableIdentity::BoundFunction(*function),
+            FunctionHandleTarget::ExternalFunction {
+                function,
+                display_name,
+            } => CallableIdentity::ExternalFunction {
+                function: *function,
+                display_name: display_name.clone(),
+            },
             FunctionHandleTarget::Builtin(builtin) => CallableIdentity::Builtin(builtin.clone()),
             FunctionHandleTarget::Anonymous(function) => {
                 CallableIdentity::AnonymousFunction(*function)

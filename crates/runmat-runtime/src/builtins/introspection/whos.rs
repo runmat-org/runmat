@@ -277,7 +277,7 @@ impl WhosRecord {
             bytes,
             class_name,
             is_global,
-            is_sparse: false,
+            is_sparse: matches!(value, Value::SparseTensor(_)),
             is_complex,
             nesting: String::new(),
             persistent: false,
@@ -572,7 +572,22 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
             .iter()
             .map(|s| s.encode_utf16().count().saturating_mul(2))
             .sum(),
+        Value::Symbolic(expr) => expr.to_string().encode_utf16().count().saturating_mul(2),
         Value::Tensor(t) => t.data.len().saturating_mul(8),
+        Value::SparseTensor(t) => t
+            .values
+            .len()
+            .saturating_mul(std::mem::size_of::<f64>())
+            .saturating_add(
+                t.row_indices
+                    .len()
+                    .saturating_mul(std::mem::size_of::<usize>()),
+            )
+            .saturating_add(
+                t.col_ptrs
+                    .len()
+                    .saturating_mul(std::mem::size_of::<usize>()),
+            ),
         Value::Complex(_, _) => 16,
         Value::ComplexTensor(t) => t.data.len().saturating_mul(16),
         Value::Cell(ca) => {

@@ -288,12 +288,14 @@ async fn circshift_builtin(
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
+        | Value::SparseTensor(_)
         | Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Symbolic(_)
         | Value::OutputList(_) => Err(circshift_unsupported_input(
             CIRCSHIFT_ERROR_UNSUPPORTED_INPUT.message,
         )),
@@ -458,6 +460,7 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
             "circshift: shifts must be real integers",
         )),
         Value::Cell(_)
+        | Value::SparseTensor(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
@@ -469,6 +472,7 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Symbolic(_)
         | Value::OutputList(_) => Err(circshift_invalid_shift(
             "circshift: unsupported shift argument type",
         )),
@@ -560,6 +564,7 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
             "circshift: dimensions must be real integers",
         )),
         Value::Cell(_)
+        | Value::SparseTensor(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
@@ -571,6 +576,7 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Symbolic(_)
         | Value::OutputList(_) => Err(circshift_invalid_dims(
             "circshift: unsupported dimension argument type",
         )),

@@ -9,6 +9,14 @@ thread_local! {
     static CLASS_ACCESS_CONTEXT: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
+#[cfg(target_arch = "wasm32")]
+fn ensure_wasm_builtins_registered() {
+    crate::builtins::wasm_registry::register_all();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn ensure_wasm_builtins_registered() {}
+
 pub struct ClassAccessContextGuard {
     previous: Option<String>,
 }
@@ -223,6 +231,8 @@ async fn call_builtin_async_impl(
     args: &[Value],
     output_count: Option<usize>,
 ) -> Result<Value, RuntimeError> {
+    ensure_wasm_builtins_registered();
+
     let _output_guard = crate::output_count::push_output_count(output_count);
     let mut matching_builtins = Vec::new();
 

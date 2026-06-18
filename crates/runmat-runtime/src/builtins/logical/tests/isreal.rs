@@ -137,8 +137,10 @@ fn isreal_host(value: Value) -> BuiltinResult<Value> {
     let flag = match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
         Value::Tensor(_) => true,
+        Value::SparseTensor(_) => true,
         Value::LogicalArray(_) => true,
         Value::CharArray(_) => true,
+        Value::Symbolic(_) => true,
         Value::Complex(_, _) => false,
         Value::ComplexTensor(_) => false,
         Value::String(_) => false,
@@ -177,7 +179,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, Listener, LogicalArray,
-        MException, ObjectInstance, ResolveContext, StructValue, Tensor, Type,
+        MException, ObjectInstance, ResolveContext, StructValue, SymbolicExpr, Tensor, Type,
     };
     use runmat_gc_api::GcPtr;
 
@@ -199,9 +201,11 @@ pub(crate) mod tests {
         let real = run_isreal(Value::Num(42.0)).expect("isreal");
         let integer = run_isreal(Value::from(5_i32)).expect("isreal");
         let boolean = run_isreal(Value::Bool(false)).expect("isreal");
+        let symbolic = run_isreal(Value::Symbolic(SymbolicExpr::variable("x"))).expect("isreal");
         assert_eq!(real, Value::Bool(true));
         assert_eq!(integer, Value::Bool(true));
         assert_eq!(boolean, Value::Bool(true));
+        assert_eq!(symbolic, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

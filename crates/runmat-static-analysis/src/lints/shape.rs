@@ -285,6 +285,7 @@ impl ShapeLintContext {
                 MirShapeValue::default()
             }
             runmat_mir::MirRvalue::Spawn(operand) => self.infer_mir_operand(body, operand),
+            runmat_mir::MirRvalue::WorkspaceFirstStaticProperty { .. } => MirShapeValue::default(),
             runmat_mir::MirRvalue::MetaClass(_)
             | runmat_mir::MirRvalue::Colon
             | runmat_mir::MirRvalue::End => MirShapeValue::default(),

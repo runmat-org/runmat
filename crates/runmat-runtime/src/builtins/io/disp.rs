@@ -153,6 +153,15 @@ fn format_for_disp(value: &Value) -> Vec<String> {
 
 fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
     match value {
+        Value::Object(obj) if obj.is_class(crate::builtins::table::TABLE_CLASS) => match mode {
+            RenderMode::TopLevel => crate::builtins::table::table_display_text(value)
+                .unwrap_or_else(|_| value.to_string())
+                .lines()
+                .map(|line| line.to_string())
+                .collect(),
+            RenderMode::Nested => vec![crate::builtins::table::table_summary_text(value)
+                .unwrap_or_else(|_| value.to_string())],
+        },
         Value::Object(obj) if obj.is_class("datetime") => match mode {
             RenderMode::TopLevel => crate::builtins::datetime::datetime_display_text(value)
                 .map(|text| text.unwrap_or_else(|| value.to_string()))
@@ -181,6 +190,7 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
             RenderMode::TopLevel => split_lines(text),
             RenderMode::Nested => vec![quote_double(text)],
         },
+        Value::Symbolic(expr) => vec![expr.to_string()],
         Value::CharArray(array) => format_char_array(array, mode),
         Value::StringArray(array) => format_string_array(array, mode),
         Value::Num(n) => vec![format_scalar_number(*n)],
@@ -189,6 +199,20 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
         Value::Tensor(tensor) => match mode {
             RenderMode::TopLevel => format_numeric_tensor(tensor),
             RenderMode::Nested => format_numeric_tensor_nested(tensor),
+        },
+        Value::SparseTensor(sparse) => match mode {
+            RenderMode::TopLevel => sparse
+                .to_string()
+                .lines()
+                .map(|line| line.to_string())
+                .collect(),
+            RenderMode::Nested => {
+                let nnz = sparse.values.len();
+                vec![format!(
+                    "<sparse {}x{} nnz={}>",
+                    sparse.rows, sparse.cols, nnz
+                )]
+            }
         },
         Value::Complex(re, im) => vec![format!("{}", Value::Complex(*re, *im))],
         Value::ComplexTensor(tensor) => match mode {
@@ -540,6 +564,10 @@ fn summarize_for_cell(value: &Value) -> String {
                 )
             }
         }
+        Value::SparseTensor(sparse) => format!(
+            "[{} sparse double]",
+            dims_to_string(&[sparse.rows, sparse.cols])
+        ),
         Value::ComplexTensor(tensor) => {
             if tensor.data.is_empty() {
                 "[]".to_string()
@@ -584,6 +612,7 @@ fn summarize_for_cell(value: &Value) -> String {
                 format!("[{} string]", dims_to_string(&canonical_dims(&array.shape)))
             }
         }
+        Value::Symbolic(expr) => expr.to_string(),
         Value::Struct(_) => "[1x1 struct]".to_string(),
         Value::Cell(inner) => format!("[{} cell]", dims_to_string(&canonical_dims(&inner.shape))),
         Value::FunctionHandle(_)
@@ -761,7 +790,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::make_cell;
-    use runmat_builtins::{ComplexTensor, IntValue, StringArray, Tensor};
+    use runmat_builtins::{ComplexTensor, IntValue, StringArray, SymbolicExpr, Tensor};
 
     #[test]
     fn disp_descriptor_signatures_cover_core_forms() {
@@ -778,6 +807,14 @@ pub(crate) mod tests {
     fn string_scalar_without_quotes() {
         let lines = format_for_disp(&Value::String("Simulation complete.".into()));
         assert_eq!(lines, vec!["Simulation complete.".to_string()]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn symbolic_scalar_displays_expression() {
+        let lines = format_for_disp(&Value::Symbolic(SymbolicExpr::variable("x")));
+
+        assert_eq!(lines, vec!["x".to_string()]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

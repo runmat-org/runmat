@@ -18,6 +18,7 @@ pub enum GuiThreadMessage {
         figure: Box<Figure>,
         response: mpsc::Sender<GuiOperationResult>,
         close_signal: Option<CloseSignal>,
+        window_title: Option<String>,
     },
     /// Request to close all GUI windows
     CloseAll {
@@ -302,8 +303,10 @@ impl GuiThreadManager {
                 figure,
                 response,
                 close_signal,
+                window_title,
             } => {
-                let result = Self::handle_show_plot(figure, close_signal, gui_context);
+                let result =
+                    Self::handle_show_plot(figure, close_signal, window_title, gui_context);
                 let _ = response.send(result.clone());
                 Some(result)
             }
@@ -329,6 +332,7 @@ impl GuiThreadManager {
     fn handle_show_plot(
         figure: Box<Figure>,
         close_signal: Option<CloseSignal>,
+        window_title: Option<String>,
         _gui_context: &GuiContext,
     ) -> GuiOperationResult {
         use crate::gui::{window::WindowConfig, PlotWindow};
@@ -346,7 +350,10 @@ impl GuiThreadManager {
         };
 
         rt.block_on(async {
-            let config = WindowConfig::default();
+            let mut config = WindowConfig::default();
+            if let Some(title) = window_title {
+                config.title = title;
+            }
             let mut window = match PlotWindow::new(config).await {
                 Ok(window) => window,
                 Err(e) => {
@@ -406,12 +413,22 @@ impl GuiThreadManager {
         figure: Figure,
         close_signal: Option<CloseSignal>,
     ) -> Result<GuiOperationResult, GuiOperationResult> {
+        self.show_plot_with_signal_and_title(figure, close_signal, None)
+    }
+
+    pub fn show_plot_with_signal_and_title(
+        &self,
+        figure: Figure,
+        close_signal: Option<CloseSignal>,
+        window_title: Option<String>,
+    ) -> Result<GuiOperationResult, GuiOperationResult> {
         let (response_tx, response_rx) = mpsc::channel();
 
         let message = GuiThreadMessage::ShowPlot {
             figure: Box::new(figure),
             response: response_tx,
             close_signal,
+            window_title,
         };
 
         // Send message to GUI thread
@@ -568,6 +585,14 @@ pub fn show_plot_global_with_signal(
     figure: Figure,
     close_signal: Option<CloseSignal>,
 ) -> Result<GuiOperationResult, GuiOperationResult> {
+    show_plot_global_with_signal_and_title(figure, close_signal, None)
+}
+
+pub fn show_plot_global_with_signal_and_title(
+    figure: Figure,
+    close_signal: Option<CloseSignal>,
+    window_title: Option<String>,
+) -> Result<GuiOperationResult, GuiOperationResult> {
     let manager_mutex = get_gui_manager()?;
     let manager_guard = manager_mutex
         .lock()
@@ -578,7 +603,9 @@ pub fn show_plot_global_with_signal(
         })?;
 
     match manager_guard.as_ref() {
-        Some(manager) => manager.show_plot_with_signal(figure, close_signal),
+        Some(manager) => {
+            manager.show_plot_with_signal_and_title(figure, close_signal, window_title)
+        }
         None => Err(GuiOperationResult::Error {
             message: "GUI manager not initialized".to_string(),
             error_code: GuiErrorCode::InvalidState,

@@ -288,6 +288,8 @@ mod tests {
             Value::Bool(true),
             Value::String("Colormap".into()),
             Value::String("hot".into()),
+            Value::String("FontSize".into()),
+            Value::Num(14.0),
         ])
         .unwrap();
 
@@ -296,6 +298,11 @@ mod tests {
         assert_eq!(meta.y_limits, Some((2.0, 8.0)));
         assert!(meta.colorbar_enabled);
         assert_eq!(format!("{:?}", meta.colormap), "Hot");
+        assert_eq!(meta.axes_style.font_size, Some(14.0));
+        assert_eq!(
+            get_builtin(vec![Value::Num(ax), Value::String("FontSize".into())]).unwrap(),
+            Value::Num(14.0)
+        );
     }
 
     #[test]
@@ -337,6 +344,112 @@ mod tests {
     }
 
     #[test]
+    fn set_updates_figure_window_properties() {
+        let _guard = setup();
+        let fig =
+            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(8888.0)]).unwrap();
+        set_builtin(vec![
+            Value::Num(fig),
+            Value::String("Name".into()),
+            Value::String("demo".into()),
+            Value::String("NumberTitle".into()),
+            Value::String("off".into()),
+            Value::String("Visible".into()),
+            Value::String("off".into()),
+            Value::String("Color".into()),
+            Value::String("k".into()),
+        ])
+        .unwrap();
+
+        let figure = clone_figure(crate::builtins::plotting::state::FigureHandle::from(8888))
+            .expect("figure should exist");
+        assert_eq!(figure.name.as_deref(), Some("demo"));
+        assert!(!figure.number_title);
+        assert!(!figure.visible);
+        assert_eq!(figure.background_color, glam::Vec4::new(0.0, 0.0, 0.0, 1.0));
+        assert_eq!(
+            get_builtin(vec![Value::Num(fig), Value::String("Name".into())]).unwrap(),
+            Value::String("demo".into())
+        );
+    }
+
+    #[test]
+    fn set_figure_prevalidates_all_pairs_before_mutating() {
+        let _guard = setup();
+        let fig =
+            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(8898.0)]).unwrap();
+        let handle = crate::builtins::plotting::state::FigureHandle::from(8898);
+        let before = clone_figure(handle).expect("figure should exist before failed set");
+
+        let err = set_builtin(vec![
+            Value::Num(fig),
+            Value::String("Name".into()),
+            Value::String("mutated".into()),
+            Value::String("Color".into()),
+            Value::String("banana".into()),
+        ])
+        .expect_err("invalid later pair should fail before any mutation");
+        assert_eq!(err.identifier(), SET_ERROR_INVALID_ARGUMENT.identifier);
+
+        let after = clone_figure(handle).expect("figure should still exist after failed set");
+        assert_eq!(after.name, before.name);
+        assert_eq!(after.background_color, before.background_color);
+    }
+
+    #[test]
+    fn set_visible_figure_display_properties_request_presentation() {
+        let _guard = setup();
+        let fig =
+            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(8899.0)]).unwrap();
+        let ax = crate::builtins::plotting::subplot::subplot_builtin(
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(2.0),
+        )
+        .unwrap();
+
+        let _host_guard = _guard.disable_host_managed_plot_env();
+        for args in [
+            vec![
+                Value::Num(fig),
+                Value::String("Name".into()),
+                Value::String("demo".into()),
+            ],
+            vec![
+                Value::Num(fig),
+                Value::String("NumberTitle".into()),
+                Value::String("off".into()),
+            ],
+            vec![
+                Value::Num(fig),
+                Value::String("SGTitle".into()),
+                Value::String("Overview".into()),
+            ],
+            vec![
+                Value::Num(fig),
+                Value::String("CurrentAxes".into()),
+                Value::Num(ax),
+            ],
+        ] {
+            let err = set_builtin(args).expect_err("visible display property should present");
+            assert!(
+                err.message().contains("Plotting is unavailable"),
+                "unexpected error: {err:?}"
+            );
+        }
+
+        set_builtin(vec![
+            Value::Num(fig),
+            Value::String("Visible".into()),
+            Value::String("off".into()),
+        ])
+        .expect("visible off should present as an update without rendering");
+        let figure = clone_figure(crate::builtins::plotting::state::FigureHandle::from(8899))
+            .expect("figure should exist");
+        assert!(!figure.visible);
+    }
+
+    #[test]
     fn set_updates_stem_properties() {
         let _guard = setup();
         let handle = crate::builtins::plotting::stem::stem_builtin(vec![Value::Tensor(
@@ -375,5 +488,18 @@ mod tests {
         ])
         .unwrap_err();
         assert!(err.message.contains("unsupported property"));
+
+        let ax = crate::builtins::plotting::gca::gca_builtin(Vec::new()).unwrap();
+        for invalid in [0.0, -1.0, f64::NAN, 1.0e6] {
+            let err = set_builtin(vec![
+                ax.clone(),
+                Value::String("FontSize".into()),
+                Value::Num(invalid),
+            ])
+            .unwrap_err();
+            assert!(err
+                .message
+                .contains("FontSize must be a positive finite value"));
+        }
     }
 }

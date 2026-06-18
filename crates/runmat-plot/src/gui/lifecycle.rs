@@ -80,17 +80,26 @@ pub fn render_figure(handle: u32, figure: Figure) -> Result<String, String> {
         return crate::show_interactive_platform_optimal(figure);
     }
 
+    if !figure.visible {
+        request_close(handle);
+        return Ok(format!("Figure {handle} is hidden"));
+    }
+
     let registration = register_handle(handle)?;
     let signal = registration.signal();
+    let window_title = figure.window_title(Some(handle));
     let mut last_err: Option<String> = None;
 
     for backend in backend_preference() {
         let fig_clone = figure.clone();
         let sig_clone = clone_signal(&signal);
+        let title_clone = window_title.clone();
         let attempt = match backend {
-            DesktopBackend::NativeWindow => render_via_native(fig_clone, sig_clone),
-            DesktopBackend::GuiThread => render_via_gui_thread(fig_clone, sig_clone),
-            DesktopBackend::SingleWindow => render_via_single_window(fig_clone, sig_clone),
+            DesktopBackend::NativeWindow => render_via_native(fig_clone, sig_clone, title_clone),
+            DesktopBackend::GuiThread => render_via_gui_thread(fig_clone, sig_clone, title_clone),
+            DesktopBackend::SingleWindow => {
+                render_via_single_window(fig_clone, sig_clone, title_clone)
+            }
         };
 
         match attempt {
@@ -155,23 +164,39 @@ fn clone_signal(signal: &Option<CloseSignal>) -> Option<CloseSignal> {
     signal.as_ref().map(Arc::clone)
 }
 
-fn render_via_native(figure: Figure, signal: Option<CloseSignal>) -> Result<String, String> {
+fn render_via_native(
+    figure: Figure,
+    signal: Option<CloseSignal>,
+    window_title: String,
+) -> Result<String, String> {
     crate::gui::initialize_native_window()
         .map_err(|err| format!("native window init failed: {err}"))?;
-    crate::gui::show_plot_native_window_with_signal(figure, signal)
+    crate::gui::show_plot_native_window_with_signal_and_title(figure, signal, Some(window_title))
 }
 
-fn render_via_gui_thread(figure: Figure, signal: Option<CloseSignal>) -> Result<String, String> {
+fn render_via_gui_thread(
+    figure: Figure,
+    signal: Option<CloseSignal>,
+    window_title: String,
+) -> Result<String, String> {
     crate::gui::initialize_gui_manager()
         .map_err(|err| format!("GUI manager init failed: {err}"))?;
-    match crate::gui::show_plot_global_with_signal(figure, signal) {
+    match crate::gui::show_plot_global_with_signal_and_title(figure, signal, Some(window_title)) {
         Ok(result) => gui_result_to_string(result),
         Err(err) => gui_result_to_string(err),
     }
 }
 
-fn render_via_single_window(figure: Figure, signal: Option<CloseSignal>) -> Result<String, String> {
-    crate::gui::single_window_manager::show_plot_sequential_with_signal(figure, signal)
+fn render_via_single_window(
+    figure: Figure,
+    signal: Option<CloseSignal>,
+    window_title: String,
+) -> Result<String, String> {
+    crate::gui::single_window_manager::show_plot_sequential_with_signal_and_title(
+        figure,
+        signal,
+        Some(window_title),
+    )
 }
 
 fn gui_result_to_string(result: crate::gui::GuiOperationResult) -> Result<String, String> {

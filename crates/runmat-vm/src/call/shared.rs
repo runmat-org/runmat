@@ -50,6 +50,9 @@ pub(crate) fn external_qualified_display_name(base: &str, member: &str) -> Strin
 pub(crate) fn strict_callable_display_name(identity: &CallableIdentity) -> Option<String> {
     match identity {
         CallableIdentity::BoundFunction(_) | CallableIdentity::AnonymousFunction(_) => None,
+        CallableIdentity::ExternalFunction { display_name, .. } => {
+            (!display_name.is_empty()).then_some(display_name.clone())
+        }
         CallableIdentity::Builtin(id) => (!id.0.is_empty()).then_some(id.0.clone()),
         CallableIdentity::Imported(path) => path.module.display_name(),
         CallableIdentity::Method(id) => (!id.0.is_empty()).then_some(id.0.clone()),
@@ -408,6 +411,21 @@ pub(crate) async fn call_object_operator_method(
         1,
         None,
         CallableFallbackPolicy::ObjectDispatch,
+    )
+    .await
+}
+
+pub(crate) async fn call_rhs_object_operator_method_ordered(
+    lhs: Value,
+    rhs: Value,
+    method: &str,
+) -> Result<Value, RuntimeError> {
+    crate::call::closures::call_rhs_operator_method_ordered_with_outputs(
+        lhs,
+        rhs,
+        method.to_string(),
+        1,
+        None,
     )
     .await
 }

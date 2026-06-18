@@ -28,6 +28,56 @@ pub fn step_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::tensor()
 }
 
+pub fn stepinfo_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Struct {
+        known_fields: Some(vec![
+            "Overshoot".to_string(),
+            "Peak".to_string(),
+            "PeakTime".to_string(),
+            "RiseTime".to_string(),
+            "SettlingMax".to_string(),
+            "SettlingMin".to_string(),
+            "SettlingTime".to_string(),
+            "SteadyStateValue".to_string(),
+            "TransientTime".to_string(),
+            "Undershoot".to_string(),
+        ]),
+    }
+}
+
+pub fn feedback_type(args: &[Type], _context: &ResolveContext) -> Type {
+    match args {
+        [sys] if is_tf_or_scalar_type(sys) => tf_object_type(),
+        [sys1, sys2] if is_tf_or_scalar_type(sys1) && is_tf_or_scalar_type(sys2) => {
+            tf_object_type()
+        }
+        [sys1, sys2, sign]
+            if is_tf_or_scalar_type(sys1)
+                && is_tf_or_scalar_type(sys2)
+                && is_sample_time_type(sign) =>
+        {
+            tf_object_type()
+        }
+        _ => Type::Unknown,
+    }
+}
+
+pub fn dcgain_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Num
+}
+
+pub fn pole_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::tensor()
+}
+
+pub fn rlocus_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::tensor()
+}
+
+pub fn isstable_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Bool
+}
+
 pub fn ss_type(args: &[Type], context: &ResolveContext) -> Type {
     let rest = match args {
         [a, b, c, d, rest @ ..] if valid_state_space_matrix_types(a, b, c, d) => rest,
@@ -48,8 +98,23 @@ pub fn ss_type(args: &[Type], context: &ResolveContext) -> Type {
     }
 }
 
-pub fn tf_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Unknown
+pub fn tf_type(args: &[Type], _context: &ResolveContext) -> Type {
+    match args {
+        [variable] if is_text_mode_type(variable) => tf_object_type(),
+        [variable, sample_time]
+            if is_text_mode_type(variable) && is_sample_time_type(sample_time) =>
+        {
+            tf_object_type()
+        }
+        [numerator, denominator, rest @ ..]
+            if is_tf_coefficient_type(numerator)
+                && is_tf_coefficient_type(denominator)
+                && valid_tf_options(rest) =>
+        {
+            tf_object_type()
+        }
+        _ => Type::Unknown,
+    }
 }
 
 pub fn impulse_type(_args: &[Type], _context: &ResolveContext) -> Type {
@@ -77,6 +142,19 @@ fn ss_object_type() -> Type {
     }
 }
 
+fn tf_object_type() -> Type {
+    Type::Struct {
+        known_fields: Some(vec![
+            "Denominator".to_string(),
+            "InputDelay".to_string(),
+            "Numerator".to_string(),
+            "OutputDelay".to_string(),
+            "Ts".to_string(),
+            "Variable".to_string(),
+        ]),
+    }
+}
+
 fn valid_state_space_matrix_types(a: &Type, b: &Type, c: &Type, d: &Type) -> bool {
     [a, b, c, d].iter().all(|ty| is_real_matrix_type(ty))
 }
@@ -87,6 +165,52 @@ fn is_real_matrix_type(ty: &Type) -> bool {
 
 fn is_sample_time_type(ty: &Type) -> bool {
     matches!(ty, Type::Num | Type::Int | Type::Unknown)
+}
+
+fn is_tf_coefficient_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Num
+            | Type::Int
+            | Type::Bool
+            | Type::Tensor { .. }
+            | Type::Logical { .. }
+            | Type::Unknown
+    )
+}
+
+fn is_tf_or_scalar_type(ty: &Type) -> bool {
+    is_tf_struct_type(ty) || matches!(ty, Type::Unknown) || is_tf_coefficient_type(ty)
+}
+
+fn is_tf_struct_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Struct {
+            known_fields: Some(fields),
+        } if fields.iter().any(|field| field == "Numerator")
+            && fields.iter().any(|field| field == "Denominator")
+            && fields.iter().any(|field| field == "Variable")
+    )
+}
+
+fn valid_tf_options(rest: &[Type]) -> bool {
+    match rest {
+        [] => true,
+        [sample_time] if is_sample_time_type(sample_time) => true,
+        _ => {
+            rest.len().is_multiple_of(2)
+                && rest.chunks_exact(2).all(|pair| {
+                    let [name, value] = pair else {
+                        return false;
+                    };
+                    is_text_mode_type(name)
+                        && (is_sample_time_type(value)
+                            || is_text_mode_type(value)
+                            || matches!(value, Type::Unknown))
+                })
+        }
+    }
 }
 
 fn valid_ss_name_value_options(rest: &[Type], context: &ResolveContext) -> bool {

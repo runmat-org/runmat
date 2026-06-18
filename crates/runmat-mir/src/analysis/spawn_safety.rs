@@ -146,6 +146,7 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
             scan_operand(body, base, reads_captures);
             scan_operand(body, member, reads_captures);
         }
+        MirRvalue::WorkspaceFirstStaticProperty { .. } => {}
         MirRvalue::MetaClass(_) | MirRvalue::Colon | MirRvalue::End => {}
         MirRvalue::Spawn(future) => {
             scan_operand(body, future, reads_captures);

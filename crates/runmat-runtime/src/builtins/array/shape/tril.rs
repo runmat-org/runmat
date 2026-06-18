@@ -247,6 +247,7 @@ async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
+        | Value::SparseTensor(_)
         | Value::Struct(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
@@ -255,6 +256,7 @@ async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Symbolic(_)
         | Value::OutputList(_) => Err(tril_error(&TRIL_ERROR_UNSUPPORTED_INPUT)),
     }
 }

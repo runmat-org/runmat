@@ -693,6 +693,7 @@ fn first_unlowered_await<'a>(
         HirExprKind::Member(base, _) => first_unlowered_await(base, await_replacements),
         HirExprKind::MemberDynamic(base, member) => first_unlowered_await(base, await_replacements)
             .or_else(|| first_unlowered_await(member, await_replacements)),
+        HirExprKind::WorkspaceFirstStaticProperty { .. } => None,
         HirExprKind::Call(call) => call
             .args
             .iter()

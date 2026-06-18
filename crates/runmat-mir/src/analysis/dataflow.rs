@@ -207,6 +207,7 @@ fn simple_rvalue_fact(value: &MirRvalue) -> SimpleValueFact {
         },
         MirRvalue::Member { .. }
         | MirRvalue::DynamicMember { .. }
+        | MirRvalue::WorkspaceFirstStaticProperty { .. }
         | MirRvalue::MetaClass(_)
         | MirRvalue::Colon
         | MirRvalue::End
@@ -262,7 +263,10 @@ fn simple_operand_fact(operand: &MirOperand) -> SimpleValueFact {
         MirOperand::Constant(crate::MirConstant::String(_)) => {
             scalar_single_fact(TypeFact::CharArray)
         }
-        MirOperand::FunctionHandle(CallableIdentity::BoundFunction(function))
+        MirOperand::FunctionHandle(
+            CallableIdentity::BoundFunction(function)
+            | CallableIdentity::ExternalFunction { function, .. },
+        )
         | MirOperand::FunctionHandle(CallableIdentity::AnonymousFunction(function)) => {
             scalar_single_fact(TypeFact::Function(*function))
         }
@@ -696,6 +700,7 @@ fn diagnose_rvalue_reads(
             diagnose_operand_read(base, state, span, diagnostics);
             diagnose_operand_read(member, state, span, diagnostics);
         }
+        MirRvalue::WorkspaceFirstStaticProperty { .. } => {}
         MirRvalue::Future { args, .. } => {
             for arg in args {
                 diagnose_operand_read(arg.operand(), state, span, diagnostics);

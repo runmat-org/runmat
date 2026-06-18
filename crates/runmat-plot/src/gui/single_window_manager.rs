@@ -27,6 +27,15 @@ pub fn show_plot_sequential_with_signal(
     figure: Figure,
     close_signal: Option<CloseSignal>,
 ) -> Result<String, String> {
+    let title = figure.window_title(None);
+    show_plot_sequential_with_signal_and_title(figure, close_signal, Some(title))
+}
+
+pub fn show_plot_sequential_with_signal_and_title(
+    figure: Figure,
+    close_signal: Option<CloseSignal>,
+    window_title: Option<String>,
+) -> Result<String, String> {
     // Acquire exclusive access to the window system
     let _guard = WINDOW_MANAGER
         .lock()
@@ -40,7 +49,7 @@ pub fn show_plot_sequential_with_signal(
     // Mark window as active
     WINDOW_ACTIVE.store(true, Ordering::Release);
 
-    let result = show_plot_internal(figure, close_signal);
+    let result = show_plot_internal(figure, close_signal, window_title);
 
     // Mark window as inactive when done
     WINDOW_ACTIVE.store(false, Ordering::Release);
@@ -49,11 +58,18 @@ pub fn show_plot_sequential_with_signal(
 }
 
 /// Internal function that actually creates and runs the window
-fn show_plot_internal(figure: Figure, close_signal: Option<CloseSignal>) -> Result<String, String> {
+fn show_plot_internal(
+    figure: Figure,
+    close_signal: Option<CloseSignal>,
+    window_title: Option<String>,
+) -> Result<String, String> {
     use crate::gui::PlotWindow;
 
     // Create window directly on the current thread (main thread)
-    let config = WindowConfig::default();
+    let mut config = WindowConfig::default();
+    if let Some(title) = window_title {
+        config.title = title;
+    }
 
     // Use existing runtime or create one if none exists
     let handle = tokio::runtime::Handle::try_current();

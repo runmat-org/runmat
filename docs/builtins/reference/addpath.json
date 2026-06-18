@@ -32,6 +32,7 @@
   "description": "`addpath` prepends or appends folders to the active search path used to resolve functions, scripts, classes, and data files. Changes apply immediately to the current session, with path ordering behavior matching MATLAB semantics.",
   "behaviors": [
     "Folder arguments may be character vectors, string scalars, string arrays, or cell arrays of character vectors or strings. Multi-row char arrays contribute one folder per row (trailing padding is stripped).",
+    "MATLAB command form is supported for path-like arguments, including `addpath ./SourceCode`, `addpath ../lib -end`, and `addpath ./src:../shared -frozen`.",
     "Multiple folders can be passed in a single argument using the platform path separator (`:` on Linux/macOS, `;` on Windows); this is compatible with `genpath`.",
     "By default, folders are added to the top of the search path. Use `'-end'` to append or `'-begin'` to force prepending explicitly. Only one position flag is permitted.",
     "The `'-frozen'` flag is accepted for MATLAB compatibility. RunMat does not currently track frozen entries separately; the flag simply suppresses incompatibility warnings.",
@@ -44,6 +45,11 @@
       "description": "Add a single folder to the top of the search path",
       "input": "mkdir(\"util/toolbox\");\noldPath = path();\naddpath(\"util/toolbox\");\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
       "output": " /util/toolbox"
+    },
+    {
+      "description": "Add a relative folder with MATLAB command syntax",
+      "input": "mkdir(\"SourceCode\");\noldPath = path();\naddpath ./SourceCode\nnewPath = path();\ncount = fprintf('%s %s\\n', oldPath, newPath);",
+      "output": " /SourceCode"
     },
     {
       "description": "Append folders to the end of the search path",

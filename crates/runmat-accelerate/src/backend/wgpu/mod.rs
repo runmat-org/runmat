@@ -1,6 +1,7 @@
 pub mod autotune;
 pub mod bindings;
 pub mod cache;
+pub mod compat;
 pub mod config;
 pub mod debug;
 pub mod dispatch;

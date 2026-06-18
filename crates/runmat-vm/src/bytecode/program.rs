@@ -59,6 +59,8 @@ pub struct FunctionBytecode {
     #[serde(default)]
     pub var_names: HashMap<usize, String>,
     #[serde(default)]
+    pub initially_unassigned_slots: HashSet<usize>,
+    #[serde(default)]
     pub argument_validations: Vec<FunctionArgumentValidation>,
 }
 
@@ -81,6 +83,7 @@ impl Default for FunctionBytecode {
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
             var_names: HashMap::new(),
+            initially_unassigned_slots: HashSet::new(),
             argument_validations: Vec::new(),
         }
     }
@@ -261,6 +264,8 @@ pub struct Bytecode {
     #[serde(default)]
     pub var_names: HashMap<usize, String>,
     #[serde(default)]
+    pub initially_unassigned_slots: HashSet<usize>,
+    #[serde(default)]
     pub layout: Option<VmAssemblyLayout>,
     #[serde(default)]
     pub async_metadata: AsyncMetadata,
@@ -386,6 +391,7 @@ impl Bytecode {
             function_registry: FunctionRegistry::default(),
             var_types: Vec::new(),
             var_names: HashMap::new(),
+            initially_unassigned_slots: HashSet::new(),
             layout: None,
             async_metadata: AsyncMetadata::default(),
             #[cfg(feature = "native-accel")]
@@ -500,7 +506,7 @@ mod function_registry_tests {
     use super::{FunctionBytecode, FunctionRegistry};
     use crate::Instr;
     use runmat_hir::FunctionId;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     fn test_function(id: usize, display_name: &str, private_owner_scope: &str) -> FunctionBytecode {
         FunctionBytecode {
@@ -520,6 +526,7 @@ mod function_registry_tests {
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
             var_names: HashMap::new(),
+            initially_unassigned_slots: HashSet::new(),
             argument_validations: Vec::new(),
         }
     }

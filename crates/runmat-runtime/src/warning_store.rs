@@ -23,6 +23,10 @@ pub fn take_all() -> Vec<RuntimeWarning> {
     WARNINGS.with(|warnings| warnings.borrow_mut().drain(..).collect())
 }
 
+pub fn extend(warnings: impl IntoIterator<Item = RuntimeWarning>) {
+    WARNINGS.with(|slot| slot.borrow_mut().extend(warnings));
+}
+
 pub fn reset() {
     WARNINGS.with(|warnings| warnings.borrow_mut().clear());
 }

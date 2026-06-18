@@ -117,10 +117,11 @@ impl GcStats {
 
         // Track allocation rate
         let mut timestamps = self.allocation_timestamps.lock();
-        timestamps.push_back(Instant::now());
+        let now = Instant::now();
+        timestamps.push_back(now);
 
         // Keep only recent allocations for rate calculation (last 60 seconds)
-        let cutoff = Instant::now() - Duration::from_secs(60);
+        let cutoff = now.checked_sub(Duration::from_secs(60)).unwrap_or(now);
         while timestamps.front().is_some_and(|&t| t < cutoff) {
             timestamps.pop_front();
         }

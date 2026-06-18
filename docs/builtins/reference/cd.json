@@ -34,6 +34,7 @@
     "`cd(newFolder)` changes the working folder and returns the previous folder, enabling the classic MATLAB pattern `old = cd(new); ...; cd(old);`.",
     "Accepts character vectors and string scalars. String arrays must contain exactly one element. Other types raise `cd: folder name must be a character vector or string scalar`.",
     "Supports relative paths (for example `cd('..')`), absolute paths, and the shell-style `~` expansion to jump to the user home folder.",
+    "MATLAB command form is supported for path-like folder arguments, including `cd ..`, `cd ./data`, and `cd ~/project`.",
     "Emits descriptive errors when the folder does not exist or cannot be accessed.",
     "Does not modify GPU residency; path values always live on the host."
   ],
@@ -52,6 +53,11 @@
       "description": "Navigate Up One Level From The Current Folder",
       "input": "old = cd(\"..\")",
       "output": "% RunMat moves to the parent folder and old captures the prior location"
+    },
+    {
+      "description": "Navigate With MATLAB Command Syntax",
+      "input": "projectRoot = pwd;\nmkdir(\"scratch\");\ncd scratch\ncd ..\nbackAtRoot = strcmp(pwd, projectRoot)",
+      "output": "backAtRoot =\n  logical\n   1"
     },
     {
       "description": "Switch To Your Home Folder With cd ~",

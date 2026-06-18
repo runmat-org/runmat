@@ -713,6 +713,10 @@ fn should_use_direct_read(length: u64, threshold: u64) -> bool {
 
 #[async_trait(?Send)]
 impl FsProvider for RemoteFsProvider {
+    fn current_dir_override(&self) -> Option<std::path::PathBuf> {
+        Some(std::path::PathBuf::from("/"))
+    }
+
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let mut data = Vec::new();
         let normalized = self.normalize(path);
