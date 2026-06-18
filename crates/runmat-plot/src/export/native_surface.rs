@@ -1125,6 +1125,31 @@ pub async fn render_geometry_scene_rgba_bytes_interactive_and_theme(
     context.render_geometry_scene_to_rgba(&scene, None).await
 }
 
+pub async fn render_geometry_scene_png_bytes_interactive_with_camera_and_theme(
+    scene: GeometryScene,
+    width: u32,
+    height: u32,
+    camera: &Camera,
+    theme: PlotThemeConfig,
+) -> Result<Vec<u8>, String> {
+    let rgba = render_geometry_scene_rgba_bytes_interactive_with_camera_and_theme(
+        scene, width, height, camera, theme,
+    )
+    .await?;
+    encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
+pub async fn render_geometry_scene_png_bytes_interactive_and_theme(
+    scene: GeometryScene,
+    width: u32,
+    height: u32,
+    theme: PlotThemeConfig,
+) -> Result<Vec<u8>, String> {
+    let rgba =
+        render_geometry_scene_rgba_bytes_interactive_and_theme(scene, width, height, theme).await?;
+    encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
 fn encode_png_bytes(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     use image::{ImageBuffer, ImageFormat, Rgba};
 

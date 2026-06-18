@@ -7,11 +7,11 @@ last_updated: "June 10, 2026"
 
 # Physics Families
 
-Choose the run family from the engineering question. The family determines required model data, run options, diagnostics, result payloads, and current support boundaries.
+Choose the physics family from the engineering question. The selected model profile determines required model data, selects the solver, validates run options, and shapes diagnostics, result payloads, and current support boundaries.
 
 ## Families
 
-| Family | Use when you need to know... | Run kind |
+| Family | Use when you need to know... | Selected solver |
 | --- | --- | --- |
 | Linear static structural | Static displacement and stress response. | `linear_static` |
 | Modal structural | Natural modes and modal frequencies. | `modal` |
@@ -19,7 +19,7 @@ Choose the run family from the engineering question. The family determines requi
 | Thermal standalone | Temperature response and thermal quality signals. | `thermal` |
 | Structural transient | Structural response over time. | `transient` |
 | Nonlinear structural | Nonlinear, plasticity, contact, or increment-controlled response. | `nonlinear` |
-| Thermo-mechanical | Structural response with thermal coupling context. | Usually structural or transient run kinds with thermo-mechanical domain data. |
+| Thermo-mechanical | Structural response with thermal coupling context. | `transient` |
 | Electro-thermal | Heating behavior from electrical coupling context. | Coupled thermal, transient, or nonlinear paths with electro-thermal domain data. |
 | Electromagnetic | Electromagnetic source, boundary, material, frequency, and sweep behavior. | `electromagnetic` |
 | CFD | Fluid-domain baseline behavior and diagnostics. | `cfd` |
@@ -40,7 +40,7 @@ Choose the run family from the engineering question. The family determines requi
 
 ## Run Options
 
-The `.fea` `run.options` block is typed by `run.kind`.
+The `.fea` `run.options` block is typed by the solver selected from `model.profile`.
 
 Common option themes include:
 

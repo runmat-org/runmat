@@ -93,7 +93,7 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.step(...)`, `fea.domain(...)`, `fea.interface(...)` | Create typed analysis steps, physics domains, and interfaces. |
 | `fea.runOptions(kind, Name, Value, ...)` | Create family-specific run options. |
 | `fea.model(id, geometry, Name, Value, ...)` | Assemble an explicit model from geometry and typed components. |
-| `fea.study(id, geometry, Name, Value, ...)` | Create a `fea.Study` from geometry, model data, run kind, backend, and run options. |
+| `fea.study(id, geometry, Name, Value, ...)` | Create a `fea.Study` from geometry, physics profile/model data, backend, and run options. |
 | `fea.sweep(id, studies, Name, Value, ...)` | Create a deterministic sweep from `fea.Study` objects. |
 | `fea.validate(study)` | Validate a `.fea` path, `fea.Study`, or `fea.Sweep`. |
 | `fea.plan(study)` | Plan a `.fea` path, `fea.Study`, or `fea.Sweep`. |

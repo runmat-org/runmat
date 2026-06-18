@@ -41,6 +41,7 @@ use runmat_runtime::builtins::plotting::{
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
     render_figure_snapshot_with_camera_state as runtime_render_figure_snapshot_with_camera_state,
+    render_geometry_scene_snapshot as runtime_render_geometry_scene_snapshot,
     reset_plot_state as runtime_reset_plot_state,
     reset_surface_camera as runtime_reset_surface_camera, resize_surface as runtime_resize_surface,
     select_figure as runtime_select_figure,
@@ -447,6 +448,30 @@ pub async fn wasm_render_figure_image_with_textmark(
     textmark: Option<String>,
 ) -> Result<Uint8Array, JsValue> {
     wasm_render_figure_image(handle, width, height, textmark).await
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = renderGeometrySceneImage)]
+pub async fn wasm_render_geometry_scene_image(
+    handle: u32,
+    width: Option<u32>,
+    height: Option<u32>,
+    view: Option<String>,
+) -> Result<Uint8Array, JsValue> {
+    const DEFAULT_PREVIEW_WIDTH: u32 = 1024;
+    const DEFAULT_PREVIEW_HEIGHT: u32 = 768;
+    let _ = shared_webgpu_context();
+    let normalized_width = width.unwrap_or(0).max(1);
+    let normalized_height = height.unwrap_or(0).max(1);
+    let (render_width, render_height) = if normalized_width == 1 && normalized_height == 1 {
+        (DEFAULT_PREVIEW_WIDTH, DEFAULT_PREVIEW_HEIGHT)
+    } else {
+        (normalized_width, normalized_height)
+    };
+    let bytes = runtime_render_geometry_scene_snapshot(handle, render_width, render_height, view)
+        .await
+        .map_err(runtime_flow_to_js)?;
+    Ok(Uint8Array::from(bytes.as_slice()))
 }
 
 #[cfg(target_arch = "wasm32")]

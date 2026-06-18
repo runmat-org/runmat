@@ -1364,6 +1364,25 @@ pub enum AnalysisRunKind {
     Electromagnetic,
 }
 
+impl AnalysisCreateModelProfile {
+    pub fn derived_run_kind(self) -> AnalysisRunKind {
+        match self {
+            AnalysisCreateModelProfile::LinearStaticStructural => AnalysisRunKind::LinearStatic,
+            AnalysisCreateModelProfile::ThermoMechanicalCoupled => AnalysisRunKind::Transient,
+            AnalysisCreateModelProfile::ThermalStandalone => AnalysisRunKind::Thermal,
+            AnalysisCreateModelProfile::ModalStructural => AnalysisRunKind::Modal,
+            AnalysisCreateModelProfile::AcousticHarmonic => AnalysisRunKind::Acoustic,
+            AnalysisCreateModelProfile::TransientStructural => AnalysisRunKind::Transient,
+            AnalysisCreateModelProfile::NonlinearStructural => AnalysisRunKind::Nonlinear,
+            AnalysisCreateModelProfile::ElectromagneticStatic => AnalysisRunKind::Electromagnetic,
+            AnalysisCreateModelProfile::CfdSteadyState
+            | AnalysisCreateModelProfile::CfdTransient => AnalysisRunKind::Cfd,
+            AnalysisCreateModelProfile::ChtCoupled => AnalysisRunKind::Cht,
+            AnalysisCreateModelProfile::FsiCoupled => AnalysisRunKind::Fsi,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisTrendKindSummary {
     pub run_kind: AnalysisRunKind,

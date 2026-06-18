@@ -304,6 +304,13 @@ export interface FigureImageOptions {
   textmark?: string;
 }
 
+export interface GeometrySceneImageOptions {
+  handle: number;
+  width?: number;
+  height?: number;
+  view?: string | null;
+}
+
 export type FigureImageCameraProjectionState =
   | {
       kind: "perspective";
@@ -915,9 +922,27 @@ export interface PlotSurfaceCameraState {
 
 export type GeometrySceneDisplayMode = "shaded" | "edges" | "wireframe";
 
+export interface GeometrySceneRegionHighlightState {
+  regionId: string;
+  color: [number, number, number, number];
+  role?: string | null;
+  label?: string | null;
+}
+
+export interface GeometrySceneRegionAnnotationState {
+  regionId: string;
+  color: [number, number, number, number];
+  role?: string | null;
+  label?: string | null;
+  direction?: [number, number, number] | null;
+  size?: number | null;
+}
+
 export interface GeometryScenePresentationState {
   selectedRegionId?: string | null;
   hoveredRegionId?: string | null;
+  regionHighlights?: GeometrySceneRegionHighlightState[];
+  regionAnnotations?: GeometrySceneRegionAnnotationState[];
   displayMode?: GeometrySceneDisplayMode;
   edgeOverlayEnabled?: boolean;
 }
@@ -991,6 +1016,12 @@ interface RunMatNativeModule {
     height: number,
     cameraState: FigureImageCameraState,
     textmark?: string
+  ) => Promise<Uint8Array>;
+  renderGeometrySceneImage?: (
+    handle: number,
+    width: number,
+    height: number,
+    view?: string | null
   ) => Promise<Uint8Array>;
   subscribeStdout?: (listener: (entry: StdoutEntry) => void) => number;
   unsubscribeStdout?: (id: number) => void;
@@ -1383,6 +1414,26 @@ export async function renderFigureImage(options: FigureImageOptions = {}): Promi
     } else {
       bytes = await native.renderFigureImage(handle, width, height);
     }
+    if (bytes instanceof Uint8Array) {
+      return bytes;
+    }
+    return new Uint8Array(bytes ?? []);
+  } catch (error) {
+    throw coerceFigureError(error);
+  }
+}
+
+export async function renderGeometrySceneImage(
+  options: GeometrySceneImageOptions
+): Promise<Uint8Array> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "renderGeometrySceneImage");
+  const handle = options.handle;
+  const width = options.width ?? 0;
+  const height = options.height ?? 0;
+  const view = options.view ?? null;
+  try {
+    const bytes = await native.renderGeometrySceneImage?.(handle, width, height, view);
     if (bytes instanceof Uint8Array) {
       return bytes;
     }

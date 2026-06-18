@@ -504,6 +504,7 @@ pub use engine::{
     render_figure_png_bytes_with_camera, render_figure_rgba_bytes,
     render_figure_rgba_bytes_with_axes_cameras, render_figure_rgba_bytes_with_camera,
     render_figure_snapshot, render_figure_snapshot_with_camera_state,
+    render_geometry_scene_snapshot,
 };
 
 pub mod ops {

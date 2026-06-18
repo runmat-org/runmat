@@ -203,7 +203,8 @@ struct FeaDomainsDocument {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FeaRunDocument {
-    kind: AnalysisRunKind,
+    #[serde(default)]
+    kind: Option<AnalysisRunKind>,
     #[serde(default = "default_backend")]
     backend: ComputeBackend,
     #[serde(default)]
@@ -290,13 +291,14 @@ async fn resolve_study(
         prep_context: None,
     };
     let model = resolve_model(&study, &geometry, &intent)?;
-    let run_options = resolve_run_options(&study.run)?;
+    let run_kind = resolve_run_kind(study.model.profile, &study.run)?;
+    let run_options = resolve_run_options(&study.run, run_kind)?;
     let spec = AnalysisStudySpec {
         study_id: study.id,
         geometry,
         create_model_intent: intent,
         model,
-        run_kind: study.run.kind,
+        run_kind,
         backend: study.run.backend,
         linear_static_run_options: run_options.linear_static,
         modal_run_options: run_options.modal,
@@ -517,12 +519,31 @@ struct ResolvedRunOptions {
     electromagnetic: Option<AnalysisElectromagneticRunOptions>,
 }
 
-fn resolve_run_options(run: &FeaRunDocument) -> Result<ResolvedRunOptions, String> {
+fn resolve_run_kind(
+    profile: AnalysisCreateModelProfile,
+    run: &FeaRunDocument,
+) -> Result<AnalysisRunKind, String> {
+    let derived = profile.derived_run_kind();
+    if let Some(explicit) = run.kind {
+        if explicit != derived {
+            return Err(format!(
+                "run.kind {:?} does not match the solver selected by model.profile {:?}; omit run.kind unless you need an advanced matching solver override",
+                explicit, profile
+            ));
+        }
+    }
+    Ok(derived)
+}
+
+fn resolve_run_options(
+    run: &FeaRunDocument,
+    run_kind: AnalysisRunKind,
+) -> Result<ResolvedRunOptions, String> {
     let Some(options) = run.options.clone() else {
         return Ok(ResolvedRunOptions::default());
     };
     let mut resolved = ResolvedRunOptions::default();
-    match run.kind {
+    match run_kind {
         AnalysisRunKind::LinearStatic => {
             resolved.linear_static = Some(parse_options(options, "linear_static options")?);
         }

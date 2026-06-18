@@ -24,9 +24,9 @@ A model attaches physics data to geometry. It defines what material exists where
 
 ## Model Profiles
 
-Profiles create the starting model shape for a run family:
+Profiles create the starting model shape and select the solver used by `run`:
 
-| Profile | Typical run kind |
+| Profile | Selected solver |
 | --- | --- |
 | `linear_static_structural` | `linear_static` |
 | `modal_structural` | `modal` |
@@ -34,7 +34,7 @@ Profiles create the starting model shape for a run family:
 | `thermal_standalone` | `thermal` |
 | `transient_structural` | `transient` |
 | `nonlinear_structural` | `nonlinear` |
-| `thermo_mechanical_coupled` | `transient` or coupled structural workflows |
+| `thermo_mechanical_coupled` | `transient` |
 | `electromagnetic_static` | `electromagnetic` |
 | `cfd_steady_state`, `cfd_transient` | `cfd` |
 | `cht_coupled` | `cht` |
@@ -88,7 +88,7 @@ Validation checks the model and study shape before a run starts. It catches prob
 - empty study or model ids,
 - missing geometry meshes,
 - unspecified units,
-- run kind and profile mismatches,
+- legacy run-kind/profile mismatches,
 - missing required steps,
 - invalid family-specific options,
 - missing or incompatible domain data.

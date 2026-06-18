@@ -118,7 +118,7 @@ const IN_STUDY_ARGS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "RunKind, Profile, Backend, and ModelId options.",
+        description: "Profile, Backend, ModelId, and model setup options.",
     },
 ];
 const IN_VARIADIC_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -440,7 +440,7 @@ pub async fn fea_interface_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "fea.runOptions",
     category = "fea",
-    summary = "Create typed FEA run options for a run kind.",
+    summary = "Create typed FEA run options for a solver.",
     keywords = "fea,run,options,solver,quality",
     descriptor(crate::builtins::fea::FEA_COMPONENT_DESCRIPTOR),
     builtin_path = "crate::builtins::fea"
@@ -677,10 +677,7 @@ fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let study_id = scalar_string(&args[0], STUDY_NAME, &ERROR_INPUT)?;
     let geometry = geometry_asset_from_value(&args[1])?;
     let options = StudyConstructorOptions::parse(&args[2..])?;
-    let run_kind = options.run_kind.unwrap_or(AnalysisRunKind::LinearStatic);
-    let profile = options
-        .profile
-        .unwrap_or_else(|| default_profile_for_run_kind(run_kind));
+    let (profile, run_kind) = resolve_study_profile_and_run_kind(&options)?;
     let model_id = options.model_id.clone().unwrap_or_else(|| {
         options
             .model
@@ -1349,11 +1346,11 @@ fn create_run_options_object_from_args(args: Vec<Value>) -> BuiltinResult<Value>
         return Err(builtin_error(
             RUN_OPTIONS_NAME,
             &ERROR_INPUT,
-            "fea.runOptions requires a run kind",
+            "fea.runOptions requires a solver",
         ));
     }
     let kind_text = scalar_string(&args[0], RUN_OPTIONS_NAME, &ERROR_INPUT)?;
-    let run_kind = parse_scalar_enum::<AnalysisRunKind>(&kind_text, "RunKind")?;
+    let run_kind = parse_scalar_enum::<AnalysisRunKind>(&kind_text, "solver")?;
     let fields = json_fields_from_name_values(RUN_OPTIONS_NAME, &args[1..])?;
     let data = run_options_json_for_kind(RUN_OPTIONS_NAME, run_kind, fields)?;
     run_options_to_object(RunOptionsPayload {
@@ -1882,7 +1879,7 @@ fn resolved_run_options_from_payload(
             builtin,
             &ERROR_INPUT,
             format!(
-                "run options kind {:?} does not match study run kind {:?}",
+                "run options kind {:?} does not match selected study solver {:?}",
                 payload.run_kind, expected_kind
             ),
         ));
@@ -2692,6 +2689,30 @@ fn default_profile_for_run_kind(run_kind: AnalysisRunKind) -> AnalysisCreateMode
     }
 }
 
+fn resolve_study_profile_and_run_kind(
+    options: &StudyConstructorOptions,
+) -> BuiltinResult<(AnalysisCreateModelProfile, AnalysisRunKind)> {
+    let profile = match (options.profile, options.run_kind) {
+        (Some(profile), _) => profile,
+        (None, Some(run_kind)) => default_profile_for_run_kind(run_kind),
+        (None, None) => AnalysisCreateModelProfile::LinearStaticStructural,
+    };
+    let run_kind = profile.derived_run_kind();
+    if let Some(explicit_run_kind) = options.run_kind {
+        if explicit_run_kind != run_kind {
+            return Err(builtin_error(
+                STUDY_NAME,
+                &ERROR_INPUT,
+                format!(
+                    "explicit solver {:?} does not match Profile {:?}; omit RunKind or choose a matching Profile",
+                    explicit_run_kind, profile
+                ),
+            ));
+        }
+    }
+    Ok((profile, run_kind))
+}
+
 fn ensure_fea_classes_registered() {
     static REGISTER: OnceLock<()> = OnceLock::new();
     REGISTER.get_or_init(|| {
@@ -2927,7 +2948,6 @@ geometry:
 model:
   profile: linear_static_structural
 run:
-  kind: linear_static
   backend: cpu
 "#,
         )
@@ -3058,8 +3078,8 @@ run:
         let study = block_on(fea_study_builtin(vec![
             Value::String("bracket_static".to_string()),
             geometry,
-            Value::String("RunKind".to_string()),
-            Value::String("linear_static".to_string()),
+            Value::String("Profile".to_string()),
+            Value::String("linear_static_structural".to_string()),
             Value::String("Backend".to_string()),
             Value::String("cpu".to_string()),
             Value::String("Model".to_string()),

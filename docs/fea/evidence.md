@@ -54,7 +54,7 @@ Study validation records include:
 Study planning records include:
 
 - model id,
-- run kind,
+- selected solver,
 - requested backend,
 - operation sequence,
 - selected run operation and version,

@@ -8199,14 +8199,14 @@ fn study_issue_message(code: &str) -> &'static str {
             "geometry.units must be specified (not unspecified)"
         }
         "RM.FEA.STUDY.RUN_KIND_PROFILE_MISMATCH" => {
-            "model profile does not support the requested run kind"
+            "model.profile selects the solver; run kind must match the selected profile when supplied"
         }
         "RM.FEA.STUDY.MODEL_GEOMETRY_MISMATCH" => {
             "resolved model geometry id or revision does not match the study geometry"
         }
         "RM.FEA.STUDY.MODEL_INVALID" => "resolved model failed FEA validation",
         "RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH" => {
-            "run options are only valid for their matching run_kind"
+            "run options are only valid for the solver selected by model.profile"
         }
         "RM.FEA.STUDY.ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID" => {
             "electromagnetic_run_options.residual_target must be finite and positive"
@@ -8228,47 +8228,7 @@ fn profile_supports_run_kind(
     profile: AnalysisCreateModelProfile,
     run_kind: AnalysisRunKind,
 ) -> bool {
-    match run_kind {
-        AnalysisRunKind::LinearStatic => {
-            matches!(profile, AnalysisCreateModelProfile::LinearStaticStructural)
-        }
-        AnalysisRunKind::Modal => matches!(profile, AnalysisCreateModelProfile::ModalStructural),
-        AnalysisRunKind::Acoustic => {
-            matches!(profile, AnalysisCreateModelProfile::AcousticHarmonic)
-        }
-        AnalysisRunKind::Thermal => {
-            matches!(
-                profile,
-                AnalysisCreateModelProfile::ThermalStandalone
-                    | AnalysisCreateModelProfile::ChtCoupled
-            )
-        }
-        AnalysisRunKind::Transient => {
-            matches!(
-                profile,
-                AnalysisCreateModelProfile::TransientStructural
-                    | AnalysisCreateModelProfile::ThermoMechanicalCoupled
-                    | AnalysisCreateModelProfile::FsiCoupled
-            )
-        }
-        AnalysisRunKind::Cfd => {
-            matches!(
-                profile,
-                AnalysisCreateModelProfile::CfdSteadyState
-                    | AnalysisCreateModelProfile::CfdTransient
-                    | AnalysisCreateModelProfile::ChtCoupled
-                    | AnalysisCreateModelProfile::FsiCoupled
-            )
-        }
-        AnalysisRunKind::Cht => matches!(profile, AnalysisCreateModelProfile::ChtCoupled),
-        AnalysisRunKind::Fsi => matches!(profile, AnalysisCreateModelProfile::FsiCoupled),
-        AnalysisRunKind::Nonlinear => {
-            matches!(profile, AnalysisCreateModelProfile::NonlinearStructural)
-        }
-        AnalysisRunKind::Electromagnetic => {
-            matches!(profile, AnalysisCreateModelProfile::ElectromagneticStatic)
-        }
-    }
+    profile.derived_run_kind() == run_kind
 }
 
 fn study_fingerprint(spec: &AnalysisStudySpec) -> String {

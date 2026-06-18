@@ -105,7 +105,8 @@ impl GeometryScene {
         &self,
         presentation: &GeometryScenePresentation,
     ) -> Vec<SceneNode> {
-        self.chunks
+        let mut nodes: Vec<SceneNode> = self
+            .chunks
             .iter()
             .enumerate()
             .map(|(index, chunk)| SceneNode {
@@ -126,11 +127,123 @@ impl GeometryScene {
                 lod_levels: Vec::new(),
                 current_lod: 0,
             })
-            .collect()
+            .collect();
+        nodes.extend(self.annotation_nodes(presentation));
+        nodes
     }
 
     pub fn chunk_node_id(&self, index: usize, chunk_id: &str) -> u64 {
         stable_node_id(&self.scene_id, self.revision, index, chunk_id)
+    }
+
+    fn annotation_nodes(&self, presentation: &GeometryScenePresentation) -> Vec<SceneNode> {
+        if presentation.region_annotations.is_empty() {
+            return Vec::new();
+        }
+
+        let mut point_vertices = Vec::new();
+        let mut line_vertices = Vec::new();
+        let arrow_length = annotation_arrow_length(self.bounds);
+
+        for annotation in &presentation.region_annotations {
+            for chunk in &self.chunks {
+                if !chunk.visible || chunk.render_data.pipeline_type != PipelineType::Triangles {
+                    continue;
+                }
+                let Some(anchor) = chunk.region_anchor(&annotation.region_id) else {
+                    continue;
+                };
+                let color = annotation.color;
+                let mut marker = vertex(
+                    anchor.to_array(),
+                    color,
+                    [0.0, 0.0, annotation.size.unwrap_or(15.0)],
+                );
+                marker.tex_coords = [1.0, 1.0];
+                point_vertices.push(marker);
+
+                if let Some(direction) = annotation
+                    .direction
+                    .and_then(normalized_annotation_direction)
+                {
+                    append_annotation_arrow(
+                        &mut line_vertices,
+                        anchor,
+                        direction,
+                        arrow_length,
+                        color,
+                    );
+                }
+            }
+        }
+
+        let mut nodes = Vec::new();
+        if !point_vertices.is_empty() {
+            nodes.push(self.annotation_node(
+                "FEA region markers",
+                "__fea_annotations:markers",
+                self.chunks.len(),
+                PipelineType::Points,
+                point_vertices,
+            ));
+        }
+        if !line_vertices.is_empty() {
+            nodes.push(self.annotation_node(
+                "FEA load vectors",
+                "__fea_annotations:vectors",
+                self.chunks.len() + 1,
+                PipelineType::Lines,
+                line_vertices,
+            ));
+        }
+        nodes
+    }
+
+    fn annotation_node(
+        &self,
+        name: &str,
+        chunk_id: &str,
+        index: usize,
+        pipeline_type: PipelineType,
+        vertices: Vec<Vertex>,
+    ) -> SceneNode {
+        let vertex_count = vertices.len();
+        let bounds = bounds_from_vertices(&vertices);
+        SceneNode {
+            id: stable_node_id(&self.scene_id, self.revision, index, chunk_id),
+            name: name.to_string(),
+            transform: Mat4::IDENTITY,
+            visible: true,
+            cast_shadows: false,
+            receive_shadows: false,
+            axes_index: 0,
+            parent: None,
+            children: Vec::new(),
+            render_data: Some(RenderData {
+                pipeline_type,
+                vertices,
+                indices: None,
+                gpu_vertices: None,
+                bounds: Some(bounds),
+                material: Material {
+                    albedo: Vec4::ONE,
+                    alpha_mode: AlphaMode::Blend,
+                    double_sided: true,
+                    ..Default::default()
+                },
+                draw_calls: vec![DrawCall {
+                    vertex_offset: 0,
+                    vertex_count,
+                    index_offset: None,
+                    index_count: None,
+                    instance_count: 1,
+                }],
+                image: None,
+            }),
+            bounds,
+            lod_levels: Vec::new(),
+            current_lod: 0,
+        }
     }
 }
 
@@ -139,6 +252,10 @@ impl GeometryScene {
 pub struct GeometryScenePresentation {
     pub selected_region_id: Option<String>,
     pub hovered_region_id: Option<String>,
+    #[serde(default)]
+    pub region_highlights: Vec<GeometrySceneRegionHighlight>,
+    #[serde(default)]
+    pub region_annotations: Vec<GeometrySceneRegionAnnotation>,
     #[serde(default)]
     pub display_mode: GeometrySceneDisplayMode,
     #[serde(default = "default_edge_overlay_enabled")]
@@ -150,10 +267,38 @@ impl Default for GeometryScenePresentation {
         Self {
             selected_region_id: None,
             hovered_region_id: None,
+            region_highlights: Vec::new(),
+            region_annotations: Vec::new(),
             display_mode: GeometrySceneDisplayMode::Shaded,
             edge_overlay_enabled: true,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometrySceneRegionHighlight {
+    pub region_id: String,
+    pub color: [f32; 4],
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometrySceneRegionAnnotation {
+    pub region_id: String,
+    pub color: [f32; 4],
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub direction: Option<[f32; 3]>,
+    #[serde(default)]
+    pub size: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -557,6 +702,9 @@ impl GeometrySceneChunk {
             }
         }
 
+        for highlight in &presentation.region_highlights {
+            self.apply_region_color(&mut render_data, &highlight.region_id, highlight.color);
+        }
         if let Some(region_id) = presentation.hovered_region_id.as_deref() {
             self.apply_region_color(&mut render_data, region_id, [0.43, 0.78, 1.0, 1.0]);
         }
@@ -583,6 +731,76 @@ impl GeometrySceneChunk {
                     && triangle_index < range.start.saturating_add(range.count)
             })
         })
+    }
+
+    fn region_anchor(&self, region_id: &str) -> Option<Vec3> {
+        if self.render_data.pipeline_type != PipelineType::Triangles {
+            return None;
+        }
+        let region = self
+            .regions
+            .iter()
+            .find(|item| item.region_id == region_id)?;
+        let mut weighted_centroid = Vec3::ZERO;
+        let mut total_area = 0.0_f32;
+        let mut fallback_centroid = Vec3::ZERO;
+        let mut fallback_count = 0_usize;
+
+        for range in &region.triangle_ranges {
+            let start = range.start as usize;
+            let end = start.saturating_add(range.count as usize);
+            for triangle_index in start..end {
+                let Some((a, b, c)) = self.triangle_vertices(triangle_index) else {
+                    continue;
+                };
+                let centroid = (a + b + c) / 3.0;
+                let area = (b - a).cross(c - a).length() * 0.5;
+                if area.is_finite() && area > 1.0e-8 {
+                    weighted_centroid += centroid * area;
+                    total_area += area;
+                } else {
+                    fallback_centroid += centroid;
+                    fallback_count += 1;
+                }
+            }
+        }
+
+        if total_area > 0.0 {
+            Some(weighted_centroid / total_area)
+        } else if fallback_count > 0 {
+            Some(fallback_centroid / fallback_count as f32)
+        } else {
+            None
+        }
+    }
+
+    fn triangle_vertices(&self, triangle_index: usize) -> Option<(Vec3, Vec3, Vec3)> {
+        let vertex_at = |index: u32| {
+            self.render_data
+                .vertices
+                .get(index as usize)
+                .map(|vertex| Vec3::from_array(vertex.position))
+        };
+
+        if let Some(indices) = self.indices.as_ref() {
+            let base = triangle_index.checked_mul(3)?;
+            let triangle = indices.get(base..base + 3)?;
+            Some((
+                vertex_at(triangle[0])?,
+                vertex_at(triangle[1])?,
+                vertex_at(triangle[2])?,
+            ))
+        } else {
+            let base = triangle_index.checked_mul(3)?;
+            let a = self.render_data.vertices.get(base)?;
+            let b = self.render_data.vertices.get(base + 1)?;
+            let c = self.render_data.vertices.get(base + 2)?;
+            Some((
+                Vec3::from_array(a.position),
+                Vec3::from_array(b.position),
+                Vec3::from_array(c.position),
+            ))
+        }
     }
 
     fn apply_region_color(&self, render_data: &mut RenderData, region_id: &str, color: [f32; 4]) {
@@ -711,6 +929,60 @@ fn combined_chunk_bounds(chunks: &[GeometrySceneChunk]) -> BoundingBox {
         bounds.expand_by_box(&chunk.bounds);
     }
     bounds
+}
+
+fn annotation_arrow_length(bounds: BoundingBox) -> f32 {
+    let size = bounds.size();
+    let diagonal = size.length();
+    if diagonal.is_finite() && diagonal > 1.0e-6 {
+        diagonal * 0.075
+    } else {
+        1.0
+    }
+}
+
+fn normalized_annotation_direction(direction: [f32; 3]) -> Option<Vec3> {
+    let direction = Vec3::from_array(direction);
+    let length = direction.length();
+    (length.is_finite() && length > 1.0e-8).then_some(direction / length)
+}
+
+fn append_annotation_arrow(
+    vertices: &mut Vec<Vertex>,
+    anchor: Vec3,
+    direction: Vec3,
+    length: f32,
+    color: [f32; 4],
+) {
+    let start = anchor;
+    let end = anchor + direction * length;
+    append_annotation_line(vertices, start, end, color);
+
+    let side = perpendicular_unit(direction);
+    let wing_base = end - direction * (length * 0.28);
+    let wing_size = length * 0.12;
+    append_annotation_line(vertices, end, wing_base + side * wing_size, color);
+    append_annotation_line(vertices, end, wing_base - side * wing_size, color);
+}
+
+fn append_annotation_line(vertices: &mut Vec<Vertex>, start: Vec3, end: Vec3, color: [f32; 4]) {
+    vertices.push(vertex(start.to_array(), color, [0.0, 0.0, 1.0]));
+    vertices.push(vertex(end.to_array(), color, [0.0, 0.0, 1.0]));
+}
+
+fn perpendicular_unit(direction: Vec3) -> Vec3 {
+    let reference = if direction.z.abs() < 0.9 {
+        Vec3::Z
+    } else {
+        Vec3::Y
+    };
+    let side = direction.cross(reference);
+    let length = side.length();
+    if length > 1.0e-8 {
+        side / length
+    } else {
+        Vec3::X
+    }
 }
 
 fn stable_node_id(scene_id: &str, revision: u64, index: usize, chunk_id: &str) -> u64 {
@@ -937,5 +1209,57 @@ mod tests {
             hit.and_then(|hit| hit.region_id),
             Some("face_a".to_string())
         );
+    }
+
+    #[test]
+    fn presentation_region_annotations_emit_marker_and_vector_nodes() {
+        let material = cad_default_material();
+        let chunk = GeometrySceneChunk::indexed_triangles(
+            "face_chunk",
+            vec![
+                vertex([-1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+                vertex([1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+                vertex([0.0, 1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+            ],
+            vec![0, 1, 2],
+            material,
+        )
+        .with_regions(vec![GeometrySceneRegion::new(
+            "loaded_face",
+            Some("Loaded face".to_string()),
+            Some("cad-face".to_string()),
+            vec![GeometrySceneTriangleRange::new(0, 1)],
+        )]);
+        let scene = GeometryScene::new("scene", 1, vec![chunk]);
+        let nodes = scene.nodes_with_presentation(&GeometryScenePresentation {
+            region_annotations: vec![GeometrySceneRegionAnnotation {
+                region_id: "loaded_face".to_string(),
+                color: [0.9, 0.1, 0.1, 1.0],
+                role: Some("load".to_string()),
+                label: Some("load".to_string()),
+                direction: Some([0.0, 0.0, 1.0]),
+                size: Some(18.0),
+            }],
+            ..Default::default()
+        });
+
+        let marker = nodes
+            .iter()
+            .find(|node| node.name == "FEA region markers")
+            .and_then(|node| node.render_data.as_ref())
+            .expect("marker annotation node");
+        assert_eq!(marker.pipeline_type, PipelineType::Points);
+        assert_eq!(marker.vertices.len(), 1);
+        assert!((marker.vertices[0].position[1] - (-1.0 / 3.0)).abs() < 1.0e-6);
+        assert_eq!(marker.vertices[0].normal[2], 18.0);
+
+        let vector = nodes
+            .iter()
+            .find(|node| node.name == "FEA load vectors")
+            .and_then(|node| node.render_data.as_ref())
+            .expect("vector annotation node");
+        assert_eq!(vector.pipeline_type, PipelineType::Lines);
+        assert_eq!(vector.vertices.len(), 6);
+        assert!(vector.vertices[1].position[2] > vector.vertices[0].position[2]);
     }
 }

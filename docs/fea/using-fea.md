@@ -51,7 +51,6 @@ model:
   profile: linear_static_structural
 
 run:
-  kind: linear_static
   backend: cpu
 ```
 
@@ -113,7 +112,6 @@ steps:
     kind: static
 
 run:
-  kind: linear_static
   backend: cpu
   options:
     deterministic_mode: true
@@ -143,7 +141,6 @@ studies:
     model:
       profile: linear_static_structural
     run:
-      kind: linear_static
       backend: cpu
 
   - version: 1
@@ -154,7 +151,6 @@ studies:
     model:
       profile: linear_static_structural
     run:
-      kind: linear_static
       backend: cpu
 ```
 
@@ -188,7 +184,7 @@ opts = fea.runOptions("linear_static", ...
     "QualityPolicy", "balanced");
 
 study = fea.study("bracket_static", geom, ...
-    "RunKind", "linear_static", ...
+    "Profile", "linear_static_structural", ...
     "Backend", "cpu", ...
     "Model", model, ...
     "RunOptions", opts);
@@ -224,7 +220,7 @@ The typed constructors are:
 | `fea.interface(...)` | Contact interfaces. |
 | `fea.runOptions(...)` | Family-specific solver and quality options. |
 | `fea.model(...)` | Explicit model assembled from typed components. |
-| `fea.study(...)` | Study assembled from geometry, model, backend, run kind, and run options. |
+| `fea.study(...)` | Study assembled from geometry, physics profile/model data, backend, and run options. |
 | `fea.sweep(...)` | Study sweep assembled from `fea.Study` objects. |
 
 Region strings in these constructors use the same selector grammar as `.fea`: direct region id, `id:<region-id>`, `region:<region-id>`, `name:<region-name>`, or `tag:<tag>`.

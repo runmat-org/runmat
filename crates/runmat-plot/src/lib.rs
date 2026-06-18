@@ -52,8 +52,8 @@ pub use geometry_scene::{
     GeometrySceneAssemblyNode, GeometrySceneCacheKey, GeometrySceneChunk,
     GeometrySceneCompleteness, GeometrySceneDisplayMode, GeometrySceneOverlay,
     GeometryScenePickIndex, GeometryScenePickRequest, GeometryScenePickResult,
-    GeometryScenePresentation, GeometrySceneRegion, GeometrySceneRegionSummary,
-    GeometrySceneTriangleRange,
+    GeometryScenePresentation, GeometrySceneRegion, GeometrySceneRegionAnnotation,
+    GeometrySceneRegionSummary, GeometrySceneTriangleRange,
 };
 pub use plots::{
     AreaPlot, ContourFillPlot, ContourPlot, Figure, Line3Plot, LinePlot, PieChart, QuiverPlot,

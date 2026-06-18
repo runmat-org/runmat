@@ -450,7 +450,6 @@ geometry:
 model:
   profile: linear_static_structural
 run:
-  kind: linear_static
   backend: cpu
   options:
     deterministic_mode: true
@@ -484,6 +483,32 @@ run:
     assert_eq!(options.precision_mode, PrecisionMode::Fp64);
     assert_eq!(options.preconditioner_mode, PreconditionerMode::Jacobi);
     assert_eq!(options.quality_policy, QualityPolicy::Strict);
+}
+
+#[test]
+fn fea_document_rejects_legacy_run_kind_profile_mismatch() {
+    let _guard = analysis_test_guard();
+    let tmp = tempfile::tempdir().expect("tempdir should be created");
+    fs::write(tmp.path().join("part.stl"), TRIANGLE_STL).expect("fixture geometry should write");
+    let input = r#"
+version: 1
+kind: study
+id: bracket_thermal
+geometry:
+  path: part.stl
+  units: meter
+model:
+  profile: thermal_standalone
+run:
+  kind: linear_static
+  backend: cpu
+"#;
+
+    let err = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
+        .expect_err("mismatched legacy run.kind should fail");
+
+    assert!(err.contains("run.kind"));
+    assert!(err.contains("model.profile"));
 }
 
 #[test]
@@ -533,7 +558,6 @@ studies:
       - id: static_step
         kind: static
     run:
-      kind: linear_static
       backend: cpu
 "#;
 
@@ -1038,7 +1062,7 @@ fn analysis_validate_study_rejects_unused_electromagnetic_options() {
         .any(|code| code == "RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH"));
     assert!(envelope.data.issues.iter().any(|issue| {
         issue.code == "RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH"
-            && issue.message.contains("matching run_kind")
+            && issue.message.contains("solver selected by model.profile")
     }));
 }
 

@@ -111,13 +111,15 @@ Direct solve operations require an `AnalysisModel`. They are the right boundary 
 
 ## Run Options
 
-Run options are specified under `run.options` in `.fea`, or through typed runtime option structs in host code. The options are validated against `run.kind`.
+Run options are specified under `run.options` in `.fea`, or through typed runtime option structs in host code. The options are validated against the solver selected by `model.profile`.
 
 Example:
 
 ```yaml
+model:
+  profile: electromagnetic_static
+
 run:
-  kind: electromagnetic
   backend: cpu
   options:
     deterministic_mode: true
@@ -130,7 +132,7 @@ run:
     sweep_frequency_hz: [40.0, 60.0, 120.0]
 ```
 
-Supplying options for the wrong family is a validation issue.
+Supplying options for the wrong selected solver is a validation issue.
 
 ## Results After A Run
 
