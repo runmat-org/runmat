@@ -35,6 +35,10 @@ pub(super) fn import_cad(
         OcctCadFormat::Iges | OcctCadFormat::Brep => None,
     };
 
+    if occt_format == OcctCadFormat::Step && !step_payload_has_topology_entities(bytes) {
+        return build_step_metadata_result(path, metadata.expect("STEP metadata"), options);
+    }
+
     context.check_cancelled()?;
     if let Some(topology) = import_cad_topology(path, bytes, occt_format, &options, context)? {
         context.check_cancelled()?;
@@ -68,6 +72,24 @@ fn parse_step_metadata(
     })?;
     context.check_cancelled()?;
     Ok(summary)
+}
+
+fn step_payload_has_topology_entities(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return true;
+    };
+    let upper = text.to_ascii_uppercase();
+    [
+        "ADVANCED_FACE",
+        "CLOSED_SHELL",
+        "EDGE_CURVE",
+        "FACE_BOUND",
+        "MANIFOLD_SOLID_BREP",
+        "POLY_LOOP",
+        "VERTEX_POINT",
+    ]
+    .iter()
+    .any(|entity| upper.contains(entity))
 }
 
 fn build_step_metadata_result(

@@ -402,6 +402,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(any(
+        all(not(target_arch = "wasm32"), feature = "occt-native"),
+        all(target_arch = "wasm32", feature = "occt-wasm-host")
+    )))]
     fn iges_import_without_occt_reports_backend_unavailable() {
         let error = import_geometry(
             "/assembly.iges",
@@ -413,6 +417,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(any(
+        all(not(target_arch = "wasm32"), feature = "occt-native"),
+        all(target_arch = "wasm32", feature = "occt-wasm-host")
+    )))]
     fn brep_import_without_occt_reports_backend_unavailable() {
         let error = import_geometry(
             "/assembly.brep",

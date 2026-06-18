@@ -1446,15 +1446,15 @@ mod tests {
     use std::fs;
     #[cfg(not(target_arch = "wasm32"))]
     use std::path::{Path, PathBuf};
-    #[cfg(not(target_arch = "wasm32"))]
-    use std::sync::Mutex;
-
-    #[cfg(not(target_arch = "wasm32"))]
-    static CWD_LOCK: Mutex<()> = Mutex::new(());
 
     #[cfg(not(target_arch = "wasm32"))]
     struct CwdGuard {
         original: PathBuf,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn cwd_lock() -> std::sync::MutexGuard<'static, ()> {
+        runmat_filesystem::provider_override_lock()
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1474,7 +1474,7 @@ mod tests {
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn source_input_path_resolves_named_manifest_entrypoint() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _guard = cwd_lock();
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("src")).unwrap();
         fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
@@ -1510,7 +1510,7 @@ path = "src/main"
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn source_input_path_infers_m_extension_for_relative_path() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _guard = cwd_lock();
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("src")).unwrap();
         fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
@@ -1528,7 +1528,7 @@ path = "src/main"
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn source_input_path_errors_for_invalid_named_entrypoint_target() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _guard = cwd_lock();
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("src")).unwrap();
         fs::write(
@@ -1562,7 +1562,7 @@ function = "main"
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn discover_known_project_symbols_reads_manifest_source_context() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _guard = cwd_lock();
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("+stats")).unwrap();
         fs::write(
@@ -1596,7 +1596,7 @@ roots = ["."]
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn discover_known_project_symbols_includes_dependency_alias_qualified_names() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _guard = cwd_lock();
         let tmp = tempfile::TempDir::new().unwrap();
         let dep_root = tmp.path().join("deps/statslib");
         fs::create_dir_all(&dep_root).unwrap();

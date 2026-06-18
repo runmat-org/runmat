@@ -1687,6 +1687,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
 #[test]
 fn analysis_run_linear_static_persists_artifacts_through_runtime_filesystem_provider() {
     let _guard = analysis_test_guard();
+    let _provider_lock = runmat_filesystem::provider_override_lock();
     storage::reset_artifact_store_for_tests();
     let sandbox_root = temp_artifact_root("artifact-provider");
     let _ = fs::remove_dir_all(&sandbox_root);
