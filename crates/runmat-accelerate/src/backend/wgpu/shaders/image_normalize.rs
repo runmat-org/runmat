@@ -222,6 +222,7 @@ fn main(
     let apply_gain = has_flag(1u);
     let apply_bias = has_flag(2u);
     let apply_gamma = has_flag(4u);
+    let apply_clamp_zero = has_flag(8u);
 
     var write_idx = spatial_lane * (LANE_COUNT * VALUES_PER_THREAD) + lane * VALUES_PER_THREAD;
     loop {
@@ -258,7 +259,9 @@ fn main(
                     if apply_bias {
                         component = component + params.bias;
                     }
-                    component = max(component, 0.0f64);
+                    if apply_clamp_zero {
+                        component = max(component, 0.0f64);
+                    }
                     if apply_gamma {
                         component = pow(component, params.gamma);
                     }
@@ -509,6 +512,7 @@ fn main(
     let apply_gain = has_flag(1u);
     let apply_bias = has_flag(2u);
     let apply_gamma = has_flag(4u);
+    let apply_clamp_zero = has_flag(8u);
 
     var write_idx = spatial_lane * (LANE_COUNT * VALUES_PER_THREAD) + lane * VALUES_PER_THREAD;
     loop {
@@ -543,7 +547,9 @@ fn main(
                 if apply_bias {
                     normalized = normalized + vec4<f32>(params.bias);
                 }
-                normalized = max(normalized, vec4<f32>(0.0));
+                if apply_clamp_zero {
+                    normalized = max(normalized, vec4<f32>(0.0));
+                }
                 if apply_gamma {
                     normalized = pow(normalized, vec4<f32>(params.gamma));
                 }

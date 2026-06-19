@@ -1369,6 +1369,8 @@ impl AccelProvider for InProcessProvider {
             device_id: 0,
             buffer_id: id,
         };
+        runmat_accelerate_api::set_handle_precision(&handle, self.precision());
+        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
         runmat_accelerate_api::set_handle_logical(&handle, false);
         Ok(handle)
     }
@@ -1393,6 +1395,7 @@ impl AccelProvider for InProcessProvider {
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
         let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         guard.remove(&h.buffer_id);
+        runmat_accelerate_api::clear_handle_precision(h);
         runmat_accelerate_api::clear_handle_logical(h);
         runmat_accelerate_api::clear_handle_storage(h);
         Ok(())
@@ -5356,6 +5359,14 @@ impl AccelProvider for InProcessProvider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             ensure!(
+                desc.epsilon.is_finite(),
+                "image_normalize: epsilon must be finite"
+            );
+            ensure!(
+                desc.epsilon >= 0.0,
+                "image_normalize: epsilon must be non-negative"
+            );
+            ensure!(
                 input.shape.len() == 3,
                 "image_normalize: expected 3-D tensor, got {:?}",
                 input.shape
@@ -5429,7 +5440,9 @@ impl AccelProvider for InProcessProvider {
                         if desc.bias.is_some() {
                             value += bias;
                         }
-                        value = value.max(0.0);
+                        if desc.clamp_zero {
+                            value = value.max(0.0);
+                        }
                         if let Some(gamma) = gamma {
                             value = value.powf(gamma);
                         }
@@ -5827,5 +5840,51 @@ pub fn register_inprocess_provider() {
 pub fn reset_inprocess_rng() {
     if let Ok(mut guard) = rng_state().lock() {
         *guard = 0x9e3779b97f4a7c15;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upload_overwrites_stale_handle_metadata() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(9_000_000, Ordering::Relaxed);
+        let stale = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_000_000,
+        };
+        runmat_accelerate_api::set_handle_precision(&stale, ProviderPrecision::F32);
+        runmat_accelerate_api::set_handle_storage(&stale, GpuTensorStorage::ComplexInterleaved);
+        runmat_accelerate_api::set_handle_logical(&stale, true);
+
+        let data = [1.0, 2.0, 3.0];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &data,
+                shape: &[1, 3],
+            })
+            .expect("upload");
+
+        assert_eq!(handle.buffer_id, stale.buffer_id);
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&handle),
+            Some(ProviderPrecision::F64)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&handle),
+            GpuTensorStorage::Real
+        );
+        assert!(!runmat_accelerate_api::handle_is_logical(&handle));
+
+        provider.free(&handle).expect("free");
+        assert_eq!(runmat_accelerate_api::handle_precision(&handle), None);
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&handle),
+            GpuTensorStorage::Real
+        );
+        assert!(!runmat_accelerate_api::handle_is_logical(&handle));
     }
 }

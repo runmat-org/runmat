@@ -935,6 +935,7 @@ pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Res
         gain,
         bias,
         gamma,
+        clamp_zero: pattern.clamp_zero,
     };
     if log::log_enabled!(log::Level::Trace) {
         log::trace!("execute_image_normalize: desc {:?}", desc);

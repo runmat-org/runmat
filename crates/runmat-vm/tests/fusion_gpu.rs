@@ -371,7 +371,9 @@ impl AccelProvider for TestProvider {
                     if let Some(bias) = desc.bias {
                         value += bias;
                     }
-                    value = value.max(0.0);
+                    if desc.clamp_zero {
+                        value = value.max(0.0);
+                    }
                     if let Some(gamma) = desc.gamma {
                         value = value.powf(gamma);
                     }
@@ -3605,12 +3607,11 @@ fn image_normalize_matches_cpu() {
 
         let bytecode = compile_semantic(source);
 
-        if let Some(graph) = graph_for_fusion_test(&bytecode) {
-            let groups = graph.detect_fusion_groups();
-            assert!(groups
-                .iter()
-                .any(|group| matches!(group.kind, FusionKind::ImageNormalize)));
-        }
+        let graph = graph_for_fusion_test(&bytecode).expect("image normalize accel graph");
+        let groups = graph.detect_fusion_groups();
+        assert!(groups
+            .iter()
+            .any(|group| matches!(group.kind, FusionKind::ImageNormalize)));
 
         let out_index = bytecode
             .instructions
@@ -3632,7 +3633,7 @@ fn image_normalize_matches_cpu() {
         };
 
         ensure_provider_registered();
-        let vars_gpu = interpret_function(&bytecode, vars_cpu.clone()).expect("gpu interpret");
+        let vars_gpu = interpret_function(&bytecode, vars.clone()).expect("gpu interpret");
         let out_gpu = vars_gpu.get(out_index).expect("gpu out");
         assert!(
             matches!(out_gpu, Value::GpuTensor(_)),
@@ -3652,6 +3653,129 @@ fn image_normalize_matches_cpu() {
                 diff <= tol,
                 "image normalize mismatch: lhs={lhs}, rhs={rhs}, diff={diff}"
             );
+        }
+    });
+}
+
+#[test]
+fn image_normalize_vecdim_unclamped_detects_fusion() {
+    gc_test_context(|| {
+        use runmat_accelerate::{FusionKind, FusionPattern};
+        let source = r#"
+        rng(0); B=2; H=4; W=5;
+        gain=single(1.0123); bias=single(-0.02); gamma=single(1.8); eps0=single(1e-6);
+
+        imgs = rand(B, H, W, 'single');
+        mu = mean(imgs, [2 3]);
+        sigma = sqrt(mean((imgs - mu).^2, [2 3]) + eps0);
+        out = ((imgs - mu) ./ sigma) * gain + bias;
+        out = out .^ gamma;
+        mse = mean((out - imgs).^2, 'all');
+
+        fprintf('RESULT_ok MSE=%.6e\n', double(mse));
+        "#;
+
+        let bytecode = compile_semantic(source);
+
+        let graph = graph_for_fusion_test(&bytecode).expect("vecdim image normalize accel graph");
+        let groups = graph.detect_fusion_groups();
+        let group = groups
+            .iter()
+            .find(|group| matches!(group.kind, FusionKind::ImageNormalize))
+            .expect("image normalize group not detected for vecdim form");
+        match group.pattern.as_ref() {
+            Some(FusionPattern::ImageNormalize(pattern)) => {
+                assert!(
+                    !pattern.clamp_zero,
+                    "exact unclamped script should not set clamp_zero"
+                );
+            }
+            other => panic!("missing image normalize pattern, got {other:?}"),
+        }
+    });
+}
+
+#[test]
+fn image_normalize_vecdim_matches_cpu() {
+    gc_test_context(|| {
+        use runmat_accelerate::{FusionKind, FusionPattern};
+        let source = r#"
+        rng(0); B=2; H=4; W=5;
+        gain=single(1.0123); bias=single(-0.02); gamma=single(1.8); eps0=single(1e-6);
+
+        imgs = rand(B, H, W, 'single');
+        mu = single(mean(imgs, [2 3], 'native'));
+        sigma = single(sqrt(mean((imgs - mu).^2, [2 3], 'native') + eps0));
+        out = single(((imgs - mu) ./ sigma) * gain + bias);
+        out = max(out, single(0));
+        out = single(out .^ gamma);
+        err = out - imgs;
+        mse = mean(err .* err, 'all');
+
+        fprintf('RESULT_ok MSE=%.6e\n', double(mse));
+        "#;
+
+        let bytecode = compile_semantic(source);
+
+        let graph = graph_for_fusion_test(&bytecode).expect("vecdim image normalize accel graph");
+        let groups = graph.detect_fusion_groups();
+        let group = groups
+            .iter()
+            .find(|group| matches!(group.kind, FusionKind::ImageNormalize))
+            .expect("image normalize group not detected for vecdim clamped form");
+        match group.pattern.as_ref() {
+            Some(FusionPattern::ImageNormalize(pattern)) => {
+                assert!(
+                    pattern.clamp_zero,
+                    "clamped vecdim script should set clamp_zero"
+                );
+            }
+            other => panic!("missing image normalize pattern, got {other:?}"),
+        }
+
+        let out_index = bytecode
+            .var_names
+            .iter()
+            .find_map(|(idx, name)| (name == "out").then_some(*idx))
+            .expect("out variable index");
+
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let vars_cpu = interpret_function(&bytecode, vars.clone()).expect("cpu interpret");
+        let out_cpu = vars_cpu.get(out_index).expect("cpu out");
+        let gathered_cpu = gather_if_needed(out_cpu).expect("gather cpu out");
+        let cpu_tensor = match gathered_cpu {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor out (cpu), got {other:?}"),
+        };
+
+        ensure_provider_registered();
+        let vars_gpu = interpret_function(&bytecode, vars.clone()).expect("gpu interpret");
+        let out_gpu = vars_gpu.get(out_index).expect("gpu out");
+        assert!(
+            matches!(out_gpu, Value::GpuTensor(_)),
+            "expected gpu tensor result"
+        );
+        let gathered_gpu = gather_if_needed(out_gpu).expect("gather gpu out");
+        let gpu_tensor = match gathered_gpu {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor out (gpu), got {other:?}"),
+        };
+
+        assert_eq!(cpu_tensor.shape, gpu_tensor.shape, "shape mismatch");
+        let tol = 5e-4;
+        for (lhs, rhs) in cpu_tensor.data.iter().zip(gpu_tensor.data.iter()) {
+            if lhs.is_nan() || rhs.is_nan() {
+                assert!(
+                    lhs.is_nan() && rhs.is_nan(),
+                    "image normalize NaN mismatch: lhs={lhs}, rhs={rhs}"
+                );
+            } else {
+                let diff = (lhs - rhs).abs();
+                assert!(
+                    diff <= tol,
+                    "image normalize vecdim mismatch: lhs={lhs}, rhs={rhs}, diff={diff}"
+                );
+            }
         }
     });
 }

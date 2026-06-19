@@ -32,6 +32,47 @@ pub fn filter_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
+pub fn filtfilt_type(args: &[Type], _context: &ResolveContext) -> Type {
+    let signal = args.get(2);
+    match signal {
+        Some(ty) => numeric_like(ty),
+        None => Type::Unknown,
+    }
+}
+
+pub fn fir1_type(args: &[Type], context: &ResolveContext) -> Type {
+    if args.len() < 2 {
+        return Type::Unknown;
+    }
+    if let Some(order) = literal_nonnegative_integer_at(context, 0) {
+        let Some(width) = fir1_width_for_literal_order(order, args, context) else {
+            return Type::Tensor {
+                shape: Some(vec![Some(1), None]),
+            };
+        };
+        return Type::Tensor {
+            shape: Some(vec![Some(1), Some(width)]),
+        };
+    }
+    Type::Tensor {
+        shape: Some(vec![Some(1), None]),
+    }
+}
+
+pub fn freqz_type(args: &[Type], context: &ResolveContext) -> Type {
+    if args.len() < 2 {
+        return Type::Unknown;
+    }
+    let n = if args.len() >= 3 {
+        literal_positive_integer_at(context, 2)
+    } else {
+        Some(512)
+    };
+    Type::Tensor {
+        shape: Some(vec![n, Some(1)]),
+    }
+}
+
 pub fn butter_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.len() < 2 {
         return Type::Unknown;
@@ -210,6 +251,41 @@ fn literal_nonnegative_integer_at(ctx: &ResolveContext, index: usize) -> Option<
         }
         Some(LiteralValue::Bool(value)) => Some(usize::from(*value)),
         _ => None,
+    }
+}
+
+fn fir1_width_for_literal_order(
+    order: usize,
+    args: &[Type],
+    context: &ResolveContext,
+) -> Option<usize> {
+    let mut needs_even_order = false;
+    for idx in 2..args.len() {
+        if let Some(word) = context.literal_string_at(idx) {
+            needs_even_order |= matches!(
+                word.trim().to_ascii_lowercase().as_str(),
+                "high" | "highpass" | "stop" | "bandstop" | "bandreject"
+            );
+        } else if order % 2 == 1 && could_be_fir1_option_text(&args[idx]) {
+            return None;
+        }
+    }
+    if needs_even_order && order % 2 == 1 {
+        order.checked_add(2)
+    } else {
+        order.checked_add(1)
+    }
+}
+
+fn could_be_fir1_option_text(ty: &Type) -> bool {
+    match ty {
+        Type::String | Type::Unknown => true,
+        Type::Cell {
+            element_type: Some(element_type),
+            ..
+        } if **element_type == Type::String => true,
+        Type::Union(types) => types.iter().any(could_be_fir1_option_text),
+        _ => false,
     }
 }
 
@@ -421,6 +497,25 @@ fn is_numeric_scalar(ty: &Type) -> bool {
 mod tests {
     use super::*;
     use runmat_builtins::LiteralValue;
+
+    #[test]
+    fn fir1_type_requires_order_and_cutoff_arguments() {
+        let ctx = ResolveContext::default();
+
+        assert_eq!(fir1_type(&[], &ctx), Type::Unknown);
+        assert_eq!(fir1_type(&[Type::Num], &ctx), Type::Unknown);
+    }
+
+    #[test]
+    fn freqz_type_requires_numerator_and_denominator_arguments() {
+        let ctx = ResolveContext::default();
+
+        assert_eq!(freqz_type(&[], &ctx), Type::Unknown);
+        assert_eq!(
+            freqz_type(&[Type::Tensor { shape: None }], &ctx),
+            Type::Unknown
+        );
+    }
 
     #[test]
     fn conv_full_uses_length_sum() {

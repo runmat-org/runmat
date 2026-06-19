@@ -48,3 +48,7 @@ lsp-types = "0.94"
 serde-wasm-bindgen = "0.6"
 wasm-bindgen-futures = "0.4"
 runmat-runtime = { workspace = true, features = ["plot-web"] }
+
+# Keep wasm-opt enabled while avoiding a Binaryen precompute crash seen on Windows.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--skip-pass=precompute"]

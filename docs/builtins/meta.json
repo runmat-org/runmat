@@ -25272,6 +25272,27 @@
           ]
         },
         {
+          "label": "ax = gca(fig)",
+          "inputs": [
+            {
+              "name": "fig",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Figure handle whose current axes should be returned."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ax",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current axes handle."
+            }
+          ]
+        },
+        {
           "label": "s = gca('struct')",
           "inputs": [
             {

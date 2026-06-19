@@ -384,6 +384,15 @@ impl WgpuProvider {
         input: &GpuTensorHandle,
         desc: &runmat_accelerate_api::ImageNormalizeDescriptor,
     ) -> Result<GpuTensorHandle> {
+        ensure!(
+            desc.epsilon.is_finite(),
+            "image_normalize: epsilon must be finite"
+        );
+        ensure!(
+            desc.epsilon >= 0.0,
+            "image_normalize: epsilon must be non-negative"
+        );
+
         let mut host = <Self as AccelProvider>::download(self, input).await?;
         ensure!(
             host.shape.len() == 3,
@@ -454,7 +463,9 @@ impl WgpuProvider {
                     if desc.bias.is_some() {
                         value += bias;
                     }
-                    value = value.max(0.0);
+                    if desc.clamp_zero {
+                        value = value.max(0.0);
+                    }
                     if let Some(gamma) = gamma {
                         value = value.powf(gamma);
                     }
