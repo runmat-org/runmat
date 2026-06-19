@@ -98,6 +98,7 @@ jobs:
           packages=(
             build-essential
             ca-certificates
+            cmake
             curl
             gdb
             git
@@ -134,6 +135,9 @@ jobs:
 
           if ! command -v pkg-config >/dev/null 2>&1; then
             missing+=('pkg-config(binary)')
+          fi
+          if ! command -v cmake >/dev/null 2>&1; then
+            missing+=('cmake(binary)')
           fi
           if ! command -v gdb >/dev/null 2>&1; then
             missing+=('gdb(binary)')

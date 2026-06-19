@@ -20,6 +20,7 @@ RUSTUP_HOME="${RUSTUP_HOME:-${HOME}/.rustup}"
 PACKAGES=(
   build-essential
   ca-certificates
+  cmake
   curl
   gdb
   git
@@ -88,6 +89,7 @@ if [[ "$(command -v cargo || true)" != "${CARGO_HOME}/bin/cargo" ]]; then
   exit 1
 fi
 pkg-config --modversion libzmq
+cmake --version >/dev/null
 if [[ -z "${LDCONFIG_BIN}" ]]; then
   echo "ldconfig was not found on PATH or at /usr/sbin/ldconfig" >&2
   exit 1
