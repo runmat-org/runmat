@@ -21,6 +21,7 @@ base64 = "0.22"
 cxx = { version = "1", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
 [build-dependencies]
@@ -33,4 +34,4 @@ anyhow = { workspace = true }
 [features]
 default = []
 occt-native = ["dep:cxx", "dep:cxx-build", "dep:occt-sys"]
-occt-wasm-host = ["dep:wasm-bindgen"]
+occt-wasm-host = ["dep:js-sys", "dep:wasm-bindgen"]

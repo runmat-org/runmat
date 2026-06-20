@@ -2,7 +2,7 @@
 pub const REGISTRY_COMPLETE: bool = true;
 pub const REGISTRY_SOURCE_FINGERPRINT: &str = "fnv1a64-844d21b2587b92d7";
 
-pub const REGISTRY_BUILD_CONFIGURATION: &str = "target=wasm32-unknown-unknown;features=plot-core,plot-web";
+pub const REGISTRY_BUILD_CONFIGURATION: &str = "target=wasm32-unknown-unknown;features=occt-wasm-host,plot-core,plot-web";
 pub const REGISTRY_ENTRY_COUNT: usize = 1428;
 
 pub fn register_all() {

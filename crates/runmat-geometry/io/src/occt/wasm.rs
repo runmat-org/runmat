@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 
 use super::{
     topology_from_raw, OcctCadFormat, OcctCadTopology, OcctRawAssemblyNode, OcctRawFaceSemantic,
@@ -296,7 +297,27 @@ fn default_backend() -> String {
 }
 
 fn js_error_message(value: JsValue) -> String {
-    value
-        .as_string()
-        .unwrap_or_else(|| "unknown JavaScript exception".to_string())
+    if let Some(message) = value.as_string() {
+        return message;
+    }
+
+    if let Some(error) = value.dyn_ref::<js_sys::Error>() {
+        let message = String::from(error.message());
+        let stack = js_sys::Reflect::get(error, &JsValue::from_str("stack"))
+            .ok()
+            .and_then(|value| value.as_string())
+            .unwrap_or_default();
+        if !stack.is_empty() {
+            return stack;
+        }
+        if !message.is_empty() {
+            return message;
+        }
+    }
+
+    js_sys::JSON::stringify(&value)
+        .ok()
+        .and_then(|message| message.as_string())
+        .filter(|message| !message.is_empty())
+        .unwrap_or_else(|| format!("{value:?}"))
 }

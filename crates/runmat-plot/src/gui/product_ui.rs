@@ -187,10 +187,7 @@ fn show_toolbar_tooltip(
         .fixed_pos(pos)
         .interactable(false)
         .show(ctx, |ui| {
-            egui::Frame::none()
-                .fill(theme.tooltip_fill)
-                .stroke(egui::Stroke::new(1.0, theme.tooltip_stroke))
-                .rounding(scaled_corner_radius(2.0 * scale))
+            tooltip_frame(theme, scale)
                 .inner_margin(scaled_margin_symmetric(margin_x, margin_y))
                 .show(ui, |ui| {
                     ui.label(
@@ -200,6 +197,22 @@ fn show_toolbar_tooltip(
                     );
                 });
         });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn tooltip_frame(theme: &ProductToolbarTheme, scale: f32) -> egui::Frame {
+    egui::Frame::NONE
+        .fill(theme.tooltip_fill)
+        .stroke(egui::Stroke::new(1.0, theme.tooltip_stroke))
+        .corner_radius(scaled_corner_radius(2.0 * scale))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn tooltip_frame(theme: &ProductToolbarTheme, scale: f32) -> egui::Frame {
+    egui::Frame::none()
+        .fill(theme.tooltip_fill)
+        .stroke(egui::Stroke::new(1.0, theme.tooltip_stroke))
+        .rounding(scaled_corner_radius(2.0 * scale))
 }
 
 fn toolbar_visuals(

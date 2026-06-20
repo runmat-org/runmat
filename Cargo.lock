@@ -5523,6 +5523,7 @@ dependencies = [
  "base64 0.22.1",
  "cxx",
  "cxx-build",
+ "js-sys",
  "occt-sys",
  "runmat-geometry-core",
  "serde",

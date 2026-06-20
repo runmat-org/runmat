@@ -1213,7 +1213,7 @@ export async function takePlotSurfaceHostActions(surfaceId: number): Promise<Plo
   if (typeof native.takePlotSurfaceHostActions !== "function") {
     return [];
   }
-  const actions = native.takePlotSurfaceHostActions(surfaceId);
+  const actions = normalizeWasmStructuredValue(native.takePlotSurfaceHostActions(surfaceId));
   return Array.isArray(actions) ? actions.filter(isPlotSurfaceHostAction) : [];
 }
 
@@ -1969,6 +1969,35 @@ function isPlotSurfaceHostAction(value: unknown): value is PlotSurfaceHostAction
     value !== null &&
     (value as { kind?: unknown }).kind === "createFeaStudy"
   );
+}
+
+function normalizeWasmStructuredValue(value: unknown): unknown {
+  if (value instanceof Map) {
+    const normalized: Record<string, unknown> = {};
+    for (const [key, entryValue] of value.entries()) {
+      if (typeof key === "string" || typeof key === "number" || typeof key === "boolean") {
+        normalized[String(key)] = normalizeWasmStructuredValue(entryValue);
+      }
+    }
+    return normalized;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeWasmStructuredValue(entry));
+  }
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
+    return value;
+  }
+  if (value && typeof value === "object") {
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (prototype === Object.prototype || prototype === null) {
+      const normalized: Record<string, unknown> = {};
+      for (const [key, entryValue] of Object.entries(value as Record<string, unknown>)) {
+        normalized[key] = normalizeWasmStructuredValue(entryValue);
+      }
+      return normalized;
+    }
+  }
+  return value;
 }
 
 function coerceFigureError(value: unknown): FigureBindingError {

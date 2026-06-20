@@ -86,10 +86,7 @@ impl GeometryImportContext {
         }
     }
 
-    #[cfg(any(
-        all(not(target_arch = "wasm32"), feature = "occt-native"),
-        all(target_arch = "wasm32", feature = "occt-wasm-host")
-    ))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
     pub(crate) fn cancellation_flag(&self) -> Option<Arc<AtomicBool>> {
         self.cancellation.clone()
     }

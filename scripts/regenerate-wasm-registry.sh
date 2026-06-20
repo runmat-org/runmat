@@ -15,11 +15,11 @@ cleanup() {
 trap cleanup EXIT
 
 pushd "${REPO_ROOT}" >/dev/null
-echo "==> generating wasm builtin registry for runmat-runtime/plot-web"
+echo "==> generating wasm builtin registry for runmat-runtime/plot-web,occt-wasm-host"
 cargo clean -p runmat-runtime --target wasm32-unknown-unknown >/dev/null
 RUNMAT_GENERATE_WASM_REGISTRY=1 \
 RUNMAT_WASM_REGISTRY_OUT="${TMP_REGISTRY}" \
-cargo check -p runmat-runtime --target wasm32-unknown-unknown --no-default-features --features plot-web >/dev/null
+cargo check -p runmat-runtime --target wasm32-unknown-unknown --no-default-features --features plot-web,occt-wasm-host >/dev/null
 
 entry_count="$(grep -c "__runmat_wasm_register_" "${TMP_REGISTRY}" || true)"
 builtin_count="$(grep -c "__runmat_wasm_register_builtin_" "${TMP_REGISTRY}" || true)"

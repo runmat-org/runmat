@@ -157,7 +157,7 @@ impl CadOverlayState {
                 }
 
                 let content_rect = strip_rect;
-                ui.allocate_ui_at_rect(content_rect, |ui| {
+                allocate_ui_at_rect_compat(ui, content_rect, |ui| {
                     ui.set_min_size(content_rect.size());
                     ui.spacing_mut().item_spacing = egui::vec2(8.0 * scale, 0.0);
                     ui.horizontal(|ui| {
@@ -458,51 +458,45 @@ impl CadOverlayState {
                         self.show_tree = false;
                     });
                     ui.add_space(3.0 * scale);
-                    egui::ScrollArea::vertical()
-                        .id_source("runmat_cad_assembly_tree_scroll")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            if overlay.assembly_nodes.is_empty() {
-                                ui.label(detail_text("No assembly tree".to_string(), scale, theme));
-                            } else {
-                                section_label(ui, "Components", scale, theme);
-                                for node in &overlay.assembly_nodes {
-                                    self.render_tree_node(
-                                        ui,
-                                        node,
-                                        0,
-                                        owner_visible,
-                                        scale,
-                                        theme,
-                                        actions,
-                                    );
-                                }
+                    scroll_area_id(
+                        egui::ScrollArea::vertical(),
+                        "runmat_cad_assembly_tree_scroll",
+                    )
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        if overlay.assembly_nodes.is_empty() {
+                            ui.label(detail_text("No assembly tree".to_string(), scale, theme));
+                        } else {
+                            section_label(ui, "Components", scale, theme);
+                            for node in &overlay.assembly_nodes {
+                                self.render_tree_node(
+                                    ui,
+                                    node,
+                                    0,
+                                    owner_visible,
+                                    scale,
+                                    theme,
+                                    actions,
+                                );
                             }
+                        }
 
-                            if !overlay.regions.is_empty() {
-                                ui.add_space(8.0 * scale);
-                                section_label(ui, "Regions", scale, theme);
-                                let row_height = TREE_ROW_HEIGHT * scale;
-                                egui::ScrollArea::vertical()
-                                    .id_source("runmat_cad_region_list")
-                                    .max_height(210.0 * scale)
-                                    .auto_shrink([false, false])
-                                    .show_rows(
-                                        ui,
-                                        row_height,
-                                        overlay.regions.len(),
-                                        |ui, range| {
-                                            for index in range {
-                                                if let Some(region) = overlay.regions.get(index) {
-                                                    self.render_region_row(
-                                                        ui, region, scale, theme,
-                                                    );
-                                                }
-                                            }
-                                        },
-                                    );
-                            }
-                        });
+                        if !overlay.regions.is_empty() {
+                            ui.add_space(8.0 * scale);
+                            section_label(ui, "Regions", scale, theme);
+                            let row_height = TREE_ROW_HEIGHT * scale;
+                            scroll_area_id(egui::ScrollArea::vertical(), "runmat_cad_region_list")
+                                .max_height(210.0 * scale)
+                                .auto_shrink([false, false])
+                                .show_rows(ui, row_height, overlay.regions.len(), |ui, range| {
+                                    for index in range {
+                                        if let Some(region) = overlay.regions.get(index) {
+                                            self.render_region_row(ui, region, scale, theme);
+                                        }
+                                    }
+                                });
+                        }
+                    });
                 });
             });
         self.capture_regions.push(response.response.rect);
@@ -838,12 +832,50 @@ fn strip_height(scale: f32) -> f32 {
     STRIP_HEIGHT * scale
 }
 
+#[cfg(target_arch = "wasm32")]
+fn panel_frame(theme: &CadOverlayTheme, scale: f32) -> egui::Frame {
+    egui::Frame::NONE
+        .fill(theme.panel_bg)
+        .stroke(egui::Stroke::new(1.0, theme.panel_border))
+        .corner_radius(scaled_corner_radius(PANEL_CORNER_RADIUS * scale))
+        .inner_margin(scaled_margin_same(10.0 * scale))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn panel_frame(theme: &CadOverlayTheme, scale: f32) -> egui::Frame {
     egui::Frame::none()
         .fill(theme.panel_bg)
         .stroke(egui::Stroke::new(1.0, theme.panel_border))
         .rounding(scaled_corner_radius(PANEL_CORNER_RADIUS * scale))
         .inner_margin(scaled_margin_same(10.0 * scale))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn allocate_ui_at_rect_compat(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), add_contents);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn allocate_ui_at_rect_compat(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    ui.allocate_ui_at_rect(rect, add_contents);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn scroll_area_id(scroll_area: egui::ScrollArea, id: &'static str) -> egui::ScrollArea {
+    scroll_area.id_salt(id)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn scroll_area_id(scroll_area: egui::ScrollArea, id: &'static str) -> egui::ScrollArea {
+    scroll_area.id_source(id)
 }
 
 #[cfg(target_arch = "wasm32")]

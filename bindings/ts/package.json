@@ -41,7 +41,7 @@
     "build:types": "npm run generate:builtins && tsc -p tsconfig.json",
     "build:snapshot": "mkdir -p artifacts && cargo run -p runmat-snapshot --bin runmat-snapshot-tool -- create -o artifacts/stdlib.snapshot",
     "build": "npm run clean && npm run build:registry && npm run build:wasm:web && npm run build:lsp && npm run build:types && npm run build:snapshot && npm run sync:wasm",
-    "ci": "npm run build && npm run lint && npm test && cargo check -p runmat-wasm --target wasm32-unknown-unknown",
+    "ci": "npm run build && npm run lint && npm test && cargo check -p runmat-wasm --target wasm32-unknown-unknown --features occt-wasm-host",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "sync:wasm": "node ./scripts/sync-wasm-artifacts.cjs",
