@@ -77,6 +77,8 @@ pub struct ImageNormalizePattern {
     pub gain: Option<ImageScalar>,
     pub bias: Option<ImageScalar>,
     pub gamma: Option<ImageScalar>,
+    #[serde(default)]
+    pub clamp_zero: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2334,6 +2336,7 @@ fn detect_image_normalize(
             gain: match_info.gain.clone(),
             bias: match_info.bias.clone(),
             gamma: match_info.gamma.clone(),
+            clamp_zero: match_info.clamp_zero,
         };
 
         groups.push(FusionGroup {
@@ -2890,6 +2893,9 @@ fn primitive_expr(
         }
         PrimitiveOp::Pow | PrimitiveOp::ElemPow => {
             let (lhs, rhs) = binary(exprs)?;
+            if expr_is_literal(rhs.as_str(), 2.0) {
+                return Some(format!("({lhs} * {lhs})"));
+            }
             Some(format!("pow({lhs}, {rhs})"))
         }
         PrimitiveOp::Neg => {
@@ -2902,6 +2908,18 @@ fn primitive_expr(
         }
         _ => None,
     }
+}
+
+fn expr_is_literal(expr: &str, expected: f64) -> bool {
+    let trimmed = expr.trim();
+    let literal = trimmed
+        .strip_prefix("f64(")
+        .and_then(|rest| rest.strip_suffix(')'))
+        .unwrap_or(trimmed);
+    literal
+        .parse::<f64>()
+        .map(|value| (value - expected).abs() <= f64::EPSILON)
+        .unwrap_or(false)
 }
 
 fn builtin_expr(
@@ -3230,6 +3248,7 @@ struct ImageNormalizeMatch {
     gain: Option<ImageScalar>,
     bias: Option<ImageScalar>,
     gamma: Option<ImageScalar>,
+    clamp_zero: bool,
 }
 
 fn analyze_image_normalize(
@@ -3276,12 +3295,21 @@ fn analyze_image_normalize(
         _ => Some(gamma_scalar),
     };
 
-    let (clamp_node_id, clamp_input_vid) =
-        split_max_with_zero_scalar(graph, pow_node.inputs[0], assigned, &mut nodes)?;
-    if assigned.contains(&clamp_node_id) {
-        img_norm_fail!("clamp node already assigned");
-    }
-    nodes.push(clamp_node_id);
+    let mut clamp_nodes = Vec::new();
+    let pow_base_vid = peel_numeric_casts(graph, pow_node.inputs[0], assigned, &mut clamp_nodes)?;
+    let (clamp_input_vid, clamp_zero) = if let Some((clamp_node_id, clamp_input_vid)) =
+        split_max_with_zero_scalar(graph, pow_base_vid, assigned, &mut clamp_nodes)
+    {
+        if assigned.contains(&clamp_node_id) {
+            img_norm_fail!("clamp node already assigned");
+        }
+        nodes.extend(clamp_nodes);
+        nodes.push(clamp_node_id);
+        (clamp_input_vid, true)
+    } else {
+        nodes.extend(clamp_nodes);
+        (pow_base_vid, false)
+    };
 
     let pre_bias_vid = peel_numeric_casts(graph, clamp_input_vid, assigned, &mut nodes)?;
     let (pre_gain_vid, bias_opt) = if let Some((add_node_id, base_vid, bias_scalar)) =
@@ -3442,6 +3470,7 @@ fn analyze_image_normalize(
         gain: gain_opt,
         bias: bias_opt,
         gamma: gamma_opt,
+        clamp_zero,
     })
 }
 

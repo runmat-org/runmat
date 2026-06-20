@@ -57,3 +57,7 @@ runmat-plot = { workspace = true, features = ["web", "egui-overlay"] }
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
 runmat-hir = { workspace = true }
+
+# Keep wasm-opt enabled while avoiding a Binaryen precompute crash seen on Windows.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--skip-pass=precompute"]
