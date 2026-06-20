@@ -302,6 +302,29 @@ const ROLLING_TARGET_FIXTURES: &[&str] = &[
 
 const SYNTHETIC_TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 
+fn default_harness_artifact_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/runmat-fea-artifacts")
+}
+
+fn env_path(primary: &str, legacy: &str) -> Option<PathBuf> {
+    std::env::var(primary)
+        .ok()
+        .or_else(|| std::env::var(legacy).ok())
+        .map(PathBuf::from)
+}
+
+fn harness_artifact_root() -> PathBuf {
+    env_path("RUNMAT_FEA_ARTIFACT_ROOT", "RUNMAT_ANALYSIS_ARTIFACT_ROOT")
+        .unwrap_or_else(default_harness_artifact_root)
+}
+
+fn harness_thermo_field_artifact_root(artifact_root: &PathBuf) -> PathBuf {
+    std::env::var("RUNMAT_THERMO_FIELD_ARTIFACT_ROOT")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| artifact_root.join("thermo-fields"))
+}
+
 fn synthesized_nonlinear_model() -> AnalysisModel {
     let geometry = geometry_load_op(
         "/synthetic/nonlinear_fixture.stl",
@@ -340,10 +363,10 @@ use runner::run_fixture;
 
 #[test]
 fn fea_benchmark_conformance_manifest_gates() {
-    let artifact_root =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/runmat-fea-artifacts");
-    let store_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/runmat-fea-artifacts/store")
+    let artifact_root = harness_artifact_root();
+    let thermo_field_artifact_root = harness_thermo_field_artifact_root(&artifact_root);
+    let store_root = artifact_root
+        .join("store")
         .join(format!("harness-{}", std::process::id()));
     let _ = fs::remove_dir_all(&store_root);
     runmat_runtime::analysis::storage::configure_artifact_store(
@@ -355,7 +378,7 @@ fn fea_benchmark_conformance_manifest_gates() {
     runmat_runtime::analysis::configure_fea_runtime(runmat_runtime::analysis::FeaRuntimeConfig {
         artifact_root: Some(artifact_root.clone()),
         study_artifact_root: Some(artifact_root.join("studies")),
-        thermo_field_artifact_root: Some(artifact_root.join("thermo-fields")),
+        thermo_field_artifact_root: Some(thermo_field_artifact_root),
     })
     .expect("configure FEA runtime artifact roots for harness");
 
@@ -403,7 +426,8 @@ fn fea_benchmark_conformance_manifest_gates() {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|value| value.as_secs())
                 .unwrap_or(0);
-            let snapshot_path = dir_path.join(format!("fea_benchmark_report_{stamp}.json"));
+            let snapshot_path =
+                dir_path.join(format!("analysis_benchmark_report_rolling_{stamp}.json"));
             let _ = fs::write(snapshot_path, &report_json);
         }
     }

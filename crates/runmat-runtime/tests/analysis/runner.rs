@@ -1949,8 +1949,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
 }
 
 fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisModel) {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/runmat-fea-artifacts/thermo-fields");
+    let root = harness_thermo_field_artifact_root(&harness_artifact_root());
     let _ = fs::create_dir_all(&root);
     let write_artifact = |artifact_id: &str,
                           source_id: &str,
@@ -1958,7 +1957,7 @@ fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisMode
                           region_temperature_deltas: serde_json::Value,
                           time_profile: serde_json::Value| {
         let mut payload = serde_json::json!({
-            "schema_version": "fea_thermo_field_artifact/v1",
+            "schema_version": "analysis_thermo_field_artifact/v1",
             "source_geometry_id": model.geometry_id,
             "source_geometry_revision": model.geometry_revision,
             "artifact_status": "approved",
