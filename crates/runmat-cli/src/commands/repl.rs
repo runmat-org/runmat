@@ -142,7 +142,9 @@ fn print_repl_banner(config: &RunMatRuntimeConfig, engine: &RunMatSession) {
 }
 
 fn detect_banner_capabilities() -> BannerCapabilities {
-    let decorated = atty::is(atty::Stream::Stdout)
+    let no_color = std::env::var_os("NO_COLOR").is_some();
+    let decorated = !no_color
+        && atty::is(atty::Stream::Stdout)
         && std::env::var("TERM")
             .map(|term| term != "dumb")
             .unwrap_or(true);
