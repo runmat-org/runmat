@@ -4,8 +4,9 @@ use runmat_analysis_fea::{
     fea_modal_mode_shape_field_id, ComputeBackend, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
     FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_MODAL_EIGENVALUE,
     FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
-    FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
+    FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
 use runmat_runtime::analysis::{
@@ -1025,6 +1026,21 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
         .data
         .run
         .field(FEA_FIELD_MODAL_PARTICIPATION_FACTOR)
+        .is_some());
+    assert!(modal_envelope
+        .data
+        .run
+        .field(FEA_FIELD_MODAL_RESIDUAL_NORM)
+        .is_some());
+    assert!(modal_envelope
+        .data
+        .run
+        .field(FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION)
+        .is_some());
+    assert!(modal_envelope
+        .data
+        .run
+        .field(FEA_FIELD_MODAL_M_ORTHOGONALITY)
         .is_some());
     assert_eq!(modal_envelope.data.run_status, RunStatus::Degraded);
     assert!(!modal_envelope.data.publishable);

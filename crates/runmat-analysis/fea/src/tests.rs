@@ -11,8 +11,9 @@ use crate::{
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
     ComputeBackend, FeaRunResult, FeaThermoMechanicalContext, ModalSolveOptions,
     ThermalSolveOptions, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
-    FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
+    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
@@ -175,6 +176,25 @@ fn modal_solver_emits_modes_for_modal_step_fixture() {
         field(&result.run, FEA_FIELD_MODAL_PARTICIPATION_FACTOR).element_count(),
         result.eigenvalues_hz.len()
     );
+    assert_eq!(
+        field(&result.run, FEA_FIELD_MODAL_RESIDUAL_NORM).element_count(),
+        result.eigenvalues_hz.len()
+    );
+    assert_eq!(
+        field(&result.run, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION).element_count(),
+        result.eigenvalues_hz.len()
+    );
+    let orthogonality = field(&result.run, FEA_FIELD_MODAL_M_ORTHOGONALITY);
+    assert_eq!(
+        orthogonality.element_count(),
+        result.eigenvalues_hz.len() * result.eigenvalues_hz.len()
+    );
+    assert_eq!(
+        orthogonality.shape,
+        vec![result.eigenvalues_hz.len(), result.eigenvalues_hz.len()]
+    );
+    let residual_norms = host_field(&result.run, FEA_FIELD_MODAL_RESIDUAL_NORM);
+    assert_eq!(residual_norms, result.residual_norms.as_slice());
     assert!(result
         .run
         .diagnostics

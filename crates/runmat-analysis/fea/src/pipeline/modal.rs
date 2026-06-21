@@ -6,8 +6,9 @@ use crate::{
         fea_modal_mode_shape_field_id, ComputeBackend, FeaModalRunResult, FeaRunError,
         FeaRunResult, ModalSolveOptions, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
         FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
-        FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-        FEA_FIELD_STRUCTURAL_VON_MISES,
+        FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
+        FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     operator::{apply_k, apply_m},
@@ -126,8 +127,12 @@ pub fn run_modal_with_options(
         .map(|value| value.abs())
         .fold(0.0_f64, f64::max)
         * 1.0e11;
-    let modal_fields =
-        recover_modal_result_fields(&summary, &modal.eigenvalues_hz, &modal.mode_shapes);
+    let modal_fields = recover_modal_result_fields(
+        &summary,
+        &modal.eigenvalues_hz,
+        &modal.mode_shapes,
+        &modal.residual_norms,
+    );
     let mut run_fields = vec![
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_DISPLACEMENT,
@@ -204,6 +209,7 @@ fn recover_modal_result_fields(
     summary: &crate::assembly::AssemblySummary,
     frequencies_hz: &[f64],
     mode_shapes: &[Vec<f64>],
+    residual_norms: &[f64],
 ) -> Vec<AnalysisField> {
     let mode_count = frequencies_hz.len().min(mode_shapes.len());
     let frequencies = frequencies_hz
@@ -218,6 +224,11 @@ fn recover_modal_result_fields(
     let mut modal_mass = Vec::with_capacity(mode_count);
     let mut modal_stiffness = Vec::with_capacity(mode_count);
     let mut participation_factor = Vec::with_capacity(mode_count);
+    let residual_norm = (0..mode_count)
+        .map(|index| residual_norms.get(index).copied().unwrap_or(f64::INFINITY))
+        .collect::<Vec<_>>();
+    let relative_frequency_separation = relative_frequency_separation(&frequencies);
+    let mut m_orthogonality = Vec::with_capacity(mode_count.saturating_mul(mode_count));
 
     for mode_shape in mode_shapes.iter().take(mode_count) {
         let mass_applied = apply_m(&summary.operator, mode_shape);
@@ -227,6 +238,13 @@ fn recover_modal_result_fields(
         modal_mass.push(mass);
         modal_stiffness.push(stiffness);
         participation_factor.push(mass_applied.iter().sum::<f64>() / mass.sqrt().max(1.0e-12));
+    }
+
+    for left in mode_shapes.iter().take(mode_count) {
+        for right in mode_shapes.iter().take(mode_count) {
+            let mass_applied = apply_m(&summary.operator, right);
+            m_orthogonality.push(dot(left, &mass_applied));
+        }
     }
 
     vec![
@@ -243,7 +261,41 @@ fn recover_modal_result_fields(
             vec![mode_count],
             participation_factor,
         ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_RESIDUAL_NORM,
+            vec![mode_count],
+            residual_norm,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
+            vec![mode_count],
+            relative_frequency_separation,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_M_ORTHOGONALITY,
+            vec![mode_count, mode_count],
+            m_orthogonality,
+        ),
     ]
+}
+
+fn relative_frequency_separation(frequencies: &[f64]) -> Vec<f64> {
+    if frequencies.len() < 2 {
+        return vec![1.0; frequencies.len()];
+    }
+
+    let mut separation = vec![f64::INFINITY; frequencies.len()];
+    for (index, window) in frequencies.windows(2).enumerate() {
+        let a = window[0].abs().max(1.0e-12);
+        let b = window[1].abs().max(1.0e-12);
+        let value = (b - a).abs() / a.max(b);
+        separation[index] = separation[index].min(value);
+        separation[index + 1] = separation[index + 1].min(value);
+    }
+    separation
+        .into_iter()
+        .map(|value| if value.is_finite() { value } else { 1.0 })
+        .collect()
 }
 
 fn dot(left: &[f64], right: &[f64]) -> f64 {

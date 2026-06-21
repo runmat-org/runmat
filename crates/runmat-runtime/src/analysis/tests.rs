@@ -29,8 +29,9 @@ use runmat_analysis_fea::{
     FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
     FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_EM_FLUX_DENSITY_PROXY,
     FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
-    FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
+    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
@@ -5272,6 +5273,19 @@ fn analysis_run_modal_returns_native_modal_result() {
     assert!(field_ids.contains(&FEA_FIELD_MODAL_MODAL_MASS));
     assert!(field_ids.contains(&FEA_FIELD_MODAL_MODAL_STIFFNESS));
     assert!(field_ids.contains(&FEA_FIELD_MODAL_PARTICIPATION_FACTOR));
+    assert!(field_ids.contains(&FEA_FIELD_MODAL_RESIDUAL_NORM));
+    assert!(field_ids.contains(&FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION));
+    let orthogonality_descriptor = results
+        .data
+        .field_descriptors
+        .iter()
+        .find(|descriptor| descriptor.field_id == FEA_FIELD_MODAL_M_ORTHOGONALITY)
+        .expect("modal orthogonality descriptor should be present");
+    assert_eq!(orthogonality_descriptor.kind, AnalysisFieldKind::Tensor);
+    assert_eq!(
+        orthogonality_descriptor.shape,
+        vec![modal.eigenvalues_hz.len(), modal.eigenvalues_hz.len()]
+    );
     assert!(!envelope
         .data
         .quality_reasons

@@ -986,6 +986,9 @@ fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
     if normalized.contains("stress") || normalized.contains("strain") {
         return AnalysisFieldKind::Tensor;
     }
+    if normalized.contains("orthogonality") {
+        return AnalysisFieldKind::Tensor;
+    }
     if normalized.contains("displacement")
         || normalized.contains("mode_shape")
         || normalized.contains("reaction_force")

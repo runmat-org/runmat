@@ -24,6 +24,10 @@ pub const FEA_FIELD_MODAL_EIGENVALUE: &str = "modal.eigenvalue";
 pub const FEA_FIELD_MODAL_MODAL_MASS: &str = "modal.modal_mass";
 pub const FEA_FIELD_MODAL_MODAL_STIFFNESS: &str = "modal.modal_stiffness";
 pub const FEA_FIELD_MODAL_PARTICIPATION_FACTOR: &str = "modal.participation_factor";
+pub const FEA_FIELD_MODAL_RESIDUAL_NORM: &str = "modal.residual_norm";
+pub const FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION: &str =
+    "modal.relative_frequency_separation";
+pub const FEA_FIELD_MODAL_M_ORTHOGONALITY: &str = "modal.m_orthogonality";
 
 pub const FEA_FIELD_ACOUSTIC_PRESSURE_REAL: &str = "acoustic.pressure_real";
 pub const FEA_FIELD_ACOUSTIC_PRESSURE_IMAG: &str = "acoustic.pressure_imag";
