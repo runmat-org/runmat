@@ -42,6 +42,8 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             for fixture_id in (
                 "cantilever_gpu_provider",
                 "cantilever_gpu_fallback",
+                "cantilever_load_sweep_gpu_provider",
+                "cantilever_large_load_sweep_gpu_provider",
             )
             for name, observed in (
                 ("structural_normalized_residual_norm", 1.4210854715202004e-17),

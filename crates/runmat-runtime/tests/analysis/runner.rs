@@ -3771,7 +3771,10 @@ pub(super) fn run_fixture(
         }
         if matches!(
             spec.id,
-            "cantilever_gpu_provider" | "cantilever_gpu_fallback"
+            "cantilever_gpu_provider"
+                | "cantilever_gpu_fallback"
+                | "cantilever_load_sweep_gpu_provider"
+                | "cantilever_large_load_sweep_gpu_provider"
         ) {
             push_linear_structural_threshold_assertions(
                 spec.id,
