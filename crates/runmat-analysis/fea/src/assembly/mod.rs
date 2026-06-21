@@ -12,6 +12,7 @@ pub struct AssemblySummary {
     pub dof_count: usize,
     pub constrained_dof_count: usize,
     pub load_count: usize,
+    pub structural_material: StructuralMaterialSummary,
     pub prep_assembly: Option<PrepAssemblySummary>,
     pub prep_operator_topology: Option<PrepOperatorTopologySummary>,
     pub prep_region_topology: Option<PrepRegionTopologySummary>,
@@ -23,6 +24,14 @@ pub struct AssemblySummary {
     pub thermo_mechanical: Option<ThermoMechanicalAssemblySummary>,
     pub electro_thermal: Option<ElectroThermalAssemblySummary>,
     pub operator: OperatorSystem,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct StructuralMaterialSummary {
+    pub youngs_modulus_pa: f64,
+    pub poisson_ratio: f64,
+    pub lame_lambda_pa: f64,
+    pub shear_modulus_pa: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -206,6 +215,15 @@ pub fn assemble_linear_system(
             .map(|material| material.thermal.reference_temperature_k)
             .sum::<f64>()
             / model.materials.len() as f64
+    };
+    let shear_modulus_pa = avg_youngs_modulus / (2.0 * (1.0 + avg_poisson_ratio)).max(1.0e-9);
+    let lame_lambda_pa = avg_youngs_modulus * avg_poisson_ratio
+        / ((1.0 + avg_poisson_ratio) * (1.0 - 2.0 * avg_poisson_ratio)).max(1.0e-9);
+    let structural_material = StructuralMaterialSummary {
+        youngs_modulus_pa: avg_youngs_modulus,
+        poisson_ratio: avg_poisson_ratio,
+        lame_lambda_pa,
+        shear_modulus_pa,
     };
     let stiffness_base = (avg_youngs_modulus / 2.0e3).max(1.0e5);
 
@@ -716,6 +734,7 @@ pub fn assemble_linear_system(
         dof_count,
         constrained_dof_count,
         load_count: model.loads.len().saturating_add(prep_load_bonus),
+        structural_material,
         prep_assembly,
         prep_operator_topology,
         prep_region_topology,

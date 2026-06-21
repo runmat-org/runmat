@@ -7,7 +7,10 @@ use crate::contracts::{
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use crate::operator::{apply_k, apply_k_unconstrained};
-use crate::{assembly::AssemblySummary, solve::linear::LinearSolveResult};
+use crate::{
+    assembly::{AssemblySummary, StructuralMaterialSummary},
+    solve::linear::LinearSolveResult,
+};
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
 const TENSOR_COMPONENT_COUNT: usize = 6;
@@ -33,9 +36,8 @@ pub fn recover_result_fields(
     displacement_values.resize(node_count * VECTOR_COMPONENT_COUNT, 0.0);
 
     let element_count = node_count.saturating_sub(1).max(1);
-    let stiffness_scale = effective_stress_scale(summary);
     let strain_values = recover_strain(&displacement_values, element_count);
-    let stress_values = recover_stress(&strain_values, stiffness_scale);
+    let stress_values = recover_stress(&strain_values, summary.structural_material);
     let von_mises_values = recover_von_mises(&stress_values);
     let internal_force = apply_k_unconstrained(&summary.operator, &solve_result.solution);
     let reaction_values = recover_reaction_force(summary, &internal_force);
@@ -103,24 +105,6 @@ fn empty_structural_fields() -> Vec<AnalysisField> {
     ]
 }
 
-fn effective_stress_scale(summary: &AssemblySummary) -> f64 {
-    let active_count = summary
-        .operator
-        .stiffness_diag
-        .iter()
-        .filter(|value| value.is_finite() && **value > 0.0)
-        .count()
-        .max(1);
-    let mean_stiffness = summary
-        .operator
-        .stiffness_diag
-        .iter()
-        .filter(|value| value.is_finite() && **value > 0.0)
-        .sum::<f64>()
-        / active_count as f64;
-    (mean_stiffness * 1.0e3).max(1.0)
-}
-
 fn recover_strain(displacement: &[f64], element_count: usize) -> Vec<f64> {
     let mut strain = vec![0.0; element_count * TENSOR_COMPONENT_COUNT];
     for element_index in 0..element_count {
@@ -135,8 +119,21 @@ fn recover_strain(displacement: &[f64], element_count: usize) -> Vec<f64> {
     strain
 }
 
-fn recover_stress(strain: &[f64], stress_scale: f64) -> Vec<f64> {
-    strain.iter().map(|value| value * stress_scale).collect()
+fn recover_stress(strain: &[f64], material: StructuralMaterialSummary) -> Vec<f64> {
+    let lambda = material.lame_lambda_pa.max(0.0);
+    let mu = material.shear_modulus_pa.max(0.0);
+    let mut stress = vec![0.0; strain.len()];
+    for (element_index, strain_tensor) in strain.chunks_exact(TENSOR_COMPONENT_COUNT).enumerate() {
+        let trace = strain_tensor[0] + strain_tensor[1] + strain_tensor[2];
+        let base = element_index * TENSOR_COMPONENT_COUNT;
+        stress[base] = lambda * trace + 2.0 * mu * strain_tensor[0];
+        stress[base + 1] = lambda * trace + 2.0 * mu * strain_tensor[1];
+        stress[base + 2] = lambda * trace + 2.0 * mu * strain_tensor[2];
+        stress[base + 3] = mu * strain_tensor[3];
+        stress[base + 4] = mu * strain_tensor[4];
+        stress[base + 5] = mu * strain_tensor[5];
+    }
+    stress
 }
 
 fn recover_von_mises(stress: &[f64]) -> Vec<f64> {

@@ -73,13 +73,14 @@ fn canonical_cantilever_benchmark_runs() {
     assert!(displacement[1] < -8.0e-6 && displacement[1] > -1.2e-5);
 
     let stress = host_field(&result, FEA_FIELD_STRUCTURAL_VON_MISES);
-    assert!(stress[0] > 8.0e5 && stress[0] < 1.2e6);
+    assert!(stress[0] > 1.0e6 && stress[0] < 2.0e6);
     assert!(host_field(&result, FEA_FIELD_STRUCTURAL_STRAIN)
         .iter()
         .any(|value| value.abs() > 0.0));
-    assert!(host_field(&result, FEA_FIELD_STRUCTURAL_STRESS)
-        .iter()
-        .any(|value| value.abs() > 0.0));
+    let stress_tensor = host_field(&result, FEA_FIELD_STRUCTURAL_STRESS);
+    assert!(stress_tensor.iter().any(|value| value.abs() > 0.0));
+    assert!(stress_tensor[0].abs() > 0.0);
+    assert!(stress_tensor[0].abs() < stress_tensor[1].abs());
     assert!(host_field(&result, FEA_FIELD_STRUCTURAL_REACTION_FORCE)
         .iter()
         .all(|value| value.is_finite()));
