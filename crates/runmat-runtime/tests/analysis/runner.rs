@@ -7486,6 +7486,62 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electromagnetic_sweep_known_reference_coverage_ratio",
+                            "FEA_EM_SWEEP_KNOWN_ANSWER",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_SWEEP_KNOWN_ANSWER",
+                                "reference_frequency_in_sweep_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electromagnetic_sweep_known_peak_frequency_error_ratio",
+                            "FEA_EM_SWEEP_KNOWN_ANSWER",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_SWEEP_KNOWN_ANSWER",
+                                "normalized_peak_frequency_error_ratio",
+                            ),
+                            Some(0.0),
+                            Some(0.25),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electromagnetic_sweep_known_quality_factor",
+                            "FEA_EM_SWEEP_KNOWN_ANSWER",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_SWEEP_KNOWN_ANSWER",
+                                "resonance_quality_factor",
+                            ),
+                            Some(1.5),
+                            Some(1.0e9),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electromagnetic_sweep_known_answer_coverage_ratio",
+                            "FEA_EM_SWEEP_KNOWN_ANSWER",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_SWEEP_KNOWN_ANSWER",
+                                "sweep_known_answer_coverage_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
                     }
                     if spec.id == "electromagnetic_reference_homogeneous_gpu_provider" {
                         push_threshold_assertion(

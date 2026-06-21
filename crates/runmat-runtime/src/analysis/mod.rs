@@ -8150,6 +8150,13 @@ pub fn analysis_run_electromagnetic_with_options_op(
             sweep_metrics.resonance_flux_gain.unwrap_or(0.0),
         ),
     });
+    if sweep_metrics.sweep_count > 1 {
+        run.diagnostics.push(em_sweep_known_answer_diagnostic(
+            em_domain.reference_frequency_hz,
+            &sweep_frequency_hz,
+            &sweep_metrics,
+        ));
+    }
     let solver_convergence = if run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_EM_STATIC"
             && diag.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
@@ -12994,6 +13001,72 @@ fn summarize_em_sweep(frequencies_hz: &[f64], peak_flux_density: &[f64]) -> EmSw
         resonance_bandwidth_hz,
         resonance_quality_factor,
         resonance_flux_gain: Some(resonance_flux_gain),
+    }
+}
+
+fn em_sweep_known_answer_diagnostic(
+    reference_frequency_hz: f64,
+    frequencies_hz: &[f64],
+    metrics: &EmSweepSummary,
+) -> runmat_analysis_fea::diagnostics::FeaDiagnostic {
+    let min_frequency_hz = frequencies_hz.iter().copied().fold(f64::INFINITY, f64::min);
+    let max_frequency_hz = frequencies_hz.iter().copied().fold(0.0_f64, f64::max);
+    let reference_scale = reference_frequency_hz.abs().max(1.0e-9);
+    let reference_frequency_in_sweep_ratio = if frequencies_hz.iter().any(|frequency_hz| {
+        (*frequency_hz - reference_frequency_hz).abs() <= reference_scale * 1.0e-9
+    }) {
+        1.0
+    } else {
+        0.0
+    };
+    let reference_frequency_bracket_ratio = if min_frequency_hz <= reference_frequency_hz
+        && reference_frequency_hz <= max_frequency_hz
+    {
+        1.0
+    } else {
+        0.0
+    };
+    let normalized_peak_frequency_error_ratio = metrics
+        .resonance_peak_frequency_hz
+        .map(|peak_frequency_hz| {
+            ((peak_frequency_hz - reference_frequency_hz).abs() / reference_scale).clamp(0.0, 1.0)
+        })
+        .unwrap_or(1.0);
+    let resonance_flux_gain = metrics.resonance_flux_gain.unwrap_or(0.0);
+    let resonance_quality_factor = metrics.resonance_quality_factor.unwrap_or(0.0);
+    let sweep_known_answer_coverage_ratio = if metrics.sweep_count >= 3
+        && reference_frequency_in_sweep_ratio >= 1.0
+        && reference_frequency_bracket_ratio >= 1.0
+        && normalized_peak_frequency_error_ratio <= 0.25
+        && resonance_flux_gain >= 1.0
+        && resonance_quality_factor >= 1.5
+    {
+        1.0
+    } else {
+        0.0
+    };
+    let severity = if sweep_known_answer_coverage_ratio >= 1.0 {
+        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+    } else {
+        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    };
+
+    runmat_analysis_fea::diagnostics::FeaDiagnostic {
+        code: "FEA_EM_SWEEP_KNOWN_ANSWER".to_string(),
+        severity,
+        message: format!(
+            "basis=bracketed_reference_frequency sweep_count={} reference_frequency_hz={} sweep_frequency_min_hz={} sweep_frequency_max_hz={} reference_frequency_in_sweep_ratio={} reference_frequency_bracket_ratio={} normalized_peak_frequency_error_ratio={} resonance_flux_gain={} resonance_quality_factor={} sweep_known_answer_coverage_ratio={}",
+            metrics.sweep_count,
+            reference_frequency_hz,
+            min_frequency_hz,
+            max_frequency_hz,
+            reference_frequency_in_sweep_ratio,
+            reference_frequency_bracket_ratio,
+            normalized_peak_frequency_error_ratio,
+            resonance_flux_gain,
+            resonance_quality_factor,
+            sweep_known_answer_coverage_ratio,
+        ),
     }
 }
 

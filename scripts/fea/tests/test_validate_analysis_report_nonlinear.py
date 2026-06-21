@@ -49,6 +49,10 @@ EM_SOURCE_ENERGY_ASSERTIONS = {
     "electromagnetic_source_energy_diagnostic_coverage_ratio",
     "electromagnetic_source_energy_consistency_ratio",
     "electromagnetic_source_energy_imbalance_ratio",
+    "electromagnetic_sweep_known_reference_coverage_ratio",
+    "electromagnetic_sweep_known_peak_frequency_error_ratio",
+    "electromagnetic_sweep_known_quality_factor",
+    "electromagnetic_sweep_known_answer_coverage_ratio",
 }
 
 

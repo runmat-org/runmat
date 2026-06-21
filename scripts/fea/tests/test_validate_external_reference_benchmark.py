@@ -21,6 +21,7 @@ from scripts.fea.governance.validate_analysis_report_nonlinear import (
     EM_SOURCE_FIDELITY_REQUIRED_FIELDS,
     EM_SOURCE_INTERFERENCE_REQUIRED_FIELDS,
     EM_SOURCE_LOCALIZATION_REQUIRED_FIELDS,
+    EM_SWEEP_KNOWN_ANSWER_REQUIRED_FIELDS,
     EM_SWEEP_RESONANCE_REQUIRED_FIELDS,
     REQUIRED_FIXTURES,
 )
@@ -54,6 +55,10 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
                 ("electromagnetic_source_energy_diagnostic_coverage_ratio", 1.0),
                 ("electromagnetic_source_energy_consistency_ratio", 0.5),
                 ("electromagnetic_source_energy_imbalance_ratio", 0.5),
+                ("electromagnetic_sweep_known_reference_coverage_ratio", 1.0),
+                ("electromagnetic_sweep_known_peak_frequency_error_ratio", 0.25),
+                ("electromagnetic_sweep_known_quality_factor", 2.0),
+                ("electromagnetic_sweep_known_answer_coverage_ratio", 1.0),
             )
         ],
         *[
@@ -6335,6 +6340,7 @@ class ValidateExternalReferenceBenchmarkTests(unittest.TestCase):
             EM_APPLIED_CURRENT_REQUIRED_FIELDS,
             EM_SOURCE_ENERGY_CONSISTENCY_REQUIRED_FIELDS,
             EM_SOURCE_ENERGY_ASSERTION_REQUIRED_FIELDS,
+            EM_SWEEP_KNOWN_ANSWER_REQUIRED_FIELDS,
             EM_SOURCE_LOCALIZATION_REQUIRED_FIELDS,
             EM_BOUNDARY_CONDITION_LOCALIZATION_REQUIRED_FIELDS,
             EM_GROUND_ANCHOR_EFFECTIVENESS_REQUIRED_FIELDS,
