@@ -3587,6 +3587,56 @@
       "tolerance_rel": 1e-12
     },
     {
+      "name": "acoustic_frequency_response_sweep_count",
+      "fixture_id": "acoustic_harmonic_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_frequency_response_sweep_count",
+      "reference": 3.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "acoustic_frequency_response_coverage_ratio",
+      "fixture_id": "acoustic_harmonic_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_frequency_response_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "acoustic_sweep_bandwidth_hz",
+      "fixture_id": "acoustic_harmonic_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_sweep_bandwidth_hz",
+      "reference": 4242.640687119285,
+      "tolerance_abs": 1e-09,
+      "tolerance_rel": 1e-12
+    },
+    {
+      "name": "acoustic_sweep_peak_pressure_pa",
+      "fixture_id": "acoustic_harmonic_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_sweep_peak_pressure_pa",
+      "reference": 55.273964941285904,
+      "tolerance_abs": 1e-09,
+      "tolerance_rel": 1e-12
+    },
+    {
+      "name": "acoustic_sweep_max_residual_norm",
+      "fixture_id": "acoustic_harmonic_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_sweep_max_residual_norm",
+      "reference": 0.0,
+      "tolerance_abs": 1e-12,
+      "tolerance_rel": null
+    },
+    {
       "name": "acoustic_peak_pressure_pa",
       "fixture_id": "acoustic_harmonic_cpu",
       "field": "unused_for_threshold_source",
@@ -3617,6 +3667,56 @@
       "tolerance_rel": 1e-12
     },
     {
+      "name": "acoustic_frequency_response_sweep_count",
+      "fixture_id": "acoustic_harmonic_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_frequency_response_sweep_count",
+      "reference": 3.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "acoustic_frequency_response_coverage_ratio",
+      "fixture_id": "acoustic_harmonic_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_frequency_response_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "acoustic_sweep_bandwidth_hz",
+      "fixture_id": "acoustic_harmonic_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_sweep_bandwidth_hz",
+      "reference": 4242.640687119285,
+      "tolerance_abs": 1e-09,
+      "tolerance_rel": 1e-12
+    },
+    {
+      "name": "acoustic_sweep_peak_pressure_pa",
+      "fixture_id": "acoustic_harmonic_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_sweep_peak_pressure_pa",
+      "reference": 55.273964941285904,
+      "tolerance_abs": 1e-09,
+      "tolerance_rel": 1e-12
+    },
+    {
+      "name": "acoustic_sweep_max_residual_norm",
+      "fixture_id": "acoustic_harmonic_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_sweep_max_residual_norm",
+      "reference": 0.0,
+      "tolerance_abs": 1e-12,
+      "tolerance_rel": null
+    },
+    {
       "name": "acoustic_peak_pressure_pa",
       "fixture_id": "acoustic_harmonic_gpu_fallback",
       "field": "unused_for_threshold_source",
@@ -3645,6 +3745,56 @@
       "reference": 8485.281374238572,
       "tolerance_abs": 1e-09,
       "tolerance_rel": 1e-12
+    },
+    {
+      "name": "acoustic_frequency_response_sweep_count",
+      "fixture_id": "acoustic_harmonic_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_frequency_response_sweep_count",
+      "reference": 3.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "acoustic_frequency_response_coverage_ratio",
+      "fixture_id": "acoustic_harmonic_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_frequency_response_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "acoustic_sweep_bandwidth_hz",
+      "fixture_id": "acoustic_harmonic_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_sweep_bandwidth_hz",
+      "reference": 4242.640687119285,
+      "tolerance_abs": 1e-09,
+      "tolerance_rel": 1e-12
+    },
+    {
+      "name": "acoustic_sweep_peak_pressure_pa",
+      "fixture_id": "acoustic_harmonic_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_sweep_peak_pressure_pa",
+      "reference": 55.273964941285904,
+      "tolerance_abs": 1e-09,
+      "tolerance_rel": 1e-12
+    },
+    {
+      "name": "acoustic_sweep_max_residual_norm",
+      "fixture_id": "acoustic_harmonic_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_sweep_max_residual_norm",
+      "reference": 0.0,
+      "tolerance_abs": 1e-12,
+      "tolerance_rel": null
     },
     {
       "name": "modal_max_m_orthogonality_offdiag",

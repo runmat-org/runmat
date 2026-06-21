@@ -3014,6 +3014,76 @@ pub(super) fn run_fixture(
                 Some(1.0e-12),
                 None,
             );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_frequency_response_sweep_count",
+                "FEA_ACOUSTIC_FREQUENCY_RESPONSE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_FREQUENCY_RESPONSE",
+                    "sweep_count",
+                ),
+                Some(3.0),
+                Some(3.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_frequency_response_coverage_ratio",
+                "FEA_ACOUSTIC_FREQUENCY_RESPONSE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_FREQUENCY_RESPONSE",
+                    "response_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_sweep_bandwidth_hz",
+                "FEA_ACOUSTIC_FREQUENCY_RESPONSE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_FREQUENCY_RESPONSE",
+                    "sweep_bandwidth_hz",
+                ),
+                Some(1.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_sweep_peak_pressure_pa",
+                "FEA_ACOUSTIC_FREQUENCY_RESPONSE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_FREQUENCY_RESPONSE",
+                    "sweep_peak_pressure_pa",
+                ),
+                Some(1.0e-12),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_sweep_max_residual_norm",
+                "FEA_ACOUSTIC_FREQUENCY_RESPONSE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_FREQUENCY_RESPONSE",
+                    "sweep_max_residual_norm",
+                ),
+                None,
+                Some(1.0e-3),
+            );
         }
         if matches!(
             spec.id,

@@ -55,6 +55,11 @@ pub const FEA_FIELD_ACOUSTIC_PHASE: &str = "acoustic.phase";
 pub const FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB: &str = "acoustic.sound_pressure_level_db";
 pub const FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY: &str = "acoustic.particle_velocity";
 
+pub fn fea_acoustic_frequency_response_field_id(frequency_hz: f64) -> String {
+    let scaled_hz = (frequency_hz.max(0.0) * 1_000.0).round() as u64;
+    format!("acoustic.frequency_response.hz_x1000_{scaled_hz}")
+}
+
 pub const FEA_FIELD_CFD_VELOCITY: &str = "cfd.velocity";
 pub const FEA_FIELD_CFD_PRESSURE: &str = "cfd.pressure";
 pub const FEA_FIELD_CFD_VORTICITY: &str = "cfd.vorticity";

@@ -14,21 +14,22 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::{
-    fea_cht_energy_residual_field_id, fea_cht_fluid_temperature_field_id,
-    fea_cht_interface_heat_flux_field_id, fea_cht_interface_temperature_jump_field_id,
-    fea_cht_solid_temperature_field_id, fea_fsi_coupling_iteration_count_field_id,
-    fea_fsi_fluid_pressure_field_id, fea_fsi_fluid_velocity_field_id,
-    fea_fsi_interface_displacement_field_id, fea_fsi_interface_pressure_field_id,
-    fea_fsi_interface_residual_field_id, fea_fsi_interface_traction_field_id,
-    fea_fsi_structural_displacement_field_id, run_electromagnetic_with_options,
-    run_linear_static_with_options, run_modal_with_options, run_nonlinear_with_options,
-    run_thermal_with_options, run_transient_with_options, ComputeBackend,
-    ElectromagneticSolveOptions, FeaProgressEvent, FeaProgressHandler, FeaProgressPhase,
-    FeaProgressStatus, FeaRunError, FeaRunResult, LinearStaticSolveOptions, ModalSolveOptions,
-    ThermalSolveOptions, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PHASE,
-    FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB,
-    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
+    fea_acoustic_frequency_response_field_id, fea_cht_energy_residual_field_id,
+    fea_cht_fluid_temperature_field_id, fea_cht_interface_heat_flux_field_id,
+    fea_cht_interface_temperature_jump_field_id, fea_cht_solid_temperature_field_id,
+    fea_fsi_coupling_iteration_count_field_id, fea_fsi_fluid_pressure_field_id,
+    fea_fsi_fluid_velocity_field_id, fea_fsi_interface_displacement_field_id,
+    fea_fsi_interface_pressure_field_id, fea_fsi_interface_residual_field_id,
+    fea_fsi_interface_traction_field_id, fea_fsi_structural_displacement_field_id,
+    run_electromagnetic_with_options, run_linear_static_with_options, run_modal_with_options,
+    run_nonlinear_with_options, run_thermal_with_options, run_transient_with_options,
+    ComputeBackend, ElectromagneticSolveOptions, FeaProgressEvent, FeaProgressHandler,
+    FeaProgressPhase, FeaProgressStatus, FeaRunError, FeaRunResult, LinearStaticSolveOptions,
+    ModalSolveOptions, ThermalSolveOptions, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
+    FEA_FIELD_ACOUSTIC_PHASE, FEA_FIELD_ACOUSTIC_PRESSURE_IMAG,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
+    FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB, FEA_FIELD_CFD_PRESSURE,
+    FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
     FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
     FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
 };
@@ -2315,7 +2316,57 @@ fn solve_acoustic_harmonic(
     let particle_velocity =
         recover_acoustic_particle_velocity(&pressure_real, drive_frequency_hz, density_kg_per_m3);
     let peak_pressure_pa = pressure_magnitude.iter().copied().fold(0.0_f64, f64::max);
-    let fields = vec![
+    let sweep_frequencies_hz = acoustic_sweep_frequencies_hz(drive_frequency_hz);
+    let mut frequency_response_fields = Vec::with_capacity(sweep_frequencies_hz.len());
+    let mut sweep_peak_pressure_pa = 0.0_f64;
+    let mut sweep_residual_norm = 0.0_f64;
+    for frequency_hz in &sweep_frequencies_hz {
+        let (sweep_diag_real, sweep_diag_imag, sweep_offdiag) = acoustic_helmholtz_operator(
+            node_count,
+            *frequency_hz,
+            speed_of_sound_m_per_s,
+            damping_ratio,
+        );
+        let (sweep_real, sweep_imag) = solve_complex_tridiagonal(
+            &sweep_diag_real,
+            &sweep_diag_imag,
+            sweep_offdiag,
+            &source_real,
+            &source_imag,
+        );
+        let sweep_magnitude = sweep_real
+            .iter()
+            .zip(sweep_imag.iter())
+            .map(|(real, imag)| real.hypot(*imag))
+            .collect::<Vec<_>>();
+        sweep_peak_pressure_pa =
+            sweep_peak_pressure_pa.max(sweep_magnitude.iter().copied().fold(0.0_f64, f64::max));
+        sweep_residual_norm = sweep_residual_norm.max(acoustic_residual_norm(
+            &sweep_diag_real,
+            &sweep_diag_imag,
+            sweep_offdiag,
+            &sweep_real,
+            &sweep_imag,
+            &source_real,
+            &source_imag,
+        ));
+        frequency_response_fields.push(AnalysisField::host_f64(
+            fea_acoustic_frequency_response_field_id(*frequency_hz),
+            vec![node_count],
+            sweep_magnitude,
+        ));
+    }
+    let sweep_frequency_min_hz = sweep_frequencies_hz
+        .iter()
+        .copied()
+        .fold(f64::INFINITY, f64::min);
+    let sweep_frequency_max_hz = sweep_frequencies_hz.iter().copied().fold(0.0_f64, f64::max);
+    let sweep_bandwidth_hz = if sweep_frequency_min_hz.is_finite() {
+        (sweep_frequency_max_hz - sweep_frequency_min_hz).max(0.0)
+    } else {
+        0.0
+    };
+    let mut fields = vec![
         AnalysisField::host_f64(
             FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
             vec![node_count],
@@ -2343,6 +2394,8 @@ fn solve_acoustic_harmonic(
             particle_velocity,
         ),
     ];
+    let acoustic_field_count = fields.len() + frequency_response_fields.len();
+    fields.extend(frequency_response_fields);
     let severity = if normalized_residual_norm <= residual_warn_threshold {
         runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
     } else {
@@ -2376,13 +2429,45 @@ fn solve_acoustic_harmonic(
                     density_kg_per_m3,
                     damping_ratio,
                     node_count,
-                    fields.len(),
+                    acoustic_field_count,
                     peak_pressure_pa,
+                ),
+            },
+            runmat_analysis_fea::diagnostics::FeaDiagnostic {
+                code: "FEA_ACOUSTIC_FREQUENCY_RESPONSE".to_string(),
+                severity: if sweep_residual_norm <= residual_warn_threshold {
+                    runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+                } else {
+                    runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+                },
+                message: format!(
+                    "sweep_count={} sweep_frequency_min_hz={} sweep_frequency_max_hz={} sweep_bandwidth_hz={} sweep_peak_pressure_pa={} sweep_max_residual_norm={} response_coverage_ratio={}",
+                    sweep_frequencies_hz.len(),
+                    sweep_frequency_min_hz,
+                    sweep_frequency_max_hz,
+                    sweep_bandwidth_hz,
+                    sweep_peak_pressure_pa,
+                    sweep_residual_norm,
+                    if sweep_frequencies_hz.is_empty() { 0.0 } else { 1.0 }
                 ),
             },
         ],
         fields,
     }
+}
+
+fn acoustic_sweep_frequencies_hz(drive_frequency_hz: f64) -> Vec<f64> {
+    let mut frequencies = Vec::new();
+    for scale in [0.75, 1.0, 1.25] {
+        let frequency = (drive_frequency_hz * scale).clamp(50.0, 20_000.0);
+        if !frequencies
+            .iter()
+            .any(|existing| f64::abs(*existing - frequency) <= 1.0e-9)
+        {
+            frequencies.push(frequency);
+        }
+    }
+    frequencies
 }
 
 fn acoustic_node_count(

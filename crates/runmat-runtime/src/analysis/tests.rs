@@ -18,25 +18,26 @@ use runmat_analysis_core::{
     ReferenceFrame,
 };
 use runmat_analysis_fea::{
-    fea_cht_energy_residual_field_id, fea_cht_fluid_temperature_field_id,
-    fea_electro_thermal_temperature_field_id, fea_electro_thermal_thermal_residual_field_id,
-    fea_fsi_coupling_iteration_count_field_id, fea_fsi_fluid_velocity_field_id,
-    fea_fsi_interface_pressure_field_id, fea_modal_mode_shape_field_id,
-    fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
-    fea_nonlinear_equivalent_plastic_strain_field_id, fea_nonlinear_load_factor_field_id,
-    fea_nonlinear_plastic_strain_field_id, fea_nonlinear_residual_norm_field_id,
-    fea_nonlinear_von_mises_field_id, fea_thermal_boundary_heat_flux_field_id,
-    fea_thermal_heat_flux_field_id, fea_thermal_heat_source_field_id,
-    fea_thermal_temperature_gradient_field_id, fea_thermo_mechanical_coupling_residual_field_id,
-    fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
-    fea_thermo_mechanical_thermal_strain_field_id, fea_thermo_mechanical_thermal_stress_field_id,
-    fea_thermo_mechanical_von_mises_field_id, fea_transient_acceleration_field_id,
-    fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
-    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
-    fea_transient_von_mises_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
-    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_REYNOLDS_NUMBER,
-    FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
+    fea_acoustic_frequency_response_field_id, fea_cht_energy_residual_field_id,
+    fea_cht_fluid_temperature_field_id, fea_electro_thermal_temperature_field_id,
+    fea_electro_thermal_thermal_residual_field_id, fea_fsi_coupling_iteration_count_field_id,
+    fea_fsi_fluid_velocity_field_id, fea_fsi_interface_pressure_field_id,
+    fea_modal_mode_shape_field_id, fea_nonlinear_contact_gap_field_id,
+    fea_nonlinear_contact_pressure_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
+    fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
+    fea_nonlinear_residual_norm_field_id, fea_nonlinear_von_mises_field_id,
+    fea_thermal_boundary_heat_flux_field_id, fea_thermal_heat_flux_field_id,
+    fea_thermal_heat_source_field_id, fea_thermal_temperature_gradient_field_id,
+    fea_thermo_mechanical_coupling_residual_field_id, fea_thermo_mechanical_displacement_field_id,
+    fea_thermo_mechanical_temperature_field_id, fea_thermo_mechanical_thermal_strain_field_id,
+    fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
+    fea_transient_acceleration_field_id, fea_transient_kinetic_energy_field_id,
+    fea_transient_residual_norm_field_id, fea_transient_strain_energy_field_id,
+    fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
+    FeaProgressPhase, FeaProgressStatus, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
+    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY,
+    FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
     FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
     FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
     FEA_FIELD_EM_CURRENT_DENSITY_REAL, FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
@@ -5879,6 +5880,12 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
     assert!(envelope
         .data
         .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_ACOUSTIC_FREQUENCY_RESPONSE"));
+    assert!(envelope
+        .data
+        .run
         .field(FEA_FIELD_ACOUSTIC_PRESSURE_REAL)
         .is_some());
     assert!(envelope
@@ -5890,6 +5897,22 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
         .data
         .run
         .field(FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY)
+        .is_some());
+    let response_field_count = envelope
+        .data
+        .run
+        .fields
+        .iter()
+        .filter(|field| field.field_id.starts_with("acoustic.frequency_response."))
+        .count();
+    assert_eq!(response_field_count, 3);
+    let expected_first_response_hz = 125.0_f64 * 3.0 * 3.0_f64.sqrt() * 0.75;
+    assert!(envelope
+        .data
+        .run
+        .field(&fea_acoustic_frequency_response_field_id(
+            expected_first_response_hz
+        ))
         .is_some());
     let results = analysis_results_op(
         &envelope.data,
@@ -5906,6 +5929,9 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
     assert!(field_ids.contains(&FEA_FIELD_ACOUSTIC_PRESSURE_REAL));
     assert!(field_ids.contains(&FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE));
     assert!(field_ids.contains(&FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY));
+    assert!(field_ids
+        .iter()
+        .any(|field_id| field_id.starts_with("acoustic.frequency_response.")));
 }
 
 #[test]
