@@ -1,3 +1,4 @@
+pub mod archive;
 pub mod clc;
 pub mod data;
 pub mod disp;
