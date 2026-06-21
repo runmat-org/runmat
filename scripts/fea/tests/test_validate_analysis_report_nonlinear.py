@@ -858,6 +858,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             _record(
                 "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
                 {
+                    "em_boundary_penalty_known_answer_coverage_ratio",
                     "em_boundary_penalty_anchor_ratio",
                     "em_boundary_penalty_conditioning_contribution",
                     "em_boundary_penalty_real_residual_norm",
@@ -909,6 +910,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             _record(
                 "electromagnetic_reference_boundary_kernel_gpu_provider",
                 {
+                    "em_boundary_kernel_known_answer_coverage_ratio",
                     "em_boundary_kernel_boundary_localization_ratio",
                     "em_boundary_kernel_ground_anchor_effectiveness_ratio",
                     "em_boundary_kernel_insulation_leakage_ratio",

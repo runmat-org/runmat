@@ -951,6 +951,39 @@ pub fn run_electromagnetic_with_options(
             field_energy_integral,
         ),
     });
+    let boundary_known_answer_coverage_ratio = if electromagnetic_boundary_count > 0
+        && boundary_anchor_ratio.is_finite()
+        && boundary_condition_localization_ratio.is_finite()
+        && ground_anchor_effectiveness_ratio.is_finite()
+        && insulation_leakage_ratio.is_finite()
+        && boundary_penalty_conditioning_contribution.is_finite()
+        && gauge_anchor_residual_ratio.is_finite()
+    {
+        1.0
+    } else {
+        0.0
+    };
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_EM_BOUNDARY_KNOWN_ANSWER".to_string(),
+        severity: if boundary_known_answer_coverage_ratio >= 1.0 {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "basis=magnetic_insulation_vector_potential_ground magnetic_insulation_count={} vector_potential_ground_count={} electromagnetic_boundary_count={} boundary_anchor_ratio={} boundary_condition_localization_ratio={} ground_anchor_effectiveness_ratio={} insulation_leakage_ratio={} boundary_penalty_conditioning_contribution={} gauge_anchor_residual_ratio={} boundary_known_answer_coverage_ratio={}",
+            magnetic_insulation_count,
+            vector_potential_ground_count,
+            electromagnetic_boundary_count,
+            boundary_anchor_ratio,
+            boundary_condition_localization_ratio,
+            ground_anchor_effectiveness_ratio,
+            insulation_leakage_ratio,
+            boundary_penalty_conditioning_contribution,
+            gauge_anchor_residual_ratio,
+            boundary_known_answer_coverage_ratio,
+        ),
+    });
     let homogeneous_known_answer =
         em_homogeneous_known_answer_metrics(EmHomogeneousKnownAnswerInput {
             material_stats: &material_stats,

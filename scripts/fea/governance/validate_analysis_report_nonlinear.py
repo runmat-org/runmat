@@ -508,6 +508,7 @@ REQUIRED_FIXTURES = {
         "electromagnetic_sweep_known_peak_frequency_error_ratio",
         "electromagnetic_sweep_known_quality_factor",
         "electromagnetic_sweep_known_answer_coverage_ratio",
+        "em_boundary_penalty_known_answer_coverage_ratio",
         "em_boundary_penalty_anchor_ratio",
         "em_boundary_penalty_conditioning_contribution",
         "em_boundary_penalty_real_residual_norm",
@@ -579,6 +580,7 @@ REQUIRED_FIXTURES = {
         "electromagnetic_sweep_known_peak_frequency_error_ratio",
         "electromagnetic_sweep_known_quality_factor",
         "electromagnetic_sweep_known_answer_coverage_ratio",
+        "em_boundary_kernel_known_answer_coverage_ratio",
         "em_boundary_kernel_boundary_localization_ratio",
         "em_boundary_kernel_ground_anchor_effectiveness_ratio",
         "em_boundary_kernel_insulation_leakage_ratio",
@@ -1140,6 +1142,11 @@ EM_SWEEP_KNOWN_ANSWER_REQUIRED_FIELDS = {
     "electromagnetic_sweep_known_peak_frequency_error_ratio",
     "electromagnetic_sweep_known_quality_factor",
     "electromagnetic_sweep_known_answer_coverage_ratio",
+}
+
+EM_BOUNDARY_KNOWN_ANSWER_REQUIRED_FIELDS = {
+    "em_boundary_penalty_known_answer_coverage_ratio",
+    "em_boundary_kernel_known_answer_coverage_ratio",
 }
 
 EM_SOURCE_LOCALIZATION_REQUIRED_FIELDS = {

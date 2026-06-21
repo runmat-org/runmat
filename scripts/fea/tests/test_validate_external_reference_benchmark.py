@@ -8,6 +8,7 @@ from scripts.fea.governance.validate_analysis_report_nonlinear import (
     EM_APPLIED_CURRENT_REQUIRED_FIELDS,
     EM_BALANCE_REQUIRED_FIELDS,
     EM_BOUNDARY_CONDITION_LOCALIZATION_REQUIRED_FIELDS,
+    EM_BOUNDARY_KNOWN_ANSWER_REQUIRED_FIELDS,
     EM_BOUNDARY_SOURCE_REQUIRED_FIELDS,
     EM_CONDITIONING_REQUIRED_FIELDS,
     EM_CONSTITUTIVE_REQUIRED_FIELDS,
@@ -1617,6 +1618,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "em_boundary_penalty_known_answer_coverage_ratio",
+            "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
             "name": "em_boundary_penalty_conditioning_contribution",
             "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
             "observed": 0.918,
@@ -2776,6 +2784,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
             "observed": 0.5187940981730527,
             "reference": 0.5187940981730527,
+            "pass": True,
+        },
+        {
+            "name": "em_boundary_kernel_known_answer_coverage_ratio",
+            "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
             "pass": True,
         },
         {
@@ -6341,6 +6356,7 @@ class ValidateExternalReferenceBenchmarkTests(unittest.TestCase):
             EM_SOURCE_ENERGY_CONSISTENCY_REQUIRED_FIELDS,
             EM_SOURCE_ENERGY_ASSERTION_REQUIRED_FIELDS,
             EM_SWEEP_KNOWN_ANSWER_REQUIRED_FIELDS,
+            EM_BOUNDARY_KNOWN_ANSWER_REQUIRED_FIELDS,
             EM_SOURCE_LOCALIZATION_REQUIRED_FIELDS,
             EM_BOUNDARY_CONDITION_LOCALIZATION_REQUIRED_FIELDS,
             EM_GROUND_ANCHOR_EFFECTIVENESS_REQUIRED_FIELDS,
