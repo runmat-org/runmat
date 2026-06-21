@@ -6523,6 +6523,26 @@ def evaluate_release_readiness(
             "electro_transient_time_scale_mean",
         ),
         (
+            "electro_thermal_joule_benign_gpu_provider",
+            "electro_thermal_benign_ohms_law_residual_ratio",
+            None,
+        ),
+        (
+            "electro_thermal_joule_benign_gpu_provider",
+            "electro_thermal_benign_joule_heat_balance_ratio",
+            None,
+        ),
+        (
+            "electro_thermal_joule_benign_gpu_provider",
+            "electro_thermal_benign_potential_monotonic_edge_fraction",
+            None,
+        ),
+        (
+            "electro_thermal_joule_benign_gpu_provider",
+            "electro_thermal_benign_resistor_known_answer_coverage_ratio",
+            None,
+        ),
+        (
             "electro_thermal_joule_pathological_gpu_provider",
             "electro_thermal_pathological_joule_heating_scale",
             "electro_joule_heating_scale",
@@ -6546,6 +6566,26 @@ def evaluate_release_readiness(
             "electro_thermal_joule_pathological_gpu_provider",
             "electro_thermal_pathological_time_scale_mean",
             "electro_nonlinear_time_scale_mean",
+        ),
+        (
+            "electro_thermal_joule_pathological_gpu_provider",
+            "electro_thermal_pathological_ohms_law_residual_ratio",
+            None,
+        ),
+        (
+            "electro_thermal_joule_pathological_gpu_provider",
+            "electro_thermal_pathological_joule_heat_balance_ratio",
+            None,
+        ),
+        (
+            "electro_thermal_joule_pathological_gpu_provider",
+            "electro_thermal_pathological_potential_monotonic_edge_fraction",
+            None,
+        ),
+        (
+            "electro_thermal_joule_pathological_gpu_provider",
+            "electro_thermal_pathological_resistor_known_answer_coverage_ratio",
+            None,
         ),
     ]
     missing_electro_assertion_fields = []
