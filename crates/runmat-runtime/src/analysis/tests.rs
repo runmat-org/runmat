@@ -4838,9 +4838,15 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
 
     assert_eq!(envelope.operation, "fea.run_cfd");
     assert_eq!(envelope.op_version, "fea.run_cfd/v1");
-    assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
-    assert_eq!(envelope.data.provenance.solver_method, "implicit_euler_pcg");
-    assert!(envelope.data.transient_results.is_some());
+    assert_eq!(
+        envelope.data.run.solver_method,
+        "cfd_incompressible_projection"
+    );
+    assert_eq!(
+        envelope.data.provenance.solver_method,
+        "cfd_incompressible_projection"
+    );
+    assert!(envelope.data.transient_results.is_none());
     assert!(envelope
         .data
         .run
@@ -4849,6 +4855,11 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
         .any(|diag| diag.code == "FEA_CFD_FLOW"
             && diag.message.contains("reynolds_number=")
             && diag.message.contains("solve_family=steady_state")));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_CFD_RESIDUAL"
+            && diag.message.contains("max_momentum_residual=")
+            && diag.message.contains("max_continuity_residual=")
+    }));
     let results = analysis_results_op(
         &envelope.data,
         AnalysisResultsQuery::default(),

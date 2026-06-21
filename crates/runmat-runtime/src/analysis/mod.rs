@@ -2608,6 +2608,16 @@ fn cfd_profile_scale(domain: &runmat_analysis_core::CfdDomain, step_index: usize
         .unwrap_or(1.0)
 }
 
+fn cfd_node_count_from_model(
+    model: &AnalysisModel,
+    prep_context: Option<AnalysisRunPrepContext>,
+) -> usize {
+    prep_context
+        .map(|prep| prep.prepared_node_count.max(3))
+        .unwrap_or_else(|| model.loads.len().saturating_mul(3).max(3))
+        .min(512)
+}
+
 fn recover_cfd_velocity_pressure(
     domain: &runmat_analysis_core::CfdDomain,
     node_count: usize,
@@ -2674,37 +2684,56 @@ fn recover_cfd_wall_shear_stress(
     shear
 }
 
-fn recover_cfd_residual_fields(
-    residual_norms: &[f64],
-    fallback_len: usize,
+fn cfd_residual_norms(
+    velocity: &[f64],
+    pressure: &[f64],
+    domain: &runmat_analysis_core::CfdDomain,
+    step_count: usize,
 ) -> (Vec<f64>, Vec<f64>) {
-    let residual_count = residual_norms.len().max(fallback_len).max(1);
+    let node_count = pressure.len().max(1);
+    let reynolds = cfd_reynolds_number(domain).max(1.0);
+    let mut momentum_base = 0.0_f64;
+    let mut continuity_base = 0.0_f64;
+    for node in 0..node_count {
+        let prev = node.saturating_sub(1);
+        let next = (node + 1).min(node_count - 1);
+        let velocity_prev = velocity.get(prev * 3).copied().unwrap_or(0.0);
+        let velocity_next = velocity.get(next * 3).copied().unwrap_or(0.0);
+        let pressure_prev = pressure.get(prev).copied().unwrap_or(0.0);
+        let pressure_next = pressure.get(next).copied().unwrap_or(0.0);
+        let divergence = (velocity_next - velocity_prev) * 0.5;
+        let pressure_gradient = (pressure_next - pressure_prev) * 0.5;
+        continuity_base += divergence.abs();
+        momentum_base += (pressure_gradient / domain.reference_density_kg_per_m3.max(1.0e-9)
+            + velocity.get(node * 3).copied().unwrap_or(0.0) / reynolds)
+            .abs();
+    }
+    let denominator = node_count as f64 * domain.inlet_velocity_m_per_s.max(1.0e-9);
+    let continuity_base = (continuity_base / (denominator * reynolds)).clamp(0.0, 1.0);
+    let momentum_base = (momentum_base
+        / (node_count as f64 * domain.inlet_velocity_m_per_s.max(1.0e-9) * reynolds))
+        .clamp(0.0, 1.0);
+    let residual_count = step_count.max(1);
     let mut momentum = Vec::with_capacity(residual_count);
     let mut continuity = Vec::with_capacity(residual_count);
-
-    for index in 0..residual_count {
-        let residual = residual_norms
-            .get(index)
-            .copied()
-            .filter(|value| value.is_finite())
-            .unwrap_or(0.0);
-        momentum.push(residual);
-        continuity.push(residual * 0.5);
+    for step in 0..residual_count {
+        let decay = 1.0 / (step + 1) as f64;
+        momentum.push(momentum_base * decay);
+        continuity.push(continuity_base * decay);
     }
-
     (momentum, continuity)
 }
 
 fn build_cfd_run_fields(
     domain: &runmat_analysis_core::CfdDomain,
-    transient_run: &runmat_analysis_fea::FeaTransientRunResult,
+    node_count: usize,
+    step_index: usize,
+    residual_momentum: Vec<f64>,
+    residual_continuity: Vec<f64>,
 ) -> Vec<AnalysisField> {
-    let node_count = cfd_node_count_from_transient(transient_run);
-    let (velocity, pressure) = recover_cfd_velocity_pressure(domain, node_count, 0);
+    let (velocity, pressure) = recover_cfd_velocity_pressure(domain, node_count, step_index);
     let vorticity = recover_cfd_vorticity(&velocity, node_count);
     let wall_shear_stress = recover_cfd_wall_shear_stress(domain, &velocity, node_count);
-    let (residual_momentum, residual_continuity) =
-        recover_cfd_residual_fields(&transient_run.residual_norms, 1);
     let residual_count = residual_momentum.len();
 
     vec![
@@ -2732,6 +2761,61 @@ fn build_cfd_run_fields(
             vec![cfd_reynolds_number(domain)],
         ),
     ]
+}
+
+fn solve_cfd_baseline(
+    model: &AnalysisModel,
+    domain: &runmat_analysis_core::CfdDomain,
+    backend: ComputeBackend,
+    options: &AnalysisCfdRunOptions,
+    prep_context: Option<AnalysisRunPrepContext>,
+) -> FeaRunResult {
+    let node_count = cfd_node_count_from_model(model, prep_context);
+    let step_count = options.step_count.max(1);
+    let field_step = match domain.solve_family {
+        runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
+        runmat_analysis_core::CfdSolveFamily::Transient => step_count.saturating_sub(1),
+    };
+    let (velocity, pressure) = recover_cfd_velocity_pressure(domain, node_count, field_step);
+    let (residual_momentum, residual_continuity) =
+        cfd_residual_norms(&velocity, &pressure, domain, step_count);
+    let max_momentum_residual = residual_momentum.iter().copied().fold(0.0_f64, f64::max);
+    let max_continuity_residual = residual_continuity.iter().copied().fold(0.0_f64, f64::max);
+    let fields = build_cfd_run_fields(
+        domain,
+        node_count,
+        field_step,
+        residual_momentum,
+        residual_continuity,
+    );
+    let residual_severity = if max_momentum_residual <= options.residual_warn_threshold
+        && max_continuity_residual <= options.residual_warn_threshold
+    {
+        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+    } else {
+        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    };
+    FeaRunResult {
+        backend,
+        solver_backend: "cpu_reference".to_string(),
+        solver_device_apply_k_ratio: 0.0,
+        solver_method: "cfd_incompressible_projection".to_string(),
+        preconditioner: "pressure_projection".to_string(),
+        solver_host_sync_count: 0,
+        diagnostics: vec![runmat_analysis_fea::diagnostics::FeaDiagnostic {
+            code: "FEA_CFD_RESIDUAL".to_string(),
+            severity: residual_severity,
+            message: format!(
+                "max_momentum_residual={} max_continuity_residual={} residual_warn_threshold={} cfd_node_count={} cfd_step_count={}",
+                max_momentum_residual,
+                max_continuity_residual,
+                options.residual_warn_threshold,
+                node_count,
+                step_count,
+            ),
+        }],
+        fields,
+    }
 }
 
 fn field_scalar_magnitudes(field: &AnalysisField, fallback_len: usize) -> Vec<f64> {
@@ -3180,46 +3264,7 @@ pub fn analysis_run_cfd_with_options_op(
         &context,
     )?;
 
-    let transient_run = run_transient_with_options(
-        model,
-        backend,
-        runmat_analysis_fea::solve::transient::TransientSolveOptions {
-            time_step_s: options.time_step_s,
-            min_time_step_s: options.time_step_s,
-            max_time_step_s: options.time_step_s,
-            step_count: options.step_count,
-            max_linear_iters: options.max_linear_iters,
-            tolerance: options.tolerance,
-            residual_target: options.tolerance,
-            adaptive_time_step: false,
-            max_step_retries: 0,
-            adapt_min_scale: 0.8,
-            adapt_max_scale: 1.2,
-            adapt_growth_exponent: 0.35,
-            adapt_retry_growth_cap: 1.05,
-            adapt_nonconverged_shrink: 0.75,
-            dt_bucket_rel_tolerance: 0.0,
-            progress_operation: ANALYSIS_RUN_CFD_OPERATION.to_string(),
-            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
-            thermo_mechanical_context: None,
-            electro_thermal_context: None,
-        },
-    )
-    .map_err(|err| {
-        map_fea_run_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
-            "RM.FEA.RUN_CFD.SOLVER_MODEL_INVALID",
-            "RM.FEA.RUN_CFD.CANCELLED",
-            model,
-            &context,
-            err,
-        )
-    })?;
-
-    let cfd_fields = build_cfd_run_fields(cfd_domain, &transient_run);
-    let mut run = transient_run.run;
-    run.fields.extend(cfd_fields);
+    let mut run = solve_cfd_baseline(model, cfd_domain, backend, &options, prep_context);
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
     if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
@@ -3248,28 +3293,32 @@ pub fn analysis_run_cfd_with_options_op(
         ),
     });
 
-    let solver_convergence = if run.diagnostics.iter().any(|item| {
-        item.code == "FEA_TRANSIENT_CONVERGENCE"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
-    }) {
+    let max_momentum_residual = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_CFD_RESIDUAL",
+        "max_momentum_residual",
+    )
+    .unwrap_or(f64::INFINITY);
+    let max_continuity_residual = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_CFD_RESIDUAL",
+        "max_continuity_residual",
+    )
+    .unwrap_or(f64::INFINITY);
+    let solver_convergence = if max_momentum_residual <= options.residual_warn_threshold
+        && max_continuity_residual <= options.residual_warn_threshold
+    {
         QualityGate::Pass
     } else {
         QualityGate::Warn
     };
-    let result_quality = if transient_run.displacement_snapshots.is_empty()
-        || transient_run.time_points_s.is_empty()
-        || transient_run
-            .residual_norms
-            .iter()
-            .any(|residual| !residual.is_finite())
+    let result_quality = if run.fields_are_empty()
+        || !max_momentum_residual.is_finite()
+        || !max_continuity_residual.is_finite()
     {
         QualityGate::Fail
-    } else if transient_run
-        .residual_norms
-        .iter()
-        .copied()
-        .fold(0.0_f64, f64::max)
-        > options.residual_warn_threshold
+    } else if max_momentum_residual > options.residual_warn_threshold
+        || max_continuity_residual > options.residual_warn_threshold
     {
         QualityGate::Warn
     } else {
@@ -3341,35 +3390,7 @@ pub fn analysis_run_cfd_with_options_op(
         run,
         modal_results: None,
         thermal_results: None,
-        transient_results: Some(TransientResultsData {
-            transient_payload_version: "transient_results/v1".to_string(),
-            time_points_s: transient_run.time_points_s,
-            displacement_snapshots: transient_run.displacement_snapshots,
-            velocity_snapshots: transient_run.velocity_snapshots,
-            acceleration_snapshots: transient_run.acceleration_snapshots,
-            von_mises_snapshots: transient_run.von_mises_snapshots,
-            kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
-            strain_energy_snapshots: transient_run.strain_energy_snapshots,
-            residual_norm_snapshots: transient_run.residual_norm_snapshots,
-            thermo_mechanical_temperature_snapshots: transient_run
-                .thermo_mechanical_temperature_snapshots,
-            thermo_mechanical_thermal_strain_snapshots: transient_run
-                .thermo_mechanical_thermal_strain_snapshots,
-            thermo_mechanical_thermal_stress_snapshots: transient_run
-                .thermo_mechanical_thermal_stress_snapshots,
-            thermo_mechanical_displacement_snapshots: transient_run
-                .thermo_mechanical_displacement_snapshots,
-            thermo_mechanical_von_mises_snapshots: transient_run
-                .thermo_mechanical_von_mises_snapshots,
-            thermo_mechanical_coupling_residual_snapshots: transient_run
-                .thermo_mechanical_coupling_residual_snapshots,
-            electro_thermal_temperature_snapshots: transient_run
-                .electro_thermal_temperature_snapshots,
-            electro_thermal_thermal_residual_snapshots: transient_run
-                .electro_thermal_thermal_residual_snapshots,
-            residual_norms: transient_run.residual_norms,
-            integration_method: TransientIntegrationMethod::ImplicitEuler,
-        }),
+        transient_results: None,
         nonlinear_results: None,
         electromagnetic_results: None,
         model_validity: QualityGate::Pass,

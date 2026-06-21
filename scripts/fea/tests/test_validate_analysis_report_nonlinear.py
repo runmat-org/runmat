@@ -770,10 +770,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "cfd_turbulence_intensity",
                     "cfd_reynolds_number",
                     "cfd_profile_point_count",
-                    "transient_max_residual_norm",
-                    "transient_max_energy_growth_ratio",
-                    "transient_prepared_cache_hit_ratio",
-                    "transient_prepared_cache_misses",
+                    "cfd_max_momentum_residual",
+                    "cfd_max_continuity_residual",
                 },
             ),
             _record(
@@ -785,8 +783,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "cfd_turbulence_intensity",
                     "cfd_reynolds_number",
                     "cfd_profile_point_count",
-                    "transient_max_residual_norm",
-                    "transient_max_energy_growth_ratio",
+                    "cfd_max_momentum_residual",
+                    "cfd_max_continuity_residual",
                 },
             ),
             _record(
@@ -798,8 +796,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "cfd_turbulence_intensity",
                     "cfd_reynolds_number",
                     "cfd_profile_point_count",
-                    "transient_max_residual_norm",
-                    "transient_max_energy_growth_ratio",
+                    "cfd_max_momentum_residual",
+                    "cfd_max_continuity_residual",
                 },
             ),
             _record(
@@ -1212,7 +1210,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             rc = self._run_main_with_report(path)
             self.assertEqual(rc, 1)
 
-    def test_fails_when_cfd_cpu_transient_residual_assertion_missing(self):
+    def test_fails_when_cfd_cpu_momentum_residual_assertion_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             records = self._base_records()
             for record in records:
@@ -1220,7 +1218,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     record["threshold_assertions"] = [
                         item
                         for item in record["threshold_assertions"]
-                        if item["name"] != "transient_max_residual_norm"
+                        if item["name"] != "cfd_max_momentum_residual"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
