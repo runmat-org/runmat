@@ -1,0 +1,102 @@
+{
+  "title": "periodogram",
+  "category": "math/signal",
+  "keywords": [
+    "periodogram",
+    "PSD",
+    "power spectrum",
+    "spectral density",
+    "signal processing",
+    "FFT"
+  ],
+  "summary": "Estimate power spectral density using a periodogram.",
+  "references": [
+    "title: \"MATLAB periodogram documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Periodogram spectral estimation runs on the host. GPU-resident signal and window inputs are gathered automatically before FFT processing."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 5,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::periodogram::tests",
+    "integration": "crates/runmat-vm/tests/basics.rs"
+  },
+  "description": "`periodogram(x)` estimates the power spectral density of a signal by windowing the full input and evaluating its DFT. Optional arguments select the analysis window, DFT length or explicit frequency grid, sampling frequency, frequency range, and spectrum scale.",
+  "behaviors": [
+    "`pxx = periodogram(x)` returns a one-sided PSD estimate for real inputs and a two-sided estimate for complex inputs.",
+    "Matrix inputs are processed column-wise; `pxx` has one output column per input column.",
+    "`[pxx, f] = periodogram(...)` also returns the frequency grid. Without `fs`, frequencies are in radians/sample; with `fs`, frequencies are in Hz. Passing `fs` as `[]` uses 1 Hz units.",
+    "`window` must be a finite real vector matching the signal length. `[]` uses a rectangular window.",
+    "`nfft` defaults to `max(256, 2^nextpow2(length(x)))` and controls the DFT grid. If `nfft` is shorter than the window, windowed samples are summed modulo `nfft` before the DFT. A real frequency vector may be supplied in the same position to evaluate explicit frequencies.",
+    "The optional range selector accepts `'onesided'`, `'twosided'`, or `'centered'`; `'onesided'` is valid only for real-valued signals.",
+    "The optional spectrum type accepts `'psd'` (default) or `'power'`; `'power'` reports power spectrum values using coherent-gain normalization."
+  ],
+  "examples": [
+    {
+      "description": "PSD of a sine wave",
+      "input": "fs = 1000;\nt = (0:999) / fs;\nx = sin(2*pi*100*t);\n[pxx, f] = periodogram(x, [], 1024, fs);"
+    },
+    {
+      "description": "Use a Hamming window and power spectrum scaling",
+      "input": "x = 1.8*cos(2*pi*(0:127)/16);\n[pxx, f] = periodogram(x, hamming(128), 128, 'power');"
+    },
+    {
+      "description": "Two-sided complex spectrum",
+      "input": "x = exp(1i*2*pi*(0:127)/16);\n[pxx, w] = periodogram(x, [], 128, 'twosided');"
+    },
+    {
+      "description": "Column-wise spectra for a matrix",
+      "input": "x = [sin(2*pi*(0:255)'/16), cos(2*pi*(0:255)'/32)];\n[pxx, f] = periodogram(x, [], 256, 1000);"
+    },
+    {
+      "description": "Evaluate at explicit normalized frequencies",
+      "input": "w = linspace(0, pi, 64);\n[pxx, wout] = periodogram(randn(1,512), [], w);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `periodogram` different from `pwelch`?",
+      "answer": "`periodogram` estimates a spectrum from one windowed full-signal segment. `pwelch` splits the signal into overlapped segments and averages the modified periodograms."
+    },
+    {
+      "question": "Does `periodogram` include the Nyquist bin?",
+      "answer": "For one-sided output and even `nfft`, yes. The output length is `nfft/2 + 1`, with DC first and the Nyquist bin last."
+    },
+    {
+      "question": "Does `periodogram` plot when no outputs are requested?",
+      "answer": "RunMat currently returns values using normal output-count semantics instead of opening a plot. Use the returned `pxx` and frequency vector with plotting functions explicitly."
+    }
+  ],
+  "links": [
+    {
+      "label": "pwelch",
+      "url": "./pwelch"
+    },
+    {
+      "label": "spectrogram",
+      "url": "./spectrogram"
+    },
+    {
+      "label": "fft",
+      "url": "./fft"
+    },
+    {
+      "label": "hamming",
+      "url": "./hamming"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/periodogram.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/periodogram.rs"
+  }
+}
