@@ -147,8 +147,8 @@ pub fn run_transient_with_options(
         fields: vec![
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-                vec![displacement.len()],
-                displacement,
+                vector_shape(summary.dof_count),
+                padded_vector_values(displacement, summary.dof_count),
             ),
             AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![1], vec![von_mises]),
         ],

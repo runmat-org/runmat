@@ -326,6 +326,10 @@ fn modal_solver_emits_modes_for_modal_step_fixture() {
         result.mode_shapes[0].shape[0] * 3
     );
     assert_eq!(
+        field(&result.run, FEA_FIELD_STRUCTURAL_DISPLACEMENT).shape,
+        result.mode_shapes[0].shape
+    );
+    assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_FREQUENCY_HZ).element_count(),
         result.eigenvalues_hz.len()
     );
@@ -382,6 +386,10 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
         crate::run_transient(&model, ComputeBackend::Cpu).expect("transient solve should succeed");
 
     assert!(!result.time_points_s.is_empty());
+    assert_eq!(
+        field(&result.run, FEA_FIELD_STRUCTURAL_DISPLACEMENT).shape,
+        result.displacement_snapshots[0].shape
+    );
     assert_eq!(
         result.time_points_s.len(),
         result.displacement_snapshots.len()

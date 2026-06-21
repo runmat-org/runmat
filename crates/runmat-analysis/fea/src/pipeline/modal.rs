@@ -136,8 +136,8 @@ pub fn run_modal_with_options(
     let mut run_fields = vec![
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-            vec![displacement.len()],
-            displacement,
+            vector_shape(summary.dof_count),
+            padded_vector_values(displacement, summary.dof_count),
         ),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![1], vec![von_mises]),
     ];
@@ -162,8 +162,8 @@ pub fn run_modal_with_options(
         fields: run_fields,
     };
 
-    let mode_shape_node_count = summary.dof_count.div_ceil(3).max(1);
-    let mode_shape_value_count = mode_shape_node_count * 3;
+    let mode_shape = vector_shape(summary.dof_count);
+    let mode_shape_value_count = mode_shape.iter().product();
     let mode_shapes = modal
         .mode_shapes
         .into_iter()
@@ -173,7 +173,7 @@ pub fn run_modal_with_options(
             values.resize(mode_shape_value_count, 0.0);
             AnalysisField::host_f64(
                 fea_modal_mode_shape_field_id(index + 1),
-                vec![mode_shape_node_count, 3],
+                mode_shape.clone(),
                 values,
             )
         })
@@ -207,6 +207,15 @@ pub fn run_modal_with_options(
 
 fn mode_shapes_iteration_count_estimate(residual_norms: &[f64]) -> f64 {
     residual_norms.len() as f64
+}
+
+fn vector_shape(dof_count: usize) -> Vec<usize> {
+    vec![dof_count.div_ceil(3).max(1), 3]
+}
+
+fn padded_vector_values(mut values: Vec<f64>, dof_count: usize) -> Vec<f64> {
+    values.resize(vector_shape(dof_count).iter().product(), 0.0);
+    values
 }
 
 fn recover_modal_result_fields(
