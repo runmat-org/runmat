@@ -1088,15 +1088,35 @@ REQUIRED_ERROR_FIXTURES = {
         "run_ok": False,
         "run_error_code": "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
     },
+    "cfd_invalid_domain_options": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_CFD.INVALID_OPTIONS",
+    },
+    "cfd_invalid_boundary_conditions": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_CFD.INVALID_BOUNDARY_CONDITIONS",
+    },
     "cht_coupled_invalid_interface_mapping": {
         "validate_ok": True,
         "run_ok": False,
         "run_error_code": "RM.FEA.RUN_CHT.INVALID_INTERFACE_MAPPING",
     },
+    "cht_coupled_invalid_cfd_domain": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_CHT.INVALID_OPTIONS",
+    },
     "fsi_coupled_invalid_interface_mapping": {
         "validate_ok": True,
         "run_ok": False,
         "run_error_code": "RM.FEA.RUN_FSI.INVALID_INTERFACE_MAPPING",
+    },
+    "fsi_coupled_invalid_cfd_domain": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_FSI.INVALID_OPTIONS",
     },
 }
 

@@ -697,12 +697,28 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
             ),
             _error_record(
+                "cfd_invalid_domain_options",
+                "RM.FEA.RUN_CFD.INVALID_OPTIONS",
+            ),
+            _error_record(
+                "cfd_invalid_boundary_conditions",
+                "RM.FEA.RUN_CFD.INVALID_BOUNDARY_CONDITIONS",
+            ),
+            _error_record(
                 "cht_coupled_invalid_interface_mapping",
                 "RM.FEA.RUN_CHT.INVALID_INTERFACE_MAPPING",
             ),
             _error_record(
+                "cht_coupled_invalid_cfd_domain",
+                "RM.FEA.RUN_CHT.INVALID_OPTIONS",
+            ),
+            _error_record(
                 "fsi_coupled_invalid_interface_mapping",
                 "RM.FEA.RUN_FSI.INVALID_INTERFACE_MAPPING",
+            ),
+            _error_record(
+                "fsi_coupled_invalid_cfd_domain",
+                "RM.FEA.RUN_FSI.INVALID_OPTIONS",
             ),
             _record(
                 "electromagnetic_reference_homogeneous_gpu_provider",

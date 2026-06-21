@@ -975,6 +975,39 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             ],
         });
     }
+    if spec_id == "cfd_invalid_domain_options" || spec_id == "cfd_invalid_boundary_conditions" {
+        model.steps = vec![runmat_analysis_core::AnalysisStep {
+            step_id: format!("step_cfd_{}", spec_id),
+            kind: runmat_analysis_core::AnalysisStepKind::Cfd,
+        }];
+        model.thermo_mechanical = None;
+        model.electro_thermal = None;
+        model.interfaces.clear();
+        model.boundary_conditions = if spec_id == "cfd_invalid_boundary_conditions" {
+            vec![runmat_analysis_core::BoundaryCondition {
+                bc_id: format!("bc_cfd_inlet_only_{}", spec_id),
+                region_id: "inlet".to_string(),
+                kind: runmat_analysis_core::BoundaryConditionKind::CfdInletVelocity {
+                    velocity_m_per_s: 5.0,
+                },
+            }]
+        } else {
+            authored_cfd_boundaries_for_fixture(spec_id, 5.0)
+        };
+        model.cfd = Some(runmat_analysis_core::CfdDomain {
+            enabled: true,
+            solve_family: runmat_analysis_core::CfdSolveFamily::SteadyState,
+            reference_density_kg_per_m3: 1.225,
+            dynamic_viscosity_pa_s: if spec_id == "cfd_invalid_domain_options" {
+                0.0
+            } else {
+                1.81e-5
+            },
+            inlet_velocity_m_per_s: 5.0,
+            turbulence_intensity: 0.06,
+            time_profile: Vec::new(),
+        });
+    }
     if spec_id.starts_with("cht_coupled_") {
         model.steps = vec![
             runmat_analysis_core::AnalysisStep {
@@ -1006,6 +1039,11 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 },
             ],
         });
+        if spec_id == "cht_coupled_invalid_cfd_domain" {
+            if let Some(cfd_domain) = model.cfd.as_mut() {
+                cfd_domain.dynamic_viscosity_pa_s = 0.0;
+            }
+        }
         model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
             enabled: true,
             reference_temperature_k: 293.15,
@@ -1080,6 +1118,11 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 },
             ],
         });
+        if spec_id == "fsi_coupled_invalid_cfd_domain" {
+            if let Some(cfd_domain) = model.cfd.as_mut() {
+                cfd_domain.dynamic_viscosity_pa_s = 0.0;
+            }
+        }
         if spec_id == "fsi_coupled_invalid_interface_mapping" {
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("fsi_invalid_contact_{spec_id}"),
