@@ -3610,6 +3610,85 @@ fn analysis_run_thermal_rejects_models_without_thermal_step() {
 }
 
 #[test]
+fn analysis_run_thermal_rejects_invalid_thermal_material_values() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "thermal_invalid_material".to_string(),
+        kind: AnalysisStepKind::Thermal,
+    }];
+    model.materials[0].thermal.conductivity_w_per_mk = 0.0;
+
+    let err = analysis_run_thermal_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("thermal run should reject nonpositive thermal material values");
+
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_THERMAL.INVALID_THERMAL_MATERIAL"
+    );
+}
+
+#[test]
+fn analysis_run_thermal_rejects_invalid_heat_source_values() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "thermal_invalid_source".to_string(),
+        kind: AnalysisStepKind::Thermal,
+    }];
+    model.loads = vec![LoadCase {
+        load_id: "load_invalid_heat_source".to_string(),
+        region_id: "thermal_core".to_string(),
+        kind: LoadKind::HeatSource {
+            volumetric_w_per_m3: f64::INFINITY,
+        },
+    }];
+
+    let err = analysis_run_thermal_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("thermal run should reject non-finite heat source values");
+
+    assert_eq!(err.error_code, "RM.FEA.RUN_THERMAL.INVALID_THERMAL_SOURCE");
+}
+
+#[test]
+fn analysis_run_thermal_rejects_invalid_thermal_boundary_values() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "thermal_invalid_boundary".to_string(),
+        kind: AnalysisStepKind::Thermal,
+    }];
+    model.boundary_conditions = vec![BoundaryCondition {
+        bc_id: "bc_invalid_convection".to_string(),
+        region_id: "thermal_open_wall".to_string(),
+        kind: BoundaryConditionKind::ThermalConvection {
+            ambient_temperature_k: 293.15,
+            coefficient_w_per_m2k: f64::NAN,
+        },
+    }];
+
+    let err = analysis_run_thermal_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("thermal run should reject non-finite thermal boundary values");
+
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_THERMAL.INVALID_THERMAL_BOUNDARY"
+    );
+}
+
+#[test]
 fn analysis_run_cht_rejects_models_without_cfd_step() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();

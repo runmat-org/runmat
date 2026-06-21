@@ -479,6 +479,18 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "thermal_standalone_ramp_gpu_fallback",
                 )
             ],
+            _error_record(
+                "thermal_standalone_ramp_invalid_material",
+                "RM.FEA.RUN_THERMAL.INVALID_THERMAL_MATERIAL",
+            ),
+            _error_record(
+                "thermal_standalone_ramp_invalid_source",
+                "RM.FEA.RUN_THERMAL.INVALID_THERMAL_SOURCE",
+            ),
+            _error_record(
+                "thermal_standalone_ramp_invalid_boundary",
+                "RM.FEA.RUN_THERMAL.INVALID_THERMAL_BOUNDARY",
+            ),
             _record(
                 "electro_thermal_joule_benign_gpu_provider",
                 {
@@ -1462,6 +1474,18 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             records = self._base_records()
             for record in records:
                 if record["fixture_id"] == "acoustic_harmonic_missing_source":
+                    record["run_error_code"] = None
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_thermal_invalid_source_error_code_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "thermal_standalone_ramp_invalid_source":
                     record["run_error_code"] = None
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"

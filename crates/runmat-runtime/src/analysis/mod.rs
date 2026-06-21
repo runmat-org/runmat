@@ -5457,6 +5457,7 @@ pub fn analysis_run_thermal_with_options_op(
             ]),
         ));
     }
+    validate_thermal_run_model(model, &context)?;
 
     let thermo_options = resolve_thermo_coupling_options(
         model,
@@ -5661,6 +5662,107 @@ pub fn analysis_run_thermal_with_options_op(
         &context,
         result,
     ))
+}
+
+fn validate_thermal_run_model(
+    model: &AnalysisModel,
+    context: &OperationContext,
+) -> Result<(), OperationErrorEnvelope> {
+    if let Some(material) = model.materials.iter().find(|material| {
+        !material.thermal.conductivity_w_per_mk.is_finite()
+            || material.thermal.conductivity_w_per_mk <= 0.0
+            || !material.thermal.specific_heat_j_per_kgk.is_finite()
+            || material.thermal.specific_heat_j_per_kgk <= 0.0
+    }) {
+        return Err(operation_error(
+            ANALYSIS_RUN_THERMAL_OPERATION,
+            ANALYSIS_RUN_THERMAL_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_THERMAL.INVALID_THERMAL_MATERIAL",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_thermal requires finite positive thermal conductivity and specific heat",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("material_id".to_string(), material.material_id.clone()),
+                (
+                    "conductivity_w_per_mk".to_string(),
+                    material.thermal.conductivity_w_per_mk.to_string(),
+                ),
+                (
+                    "specific_heat_j_per_kgk".to_string(),
+                    material.thermal.specific_heat_j_per_kgk.to_string(),
+                ),
+            ]),
+        ));
+    }
+
+    if let Some(load) = model.loads.iter().find(|load| {
+        matches!(
+            &load.kind,
+            LoadKind::HeatSource {
+                volumetric_w_per_m3
+            } if !volumetric_w_per_m3.is_finite()
+        )
+    }) {
+        return Err(operation_error(
+            ANALYSIS_RUN_THERMAL_OPERATION,
+            ANALYSIS_RUN_THERMAL_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_THERMAL.INVALID_THERMAL_SOURCE",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_thermal requires finite thermal heat-source values",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("load_id".to_string(), load.load_id.clone()),
+            ]),
+        ));
+    }
+
+    if let Some(boundary) = model.boundary_conditions.iter().find(|bc| match &bc.kind {
+        BoundaryConditionKind::ThermalPrescribedTemperature { temperature_k } => {
+            !temperature_k.is_finite() || *temperature_k <= 0.0
+        }
+        BoundaryConditionKind::ThermalHeatFlux { heat_flux_w_per_m2 } => {
+            !heat_flux_w_per_m2.is_finite()
+        }
+        BoundaryConditionKind::ThermalConvection {
+            ambient_temperature_k,
+            coefficient_w_per_m2k,
+        } => {
+            !ambient_temperature_k.is_finite()
+                || *ambient_temperature_k <= 0.0
+                || !coefficient_w_per_m2k.is_finite()
+                || *coefficient_w_per_m2k < 0.0
+        }
+        _ => false,
+    }) {
+        return Err(operation_error(
+            ANALYSIS_RUN_THERMAL_OPERATION,
+            ANALYSIS_RUN_THERMAL_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_THERMAL.INVALID_THERMAL_BOUNDARY",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_thermal requires finite physically valid thermal boundary condition values",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("boundary_condition_id".to_string(), boundary.bc_id.clone()),
+            ]),
+        ));
+    }
+
+    Ok(())
 }
 
 pub fn analysis_run_transient_with_options_op(

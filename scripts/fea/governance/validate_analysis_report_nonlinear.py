@@ -688,6 +688,21 @@ REQUIRED_ERROR_FIXTURES = {
         "run_ok": False,
         "run_error_code": "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_BOUNDARY",
     },
+    "thermal_standalone_ramp_invalid_material": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_THERMAL.INVALID_THERMAL_MATERIAL",
+    },
+    "thermal_standalone_ramp_invalid_source": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_THERMAL.INVALID_THERMAL_SOURCE",
+    },
+    "thermal_standalone_ramp_invalid_boundary": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_THERMAL.INVALID_THERMAL_BOUNDARY",
+    },
 }
 
 THERMO_REQUIRED_FIELDS = {

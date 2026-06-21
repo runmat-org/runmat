@@ -1518,6 +1518,99 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_cache_misses: None,
         },
         FixtureSpec {
+            id: "thermal_standalone_ramp_invalid_material",
+            description: "standalone thermal fixture rejects invalid thermal material values",
+            model: || {
+                let mut model = fixture_model(FixtureId::ThermoRampSmooth);
+                model.steps = vec![runmat_analysis_core::AnalysisStep {
+                    step_id: "thermal_invalid_material".to_string(),
+                    kind: runmat_analysis_core::AnalysisStepKind::Thermal,
+                }];
+                model
+            },
+            run_kind: AnalysisRunKind::Thermal,
+            expect_validate_error: None,
+            expect_run_error: Some("RM.FEA.RUN_THERMAL.INVALID_THERMAL_MATERIAL"),
+            expected_publishable: None,
+            parity_tolerance: None,
+            gpu_mode: None,
+            residency_expectation: None,
+            max_solver_host_sync_count: None,
+            min_solver_device_apply_k_ratio: None,
+            expected_solver_backend: None,
+            modal_mode_count: None,
+            transient_step_count: Some(12),
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
+            min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
+        },
+        FixtureSpec {
+            id: "thermal_standalone_ramp_invalid_source",
+            description: "standalone thermal fixture rejects invalid heat-source values",
+            model: || {
+                let mut model = fixture_model(FixtureId::ThermoRampSmooth);
+                model.steps = vec![runmat_analysis_core::AnalysisStep {
+                    step_id: "thermal_invalid_source".to_string(),
+                    kind: runmat_analysis_core::AnalysisStepKind::Thermal,
+                }];
+                model
+            },
+            run_kind: AnalysisRunKind::Thermal,
+            expect_validate_error: None,
+            expect_run_error: Some("RM.FEA.RUN_THERMAL.INVALID_THERMAL_SOURCE"),
+            expected_publishable: None,
+            parity_tolerance: None,
+            gpu_mode: None,
+            residency_expectation: None,
+            max_solver_host_sync_count: None,
+            min_solver_device_apply_k_ratio: None,
+            expected_solver_backend: None,
+            modal_mode_count: None,
+            transient_step_count: Some(12),
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
+            min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
+        },
+        FixtureSpec {
+            id: "thermal_standalone_ramp_invalid_boundary",
+            description: "standalone thermal fixture rejects invalid thermal boundary values",
+            model: || {
+                let mut model = fixture_model(FixtureId::ThermoRampSmooth);
+                model.steps = vec![runmat_analysis_core::AnalysisStep {
+                    step_id: "thermal_invalid_boundary".to_string(),
+                    kind: runmat_analysis_core::AnalysisStepKind::Thermal,
+                }];
+                model
+            },
+            run_kind: AnalysisRunKind::Thermal,
+            expect_validate_error: None,
+            expect_run_error: Some("RM.FEA.RUN_THERMAL.INVALID_THERMAL_BOUNDARY"),
+            expected_publishable: None,
+            parity_tolerance: None,
+            gpu_mode: None,
+            residency_expectation: None,
+            max_solver_host_sync_count: None,
+            min_solver_device_apply_k_ratio: None,
+            expected_solver_backend: None,
+            modal_mode_count: None,
+            transient_step_count: Some(12),
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
+            min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
+        },
+        FixtureSpec {
             id: "missing_materials",
             description: "invalid fixture must fail validation and run with typed errors",
             model: || fixture_model(FixtureId::MissingMaterials),

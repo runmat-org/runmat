@@ -812,6 +812,33 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 volumetric_w_per_m3: 1.2e6,
             },
         }];
+        match spec_id {
+            "thermal_standalone_ramp_invalid_material" => {
+                if let Some(material) = model.materials.first_mut() {
+                    material.thermal.conductivity_w_per_mk = 0.0;
+                }
+            }
+            "thermal_standalone_ramp_invalid_source" => {
+                model.loads = vec![runmat_analysis_core::LoadCase {
+                    load_id: format!("load_thermal_invalid_heat_source_{}", spec_id),
+                    region_id: "thermal_core".to_string(),
+                    kind: runmat_analysis_core::LoadKind::HeatSource {
+                        volumetric_w_per_m3: f64::INFINITY,
+                    },
+                }];
+            }
+            "thermal_standalone_ramp_invalid_boundary" => {
+                model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
+                    bc_id: format!("bc_thermal_invalid_convection_{}", spec_id),
+                    region_id: "thermal_open_wall".to_string(),
+                    kind: runmat_analysis_core::BoundaryConditionKind::ThermalConvection {
+                        ambient_temperature_k: 293.15,
+                        coefficient_w_per_m2k: f64::NAN,
+                    },
+                }];
+            }
+            _ => {}
+        }
         model.electro_thermal = None;
         model.electromagnetic = None;
         model.interfaces.clear();
