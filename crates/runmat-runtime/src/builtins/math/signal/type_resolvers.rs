@@ -82,6 +82,15 @@ pub fn pwelch_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
+pub fn periodogram_type(args: &[Type], _context: &ResolveContext) -> Type {
+    if args.is_empty() {
+        return Type::Unknown;
+    }
+    Type::Tensor {
+        shape: Some(vec![None, None]),
+    }
+}
+
 pub fn zplane_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Tensor {
         shape: Some(vec![Some(1), None]),

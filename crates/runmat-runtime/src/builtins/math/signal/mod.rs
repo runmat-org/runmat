@@ -15,6 +15,7 @@ pub(crate) mod gauspuls;
 pub(crate) mod hamming;
 pub(crate) mod hann;
 pub(crate) mod hilbert;
+pub(crate) mod periodogram;
 pub(crate) mod pulstran;
 pub(crate) mod pwelch;
 pub(crate) mod rectpuls;
