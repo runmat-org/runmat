@@ -20,7 +20,9 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::{
     fea_modal_mode_shape_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
     FEA_FIELD_EM_FLUX_DENSITY_PROXY, FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
     GeometryAsset, GeometrySource, MaterialEvidence, MaterialEvidenceConfidence, MeshDescriptor,
@@ -1981,6 +1983,79 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
     assert_eq!(results.data.summary.time_end_s, None);
     assert_eq!(results.data.summary.max_transient_residual_norm, None);
     assert_eq!(results.data.summary.final_step_converged, None);
+}
+
+#[test]
+fn analysis_results_describes_structural_l2_fields() {
+    let _guard = analysis_test_guard();
+    let model = sample_model();
+    let run = analysis_run_linear_static_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-results-structural-fields-1".to_string()), None),
+    )
+    .expect("run should pass");
+
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery {
+            include_fields: vec![
+                FEA_FIELD_STRUCTURAL_STRAIN.to_string(),
+                FEA_FIELD_STRUCTURAL_STRESS.to_string(),
+                FEA_FIELD_STRUCTURAL_REACTION_FORCE.to_string(),
+                FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY.to_string(),
+            ],
+            include_field_values: false,
+            include_diagnostics: false,
+            diagnostic_codes: Vec::new(),
+            include_modal_results: true,
+            mode_indices: Vec::new(),
+            include_transient_results: true,
+            transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: true,
+            include_electromagnetic_results: true,
+        },
+        OperationContext::new(Some("trace-results-structural-fields-2".to_string()), None),
+    )
+    .expect("results should pass");
+
+    let descriptor = |field_id: &str| {
+        results
+            .data
+            .field_descriptors
+            .iter()
+            .find(|descriptor| descriptor.field_id == field_id)
+            .expect("descriptor should be present")
+    };
+
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_STRAIN).kind,
+        AnalysisFieldKind::Tensor
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_STRAIN).component_count,
+        Some(6)
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_STRESS).kind,
+        AnalysisFieldKind::Tensor
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_STRESS).component_count,
+        Some(6)
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_REACTION_FORCE).kind,
+        AnalysisFieldKind::Vector
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_REACTION_FORCE).component_count,
+        Some(3)
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY).kind,
+        AnalysisFieldKind::Scalar
+    );
 }
 
 #[test]

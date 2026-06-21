@@ -977,8 +977,12 @@ fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
     {
         return AnalysisFieldKind::Scalar;
     }
+    if normalized.contains("stress") || normalized.contains("strain") {
+        return AnalysisFieldKind::Tensor;
+    }
     if normalized.contains("displacement")
         || normalized.contains("mode_shape")
+        || normalized.contains("reaction_force")
         || normalized.contains("vector")
         || normalized.contains("flux")
     {
@@ -999,6 +1003,7 @@ fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
     }
     if normalized.contains("displacement")
         || normalized.contains("mode_shape")
+        || normalized.contains("reaction_force")
         || normalized.contains("vector")
         || normalized.contains("flux")
     {
@@ -1008,6 +1013,15 @@ fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
                 .copied()
                 .filter(|value| (2..=6).contains(value))
                 .unwrap_or(3),
+        );
+    }
+    if normalized.contains("stress") || normalized.contains("strain") {
+        return Some(
+            shape
+                .last()
+                .copied()
+                .filter(|value| *value == 6)
+                .unwrap_or(6),
         );
     }
     match shape {

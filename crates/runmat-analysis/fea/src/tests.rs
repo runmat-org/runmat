@@ -3,7 +3,9 @@ use crate::{
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
     ComputeBackend, FeaRunResult, FeaThermoMechanicalContext, ModalSolveOptions,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 
 fn field<'a>(result: &'a FeaRunResult, field_id: &str) -> &'a runmat_analysis_core::AnalysisField {
@@ -30,12 +32,38 @@ fn canonical_cantilever_benchmark_runs() {
         field(&result, FEA_FIELD_STRUCTURAL_VON_MISES).element_count(),
         1
     );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).shape,
+        vec![1, 3]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_STRAIN).shape,
+        vec![1, 6]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_STRESS).shape,
+        vec![1, 6]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_REACTION_FORCE).shape,
+        vec![1, 3]
+    );
     let displacement = host_field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT);
     assert!(displacement[1] < 0.0);
     assert!(displacement[1] < -8.0e-6 && displacement[1] > -1.2e-5);
 
     let stress = host_field(&result, FEA_FIELD_STRUCTURAL_VON_MISES);
     assert!(stress[0] > 8.0e5 && stress[0] < 1.2e6);
+    assert!(host_field(&result, FEA_FIELD_STRUCTURAL_STRAIN)
+        .iter()
+        .any(|value| value.abs() > 0.0));
+    assert!(host_field(&result, FEA_FIELD_STRUCTURAL_STRESS)
+        .iter()
+        .any(|value| value.abs() > 0.0));
+    assert!(host_field(&result, FEA_FIELD_STRUCTURAL_REACTION_FORCE)
+        .iter()
+        .all(|value| value.is_finite()));
+    assert!(host_field(&result, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)[0] > 0.0);
 }
 
 #[test]
@@ -77,6 +105,14 @@ fn cpu_gpu_parity_respects_tolerance_policy() {
     let cpu_stress = host_field(&cpu, FEA_FIELD_STRUCTURAL_VON_MISES);
     let gpu_stress = host_field(&gpu, FEA_FIELD_STRUCTURAL_VON_MISES);
     assert_vectors_within_tolerance(cpu_stress, gpu_stress, tol);
+
+    let cpu_tensor_stress = host_field(&cpu, FEA_FIELD_STRUCTURAL_STRESS);
+    let gpu_tensor_stress = host_field(&gpu, FEA_FIELD_STRUCTURAL_STRESS);
+    assert_vectors_within_tolerance(cpu_tensor_stress, gpu_tensor_stress, tol);
+
+    let cpu_reactions = host_field(&cpu, FEA_FIELD_STRUCTURAL_REACTION_FORCE);
+    let gpu_reactions = host_field(&gpu, FEA_FIELD_STRUCTURAL_REACTION_FORCE);
+    assert_vectors_within_tolerance(cpu_reactions, gpu_reactions, tol);
 }
 
 #[test]

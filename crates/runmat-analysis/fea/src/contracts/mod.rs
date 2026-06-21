@@ -8,6 +8,10 @@ use crate::solve::{
 
 pub const FEA_FIELD_STRUCTURAL_DISPLACEMENT: &str = "structural.displacement";
 pub const FEA_FIELD_STRUCTURAL_VON_MISES: &str = "structural.von_mises";
+pub const FEA_FIELD_STRUCTURAL_STRAIN: &str = "structural.strain";
+pub const FEA_FIELD_STRUCTURAL_STRESS: &str = "structural.stress";
+pub const FEA_FIELD_STRUCTURAL_REACTION_FORCE: &str = "structural.reaction_force";
+pub const FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY: &str = "structural.total_strain_energy";
 pub const FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY: &str = "em.vector_potential_proxy";
 pub const FEA_FIELD_EM_FLUX_DENSITY_PROXY: &str = "em.flux_density_proxy";
 

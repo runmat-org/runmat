@@ -33,6 +33,23 @@ pub fn apply_k(system: &OperatorSystem, x: &[f64]) -> Vec<f64> {
     y
 }
 
+pub fn apply_k_unconstrained(system: &OperatorSystem, x: &[f64]) -> Vec<f64> {
+    let mut y = vec![0.0; x.len()];
+    for i in 0..x.len() {
+        let mut value = system.stiffness_diag[i] * x[i];
+
+        if i > 0 {
+            value -= system.stiffness_upper[i - 1] * x[i - 1];
+        }
+        if i + 1 < x.len() {
+            value -= system.stiffness_upper[i] * x[i + 1];
+        }
+
+        y[i] = value;
+    }
+    y
+}
+
 pub fn apply_m(system: &OperatorSystem, x: &[f64]) -> Vec<f64> {
     apply_diag_with_constraints(&system.mass_diag, &system.constrained, x)
 }
@@ -75,6 +92,7 @@ mod tests {
         let x = vec![4.0, 5.0, 6.0];
 
         assert_eq!(apply_k(&system, &x), vec![4.0, 47.0, 27.5]);
+        assert_eq!(apply_k_unconstrained(&system, &x), vec![395.0, 43.0, 27.5]);
         assert_eq!(apply_m(&system, &x), vec![4.0, 10.0, 18.0]);
         let c = apply_c(&system, &x);
         assert!((c[0] - 4.0).abs() <= 1.0e-12);
