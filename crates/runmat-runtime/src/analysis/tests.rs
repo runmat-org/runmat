@@ -5873,7 +5873,7 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
     assert_eq!(envelope.op_version, "fea.run_acoustic/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        "acoustic_helmholtz_harmonic"
+        "acoustic_domain_graph_helmholtz_harmonic"
     );
     assert!(envelope.data.modal_results.is_none());
     assert!(envelope
@@ -5882,6 +5882,17 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_ACOUSTIC_HARMONIC_RESPONSE"));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_ACOUSTIC_DOMAIN_ASSEMBLY"));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_ACOUSTIC_DOMAIN_ASSEMBLY"
+            && diag.message.contains("domain_edge_count=2")
+            && diag.message.contains("domain_active_dimension_count=2")
+    }));
     assert!(envelope
         .data
         .run

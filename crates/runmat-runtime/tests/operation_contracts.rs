@@ -1190,6 +1190,12 @@ fn analysis_run_acoustic_contract_is_v1_and_typed() {
         .run
         .diagnostics
         .iter()
+        .any(|diag| diag.code == "FEA_ACOUSTIC_DOMAIN_ASSEMBLY"));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
         .any(|diag| diag.code == "FEA_ACOUSTIC_HELMHOLTZ_RESIDUAL"));
     assert!(envelope
         .data

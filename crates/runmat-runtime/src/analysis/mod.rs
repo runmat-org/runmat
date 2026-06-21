@@ -2287,7 +2287,9 @@ fn solve_acoustic_harmonic(
     let damping_ratio = material_summary.damping_ratio;
     let source_real = acoustic_source_vector(model, node_count);
     let source_imag = vec![0.0; node_count];
-    let (diag_real, diag_imag, offdiag) = acoustic_helmholtz_operator(
+    let domain = acoustic_domain_topology(node_count, prep_context);
+    let system = acoustic_helmholtz_operator(
+        domain,
         node_count,
         drive_frequency_hz,
         speed_of_sound_m_per_s,
@@ -2295,11 +2297,9 @@ fn solve_acoustic_harmonic(
         &boundary_summary,
     );
     let (pressure_real, pressure_imag) =
-        solve_complex_tridiagonal(&diag_real, &diag_imag, offdiag, &source_real, &source_imag);
+        solve_complex_graph_operator(&system, &source_real, &source_imag);
     let normalized_residual_norm = acoustic_residual_norm(
-        &diag_real,
-        &diag_imag,
-        offdiag,
+        &system,
         &pressure_real,
         &pressure_imag,
         &source_real,
@@ -2319,28 +2319,28 @@ fn solve_acoustic_harmonic(
         .iter()
         .map(|pressure| 20.0 * (pressure.max(2.0e-5) / 2.0e-5).log10())
         .collect::<Vec<_>>();
-    let particle_velocity =
-        recover_acoustic_particle_velocity(&pressure_real, drive_frequency_hz, density_kg_per_m3);
+    let particle_velocity = recover_acoustic_particle_velocity(
+        &pressure_real,
+        domain,
+        drive_frequency_hz,
+        density_kg_per_m3,
+    );
     let peak_pressure_pa = pressure_magnitude.iter().copied().fold(0.0_f64, f64::max);
     let sweep_frequencies_hz = acoustic_sweep_frequencies_hz(drive_frequency_hz);
     let mut frequency_response_fields = Vec::with_capacity(sweep_frequencies_hz.len());
     let mut sweep_peak_pressure_pa = 0.0_f64;
     let mut sweep_residual_norm = 0.0_f64;
     for frequency_hz in &sweep_frequencies_hz {
-        let (sweep_diag_real, sweep_diag_imag, sweep_offdiag) = acoustic_helmholtz_operator(
+        let sweep_system = acoustic_helmholtz_operator(
+            domain,
             node_count,
             *frequency_hz,
             speed_of_sound_m_per_s,
             damping_ratio,
             &boundary_summary,
         );
-        let (sweep_real, sweep_imag) = solve_complex_tridiagonal(
-            &sweep_diag_real,
-            &sweep_diag_imag,
-            sweep_offdiag,
-            &source_real,
-            &source_imag,
-        );
+        let (sweep_real, sweep_imag) =
+            solve_complex_graph_operator(&sweep_system, &source_real, &source_imag);
         let sweep_magnitude = sweep_real
             .iter()
             .zip(sweep_imag.iter())
@@ -2349,9 +2349,7 @@ fn solve_acoustic_harmonic(
         sweep_peak_pressure_pa =
             sweep_peak_pressure_pa.max(sweep_magnitude.iter().copied().fold(0.0_f64, f64::max));
         sweep_residual_norm = sweep_residual_norm.max(acoustic_residual_norm(
-            &sweep_diag_real,
-            &sweep_diag_imag,
-            sweep_offdiag,
+            &sweep_system,
             &sweep_real,
             &sweep_imag,
             &source_real,
@@ -2412,7 +2410,7 @@ fn solve_acoustic_harmonic(
         backend,
         solver_backend: "cpu_reference".to_string(),
         solver_device_apply_k_ratio: 0.0,
-        solver_method: "acoustic_helmholtz_harmonic".to_string(),
+        solver_method: "acoustic_domain_graph_helmholtz_harmonic".to_string(),
         preconditioner: "none".to_string(),
         solver_host_sync_count: 0,
         diagnostics: vec![
@@ -2424,6 +2422,30 @@ fn solve_acoustic_harmonic(
                     normalized_residual_norm,
                     source_norm(&source_real, &source_imag).max(1.0),
                     residual_warn_threshold,
+                ),
+            },
+            runmat_analysis_fea::diagnostics::FeaDiagnostic {
+                code: "FEA_ACOUSTIC_DOMAIN_ASSEMBLY".to_string(),
+                severity: if domain.edge_count > 0 && domain.active_dimension_count >= 2 {
+                    runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+                } else {
+                    runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+                },
+                message: format!(
+                    "domain_node_count={} domain_edge_count={} domain_active_dimension_count={} domain_dim_x={} domain_dim_y={} domain_dim_z={} domain_spacing_x_m={} domain_spacing_y_m={} domain_spacing_z_m={} boundary_node_count={} average_node_degree={} source_node_count={} domain_volume_m3={}",
+                    domain.node_count,
+                    domain.edge_count,
+                    domain.active_dimension_count,
+                    domain.dims[0],
+                    domain.dims[1],
+                    domain.dims[2],
+                    domain.spacing[0],
+                    domain.spacing[1],
+                    domain.spacing[2],
+                    domain.boundary_node_count,
+                    domain.average_node_degree(),
+                    source_real.iter().filter(|value| value.abs() > 1.0e-12).count(),
+                    domain.volume_m3(),
                 ),
             },
             runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -2639,6 +2661,148 @@ fn acoustic_drive_frequency_hz(mode_count: usize, node_count: usize) -> f64 {
     (125.0 * mode_count.max(1) as f64 * (node_count as f64).sqrt()).clamp(50.0, 20_000.0)
 }
 
+#[derive(Debug, Clone, Copy)]
+struct AcousticDomainTopology {
+    node_count: usize,
+    dims: [usize; 3],
+    spacing: [f64; 3],
+    edge_count: usize,
+    boundary_node_count: usize,
+    active_dimension_count: usize,
+}
+
+impl AcousticDomainTopology {
+    fn coords(self, index: usize) -> [usize; 3] {
+        let x_dim = self.dims[0].max(1);
+        let y_dim = self.dims[1].max(1);
+        let plane = x_dim.saturating_mul(y_dim).max(1);
+        let z = index / plane;
+        let rem = index % plane;
+        let y = rem / x_dim;
+        let x = rem % x_dim;
+        [x, y, z]
+    }
+
+    fn index(self, coords: [usize; 3]) -> Option<usize> {
+        if coords
+            .iter()
+            .zip(self.dims.iter())
+            .any(|(coord, dim)| *coord >= *dim)
+        {
+            return None;
+        }
+        let index = coords[0]
+            + coords[1].saturating_mul(self.dims[0])
+            + coords[2].saturating_mul(self.dims[0].saturating_mul(self.dims[1]));
+        (index < self.node_count).then_some(index)
+    }
+
+    fn is_boundary_node(self, index: usize) -> bool {
+        let coords = self.coords(index);
+        coords
+            .iter()
+            .zip(self.dims.iter())
+            .any(|(coord, dim)| *dim > 1 && (*coord == 0 || *coord + 1 == *dim))
+    }
+
+    fn average_node_degree(self) -> f64 {
+        if self.node_count == 0 {
+            0.0
+        } else {
+            2.0 * self.edge_count as f64 / self.node_count as f64
+        }
+    }
+
+    fn volume_m3(self) -> f64 {
+        self.spacing
+            .iter()
+            .zip(self.dims.iter())
+            .map(|(spacing, dim)| spacing * dim.saturating_sub(1).max(1) as f64)
+            .product::<f64>()
+            .max(1.0e-12)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AcousticGraphEdge {
+    left: usize,
+    right: usize,
+    stiffness: f64,
+}
+
+#[derive(Debug, Clone)]
+struct AcousticDomainSystem {
+    diag_real: Vec<f64>,
+    diag_imag: Vec<f64>,
+    edges: Vec<AcousticGraphEdge>,
+}
+
+fn acoustic_domain_topology(
+    node_count: usize,
+    prep_context: Option<AnalysisRunPrepContext>,
+) -> AcousticDomainTopology {
+    let n = node_count.max(1);
+    let volume_hint = prep_context
+        .map(|prep| {
+            prep.topology_volume_core_ratio
+                + prep.topology_tet_family_ratio
+                + prep.topology_hex_family_ratio
+        })
+        .unwrap_or(0.0);
+    let z_dim = if n >= 8 && volume_hint > 0.05 {
+        (n as f64).cbrt().round().max(2.0) as usize
+    } else if n >= 24 {
+        2
+    } else {
+        1
+    };
+    let y_dim = if n >= 3 {
+        ((n as f64 / z_dim as f64).sqrt().ceil() as usize).max(2)
+    } else {
+        1
+    };
+    let x_dim = n.div_ceil(y_dim * z_dim).max(1);
+    let dims = [x_dim, y_dim, z_dim];
+    let spacing = dims.map(|dim| {
+        if dim <= 1 {
+            1.0
+        } else {
+            1.0 / dim.saturating_sub(1) as f64
+        }
+    });
+    let mut edge_count = 0usize;
+    let mut boundary_node_count = 0usize;
+    let topology = AcousticDomainTopology {
+        node_count: n,
+        dims,
+        spacing,
+        edge_count: 0,
+        boundary_node_count: 0,
+        active_dimension_count: dims.iter().filter(|dim| **dim > 1).count(),
+    };
+    for node in 0..n {
+        if topology.is_boundary_node(node) {
+            boundary_node_count += 1;
+        }
+        let coords = topology.coords(node);
+        for axis in 0..3 {
+            if coords[axis] + 1 >= topology.dims[axis] {
+                continue;
+            }
+            let mut next = coords;
+            next[axis] += 1;
+            if topology.index(next).is_some() {
+                edge_count += 1;
+            }
+        }
+    }
+    AcousticDomainTopology {
+        edge_count,
+        boundary_node_count,
+        ..topology
+    }
+}
+
 fn acoustic_source_vector(model: &AnalysisModel, node_count: usize) -> Vec<f64> {
     let mut source = vec![0.0; node_count.max(1)];
     for (index, load) in model.loads.iter().enumerate() {
@@ -2661,97 +2825,117 @@ fn acoustic_source_vector(model: &AnalysisModel, node_count: usize) -> Vec<f64> 
 }
 
 fn acoustic_helmholtz_operator(
+    topology: AcousticDomainTopology,
     node_count: usize,
     drive_frequency_hz: f64,
     speed_of_sound_m_per_s: f64,
     damping_ratio: f64,
     boundary_summary: &AcousticBoundarySummary,
-) -> (Vec<f64>, Vec<f64>, f64) {
+) -> AcousticDomainSystem {
     let n = node_count.max(1);
-    let length_m = 1.0_f64;
-    let h = length_m / n.saturating_sub(1).max(1) as f64;
     let omega = 2.0 * std::f64::consts::PI * drive_frequency_hz.max(1.0);
     let wave_number = omega / speed_of_sound_m_per_s.max(1.0);
-    let kh_sq = (wave_number * h).powi(2);
-    let mut diag_real = vec![2.0 - kh_sq; n];
-    let mut diag_imag = vec![2.0 * damping_ratio.max(0.0) * kh_sq.max(1.0e-9); n];
+    let mut diag_real = vec![0.0; n];
+    let mut diag_imag = vec![0.0; n];
+    let mut edges = Vec::with_capacity(topology.edge_count);
+    for node in 0..n {
+        let coords = topology.coords(node);
+        for axis in 0..3 {
+            if coords[axis] + 1 >= topology.dims[axis] {
+                continue;
+            }
+            let mut next = coords;
+            next[axis] += 1;
+            let Some(next_index) = topology.index(next) else {
+                continue;
+            };
+            let stiffness = 1.0 / topology.spacing[axis].max(1.0e-9).powi(2);
+            diag_real[node] += stiffness;
+            diag_real[next_index] += stiffness;
+            edges.push(AcousticGraphEdge {
+                left: node,
+                right: next_index,
+                stiffness,
+            });
+        }
+    }
+    let mass_term =
+        (wave_number * topology.volume_m3().cbrt()).powi(2) / topology.node_count.max(1) as f64;
+    let damping = (2.0 * damping_ratio.max(0.0) * mass_term.max(1.0e-9)).max(1.0e-9);
     let boundary_loss = (boundary_summary.radiation_loss_factor
         + boundary_summary.impedance_loss_factor)
-        * (wave_number * h).abs().max(1.0e-9);
-    if n == 1 {
-        diag_real[0] = 1.0 - kh_sq;
-        diag_imag[0] += boundary_loss;
-    } else {
-        diag_real[0] = 1.0 - 0.5 * kh_sq;
-        diag_real[n - 1] = 1.0 - 0.5 * kh_sq;
-        diag_imag[0] += boundary_loss;
-        diag_imag[n - 1] += boundary_loss;
+        * wave_number.abs().max(1.0e-9)
+        / topology.boundary_node_count.max(1) as f64;
+    for node in 0..n {
+        diag_real[node] -= mass_term;
+        diag_imag[node] += damping;
+        if topology.is_boundary_node(node) {
+            diag_imag[node] += boundary_loss;
+            diag_real[node] += 0.02 * boundary_summary.rigid_wall_count as f64;
+        }
     }
-    (diag_real, diag_imag, -1.0)
+    AcousticDomainSystem {
+        diag_real,
+        diag_imag,
+        edges,
+    }
 }
 
-fn solve_complex_tridiagonal(
-    diag_real: &[f64],
-    diag_imag: &[f64],
-    offdiag: f64,
+fn solve_complex_graph_operator(
+    system: &AcousticDomainSystem,
     source_real: &[f64],
     source_imag: &[f64],
 ) -> (Vec<f64>, Vec<f64>) {
-    let n = diag_real.len().max(1);
-    let mut c_real = vec![0.0; n];
-    let mut c_imag = vec![0.0; n];
-    let mut d_real = vec![0.0; n];
-    let mut d_imag = vec![0.0; n];
-    let (inv_real, inv_imag) = complex_recip(diag_real[0], diag_imag[0]);
-    c_real[0] = offdiag * inv_real;
-    c_imag[0] = offdiag * inv_imag;
-    let rhs0_real = source_real.first().copied().unwrap_or(0.0);
-    let rhs0_imag = source_imag.first().copied().unwrap_or(0.0);
-    (d_real[0], d_imag[0]) = complex_mul(rhs0_real, rhs0_imag, inv_real, inv_imag);
-    for i in 1..n {
-        let denom_real = diag_real[i] - offdiag * c_real[i - 1];
-        let denom_imag = diag_imag[i] - offdiag * c_imag[i - 1];
-        let (inv_real, inv_imag) = complex_recip(denom_real, denom_imag);
-        if i + 1 < n {
-            c_real[i] = offdiag * inv_real;
-            c_imag[i] = offdiag * inv_imag;
-        }
-        let rhs_real = source_real.get(i).copied().unwrap_or(0.0) - offdiag * d_real[i - 1];
-        let rhs_imag = source_imag.get(i).copied().unwrap_or(0.0) - offdiag * d_imag[i - 1];
-        (d_real[i], d_imag[i]) = complex_mul(rhs_real, rhs_imag, inv_real, inv_imag);
+    let n = system.diag_real.len().max(1);
+    let mut matrix_real = vec![vec![0.0; n]; n];
+    let mut matrix_imag = vec![vec![0.0; n]; n];
+    for row in 0..n {
+        matrix_real[row][row] = system.diag_real[row];
+        matrix_imag[row][row] = system.diag_imag[row];
     }
-    let mut x_real = vec![0.0; n];
-    let mut x_imag = vec![0.0; n];
-    x_real[n - 1] = d_real[n - 1];
-    x_imag[n - 1] = d_imag[n - 1];
-    for i in (0..n.saturating_sub(1)).rev() {
-        let (cx_real, cx_imag) = complex_mul(c_real[i], c_imag[i], x_real[i + 1], x_imag[i + 1]);
-        x_real[i] = d_real[i] - cx_real;
-        x_imag[i] = d_imag[i] - cx_imag;
+    for edge in &system.edges {
+        matrix_real[edge.left][edge.right] -= edge.stiffness;
+        matrix_real[edge.right][edge.left] -= edge.stiffness;
     }
-    (x_real, x_imag)
+    let mut rhs_real = (0..n)
+        .map(|index| source_real.get(index).copied().unwrap_or(0.0))
+        .collect::<Vec<_>>();
+    let mut rhs_imag = (0..n)
+        .map(|index| source_imag.get(index).copied().unwrap_or(0.0))
+        .collect::<Vec<_>>();
+    solve_dense_complex_system(
+        &mut matrix_real,
+        &mut matrix_imag,
+        &mut rhs_real,
+        &mut rhs_imag,
+    )
 }
 
 fn acoustic_residual_norm(
-    diag_real: &[f64],
-    diag_imag: &[f64],
-    offdiag: f64,
+    system: &AcousticDomainSystem,
     pressure_real: &[f64],
     pressure_imag: &[f64],
     source_real: &[f64],
     source_imag: &[f64],
 ) -> f64 {
     let mut residual_sq = 0.0_f64;
-    for i in 0..diag_real.len() {
-        let mut applied_real = diag_real[i] * pressure_real[i] - diag_imag[i] * pressure_imag[i];
-        let mut applied_imag = diag_real[i] * pressure_imag[i] + diag_imag[i] * pressure_real[i];
-        if i > 0 {
-            applied_real += offdiag * pressure_real[i - 1];
-            applied_imag += offdiag * pressure_imag[i - 1];
-        }
-        if i + 1 < diag_real.len() {
-            applied_real += offdiag * pressure_real[i + 1];
-            applied_imag += offdiag * pressure_imag[i + 1];
+    for i in 0..system.diag_real.len() {
+        let mut applied_real =
+            system.diag_real[i] * pressure_real[i] - system.diag_imag[i] * pressure_imag[i];
+        let mut applied_imag =
+            system.diag_real[i] * pressure_imag[i] + system.diag_imag[i] * pressure_real[i];
+        for edge in system
+            .edges
+            .iter()
+            .filter(|edge| edge.left == i || edge.right == i)
+        {
+            let neighbor = if edge.left == i {
+                edge.right
+            } else {
+                edge.left
+            };
+            applied_real -= edge.stiffness * pressure_real[neighbor];
+            applied_imag -= edge.stiffness * pressure_imag[neighbor];
         }
         let real = applied_real - source_real.get(i).copied().unwrap_or(0.0);
         let imag = applied_imag - source_imag.get(i).copied().unwrap_or(0.0);
@@ -2769,6 +2953,87 @@ fn source_norm(source_real: &[f64], source_imag: &[f64]) -> f64 {
         .sqrt()
 }
 
+fn solve_dense_complex_system(
+    matrix_real: &mut [Vec<f64>],
+    matrix_imag: &mut [Vec<f64>],
+    rhs_real: &mut [f64],
+    rhs_imag: &mut [f64],
+) -> (Vec<f64>, Vec<f64>) {
+    let n = rhs_real.len();
+    for pivot in 0..n {
+        let mut pivot_row = pivot;
+        let mut pivot_norm = complex_abs_sq(matrix_real[pivot][pivot], matrix_imag[pivot][pivot]);
+        for candidate in pivot + 1..n {
+            let candidate_norm =
+                complex_abs_sq(matrix_real[candidate][pivot], matrix_imag[candidate][pivot]);
+            if candidate_norm > pivot_norm {
+                pivot_row = candidate;
+                pivot_norm = candidate_norm;
+            }
+        }
+        if pivot_row != pivot {
+            matrix_real.swap(pivot, pivot_row);
+            matrix_imag.swap(pivot, pivot_row);
+            rhs_real.swap(pivot, pivot_row);
+            rhs_imag.swap(pivot, pivot_row);
+        }
+        if pivot_norm <= 1.0e-24 {
+            matrix_real[pivot][pivot] += 1.0e-9;
+        }
+        let (pivot_inv_real, pivot_inv_imag) =
+            complex_recip(matrix_real[pivot][pivot], matrix_imag[pivot][pivot]);
+        for row in pivot + 1..n {
+            let (factor_real, factor_imag) = complex_mul(
+                matrix_real[row][pivot],
+                matrix_imag[row][pivot],
+                pivot_inv_real,
+                pivot_inv_imag,
+            );
+            matrix_real[row][pivot] = 0.0;
+            matrix_imag[row][pivot] = 0.0;
+            for col in pivot + 1..n {
+                let (update_real, update_imag) = complex_mul(
+                    factor_real,
+                    factor_imag,
+                    matrix_real[pivot][col],
+                    matrix_imag[pivot][col],
+                );
+                matrix_real[row][col] -= update_real;
+                matrix_imag[row][col] -= update_imag;
+            }
+            let (rhs_update_real, rhs_update_imag) =
+                complex_mul(factor_real, factor_imag, rhs_real[pivot], rhs_imag[pivot]);
+            rhs_real[row] -= rhs_update_real;
+            rhs_imag[row] -= rhs_update_imag;
+        }
+    }
+
+    let mut solution_real = vec![0.0; n];
+    let mut solution_imag = vec![0.0; n];
+    for row in (0..n).rev() {
+        let mut accum_real = rhs_real[row];
+        let mut accum_imag = rhs_imag[row];
+        for col in row + 1..n {
+            let (update_real, update_imag) = complex_mul(
+                matrix_real[row][col],
+                matrix_imag[row][col],
+                solution_real[col],
+                solution_imag[col],
+            );
+            accum_real -= update_real;
+            accum_imag -= update_imag;
+        }
+        let (inv_real, inv_imag) = complex_recip(matrix_real[row][row], matrix_imag[row][row]);
+        (solution_real[row], solution_imag[row]) =
+            complex_mul(accum_real, accum_imag, inv_real, inv_imag);
+    }
+    (solution_real, solution_imag)
+}
+
+fn complex_abs_sq(real: f64, imag: f64) -> f64 {
+    real * real + imag * imag
+}
+
 fn complex_recip(real: f64, imag: f64) -> (f64, f64) {
     let denom = (real * real + imag * imag).max(1.0e-24);
     (real / denom, -imag / denom)
@@ -2783,6 +3048,7 @@ fn complex_mul(a_real: f64, a_imag: f64, b_real: f64, b_imag: f64) -> (f64, f64)
 
 fn recover_acoustic_particle_velocity(
     pressure_real: &[f64],
+    topology: AcousticDomainTopology,
     drive_frequency_hz: f64,
     density_kg_per_m3: f64,
 ) -> Vec<f64> {
@@ -2791,24 +3057,45 @@ fn recover_acoustic_particle_velocity(
     let impedance_scale = (density_kg_per_m3.max(1.0e-12) * omega).max(1.0e-12);
     let mut velocity = vec![0.0; node_count * 3];
     for node in 0..pressure_real.len() {
-        let left = if node == 0 {
-            pressure_real[node]
-        } else {
-            pressure_real[node - 1]
-        };
-        let right = if node + 1 >= pressure_real.len() {
-            pressure_real[node]
-        } else {
-            pressure_real[node + 1]
-        };
-        let spacing = if node == 0 || node + 1 >= pressure_real.len() {
-            1.0
-        } else {
-            2.0
-        };
-        velocity[node * 3] = -((right - left) / spacing) / impedance_scale;
+        for axis in 0..3 {
+            velocity[node * 3 + axis] =
+                -acoustic_axis_derivative(pressure_real, topology, node, axis) / impedance_scale;
+        }
     }
     velocity
+}
+
+fn acoustic_axis_derivative(
+    pressure: &[f64],
+    topology: AcousticDomainTopology,
+    index: usize,
+    axis: usize,
+) -> f64 {
+    if topology.dims[axis] <= 1 {
+        return 0.0;
+    }
+    let coords = topology.coords(index);
+    let mut prev_coords = coords;
+    let prev_index = if coords[axis] > 0 {
+        prev_coords[axis] -= 1;
+        topology.index(prev_coords)
+    } else {
+        None
+    };
+    let mut next_coords = coords;
+    let next_index = if coords[axis] + 1 < topology.dims[axis] {
+        next_coords[axis] += 1;
+        topology.index(next_coords)
+    } else {
+        None
+    };
+    let spacing = topology.spacing[axis].max(1.0e-12);
+    match (prev_index, next_index) {
+        (Some(prev), Some(next)) => (pressure[next] - pressure[prev]) / (2.0 * spacing),
+        (Some(prev), None) => (pressure[index] - pressure[prev]) / spacing,
+        (None, Some(next)) => (pressure[next] - pressure[index]) / spacing,
+        (None, None) => 0.0,
+    }
 }
 
 fn cfd_reynolds_number(domain: &runmat_analysis_core::CfdDomain) -> f64 {

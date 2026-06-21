@@ -3284,6 +3284,62 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
+                "acoustic_domain_node_count",
+                "FEA_ACOUSTIC_DOMAIN_ASSEMBLY",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_DOMAIN_ASSEMBLY",
+                    "domain_node_count",
+                ),
+                Some(3.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_domain_edge_count",
+                "FEA_ACOUSTIC_DOMAIN_ASSEMBLY",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_DOMAIN_ASSEMBLY",
+                    "domain_edge_count",
+                ),
+                Some(2.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_domain_active_dimension_count",
+                "FEA_ACOUSTIC_DOMAIN_ASSEMBLY",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_DOMAIN_ASSEMBLY",
+                    "domain_active_dimension_count",
+                ),
+                Some(2.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_boundary_node_count",
+                "FEA_ACOUSTIC_DOMAIN_ASSEMBLY",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_DOMAIN_ASSEMBLY",
+                    "boundary_node_count",
+                ),
+                Some(2.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
                 "acoustic_material_coverage_ratio",
                 "FEA_ACOUSTIC_HARMONIC_RESPONSE",
                 diagnostic_metric(
