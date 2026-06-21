@@ -76,7 +76,7 @@ The main gaps for production-grade claims are:
 | Nonlinear structural | L2 | Independent nonlinear, plasticity, and contact references with tolerance envelopes. |
 | Thermo-mechanical | L1-L2 | Coupled known-answer cases and independent thermo-mechanical references. |
 | Electro-thermal | L1-L2 | Coupled electrical/thermal references and conservation checks. |
-| Electromagnetic | L2 for current proxy behavior | Maxwell field validation, source/boundary realization references, larger workload studies. |
+| Electromagnetic | L1-L2 | Maxwell field validation, source/boundary realization references, larger workload studies. |
 | Acoustic harmonic | L1-L2 baseline | Acoustic-specific validation and external acoustic references. |
 | CFD | L1-L2 baseline | Canonical CFD benchmarks, conservation checks, independent fluid references. |
 | CHT | L1-L2 baseline | Coupled fluid/thermal benchmarks and independent CHT references. |

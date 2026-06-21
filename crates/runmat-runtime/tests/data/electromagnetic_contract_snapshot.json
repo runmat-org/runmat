@@ -124,7 +124,7 @@
     "electromagnetic_enabled": null,
     "electromagnetic_reference_frequency_hz": null,
     "electromagnetic_applied_current_a": null,
-    "electromagnetic_placeholder_quality": null,
+    "electromagnetic_solve_quality": null,
     "electromagnetic_conductivity_spread_ratio": null,
     "electromagnetic_relative_permittivity_spread_ratio": null,
     "electromagnetic_relative_permeability_spread_ratio": null,
@@ -132,7 +132,7 @@
     "electromagnetic_assignment_coverage_ratio": null,
     "electromagnetic_fallback_coefficient_ratio": null,
     "electromagnetic_region_coefficient_contrast_index": null,
-    "electromagnetic_solver_conditioning_proxy": null,
+    "electromagnetic_condition_number_estimate": null,
     "electromagnetic_source_realization_ratio": null,
     "electromagnetic_source_region_coverage_ratio": null,
     "electromagnetic_source_material_alignment_ratio": null,
@@ -142,8 +142,8 @@
     "electromagnetic_boundary_anchor_ratio": null,
     "electromagnetic_boundary_condition_localization_ratio": null,
     "electromagnetic_ground_anchor_effectiveness_ratio": null,
-    "electromagnetic_insulation_leakage_proxy": null,
-    "electromagnetic_flux_divergence_proxy": null,
+    "electromagnetic_insulation_leakage_ratio": null,
+    "electromagnetic_flux_divergence_ratio": null,
     "electromagnetic_energy_imbalance_ratio": null,
     "electromagnetic_boundary_energy_ratio": null,
     "electromagnetic_boundary_penalty_conditioning_contribution": null,
@@ -154,7 +154,7 @@
     "electromagnetic_resonance_peak_frequency_hz": null,
     "electromagnetic_resonance_peak_flux_density": null,
     "electromagnetic_resonance_bandwidth_hz": null,
-    "electromagnetic_resonance_q_proxy": null,
+    "electromagnetic_resonance_quality_factor": null,
     "electromagnetic_resonance_flux_gain": null
   }
 }

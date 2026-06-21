@@ -249,11 +249,11 @@
       "tolerance_rel": null
     },
     {
-      "name": "em_homogeneous_flux_divergence_proxy",
+      "name": "em_homogeneous_flux_divergence_ratio",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "em_homogeneous_flux_divergence_proxy",
+      "assertion_name": "em_homogeneous_flux_divergence_ratio",
       "reference": 0.22654165350351355,
       "tolerance_abs": 0.08,
       "tolerance_rel": 0.35
@@ -489,17 +489,17 @@
       "tolerance_rel": 1.0
     },
     {
-      "name": "electromagnetic_insulation_leakage_proxy",
+      "name": "electromagnetic_insulation_leakage_ratio",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
-      "field": "electromagnetic_insulation_leakage_proxy",
+      "field": "electromagnetic_insulation_leakage_ratio",
       "reference": 0.0,
       "tolerance_abs": 0.1,
       "tolerance_rel": 1.0
     },
     {
-      "name": "electromagnetic_placeholder_quality",
+      "name": "electromagnetic_solve_quality",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
-      "field": "electromagnetic_placeholder_quality",
+      "field": "electromagnetic_solve_quality",
       "reference": 0.9999625066570741,
       "tolerance_abs": 0.05,
       "tolerance_rel": 0.1
@@ -513,9 +513,9 @@
       "tolerance_rel": 10.0
     },
     {
-      "name": "electromagnetic_flux_divergence_proxy",
+      "name": "electromagnetic_flux_divergence_ratio",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
-      "field": "electromagnetic_flux_divergence_proxy",
+      "field": "electromagnetic_flux_divergence_ratio",
       "reference": 0.22654165392772133,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.8
@@ -537,9 +537,9 @@
       "tolerance_rel": 10.0
     },
     {
-      "name": "electromagnetic_solver_conditioning_proxy",
+      "name": "electromagnetic_condition_number_estimate",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
-      "field": "electromagnetic_solver_conditioning_proxy",
+      "field": "electromagnetic_condition_number_estimate",
       "reference": 1.8318888888888964,
       "tolerance_abs": 1.0,
       "tolerance_rel": 0.6
@@ -585,9 +585,9 @@
       "tolerance_rel": 0.6
     },
     {
-      "name": "electromagnetic_resonance_q_proxy",
+      "name": "electromagnetic_resonance_quality_factor",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
-      "field": "electromagnetic_resonance_q_proxy",
+      "field": "electromagnetic_resonance_quality_factor",
       "reference": 3.0,
       "tolerance_abs": 1.5,
       "tolerance_rel": 0.6
@@ -851,11 +851,11 @@
       "tolerance_rel": 0.2
     },
     {
-      "name": "em_heterogeneous_flux_divergence_proxy",
+      "name": "em_heterogeneous_flux_divergence_ratio",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "em_heterogeneous_flux_divergence_proxy",
+      "assertion_name": "em_heterogeneous_flux_divergence_ratio",
       "reference": 0.14285714285714288,
       "tolerance_abs": 0.15,
       "tolerance_rel": 1.0
@@ -1041,17 +1041,17 @@
       "tolerance_rel": 1.0
     },
     {
-      "name": "electromagnetic_insulation_leakage_proxy",
+      "name": "electromagnetic_insulation_leakage_ratio",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
-      "field": "electromagnetic_insulation_leakage_proxy",
+      "field": "electromagnetic_insulation_leakage_ratio",
       "reference": 0.5148602374120815,
       "tolerance_abs": 0.25,
       "tolerance_rel": 0.6
     },
     {
-      "name": "electromagnetic_placeholder_quality",
+      "name": "electromagnetic_solve_quality",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
-      "field": "electromagnetic_placeholder_quality",
+      "field": "electromagnetic_solve_quality",
       "reference": 0.7719999999999999,
       "tolerance_abs": 0.15,
       "tolerance_rel": 0.25
@@ -1065,9 +1065,9 @@
       "tolerance_rel": 0.8
     },
     {
-      "name": "electromagnetic_flux_divergence_proxy",
+      "name": "electromagnetic_flux_divergence_ratio",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
-      "field": "electromagnetic_flux_divergence_proxy",
+      "field": "electromagnetic_flux_divergence_ratio",
       "reference": 0.14285714285714285,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.8
@@ -1089,9 +1089,9 @@
       "tolerance_rel": 10.0
     },
     {
-      "name": "electromagnetic_solver_conditioning_proxy",
+      "name": "electromagnetic_condition_number_estimate",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
-      "field": "electromagnetic_solver_conditioning_proxy",
+      "field": "electromagnetic_condition_number_estimate",
       "reference": 3.3684700368835356,
       "tolerance_abs": 2.0,
       "tolerance_rel": 0.6
@@ -1137,9 +1137,9 @@
       "tolerance_rel": 0.6
     },
     {
-      "name": "electromagnetic_resonance_q_proxy",
+      "name": "electromagnetic_resonance_quality_factor",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
-      "field": "electromagnetic_resonance_q_proxy",
+      "field": "electromagnetic_resonance_quality_factor",
       "reference": 3.1,
       "tolerance_abs": 1.6,
       "tolerance_rel": 0.6
@@ -1193,9 +1193,9 @@
       "tolerance_rel": null
     },
     {
-      "name": "electromagnetic_placeholder_quality",
+      "name": "electromagnetic_solve_quality",
       "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
-      "field": "electromagnetic_placeholder_quality",
+      "field": "electromagnetic_solve_quality",
       "reference": 0.802,
       "tolerance_abs": 0.2,
       "tolerance_rel": 0.35
@@ -1209,9 +1209,9 @@
       "tolerance_rel": 0.5
     },
     {
-      "name": "electromagnetic_flux_divergence_proxy",
+      "name": "electromagnetic_flux_divergence_ratio",
       "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
-      "field": "electromagnetic_flux_divergence_proxy",
+      "field": "electromagnetic_flux_divergence_ratio",
       "reference": 0.0,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.8
@@ -1305,9 +1305,9 @@
       "tolerance_rel": 0.6
     },
     {
-      "name": "electromagnetic_solver_conditioning_proxy",
+      "name": "electromagnetic_condition_number_estimate",
       "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
-      "field": "electromagnetic_solver_conditioning_proxy",
+      "field": "electromagnetic_condition_number_estimate",
       "reference": 1.0,
       "tolerance_abs": 2.0,
       "tolerance_rel": 0.7
@@ -1409,9 +1409,9 @@
       "tolerance_rel": 1.0
     },
     {
-      "name": "electromagnetic_insulation_leakage_proxy",
+      "name": "electromagnetic_insulation_leakage_ratio",
       "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
-      "field": "electromagnetic_insulation_leakage_proxy",
+      "field": "electromagnetic_insulation_leakage_ratio",
       "reference": 1.0,
       "tolerance_abs": 0.25,
       "tolerance_rel": 0.6
@@ -1457,9 +1457,9 @@
       "tolerance_rel": null
     },
     {
-      "name": "electromagnetic_placeholder_quality",
+      "name": "electromagnetic_solve_quality",
       "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
-      "field": "electromagnetic_placeholder_quality",
+      "field": "electromagnetic_solve_quality",
       "reference": 0.8019999992684326,
       "tolerance_abs": 0.2,
       "tolerance_rel": 0.35
@@ -1473,9 +1473,9 @@
       "tolerance_rel": 0.5
     },
     {
-      "name": "electromagnetic_flux_divergence_proxy",
+      "name": "electromagnetic_flux_divergence_ratio",
       "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
-      "field": "electromagnetic_flux_divergence_proxy",
+      "field": "electromagnetic_flux_divergence_ratio",
       "reference": 0.07852882168228406,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.8
@@ -1569,9 +1569,9 @@
       "tolerance_rel": 0.6
     },
     {
-      "name": "electromagnetic_solver_conditioning_proxy",
+      "name": "electromagnetic_condition_number_estimate",
       "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
-      "field": "electromagnetic_solver_conditioning_proxy",
+      "field": "electromagnetic_condition_number_estimate",
       "reference": 2.6334071621248594,
       "tolerance_abs": 2.0,
       "tolerance_rel": 0.7
@@ -1673,9 +1673,9 @@
       "tolerance_rel": 1.0
     },
     {
-      "name": "electromagnetic_insulation_leakage_proxy",
+      "name": "electromagnetic_insulation_leakage_ratio",
       "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
-      "field": "electromagnetic_insulation_leakage_proxy",
+      "field": "electromagnetic_insulation_leakage_ratio",
       "reference": 1.0,
       "tolerance_abs": 0.25,
       "tolerance_rel": 0.6
@@ -1751,9 +1751,9 @@
       "tolerance_rel": 0.35
     },
     {
-      "name": "electromagnetic_placeholder_quality",
+      "name": "electromagnetic_solve_quality",
       "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
-      "field": "electromagnetic_placeholder_quality",
+      "field": "electromagnetic_solve_quality",
       "reference": 0.65,
       "tolerance_abs": 0.2,
       "tolerance_rel": 0.35
@@ -1767,9 +1767,9 @@
       "tolerance_rel": 0.5
     },
     {
-      "name": "electromagnetic_flux_divergence_proxy",
+      "name": "electromagnetic_flux_divergence_ratio",
       "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
-      "field": "electromagnetic_flux_divergence_proxy",
+      "field": "electromagnetic_flux_divergence_ratio",
       "reference": 0.0,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.8
@@ -1863,9 +1863,9 @@
       "tolerance_rel": 0.7
     },
     {
-      "name": "electromagnetic_solver_conditioning_proxy",
+      "name": "electromagnetic_condition_number_estimate",
       "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
-      "field": "electromagnetic_solver_conditioning_proxy",
+      "field": "electromagnetic_condition_number_estimate",
       "reference": 2.070551535629522,
       "tolerance_abs": 2.0,
       "tolerance_rel": 0.7
@@ -1967,9 +1967,9 @@
       "tolerance_rel": 1.0
     },
     {
-      "name": "electromagnetic_insulation_leakage_proxy",
+      "name": "electromagnetic_insulation_leakage_ratio",
       "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
-      "field": "electromagnetic_insulation_leakage_proxy",
+      "field": "electromagnetic_insulation_leakage_ratio",
       "reference": 1.0,
       "tolerance_abs": 0.25,
       "tolerance_rel": 0.6
@@ -2045,9 +2045,9 @@
       "tolerance_rel": 0.35
     },
     {
-      "name": "electromagnetic_placeholder_quality",
+      "name": "electromagnetic_solve_quality",
       "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
-      "field": "electromagnetic_placeholder_quality",
+      "field": "electromagnetic_solve_quality",
       "reference": 0.65,
       "tolerance_abs": 0.2,
       "tolerance_rel": 0.35
@@ -2061,9 +2061,9 @@
       "tolerance_rel": 0.5
     },
     {
-      "name": "electromagnetic_flux_divergence_proxy",
+      "name": "electromagnetic_flux_divergence_ratio",
       "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
-      "field": "electromagnetic_flux_divergence_proxy",
+      "field": "electromagnetic_flux_divergence_ratio",
       "reference": 0.0,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.8
@@ -2157,9 +2157,9 @@
       "tolerance_rel": 0.6
     },
     {
-      "name": "electromagnetic_solver_conditioning_proxy",
+      "name": "electromagnetic_condition_number_estimate",
       "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
-      "field": "electromagnetic_solver_conditioning_proxy",
+      "field": "electromagnetic_condition_number_estimate",
       "reference": 4.021582075719457,
       "tolerance_abs": 3.0,
       "tolerance_rel": 0.7
@@ -2261,9 +2261,9 @@
       "tolerance_rel": 1.0
     },
     {
-      "name": "electromagnetic_insulation_leakage_proxy",
+      "name": "electromagnetic_insulation_leakage_ratio",
       "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
-      "field": "electromagnetic_insulation_leakage_proxy",
+      "field": "electromagnetic_insulation_leakage_ratio",
       "reference": 1.0,
       "tolerance_abs": 0.25,
       "tolerance_rel": 0.6
@@ -2309,9 +2309,9 @@
       "tolerance_rel": 0.05
     },
     {
-      "name": "electromagnetic_placeholder_quality",
+      "name": "electromagnetic_solve_quality",
       "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
-      "field": "electromagnetic_placeholder_quality",
+      "field": "electromagnetic_solve_quality",
       "reference": 0.7300444910122844,
       "tolerance_abs": 0.2,
       "tolerance_rel": 0.35
@@ -2325,9 +2325,9 @@
       "tolerance_rel": 0.5
     },
     {
-      "name": "electromagnetic_flux_divergence_proxy",
+      "name": "electromagnetic_flux_divergence_ratio",
       "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
-      "field": "electromagnetic_flux_divergence_proxy",
+      "field": "electromagnetic_flux_divergence_ratio",
       "reference": 0.19999999999999998,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.8
@@ -2421,9 +2421,9 @@
       "tolerance_rel": 0.6
     },
     {
-      "name": "electromagnetic_solver_conditioning_proxy",
+      "name": "electromagnetic_condition_number_estimate",
       "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
-      "field": "electromagnetic_solver_conditioning_proxy",
+      "field": "electromagnetic_condition_number_estimate",
       "reference": 11.542118015125101,
       "tolerance_abs": 6.0,
       "tolerance_rel": 0.7
@@ -2525,9 +2525,9 @@
       "tolerance_rel": 0.1
     },
     {
-      "name": "electromagnetic_insulation_leakage_proxy",
+      "name": "electromagnetic_insulation_leakage_ratio",
       "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
-      "field": "electromagnetic_insulation_leakage_proxy",
+      "field": "electromagnetic_insulation_leakage_ratio",
       "reference": 0.5187940981730527,
       "tolerance_abs": 0.25,
       "tolerance_rel": 0.6
@@ -2553,19 +2553,19 @@
       "tolerance_rel": 0.35
     },
     {
-      "name": "em_boundary_kernel_insulation_leakage_proxy",
+      "name": "em_boundary_kernel_insulation_leakage_ratio",
       "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "em_boundary_kernel_insulation_leakage_proxy",
+      "assertion_name": "em_boundary_kernel_insulation_leakage_ratio",
       "reference": 1.0,
       "tolerance_abs": 0.2,
       "tolerance_rel": 0.25
     },
     {
-      "name": "electromagnetic_placeholder_quality",
+      "name": "electromagnetic_solve_quality",
       "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
-      "field": "electromagnetic_placeholder_quality",
+      "field": "electromagnetic_solve_quality",
       "reference": 0.8019201300548723,
       "tolerance_abs": 0.2,
       "tolerance_rel": 0.35
@@ -2579,9 +2579,9 @@
       "tolerance_rel": 0.5
     },
     {
-      "name": "electromagnetic_flux_divergence_proxy",
+      "name": "electromagnetic_flux_divergence_ratio",
       "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
-      "field": "electromagnetic_flux_divergence_proxy",
+      "field": "electromagnetic_flux_divergence_ratio",
       "reference": 0.0,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.8
@@ -2675,9 +2675,9 @@
       "tolerance_rel": 0.7
     },
     {
-      "name": "electromagnetic_solver_conditioning_proxy",
+      "name": "electromagnetic_condition_number_estimate",
       "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
-      "field": "electromagnetic_solver_conditioning_proxy",
+      "field": "electromagnetic_condition_number_estimate",
       "reference": 1.6036393287236705,
       "tolerance_abs": 2.0,
       "tolerance_rel": 0.7
@@ -2779,9 +2779,9 @@
       "tolerance_rel": 1.0
     },
     {
-      "name": "electromagnetic_insulation_leakage_proxy",
+      "name": "electromagnetic_insulation_leakage_ratio",
       "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
-      "field": "electromagnetic_insulation_leakage_proxy",
+      "field": "electromagnetic_insulation_leakage_ratio",
       "reference": 1.0,
       "tolerance_abs": 0.25,
       "tolerance_rel": 0.6

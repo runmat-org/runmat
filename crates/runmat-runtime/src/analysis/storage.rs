@@ -183,7 +183,7 @@ fn run_operation_version(run: &AnalysisRunResult) -> String {
             .run
             .diagnostics
             .iter()
-            .any(|diag| diag.code == "FEA_EM_PLACEHOLDER")
+            .any(|diag| diag.code == "FEA_EM_STATIC")
     {
         "fea.run_electromagnetic/v1".to_string()
     } else if run

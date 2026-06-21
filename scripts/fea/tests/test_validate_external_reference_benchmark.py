@@ -14,7 +14,7 @@ from scripts.fea.governance.validate_analysis_report_nonlinear import (
     EM_CORE_ASSIGNMENT_REQUIRED_FIELDS,
     EM_FREQUENCY_REQUIRED_FIELDS,
     EM_GROUND_ANCHOR_EFFECTIVENESS_REQUIRED_FIELDS,
-    EM_PLACEHOLDER_QUALITY_REQUIRED_FIELDS,
+    EM_SOLVE_QUALITY_REQUIRED_FIELDS,
     EM_RESIDUAL_REQUIRED_FIELDS,
     EM_SOURCE_ENERGY_CONSISTENCY_REQUIRED_FIELDS,
     EM_SOURCE_FIDELITY_REQUIRED_FIELDS,
@@ -585,7 +585,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "em_homogeneous_flux_divergence_proxy",
+            "name": "em_homogeneous_flux_divergence_ratio",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 0.23,
             "reference": 0.22,
@@ -781,14 +781,14 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_insulation_leakage_proxy",
+            "name": "electromagnetic_insulation_leakage_ratio",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 0.0,
             "reference": 0.0,
             "pass": True,
         },
         {
-            "name": "electromagnetic_placeholder_quality",
+            "name": "electromagnetic_solve_quality",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 0.9999625066570741,
             "reference": 0.9999625066570741,
@@ -802,7 +802,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_flux_divergence_proxy",
+            "name": "electromagnetic_flux_divergence_ratio",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 0.22654165392772133,
             "reference": 0.22654165392772133,
@@ -823,7 +823,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_solver_conditioning_proxy",
+            "name": "electromagnetic_condition_number_estimate",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 1.83,
             "reference": 1.83,
@@ -865,7 +865,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_resonance_q_proxy",
+            "name": "electromagnetic_resonance_quality_factor",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 3.0,
             "reference": 3.0,
@@ -1047,7 +1047,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "em_heterogeneous_flux_divergence_proxy",
+            "name": "em_heterogeneous_flux_divergence_ratio",
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 0.14,
             "reference": 0.14,
@@ -1215,14 +1215,14 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_insulation_leakage_proxy",
+            "name": "electromagnetic_insulation_leakage_ratio",
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 0.5148602374120815,
             "reference": 0.5148602374120815,
             "pass": True,
         },
         {
-            "name": "electromagnetic_placeholder_quality",
+            "name": "electromagnetic_solve_quality",
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 0.7719999999999999,
             "reference": 0.7719999999999999,
@@ -1236,7 +1236,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_flux_divergence_proxy",
+            "name": "electromagnetic_flux_divergence_ratio",
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 0.14285714285714285,
             "reference": 0.14285714285714285,
@@ -1257,7 +1257,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_solver_conditioning_proxy",
+            "name": "electromagnetic_condition_number_estimate",
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 3.36,
             "reference": 3.36,
@@ -1299,7 +1299,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_resonance_q_proxy",
+            "name": "electromagnetic_resonance_quality_factor",
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 3.1,
             "reference": 3.1,
@@ -1341,7 +1341,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_placeholder_quality",
+            "name": "electromagnetic_solve_quality",
             "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
             "observed": 0.802,
             "reference": 0.802,
@@ -1355,7 +1355,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_flux_divergence_proxy",
+            "name": "electromagnetic_flux_divergence_ratio",
             "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
             "observed": 0.0,
             "reference": 0.0,
@@ -1439,7 +1439,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_solver_conditioning_proxy",
+            "name": "electromagnetic_condition_number_estimate",
             "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,
@@ -1530,7 +1530,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_insulation_leakage_proxy",
+            "name": "electromagnetic_insulation_leakage_ratio",
             "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,
@@ -1565,7 +1565,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_placeholder_quality",
+            "name": "electromagnetic_solve_quality",
             "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
             "observed": 0.8019999992684326,
             "reference": 0.8019999992684326,
@@ -1579,7 +1579,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_flux_divergence_proxy",
+            "name": "electromagnetic_flux_divergence_ratio",
             "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
             "observed": 0.07852882168228406,
             "reference": 0.07852882168228406,
@@ -1663,7 +1663,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_solver_conditioning_proxy",
+            "name": "electromagnetic_condition_number_estimate",
             "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
             "observed": 2.6334071621248594,
             "reference": 2.6334071621248594,
@@ -1754,7 +1754,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_insulation_leakage_proxy",
+            "name": "electromagnetic_insulation_leakage_ratio",
             "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,
@@ -1810,7 +1810,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_placeholder_quality",
+            "name": "electromagnetic_solve_quality",
             "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
             "observed": 0.65,
             "reference": 0.65,
@@ -1824,7 +1824,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_flux_divergence_proxy",
+            "name": "electromagnetic_flux_divergence_ratio",
             "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
             "observed": 0.0,
             "reference": 0.0,
@@ -1908,7 +1908,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_solver_conditioning_proxy",
+            "name": "electromagnetic_condition_number_estimate",
             "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
             "observed": 2.070551535629522,
             "reference": 2.070551535629522,
@@ -1999,7 +1999,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_insulation_leakage_proxy",
+            "name": "electromagnetic_insulation_leakage_ratio",
             "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,
@@ -2055,7 +2055,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_placeholder_quality",
+            "name": "electromagnetic_solve_quality",
             "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
             "observed": 0.65,
             "reference": 0.65,
@@ -2069,7 +2069,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_flux_divergence_proxy",
+            "name": "electromagnetic_flux_divergence_ratio",
             "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
             "observed": 0.0,
             "reference": 0.0,
@@ -2153,7 +2153,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_solver_conditioning_proxy",
+            "name": "electromagnetic_condition_number_estimate",
             "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
             "observed": 4.021582075719457,
             "reference": 4.021582075719457,
@@ -2244,7 +2244,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_insulation_leakage_proxy",
+            "name": "electromagnetic_insulation_leakage_ratio",
             "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,
@@ -2279,7 +2279,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_placeholder_quality",
+            "name": "electromagnetic_solve_quality",
             "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
             "observed": 0.7300444910122844,
             "reference": 0.7300444910122844,
@@ -2293,7 +2293,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_flux_divergence_proxy",
+            "name": "electromagnetic_flux_divergence_ratio",
             "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
             "observed": 0.19999999999999998,
             "reference": 0.19999999999999998,
@@ -2377,7 +2377,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_solver_conditioning_proxy",
+            "name": "electromagnetic_condition_number_estimate",
             "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
             "observed": 11.542118015125101,
             "reference": 11.542118015125101,
@@ -2468,7 +2468,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_insulation_leakage_proxy",
+            "name": "electromagnetic_insulation_leakage_ratio",
             "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
             "observed": 0.5187940981730527,
             "reference": 0.5187940981730527,
@@ -2489,14 +2489,14 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "em_boundary_kernel_insulation_leakage_proxy",
+            "name": "em_boundary_kernel_insulation_leakage_ratio",
             "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,
             "pass": True,
         },
         {
-            "name": "electromagnetic_placeholder_quality",
+            "name": "electromagnetic_solve_quality",
             "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
             "observed": 0.8019201300548723,
             "reference": 0.8019201300548723,
@@ -2510,7 +2510,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_flux_divergence_proxy",
+            "name": "electromagnetic_flux_divergence_ratio",
             "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
             "observed": 0.0,
             "reference": 0.0,
@@ -2594,7 +2594,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_solver_conditioning_proxy",
+            "name": "electromagnetic_condition_number_estimate",
             "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
             "observed": 1.6036393287236705,
             "reference": 1.6036393287236705,
@@ -2685,7 +2685,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electromagnetic_insulation_leakage_proxy",
+            "name": "electromagnetic_insulation_leakage_ratio",
             "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,
@@ -4501,7 +4501,7 @@ class ValidateExternalReferenceBenchmarkTests(unittest.TestCase):
             EM_CORE_ASSIGNMENT_REQUIRED_FIELDS,
             EM_CONSTITUTIVE_REQUIRED_FIELDS,
             EM_BOUNDARY_SOURCE_REQUIRED_FIELDS,
-            EM_PLACEHOLDER_QUALITY_REQUIRED_FIELDS,
+            EM_SOLVE_QUALITY_REQUIRED_FIELDS,
             EM_RESIDUAL_REQUIRED_FIELDS,
             EM_BALANCE_REQUIRED_FIELDS,
         )

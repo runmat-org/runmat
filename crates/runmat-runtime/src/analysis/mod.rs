@@ -5842,12 +5842,12 @@ pub fn analysis_run_electromagnetic_with_options_op(
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "sweep_count={} resonance_peak_frequency_hz={} resonance_peak_flux_density={} resonance_bandwidth_hz={} resonance_q_proxy={} resonance_flux_gain={}",
+            "sweep_count={} resonance_peak_frequency_hz={} resonance_peak_flux_density={} resonance_bandwidth_hz={} resonance_quality_factor={} resonance_flux_gain={}",
             sweep_metrics.sweep_count,
             sweep_metrics.resonance_peak_frequency_hz.unwrap_or(0.0),
             sweep_metrics.resonance_peak_flux_density.unwrap_or(0.0),
             sweep_metrics.resonance_bandwidth_hz.unwrap_or(0.0),
-            sweep_metrics.resonance_q_proxy.unwrap_or(0.0),
+            sweep_metrics.resonance_quality_factor.unwrap_or(0.0),
             sweep_metrics.resonance_flux_gain.unwrap_or(0.0),
         ),
     });
@@ -5892,10 +5892,10 @@ pub fn analysis_run_electromagnetic_with_options_op(
         "FEA_EM_STATIC",
         "region_coefficient_contrast_index",
     );
-    let em_solver_conditioning_proxy = diagnostic_metric(
+    let em_condition_number_estimate = diagnostic_metric(
         &run.diagnostics,
         "FEA_EM_STATIC",
-        "solver_conditioning_proxy",
+        "condition_number_estimate",
     );
     let em_source_realization_ratio = diagnostic_metric(
         &run.diagnostics,
@@ -5931,13 +5931,13 @@ pub fn analysis_run_electromagnetic_with_options_op(
         "FEA_EM_STATIC",
         "ground_anchor_effectiveness_ratio",
     );
-    let em_insulation_leakage_proxy = diagnostic_metric(
+    let em_insulation_leakage_ratio = diagnostic_metric(
         &run.diagnostics,
         "FEA_EM_STATIC",
-        "insulation_leakage_proxy",
+        "insulation_leakage_ratio",
     );
-    let em_flux_divergence_proxy =
-        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "flux_divergence_proxy");
+    let em_flux_divergence_ratio =
+        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "flux_divergence_ratio");
     let em_energy_imbalance_ratio =
         diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "energy_imbalance_ratio");
     let em_boundary_energy_ratio =
@@ -5957,8 +5957,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
     let em_imag_residual_norm =
         diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "imag_residual_norm");
     let em_sweep_count = diagnostic_metric(&run.diagnostics, "FEA_EM_SWEEP", "sweep_count");
-    let em_resonance_q_proxy =
-        diagnostic_metric(&run.diagnostics, "FEA_EM_SWEEP", "resonance_q_proxy");
+    let em_resonance_quality_factor =
+        diagnostic_metric(&run.diagnostics, "FEA_EM_SWEEP", "resonance_quality_factor");
     let ElectromagneticQualityThresholds {
         em_spread_threshold,
         em_heterogeneity_threshold,
@@ -6000,7 +6000,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
     let em_contrast_breach = em_region_contrast_index
         .map(|value| value > em_contrast_max_threshold)
         .unwrap_or(false);
-    let em_conditioning_breach = em_solver_conditioning_proxy
+    let em_conditioning_breach = em_condition_number_estimate
         .map(|value| value > em_conditioning_max_threshold)
         .unwrap_or(false);
     let em_source_realization_breach = em_source_realization_ratio
@@ -6027,10 +6027,10 @@ pub fn analysis_run_electromagnetic_with_options_op(
     let em_ground_effectiveness_breach = em_ground_anchor_effectiveness_ratio
         .map(|value| value < em_ground_effectiveness_min_threshold)
         .unwrap_or(false);
-    let em_insulation_leakage_breach = em_insulation_leakage_proxy
+    let em_insulation_leakage_breach = em_insulation_leakage_ratio
         .map(|value| value > em_insulation_leakage_max_threshold)
         .unwrap_or(false);
-    let em_divergence_breach = em_flux_divergence_proxy
+    let em_divergence_breach = em_flux_divergence_ratio
         .map(|value| value > em_divergence_max_threshold)
         .unwrap_or(false);
     let em_energy_imbalance_breach = em_energy_imbalance_ratio
@@ -6057,7 +6057,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
             .map(|value| value < em_sweep_count_min_threshold)
             .unwrap_or(false);
     let em_resonance_sharpness_breach = sweep_governance_active
-        && em_resonance_q_proxy
+        && em_resonance_quality_factor
             .map(|value| value < em_resonance_q_min_threshold)
             .unwrap_or(false);
     if (em_spread_breach
@@ -6096,7 +6096,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
     }
     if result_quality != QualityGate::Pass {
         quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticPlaceholder,
+            code: QualityReasonCode::ElectromagneticSolveQualityLow,
             detail: "electromagnetic static solve quality below production target".to_string(),
         });
     }
@@ -6154,8 +6154,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ElectromagneticConditioningHigh,
             detail: format!(
-                "electromagnetic solver conditioning proxy {} exceeds threshold {}",
-                em_solver_conditioning_proxy.unwrap_or(0.0),
+                "electromagnetic condition-number estimate {} exceeds threshold {}",
+                em_condition_number_estimate.unwrap_or(0.0),
                 em_conditioning_max_threshold
             ),
         });
@@ -6244,8 +6244,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ElectromagneticInsulationLeakageHigh,
             detail: format!(
-                "electromagnetic insulation leakage proxy {} exceeds threshold {}",
-                em_insulation_leakage_proxy.unwrap_or(0.0),
+                "electromagnetic insulation leakage ratio {} exceeds threshold {}",
+                em_insulation_leakage_ratio.unwrap_or(0.0),
                 em_insulation_leakage_max_threshold
             ),
         });
@@ -6254,8 +6254,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ElectromagneticFluxDivergenceHigh,
             detail: format!(
-                "electromagnetic flux divergence proxy {} exceeds threshold {}",
-                em_flux_divergence_proxy.unwrap_or(0.0),
+                "electromagnetic flux divergence ratio {} exceeds threshold {}",
+                em_flux_divergence_ratio.unwrap_or(0.0),
                 em_divergence_max_threshold
             ),
         });
@@ -6334,8 +6334,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ElectromagneticResonanceSharpnessLow,
             detail: format!(
-                "electromagnetic resonance q proxy {} is below threshold {}",
-                em_resonance_q_proxy.unwrap_or(0.0),
+                "electromagnetic resonance quality factor {} is below threshold {}",
+                em_resonance_quality_factor.unwrap_or(0.0),
                 em_resonance_q_min_threshold
             ),
         });
@@ -6386,7 +6386,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
             resonance_peak_frequency_hz: sweep_metrics.resonance_peak_frequency_hz,
             resonance_peak_flux_density: sweep_metrics.resonance_peak_flux_density,
             resonance_bandwidth_hz: sweep_metrics.resonance_bandwidth_hz,
-            resonance_quality_factor: sweep_metrics.resonance_q_proxy,
+            resonance_quality_factor: sweep_metrics.resonance_quality_factor,
             resonance_flux_gain: sweep_metrics.resonance_flux_gain,
         }),
         model_validity: QualityGate::Pass,
@@ -7002,45 +7002,22 @@ pub fn analysis_results_op(
         "thermal_response_realization_ratio",
     );
     let electromagnetic_enabled =
-        diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_EM_STATIC", "enabled").or_else(
-            || diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_EM_PLACEHOLDER", "enabled"),
-        );
+        diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_EM_STATIC", "enabled");
     let electromagnetic_reference_frequency_hz = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_EM_STATIC",
         "reference_frequency_hz",
-    )
-    .or_else(|| {
-        diagnostic_metric(
-            &run_result.run.diagnostics,
-            "FEA_EM_PLACEHOLDER",
-            "reference_frequency_hz",
-        )
-    });
+    );
     let electromagnetic_applied_current_a = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_EM_STATIC",
         "applied_current_a",
-    )
-    .or_else(|| {
-        diagnostic_metric(
-            &run_result.run.diagnostics,
-            "FEA_EM_PLACEHOLDER",
-            "applied_current_a",
-        )
-    });
-    let electromagnetic_placeholder_quality = diagnostic_metric(
+    );
+    let electromagnetic_solve_quality = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_EM_STATIC",
         "solve_quality",
-    )
-    .or_else(|| {
-        diagnostic_metric(
-            &run_result.run.diagnostics,
-            "FEA_EM_PLACEHOLDER",
-            "placeholder_quality",
-        )
-    });
+    );
     let electromagnetic_conductivity_spread_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_EM_STATIC",
@@ -7076,10 +7053,10 @@ pub fn analysis_results_op(
         "FEA_EM_STATIC",
         "region_coefficient_contrast_index",
     );
-    let electromagnetic_solver_conditioning_proxy = diagnostic_metric(
+    let electromagnetic_condition_number_estimate = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_EM_STATIC",
-        "solver_conditioning_proxy",
+        "condition_number_estimate",
     );
     let electromagnetic_source_realization_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
@@ -7126,15 +7103,15 @@ pub fn analysis_results_op(
         "FEA_EM_STATIC",
         "ground_anchor_effectiveness_ratio",
     );
-    let electromagnetic_insulation_leakage_proxy = diagnostic_metric(
+    let electromagnetic_insulation_leakage_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_EM_STATIC",
-        "insulation_leakage_proxy",
+        "insulation_leakage_ratio",
     );
-    let electromagnetic_flux_divergence_proxy = diagnostic_metric(
+    let electromagnetic_flux_divergence_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_EM_STATIC",
-        "flux_divergence_proxy",
+        "flux_divergence_ratio",
     );
     let electromagnetic_energy_imbalance_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
@@ -7183,10 +7160,10 @@ pub fn analysis_results_op(
         "FEA_EM_SWEEP",
         "resonance_bandwidth_hz",
     );
-    let electromagnetic_resonance_q_proxy = diagnostic_metric(
+    let electromagnetic_resonance_quality_factor = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_EM_SWEEP",
-        "resonance_q_proxy",
+        "resonance_quality_factor",
     );
     let electromagnetic_resonance_flux_gain = diagnostic_metric(
         &run_result.run.diagnostics,
@@ -7267,7 +7244,7 @@ pub fn analysis_results_op(
         electromagnetic_enabled,
         electromagnetic_reference_frequency_hz,
         electromagnetic_applied_current_a,
-        electromagnetic_placeholder_quality,
+        electromagnetic_solve_quality,
         electromagnetic_conductivity_spread_ratio,
         electromagnetic_relative_permittivity_spread_ratio,
         electromagnetic_relative_permeability_spread_ratio,
@@ -7275,7 +7252,7 @@ pub fn analysis_results_op(
         electromagnetic_assignment_coverage_ratio,
         electromagnetic_fallback_coefficient_ratio,
         electromagnetic_region_coefficient_contrast_index,
-        electromagnetic_solver_conditioning_proxy,
+        electromagnetic_condition_number_estimate,
         electromagnetic_source_realization_ratio,
         electromagnetic_source_region_coverage_ratio,
         electromagnetic_source_material_alignment_ratio,
@@ -7285,8 +7262,8 @@ pub fn analysis_results_op(
         electromagnetic_boundary_anchor_ratio,
         electromagnetic_boundary_condition_localization_ratio,
         electromagnetic_ground_anchor_effectiveness_ratio,
-        electromagnetic_insulation_leakage_proxy,
-        electromagnetic_flux_divergence_proxy,
+        electromagnetic_insulation_leakage_ratio,
+        electromagnetic_flux_divergence_ratio,
         electromagnetic_energy_imbalance_ratio,
         electromagnetic_boundary_energy_ratio,
         electromagnetic_boundary_penalty_conditioning_contribution,
@@ -7297,7 +7274,7 @@ pub fn analysis_results_op(
         electromagnetic_resonance_peak_frequency_hz,
         electromagnetic_resonance_peak_flux_density,
         electromagnetic_resonance_bandwidth_hz,
-        electromagnetic_resonance_q_proxy,
+        electromagnetic_resonance_quality_factor,
         electromagnetic_resonance_flux_gain,
     };
 
@@ -8188,11 +8165,8 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let electromagnetic_placeholder_warn_rate = if kind == AnalysisRunKind::Electromagnetic {
-            let static_warn = diagnostic_warning_rate(&entries, "FEA_EM_STATIC").unwrap_or(0.0);
-            let placeholder_warn =
-                diagnostic_warning_rate(&entries, "FEA_EM_PLACEHOLDER").unwrap_or(0.0);
-            Some(static_warn.max(placeholder_warn))
+        let electromagnetic_solve_warn_rate = if kind == AnalysisRunKind::Electromagnetic {
+            Some(diagnostic_warning_rate(&entries, "FEA_EM_STATIC").unwrap_or(0.0))
         } else {
             None
         };
@@ -8279,7 +8253,7 @@ pub fn analysis_trends_op(
                     diagnostic_metric(
                         &run.run.diagnostics,
                         "FEA_EM_STATIC",
-                        "solver_conditioning_proxy",
+                        "condition_number_estimate",
                     )
                 })
                 .collect::<Vec<_>>();
@@ -8423,7 +8397,7 @@ pub fn analysis_trends_op(
                         diagnostic_metric(
                             &run.run.diagnostics,
                             "FEA_EM_STATIC",
-                            "insulation_leakage_proxy",
+                            "insulation_leakage_ratio",
                         )
                     })
                     .collect::<Vec<_>>();
@@ -8438,7 +8412,7 @@ pub fn analysis_trends_op(
                     diagnostic_metric(
                         &run.run.diagnostics,
                         "FEA_EM_STATIC",
-                        "flux_divergence_proxy",
+                        "flux_divergence_ratio",
                     )
                 })
                 .collect::<Vec<_>>();
@@ -8551,7 +8525,11 @@ pub fn analysis_trends_op(
                 let values = entries
                     .iter()
                     .filter_map(|run| {
-                        diagnostic_metric(&run.run.diagnostics, "FEA_EM_SWEEP", "resonance_q_proxy")
+                        diagnostic_metric(
+                            &run.run.diagnostics,
+                            "FEA_EM_SWEEP",
+                            "resonance_quality_factor",
+                        )
                     })
                     .collect::<Vec<_>>();
                 breach_rate_less_than(&values, EM_RESONANCE_Q_MIN_BALANCED)
@@ -8585,7 +8563,7 @@ pub fn analysis_trends_op(
             thermal_stability_warn_rate,
             thermal_constitutive_warn_rate,
             thermal_spread_breach_rate,
-            electromagnetic_placeholder_warn_rate,
+            electromagnetic_solve_warn_rate,
             electromagnetic_spread_breach_rate,
             electromagnetic_heterogeneity_breach_rate,
             electromagnetic_coverage_breach_rate,
@@ -8637,7 +8615,7 @@ fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
             .run
             .diagnostics
             .iter()
-            .any(|diag| diag.code == "FEA_EM_PLACEHOLDER")
+            .any(|diag| diag.code == "FEA_EM_STATIC")
     {
         AnalysisRunKind::Electromagnetic
     } else if run
@@ -10542,7 +10520,7 @@ struct EmSweepSummary {
     resonance_peak_frequency_hz: Option<f64>,
     resonance_peak_flux_density: Option<f64>,
     resonance_bandwidth_hz: Option<f64>,
-    resonance_q_proxy: Option<f64>,
+    resonance_quality_factor: Option<f64>,
     resonance_flux_gain: Option<f64>,
 }
 
@@ -10618,7 +10596,7 @@ fn summarize_em_sweep(frequencies_hz: &[f64], peak_flux_density: &[f64]) -> EmSw
     } else {
         None
     };
-    let resonance_q_proxy = resonance_bandwidth_hz
+    let resonance_quality_factor = resonance_bandwidth_hz
         .filter(|bandwidth| *bandwidth > 0.0)
         .map(|bandwidth| (peak_frequency_hz / bandwidth).max(0.0));
 
@@ -10627,7 +10605,7 @@ fn summarize_em_sweep(frequencies_hz: &[f64], peak_flux_density: &[f64]) -> EmSw
         resonance_peak_frequency_hz: Some(peak_frequency_hz),
         resonance_peak_flux_density: Some(peak_flux_density_value),
         resonance_bandwidth_hz,
-        resonance_q_proxy,
+        resonance_quality_factor,
         resonance_flux_gain: Some(resonance_flux_gain),
     }
 }

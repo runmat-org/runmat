@@ -322,10 +322,10 @@ pub(super) fn check_rolling_baseline_drift(
             );
             check_rolling_metric_drift(
                 fixture_id,
-                "electromagnetic_solver_conditioning_proxy",
+                "electromagnetic_condition_number_estimate",
                 history,
-                current_record.electromagnetic_solver_conditioning_proxy,
-                |record| record.electromagnetic_solver_conditioning_proxy,
+                current_record.electromagnetic_condition_number_estimate,
+                |record| record.electromagnetic_condition_number_estimate,
                 EM_CONDITIONING_DRIFT_BOUNDS,
                 failures,
             );
@@ -412,19 +412,19 @@ pub(super) fn check_rolling_baseline_drift(
             );
             check_rolling_metric_drift(
                 fixture_id,
-                "electromagnetic_insulation_leakage_proxy",
+                "electromagnetic_insulation_leakage_ratio",
                 history,
-                current_record.electromagnetic_insulation_leakage_proxy,
-                |record| record.electromagnetic_insulation_leakage_proxy,
+                current_record.electromagnetic_insulation_leakage_ratio,
+                |record| record.electromagnetic_insulation_leakage_ratio,
                 EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_rolling_metric_drift(
                 fixture_id,
-                "electromagnetic_flux_divergence_proxy",
+                "electromagnetic_flux_divergence_ratio",
                 history,
-                current_record.electromagnetic_flux_divergence_proxy,
-                |record| record.electromagnetic_flux_divergence_proxy,
+                current_record.electromagnetic_flux_divergence_ratio,
+                |record| record.electromagnetic_flux_divergence_ratio,
                 EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
@@ -544,9 +544,9 @@ pub(super) fn check_baseline_drift(
             );
             check_metric_drift(
                 &current_record.fixture_id,
-                "electromagnetic_solver_conditioning_proxy",
-                baseline_record.electromagnetic_solver_conditioning_proxy,
-                current_record.electromagnetic_solver_conditioning_proxy,
+                "electromagnetic_condition_number_estimate",
+                baseline_record.electromagnetic_condition_number_estimate,
+                current_record.electromagnetic_condition_number_estimate,
                 EM_CONDITIONING_DRIFT_BOUNDS,
                 failures,
             );
@@ -624,17 +624,17 @@ pub(super) fn check_baseline_drift(
             );
             check_metric_drift(
                 &current_record.fixture_id,
-                "electromagnetic_insulation_leakage_proxy",
-                baseline_record.electromagnetic_insulation_leakage_proxy,
-                current_record.electromagnetic_insulation_leakage_proxy,
+                "electromagnetic_insulation_leakage_ratio",
+                baseline_record.electromagnetic_insulation_leakage_ratio,
+                current_record.electromagnetic_insulation_leakage_ratio,
                 EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
             check_metric_drift(
                 &current_record.fixture_id,
-                "electromagnetic_flux_divergence_proxy",
-                baseline_record.electromagnetic_flux_divergence_proxy,
-                current_record.electromagnetic_flux_divergence_proxy,
+                "electromagnetic_flux_divergence_ratio",
+                baseline_record.electromagnetic_flux_divergence_ratio,
+                current_record.electromagnetic_flux_divergence_ratio,
                 EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );

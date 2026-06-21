@@ -2551,7 +2551,7 @@ pub(super) fn run_fixture(
     let mut electromagnetic_enabled = None;
     let mut electromagnetic_reference_frequency_hz = None;
     let mut electromagnetic_applied_current_a = None;
-    let mut electromagnetic_placeholder_quality = None;
+    let mut electromagnetic_solve_quality = None;
     let mut electromagnetic_conductivity_spread_ratio = None;
     let mut electromagnetic_relative_permittivity_spread_ratio = None;
     let mut electromagnetic_relative_permeability_spread_ratio = None;
@@ -2559,7 +2559,7 @@ pub(super) fn run_fixture(
     let mut electromagnetic_assignment_coverage_ratio = None;
     let mut electromagnetic_fallback_coefficient_ratio = None;
     let mut electromagnetic_region_coefficient_contrast_index = None;
-    let mut electromagnetic_solver_conditioning_proxy = None;
+    let mut electromagnetic_condition_number_estimate = None;
     let mut electromagnetic_source_realization_ratio = None;
     let mut electromagnetic_source_region_coverage_ratio = None;
     let mut electromagnetic_source_material_alignment_ratio = None;
@@ -2569,8 +2569,8 @@ pub(super) fn run_fixture(
     let mut electromagnetic_boundary_anchor_ratio = None;
     let mut electromagnetic_boundary_condition_localization_ratio = None;
     let mut electromagnetic_ground_anchor_effectiveness_ratio = None;
-    let mut electromagnetic_insulation_leakage_proxy = None;
-    let mut electromagnetic_flux_divergence_proxy = None;
+    let mut electromagnetic_insulation_leakage_ratio = None;
+    let mut electromagnetic_flux_divergence_ratio = None;
     let mut electromagnetic_energy_imbalance_ratio = None;
     let mut electromagnetic_boundary_energy_ratio = None;
     let mut electromagnetic_boundary_penalty_conditioning_contribution = None;
@@ -2581,7 +2581,7 @@ pub(super) fn run_fixture(
     let mut electromagnetic_resonance_peak_frequency_hz = None;
     let mut electromagnetic_resonance_peak_flux_density = None;
     let mut electromagnetic_resonance_bandwidth_hz = None;
-    let mut electromagnetic_resonance_q_proxy = None;
+    let mut electromagnetic_resonance_quality_factor = None;
     let mut electromagnetic_resonance_flux_gain = None;
     let mut publishable = None;
     let mut parity = None;
@@ -2667,7 +2667,7 @@ pub(super) fn run_fixture(
                     electromagnetic_enabled,
                     electromagnetic_reference_frequency_hz,
                     electromagnetic_applied_current_a,
-                    electromagnetic_placeholder_quality,
+                    electromagnetic_solve_quality,
                     electromagnetic_conductivity_spread_ratio,
                     electromagnetic_relative_permittivity_spread_ratio,
                     electromagnetic_relative_permeability_spread_ratio,
@@ -2675,7 +2675,7 @@ pub(super) fn run_fixture(
                     electromagnetic_assignment_coverage_ratio,
                     electromagnetic_fallback_coefficient_ratio,
                     electromagnetic_region_coefficient_contrast_index,
-                    electromagnetic_solver_conditioning_proxy,
+                    electromagnetic_condition_number_estimate,
                     electromagnetic_source_realization_ratio,
                     electromagnetic_source_region_coverage_ratio,
                     electromagnetic_source_material_alignment_ratio,
@@ -2685,8 +2685,8 @@ pub(super) fn run_fixture(
                     electromagnetic_boundary_anchor_ratio,
                     electromagnetic_boundary_condition_localization_ratio,
                     electromagnetic_ground_anchor_effectiveness_ratio,
-                    electromagnetic_insulation_leakage_proxy,
-                    electromagnetic_flux_divergence_proxy,
+                    electromagnetic_insulation_leakage_ratio,
+                    electromagnetic_flux_divergence_ratio,
                     electromagnetic_energy_imbalance_ratio,
                     electromagnetic_boundary_energy_ratio,
                     electromagnetic_boundary_penalty_conditioning_contribution,
@@ -2697,7 +2697,7 @@ pub(super) fn run_fixture(
                     electromagnetic_resonance_peak_frequency_hz,
                     electromagnetic_resonance_peak_flux_density,
                     electromagnetic_resonance_bandwidth_hz,
-                    electromagnetic_resonance_q_proxy,
+                    electromagnetic_resonance_quality_factor,
                     electromagnetic_resonance_flux_gain,
                     publishable,
                     parity,
@@ -5267,12 +5267,12 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
-                            "em_homogeneous_flux_divergence_proxy",
+                            "em_homogeneous_flux_divergence_ratio",
                             "FEA_EM_STATIC",
                             diagnostic_metric(
                                 &gpu_envelope.data,
                                 "FEA_EM_STATIC",
-                                "flux_divergence_proxy",
+                                "flux_divergence_ratio",
                             ),
                             Some(0.0),
                             Some(0.35),
@@ -5675,12 +5675,12 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
-                            "em_heterogeneous_flux_divergence_proxy",
+                            "em_heterogeneous_flux_divergence_ratio",
                             "FEA_EM_STATIC",
                             diagnostic_metric(
                                 &gpu_envelope.data,
                                 "FEA_EM_STATIC",
-                                "flux_divergence_proxy",
+                                "flux_divergence_ratio",
                             ),
                             Some(0.12),
                             Some(2.5),
@@ -5991,12 +5991,12 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
-                            "em_boundary_kernel_insulation_leakage_proxy",
+                            "em_boundary_kernel_insulation_leakage_ratio",
                             "FEA_EM_STATIC",
                             diagnostic_metric(
                                 &gpu_envelope.data,
                                 "FEA_EM_STATIC",
-                                "insulation_leakage_proxy",
+                                "insulation_leakage_ratio",
                             ),
                             Some(0.8),
                             Some(2.0),
@@ -6214,7 +6214,7 @@ pub(super) fn run_fixture(
                                 electromagnetic_enabled,
                                 electromagnetic_reference_frequency_hz,
                                 electromagnetic_applied_current_a,
-                                electromagnetic_placeholder_quality,
+                                electromagnetic_solve_quality,
                                 electromagnetic_conductivity_spread_ratio,
                                 electromagnetic_relative_permittivity_spread_ratio,
                                 electromagnetic_relative_permeability_spread_ratio,
@@ -6222,7 +6222,7 @@ pub(super) fn run_fixture(
                                 electromagnetic_assignment_coverage_ratio,
                                 electromagnetic_fallback_coefficient_ratio,
                                 electromagnetic_region_coefficient_contrast_index,
-                                electromagnetic_solver_conditioning_proxy,
+                                electromagnetic_condition_number_estimate,
                                 electromagnetic_source_realization_ratio,
                                 electromagnetic_source_region_coverage_ratio,
                                 electromagnetic_source_material_alignment_ratio,
@@ -6232,8 +6232,8 @@ pub(super) fn run_fixture(
                                 electromagnetic_boundary_anchor_ratio,
                                 electromagnetic_boundary_condition_localization_ratio,
                                 electromagnetic_ground_anchor_effectiveness_ratio,
-                                electromagnetic_insulation_leakage_proxy,
-                                electromagnetic_flux_divergence_proxy,
+                                electromagnetic_insulation_leakage_ratio,
+                                electromagnetic_flux_divergence_ratio,
                                 electromagnetic_energy_imbalance_ratio,
                                 electromagnetic_boundary_energy_ratio,
                                 electromagnetic_boundary_penalty_conditioning_contribution,
@@ -6244,7 +6244,7 @@ pub(super) fn run_fixture(
                                 electromagnetic_resonance_peak_frequency_hz,
                                 electromagnetic_resonance_peak_flux_density,
                                 electromagnetic_resonance_bandwidth_hz,
-                                electromagnetic_resonance_q_proxy,
+                                electromagnetic_resonance_quality_factor,
                                 electromagnetic_resonance_flux_gain,
                                 publishable,
                                 parity,
@@ -6346,8 +6346,8 @@ pub(super) fn run_fixture(
                         .electromagnetic_reference_frequency_hz;
                     electromagnetic_applied_current_a =
                         gpu_results.data.summary.electromagnetic_applied_current_a;
-                    electromagnetic_placeholder_quality =
-                        gpu_results.data.summary.electromagnetic_placeholder_quality;
+                    electromagnetic_solve_quality =
+                        gpu_results.data.summary.electromagnetic_solve_quality;
                     electromagnetic_conductivity_spread_ratio = gpu_results
                         .data
                         .summary
@@ -6376,10 +6376,10 @@ pub(super) fn run_fixture(
                         .data
                         .summary
                         .electromagnetic_region_coefficient_contrast_index;
-                    electromagnetic_solver_conditioning_proxy = gpu_results
+                    electromagnetic_condition_number_estimate = gpu_results
                         .data
                         .summary
-                        .electromagnetic_solver_conditioning_proxy;
+                        .electromagnetic_condition_number_estimate;
                     electromagnetic_source_realization_ratio = gpu_results
                         .data
                         .summary
@@ -6416,14 +6416,14 @@ pub(super) fn run_fixture(
                         .data
                         .summary
                         .electromagnetic_ground_anchor_effectiveness_ratio;
-                    electromagnetic_insulation_leakage_proxy = gpu_results
+                    electromagnetic_insulation_leakage_ratio = gpu_results
                         .data
                         .summary
-                        .electromagnetic_insulation_leakage_proxy;
-                    electromagnetic_flux_divergence_proxy = gpu_results
+                        .electromagnetic_insulation_leakage_ratio;
+                    electromagnetic_flux_divergence_ratio = gpu_results
                         .data
                         .summary
-                        .electromagnetic_flux_divergence_proxy;
+                        .electromagnetic_flux_divergence_ratio;
                     electromagnetic_energy_imbalance_ratio = gpu_results
                         .data
                         .summary
@@ -6458,8 +6458,10 @@ pub(super) fn run_fixture(
                         .data
                         .summary
                         .electromagnetic_resonance_bandwidth_hz;
-                    electromagnetic_resonance_q_proxy =
-                        gpu_results.data.summary.electromagnetic_resonance_q_proxy;
+                    electromagnetic_resonance_quality_factor = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_resonance_quality_factor;
                     electromagnetic_resonance_flux_gain =
                         gpu_results.data.summary.electromagnetic_resonance_flux_gain;
 
@@ -6649,7 +6651,7 @@ pub(super) fn run_fixture(
                                     electromagnetic_enabled,
                                     electromagnetic_reference_frequency_hz,
                                     electromagnetic_applied_current_a,
-                                    electromagnetic_placeholder_quality,
+                                    electromagnetic_solve_quality,
                                     electromagnetic_conductivity_spread_ratio,
                                     electromagnetic_relative_permittivity_spread_ratio,
                                     electromagnetic_relative_permeability_spread_ratio,
@@ -6657,7 +6659,7 @@ pub(super) fn run_fixture(
                                     electromagnetic_assignment_coverage_ratio,
                                     electromagnetic_fallback_coefficient_ratio,
                                     electromagnetic_region_coefficient_contrast_index,
-                                    electromagnetic_solver_conditioning_proxy,
+                                    electromagnetic_condition_number_estimate,
                                     electromagnetic_source_realization_ratio,
                                     electromagnetic_source_region_coverage_ratio,
                                     electromagnetic_source_material_alignment_ratio,
@@ -6667,8 +6669,8 @@ pub(super) fn run_fixture(
                                     electromagnetic_boundary_anchor_ratio,
                                     electromagnetic_boundary_condition_localization_ratio,
                                     electromagnetic_ground_anchor_effectiveness_ratio,
-                                    electromagnetic_insulation_leakage_proxy,
-                                    electromagnetic_flux_divergence_proxy,
+                                    electromagnetic_insulation_leakage_ratio,
+                                    electromagnetic_flux_divergence_ratio,
                                     electromagnetic_energy_imbalance_ratio,
                                     electromagnetic_boundary_energy_ratio,
                                     electromagnetic_boundary_penalty_conditioning_contribution,
@@ -6679,7 +6681,7 @@ pub(super) fn run_fixture(
                                     electromagnetic_resonance_peak_frequency_hz,
                                     electromagnetic_resonance_peak_flux_density,
                                     electromagnetic_resonance_bandwidth_hz,
-                                    electromagnetic_resonance_q_proxy,
+                                    electromagnetic_resonance_quality_factor,
                                     electromagnetic_resonance_flux_gain,
                                     publishable,
                                     parity,
@@ -6814,7 +6816,7 @@ pub(super) fn run_fixture(
         electromagnetic_enabled,
         electromagnetic_reference_frequency_hz,
         electromagnetic_applied_current_a,
-        electromagnetic_placeholder_quality,
+        electromagnetic_solve_quality,
         electromagnetic_conductivity_spread_ratio,
         electromagnetic_relative_permittivity_spread_ratio,
         electromagnetic_relative_permeability_spread_ratio,
@@ -6822,7 +6824,7 @@ pub(super) fn run_fixture(
         electromagnetic_assignment_coverage_ratio,
         electromagnetic_fallback_coefficient_ratio,
         electromagnetic_region_coefficient_contrast_index,
-        electromagnetic_solver_conditioning_proxy,
+        electromagnetic_condition_number_estimate,
         electromagnetic_source_realization_ratio,
         electromagnetic_source_region_coverage_ratio,
         electromagnetic_source_material_alignment_ratio,
@@ -6832,8 +6834,8 @@ pub(super) fn run_fixture(
         electromagnetic_boundary_anchor_ratio,
         electromagnetic_boundary_condition_localization_ratio,
         electromagnetic_ground_anchor_effectiveness_ratio,
-        electromagnetic_insulation_leakage_proxy,
-        electromagnetic_flux_divergence_proxy,
+        electromagnetic_insulation_leakage_ratio,
+        electromagnetic_flux_divergence_ratio,
         electromagnetic_energy_imbalance_ratio,
         electromagnetic_boundary_energy_ratio,
         electromagnetic_boundary_penalty_conditioning_contribution,
@@ -6844,7 +6846,7 @@ pub(super) fn run_fixture(
         electromagnetic_resonance_peak_frequency_hz,
         electromagnetic_resonance_peak_flux_density,
         electromagnetic_resonance_bandwidth_hz,
-        electromagnetic_resonance_q_proxy,
+        electromagnetic_resonance_quality_factor,
         electromagnetic_resonance_flux_gain,
         publishable,
         parity,

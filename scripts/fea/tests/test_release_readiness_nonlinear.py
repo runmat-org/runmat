@@ -1625,13 +1625,13 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.2,
                 "electromagnetic_energy_imbalance_ratio": 0.9,
-                "electromagnetic_flux_divergence_proxy": 0.9,
+                "electromagnetic_flux_divergence_ratio": 0.9,
                 "electromagnetic_real_residual_norm": 0.9,
                 "electromagnetic_imag_residual_norm": 0.9,
                 "electromagnetic_source_realization_ratio": 0.1,
                 "electromagnetic_source_region_coverage_ratio": 0.1,
                 "electromagnetic_source_material_alignment_ratio": 0.1,
-                "electromagnetic_placeholder_quality": 0.1,
+                "electromagnetic_solve_quality": 0.1,
                 "threshold_assertions": [
                     {"name": "em_homogeneous_sigma_omega_scale_mean", "observed": 0.6},
                     {
@@ -1958,7 +1958,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_boundary_kernel_ground_anchor_effectiveness_ratio",
                         "observed": 0.2,
                     },
-                    {"name": "em_boundary_kernel_insulation_leakage_proxy", "observed": 1.2},
+                    {"name": "em_boundary_kernel_insulation_leakage_ratio", "observed": 1.2},
                 ],
             }
         )
@@ -2191,7 +2191,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.2,
                 "electromagnetic_energy_imbalance_ratio": 0.4,
-                "electromagnetic_flux_divergence_proxy": 0.4,
+                "electromagnetic_flux_divergence_ratio": 0.4,
             }
         )
         rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
@@ -2202,7 +2202,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.2,
                 "electromagnetic_energy_imbalance_ratio": 0.1,
-                "electromagnetic_flux_divergence_proxy": 0.1,
+                "electromagnetic_flux_divergence_ratio": 0.1,
             }
         )
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO"] = "1.5"
@@ -2225,7 +2225,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "electromagnetic_resonance_peak_frequency_hz": 0.5,
                 "electromagnetic_resonance_peak_flux_density": 0.0,
                 "electromagnetic_resonance_bandwidth_hz": 0.05,
-                "electromagnetic_resonance_q_proxy": 0.4,
+                "electromagnetic_resonance_quality_factor": 0.4,
                 "electromagnetic_resonance_flux_gain": 0.8,
             }
         )
@@ -2468,7 +2468,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "publishable": True,
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.2,
-                "electromagnetic_solver_conditioning_proxy": 6.0,
+                "electromagnetic_condition_number_estimate": 6.0,
             }
         )
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_PROXY"] = "5.0"
@@ -2602,7 +2602,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "publishable": True,
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.2,
-                "electromagnetic_solver_conditioning_proxy": 4.0,
+                "electromagnetic_condition_number_estimate": 4.0,
             }
         )
         rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
@@ -2612,7 +2612,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "publishable": True,
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.2,
-                "electromagnetic_solver_conditioning_proxy": 2.0,
+                "electromagnetic_condition_number_estimate": 2.0,
             }
         )
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_TREND_RATIO"] = "1.5"
@@ -2853,7 +2853,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "electromagnetic_resonance_peak_frequency_hz": 20.0,
                 "electromagnetic_resonance_peak_flux_density": 0.6,
                 "electromagnetic_resonance_bandwidth_hz": 8.0,
-                "electromagnetic_resonance_q_proxy": 1.0,
+                "electromagnetic_resonance_quality_factor": 1.0,
                 "electromagnetic_resonance_flux_gain": 1.05,
             }
         )
@@ -2869,7 +2869,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "electromagnetic_resonance_peak_frequency_hz": 40.0,
                 "electromagnetic_resonance_peak_flux_density": 1.2,
                 "electromagnetic_resonance_bandwidth_hz": 4.0,
-                "electromagnetic_resonance_q_proxy": 2.0,
+                "electromagnetic_resonance_quality_factor": 2.0,
                 "electromagnetic_resonance_flux_gain": 1.5,
             }
         )
@@ -2909,7 +2909,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.2,
                 "threshold_assertions": [
-                    {"name": "em_homogeneous_flux_divergence_proxy", "observed": 0.9}
+                    {"name": "em_homogeneous_flux_divergence_ratio", "observed": 0.9}
                 ],
             }
         )
@@ -2947,7 +2947,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.2,
                 "threshold_assertions": [
-                    {"name": "em_homogeneous_flux_divergence_proxy", "observed": 0.4}
+                    {"name": "em_homogeneous_flux_divergence_ratio", "observed": 0.4}
                 ],
             }
         )
@@ -2959,7 +2959,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.2,
                 "threshold_assertions": [
-                    {"name": "em_homogeneous_flux_divergence_proxy", "observed": 0.1}
+                    {"name": "em_homogeneous_flux_divergence_ratio", "observed": 0.1}
                 ],
             }
         )
@@ -3076,7 +3076,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_FLUX_PHASOR_COHERENCE_TREND_WORSENING", codes)
 
-    def test_em_placeholder_quality_trend_reason_is_emitted(self):
+    def test_em_solve_quality_trend_reason_is_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
             {
@@ -3084,7 +3084,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "publishable": True,
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.2,
-                "electromagnetic_placeholder_quality": 0.4,
+                "electromagnetic_solve_quality": 0.4,
             }
         )
         rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
@@ -3094,7 +3094,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "publishable": True,
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.2,
-                "electromagnetic_placeholder_quality": 0.9,
+                "electromagnetic_solve_quality": 0.9,
             }
         )
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_PLACEHOLDER_QUALITY_DROP_TREND_RATIO"] = (
@@ -3986,7 +3986,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_boundary_kernel_ground_anchor_effectiveness_ratio",
                         "observed": 0.3,
                     },
-                    {"name": "em_boundary_kernel_insulation_leakage_proxy", "observed": 1.2},
+                    {"name": "em_boundary_kernel_insulation_leakage_ratio", "observed": 1.2},
                 ],
             }
         )
@@ -4066,7 +4066,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_boundary_kernel_ground_anchor_effectiveness_ratio",
                         "observed": 0.6,
                     },
-                    {"name": "em_boundary_kernel_insulation_leakage_proxy", "observed": 0.4},
+                    {"name": "em_boundary_kernel_insulation_leakage_ratio", "observed": 0.4},
                 ],
             }
         )

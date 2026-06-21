@@ -20,10 +20,10 @@ def _record(fixture_id: str, assertion_names: set[str]) -> dict:
     }
     if fixture_id.startswith("electromagnetic_reference_"):
         record["gpu_solver_fallback_apply_count"] = 0.0
-        record["electromagnetic_placeholder_quality"] = 1.0
+        record["electromagnetic_solve_quality"] = 1.0
         record["electromagnetic_enabled"] = True
         record["electromagnetic_energy_imbalance_ratio"] = 0.0
-        record["electromagnetic_flux_divergence_proxy"] = 0.0
+        record["electromagnetic_flux_divergence_ratio"] = 0.0
         record["electromagnetic_real_residual_norm"] = 0.0
         record["electromagnetic_imag_residual_norm"] = 0.0
         record["electromagnetic_source_region_energy_consistency_ratio"] = 1.0
@@ -35,7 +35,7 @@ def _record(fixture_id: str, assertion_names: set[str]) -> dict:
         record["electromagnetic_boundary_condition_localization_ratio"] = 1.0
         record["electromagnetic_ground_anchor_effectiveness_ratio"] = 1.0
         record["electromagnetic_applied_current_a"] = 1.0
-        record["electromagnetic_solver_conditioning_proxy"] = 1.0
+        record["electromagnetic_condition_number_estimate"] = 1.0
         record["electromagnetic_reference_frequency_hz"] = 1.0
         record["electromagnetic_assignment_coverage_ratio"] = 1.0
         record["electromagnetic_fallback_coefficient_ratio"] = 0.0
@@ -48,7 +48,7 @@ def _record(fixture_id: str, assertion_names: set[str]) -> dict:
         record["electromagnetic_boundary_energy_ratio"] = 0.5
         record["electromagnetic_boundary_penalty_conditioning_contribution"] = 0.5
         record["electromagnetic_source_overlap_ratio"] = 0.0
-        record["electromagnetic_insulation_leakage_proxy"] = 1.0
+        record["electromagnetic_insulation_leakage_ratio"] = 1.0
     return record
 
 
@@ -480,7 +480,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "em_homogeneous_assignment_coverage_ratio",
                     "em_homogeneous_fallback_coefficient_ratio",
                     "em_homogeneous_flux_phasor_coherence_ratio",
-                    "em_homogeneous_flux_divergence_proxy",
+                    "em_homogeneous_flux_divergence_ratio",
                     "em_homogeneous_energy_imbalance_ratio",
                     "em_homogeneous_boundary_energy_ratio",
                     "em_homogeneous_source_realization_ratio",
@@ -510,20 +510,20 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electromagnetic_boundary_energy_ratio": 0.463,
                 "electromagnetic_boundary_penalty_conditioning_contribution": 0.414,
                 "electromagnetic_source_overlap_ratio": 0.0,
-                "electromagnetic_insulation_leakage_proxy": 0.0,
-                "electromagnetic_placeholder_quality": 0.99996,
+                "electromagnetic_insulation_leakage_ratio": 0.0,
+                "electromagnetic_solve_quality": 0.99996,
                 "electromagnetic_enabled": True,
                 "electromagnetic_energy_imbalance_ratio": 4.2e-5,
-                "electromagnetic_flux_divergence_proxy": 0.23,
+                "electromagnetic_flux_divergence_ratio": 0.23,
                 "electromagnetic_real_residual_norm": 1.0e-10,
                 "electromagnetic_imag_residual_norm": 2.0e-8,
-                "electromagnetic_solver_conditioning_proxy": 1.83,
+                "electromagnetic_condition_number_estimate": 1.83,
                 "electromagnetic_reference_frequency_hz": 60.0,
                 "electromagnetic_sweep_count": 5.0,
                 "electromagnetic_resonance_peak_frequency_hz": 60.0,
                 "electromagnetic_resonance_peak_flux_density": 1.0,
                 "electromagnetic_resonance_bandwidth_hz": 20.0,
-                "electromagnetic_resonance_q_proxy": 3.0,
+                "electromagnetic_resonance_quality_factor": 3.0,
                 "electromagnetic_resonance_flux_gain": 1.2,
             },
             _record(
@@ -554,7 +554,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "em_heterogeneous_source_material_alignment_ratio",
                     "em_heterogeneous_source_region_coverage_ratio",
                     "em_heterogeneous_flux_phasor_coherence_ratio",
-                    "em_heterogeneous_flux_divergence_proxy",
+                    "em_heterogeneous_flux_divergence_ratio",
                     "em_heterogeneous_energy_imbalance_ratio",
                     "em_heterogeneous_boundary_anchor_ratio",
                 },
@@ -580,20 +580,20 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electromagnetic_boundary_energy_ratio": 0.839,
                 "electromagnetic_boundary_penalty_conditioning_contribution": 0.443,
                 "electromagnetic_source_overlap_ratio": 0.0,
-                "electromagnetic_insulation_leakage_proxy": 0.515,
-                "electromagnetic_placeholder_quality": 0.772,
+                "electromagnetic_insulation_leakage_ratio": 0.515,
+                "electromagnetic_solve_quality": 0.772,
                 "electromagnetic_enabled": True,
                 "electromagnetic_energy_imbalance_ratio": 0.253,
-                "electromagnetic_flux_divergence_proxy": 0.143,
+                "electromagnetic_flux_divergence_ratio": 0.143,
                 "electromagnetic_real_residual_norm": 1.0e-18,
                 "electromagnetic_imag_residual_norm": 1.0e-15,
-                "electromagnetic_solver_conditioning_proxy": 3.36,
+                "electromagnetic_condition_number_estimate": 3.36,
                 "electromagnetic_reference_frequency_hz": 75.0,
                 "electromagnetic_sweep_count": 5.0,
                 "electromagnetic_resonance_peak_frequency_hz": 75.0,
                 "electromagnetic_resonance_peak_flux_density": 1.3,
                 "electromagnetic_resonance_bandwidth_hz": 24.0,
-                "electromagnetic_resonance_q_proxy": 3.1,
+                "electromagnetic_resonance_quality_factor": 3.1,
                 "electromagnetic_resonance_flux_gain": 1.25,
             },
             _record(
@@ -652,7 +652,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 {
                     "em_boundary_kernel_boundary_localization_ratio",
                     "em_boundary_kernel_ground_anchor_effectiveness_ratio",
-                    "em_boundary_kernel_insulation_leakage_proxy",
+                    "em_boundary_kernel_insulation_leakage_ratio",
                 },
             ),
             _record(
@@ -1504,12 +1504,12 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             rc = self._run_main_with_report(path)
             self.assertEqual(rc, 1)
 
-    def test_fails_when_em_placeholder_quality_field_missing(self):
+    def test_fails_when_em_solve_quality_field_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             records = self._base_records()
             for record in records:
                 if record["fixture_id"] == "electromagnetic_reference_homogeneous_gpu_provider":
-                    record.pop("electromagnetic_placeholder_quality", None)
+                    record.pop("electromagnetic_solve_quality", None)
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
             path.write_text(json.dumps({"records": records}))
@@ -1528,7 +1528,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             rc = self._run_main_with_report(path)
             self.assertEqual(rc, 1)
 
-    def test_fails_when_non_core_em_placeholder_quality_field_missing(self):
+    def test_fails_when_non_core_em_solve_quality_field_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             records = self._base_records()
             for record in records:
@@ -1536,7 +1536,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     record["fixture_id"]
                     == "electromagnetic_reference_sparse_assignments_gpu_provider"
                 ):
-                    record.pop("electromagnetic_placeholder_quality", None)
+                    record.pop("electromagnetic_solve_quality", None)
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
             path.write_text(json.dumps({"records": records}))

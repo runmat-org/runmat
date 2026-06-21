@@ -225,7 +225,7 @@ REQUIRED_FIXTURES = {
         "em_homogeneous_fallback_coefficient_ratio",
         "em_homogeneous_source_realization_ratio",
         "em_homogeneous_flux_phasor_coherence_ratio",
-        "em_homogeneous_flux_divergence_proxy",
+        "em_homogeneous_flux_divergence_ratio",
         "em_homogeneous_energy_imbalance_ratio",
         "em_homogeneous_boundary_energy_ratio",
         "em_homogeneous_source_material_alignment_ratio",
@@ -258,7 +258,7 @@ REQUIRED_FIXTURES = {
         "em_heterogeneous_source_material_alignment_ratio",
         "em_heterogeneous_source_region_coverage_ratio",
         "em_heterogeneous_flux_phasor_coherence_ratio",
-        "em_heterogeneous_flux_divergence_proxy",
+        "em_heterogeneous_flux_divergence_ratio",
         "em_heterogeneous_energy_imbalance_ratio",
         "em_heterogeneous_boundary_anchor_ratio",
     },
@@ -301,7 +301,7 @@ REQUIRED_FIXTURES = {
     "electromagnetic_reference_boundary_kernel_gpu_provider": {
         "em_boundary_kernel_boundary_localization_ratio",
         "em_boundary_kernel_ground_anchor_effectiveness_ratio",
-        "em_boundary_kernel_insulation_leakage_proxy",
+        "em_boundary_kernel_insulation_leakage_ratio",
     },
     "acoustic_harmonic_gpu_provider": {
         "acoustic_max_m_orthogonality_offdiag",
@@ -534,7 +534,7 @@ EM_SWEEP_RESONANCE_REQUIRED_FIELDS = {
     "electromagnetic_resonance_peak_frequency_hz",
     "electromagnetic_resonance_peak_flux_density",
     "electromagnetic_resonance_bandwidth_hz",
-    "electromagnetic_resonance_q_proxy",
+    "electromagnetic_resonance_quality_factor",
     "electromagnetic_resonance_flux_gain",
 }
 
@@ -543,7 +543,7 @@ EM_FREQUENCY_REQUIRED_FIELDS = {
 }
 
 EM_CONDITIONING_REQUIRED_FIELDS = {
-    "electromagnetic_solver_conditioning_proxy",
+    "electromagnetic_condition_number_estimate",
 }
 
 EM_APPLIED_CURRENT_REQUIRED_FIELDS = {
@@ -594,11 +594,11 @@ EM_BOUNDARY_SOURCE_REQUIRED_FIELDS = {
     "electromagnetic_boundary_energy_ratio",
     "electromagnetic_boundary_penalty_conditioning_contribution",
     "electromagnetic_source_overlap_ratio",
-    "electromagnetic_insulation_leakage_proxy",
+    "electromagnetic_insulation_leakage_ratio",
 }
 
-EM_PLACEHOLDER_QUALITY_REQUIRED_FIELDS = {
-    "electromagnetic_placeholder_quality",
+EM_SOLVE_QUALITY_REQUIRED_FIELDS = {
+    "electromagnetic_solve_quality",
 }
 
 EM_RESIDUAL_REQUIRED_FIELDS = {
@@ -608,7 +608,7 @@ EM_RESIDUAL_REQUIRED_FIELDS = {
 
 EM_BALANCE_REQUIRED_FIELDS = {
     "electromagnetic_energy_imbalance_ratio",
-    "electromagnetic_flux_divergence_proxy",
+    "electromagnetic_flux_divergence_ratio",
 }
 
 PERFORMANCE_REQUIRED_FIELDS = {
@@ -933,7 +933,7 @@ def main() -> int:
 
         if fixture_id.startswith("electromagnetic_reference_"):
             missing_fields = []
-            for field in sorted(EM_PLACEHOLDER_QUALITY_REQUIRED_FIELDS):
+            for field in sorted(EM_SOLVE_QUALITY_REQUIRED_FIELDS):
                 value = record.get(field)
                 if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
                     missing_fields.append(field)
