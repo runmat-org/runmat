@@ -14,8 +14,8 @@ pub const FEA_FIELD_STRUCTURAL_REACTION_FORCE: &str = "structural.reaction_force
 pub const FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY: &str = "structural.total_strain_energy";
 pub const FEA_FIELD_STRUCTURAL_RESIDUAL_NORM: &str = "structural.residual_norm";
 pub const FEA_FIELD_STRUCTURAL_EQUATION_SCALE: &str = "structural.equation_scale";
-pub const FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY: &str = "em.vector_potential_proxy";
-pub const FEA_FIELD_EM_FLUX_DENSITY_PROXY: &str = "em.flux_density_proxy";
+pub const FEA_FIELD_EM_VECTOR_POTENTIAL_REAL: &str = "em.vector_potential_real";
+pub const FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE: &str = "em.magnetic_flux_density_magnitude";
 
 pub fn fea_modal_mode_shape_field_id(mode_number: usize) -> String {
     format!("modal.mode_shape.{mode_number}")

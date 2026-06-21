@@ -1603,9 +1603,8 @@ pub struct ElectromagneticResultsData {
     pub electromagnetic_payload_version: String,
     pub reference_frequency_hz: f64,
     pub applied_current_a: f64,
-    pub vector_potential_proxy: AnalysisField,
-    pub flux_density_proxy: AnalysisField,
-    pub placeholder_mode: bool,
+    pub vector_potential_real: AnalysisField,
+    pub magnetic_flux_density_magnitude: AnalysisField,
     #[serde(default)]
     pub sweep_frequency_hz: Vec<f64>,
     #[serde(default)]
@@ -1619,7 +1618,7 @@ pub struct ElectromagneticResultsData {
     #[serde(default)]
     pub resonance_bandwidth_hz: Option<f64>,
     #[serde(default)]
-    pub resonance_q_proxy: Option<f64>,
+    pub resonance_quality_factor: Option<f64>,
     #[serde(default)]
     pub resonance_flux_gain: Option<f64>,
 }

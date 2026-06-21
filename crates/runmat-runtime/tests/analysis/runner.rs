@@ -4,7 +4,7 @@ use super::*;
 use runmat_analysis_core::AnalysisField;
 use runmat_analysis_fea::{
     fea_thermal_temperature_field_id, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
 };
 use runmat_runtime::analysis::{
     AnalysisRunResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
@@ -127,7 +127,7 @@ fn primary_result_field_id(run_kind: AnalysisRunKind) -> String {
     match run_kind {
         AnalysisRunKind::Thermal => fea_thermal_temperature_field_id(0),
         AnalysisRunKind::Acoustic => FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE.to_string(),
-        AnalysisRunKind::Electromagnetic => FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY.to_string(),
+        AnalysisRunKind::Electromagnetic => FEA_FIELD_EM_VECTOR_POTENTIAL_REAL.to_string(),
         AnalysisRunKind::LinearStatic
         | AnalysisRunKind::Modal
         | AnalysisRunKind::Transient
@@ -183,8 +183,8 @@ fn analysis_result_field<'a>(
                 .as_ref()
                 .and_then(|electromagnetic| {
                     [
-                        &electromagnetic.vector_potential_proxy,
-                        &electromagnetic.flux_density_proxy,
+                        &electromagnetic.vector_potential_real,
+                        &electromagnetic.magnetic_flux_density_magnitude,
                     ]
                     .into_iter()
                     .find(|field| field.field_id == field_id)

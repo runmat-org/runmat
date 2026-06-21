@@ -9,7 +9,8 @@ use crate::{
     assembly::assemble_linear_system,
     contracts::{
         ComputeBackend, ElectromagneticSolveOptions, FeaElectromagneticRunResult, FeaRunError,
-        FeaRunResult, FEA_FIELD_EM_FLUX_DENSITY_PROXY, FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY,
+        FeaRunResult, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
+        FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
     },
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     operator::{apply_k, OperatorSystem},
@@ -885,12 +886,12 @@ pub fn run_electromagnetic_with_options(
         diagnostics,
         fields: vec![
             AnalysisField::host_f64(
-                FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY,
+                FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
                 vec![node_count],
                 vector_potential.clone(),
             ),
             AnalysisField::host_f64(
-                FEA_FIELD_EM_FLUX_DENSITY_PROXY,
+                FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
                 vec![node_count],
                 flux_density.clone(),
             ),
@@ -920,12 +921,12 @@ pub fn run_electromagnetic_with_options(
         reference_frequency_hz: domain.reference_frequency_hz,
         applied_current_a: domain.applied_current_a,
         vector_potential_field: AnalysisField::host_f64(
-            FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY,
+            FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
             vec![node_count],
             vector_potential,
         ),
         flux_density_field: AnalysisField::host_f64(
-            FEA_FIELD_EM_FLUX_DENSITY_PROXY,
+            FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
             vec![node_count],
             flux_density,
         ),

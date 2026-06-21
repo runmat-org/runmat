@@ -3,9 +3,9 @@
     "electromagnetic_payload_version": "electromagnetic_results/v1",
     "reference_frequency_hz": 0.0,
     "applied_current_a": 0.0,
-    "vector_potential_proxy": {
-      "field_id": "field_em_vector_potential",
-      "display_name": "EM Vector Potential",
+    "vector_potential_real": {
+      "field_id": "em.vector_potential_real",
+      "display_name": "EM Vector Potential Real",
       "units": "A_turn_per_m",
       "reference_frame": "global",
       "element_association": "point",
@@ -24,9 +24,9 @@
         "source_operation": "fea.run_electromagnetic"
       }
     },
-    "flux_density_proxy": {
-      "field_id": "field_em_flux_density",
-      "display_name": "EM Flux Density Proxy",
+    "magnetic_flux_density_magnitude": {
+      "field_id": "em.magnetic_flux_density_magnitude",
+      "display_name": "EM Magnetic Flux Density Magnitude",
       "units": "tesla",
       "reference_frame": "global",
       "element_association": "point",
@@ -45,14 +45,13 @@
         "source_operation": "fea.run_electromagnetic"
       }
     },
-    "placeholder_mode": null,
     "sweep_frequency_hz": [],
     "sweep_peak_flux_density": [],
     "sweep_solve_quality": [],
     "resonance_peak_frequency_hz": null,
     "resonance_peak_flux_density": null,
     "resonance_bandwidth_hz": null,
-    "resonance_q_proxy": null,
+    "resonance_quality_factor": null,
     "resonance_flux_gain": null
   },
   "summary": {

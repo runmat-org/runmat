@@ -6378,16 +6378,15 @@ pub fn analysis_run_electromagnetic_with_options_op(
             electromagnetic_payload_version: "electromagnetic_results/v1".to_string(),
             reference_frequency_hz: em_run.reference_frequency_hz,
             applied_current_a: em_run.applied_current_a,
-            vector_potential_proxy: em_run.vector_potential_field,
-            flux_density_proxy: em_run.flux_density_field,
-            placeholder_mode: false,
+            vector_potential_real: em_run.vector_potential_field,
+            magnetic_flux_density_magnitude: em_run.flux_density_field,
             sweep_frequency_hz,
             sweep_peak_flux_density,
             sweep_solve_quality,
             resonance_peak_frequency_hz: sweep_metrics.resonance_peak_frequency_hz,
             resonance_peak_flux_density: sweep_metrics.resonance_peak_flux_density,
             resonance_bandwidth_hz: sweep_metrics.resonance_bandwidth_hz,
-            resonance_q_proxy: sweep_metrics.resonance_q_proxy,
+            resonance_quality_factor: sweep_metrics.resonance_q_proxy,
             resonance_flux_gain: sweep_metrics.resonance_flux_gain,
         }),
         model_validity: QualityGate::Pass,
@@ -6561,9 +6560,13 @@ fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<Analysi
         push_analysis_result_field(
             &mut fields,
             &mut seen,
-            &electromagnetic.vector_potential_proxy,
+            &electromagnetic.vector_potential_real,
         );
-        push_analysis_result_field(&mut fields, &mut seen, &electromagnetic.flux_density_proxy);
+        push_analysis_result_field(
+            &mut fields,
+            &mut seen,
+            &electromagnetic.magnetic_flux_density_magnitude,
+        );
     }
 
     fields

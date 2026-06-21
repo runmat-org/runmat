@@ -1507,7 +1507,7 @@ fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
     assert_eq!(em_payload.sweep_peak_flux_density.len(), 1);
     assert_eq!(em_payload.sweep_solve_quality.len(), 1);
     assert!(em_payload.resonance_peak_frequency_hz.is_some());
-    assert!(em_payload.resonance_q_proxy.is_none());
+    assert!(em_payload.resonance_quality_factor.is_none());
 }
 
 #[test]

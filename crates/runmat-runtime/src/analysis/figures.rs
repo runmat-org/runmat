@@ -441,8 +441,8 @@ fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> 
                     Vec4::new(0.28, 0.74, 0.57, 1.0),
                 )],
                 vec![
-                    em.vector_potential_proxy.field_id.clone(),
-                    em.flux_density_proxy.field_id.clone(),
+                    em.vector_potential_real.field_id.clone(),
+                    em.magnetic_flux_density_magnitude.field_id.clone(),
                 ],
                 false,
             ));
@@ -460,8 +460,8 @@ fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> 
                     Vec4::new(0.92, 0.68, 0.28, 1.0),
                 )],
                 vec![
-                    em.vector_potential_proxy.field_id.clone(),
-                    em.flux_density_proxy.field_id.clone(),
+                    em.vector_potential_real.field_id.clone(),
+                    em.magnetic_flux_density_magnitude.field_id.clone(),
                 ],
                 false,
             ));
