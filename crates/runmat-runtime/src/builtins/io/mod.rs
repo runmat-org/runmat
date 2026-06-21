@@ -6,6 +6,7 @@ pub mod disp;
 pub mod filetext;
 pub mod format;
 pub mod http;
+pub mod importdata;
 pub mod input;
 pub mod json;
 pub mod mat;
