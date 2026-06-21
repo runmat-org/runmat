@@ -173,6 +173,9 @@ jobs:
       - name: Format
         run: cargo fmt -- --check
 
+      - name: Validate public FEA field ids
+        run: python3 scripts/fea/governance/validate_public_field_ids.py
+
       - name: Clippy (Unix)
         run: cargo clippy --all-targets --all-features -- -D warnings
 
