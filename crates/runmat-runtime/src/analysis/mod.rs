@@ -4207,6 +4207,80 @@ struct ChtInterfaceClosure {
     max_flux_temperature_law_residual_ratio: f64,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ChtKnownAnswerMetrics {
+    heated_channel_energy_residual_ratio: f64,
+    conjugate_slab_flux_law_residual_ratio: f64,
+    interface_temperature_continuity_ratio: f64,
+    advection_shift_coverage_ratio: f64,
+    known_answer_coverage_ratio: f64,
+}
+
+fn cht_known_answer_metrics(
+    domain: &runmat_analysis_core::CfdDomain,
+    closure: &ChtInterfaceClosure,
+) -> ChtKnownAnswerMetrics {
+    let reynolds = cfd_reynolds_number(domain);
+    let advection_shift_coverage_ratio = if reynolds.is_finite()
+        && reynolds > 0.0
+        && closure.max_advection_temperature_shift_k.is_finite()
+        && closure.max_advection_temperature_shift_k >= 0.0
+    {
+        1.0
+    } else {
+        0.0
+    };
+    let known_answer_coverage_ratio = if closure.interface_face_count > 0
+        && closure.interface_conductance_w_per_m2k.is_finite()
+        && closure.interface_conductance_w_per_m2k > 0.0
+        && closure.max_energy_residual.is_finite()
+        && closure.max_flux_temperature_law_residual_ratio.is_finite()
+        && closure.interface_temperature_continuity_ratio.is_finite()
+        && advection_shift_coverage_ratio >= 1.0
+    {
+        1.0
+    } else {
+        0.0
+    };
+
+    ChtKnownAnswerMetrics {
+        heated_channel_energy_residual_ratio: closure.max_energy_residual,
+        conjugate_slab_flux_law_residual_ratio: closure.max_flux_temperature_law_residual_ratio,
+        interface_temperature_continuity_ratio: closure.interface_temperature_continuity_ratio,
+        advection_shift_coverage_ratio,
+        known_answer_coverage_ratio,
+    }
+}
+
+fn cht_known_answer_diagnostic(
+    metrics: &ChtKnownAnswerMetrics,
+    residual_threshold: f64,
+) -> runmat_analysis_fea::diagnostics::FeaDiagnostic {
+    let severity = if metrics.heated_channel_energy_residual_ratio <= residual_threshold
+        && metrics.conjugate_slab_flux_law_residual_ratio <= residual_threshold
+        && metrics.interface_temperature_continuity_ratio >= 0.999
+        && metrics.advection_shift_coverage_ratio >= 1.0
+        && metrics.known_answer_coverage_ratio >= 1.0
+    {
+        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+    } else {
+        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    };
+
+    runmat_analysis_fea::diagnostics::FeaDiagnostic {
+        code: "FEA_CHT_KNOWN_ANSWER".to_string(),
+        severity,
+        message: format!(
+            "basis=heated_channel_conjugate_slab heated_channel_energy_residual_ratio={} conjugate_slab_flux_law_residual_ratio={} interface_temperature_continuity_ratio={} advection_shift_coverage_ratio={} known_answer_coverage_ratio={}",
+            metrics.heated_channel_energy_residual_ratio,
+            metrics.conjugate_slab_flux_law_residual_ratio,
+            metrics.interface_temperature_continuity_ratio,
+            metrics.advection_shift_coverage_ratio,
+            metrics.known_answer_coverage_ratio,
+        ),
+    }
+}
+
 fn build_fsi_run_fields(
     domain: &runmat_analysis_core::CfdDomain,
     node_count: usize,
@@ -5359,6 +5433,11 @@ pub fn analysis_run_cht_with_options_op(
             cht_interface_closure.max_flux_temperature_law_residual_ratio,
         ),
     });
+    let cht_known_answer = cht_known_answer_metrics(cfd_domain, &cht_interface_closure);
+    run.diagnostics.push(cht_known_answer_diagnostic(
+        &cht_known_answer,
+        options.residual_warn_threshold,
+    ));
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
     run.diagnostics
         .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {

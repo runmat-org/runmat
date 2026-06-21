@@ -4745,6 +4745,76 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_heated_channel_energy_residual_ratio",
+                "FEA_CHT_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_KNOWN_ANSWER",
+                    "heated_channel_energy_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-9),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_conjugate_slab_flux_law_residual_ratio",
+                "FEA_CHT_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_KNOWN_ANSWER",
+                    "conjugate_slab_flux_law_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-9),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_known_answer_interface_temperature_continuity_ratio",
+                "FEA_CHT_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_KNOWN_ANSWER",
+                    "interface_temperature_continuity_ratio",
+                ),
+                Some(0.999),
+                Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_advection_shift_coverage_ratio",
+                "FEA_CHT_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_KNOWN_ANSWER",
+                    "advection_shift_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_known_answer_coverage_ratio",
+                "FEA_CHT_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_KNOWN_ANSWER",
+                    "known_answer_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
         }
         if spec.id.starts_with("fsi_coupled_") {
             push_threshold_assertion(

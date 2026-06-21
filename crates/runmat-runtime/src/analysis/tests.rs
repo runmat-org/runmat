@@ -5360,6 +5360,18 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
                 .message
                 .contains("flux_temperature_law_residual_ratio=")
     }));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_CHT_KNOWN_ANSWER"
+            && diag.message.contains("basis=heated_channel_conjugate_slab")
+            && diag
+                .message
+                .contains("heated_channel_energy_residual_ratio=")
+            && diag
+                .message
+                .contains("conjugate_slab_flux_law_residual_ratio=")
+            && diag.message.contains("advection_shift_coverage_ratio=")
+            && diag.message.contains("known_answer_coverage_ratio=")
+    }));
     let thermal = envelope
         .data
         .thermal_results
