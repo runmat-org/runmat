@@ -38,7 +38,8 @@
     "`save(filename, 'A', 'B')` writes only the listed variables. String arrays or cell arrays of character vectors are accepted to specify multiple names.",
     "`save(filename, '-struct', 'S')` saves each field of struct `S` as a separate variable. Provide additional field names (`'field1'`, `'field2'`) to restrict the set.",
     "`save filename -regexp '^foo' 'bar$'` saves every variable whose name matches any of the supplied regular expressions.",
-    "Existing files are overwritten unless `-append` is specified. RunMat currently reports an error when `-append` or other numeric/text format flags (for example `-ascii`, `-double`, `-v6`, `-v7.3`) are requested.",
+    "Existing files are overwritten unless `-append` is specified. With `-append`, RunMat reads the existing supported MAT variables, merges in the newly selected variables, and rewrites the file so newer variables replace older variables with the same name.",
+    "Numeric/text format flags outside the MAT-file path (for example `-ascii`, `-double`, `-v6`, `-v7.3`) are not supported yet and report descriptive option errors.",
     "Unsupported types (function handles, objects, opaque graphics handles) raise descriptive errors. Numeric, logical, character, string, cell, scalar struct, and real sparse data are stored using MATLAB Level-5 MAT-file layout.",
     "`save` returns `0` so scripts can treat it as a statement, matching MATLAB's void behaviour."
   ],
@@ -60,6 +61,10 @@
       "input": "result_acc = 1:3;\nresult_tmp = 4:6;\nscratch = pi;\nsave('filtered.mat', '-regexp', '^result_', 'tmp$')"
     },
     {
+      "description": "Append variables to an existing MAT-file",
+      "input": "save('session.mat', 'x')\ny = 2*x;\nsave('session.mat', 'y', '-append')"
+    },
+    {
       "description": "Save multiple names using a string array",
       "input": "names = [\"result_acc\", \"scratch\"];\nsave('mixed.mat', names)"
     },
@@ -79,7 +84,7 @@
     },
     {
       "question": "Is `-append` supported?",
-      "answer": "Not yet. The builtin currently reports `save: -append is not supported` to signal the limitation. Future releases will add incremental writing."
+      "answer": "Yes for supported MAT-file content. RunMat decodes the existing MAT-file, merges the selected variables, and writes a fresh Level-5 MAT-file. If a variable name already exists, the new value replaces the previous value, matching MATLAB's practical append workflow."
     },
     {
       "question": "Do text options like `-ascii` or `-double` work?",

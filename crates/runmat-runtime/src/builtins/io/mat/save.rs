@@ -1,7 +1,7 @@
 //! MATLAB-compatible `save` builtin for RunMat.
 
 use std::collections::HashSet;
-use std::io::{BufWriter, Cursor, Write};
+use std::io::{BufWriter, Cursor, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 
 use futures::future::LocalBoxFuture;
@@ -18,6 +18,7 @@ use super::format::{
     MatArray, MatClass, MatData, FLAG_COMPLEX, FLAG_LOGICAL, MAT_HEADER_LEN, MI_DOUBLE, MI_INT16,
     MI_INT32, MI_INT64, MI_INT8, MI_MATRIX, MI_SINGLE, MI_UINT16, MI_UINT32, MI_UINT64, MI_UINT8,
 };
+use super::load::decode_workspace_from_mat_bytes;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -245,12 +246,6 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 
     let request = parse_arguments(&host_args[option_start..]).await?;
-    if request.append {
-        return Err(save_error_with(
-            &SAVE_ERROR_UNSUPPORTED,
-            "save: -append is not supported yet",
-        ));
-    }
 
     let mut workspace_entries: Option<Vec<(String, Value)>> = None;
     let mut entries: Vec<(String, Value)> = Vec::new();
@@ -338,15 +333,11 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         ));
     }
 
-    // Deduplicate while preserving the last occurrence for MATLAB compatibility
-    let mut seen = HashSet::new();
-    let mut unique_entries = Vec::new();
-    for (name, value) in entries.into_iter().rev() {
-        if seen.insert(name.clone()) {
-            unique_entries.push((name, value));
-        }
+    let path = normalise_path(&path_value)?;
+    let mut unique_entries = deduplicate_entries(entries);
+    if request.append {
+        unique_entries = append_existing_entries(&path, unique_entries)?;
     }
-    unique_entries.reverse();
 
     let mut mat_vars = Vec::with_capacity(unique_entries.len());
     for (name, value) in unique_entries {
@@ -356,7 +347,6 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         });
     }
 
-    let path = normalise_path(&path_value)?;
     write_mat_file(&path, &mat_vars)?;
 
     Ok(Value::Num(0.0))
@@ -530,6 +520,66 @@ fn find_in_entries(entries: &[(String, Value)], name: &str) -> Option<Value> {
         .iter()
         .find(|(entry_name, _)| entry_name == name)
         .map(|(_, value)| value.clone())
+}
+
+fn deduplicate_entries(entries: Vec<(String, Value)>) -> Vec<(String, Value)> {
+    let mut seen = HashSet::new();
+    let mut unique_entries = Vec::new();
+    for (name, value) in entries.into_iter().rev() {
+        if seen.insert(name.clone()) {
+            unique_entries.push((name, value));
+        }
+    }
+    unique_entries.reverse();
+    unique_entries
+}
+
+fn append_existing_entries(
+    path: &Path,
+    new_entries: Vec<(String, Value)>,
+) -> BuiltinResult<Vec<(String, Value)>> {
+    let mut entries = read_existing_entries_for_append(path)?;
+    entries.extend(new_entries);
+    Ok(deduplicate_entries(entries))
+}
+
+fn read_existing_entries_for_append(path: &Path) -> BuiltinResult<Vec<(String, Value)>> {
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => {
+            return Err(save_error_with_source(
+                &SAVE_ERROR_IO,
+                format!(
+                    "save: failed to open existing MAT-file '{}': {err}",
+                    path.display()
+                ),
+                err,
+            ));
+        }
+    };
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(|err| {
+        save_error_with_source(
+            &SAVE_ERROR_IO,
+            format!(
+                "save: failed to read existing MAT-file '{}': {err}",
+                path.display()
+            ),
+            err,
+        )
+    })?;
+    decode_workspace_from_mat_bytes(&bytes).map_err(|err| {
+        save_error_with_source(
+            &SAVE_ERROR_IO,
+            format!(
+                "save: failed to decode existing MAT-file '{}': {}",
+                path.display(),
+                err.message()
+            ),
+            err,
+        )
+    })
 }
 
 fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
@@ -1300,6 +1350,16 @@ pub(crate) mod tests {
         }
     }
 
+    fn assert_saved_double(path: &Path, name: &str, expected: f64) {
+        let file = File::open(path).unwrap();
+        let mat = matfile::MatFile::parse(file).unwrap();
+        let array = mat.find_by_name(name).unwrap();
+        match array.data() {
+            matfile::NumericData::Double { real, .. } => assert_eq!(real, &[expected]),
+            other => panic!("expected double array for {name}, got {other:?}"),
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn save_descriptor_signatures_cover_core_forms() {
@@ -1575,6 +1635,52 @@ pub(crate) mod tests {
         set_workspace(&[("foo", Value::Num(1.0))]);
         let result = block_on(save_builtin(vec![Value::from("-regexp")]));
         assert_error_contains(result, "'-regexp' requires at least one pattern");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn save_append_creates_missing_file() {
+        let _guard = workspace_guard();
+        ensure_test_resolver();
+        set_workspace(&[("A", Value::Num(1.0))]);
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("append_new.mat");
+        let args = vec![
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("A"),
+            Value::from("-append"),
+        ];
+
+        block_on(save_builtin(args)).unwrap();
+
+        assert_saved_double(&path, "A", 1.0);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn save_append_preserves_existing_and_replaces_duplicates() {
+        let _guard = workspace_guard();
+        ensure_test_resolver();
+        set_workspace(&[("A", Value::Num(1.0))]);
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("append_replace.mat");
+        block_on(save_builtin(vec![
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("A"),
+        ]))
+        .unwrap();
+
+        set_workspace(&[("A", Value::Num(3.0)), ("B", Value::Num(2.0))]);
+        block_on(save_builtin(vec![
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("B"),
+            Value::from("A"),
+            Value::from("-append"),
+        ]))
+        .unwrap();
+
+        assert_saved_double(&path, "A", 3.0);
+        assert_saved_double(&path, "B", 2.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
