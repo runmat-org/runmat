@@ -2711,6 +2711,62 @@ fn push_thermal_standalone_threshold_assertions(
         fixture_id,
         assertions,
         failures,
+        "thermal_standalone_slab_linear_profile_rms_ratio",
+        "FEA_THERMAL_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_KNOWN_ANSWER",
+            "slab_linear_profile_rms_ratio",
+        ),
+        Some(0.0),
+        Some(0.12),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_slab_monotonic_edge_fraction",
+        "FEA_THERMAL_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_KNOWN_ANSWER",
+            "slab_monotonic_edge_fraction",
+        ),
+        Some(0.95),
+        Some(1.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_lumped_response_error_ratio",
+        "FEA_THERMAL_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_KNOWN_ANSWER",
+            "lumped_response_error_ratio",
+        ),
+        Some(0.0),
+        Some(0.45),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_source_response_sign_alignment",
+        "FEA_THERMAL_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_KNOWN_ANSWER",
+            "source_response_sign_alignment",
+        ),
+        Some(1.0),
+        Some(1.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
         "thermal_standalone_source_coverage_ratio",
         "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
         diagnostic_metric(

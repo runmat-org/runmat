@@ -330,6 +330,13 @@ pub fn run_thermal_with_options(
             * end_profile
             * (1.0 - (-constitutive.response_rate).exp()).max(0.05)
     };
+    let expected_known_answer_delta = {
+        let end_profile = thermo_mechanical::sample_time_profile(Some(&thermo_context), 1.0).scale;
+        let transient_response_scale = (1.0 - (-constitutive.response_rate).exp()).max(0.05);
+        expected_final_delta
+            + source_boundary.source_temperature_delta_k * transient_response_scale
+            + source_boundary.boundary_temperature_delta_k * end_profile
+    };
     let thermal_response_realization_ratio = if expected_final_delta.abs() <= 1.0e-9 {
         1.0
     } else {
@@ -354,6 +361,14 @@ pub fn run_thermal_with_options(
     } else {
         residual_norms.iter().sum::<f64>() / residual_norms.len() as f64
     };
+    let known_answer = thermal_known_answer(
+        &initial_snapshot,
+        &final_snapshot,
+        recovery_topology,
+        thermo_context.reference_temperature_k,
+        expected_known_answer_delta,
+        source_boundary,
+    );
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_THERMAL_STABILITY".to_string(),
         severity: if max_residual_norm <= options.residual_target {
@@ -440,6 +455,27 @@ pub fn run_thermal_with_options(
             heat_balance.stored_energy,
             heat_balance.numerical_loss,
             heat_balance.residual_ratio,
+        ),
+    });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_THERMAL_KNOWN_ANSWER".to_string(),
+        severity: if known_answer.slab_linear_profile_rms_ratio <= 0.12
+            && known_answer.slab_monotonic_edge_fraction >= 0.95
+            && known_answer.lumped_response_error_ratio <= 0.45
+            && known_answer.source_response_sign_alignment >= 1.0
+        {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "slab_linear_profile_rms_ratio={} slab_monotonic_edge_fraction={} lumped_response_error_ratio={} source_response_sign_alignment={} expected_lumped_delta_k={} observed_lumped_delta_k={}",
+            known_answer.slab_linear_profile_rms_ratio,
+            known_answer.slab_monotonic_edge_fraction,
+            known_answer.lumped_response_error_ratio,
+            known_answer.source_response_sign_alignment,
+            expected_known_answer_delta,
+            known_answer.observed_lumped_delta_k,
         ),
     });
     diagnostics.push(FeaDiagnostic {
@@ -740,6 +776,15 @@ struct ThermalHeatBalance {
 }
 
 #[derive(Debug, Clone, Copy)]
+struct ThermalKnownAnswer {
+    slab_linear_profile_rms_ratio: f64,
+    slab_monotonic_edge_fraction: f64,
+    lumped_response_error_ratio: f64,
+    source_response_sign_alignment: f64,
+    observed_lumped_delta_k: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
 struct ThermalSourceBoundarySummary {
     thermal_source_count: usize,
     thermal_boundary_count: usize,
@@ -847,6 +892,141 @@ fn thermal_source_boundary_summary(
         convection_coefficient_mean_w_per_m2k,
         source_temperature_delta_k,
         boundary_temperature_delta_k: 0.45 * prescribed_delta_k + flux_delta_k + convection_delta_k,
+    }
+}
+
+fn thermal_known_answer(
+    initial_snapshot: &[f64],
+    final_snapshot: &[f64],
+    topology: ThermalRecoveryTopology,
+    reference_temperature_k: f64,
+    expected_lumped_delta_k: f64,
+    source_boundary: ThermalSourceBoundarySummary,
+) -> ThermalKnownAnswer {
+    let observed_lumped_delta_k = if final_snapshot.is_empty() {
+        0.0
+    } else {
+        final_snapshot.iter().sum::<f64>() / final_snapshot.len() as f64 - reference_temperature_k
+    };
+    let slab_linear_profile_rms_ratio =
+        thermal_slab_linear_profile_rms_ratio(final_snapshot, topology);
+    let slab_monotonic_edge_fraction =
+        thermal_slab_monotonic_edge_fraction(final_snapshot, topology);
+    let lumped_response_error_ratio = if expected_lumped_delta_k.abs() <= 1.0e-9 {
+        observed_lumped_delta_k.abs().min(1.0)
+    } else {
+        ((observed_lumped_delta_k - expected_lumped_delta_k).abs() / expected_lumped_delta_k.abs())
+            .clamp(0.0, 10.0)
+    };
+    let initial_mean_delta_k = if initial_snapshot.is_empty() {
+        0.0
+    } else {
+        initial_snapshot.iter().sum::<f64>() / initial_snapshot.len() as f64
+            - reference_temperature_k
+    };
+    let source_response_sign_alignment = if source_boundary.volumetric_heat_source_w_per_m3.abs()
+        <= 1.0e-12
+    {
+        1.0
+    } else {
+        let observed_source_delta = observed_lumped_delta_k - initial_mean_delta_k;
+        let source_sign = source_boundary.volumetric_heat_source_w_per_m3.signum();
+        if observed_source_delta.abs() <= 1.0e-12 || observed_source_delta.signum() == source_sign {
+            1.0
+        } else {
+            0.0
+        }
+    };
+
+    ThermalKnownAnswer {
+        slab_linear_profile_rms_ratio,
+        slab_monotonic_edge_fraction,
+        lumped_response_error_ratio,
+        source_response_sign_alignment,
+        observed_lumped_delta_k,
+    }
+}
+
+fn thermal_slab_linear_profile_rms_ratio(
+    final_snapshot: &[f64],
+    topology: ThermalRecoveryTopology,
+) -> f64 {
+    if final_snapshot.len() <= 2 {
+        return 0.0;
+    }
+    let node_count = final_snapshot.len();
+    let mut x_values = Vec::with_capacity(node_count);
+    for index in 0..node_count {
+        let coords = topology.coords(index);
+        let x = if topology.dims[0] <= 1 {
+            index as f64 / node_count.saturating_sub(1).max(1) as f64
+        } else {
+            coords[0] as f64 / topology.dims[0].saturating_sub(1).max(1) as f64
+        };
+        x_values.push(x);
+    }
+    let mean_x = x_values.iter().sum::<f64>() / node_count as f64;
+    let mean_t = final_snapshot.iter().sum::<f64>() / node_count as f64;
+    let mut numerator = 0.0_f64;
+    let mut denominator = 0.0_f64;
+    for (x, temperature) in x_values.iter().zip(final_snapshot.iter()) {
+        let dx = *x - mean_x;
+        numerator += dx * (*temperature - mean_t);
+        denominator += dx * dx;
+    }
+    let slope = if denominator <= 1.0e-18 {
+        0.0
+    } else {
+        numerator / denominator
+    };
+    let intercept = mean_t - slope * mean_x;
+    let rms_error = x_values
+        .iter()
+        .zip(final_snapshot.iter())
+        .map(|(x, temperature)| {
+            let error = *temperature - (intercept + slope * *x);
+            error * error
+        })
+        .sum::<f64>()
+        / node_count as f64;
+    let span = final_snapshot
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max)
+        - final_snapshot.iter().copied().fold(f64::INFINITY, f64::min);
+    (rms_error.sqrt() / span.abs().max(1.0e-9)).clamp(0.0, 10.0)
+}
+
+fn thermal_slab_monotonic_edge_fraction(
+    final_snapshot: &[f64],
+    topology: ThermalRecoveryTopology,
+) -> f64 {
+    if final_snapshot.len() <= 1 {
+        return 1.0;
+    }
+    let mut checked_edges = 0usize;
+    let mut monotonic_edges = 0usize;
+    for index in 0..final_snapshot.len() {
+        let coords = topology.coords(index);
+        for axis in 0..VECTOR_COMPONENT_COUNT {
+            if coords[axis] + 1 >= topology.dims[axis] {
+                continue;
+            }
+            let mut next_coords = coords;
+            next_coords[axis] += 1;
+            let Some(next_index) = topology.index(next_coords) else {
+                continue;
+            };
+            checked_edges = checked_edges.saturating_add(1);
+            if final_snapshot[next_index] + 1.0e-9 >= final_snapshot[index] {
+                monotonic_edges = monotonic_edges.saturating_add(1);
+            }
+        }
+    }
+    if checked_edges == 0 {
+        1.0
+    } else {
+        monotonic_edges as f64 / checked_edges as f64
     }
 }
 

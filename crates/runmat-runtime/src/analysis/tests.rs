@@ -4003,6 +4003,13 @@ fn analysis_run_thermal_returns_temperature_payload() {
             && diag.message.contains("recovery_dimensions=")
             && diag.message.contains("boundary_face_count=6")
     }));
+    assert!(run.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_THERMAL_KNOWN_ANSWER"
+            && diag.message.contains("slab_linear_profile_rms_ratio=")
+            && diag.message.contains("slab_monotonic_edge_fraction=")
+            && diag.message.contains("lumped_response_error_ratio=")
+            && diag.message.contains("source_response_sign_alignment=")
+    }));
     let results = analysis_results_op(
         &run.data,
         AnalysisResultsQuery::default(),
