@@ -71,6 +71,12 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `image/filters` | `imfilter`, `filter2` | yes | S | - | Linear image filters and padding modes. |
 | done | `image/color` | `rgb2gray`, `gray2rgb`, `ind2rgb`, `im2double`, `im2uint8`, `im2uint16`, `rgb2hsv`, `hsv2rgb`, `rgb2lab`, `lab2rgb` | host | - | - | Image color and class conversions. |
 
+## Communications
+
+| Status | Path | Names | GPU | Fusion | Backend | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| done | `comms/modulation` | `qammod`, `pskmod` | host | - | - | Integer and bit-symbol modulation to complex baseband constellations; gpuArray inputs are gathered while complex GPU outputs are not represented. |
+
 ## Polynomials and Fitting
 
 | Status | Path | Names | GPU | Fusion | Backend | Notes |

@@ -1,0 +1,106 @@
+{
+  "title": "pskmod",
+  "category": "comms/modulation",
+  "keywords": [
+    "pskmod",
+    "psk",
+    "modulation",
+    "communications",
+    "gray",
+    "binary",
+    "phaseoffset",
+    "constellation",
+    "gpu"
+  ],
+  "summary": "Map integers or bit groups to PSK constellation points in MATLAB and RunMat.",
+  "references": [
+    {
+      "label": "MathWorks pskmod documentation",
+      "url": "https://www.mathworks.com/help/comm/ref/pskmod.html"
+    }
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64",
+      "i32",
+      "bool"
+    ],
+    "broadcasting": "none",
+    "notes": "gpuArray inputs are gathered through the active provider and modulated on the host because RunMat does not yet represent complex-valued GPU tensor handles. The result is a host ComplexTensor."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::comms::pskmod::tests"
+  },
+  "description": "`pskmod(X, M)` maps integer symbols or bit groups to unit-magnitude M-PSK complex-baseband samples. Phase offset, Gray ordering, binary ordering, custom symbol ordering, bit input, and output precision follow the MATLAB Communications Toolbox surface.",
+  "behaviors": [
+    "`X` must contain finite integer symbols in the inclusive range `[0, M-1]` when `InputType` is `'integer'`.",
+    "`M` must be an integer greater than one. Bit input additionally requires `M` to be a power of two.",
+    "The default phase offset is zero radians.",
+    "The default symbol order is `'gray'`; `'bin'` maps symbol `k` to angle `phaseoffset + 2*pi*k/M`.",
+    "Custom symbol order vectors must have length `M`, contain each integer in `[0, M-1]` exactly once, and label constellation points counter-clockwise starting at `phaseoffset`.",
+    "`InputType='bit'` groups rows by `log2(M)` bits per symbol with the first bit as the MSB, preserving remaining dimensions as independent channels.",
+    "`OutputDataType='single'` rounds real and imaginary samples through single precision before returning the host complex tensor.",
+    "`PlotConstellation=true` is accepted as a recognized option but raises an explicit not-implemented error."
+  ],
+  "examples": [
+    {
+      "description": "Default 8-PSK Gray mapping",
+      "input": "y = pskmod(0:7, 8)"
+    },
+    {
+      "description": "QPSK with a phase offset",
+      "input": "y = pskmod(0:3, 4, pi/4)"
+    },
+    {
+      "description": "Binary symbol ordering",
+      "input": "y = pskmod(0:3, 4, 0, 'bin')"
+    },
+    {
+      "description": "Bit input",
+      "input": "bits = [0 0; 0 1; 1 0; 1 1];\ny = pskmod(bits, 4, InputType='bit')"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does pskmod execute on the GPU?",
+      "answer": "It accepts gpuArray inputs, but the current runtime gathers them to host memory and returns a host ComplexTensor because complex GPU tensor handles are not yet part of RunMat's value model."
+    },
+    {
+      "question": "Is custom symbol ordering supported?",
+      "answer": "Yes. Supply a vector whose first element labels the constellation point at `phaseoffset`; later elements label points counter-clockwise around the unit circle."
+    }
+  ],
+  "links": [
+    {
+      "label": "qammod",
+      "url": "./qammod"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/comms/pskmod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/comms/pskmod.rs"
+  },
+  "gpu_residency": "The builtin declares `GatherImmediately` residency. A gpuArray input is downloaded once through the dispatcher and then mapped to complex host output.",
+  "gpu_behavior": [
+    "RunMat's current accelerator API stores real-valued GPU buffers. Since `pskmod` necessarily produces complex-valued samples, the GPU-aware implementation preserves correctness by gathering device input and producing a `ComplexTensor` on the host.",
+    "The registered GPU metadata advertises the supported input scalar classes and the provider hook name future accelerators can use once complex GPU outputs are represented."
+  ]
+}
