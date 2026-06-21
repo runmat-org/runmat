@@ -1,0 +1,74 @@
+{
+  "title": "vpa",
+  "category": "math/symbolic",
+  "keywords": [
+    "vpa",
+    "symbolic",
+    "variable precision",
+    "digits",
+    "decimal"
+  ],
+  "summary": "Evaluate scalar symbolic or numeric input as a symbolic decimal.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Variable-precision symbolic values are host algebra values and are not uploaded to GPU providers."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::symbolic::vpa::tests",
+    "integration": "runmat-vm tests::symbolic_vpa_source_workflow"
+  },
+  "description": "`vpa(x)` converts a scalar symbolic or numeric input to a scalar symbolic decimal literal using the current `digits` setting. `vpa(x, d)` uses `d` significant decimal digits. Exact symbolic rationals are expanded exactly; ordinary numeric inputs are rendered from the numeric value supplied by the script.",
+  "behaviors": [
+    "The default precision is controlled by `digits` and starts at 32 significant digits.",
+    "Exact rational symbolic inputs such as `sym('1/3')` are expanded and rounded with the requested significant digits.",
+    "Numeric scalar inputs are converted to symbolic decimal literals from their existing numeric value at the requested display precision.",
+    "Nonconstant symbolic variables remain symbolic.",
+    "RunMat currently represents scalar symbolic expressions; array-valued symbolic containers are not materialized."
+  ],
+  "examples": [
+    {
+      "description": "Render numeric pi at 50 digits",
+      "input": "vpa(pi, 50)",
+      "output": "3.141592653589793..."
+    },
+    {
+      "description": "Evaluate an exact rational",
+      "input": "vpa(sym('1/3'), 20)",
+      "output": "0.33333333333333333333"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `vpa` return a double?",
+      "answer": "No. It returns a scalar symbolic value so formatting and downstream symbolic operations can preserve the decimal literal."
+    }
+  ],
+  "links": [
+    {
+      "label": "digits",
+      "url": "./digits"
+    },
+    {
+      "label": "sym",
+      "url": "./sym"
+    },
+    {
+      "label": "syms",
+      "url": "./syms"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/symbolic/vpa.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/symbolic/vpa.rs"
+  }
+}

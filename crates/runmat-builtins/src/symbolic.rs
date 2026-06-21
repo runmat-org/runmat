@@ -1,4 +1,7 @@
 use crate::format_number;
+use num_bigint::BigInt;
+use num_integer::Integer;
+use num_traits::{One, Signed, ToPrimitive, Zero};
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -61,6 +64,15 @@ impl SymbolicFunction {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SymbolicExpr {
     Constant(f64),
+    Rational {
+        numerator: BigInt,
+        denominator: BigInt,
+    },
+    DecimalLiteral {
+        text: String,
+        value: f64,
+        digits: usize,
+    },
     Variable(String),
     FunctionReference(String, Vec<String>),
     FunctionCall(String, Vec<SymbolicExpr>),
@@ -82,6 +94,33 @@ pub enum SymbolicExpr {
 impl SymbolicExpr {
     pub fn constant(value: f64) -> Self {
         SymbolicExpr::Constant(value)
+    }
+
+    pub fn rational(numerator: impl Into<BigInt>, denominator: impl Into<BigInt>) -> Option<Self> {
+        let numerator = numerator.into();
+        let denominator = denominator.into();
+        if denominator.is_zero() {
+            return None;
+        }
+        let mut numerator = numerator;
+        let mut denominator = denominator;
+        if denominator.is_negative() {
+            numerator = -numerator;
+            denominator = -denominator;
+        }
+        let divisor = numerator.gcd(&denominator);
+        Some(SymbolicExpr::Rational {
+            numerator: numerator / &divisor,
+            denominator: denominator / divisor,
+        })
+    }
+
+    pub fn decimal_literal(text: impl Into<String>, value: f64, digits: usize) -> Self {
+        SymbolicExpr::DecimalLiteral {
+            text: text.into(),
+            value,
+            digits,
+        }
     }
 
     pub fn variable(name: impl Into<String>) -> Self {
@@ -168,7 +207,9 @@ impl SymbolicExpr {
 
     pub fn contains_variable(&self, variable: &str) -> bool {
         match self {
-            SymbolicExpr::Constant(_) => false,
+            SymbolicExpr::Constant(_)
+            | SymbolicExpr::Rational { .. }
+            | SymbolicExpr::DecimalLiteral { .. } => false,
             SymbolicExpr::Variable(name) => name == variable,
             SymbolicExpr::FunctionReference(_, parameters) => {
                 parameters.iter().any(|parameter| parameter == variable)
@@ -201,7 +242,9 @@ impl SymbolicExpr {
 
     fn collect_variables(&self, variables: &mut BTreeSet<String>) {
         match self {
-            SymbolicExpr::Constant(_) => {}
+            SymbolicExpr::Constant(_)
+            | SymbolicExpr::Rational { .. }
+            | SymbolicExpr::DecimalLiteral { .. } => {}
             SymbolicExpr::Variable(name) => {
                 variables.insert(name.clone());
             }
@@ -239,6 +282,22 @@ impl SymbolicExpr {
     pub fn substitute(&self, variable: &str, replacement: &SymbolicExpr) -> SymbolicExpr {
         match self {
             SymbolicExpr::Constant(value) => SymbolicExpr::Constant(*value),
+            SymbolicExpr::Rational {
+                numerator,
+                denominator,
+            } => SymbolicExpr::Rational {
+                numerator: numerator.clone(),
+                denominator: denominator.clone(),
+            },
+            SymbolicExpr::DecimalLiteral {
+                text,
+                value,
+                digits,
+            } => SymbolicExpr::DecimalLiteral {
+                text: text.clone(),
+                value: *value,
+                digits: *digits,
+            },
             SymbolicExpr::Variable(name) if name == variable => replacement.clone(),
             SymbolicExpr::Variable(name) => SymbolicExpr::Variable(name.clone()),
             SymbolicExpr::FunctionReference(name, parameters) => {
@@ -311,7 +370,9 @@ impl SymbolicExpr {
 
     pub fn derivative(&self, variable: &str) -> SymbolicExpr {
         match self {
-            SymbolicExpr::Constant(_) => SymbolicExpr::constant(0.0),
+            SymbolicExpr::Constant(_)
+            | SymbolicExpr::Rational { .. }
+            | SymbolicExpr::DecimalLiteral { .. } => SymbolicExpr::constant(0.0),
             SymbolicExpr::Variable(name) if name == variable => SymbolicExpr::constant(1.0),
             SymbolicExpr::Variable(_) => SymbolicExpr::constant(0.0),
             SymbolicExpr::FunctionReference(_, parameters) => {
@@ -427,6 +488,11 @@ impl SymbolicExpr {
     pub fn numeric_constant_value(&self) -> Option<f64> {
         match self {
             SymbolicExpr::Constant(value) => (!value.is_nan()).then_some(*value),
+            SymbolicExpr::Rational {
+                numerator,
+                denominator,
+            } => Some(numerator.to_f64()? / denominator.to_f64()?),
+            SymbolicExpr::DecimalLiteral { value, .. } => (!value.is_nan()).then_some(*value),
             SymbolicExpr::Variable(_) => None,
             SymbolicExpr::FunctionReference(_, _)
             | SymbolicExpr::FunctionCall(_, _)
@@ -473,6 +539,8 @@ impl SymbolicExpr {
     pub fn has_undefined_constant_subexpression(&self) -> bool {
         match self {
             SymbolicExpr::Constant(value) => value.is_nan(),
+            SymbolicExpr::Rational { .. } => false,
+            SymbolicExpr::DecimalLiteral { value, .. } => value.is_nan(),
             SymbolicExpr::Variable(_) => false,
             SymbolicExpr::FunctionReference(_, _) => false,
             SymbolicExpr::FunctionCall(_, args) => args
@@ -516,6 +584,8 @@ impl SymbolicExpr {
     pub fn has_nonfinite_constant(&self) -> bool {
         match self {
             SymbolicExpr::Constant(value) => !value.is_finite(),
+            SymbolicExpr::Rational { .. } => false,
+            SymbolicExpr::DecimalLiteral { value, .. } => !value.is_finite(),
             SymbolicExpr::Variable(_) => false,
             SymbolicExpr::FunctionReference(_, _) => false,
             SymbolicExpr::FunctionCall(_, args) => {
@@ -548,6 +618,7 @@ impl SymbolicExpr {
 
     pub fn simplify(self) -> SymbolicExpr {
         match self {
+            SymbolicExpr::Rational { .. } | SymbolicExpr::DecimalLiteral { .. } => self,
             SymbolicExpr::FunctionReference(name, parameters) => {
                 SymbolicExpr::FunctionReference(name, parameters)
             }
@@ -616,6 +687,17 @@ impl SymbolicExpr {
                     (SymbolicExpr::Constant(a), SymbolicExpr::Constant(b)) if !(a + b).is_nan() => {
                         SymbolicExpr::Constant(a + b)
                     }
+                    (
+                        SymbolicExpr::Rational {
+                            numerator: an,
+                            denominator: ad,
+                        },
+                        SymbolicExpr::Rational {
+                            numerator: bn,
+                            denominator: bd,
+                        },
+                    ) => SymbolicExpr::rational(an * bd + bn * ad, ad * bd)
+                        .unwrap_or(SymbolicExpr::Add(Box::new(lhs), Box::new(rhs))),
                     (left, right) if left.is_zero_constant() => right.clone(),
                     (left, right) if right.is_zero_constant() => left.clone(),
                     _ => SymbolicExpr::Add(Box::new(lhs), Box::new(rhs)),
@@ -628,6 +710,17 @@ impl SymbolicExpr {
                     (SymbolicExpr::Constant(a), SymbolicExpr::Constant(b)) if !(a - b).is_nan() => {
                         SymbolicExpr::Constant(a - b)
                     }
+                    (
+                        SymbolicExpr::Rational {
+                            numerator: an,
+                            denominator: ad,
+                        },
+                        SymbolicExpr::Rational {
+                            numerator: bn,
+                            denominator: bd,
+                        },
+                    ) => SymbolicExpr::rational(an * bd - bn * ad, ad * bd)
+                        .unwrap_or(SymbolicExpr::Sub(Box::new(lhs), Box::new(rhs))),
                     (left, right) if right.is_zero_constant() => left.clone(),
                     (left, right) if left.is_zero_constant() => {
                         SymbolicExpr::neg_expr(right.clone())
@@ -643,6 +736,17 @@ impl SymbolicExpr {
                     (SymbolicExpr::Constant(a), SymbolicExpr::Constant(b)) if !(a * b).is_nan() => {
                         SymbolicExpr::Constant(a * b)
                     }
+                    (
+                        SymbolicExpr::Rational {
+                            numerator: an,
+                            denominator: ad,
+                        },
+                        SymbolicExpr::Rational {
+                            numerator: bn,
+                            denominator: bd,
+                        },
+                    ) => SymbolicExpr::rational(an * bn, ad * bd)
+                        .unwrap_or(SymbolicExpr::Mul(Box::new(lhs), Box::new(rhs))),
                     (left, right)
                         if left.is_zero_constant() && right.can_eliminate_zero_product_factor() =>
                     {
@@ -676,6 +780,17 @@ impl SymbolicExpr {
                     (SymbolicExpr::Constant(a), SymbolicExpr::Constant(b)) if !is_zero(*b) => {
                         SymbolicExpr::Constant(a / b)
                     }
+                    (
+                        SymbolicExpr::Rational {
+                            numerator: an,
+                            denominator: ad,
+                        },
+                        SymbolicExpr::Rational {
+                            numerator: bn,
+                            denominator: bd,
+                        },
+                    ) if !bn.is_zero() => SymbolicExpr::rational(an * bd, ad * bn)
+                        .unwrap_or(SymbolicExpr::Div(Box::new(lhs), Box::new(rhs))),
                     _ => SymbolicExpr::Div(Box::new(lhs), Box::new(rhs)),
                 }
             }
@@ -748,6 +863,8 @@ impl fmt::Display for SymbolicExpr {
 fn precedence(expr: &SymbolicExpr) -> u8 {
     match expr {
         SymbolicExpr::Constant(_)
+        | SymbolicExpr::Rational { .. }
+        | SymbolicExpr::DecimalLiteral { .. }
         | SymbolicExpr::Variable(_)
         | SymbolicExpr::FunctionReference(_, _)
         | SymbolicExpr::FunctionCall(_, _)
@@ -775,6 +892,15 @@ fn fmt_expr(
     }
     match expr {
         SymbolicExpr::Constant(value) => write!(f, "{}", format_number(*value))?,
+        SymbolicExpr::Rational {
+            numerator,
+            denominator,
+        } if denominator.is_one() => write!(f, "{numerator}")?,
+        SymbolicExpr::Rational {
+            numerator,
+            denominator,
+        } => write!(f, "{numerator}/{denominator}")?,
+        SymbolicExpr::DecimalLiteral { text, .. } => write!(f, "{text}")?,
         SymbolicExpr::Variable(name) => write!(f, "{name}")?,
         SymbolicExpr::FunctionReference(name, parameters) => {
             write!(f, "{name}(")?;
@@ -1139,6 +1265,15 @@ mod tests {
             SymbolicExpr::constant(f64::NAN).numeric_constant_value(),
             None
         );
+    }
+
+    #[test]
+    fn oversized_rational_simplification_does_not_panic() {
+        let lhs = SymbolicExpr::rational(i128::MAX, i128::MAX - 2).expect("lhs");
+        let rhs = SymbolicExpr::rational(i128::MAX - 4, i128::MAX - 6).expect("rhs");
+        let sum = SymbolicExpr::add_expr(lhs, rhs);
+
+        assert!(matches!(sum, SymbolicExpr::Rational { .. }));
     }
 
     #[test]

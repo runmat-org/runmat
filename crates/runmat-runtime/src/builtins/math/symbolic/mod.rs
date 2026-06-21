@@ -1,6 +1,8 @@
+pub(crate) mod digits;
 pub(crate) mod limit;
 pub(crate) mod sym;
 pub(crate) mod syms;
+pub(crate) mod vpa;
 
 use runmat_builtins::{
     symbolic::{is_valid_symbolic_identifier, SymbolicFunction},
