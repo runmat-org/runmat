@@ -4238,6 +4238,12 @@ fn build_fsi_run_fields(
         closure.max_pressure_feedback_residual_ratio = closure
             .max_pressure_feedback_residual_ratio
             .max(interface_step.pressure_feedback_residual_ratio);
+        closure.max_pressure_displacement_law_residual_ratio = closure
+            .max_pressure_displacement_law_residual_ratio
+            .max(interface_step.pressure_displacement_law_residual_ratio);
+        closure.interface_stiffness_pa_per_m = closure
+            .interface_stiffness_pa_per_m
+            .max(interface_step.interface_stiffness_pa_per_m);
         let fluid_normal_force = interface_step.interface_pressure.iter().sum::<f64>();
         let structural_normal_force = -fluid_normal_force;
         let force_balance_ratio = (fluid_normal_force + structural_normal_force).abs()
@@ -4258,7 +4264,7 @@ fn build_fsi_run_fields(
                 .map(|pressure| pressure.abs())
                 .fold(0.0_f64, f64::max),
         );
-        let interface_displacement = displacement.clone();
+        let interface_displacement = interface_step.interface_displacement.clone();
         let displacement_transfer_residual = displacement
             .iter()
             .zip(interface_displacement.iter())
@@ -4341,8 +4347,11 @@ fn build_fsi_run_fields(
 struct FsiPartitionedInterfaceStep {
     interface_pressure: Vec<f64>,
     structural_displacement: Vec<f64>,
+    interface_displacement: Vec<f64>,
     iteration_count: usize,
     pressure_feedback_residual_ratio: f64,
+    pressure_displacement_law_residual_ratio: f64,
+    interface_stiffness_pa_per_m: f64,
 }
 
 fn solve_fsi_partitioned_interface(
@@ -4362,8 +4371,10 @@ fn solve_fsi_partitioned_interface(
     let relaxation = 0.5_f64;
     let mut interface_pressure = vec![0.0; fluid_pressure.len()];
     let mut structural_displacement = vec![0.0; fluid_pressure.len() * 3];
+    let mut interface_displacement = vec![0.0; fluid_pressure.len() * 3];
     let mut iteration_count = 0_usize;
     let mut pressure_feedback_residual_ratio = if fluid_pressure.is_empty() { 0.0 } else { 1.0 };
+    let mut displacement_transfer_residual_ratio: f64;
 
     for iteration in 1..=max_linear_iters {
         for (interface, target) in interface_pressure.iter_mut().zip(fluid_pressure.iter()) {
@@ -4374,6 +4385,12 @@ fn solve_fsi_partitioned_interface(
             structural_displacement[node * 3 + 1] = 0.0;
             structural_displacement[node * 3 + 2] = 0.0;
         }
+        for (interface, structural) in interface_displacement
+            .iter_mut()
+            .zip(structural_displacement.iter())
+        {
+            *interface += relaxation * (*structural - *interface);
+        }
         let max_feedback_residual = fluid_pressure
             .iter()
             .zip(structural_displacement.chunks_exact(3))
@@ -4383,17 +4400,46 @@ fn solve_fsi_partitioned_interface(
             })
             .fold(0.0_f64, f64::max);
         pressure_feedback_residual_ratio = max_feedback_residual / pressure_scale;
+        let displacement_scale = structural_displacement
+            .iter()
+            .copied()
+            .map(f64::abs)
+            .fold(0.0_f64, f64::max)
+            .max(1.0e-18);
+        displacement_transfer_residual_ratio = structural_displacement
+            .iter()
+            .zip(interface_displacement.iter())
+            .map(|(structural, interface)| (structural - interface).abs())
+            .fold(0.0_f64, f64::max)
+            / displacement_scale;
         iteration_count = iteration;
-        if pressure_feedback_residual_ratio <= tolerance {
+        if pressure_feedback_residual_ratio <= tolerance
+            && displacement_transfer_residual_ratio <= tolerance
+        {
             break;
         }
     }
+    let pressure_displacement_law_residual_ratio = interface_pressure
+        .iter()
+        .enumerate()
+        .map(|(node, pressure)| {
+            let expected = *pressure * compliance;
+            let actual = structural_displacement
+                .get(node * 3)
+                .copied()
+                .unwrap_or(0.0);
+            (actual - expected).abs() / expected.abs().max(1.0e-18)
+        })
+        .fold(0.0_f64, f64::max);
 
     FsiPartitionedInterfaceStep {
         interface_pressure,
         structural_displacement,
+        interface_displacement,
         iteration_count,
         pressure_feedback_residual_ratio,
+        pressure_displacement_law_residual_ratio,
+        interface_stiffness_pa_per_m: 1.0 / compliance,
     }
 }
 
@@ -4408,6 +4454,8 @@ struct FsiInterfaceClosure {
     max_traction_magnitude_pa: f64,
     max_coupling_iteration_count: usize,
     max_pressure_feedback_residual_ratio: f64,
+    max_pressure_displacement_law_residual_ratio: f64,
+    interface_stiffness_pa_per_m: f64,
 }
 
 fn fsi_structural_compliance_per_pa(model: &AnalysisModel) -> f64 {
@@ -5742,6 +5790,7 @@ pub fn analysis_run_fsi_with_options_op(
         &context,
     )?;
 
+    let solve_start = Instant::now();
     let node_count = cfd_node_count_from_model(model, prep_context);
     let field_step = match cfd_domain.solve_family {
         runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
@@ -5836,6 +5885,8 @@ pub fn analysis_run_fsi_with_options_op(
         severity: if fsi_interface_closure.force_balance_ratio <= 1.0e-9
             && fsi_interface_closure.max_displacement_transfer_residual_m <= 1.0e-12
             && fsi_interface_closure.max_pressure_feedback_residual_ratio <= options.tolerance
+            && fsi_interface_closure.max_pressure_displacement_law_residual_ratio
+                <= options.tolerance
             && fsi_interface_closure.max_interface_residual <= options.residual_warn_threshold
         {
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
@@ -5843,7 +5894,7 @@ pub fn analysis_run_fsi_with_options_op(
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "interface_node_count={} max_interface_residual={} force_balance_ratio={} max_displacement_transfer_residual_m={} max_interface_displacement_m={} mean_interface_pressure_pa={} max_traction_magnitude_pa={} max_coupling_iteration_count={} pressure_feedback_residual_ratio={}",
+            "interface_node_count={} max_interface_residual={} force_balance_ratio={} max_displacement_transfer_residual_m={} max_interface_displacement_m={} mean_interface_pressure_pa={} max_traction_magnitude_pa={} max_coupling_iteration_count={} pressure_feedback_residual_ratio={} pressure_displacement_law_residual_ratio={} interface_stiffness_pa_per_m={}",
             fsi_interface_closure.interface_node_count,
             fsi_interface_closure.max_interface_residual,
             fsi_interface_closure.force_balance_ratio,
@@ -5853,6 +5904,8 @@ pub fn analysis_run_fsi_with_options_op(
             fsi_interface_closure.max_traction_magnitude_pa,
             fsi_interface_closure.max_coupling_iteration_count,
             fsi_interface_closure.max_pressure_feedback_residual_ratio,
+            fsi_interface_closure.max_pressure_displacement_law_residual_ratio,
+            fsi_interface_closure.interface_stiffness_pa_per_m,
         ),
     });
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -5873,6 +5926,16 @@ pub fn analysis_run_fsi_with_options_op(
             options.tolerance,
         ),
     });
+    let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
+    run.diagnostics
+        .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+            code: "FEA_FSI_COST".to_string(),
+            severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
+            message: format!(
+                "solve_ms={} step_count={} max_linear_iters={} tolerance={}",
+                solve_ms, options.step_count, options.max_linear_iters, options.tolerance,
+            ),
+        });
 
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
@@ -12424,6 +12487,7 @@ fn run_solve_ms(run: &AnalysisRunResult) -> Option<f64> {
         "FEA_MODAL_COST",
         "FEA_CFD_COST",
         "FEA_CHT_COST",
+        "FEA_FSI_COST",
     ] {
         if let Some(value) = diagnostic_metric(&run.run.diagnostics, code, "solve_ms") {
             return Some(value);

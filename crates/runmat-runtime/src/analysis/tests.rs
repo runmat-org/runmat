@@ -5455,7 +5455,11 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
             .message
             .contains("max_displacement_transfer_residual_m=")
         && diag.message.contains("max_coupling_iteration_count=")
-        && diag.message.contains("pressure_feedback_residual_ratio=")));
+        && diag.message.contains("pressure_feedback_residual_ratio=")
+        && diag
+            .message
+            .contains("pressure_displacement_law_residual_ratio=")
+        && diag.message.contains("interface_stiffness_pa_per_m=")));
     assert!(envelope
         .data
         .run

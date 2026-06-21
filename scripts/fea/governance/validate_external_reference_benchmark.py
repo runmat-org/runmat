@@ -758,6 +758,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "fsi_max_displacement_transfer_residual_m",
         "fsi_max_coupling_iteration_count",
         "fsi_pressure_feedback_residual_ratio",
+        "fsi_pressure_displacement_law_residual_ratio",
+        "fsi_interface_stiffness_pa_per_m",
     },
     "fsi_coupled_cpu": {
         "fsi_reference_density_kg_per_m3",
@@ -778,6 +780,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "fsi_max_displacement_transfer_residual_m",
         "fsi_max_coupling_iteration_count",
         "fsi_pressure_feedback_residual_ratio",
+        "fsi_pressure_displacement_law_residual_ratio",
+        "fsi_interface_stiffness_pa_per_m",
     },
     "fsi_coupled_gpu_fallback": {
         "fsi_reference_density_kg_per_m3",
@@ -798,6 +802,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "fsi_max_displacement_transfer_residual_m",
         "fsi_max_coupling_iteration_count",
         "fsi_pressure_feedback_residual_ratio",
+        "fsi_pressure_displacement_law_residual_ratio",
+        "fsi_interface_stiffness_pa_per_m",
     },
     "thermo_mech_kickoff_gpu_provider": {
         "thermo_mech_thermal_strain_scale",

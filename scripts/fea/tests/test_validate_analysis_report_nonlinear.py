@@ -1245,6 +1245,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "fsi_max_displacement_transfer_residual_m",
                     "fsi_max_coupling_iteration_count",
                     "fsi_pressure_feedback_residual_ratio",
+                    "fsi_pressure_displacement_law_residual_ratio",
+                    "fsi_interface_stiffness_pa_per_m",
                 },
             ),
             _record(
@@ -1268,6 +1270,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "fsi_max_displacement_transfer_residual_m",
                     "fsi_max_coupling_iteration_count",
                     "fsi_pressure_feedback_residual_ratio",
+                    "fsi_pressure_displacement_law_residual_ratio",
+                    "fsi_interface_stiffness_pa_per_m",
                 },
             ),
             _record(
@@ -1291,6 +1295,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "fsi_max_displacement_transfer_residual_m",
                     "fsi_max_coupling_iteration_count",
                     "fsi_pressure_feedback_residual_ratio",
+                    "fsi_pressure_displacement_law_residual_ratio",
+                    "fsi_interface_stiffness_pa_per_m",
                 },
             ),
         ]

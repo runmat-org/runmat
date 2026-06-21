@@ -3867,6 +3867,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "fsi_pressure_displacement_law_residual_ratio",
+            "fixture_id": "fsi_coupled_cpu",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_interface_stiffness_pa_per_m",
+            "fixture_id": "fsi_coupled_cpu",
+            "observed": 200.0e9,
+            "reference": 200.0e9,
+            "pass": True,
+        },
+        {
             "name": "fsi_reynolds_number",
             "fixture_id": "fsi_coupled_gpu_fallback",
             "observed": 270718.2320441989,
@@ -3993,6 +4007,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "fsi_pressure_displacement_law_residual_ratio",
+            "fixture_id": "fsi_coupled_gpu_fallback",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_interface_stiffness_pa_per_m",
+            "fixture_id": "fsi_coupled_gpu_fallback",
+            "observed": 200.0e9,
+            "reference": 200.0e9,
+            "pass": True,
+        },
+        {
             "name": "fsi_reynolds_number",
             "fixture_id": "fsi_coupled_gpu_provider",
             "observed": 271000.0,
@@ -4116,6 +4144,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "fsi_coupled_gpu_provider",
             "observed": 8.102392506925682e-09,
             "reference": 8.102392506925682e-09,
+            "pass": True,
+        },
+        {
+            "name": "fsi_pressure_displacement_law_residual_ratio",
+            "fixture_id": "fsi_coupled_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_interface_stiffness_pa_per_m",
+            "fixture_id": "fsi_coupled_gpu_provider",
+            "observed": 200.0e9,
+            "reference": 200.0e9,
             "pass": True,
         },
         {
