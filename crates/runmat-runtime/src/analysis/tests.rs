@@ -4945,6 +4945,13 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         .iter()
         .any(|diag| diag.code == "FEA_CHT_COUPLING"
             && diag.message.contains("applied_temperature_delta_k=60")));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_CHT_INTERFACE_CLOSURE"
+            && diag.message.contains("interface_face_count=")
+            && diag.message.contains("max_temperature_jump_k=")
+            && diag.message.contains("max_energy_residual=")
+            && diag.message.contains("heat_flux_balance_ratio=")
+    }));
     let thermal = envelope
         .data
         .thermal_results

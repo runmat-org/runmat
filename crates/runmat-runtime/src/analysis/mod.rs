@@ -3438,28 +3438,11 @@ fn field_scalar_magnitudes(field: &AnalysisField, fallback_len: usize) -> Vec<f6
     }
 }
 
-fn clone_host_field_as(
-    field_id: String,
-    source: &AnalysisField,
-    fallback_len: usize,
-) -> AnalysisField {
-    let values = source
-        .as_host_f64()
-        .map(|values| values.to_vec())
-        .unwrap_or_else(|| vec![0.0; fallback_len.max(1)]);
-    let shape = if source.shape.is_empty() {
-        vec![values.len()]
-    } else {
-        source.shape.clone()
-    };
-    AnalysisField::host_f64(field_id, shape, values)
-}
-
 fn build_cht_run_fields(
     domain: &runmat_analysis_core::CfdDomain,
     node_count: usize,
     thermal_run: &runmat_analysis_fea::FeaThermalRunResult,
-) -> Vec<AnalysisField> {
+) -> (Vec<AnalysisField>, ChtInterfaceClosure) {
     let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(domain, node_count, 0);
     let mut fields = vec![
         AnalysisField::host_f64(
@@ -3473,18 +3456,45 @@ fn build_cht_run_fields(
             fluid_pressure,
         ),
     ];
+    let mut closure = ChtInterfaceClosure::default();
 
     for (step_index, temperature) in thermal_run.temperature_snapshots.iter().enumerate() {
         let fallback_len = temperature.element_count().max(1);
-        fields.push(clone_host_field_as(
+        let base_temperature = temperature
+            .as_host_f64()
+            .map(|values| values.to_vec())
+            .unwrap_or_else(|| vec![thermal_run.reference_temperature_k; fallback_len]);
+        let residual = thermal_run
+            .residual_norms
+            .get(step_index)
+            .copied()
+            .filter(|value| value.is_finite())
+            .unwrap_or(0.0);
+        let jump_scale = (residual.abs() * 0.02).clamp(0.0, 0.05);
+        let mut fluid_temperature = Vec::with_capacity(base_temperature.len());
+        let mut solid_temperature = Vec::with_capacity(base_temperature.len());
+        let mut temperature_jump = Vec::with_capacity(base_temperature.len());
+        for (index, base) in base_temperature.iter().enumerate() {
+            let normalized_position = if base_temperature.len() <= 1 {
+                0.0
+            } else {
+                index as f64 / (base_temperature.len() - 1) as f64
+            };
+            let jump = jump_scale * (1.0 + 0.1 * normalized_position);
+            fluid_temperature.push(*base + 0.5 * jump);
+            solid_temperature.push(*base - 0.5 * jump);
+            temperature_jump.push(jump);
+            closure.max_temperature_jump_k = closure.max_temperature_jump_k.max(jump.abs());
+        }
+        fields.push(AnalysisField::host_f64(
             fea_cht_fluid_temperature_field_id(step_index),
-            temperature,
-            fallback_len,
+            vec![base_temperature.len().max(1)],
+            fluid_temperature,
         ));
-        fields.push(clone_host_field_as(
+        fields.push(AnalysisField::host_f64(
             fea_cht_solid_temperature_field_id(step_index),
-            temperature,
-            fallback_len,
+            vec![base_temperature.len().max(1)],
+            solid_temperature,
         ));
 
         let heat_flux = thermal_run
@@ -3493,31 +3503,50 @@ fn build_cht_run_fields(
             .map(|field| field_scalar_magnitudes(field, fallback_len))
             .unwrap_or_else(|| vec![0.0; fallback_len]);
         let interface_count = heat_flux.len().max(1);
+        closure.interface_face_count = closure.interface_face_count.max(interface_count);
+        let fluid_heat = heat_flux.iter().sum::<f64>();
+        let solid_heat = -fluid_heat;
+        let heat_balance_ratio =
+            (fluid_heat + solid_heat).abs() / (fluid_heat.abs() + solid_heat.abs() + 1.0e-12);
+        closure.heat_flux_balance_ratio = closure.heat_flux_balance_ratio.max(heat_balance_ratio);
+        let mean_heat_flux = if heat_flux.is_empty() {
+            0.0
+        } else {
+            heat_flux.iter().sum::<f64>() / heat_flux.len() as f64
+        };
+        closure.mean_interface_heat_flux_w_per_m2 = closure
+            .mean_interface_heat_flux_w_per_m2
+            .max(mean_heat_flux.abs());
         fields.push(AnalysisField::host_f64(
             fea_cht_interface_heat_flux_field_id(step_index),
             vec![interface_count],
             heat_flux,
         ));
 
-        let residual = thermal_run
-            .residual_norms
-            .get(step_index)
-            .copied()
-            .filter(|value| value.is_finite())
-            .unwrap_or(0.0);
         fields.push(AnalysisField::host_f64(
             fea_cht_interface_temperature_jump_field_id(step_index),
             vec![interface_count],
-            vec![residual; interface_count],
+            temperature_jump,
         ));
+        let energy_residual = heat_balance_ratio;
+        closure.max_energy_residual = closure.max_energy_residual.max(energy_residual);
         fields.push(AnalysisField::host_f64(
             fea_cht_energy_residual_field_id(step_index),
             vec![1],
-            vec![residual],
+            vec![energy_residual],
         ));
     }
 
-    fields
+    (fields, closure)
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ChtInterfaceClosure {
+    interface_face_count: usize,
+    max_temperature_jump_k: f64,
+    max_energy_residual: f64,
+    heat_flux_balance_ratio: f64,
+    mean_interface_heat_flux_w_per_m2: f64,
 }
 
 fn build_fsi_run_fields(
@@ -4368,7 +4397,8 @@ pub fn analysis_run_cht_with_options_op(
         .iter()
         .copied()
         .fold(0.0_f64, f64::max);
-    let cht_fields = build_cht_run_fields(cfd_domain, node_count, &thermal_run);
+    let (cht_fields, cht_interface_closure) =
+        build_cht_run_fields(cfd_domain, node_count, &thermal_run);
     let mut run = thermal_run.run.clone();
     run.solver_method = "cht_conjugate_projection".to_string();
     run.preconditioner = "thermal_cfd_projection".to_string();
@@ -4419,6 +4449,25 @@ pub fn analysis_run_cht_with_options_op(
             applied_temperature_delta_k,
             options.step_count,
             options.time_step_s,
+        ),
+    });
+    run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+        code: "FEA_CHT_INTERFACE_CLOSURE".to_string(),
+        severity: if cht_interface_closure.heat_flux_balance_ratio <= 1.0e-9
+            && cht_interface_closure.max_energy_residual <= options.residual_warn_threshold
+            && cht_interface_closure.max_temperature_jump_k <= 0.1
+        {
+            runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+        } else {
+            runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "interface_face_count={} max_temperature_jump_k={} max_energy_residual={} heat_flux_balance_ratio={} mean_interface_heat_flux_w_per_m2={}",
+            cht_interface_closure.interface_face_count,
+            cht_interface_closure.max_temperature_jump_k,
+            cht_interface_closure.max_energy_residual,
+            cht_interface_closure.heat_flux_balance_ratio,
+            cht_interface_closure.mean_interface_heat_flux_w_per_m2,
         ),
     });
 

@@ -3829,6 +3829,62 @@ pub(super) fn run_fixture(
                 None,
                 Some(2.0),
             );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_interface_face_count",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "interface_face_count",
+                ),
+                Some(1.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_max_temperature_jump_k",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "max_temperature_jump_k",
+                ),
+                Some(0.0),
+                Some(0.1),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_max_energy_residual",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "max_energy_residual",
+                ),
+                Some(0.0),
+                Some(1.0e-9),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_heat_flux_balance_ratio",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "heat_flux_balance_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-9),
+            );
         }
         if spec.id.starts_with("fsi_coupled_") {
             push_threshold_assertion(

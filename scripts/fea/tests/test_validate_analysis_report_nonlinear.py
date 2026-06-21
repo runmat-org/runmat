@@ -925,6 +925,10 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "cht_max_momentum_residual",
                     "cht_max_continuity_residual",
                     "cht_max_thermal_residual",
+                    "cht_interface_face_count",
+                    "cht_max_temperature_jump_k",
+                    "cht_max_energy_residual",
+                    "cht_heat_flux_balance_ratio",
                 },
             ),
             _record(
@@ -942,6 +946,10 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "cht_max_momentum_residual",
                     "cht_max_continuity_residual",
                     "cht_max_thermal_residual",
+                    "cht_interface_face_count",
+                    "cht_max_temperature_jump_k",
+                    "cht_max_energy_residual",
+                    "cht_heat_flux_balance_ratio",
                 },
             ),
             _record(
@@ -959,6 +967,10 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "cht_max_momentum_residual",
                     "cht_max_continuity_residual",
                     "cht_max_thermal_residual",
+                    "cht_interface_face_count",
+                    "cht_max_temperature_jump_k",
+                    "cht_max_energy_residual",
+                    "cht_heat_flux_balance_ratio",
                 },
             ),
             _record(
