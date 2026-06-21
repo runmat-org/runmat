@@ -2,7 +2,9 @@ use runmat_analysis_core::{AnalysisFieldValues, ElectromagneticDomain, Reference
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::{
     fea_modal_mode_shape_field_id, ComputeBackend, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_MODAL_EIGENVALUE,
+    FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
+    FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
@@ -999,6 +1001,31 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
         modal_results.frequency_basis,
         ModalFrequencyBasis::NativeEigenSolve
     );
+    assert!(modal_envelope
+        .data
+        .run
+        .field(FEA_FIELD_MODAL_FREQUENCY_HZ)
+        .is_some());
+    assert!(modal_envelope
+        .data
+        .run
+        .field(FEA_FIELD_MODAL_EIGENVALUE)
+        .is_some());
+    assert!(modal_envelope
+        .data
+        .run
+        .field(FEA_FIELD_MODAL_MODAL_MASS)
+        .is_some());
+    assert!(modal_envelope
+        .data
+        .run
+        .field(FEA_FIELD_MODAL_MODAL_STIFFNESS)
+        .is_some());
+    assert!(modal_envelope
+        .data
+        .run
+        .field(FEA_FIELD_MODAL_PARTICIPATION_FACTOR)
+        .is_some());
     assert_eq!(modal_envelope.data.run_status, RunStatus::Degraded);
     assert!(!modal_envelope.data.publishable);
     assert!(!modal_envelope

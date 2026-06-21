@@ -4,10 +4,13 @@ use crate::{
     assembly::assemble_linear_system,
     contracts::{
         fea_modal_mode_shape_field_id, ComputeBackend, FeaModalRunResult, FeaRunError,
-        FeaRunResult, ModalSolveOptions, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        FeaRunResult, ModalSolveOptions, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+        FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
+        FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
         FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
+    operator::{apply_k, apply_m},
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::modal::solve_modal_system,
 };
@@ -123,6 +126,17 @@ pub fn run_modal_with_options(
         .map(|value| value.abs())
         .fold(0.0_f64, f64::max)
         * 1.0e11;
+    let modal_fields =
+        recover_modal_result_fields(&summary, &modal.eigenvalues_hz, &modal.mode_shapes);
+    let mut run_fields = vec![
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            vec![displacement.len()],
+            displacement,
+        ),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![1], vec![von_mises]),
+    ];
+    run_fields.extend(modal_fields);
 
     let run = FeaRunResult {
         backend,
@@ -140,14 +154,7 @@ pub fn run_modal_with_options(
         },
         solver_host_sync_count: modal.solver_host_sync_count,
         diagnostics,
-        fields: vec![
-            AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-                vec![displacement.len()],
-                displacement,
-            ),
-            AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![1], vec![von_mises]),
-        ],
+        fields: run_fields,
     };
 
     let mode_shapes = modal
@@ -191,4 +198,57 @@ pub fn run_modal_with_options(
 
 fn mode_shapes_iteration_proxy(residual_norms: &[f64]) -> f64 {
     residual_norms.len() as f64
+}
+
+fn recover_modal_result_fields(
+    summary: &crate::assembly::AssemblySummary,
+    frequencies_hz: &[f64],
+    mode_shapes: &[Vec<f64>],
+) -> Vec<AnalysisField> {
+    let mode_count = frequencies_hz.len().min(mode_shapes.len());
+    let frequencies = frequencies_hz
+        .iter()
+        .copied()
+        .take(mode_count)
+        .collect::<Vec<_>>();
+    let eigenvalues = frequencies
+        .iter()
+        .map(|frequency| (2.0 * std::f64::consts::PI * frequency).powi(2))
+        .collect::<Vec<_>>();
+    let mut modal_mass = Vec::with_capacity(mode_count);
+    let mut modal_stiffness = Vec::with_capacity(mode_count);
+    let mut participation_factor = Vec::with_capacity(mode_count);
+
+    for mode_shape in mode_shapes.iter().take(mode_count) {
+        let mass_applied = apply_m(&summary.operator, mode_shape);
+        let stiffness_applied = apply_k(&summary.operator, mode_shape);
+        let mass = dot(mode_shape, &mass_applied).abs();
+        let stiffness = dot(mode_shape, &stiffness_applied).abs();
+        modal_mass.push(mass);
+        modal_stiffness.push(stiffness);
+        participation_factor.push(mass_applied.iter().sum::<f64>() / mass.sqrt().max(1.0e-12));
+    }
+
+    vec![
+        AnalysisField::host_f64(FEA_FIELD_MODAL_FREQUENCY_HZ, vec![mode_count], frequencies),
+        AnalysisField::host_f64(FEA_FIELD_MODAL_EIGENVALUE, vec![mode_count], eigenvalues),
+        AnalysisField::host_f64(FEA_FIELD_MODAL_MODAL_MASS, vec![mode_count], modal_mass),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_MODAL_STIFFNESS,
+            vec![mode_count],
+            modal_stiffness,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
+            vec![mode_count],
+            participation_factor,
+        ),
+    ]
+}
+
+fn dot(left: &[f64], right: &[f64]) -> f64 {
+    left.iter()
+        .zip(right.iter())
+        .map(|(lhs, rhs)| lhs * rhs)
+        .sum()
 }

@@ -19,6 +19,12 @@ pub fn fea_modal_mode_shape_field_id(mode_number: usize) -> String {
     format!("modal.mode_shape.{mode_number}")
 }
 
+pub const FEA_FIELD_MODAL_FREQUENCY_HZ: &str = "modal.frequency_hz";
+pub const FEA_FIELD_MODAL_EIGENVALUE: &str = "modal.eigenvalue";
+pub const FEA_FIELD_MODAL_MODAL_MASS: &str = "modal.modal_mass";
+pub const FEA_FIELD_MODAL_MODAL_STIFFNESS: &str = "modal.modal_stiffness";
+pub const FEA_FIELD_MODAL_PARTICIPATION_FACTOR: &str = "modal.participation_factor";
+
 pub const FEA_FIELD_ACOUSTIC_PRESSURE_REAL: &str = "acoustic.pressure_real";
 pub const FEA_FIELD_ACOUSTIC_PRESSURE_IMAG: &str = "acoustic.pressure_imag";
 pub const FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE: &str = "acoustic.pressure_magnitude";

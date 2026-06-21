@@ -28,7 +28,9 @@ use runmat_analysis_fea::{
     fea_transient_von_mises_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
     FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
     FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_EM_FLUX_DENSITY_PROXY,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
+    FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
@@ -5253,6 +5255,23 @@ fn analysis_run_modal_returns_native_modal_result() {
     assert_eq!(modal.modal_payload_version, "modal_results/v1");
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(modal.frequency_basis, ModalFrequencyBasis::NativeEigenSolve);
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("modal results should be queryable");
+    let field_ids = results
+        .data
+        .field_descriptors
+        .iter()
+        .map(|descriptor| descriptor.field_id.as_str())
+        .collect::<Vec<_>>();
+    assert!(field_ids.contains(&FEA_FIELD_MODAL_FREQUENCY_HZ));
+    assert!(field_ids.contains(&FEA_FIELD_MODAL_EIGENVALUE));
+    assert!(field_ids.contains(&FEA_FIELD_MODAL_MODAL_MASS));
+    assert!(field_ids.contains(&FEA_FIELD_MODAL_MODAL_STIFFNESS));
+    assert!(field_ids.contains(&FEA_FIELD_MODAL_PARTICIPATION_FACTOR));
     assert!(!envelope
         .data
         .quality_reasons
