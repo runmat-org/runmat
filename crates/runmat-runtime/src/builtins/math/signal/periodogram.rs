@@ -11,10 +11,12 @@ use rustfft::FftPlanner;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::math::signal::common::{
-    parse_nonnegative_integer, parse_scalar_f64, value_to_complex_vector,
+    centered_frequency_offset, centered_shift, gpu_matrix_shape, gpu_uniform_spectral_estimate,
+    parse_nonnegative_integer, parse_scalar_f64, value_to_complex_vector, GpuSpectralFrameMode,
+    GpuSpectralRange, GpuSpectralRequest,
 };
 use crate::builtins::math::signal::type_resolvers::periodogram_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -30,14 +32,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("periodogram-psd"),
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
+    provider_hooks: &[ProviderHook::Custom("fft_dim")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Periodogram spectral estimation runs on the host; GPU-resident inputs are gathered automatically.",
+    notes: "Uniform-grid periodograms window, FFT, select, and power-scale on GPU for resident inputs; explicit-frequency forms fall back to host.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::periodogram")]
@@ -282,6 +284,17 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     if rest.len() > 6 {
         return Err(periodogram_error(&PERIODOGRAM_ERROR_ARG_COUNT));
     }
+    if let Value::GpuTensor(handle) = &x {
+        let (rows, cols) = gpu_matrix_shape(BUILTIN_NAME, "x", handle).map_err(|err| {
+            periodogram_error_with_detail(&PERIODOGRAM_ERROR_INVALID_SIGNAL, err.message())
+        })?;
+        let complex_input = runmat_accelerate_api::handle_storage(handle)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
+        let options = parse_options(rest, rows, complex_input).await?;
+        if let Ok(value) = output_gpu(handle, rows, cols, &options).await {
+            return Ok(value);
+        }
+    }
     let input = value_to_signal_columns(x).await?;
     if input.rows == 0 || input.cols == 0 {
         return Err(periodogram_error(&PERIODOGRAM_ERROR_INVALID_SIGNAL));
@@ -299,6 +312,75 @@ fn output_eval(eval: PeriodogramEvaluation) -> BuiltinResult<Value> {
     let f = Tensor::new(eval.f, vec![freq_len, 1])
         .map(Value::Tensor)
         .map_err(|e| periodogram_error_with_detail(&PERIODOGRAM_ERROR_INTERNAL, e))?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![pxx]));
+        }
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            vec![pxx, f],
+        ));
+    }
+    Ok(pxx)
+}
+
+async fn output_gpu(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    rows: usize,
+    cols: usize,
+    options: &PeriodogramOptions,
+) -> BuiltinResult<Value> {
+    let FrequencyGrid::Uniform { nfft } = options.grid else {
+        return Err(periodogram_error(&PERIODOGRAM_ERROR_INTERNAL));
+    };
+    let window_energy = options.window.iter().map(|v| v * v).sum::<f64>();
+    let coherent_gain = options.window.iter().sum::<f64>();
+    if window_energy <= 0.0 || !window_energy.is_finite() {
+        return Err(periodogram_error(&PERIODOGRAM_ERROR_INVALID_WINDOW));
+    }
+    let denominator = match options.scale {
+        SpectrumScale::Psd => frequency_scale(options.frequency_units) * window_energy,
+        SpectrumScale::Power => {
+            let gain_sq = coherent_gain * coherent_gain;
+            if gain_sq <= EPS || !gain_sq.is_finite() {
+                return Err(periodogram_error(&PERIODOGRAM_ERROR_INVALID_WINDOW));
+            }
+            gain_sq
+        }
+    };
+    let input_len = rows
+        .checked_mul(cols)
+        .ok_or_else(|| periodogram_error(&PERIODOGRAM_ERROR_INTERNAL))?;
+    let estimate = gpu_uniform_spectral_estimate(GpuSpectralRequest {
+        input: handle,
+        input_len,
+        input_complex: runmat_accelerate_api::handle_storage(handle)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+        window: &options.window,
+        nfft,
+        frame_count: cols,
+        frame_mode: GpuSpectralFrameMode::FoldedColumns { input_rows: rows },
+        range: gpu_range(options.range),
+        denominator,
+    })
+    .await
+    .map_err(|err| periodogram_error_with_detail(&PERIODOGRAM_ERROR_INTERNAL, err.message()))?;
+    let Some(provider) = runmat_accelerate_api::provider() else {
+        return Err(periodogram_error(&PERIODOGRAM_ERROR_INTERNAL));
+    };
+    let f_values = frequency_vector(nfft, options.frequency_units, options.range);
+    let f_shape = [estimate.rows, 1usize];
+    let f = provider
+        .upload(&runmat_accelerate_api::HostTensorView {
+            data: &f_values,
+            shape: &f_shape,
+        })
+        .map_err(|e| periodogram_error_with_detail(&PERIODOGRAM_ERROR_INTERNAL, e.to_string()))?;
+    let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.ps);
+    let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f);
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
@@ -753,11 +835,11 @@ fn select_range(
             }
         }
         FrequencyRange::Centered => {
-            let shift = nfft.div_ceil(2);
+            let shift = centered_shift(nfft);
             power.rotate_left(shift);
-            let offset = nfft / 2;
+            let offset = centered_frequency_offset(nfft);
             let f = (0..nfft)
-                .map(|idx| freq_scale * (idx as f64 - offset as f64) / nfft as f64)
+                .map(|idx| freq_scale * (idx as isize - offset) as f64 / nfft as f64)
                 .collect();
             PeriodogramEvaluation {
                 pxx: power,
@@ -798,6 +880,35 @@ fn angular_frequency(frequency: f64, units: FrequencyUnits) -> f64 {
     }
 }
 
+fn gpu_range(range: FrequencyRange) -> GpuSpectralRange {
+    match range {
+        FrequencyRange::Onesided => GpuSpectralRange::Onesided,
+        FrequencyRange::Twosided => GpuSpectralRange::Twosided,
+        FrequencyRange::Centered => GpuSpectralRange::Centered,
+    }
+}
+
+fn frequency_vector(nfft: usize, units: FrequencyUnits, range: FrequencyRange) -> Vec<f64> {
+    let freq_scale = frequency_scale(units);
+    match range {
+        FrequencyRange::Twosided => (0..nfft)
+            .map(|idx| freq_scale * idx as f64 / nfft as f64)
+            .collect(),
+        FrequencyRange::Centered => {
+            let offset = centered_frequency_offset(nfft);
+            (0..nfft)
+                .map(|idx| freq_scale * (idx as isize - offset) as f64 / nfft as f64)
+                .collect()
+        }
+        FrequencyRange::Onesided => {
+            let len = nfft / 2 + 1;
+            (0..len)
+                .map(|idx| freq_scale * idx as f64 / nfft as f64)
+                .collect()
+        }
+    }
+}
+
 fn is_empty(value: &Value) -> bool {
     match value {
         Value::Tensor(t) => t.data.is_empty(),
@@ -828,6 +939,8 @@ fn keyword(value: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::builtin_function_by_name;
 
     fn call(x: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
@@ -984,6 +1097,24 @@ mod tests {
     }
 
     #[test]
+    fn periodogram_centered_even_nfft_uses_matlab_interval() {
+        let x = Tensor::new(vec![1.0, 0.0, 0.0, 0.0], vec![1, 4]).unwrap();
+        let out = call(
+            Value::Tensor(x),
+            &[
+                Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                Value::Num(4.0),
+                Value::Num(4.0),
+                Value::from("centered"),
+            ],
+            Some(2),
+        )
+        .unwrap();
+        let (_, f) = output_pair(out);
+        assert_eq!(f, vec![-1.0, 0.0, 1.0, 2.0]);
+    }
+
+    #[test]
     fn periodogram_rejects_wrong_window_length() {
         let x = Tensor::new(vec![1.0; 8], vec![1, 8]).unwrap();
         let window = Tensor::new(vec![1.0; 4], vec![1, 4]).unwrap();
@@ -1008,6 +1139,57 @@ mod tests {
         assert_eq!(f.len(), 3);
         assert!(pxx[0] > 1.0);
         assert!(pxx[1..].iter().all(|value| value.abs() < 1e-12));
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn periodogram_wgpu_keeps_uniform_outputs_resident() {
+        let Some(provider) = runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider()
+            .expect("wgpu provider")
+        else {
+            return;
+        };
+        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let data = (0..32)
+            .map(|idx| (2.0 * std::f64::consts::PI * 4.0 * idx as f64 / 32.0).sin())
+            .collect::<Vec<_>>();
+        let shape = [1usize, 32usize];
+        let handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &data,
+                shape: &shape,
+            })
+            .expect("upload");
+        let out = call(
+            Value::GpuTensor(handle.clone()),
+            &[
+                Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                Value::Num(32.0),
+                Value::Num(32.0),
+            ],
+            Some(2),
+        )
+        .expect("periodogram gpu");
+        let Value::OutputList(values) = out else {
+            panic!("expected output list");
+        };
+        for value in &values {
+            assert!(matches!(value, Value::GpuTensor(_)));
+        }
+        let pxx =
+            crate::builtins::common::test_support::gather(values[0].clone()).expect("gather pxx");
+        let f = crate::builtins::common::test_support::gather(values[1].clone()).expect("gather f");
+        assert_eq!(pxx.shape, vec![17, 1]);
+        assert_eq!(f.data[4], 4.0);
+        let peak = pxx
+            .data
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .map(|(idx, _)| idx)
+            .unwrap();
+        assert_eq!(peak, 4);
+        provider.free(&handle).ok();
     }
 
     #[test]

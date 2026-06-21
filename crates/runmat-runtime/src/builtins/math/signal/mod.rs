@@ -22,6 +22,7 @@ pub(crate) mod rectpuls;
 pub(crate) mod sample_rate;
 pub(crate) mod sawtooth;
 pub(crate) mod sinc;
+pub(crate) mod spectrogram;
 pub(crate) mod square;
 pub(crate) mod tripuls;
 pub(crate) mod type_resolvers;

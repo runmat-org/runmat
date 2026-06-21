@@ -1,0 +1,106 @@
+{
+  "title": "spectrogram",
+  "category": "math/signal",
+  "keywords": [
+    "spectrogram",
+    "STFT",
+    "short-time Fourier transform",
+    "PSD",
+    "power spectrum",
+    "time frequency",
+    "signal processing"
+  ],
+  "summary": "Compute a short-time Fourier transform spectrogram.",
+  "references": [
+    "title: \"MATLAB spectrogram documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Uniform-grid spectrograms keep GPU-resident signal data on device through windowing, framing, FFT, frequency selection, and power scaling. Explicit-frequency and unsupported option forms fall back to host execution."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 7,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::spectrogram::tests",
+    "integration": "crates/runmat-vm/tests/basics.rs"
+  },
+  "description": "`spectrogram(x)` computes a short-time Fourier transform (STFT) of a signal. Optional arguments select the segment window, overlap, DFT length or explicit frequency grid, sampling frequency, frequency range, and PSD or power-spectrum scaling.",
+  "behaviors": [
+    "`s = spectrogram(x)` returns the complex STFT matrix with time increasing across columns and frequency increasing down rows.",
+    "`[s, f, t, ps] = spectrogram(...)` also returns the frequency vector, segment midpoint vector, and PSD or power-spectrum matrix.",
+    "`win` may be a positive scalar length, a finite real window vector, or `[]`. `[]` uses a Hamming window sized to divide the signal into about eight 50%-overlapped sections.",
+    "`nOverlap` defaults to half the window length and must be less than the window length.",
+    "`freqSpec` defaults to `max(256, 2^nextpow2(length(win)))`. A real frequency vector with at least two elements may be supplied to evaluate explicit frequencies.",
+    "Omitting `Fs` uses normalized radians/sample and segment midpoint times divided by `2*pi`. Passing `Fs` as `[]` uses a 1 Hz sample rate.",
+    "Real inputs default to one-sided output; complex inputs default to two-sided output and reject `'onesided'`.",
+    "The optional range selector accepts `'onesided'`, `'twosided'`, or `'centered'`. Range selectors are not combined with explicit frequency vectors.",
+    "The optional spectrum type accepts `'psd'` (default) or `'power'`; `'power'` uses coherent-gain normalization.",
+    "`'yaxis'` is accepted as a plotting-orientation no-op for numeric execution. `'reassigned'` is rejected until true energy-center reassignment is implemented."
+  ],
+  "examples": [
+    {
+      "description": "STFT of a sine wave",
+      "input": "fs = 1000;\nt = (0:999) / fs;\nx = sin(2*pi*100*t);\n[s, f, tt, ps] = spectrogram(x, hamming(128), 64, 256, fs);"
+    },
+    {
+      "description": "Use scalar window length",
+      "input": "[s, f, t] = spectrogram(randn(1,1024), 128, 64, 256);"
+    },
+    {
+      "description": "Centered complex STFT",
+      "input": "x = exp(1i*2*pi*(0:127)/16);\n[s, f, t] = spectrogram(x, 32, 16, 64, 'centered');"
+    },
+    {
+      "description": "Power spectrum scaling",
+      "input": "[s, f, t, p] = spectrogram(randn(1,512), 64, 32, 128, 'power');"
+    },
+    {
+      "description": "Explicit normalized frequencies",
+      "input": "w = linspace(0, pi, 64);\n[s, wout, t] = spectrogram(randn(1,512), hamming(128), 64, w);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What is the relationship between `s` and `ps`?",
+      "answer": "`s` is the complex STFT. `ps` is derived from `abs(s).^2` using PSD or power-spectrum normalization and one-sided doubling when appropriate."
+    },
+    {
+      "question": "Does `spectrogram` plot when no outputs are requested?",
+      "answer": "RunMat currently returns values using normal output-count semantics instead of opening a plot. The `'yaxis'` token is accepted so scripts can continue numeric execution."
+    },
+    {
+      "question": "Does RunMat implement reassigned spectrogram energy centers?",
+      "answer": "No. RunMat rejects `'reassigned'` rather than returning unreassigned coordinate grids."
+    }
+  ],
+  "links": [
+    {
+      "label": "pwelch",
+      "url": "./pwelch"
+    },
+    {
+      "label": "periodogram",
+      "url": "./periodogram"
+    },
+    {
+      "label": "fft",
+      "url": "./fft"
+    },
+    {
+      "label": "hamming",
+      "url": "./hamming"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/spectrogram.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/spectrogram.rs"
+  }
+}
