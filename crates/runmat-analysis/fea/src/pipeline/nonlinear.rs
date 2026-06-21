@@ -5,7 +5,8 @@ use crate::{
     contracts::{
         fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
         fea_nonlinear_displacement_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
-        fea_nonlinear_plastic_strain_field_id, fea_nonlinear_von_mises_field_id, ComputeBackend,
+        fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
+        fea_nonlinear_residual_norm_field_id, fea_nonlinear_von_mises_field_id, ComputeBackend,
         FeaContactInterfaceContext, FeaNonlinearRunResult, FeaPlasticityConstitutiveContext,
         FeaRunError, FeaRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
         FEA_FIELD_STRUCTURAL_VON_MISES,
@@ -240,6 +241,32 @@ pub fn run_nonlinear_with_options(
             )
         })
         .collect::<Vec<_>>();
+    let load_factor_snapshots = nonlinear
+        .load_factors
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, value)| {
+            AnalysisField::host_f64(
+                fea_nonlinear_load_factor_field_id(index),
+                vec![1],
+                vec![value],
+            )
+        })
+        .collect::<Vec<_>>();
+    let residual_norm_snapshots = nonlinear
+        .residual_norms
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, value)| {
+            AnalysisField::host_f64(
+                fea_nonlinear_residual_norm_field_id(index),
+                vec![1],
+                vec![value],
+            )
+        })
+        .collect::<Vec<_>>();
 
     emit_phase(
         "fea.run_nonlinear",
@@ -268,6 +295,8 @@ pub fn run_nonlinear_with_options(
         equivalent_plastic_strain_snapshots,
         contact_pressure_snapshots,
         contact_gap_snapshots,
+        load_factor_snapshots,
+        residual_norm_snapshots,
         residual_norms: nonlinear.residual_norms,
         increment_norms: nonlinear.increment_norms,
         iteration_counts: nonlinear.iteration_counts,

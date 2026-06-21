@@ -1,7 +1,8 @@
 use runmat_analysis_core::{AnalysisFieldValues, ElectromagneticDomain, ReferenceFrame};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::{
-    fea_modal_mode_shape_field_id, fea_transient_residual_norm_field_id, ComputeBackend,
+    fea_modal_mode_shape_field_id, fea_nonlinear_load_factor_field_id,
+    fea_nonlinear_residual_norm_field_id, fea_transient_residual_norm_field_id, ComputeBackend,
     FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
     FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
     FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
@@ -1380,6 +1381,22 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
     assert_eq!(
         nonlinear.increment_norms.len(),
         nonlinear.iteration_counts.len()
+    );
+    assert_eq!(
+        nonlinear.load_factors.len(),
+        nonlinear.load_factor_snapshots.len()
+    );
+    assert_eq!(
+        nonlinear.residual_norms.len(),
+        nonlinear.residual_norm_snapshots.len()
+    );
+    assert_eq!(
+        nonlinear.load_factor_snapshots[0].field_id,
+        fea_nonlinear_load_factor_field_id(0)
+    );
+    assert_eq!(
+        nonlinear.residual_norm_snapshots[0].field_id,
+        fea_nonlinear_residual_norm_field_id(0)
     );
     assert!(nonlinear.max_line_search_backtracks_per_increment > 0);
     assert!(nonlinear.iteration_spike_count <= nonlinear.load_factors.len());

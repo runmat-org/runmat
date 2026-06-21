@@ -1540,6 +1540,10 @@ pub struct NonlinearResultsData {
     pub contact_pressure_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub contact_gap_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub load_factor_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub residual_norm_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     #[serde(default)]
     pub increment_norms: Vec<f64>,

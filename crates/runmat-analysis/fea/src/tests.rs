@@ -1,6 +1,7 @@
 use crate::{
     fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
-    fea_nonlinear_equivalent_plastic_strain_field_id, fea_nonlinear_plastic_strain_field_id,
+    fea_nonlinear_equivalent_plastic_strain_field_id, fea_nonlinear_load_factor_field_id,
+    fea_nonlinear_plastic_strain_field_id, fea_nonlinear_residual_norm_field_id,
     fea_nonlinear_von_mises_field_id, fea_thermal_boundary_heat_flux_field_id,
     fea_thermal_heat_flux_field_id, fea_thermal_heat_source_field_id,
     fea_thermal_temperature_gradient_field_id, fea_transient_acceleration_field_id,
@@ -508,6 +509,14 @@ fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
         result.contact_gap_snapshots.len()
     );
     assert_eq!(
+        result.load_factors.len(),
+        result.load_factor_snapshots.len()
+    );
+    assert_eq!(
+        result.load_factors.len(),
+        result.residual_norm_snapshots.len()
+    );
+    assert_eq!(
         result.von_mises_snapshots[0].field_id,
         fea_nonlinear_von_mises_field_id(0)
     );
@@ -526,6 +535,26 @@ fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
     assert_eq!(
         result.contact_gap_snapshots[0].field_id,
         fea_nonlinear_contact_gap_field_id(0)
+    );
+    assert_eq!(
+        result.load_factor_snapshots[0].field_id,
+        fea_nonlinear_load_factor_field_id(0)
+    );
+    assert_eq!(
+        result.residual_norm_snapshots[0].field_id,
+        fea_nonlinear_residual_norm_field_id(0)
+    );
+    assert_eq!(
+        result.load_factor_snapshots[0]
+            .as_host_f64()
+            .expect("load factor field should be host-backed")[0],
+        result.load_factors[0]
+    );
+    assert_eq!(
+        result.residual_norm_snapshots[0]
+            .as_host_f64()
+            .expect("residual field should be host-backed")[0],
+        result.residual_norms[0]
     );
     assert!(result
         .run

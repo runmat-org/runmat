@@ -110,6 +110,14 @@ pub fn fea_nonlinear_contact_gap_field_id(increment_index: usize) -> String {
     format!("nonlinear.contact_gap.{increment_index}")
 }
 
+pub fn fea_nonlinear_load_factor_field_id(increment_index: usize) -> String {
+    format!("nonlinear.load_factor.{increment_index}")
+}
+
+pub fn fea_nonlinear_residual_norm_field_id(increment_index: usize) -> String {
+    format!("nonlinear.residual_norm.{increment_index}")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ComputeBackend {
@@ -396,6 +404,8 @@ pub struct FeaNonlinearRunResult {
     pub equivalent_plastic_strain_snapshots: Vec<AnalysisField>,
     pub contact_pressure_snapshots: Vec<AnalysisField>,
     pub contact_gap_snapshots: Vec<AnalysisField>,
+    pub load_factor_snapshots: Vec<AnalysisField>,
+    pub residual_norm_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub increment_norms: Vec<f64>,
     pub iteration_counts: Vec<usize>,

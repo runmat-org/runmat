@@ -20,7 +20,8 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::{
     fea_modal_mode_shape_field_id, fea_nonlinear_contact_gap_field_id,
     fea_nonlinear_contact_pressure_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
-    fea_nonlinear_plastic_strain_field_id, fea_nonlinear_von_mises_field_id,
+    fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
+    fea_nonlinear_residual_norm_field_id, fea_nonlinear_von_mises_field_id,
     fea_thermal_boundary_heat_flux_field_id, fea_thermal_heat_flux_field_id,
     fea_thermal_heat_source_field_id, fea_thermal_temperature_gradient_field_id,
     fea_transient_acceleration_field_id, fea_transient_kinetic_energy_field_id,
@@ -3921,6 +3922,14 @@ fn analysis_run_nonlinear_returns_native_nonlinear_result() {
         nonlinear.contact_gap_snapshots.len()
     );
     assert_eq!(
+        nonlinear.load_factors.len(),
+        nonlinear.load_factor_snapshots.len()
+    );
+    assert_eq!(
+        nonlinear.load_factors.len(),
+        nonlinear.residual_norm_snapshots.len()
+    );
+    assert_eq!(
         nonlinear.von_mises_snapshots[0].field_id,
         fea_nonlinear_von_mises_field_id(0)
     );
@@ -3940,6 +3949,30 @@ fn analysis_run_nonlinear_returns_native_nonlinear_result() {
         nonlinear.contact_gap_snapshots[0].field_id,
         fea_nonlinear_contact_gap_field_id(0)
     );
+    assert_eq!(
+        nonlinear.load_factor_snapshots[0].field_id,
+        fea_nonlinear_load_factor_field_id(0)
+    );
+    assert_eq!(
+        nonlinear.residual_norm_snapshots[0].field_id,
+        fea_nonlinear_residual_norm_field_id(0)
+    );
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("nonlinear results should be queryable");
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == fea_nonlinear_load_factor_field_id(0)));
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == fea_nonlinear_residual_norm_field_id(0)));
     assert!(nonlinear.tangent_rebuild_count > 0);
     assert!(nonlinear.iteration_spike_count <= nonlinear.load_factors.len());
     assert!(nonlinear.max_line_search_backtracks_per_increment > 0);
