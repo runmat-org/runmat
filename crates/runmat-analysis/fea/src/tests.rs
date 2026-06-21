@@ -674,6 +674,21 @@ fn electro_thermal_transient_emits_coupled_fields() {
     assert!(coupling.message.contains("integrated_joule_heat_w="));
     assert!(coupling.message.contains("power_balance_ratio="));
     assert!(coupling.message.contains("conservation_residual="));
+    let resistor_known_answer = result
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_ET_RESISTOR_KNOWN_ANSWER")
+        .expect("electro-thermal resistor known-answer diagnostic should be present");
+    assert!(resistor_known_answer
+        .message
+        .contains("ohms_law_residual_ratio="));
+    assert!(resistor_known_answer
+        .message
+        .contains("joule_heat_balance_ratio="));
+    assert!(resistor_known_answer
+        .message
+        .contains("resistor_known_answer_coverage_ratio="));
 }
 
 #[test]

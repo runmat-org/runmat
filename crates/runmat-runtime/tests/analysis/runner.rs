@@ -5212,6 +5212,62 @@ pub(super) fn run_fixture(
                             Some(35.9),
                             Some(36.1),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_ohms_law_residual_ratio",
+                            "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                                "ohms_law_residual_ratio",
+                            ),
+                            Some(0.0),
+                            Some(1.0e-8),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_joule_heat_balance_ratio",
+                            "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                                "joule_heat_balance_ratio",
+                            ),
+                            Some(0.999_999),
+                            Some(1.000_001),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_potential_monotonic_edge_fraction",
+                            "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                                "potential_monotonic_edge_fraction",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_resistor_known_answer_coverage_ratio",
+                            "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                                "resistor_known_answer_coverage_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
                     } else if spec.id == "electro_thermal_joule_pathological_gpu_provider" {
                         push_threshold_assertion(
                             spec.id,
@@ -5324,6 +5380,62 @@ pub(super) fn run_fixture(
                             ),
                             Some(179.9),
                             Some(180.1),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_ohms_law_residual_ratio",
+                            "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                                "ohms_law_residual_ratio",
+                            ),
+                            Some(0.0),
+                            Some(1.0e-8),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_joule_heat_balance_ratio",
+                            "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                                "joule_heat_balance_ratio",
+                            ),
+                            Some(0.999_999),
+                            Some(1.000_001),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_potential_monotonic_edge_fraction",
+                            "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                                "potential_monotonic_edge_fraction",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_resistor_known_answer_coverage_ratio",
+                            "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_RESISTOR_KNOWN_ANSWER",
+                                "resistor_known_answer_coverage_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
                         );
                     }
                     if spec.id == "nonlinear_assembly_gpu_provider" {

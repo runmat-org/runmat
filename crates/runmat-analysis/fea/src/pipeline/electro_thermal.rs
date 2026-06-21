@@ -87,9 +87,10 @@ pub(crate) fn recover_electro_thermal_fields(
         joule_heat.push((local_joule_heat * heating_scale).max(0.0));
     }
 
-    let diagnostics = vec![electro_thermal_potential_solve_diagnostic(
-        node_count, &solve,
-    )];
+    let diagnostics = vec![
+        electro_thermal_potential_solve_diagnostic(node_count, &solve),
+        electro_thermal_resistor_known_answer_diagnostic(node_count, &solve),
+    ];
 
     let static_fields = vec![
         AnalysisField::host_f64(
@@ -289,6 +290,103 @@ fn electro_thermal_potential_solve_diagnostic(
     }
 }
 
+fn electro_thermal_resistor_known_answer_diagnostic(
+    node_count: usize,
+    solve: &ElectroThermalPotentialSolve,
+) -> FeaDiagnostic {
+    let coverage_ratio = resistor_known_answer_coverage_ratio(node_count, solve);
+    let ohms_law_residual_ratio = solve
+        .segment_conductance
+        .iter()
+        .zip(solve.segment_current.iter())
+        .enumerate()
+        .map(|(index, (conductance, current))| {
+            let voltage_drop = solve.potential[index] - solve.potential[index + 1];
+            let expected_current = conductance * voltage_drop;
+            (current - expected_current).abs()
+                / current.abs().max(expected_current.abs()).max(1.0e-12)
+        })
+        .fold(0.0_f64, f64::max);
+    let input_power_w = solve
+        .segment_current
+        .first()
+        .map(|current| current.abs() * solve.potential_span_v)
+        .unwrap_or(0.0);
+    let joule_heat_balance_ratio = if input_power_w > 1.0e-12 {
+        solve.integrated_joule_heat_w / input_power_w
+    } else if solve.integrated_joule_heat_w <= 1.0e-12 {
+        1.0
+    } else {
+        0.0
+    };
+    let potential_monotonic_edge_fraction = potential_monotonic_edge_fraction(solve);
+    let severity = if coverage_ratio >= 1.0
+        && ohms_law_residual_ratio <= 1.0e-10
+        && (joule_heat_balance_ratio - 1.0).abs() <= 1.0e-10
+        && potential_monotonic_edge_fraction >= 1.0
+    {
+        FeaDiagnosticSeverity::Info
+    } else {
+        FeaDiagnosticSeverity::Warning
+    };
+
+    FeaDiagnostic {
+        code: "FEA_ET_RESISTOR_KNOWN_ANSWER".to_string(),
+        severity,
+        message: format!(
+            "basis=resistor_network node_count={} segment_count={} ohms_law_residual_ratio={} joule_heat_balance_ratio={} potential_monotonic_edge_fraction={} resistor_known_answer_coverage_ratio={}",
+            node_count,
+            solve.segment_conductance.len(),
+            ohms_law_residual_ratio,
+            joule_heat_balance_ratio,
+            potential_monotonic_edge_fraction,
+            coverage_ratio,
+        ),
+    }
+}
+
+fn resistor_known_answer_coverage_ratio(
+    node_count: usize,
+    solve: &ElectroThermalPotentialSolve,
+) -> f64 {
+    if node_count >= 2
+        && solve.segment_conductance.len() == node_count - 1
+        && solve.segment_current.len() == node_count - 1
+        && solve.potential.len() == node_count
+        && solve.potential_span_v.is_finite()
+        && solve
+            .segment_conductance
+            .iter()
+            .all(|value| value.is_finite() && *value > MIN_CONDUCTIVITY)
+    {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+fn potential_monotonic_edge_fraction(solve: &ElectroThermalPotentialSolve) -> f64 {
+    let edge_count = solve.potential.len().saturating_sub(1);
+    if edge_count == 0 {
+        return 1.0;
+    }
+    let signed_span = solve.potential[0] - solve.potential[solve.potential.len() - 1];
+    let tolerance = solve.potential_span_v.max(1.0) * 1.0e-12;
+    let monotonic_edges = solve
+        .potential
+        .windows(2)
+        .filter(|pair| {
+            let drop = pair[0] - pair[1];
+            if signed_span >= 0.0 {
+                drop >= -tolerance
+            } else {
+                drop <= tolerance
+            }
+        })
+        .count();
+    monotonic_edges as f64 / edge_count as f64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,10 +422,17 @@ mod tests {
         let fields = recover_electro_thermal_fields(Some(&summary()), &[1.0], &[0.01], 48);
 
         assert_eq!(fields.static_fields.len(), 4);
-        assert_eq!(fields.diagnostics.len(), 1);
+        assert_eq!(fields.diagnostics.len(), 2);
         assert_eq!(fields.diagnostics[0].code, "FEA_ET_POTENTIAL_SOLVE");
         assert!(fields.diagnostics[0]
             .message
             .contains("current_balance_residual="));
+        assert_eq!(fields.diagnostics[1].code, "FEA_ET_RESISTOR_KNOWN_ANSWER");
+        assert!(fields.diagnostics[1]
+            .message
+            .contains("ohms_law_residual_ratio="));
+        assert!(fields.diagnostics[1]
+            .message
+            .contains("joule_heat_balance_ratio="));
     }
 }
