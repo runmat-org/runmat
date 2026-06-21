@@ -4193,6 +4193,54 @@
       ]
     },
     {
+      "name": "audioinfo",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "info = audioinfo(filename)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Audio file path."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "info",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Audio metadata structure."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.AUDIOINFO.ARGUMENT",
+          "identifier": "RunMat:audioinfo:InvalidArgument",
+          "when": "Filename is missing or cannot be interpreted as a scalar path.",
+          "message": "audioinfo: invalid filename"
+        },
+        {
+          "code": "RM.AUDIOINFO.IO",
+          "identifier": "RunMat:audioinfo:Io",
+          "when": "The audio file cannot be read.",
+          "message": "audioinfo: unable to read file"
+        },
+        {
+          "code": "RM.AUDIOINFO.FORMAT",
+          "identifier": "RunMat:audioinfo:UnsupportedFormat",
+          "when": "The file is not a supported audio container or has malformed metadata.",
+          "message": "audioinfo: unsupported or invalid audio file"
+        }
+      ]
+    },
+    {
       "name": "axis",
       "output_mode": "Fixed",
       "completion_policy": "Public",

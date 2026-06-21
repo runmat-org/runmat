@@ -531,6 +531,13 @@ mod tests {
     assert_resolver!(tempdir_type_resolver, tempdir_type, &[], Type::String);
     assert_resolver!(tempname_type_resolver, tempname_type, &[], Type::String);
 
+    assert_resolver!(
+        audioinfo_type_resolver,
+        struct_type,
+        &[],
+        Type::Struct { known_fields: None }
+    );
+
     assert_resolver!(csvread_type_resolver, tensor_type, &[], Type::tensor());
     assert_resolver!(csvwrite_type_resolver, num_type, &[], Type::Num);
     assert_resolver!(dlmread_type_resolver, tensor_type, &[], Type::tensor());
