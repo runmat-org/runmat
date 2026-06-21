@@ -1048,6 +1048,16 @@ REQUIRED_ERROR_FIXTURES = {
         "run_ok": False,
         "run_error_code": "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_BOUNDARY",
     },
+    "nonlinear_invalid_plasticity_options": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
+    },
+    "nonlinear_invalid_contact_options": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
+    },
     "thermal_standalone_ramp_invalid_material": {
         "validate_ok": True,
         "run_ok": False,

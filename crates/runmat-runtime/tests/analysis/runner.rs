@@ -268,6 +268,12 @@ fn plasticity_for_fixture(spec_id: &str) -> Option<PlasticityConstitutiveOptions
             hardening_modulus_ratio: 0.2,
             saturation_exponent: 4.0,
         }),
+        "nonlinear_invalid_plasticity_options" => Some(PlasticityConstitutiveOptions {
+            enabled: true,
+            yield_strain: -1.0,
+            hardening_modulus_ratio: 0.2,
+            saturation_exponent: 4.0,
+        }),
         "nonlinear_plastic_hardening_reference_gpu_provider" => {
             Some(PlasticityConstitutiveOptions {
                 enabled: true,
@@ -295,6 +301,12 @@ fn contact_for_fixture(spec_id: &str) -> Option<ContactInterfaceOptions> {
             penalty_stiffness_scale: 0.15,
             max_penetration_ratio: 0.035,
             friction_coefficient: 0.9,
+        }),
+        "nonlinear_invalid_contact_options" => Some(ContactInterfaceOptions {
+            enabled: true,
+            penalty_stiffness_scale: 0.0,
+            max_penetration_ratio: 0.01,
+            friction_coefficient: 0.0,
         }),
         "nonlinear_contact_frictionless_reference_gpu_provider" => Some(ContactInterfaceOptions {
             enabled: true,

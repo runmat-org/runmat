@@ -1014,6 +1014,14 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electromagnetic_missing_boundary",
                 "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_BOUNDARY",
             ),
+            _error_record(
+                "nonlinear_invalid_plasticity_options",
+                "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
+            ),
+            _error_record(
+                "nonlinear_invalid_contact_options",
+                "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
+            ),
             _record(
                 "modal_large_cpu",
                 {
