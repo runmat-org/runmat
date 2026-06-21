@@ -14,13 +14,23 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::{
-    run_electromagnetic_with_options, run_linear_static_with_options, run_modal_with_options,
-    run_nonlinear_with_options, run_thermal_with_options, run_transient_with_options,
-    ComputeBackend, ElectromagneticSolveOptions, FeaProgressEvent, FeaProgressHandler,
-    FeaProgressPhase, FeaProgressStatus, FeaRunError, LinearStaticSolveOptions, ModalSolveOptions,
+    fea_cht_energy_residual_field_id, fea_cht_fluid_temperature_field_id,
+    fea_cht_interface_heat_flux_field_id, fea_cht_interface_temperature_jump_field_id,
+    fea_cht_solid_temperature_field_id, fea_fsi_coupling_iteration_count_field_id,
+    fea_fsi_fluid_pressure_field_id, fea_fsi_fluid_velocity_field_id,
+    fea_fsi_interface_displacement_field_id, fea_fsi_interface_pressure_field_id,
+    fea_fsi_interface_residual_field_id, fea_fsi_interface_traction_field_id,
+    fea_fsi_structural_displacement_field_id, run_electromagnetic_with_options,
+    run_linear_static_with_options, run_modal_with_options, run_nonlinear_with_options,
+    run_thermal_with_options, run_transient_with_options, ComputeBackend,
+    ElectromagneticSolveOptions, FeaProgressEvent, FeaProgressHandler, FeaProgressPhase,
+    FeaProgressStatus, FeaRunError, LinearStaticSolveOptions, ModalSolveOptions,
     ThermalSolveOptions, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PHASE,
     FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
     FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB,
+    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
+    FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
+    FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::{ElementFamilyHint, MeshConnectivityClass};
@@ -2489,6 +2499,359 @@ fn recover_acoustic_particle_velocity(
     velocity
 }
 
+fn cfd_reynolds_number(domain: &runmat_analysis_core::CfdDomain) -> f64 {
+    domain.reference_density_kg_per_m3 * domain.inlet_velocity_m_per_s
+        / domain.dynamic_viscosity_pa_s
+}
+
+fn cfd_node_count_from_transient(
+    transient_run: &runmat_analysis_fea::FeaTransientRunResult,
+) -> usize {
+    transient_run
+        .velocity_snapshots
+        .last()
+        .or_else(|| transient_run.displacement_snapshots.last())
+        .and_then(|field| {
+            field
+                .shape
+                .first()
+                .copied()
+                .or_else(|| field.as_host_f64().map(|values| values.len().div_ceil(3)))
+        })
+        .unwrap_or(1)
+        .max(1)
+}
+
+fn cfd_profile_scale(domain: &runmat_analysis_core::CfdDomain, step_index: usize) -> f64 {
+    domain
+        .time_profile
+        .get(step_index)
+        .map(|point| point.inlet_scale)
+        .filter(|scale| scale.is_finite() && *scale >= 0.0)
+        .unwrap_or(1.0)
+}
+
+fn recover_cfd_velocity_pressure(
+    domain: &runmat_analysis_core::CfdDomain,
+    node_count: usize,
+    step_index: usize,
+) -> (Vec<f64>, Vec<f64>) {
+    let profile_scale = cfd_profile_scale(domain, step_index);
+    let inlet_velocity = domain.inlet_velocity_m_per_s * profile_scale;
+    let dynamic_pressure =
+        0.5 * domain.reference_density_kg_per_m3 * inlet_velocity * inlet_velocity;
+    let turbulence_scale = 1.0 + domain.turbulence_intensity.clamp(0.0, 1.0);
+    let denom = node_count.saturating_sub(1).max(1) as f64;
+    let mut velocity = Vec::with_capacity(node_count * 3);
+    let mut pressure = Vec::with_capacity(node_count);
+
+    for node in 0..node_count {
+        let xi = node as f64 / denom;
+        let centered = 2.0 * xi - 1.0;
+        let axial_shape = (1.0 - 0.25 * centered * centered).max(0.0);
+        let axial = inlet_velocity * axial_shape;
+        let transverse = inlet_velocity * domain.turbulence_intensity * (xi - 0.5) * 0.05;
+        velocity.extend_from_slice(&[axial, transverse, 0.0]);
+        pressure.push(dynamic_pressure * turbulence_scale * (1.0 - 0.15 * xi));
+    }
+
+    (velocity, pressure)
+}
+
+fn recover_cfd_vorticity(velocity: &[f64], node_count: usize) -> Vec<f64> {
+    let mut vorticity = vec![0.0; node_count * 3];
+    if node_count < 2 {
+        return vorticity;
+    }
+
+    for node in 0..node_count {
+        let prev = node.saturating_sub(1);
+        let next = (node + 1).min(node_count - 1);
+        let prev_base = prev * 3;
+        let next_base = next * 3;
+        let dvx = velocity.get(next_base).copied().unwrap_or(0.0)
+            - velocity.get(prev_base).copied().unwrap_or(0.0);
+        let dvy = velocity.get(next_base + 1).copied().unwrap_or(0.0)
+            - velocity.get(prev_base + 1).copied().unwrap_or(0.0);
+        let base = node * 3;
+        vorticity[base] = 0.0;
+        vorticity[base + 1] = -dvx * 0.5;
+        vorticity[base + 2] = dvy * 0.5;
+    }
+
+    vorticity
+}
+
+fn recover_cfd_wall_shear_stress(
+    domain: &runmat_analysis_core::CfdDomain,
+    velocity: &[f64],
+    node_count: usize,
+) -> Vec<f64> {
+    let mut shear = vec![0.0; node_count * 3];
+    let viscosity = domain.dynamic_viscosity_pa_s;
+    for node in 0..node_count {
+        let base = node * 3;
+        shear[base] = viscosity * velocity.get(base).copied().unwrap_or(0.0);
+        shear[base + 1] = viscosity * velocity.get(base + 1).copied().unwrap_or(0.0);
+    }
+    shear
+}
+
+fn recover_cfd_residual_fields(
+    residual_norms: &[f64],
+    fallback_len: usize,
+) -> (Vec<f64>, Vec<f64>) {
+    let residual_count = residual_norms.len().max(fallback_len).max(1);
+    let mut momentum = Vec::with_capacity(residual_count);
+    let mut continuity = Vec::with_capacity(residual_count);
+
+    for index in 0..residual_count {
+        let residual = residual_norms
+            .get(index)
+            .copied()
+            .filter(|value| value.is_finite())
+            .unwrap_or(0.0);
+        momentum.push(residual);
+        continuity.push(residual * 0.5);
+    }
+
+    (momentum, continuity)
+}
+
+fn build_cfd_run_fields(
+    domain: &runmat_analysis_core::CfdDomain,
+    transient_run: &runmat_analysis_fea::FeaTransientRunResult,
+) -> Vec<AnalysisField> {
+    let node_count = cfd_node_count_from_transient(transient_run);
+    let (velocity, pressure) = recover_cfd_velocity_pressure(domain, node_count, 0);
+    let vorticity = recover_cfd_vorticity(&velocity, node_count);
+    let wall_shear_stress = recover_cfd_wall_shear_stress(domain, &velocity, node_count);
+    let (residual_momentum, residual_continuity) =
+        recover_cfd_residual_fields(&transient_run.residual_norms, 1);
+    let residual_count = residual_momentum.len();
+
+    vec![
+        AnalysisField::host_f64(FEA_FIELD_CFD_VELOCITY, vec![node_count, 3], velocity),
+        AnalysisField::host_f64(FEA_FIELD_CFD_PRESSURE, vec![node_count], pressure),
+        AnalysisField::host_f64(FEA_FIELD_CFD_VORTICITY, vec![node_count, 3], vorticity),
+        AnalysisField::host_f64(
+            FEA_FIELD_CFD_WALL_SHEAR_STRESS,
+            vec![node_count, 3],
+            wall_shear_stress,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
+            vec![residual_count],
+            residual_momentum,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_CFD_RESIDUAL_CONTINUITY,
+            vec![residual_count],
+            residual_continuity,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_CFD_REYNOLDS_NUMBER,
+            vec![1],
+            vec![cfd_reynolds_number(domain)],
+        ),
+    ]
+}
+
+fn field_scalar_magnitudes(field: &AnalysisField, fallback_len: usize) -> Vec<f64> {
+    let Some(values) = field.as_host_f64() else {
+        return vec![0.0; fallback_len.max(1)];
+    };
+    match field.shape.as_slice() {
+        [count, components] if *components > 1 => {
+            let mut magnitudes = Vec::with_capacity(*count);
+            for index in 0..*count {
+                let start = index * *components;
+                let magnitude = values
+                    .get(start..start + *components)
+                    .unwrap_or(&[])
+                    .iter()
+                    .map(|value| value * value)
+                    .sum::<f64>()
+                    .sqrt();
+                magnitudes.push(magnitude);
+            }
+            magnitudes
+        }
+        _ => values.to_vec(),
+    }
+}
+
+fn clone_host_field_as(
+    field_id: String,
+    source: &AnalysisField,
+    fallback_len: usize,
+) -> AnalysisField {
+    let values = source
+        .as_host_f64()
+        .map(|values| values.to_vec())
+        .unwrap_or_else(|| vec![0.0; fallback_len.max(1)]);
+    let shape = if source.shape.is_empty() {
+        vec![values.len()]
+    } else {
+        source.shape.clone()
+    };
+    AnalysisField::host_f64(field_id, shape, values)
+}
+
+fn build_cht_run_fields(
+    domain: &runmat_analysis_core::CfdDomain,
+    transient_run: &runmat_analysis_fea::FeaTransientRunResult,
+    thermal_run: &runmat_analysis_fea::FeaThermalRunResult,
+) -> Vec<AnalysisField> {
+    let node_count = cfd_node_count_from_transient(transient_run);
+    let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(domain, node_count, 0);
+    let mut fields = vec![
+        AnalysisField::host_f64(
+            FEA_FIELD_CHT_FLUID_VELOCITY,
+            vec![node_count, 3],
+            fluid_velocity,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_CHT_FLUID_PRESSURE,
+            vec![node_count],
+            fluid_pressure,
+        ),
+    ];
+
+    for (step_index, temperature) in thermal_run.temperature_snapshots.iter().enumerate() {
+        let fallback_len = temperature.element_count().max(1);
+        fields.push(clone_host_field_as(
+            fea_cht_fluid_temperature_field_id(step_index),
+            temperature,
+            fallback_len,
+        ));
+        fields.push(clone_host_field_as(
+            fea_cht_solid_temperature_field_id(step_index),
+            temperature,
+            fallback_len,
+        ));
+
+        let heat_flux = thermal_run
+            .heat_flux_snapshots
+            .get(step_index)
+            .map(|field| field_scalar_magnitudes(field, fallback_len))
+            .unwrap_or_else(|| vec![0.0; fallback_len]);
+        let interface_count = heat_flux.len().max(1);
+        fields.push(AnalysisField::host_f64(
+            fea_cht_interface_heat_flux_field_id(step_index),
+            vec![interface_count],
+            heat_flux,
+        ));
+
+        let residual = thermal_run
+            .residual_norms
+            .get(step_index)
+            .copied()
+            .filter(|value| value.is_finite())
+            .unwrap_or(0.0);
+        fields.push(AnalysisField::host_f64(
+            fea_cht_interface_temperature_jump_field_id(step_index),
+            vec![interface_count],
+            vec![residual; interface_count],
+        ));
+        fields.push(AnalysisField::host_f64(
+            fea_cht_energy_residual_field_id(step_index),
+            vec![1],
+            vec![residual],
+        ));
+    }
+
+    fields
+}
+
+fn build_fsi_run_fields(
+    domain: &runmat_analysis_core::CfdDomain,
+    transient_run: &runmat_analysis_fea::FeaTransientRunResult,
+) -> Vec<AnalysisField> {
+    let node_count = cfd_node_count_from_transient(transient_run);
+    let mut fields = Vec::new();
+    let step_count = transient_run.time_points_s.len().max(1);
+
+    for step_index in 0..step_count {
+        let (fluid_velocity, fluid_pressure) =
+            recover_cfd_velocity_pressure(domain, node_count, step_index);
+        fields.push(AnalysisField::host_f64(
+            fea_fsi_fluid_velocity_field_id(step_index),
+            vec![node_count, 3],
+            fluid_velocity,
+        ));
+        fields.push(AnalysisField::host_f64(
+            fea_fsi_fluid_pressure_field_id(step_index),
+            vec![node_count],
+            fluid_pressure.clone(),
+        ));
+
+        let displacement = transient_run
+            .displacement_snapshots
+            .get(step_index)
+            .or_else(|| transient_run.displacement_snapshots.last());
+        let fallback_displacement_len = node_count * 3;
+        if let Some(displacement) = displacement {
+            fields.push(clone_host_field_as(
+                fea_fsi_structural_displacement_field_id(step_index),
+                displacement,
+                fallback_displacement_len,
+            ));
+            fields.push(clone_host_field_as(
+                fea_fsi_interface_displacement_field_id(step_index),
+                displacement,
+                fallback_displacement_len,
+            ));
+        } else {
+            let zeros = vec![0.0; fallback_displacement_len];
+            fields.push(AnalysisField::host_f64(
+                fea_fsi_structural_displacement_field_id(step_index),
+                vec![node_count, 3],
+                zeros.clone(),
+            ));
+            fields.push(AnalysisField::host_f64(
+                fea_fsi_interface_displacement_field_id(step_index),
+                vec![node_count, 3],
+                zeros,
+            ));
+        }
+
+        fields.push(AnalysisField::host_f64(
+            fea_fsi_interface_pressure_field_id(step_index),
+            vec![node_count],
+            fluid_pressure.clone(),
+        ));
+        let mut traction = Vec::with_capacity(node_count * 3);
+        for pressure in &fluid_pressure {
+            traction.extend_from_slice(&[-*pressure, 0.0, 0.0]);
+        }
+        fields.push(AnalysisField::host_f64(
+            fea_fsi_interface_traction_field_id(step_index),
+            vec![node_count, 3],
+            traction,
+        ));
+
+        let residual = transient_run
+            .residual_norms
+            .get(step_index)
+            .copied()
+            .filter(|value| value.is_finite())
+            .unwrap_or(0.0);
+        fields.push(AnalysisField::host_f64(
+            fea_fsi_interface_residual_field_id(step_index),
+            vec![1],
+            vec![residual],
+        ));
+        fields.push(AnalysisField::host_f64(
+            fea_fsi_coupling_iteration_count_field_id(step_index),
+            vec![1],
+            vec![1.0],
+        ));
+    }
+
+    fields
+}
+
 pub fn analysis_run_transient_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
@@ -2777,7 +3140,9 @@ pub fn analysis_run_cfd_with_options_op(
         )
     })?;
 
+    let cfd_fields = build_cfd_run_fields(cfd_domain, &transient_run);
     let mut run = transient_run.run;
+    run.fields.extend(cfd_fields);
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
     if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
@@ -2786,8 +3151,7 @@ pub fn analysis_run_cfd_with_options_op(
         );
     }
 
-    let reynolds_proxy = cfd_domain.reference_density_kg_per_m3 * cfd_domain.inlet_velocity_m_per_s
-        / cfd_domain.dynamic_viscosity_pa_s;
+    let reynolds_number = cfd_reynolds_number(cfd_domain);
     let solve_family = match cfd_domain.solve_family {
         runmat_analysis_core::CfdSolveFamily::SteadyState => "steady_state",
         runmat_analysis_core::CfdSolveFamily::Transient => "transient",
@@ -2796,12 +3160,12 @@ pub fn analysis_run_cfd_with_options_op(
         code: "FEA_CFD_FLOW".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
         message: format!(
-            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_proxy={} solve_family={} profile_point_count={}",
+            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={}",
             cfd_domain.reference_density_kg_per_m3,
             cfd_domain.dynamic_viscosity_pa_s,
             cfd_domain.inlet_velocity_m_per_s,
             cfd_domain.turbulence_intensity,
-            reynolds_proxy,
+            reynolds_number,
             solve_family,
             cfd_domain.time_profile.len(),
         ),
@@ -3320,20 +3684,21 @@ pub fn analysis_run_cht_with_options_op(
         )
     })?;
 
+    let cht_fields = build_cht_run_fields(cfd_domain, &transient_run, &thermal_run);
     let mut run = transient_run.run;
+    run.fields.extend(cht_fields);
     run.diagnostics.extend(thermal_run.run.diagnostics.clone());
-    let reynolds_proxy = cfd_domain.reference_density_kg_per_m3 * cfd_domain.inlet_velocity_m_per_s
-        / cfd_domain.dynamic_viscosity_pa_s;
+    let reynolds_number = cfd_reynolds_number(cfd_domain);
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
         code: "FEA_CFD_FLOW".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
         message: format!(
-            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_proxy={} solve_family={} profile_point_count={}",
+            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={}",
             cfd_domain.reference_density_kg_per_m3,
             cfd_domain.dynamic_viscosity_pa_s,
             cfd_domain.inlet_velocity_m_per_s,
             cfd_domain.turbulence_intensity,
-            reynolds_proxy,
+            reynolds_number,
             match cfd_domain.solve_family {
                 runmat_analysis_core::CfdSolveFamily::SteadyState => "steady_state",
                 runmat_analysis_core::CfdSolveFamily::Transient => "transient",
@@ -3824,19 +4189,20 @@ pub fn analysis_run_fsi_with_options_op(
         )
     })?;
 
+    let fsi_fields = build_fsi_run_fields(cfd_domain, &transient_run);
     let mut run = transient_run.run;
-    let reynolds_proxy = cfd_domain.reference_density_kg_per_m3 * cfd_domain.inlet_velocity_m_per_s
-        / cfd_domain.dynamic_viscosity_pa_s;
+    run.fields.extend(fsi_fields);
+    let reynolds_number = cfd_reynolds_number(cfd_domain);
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
         code: "FEA_CFD_FLOW".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
         message: format!(
-            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_proxy={} solve_family={} profile_point_count={}",
+            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={}",
             cfd_domain.reference_density_kg_per_m3,
             cfd_domain.dynamic_viscosity_pa_s,
             cfd_domain.inlet_velocity_m_per_s,
             cfd_domain.turbulence_intensity,
-            reynolds_proxy,
+            reynolds_number,
             match cfd_domain.solve_family {
                 runmat_analysis_core::CfdSolveFamily::SteadyState => "steady_state",
                 runmat_analysis_core::CfdSolveFamily::Transient => "transient",

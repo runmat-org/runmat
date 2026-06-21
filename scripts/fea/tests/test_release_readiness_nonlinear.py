@@ -313,10 +313,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_EFFECTIVE_MODULUS_SCALE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS",
-            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY",
-            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_NUMBER",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_NUMBER",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_APPLIED_TEMPERATURE_DELTA_K",
-            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_NUMBER",
             "RUNMAT_RELEASE_READINESS_FSI_MIN_STRUCTURAL_STEP_COUNT",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_PROFILE_POINT_COUNT",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_STEP_COUNT",
@@ -338,10 +338,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_FSI_MIN_DYNAMIC_VISCOSITY_PA_S",
             "RUNMAT_RELEASE_READINESS_FSI_MIN_INLET_VELOCITY_M_PER_S",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY",
-            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_STEP_COUNT_DROP_TREND_RATIO",
@@ -5974,7 +5974,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cfd_reynolds_proxy", "observed": 100000.0}
+                    {"name": "cfd_reynolds_number", "observed": 100000.0}
                 ],
             }
         )
@@ -5985,7 +5985,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cht_reynolds_proxy", "observed": 100000.0},
+                    {"name": "cht_reynolds_number", "observed": 100000.0},
                     {"name": "cht_applied_temperature_delta_k", "observed": 20.0},
                 ],
             }
@@ -5997,15 +5997,15 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "fsi_reynolds_proxy", "observed": 50000.0},
+                    {"name": "fsi_reynolds_number", "observed": 50000.0},
                     {"name": "fsi_structural_step_count", "observed": 0.0},
                 ],
             }
         )
-        os.environ["RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY"] = "200000.0"
-        os.environ["RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY"] = "200000.0"
+        os.environ["RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_NUMBER"] = "200000.0"
+        os.environ["RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_NUMBER"] = "200000.0"
         os.environ["RUNMAT_RELEASE_READINESS_CHT_MIN_APPLIED_TEMPERATURE_DELTA_K"] = "45.0"
-        os.environ["RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY"] = "150000.0"
+        os.environ["RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_NUMBER"] = "150000.0"
         os.environ["RUNMAT_RELEASE_READINESS_FSI_MIN_STRUCTURAL_STEP_COUNT"] = "1.0"
         result = evaluate_release_readiness(
             latest,
@@ -6013,10 +6013,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             protected=False,
         )
         codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("CFD_REYNOLDS_PROXY_LOW", codes)
-        self.assertIn("CHT_REYNOLDS_PROXY_LOW", codes)
+        self.assertIn("CFD_REYNOLDS_NUMBER_LOW", codes)
+        self.assertIn("CHT_REYNOLDS_NUMBER_LOW", codes)
         self.assertIn("CHT_APPLIED_TEMPERATURE_DELTA_K_LOW", codes)
-        self.assertIn("FSI_REYNOLDS_PROXY_LOW", codes)
+        self.assertIn("FSI_REYNOLDS_NUMBER_LOW", codes)
         self.assertIn("FSI_STRUCTURAL_STEP_COUNT_LOW", codes)
 
     def test_coupled_flow_metrics_missing_is_fail_on_protected_branches(self):
@@ -6042,7 +6042,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cfd_reynolds_proxy", "observed": 200000.0}
+                    {"name": "cfd_reynolds_number", "observed": 200000.0}
                 ],
             }
         )
@@ -6067,7 +6067,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cfd_reynolds_proxy", "observed": 200000.0}
+                    {"name": "cfd_reynolds_number", "observed": 200000.0}
                 ],
             }
         )
@@ -6078,7 +6078,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cht_reynolds_proxy", "observed": 200000.0},
+                    {"name": "cht_reynolds_number", "observed": 200000.0},
                     {"name": "cht_applied_temperature_delta_k", "observed": 40.0},
                 ],
             }
@@ -6090,7 +6090,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "fsi_reynolds_proxy", "observed": 120000.0},
+                    {"name": "fsi_reynolds_number", "observed": 120000.0},
                     {"name": "fsi_structural_step_count", "observed": 1.0},
                 ],
             }
@@ -6103,7 +6103,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cfd_reynolds_proxy", "observed": 300000.0}
+                    {"name": "cfd_reynolds_number", "observed": 300000.0}
                 ],
             }
         )
@@ -6114,7 +6114,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cht_reynolds_proxy", "observed": 300000.0},
+                    {"name": "cht_reynolds_number", "observed": 300000.0},
                     {"name": "cht_applied_temperature_delta_k", "observed": 60.0},
                 ],
             }
@@ -6126,21 +6126,21 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "fsi_reynolds_proxy", "observed": 240000.0},
+                    {"name": "fsi_reynolds_number", "observed": 240000.0},
                     {"name": "fsi_structural_step_count", "observed": 2.0},
                 ],
             }
         )
-        os.environ["RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO"] = (
+        os.environ["RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO"] = (
             "1.4"
         )
-        os.environ["RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO"] = (
+        os.environ["RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO"] = (
             "1.4"
         )
         os.environ[
             "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO"
         ] = "1.4"
-        os.environ["RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO"] = (
+        os.environ["RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO"] = (
             "1.4"
         )
         os.environ[
@@ -6148,10 +6148,10 @@ class ReleaseReadinessTests(unittest.TestCase):
         ] = "1.4"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("CFD_REYNOLDS_PROXY_TREND_WORSENING", codes)
-        self.assertIn("CHT_REYNOLDS_PROXY_TREND_WORSENING", codes)
+        self.assertIn("CFD_REYNOLDS_NUMBER_TREND_WORSENING", codes)
+        self.assertIn("CHT_REYNOLDS_NUMBER_TREND_WORSENING", codes)
         self.assertIn("CHT_APPLIED_TEMPERATURE_DELTA_K_TREND_WORSENING", codes)
-        self.assertIn("FSI_REYNOLDS_PROXY_TREND_WORSENING", codes)
+        self.assertIn("FSI_REYNOLDS_NUMBER_TREND_WORSENING", codes)
         self.assertIn("FSI_STRUCTURAL_STEP_COUNT_TREND_WORSENING", codes)
 
     def test_coupled_flow_profile_step_metric_breaches_emit_reasons(self):
@@ -6163,7 +6163,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cfd_reynolds_proxy", "observed": 250000.0},
+                    {"name": "cfd_reynolds_number", "observed": 250000.0},
                     {"name": "cfd_reference_density_kg_per_m3", "observed": 0.3},
                     {"name": "cfd_dynamic_viscosity_pa_s", "observed": 1e-07},
                     {"name": "cfd_inlet_velocity_m_per_s", "observed": 0.2},
@@ -6179,7 +6179,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cht_reynolds_proxy", "observed": 250000.0},
+                    {"name": "cht_reynolds_number", "observed": 250000.0},
                     {"name": "cht_reference_density_kg_per_m3", "observed": 0.3},
                     {"name": "cht_dynamic_viscosity_pa_s", "observed": 1e-07},
                     {"name": "cht_inlet_velocity_m_per_s", "observed": 0.2},
@@ -6198,7 +6198,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "fsi_reynolds_proxy", "observed": 200000.0},
+                    {"name": "fsi_reynolds_number", "observed": 200000.0},
                     {"name": "fsi_reference_density_kg_per_m3", "observed": 0.3},
                     {"name": "fsi_dynamic_viscosity_pa_s", "observed": 1e-07},
                     {"name": "fsi_inlet_velocity_m_per_s", "observed": 0.2},
@@ -6267,7 +6267,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cfd_reynolds_proxy", "observed": 200000.0},
+                    {"name": "cfd_reynolds_number", "observed": 200000.0},
                     {"name": "cfd_reference_density_kg_per_m3", "observed": 1.0},
                     {"name": "cfd_dynamic_viscosity_pa_s", "observed": 1.0e-4},
                     {"name": "cfd_inlet_velocity_m_per_s", "observed": 5.0},
@@ -6283,7 +6283,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cht_reynolds_proxy", "observed": 250000.0},
+                    {"name": "cht_reynolds_number", "observed": 250000.0},
                     {"name": "cht_applied_temperature_delta_k", "observed": 50.0},
                     {"name": "cht_reference_density_kg_per_m3", "observed": 1.0},
                     {"name": "cht_dynamic_viscosity_pa_s", "observed": 1.0e-4},
@@ -6302,7 +6302,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "fsi_reynolds_proxy", "observed": 200000.0},
+                    {"name": "fsi_reynolds_number", "observed": 200000.0},
                     {"name": "fsi_structural_step_count", "observed": 2.0},
                     {"name": "fsi_reference_density_kg_per_m3", "observed": 1.0},
                     {"name": "fsi_dynamic_viscosity_pa_s", "observed": 1.0e-4},
@@ -6323,7 +6323,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cfd_reynolds_proxy", "observed": 300000.0},
+                    {"name": "cfd_reynolds_number", "observed": 300000.0},
                     {"name": "cfd_reference_density_kg_per_m3", "observed": 2.0},
                     {"name": "cfd_dynamic_viscosity_pa_s", "observed": 2.0e-4},
                     {"name": "cfd_inlet_velocity_m_per_s", "observed": 10.0},
@@ -6339,7 +6339,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cht_reynolds_proxy", "observed": 300000.0},
+                    {"name": "cht_reynolds_number", "observed": 300000.0},
                     {"name": "cht_applied_temperature_delta_k", "observed": 60.0},
                     {"name": "cht_reference_density_kg_per_m3", "observed": 2.0},
                     {"name": "cht_dynamic_viscosity_pa_s", "observed": 2.0e-4},
@@ -6358,7 +6358,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "fsi_reynolds_proxy", "observed": 240000.0},
+                    {"name": "fsi_reynolds_number", "observed": 240000.0},
                     {"name": "fsi_structural_step_count", "observed": 2.0},
                     {"name": "fsi_reference_density_kg_per_m3", "observed": 2.0},
                     {"name": "fsi_dynamic_viscosity_pa_s", "observed": 2.0e-4},
@@ -6455,7 +6455,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cfd_reynolds_proxy", "observed": 250000.0},
+                    {"name": "cfd_reynolds_number", "observed": 250000.0},
                     {"name": "transient_max_residual_norm", "observed": 1e-4},
                     {"name": "transient_max_energy_growth_ratio", "observed": 1.08},
                     {"name": "transient_prepared_cache_hit_ratio", "observed": 0.72},
@@ -6470,7 +6470,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cht_reynolds_proxy", "observed": 250000.0},
+                    {"name": "cht_reynolds_number", "observed": 250000.0},
                     {"name": "cht_applied_temperature_delta_k", "observed": 60.0},
                     {"name": "transient_max_residual_norm", "observed": 8e-5},
                     {"name": "transient_max_energy_growth_ratio", "observed": 1.07},
@@ -6486,7 +6486,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "fsi_reynolds_proxy", "observed": 200000.0},
+                    {"name": "fsi_reynolds_number", "observed": 200000.0},
                     {"name": "fsi_structural_step_count", "observed": 1.0},
                     {"name": "transient_max_residual_norm", "observed": 9e-5},
                     {"name": "transient_max_energy_growth_ratio", "observed": 1.09},
@@ -6527,7 +6527,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cfd_reynolds_proxy", "observed": 250000.0},
+                    {"name": "cfd_reynolds_number", "observed": 250000.0},
                     {"name": "transient_max_residual_norm", "observed": 1e-5},
                     {"name": "transient_max_energy_growth_ratio", "observed": 1.03},
                     {"name": "transient_prepared_cache_hit_ratio", "observed": 0.7},
@@ -6543,7 +6543,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cfd_reynolds_proxy", "observed": 260000.0},
+                    {"name": "cfd_reynolds_number", "observed": 260000.0},
                     {"name": "transient_max_residual_norm", "observed": 1e-7},
                     {"name": "transient_max_energy_growth_ratio", "observed": 1.0},
                     {"name": "transient_prepared_cache_hit_ratio", "observed": 0.95},
@@ -6579,7 +6579,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cfd_reynolds_proxy", "observed": 250000.0}
+                    {"name": "cfd_reynolds_number", "observed": 250000.0}
                 ],
             }
         )
@@ -6671,7 +6671,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "cfd_reynolds_proxy", "observed": 250000.0}
+                    {"name": "cfd_reynolds_number", "observed": 250000.0}
                 ],
             }
         )
@@ -8101,7 +8101,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Acoustic mode count/threshold", summary)
         self.assertIn("Acoustic trend ratios (orthogonality, frequency separation, mode count, residual threshold)", summary)
         self.assertIn("### Coupled Flow Posture", summary)
-        self.assertIn("CFD min Reynolds proxy/threshold", summary)
+        self.assertIn("CFD min Reynolds number/threshold", summary)
         self.assertIn("Coupled-flow trend ratios (CFD Reynolds, CHT Reynolds, CHT delta K, FSI Reynolds, FSI structural steps)", summary)
         self.assertIn(
             "Coupled-flow transient assertions (residual, energy growth, cache hit, cache misses)",

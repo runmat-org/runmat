@@ -38,6 +38,69 @@ pub const FEA_FIELD_ACOUSTIC_PHASE: &str = "acoustic.phase";
 pub const FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB: &str = "acoustic.sound_pressure_level_db";
 pub const FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY: &str = "acoustic.particle_velocity";
 
+pub const FEA_FIELD_CFD_VELOCITY: &str = "cfd.velocity";
+pub const FEA_FIELD_CFD_PRESSURE: &str = "cfd.pressure";
+pub const FEA_FIELD_CFD_VORTICITY: &str = "cfd.vorticity";
+pub const FEA_FIELD_CFD_WALL_SHEAR_STRESS: &str = "cfd.wall_shear_stress";
+pub const FEA_FIELD_CFD_RESIDUAL_MOMENTUM: &str = "cfd.residual_momentum";
+pub const FEA_FIELD_CFD_RESIDUAL_CONTINUITY: &str = "cfd.residual_continuity";
+pub const FEA_FIELD_CFD_REYNOLDS_NUMBER: &str = "cfd.reynolds_number";
+
+pub const FEA_FIELD_CHT_FLUID_VELOCITY: &str = "cht.fluid_velocity";
+pub const FEA_FIELD_CHT_FLUID_PRESSURE: &str = "cht.fluid_pressure";
+
+pub fn fea_cht_fluid_temperature_field_id(step_index: usize) -> String {
+    format!("cht.fluid_temperature.{step_index}")
+}
+
+pub fn fea_cht_solid_temperature_field_id(step_index: usize) -> String {
+    format!("cht.solid_temperature.{step_index}")
+}
+
+pub fn fea_cht_interface_heat_flux_field_id(step_index: usize) -> String {
+    format!("cht.interface_heat_flux.{step_index}")
+}
+
+pub fn fea_cht_interface_temperature_jump_field_id(step_index: usize) -> String {
+    format!("cht.interface_temperature_jump.{step_index}")
+}
+
+pub fn fea_cht_energy_residual_field_id(step_index: usize) -> String {
+    format!("cht.energy_residual.{step_index}")
+}
+
+pub fn fea_fsi_fluid_velocity_field_id(step_index: usize) -> String {
+    format!("fsi.fluid_velocity.{step_index}")
+}
+
+pub fn fea_fsi_fluid_pressure_field_id(step_index: usize) -> String {
+    format!("fsi.fluid_pressure.{step_index}")
+}
+
+pub fn fea_fsi_structural_displacement_field_id(step_index: usize) -> String {
+    format!("fsi.structural_displacement.{step_index}")
+}
+
+pub fn fea_fsi_interface_pressure_field_id(step_index: usize) -> String {
+    format!("fsi.interface_pressure.{step_index}")
+}
+
+pub fn fea_fsi_interface_traction_field_id(step_index: usize) -> String {
+    format!("fsi.interface_traction.{step_index}")
+}
+
+pub fn fea_fsi_interface_displacement_field_id(step_index: usize) -> String {
+    format!("fsi.interface_displacement.{step_index}")
+}
+
+pub fn fea_fsi_interface_residual_field_id(step_index: usize) -> String {
+    format!("fsi.interface_residual.{step_index}")
+}
+
+pub fn fea_fsi_coupling_iteration_count_field_id(step_index: usize) -> String {
+    format!("fsi.coupling_iteration_count.{step_index}")
+}
+
 pub fn fea_thermal_temperature_field_id(snapshot_index: usize) -> String {
     format!("thermal.temperature.{snapshot_index}")
 }

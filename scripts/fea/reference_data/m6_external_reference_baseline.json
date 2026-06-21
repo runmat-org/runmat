@@ -2797,11 +2797,11 @@
       "tolerance_rel": 0.08
     },
     {
-      "name": "cfd_reynolds_proxy",
+      "name": "cfd_reynolds_number",
       "fixture_id": "cfd_steady_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "cfd_reynolds_proxy",
+      "assertion_name": "cfd_reynolds_number",
       "reference": 338397.79005524865,
       "tolerance_abs": 70000.0,
       "tolerance_rel": 0.2
@@ -2887,11 +2887,11 @@
       "tolerance_rel": 0.5
     },
     {
-      "name": "cfd_reynolds_proxy",
+      "name": "cfd_reynolds_number",
       "fixture_id": "cfd_steady_cpu",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "cfd_reynolds_proxy",
+      "assertion_name": "cfd_reynolds_number",
       "reference": 338397.79005524865,
       "tolerance_abs": 70000.0,
       "tolerance_rel": 0.2
@@ -2967,11 +2967,11 @@
       "tolerance_rel": 0.5
     },
     {
-      "name": "cfd_reynolds_proxy",
+      "name": "cfd_reynolds_number",
       "fixture_id": "cfd_steady_gpu_fallback",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "cfd_reynolds_proxy",
+      "assertion_name": "cfd_reynolds_number",
       "reference": 338397.79005524865,
       "tolerance_abs": 70000.0,
       "tolerance_rel": 0.2
@@ -3017,11 +3017,11 @@
       "tolerance_rel": 0.1
     },
     {
-      "name": "cht_reynolds_proxy",
+      "name": "cht_reynolds_number",
       "fixture_id": "cht_coupled_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "cht_reynolds_proxy",
+      "assertion_name": "cht_reynolds_number",
       "reference": 338397.79005524865,
       "tolerance_abs": 70000.0,
       "tolerance_rel": 0.2
@@ -3077,11 +3077,11 @@
       "tolerance_rel": 0.1
     },
     {
-      "name": "cht_reynolds_proxy",
+      "name": "cht_reynolds_number",
       "fixture_id": "cht_coupled_cpu",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "cht_reynolds_proxy",
+      "assertion_name": "cht_reynolds_number",
       "reference": 338397.79005524865,
       "tolerance_abs": 70000.0,
       "tolerance_rel": 0.2
@@ -3117,11 +3117,11 @@
       "tolerance_rel": 0.1
     },
     {
-      "name": "cht_reynolds_proxy",
+      "name": "cht_reynolds_number",
       "fixture_id": "cht_coupled_gpu_fallback",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "cht_reynolds_proxy",
+      "assertion_name": "cht_reynolds_number",
       "reference": 338397.79005524865,
       "tolerance_abs": 70000.0,
       "tolerance_rel": 0.2
@@ -3147,11 +3147,11 @@
       "tolerance_rel": 0.03
     },
     {
-      "name": "fsi_reynolds_proxy",
+      "name": "fsi_reynolds_number",
       "fixture_id": "fsi_coupled_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "fsi_reynolds_proxy",
+      "assertion_name": "fsi_reynolds_number",
       "reference": 270718.2320441989,
       "tolerance_abs": 60000.0,
       "tolerance_rel": 0.22
@@ -3207,11 +3207,11 @@
       "tolerance_rel": 2.0
     },
     {
-      "name": "fsi_reynolds_proxy",
+      "name": "fsi_reynolds_number",
       "fixture_id": "fsi_coupled_cpu",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "fsi_reynolds_proxy",
+      "assertion_name": "fsi_reynolds_number",
       "reference": 270718.2320441989,
       "tolerance_abs": 60000.0,
       "tolerance_rel": 0.22
@@ -3247,11 +3247,11 @@
       "tolerance_rel": 0.03
     },
     {
-      "name": "fsi_reynolds_proxy",
+      "name": "fsi_reynolds_number",
       "fixture_id": "fsi_coupled_gpu_fallback",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "fsi_reynolds_proxy",
+      "assertion_name": "fsi_reynolds_number",
       "reference": 270718.2320441989,
       "tolerance_abs": 60000.0,
       "tolerance_rel": 0.22

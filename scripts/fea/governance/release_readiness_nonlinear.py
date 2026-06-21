@@ -212,10 +212,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_EFFECTIVE_MODULUS_SCALE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "true",
-            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "250000.0",
-            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "250000.0",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_NUMBER": "250000.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_NUMBER": "250000.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_APPLIED_TEMPERATURE_DELTA_K": "50.0",
-            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY": "180000.0",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_NUMBER": "180000.0",
             "RUNMAT_RELEASE_READINESS_FSI_MIN_STRUCTURAL_STEP_COUNT": "1.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_PROFILE_POINT_COUNT": "2.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_STEP_COUNT": "12.0",
@@ -237,10 +237,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_FSI_MIN_DYNAMIC_VISCOSITY_PA_S": "1e-05",
             "RUNMAT_RELEASE_READINESS_FSI_MIN_INLET_VELOCITY_M_PER_S": "2.5",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY": "0.1",
-            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.1",
-            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO": "1.1",
-            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_STEP_COUNT_DROP_TREND_RATIO": "1.1",
@@ -539,10 +539,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_EFFECTIVE_MODULUS_SCALE_DROP_TREND_RATIO": "1.3",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO_TREND_RATIO": "1.3",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "false",
-            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "200000.0",
-            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "200000.0",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_NUMBER": "200000.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_NUMBER": "200000.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_APPLIED_TEMPERATURE_DELTA_K": "45.0",
-            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY": "150000.0",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_NUMBER": "150000.0",
             "RUNMAT_RELEASE_READINESS_FSI_MIN_STRUCTURAL_STEP_COUNT": "1.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_PROFILE_POINT_COUNT": "2.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_STEP_COUNT": "10.0",
@@ -564,10 +564,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_FSI_MIN_DYNAMIC_VISCOSITY_PA_S": "5e-06",
             "RUNMAT_RELEASE_READINESS_FSI_MIN_INLET_VELOCITY_M_PER_S": "1.5",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY": "0.12",
-            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.2",
-            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO": "1.2",
-            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_STEP_COUNT_DROP_TREND_RATIO": "1.2",
@@ -866,10 +866,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_EFFECTIVE_MODULUS_SCALE_DROP_TREND_RATIO": "1.5",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO_TREND_RATIO": "1.5",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "false",
-            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "150000.0",
-            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "150000.0",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_NUMBER": "150000.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_NUMBER": "150000.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_APPLIED_TEMPERATURE_DELTA_K": "35.0",
-            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY": "100000.0",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_NUMBER": "100000.0",
             "RUNMAT_RELEASE_READINESS_FSI_MIN_STRUCTURAL_STEP_COUNT": "1.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_PROFILE_POINT_COUNT": "2.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_STEP_COUNT": "8.0",
@@ -891,10 +891,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_FSI_MIN_DYNAMIC_VISCOSITY_PA_S": "1e-06",
             "RUNMAT_RELEASE_READINESS_FSI_MIN_INLET_VELOCITY_M_PER_S": "1.0",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY": "0.2",
-            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.35",
-            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO": "1.35",
-            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_STEP_COUNT_DROP_TREND_RATIO": "1.35",
@@ -2722,16 +2722,16 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS", "false"),
         )
     )
-    cfd_min_reynolds_proxy_threshold = float(
+    cfd_min_reynolds_number_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY",
-            profile_default("RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY", "200000.0"),
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_NUMBER",
+            profile_default("RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_NUMBER", "200000.0"),
         )
     )
-    cht_min_reynolds_proxy_threshold = float(
+    cht_min_reynolds_number_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY",
-            profile_default("RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY", "200000.0"),
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_NUMBER",
+            profile_default("RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_NUMBER", "200000.0"),
         )
     )
     cht_min_applied_temperature_delta_k_threshold = float(
@@ -2743,10 +2743,10 @@ def evaluate_release_readiness(
             ),
         )
     )
-    fsi_min_reynolds_proxy_threshold = float(
+    fsi_min_reynolds_number_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY",
-            profile_default("RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY", "150000.0"),
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_NUMBER",
+            profile_default("RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_NUMBER", "150000.0"),
         )
     )
     fsi_min_structural_step_count_threshold = float(
@@ -2884,20 +2884,20 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY", "0.12"),
         )
     )
-    cfd_max_reynolds_proxy_drop_trend_ratio_threshold = float(
+    cfd_max_reynolds_number_drop_trend_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+                "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
     )
-    cht_max_reynolds_proxy_drop_trend_ratio_threshold = float(
+    cht_max_reynolds_number_drop_trend_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+                "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
@@ -2911,11 +2911,11 @@ def evaluate_release_readiness(
             ),
         )
     )
-    fsi_max_reynolds_proxy_drop_trend_ratio_threshold = float(
+    fsi_max_reynolds_number_drop_trend_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+                "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_NUMBER_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
@@ -5159,13 +5159,13 @@ def evaluate_release_readiness(
     nonlinear_path_mix_backtrack_bursts_trend_ratio = None
     nonlinear_path_mix_effective_modulus_scale_drop_trend_ratio = None
     nonlinear_path_mix_material_spread_ratio_trend_ratio = None
-    cfd_min_reynolds_proxy = None
+    cfd_min_reynolds_number = None
     cfd_min_reference_density_kg_per_m3 = None
     cfd_min_dynamic_viscosity_pa_s = None
     cfd_min_inlet_velocity_m_per_s = None
     cfd_max_turbulence_intensity = None
     cfd_min_profile_point_count = None
-    cht_min_reynolds_proxy = None
+    cht_min_reynolds_number = None
     cht_min_applied_temperature_delta_k = None
     cht_min_reference_density_kg_per_m3 = None
     cht_min_dynamic_viscosity_pa_s = None
@@ -5174,7 +5174,7 @@ def evaluate_release_readiness(
     cht_min_profile_point_count = None
     cht_min_step_count = None
     cht_max_time_step_s = None
-    fsi_min_reynolds_proxy = None
+    fsi_min_reynolds_number = None
     fsi_min_structural_step_count = None
     fsi_min_reference_density_kg_per_m3 = None
     fsi_min_dynamic_viscosity_pa_s = None
@@ -5184,13 +5184,13 @@ def evaluate_release_readiness(
     fsi_min_step_count = None
     fsi_max_time_step_s = None
     fsi_min_cfd_profile_point_count = None
-    cfd_reynolds_proxy_drop_trend_ratio = None
+    cfd_reynolds_number_drop_trend_ratio = None
     cfd_reference_density_drop_trend_ratio = None
     cfd_dynamic_viscosity_drop_trend_ratio = None
     cfd_inlet_velocity_drop_trend_ratio = None
     cfd_turbulence_intensity_trend_ratio = None
     cfd_profile_point_count_drop_trend_ratio = None
-    cht_reynolds_proxy_drop_trend_ratio = None
+    cht_reynolds_number_drop_trend_ratio = None
     cht_applied_temperature_delta_drop_trend_ratio = None
     cht_reference_density_drop_trend_ratio = None
     cht_dynamic_viscosity_drop_trend_ratio = None
@@ -5199,7 +5199,7 @@ def evaluate_release_readiness(
     cht_profile_point_count_drop_trend_ratio = None
     cht_step_count_drop_trend_ratio = None
     cht_time_step_s_trend_ratio = None
-    fsi_reynolds_proxy_drop_trend_ratio = None
+    fsi_reynolds_number_drop_trend_ratio = None
     fsi_structural_step_count_drop_trend_ratio = None
     fsi_reference_density_drop_trend_ratio = None
     fsi_dynamic_viscosity_drop_trend_ratio = None
@@ -6925,11 +6925,11 @@ def evaluate_release_readiness(
         coupled_flow_assertion_specs = [
             (
                 "cfd_steady_gpu_provider",
-                "cfd_reynolds_proxy",
-                cfd_min_reynolds_proxy_threshold,
+                "cfd_reynolds_number",
+                cfd_min_reynolds_number_threshold,
                 "min",
-                "CFD_REYNOLDS_PROXY_LOW",
-                "CFD Reynolds proxy",
+                "CFD_REYNOLDS_NUMBER_LOW",
+                "CFD Reynolds number",
             ),
             (
                 "cfd_steady_gpu_provider",
@@ -6973,11 +6973,11 @@ def evaluate_release_readiness(
             ),
             (
                 "cht_coupled_gpu_provider",
-                "cht_reynolds_proxy",
-                cht_min_reynolds_proxy_threshold,
+                "cht_reynolds_number",
+                cht_min_reynolds_number_threshold,
                 "min",
-                "CHT_REYNOLDS_PROXY_LOW",
-                "CHT Reynolds proxy",
+                "CHT_REYNOLDS_NUMBER_LOW",
+                "CHT Reynolds number",
             ),
             (
                 "cht_coupled_gpu_provider",
@@ -7021,11 +7021,11 @@ def evaluate_release_readiness(
             ),
             (
                 "fsi_coupled_gpu_provider",
-                "fsi_reynolds_proxy",
-                fsi_min_reynolds_proxy_threshold,
+                "fsi_reynolds_number",
+                fsi_min_reynolds_number_threshold,
                 "min",
-                "FSI_REYNOLDS_PROXY_LOW",
-                "FSI Reynolds proxy",
+                "FSI_REYNOLDS_NUMBER_LOW",
+                "FSI Reynolds number",
             ),
             (
                 "fsi_coupled_gpu_provider",
@@ -7144,8 +7144,8 @@ def evaluate_release_readiness(
                 missing_coupled_flow_fields.append(f"{fixture_id}.{assertion_name}")
                 continue
             observed = min(values) if mode == "min" else max(values)
-            if assertion_name == "cfd_reynolds_proxy":
-                cfd_min_reynolds_proxy = observed
+            if assertion_name == "cfd_reynolds_number":
+                cfd_min_reynolds_number = observed
             elif assertion_name == "cfd_reference_density_kg_per_m3":
                 cfd_min_reference_density_kg_per_m3 = observed
             elif assertion_name == "cfd_dynamic_viscosity_pa_s":
@@ -7156,8 +7156,8 @@ def evaluate_release_readiness(
                 cfd_max_turbulence_intensity = observed
             elif assertion_name == "cfd_profile_point_count":
                 cfd_min_profile_point_count = observed
-            elif assertion_name == "cht_reynolds_proxy":
-                cht_min_reynolds_proxy = observed
+            elif assertion_name == "cht_reynolds_number":
+                cht_min_reynolds_number = observed
             elif assertion_name == "cht_reference_density_kg_per_m3":
                 cht_min_reference_density_kg_per_m3 = observed
             elif assertion_name == "cht_dynamic_viscosity_pa_s":
@@ -7174,8 +7174,8 @@ def evaluate_release_readiness(
                 cht_min_step_count = observed
             elif assertion_name == "cht_time_step_s":
                 cht_max_time_step_s = observed
-            elif assertion_name == "fsi_reynolds_proxy":
-                fsi_min_reynolds_proxy = observed
+            elif assertion_name == "fsi_reynolds_number":
+                fsi_min_reynolds_number = observed
             elif assertion_name == "fsi_reference_density_kg_per_m3":
                 fsi_min_reference_density_kg_per_m3 = observed
             elif assertion_name == "fsi_dynamic_viscosity_pa_s":
@@ -11148,22 +11148,22 @@ def evaluate_release_readiness(
                 )
             )
 
-        cfd_reynolds_proxy_drop_trend_ratio = fixture_assertion_trend_ratio(
-            "cfd_reynolds_proxy"
+        cfd_reynolds_number_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "cfd_reynolds_number"
         )
         if (
-            cfd_reynolds_proxy_drop_trend_ratio is not None
-            and cfd_reynolds_proxy_drop_trend_ratio
-            > cfd_max_reynolds_proxy_drop_trend_ratio_threshold
+            cfd_reynolds_number_drop_trend_ratio is not None
+            and cfd_reynolds_number_drop_trend_ratio
+            > cfd_max_reynolds_number_drop_trend_ratio_threshold
         ):
             reasons.append(
                 Reason(
-                    code="CFD_REYNOLDS_PROXY_TREND_WORSENING",
+                    code="CFD_REYNOLDS_NUMBER_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
-                        "CFD Reynolds proxy drop trend ratio "
-                        f"{cfd_reynolds_proxy_drop_trend_ratio:.3f} exceeds threshold "
-                        f"{cfd_max_reynolds_proxy_drop_trend_ratio_threshold:.3f}"
+                        "CFD Reynolds number drop trend ratio "
+                        f"{cfd_reynolds_number_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{cfd_max_reynolds_number_drop_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
@@ -11268,22 +11268,22 @@ def evaluate_release_readiness(
                 )
             )
 
-        cht_reynolds_proxy_drop_trend_ratio = fixture_assertion_trend_ratio(
-            "cht_reynolds_proxy"
+        cht_reynolds_number_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "cht_reynolds_number"
         )
         if (
-            cht_reynolds_proxy_drop_trend_ratio is not None
-            and cht_reynolds_proxy_drop_trend_ratio
-            > cht_max_reynolds_proxy_drop_trend_ratio_threshold
+            cht_reynolds_number_drop_trend_ratio is not None
+            and cht_reynolds_number_drop_trend_ratio
+            > cht_max_reynolds_number_drop_trend_ratio_threshold
         ):
             reasons.append(
                 Reason(
-                    code="CHT_REYNOLDS_PROXY_TREND_WORSENING",
+                    code="CHT_REYNOLDS_NUMBER_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
-                        "CHT Reynolds proxy drop trend ratio "
-                        f"{cht_reynolds_proxy_drop_trend_ratio:.3f} exceeds threshold "
-                        f"{cht_max_reynolds_proxy_drop_trend_ratio_threshold:.3f}"
+                        "CHT Reynolds number drop trend ratio "
+                        f"{cht_reynolds_number_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{cht_max_reynolds_number_drop_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
@@ -11388,22 +11388,22 @@ def evaluate_release_readiness(
                 )
             )
 
-        fsi_reynolds_proxy_drop_trend_ratio = fixture_assertion_trend_ratio(
-            "fsi_reynolds_proxy"
+        fsi_reynolds_number_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "fsi_reynolds_number"
         )
         if (
-            fsi_reynolds_proxy_drop_trend_ratio is not None
-            and fsi_reynolds_proxy_drop_trend_ratio
-            > fsi_max_reynolds_proxy_drop_trend_ratio_threshold
+            fsi_reynolds_number_drop_trend_ratio is not None
+            and fsi_reynolds_number_drop_trend_ratio
+            > fsi_max_reynolds_number_drop_trend_ratio_threshold
         ):
             reasons.append(
                 Reason(
-                    code="FSI_REYNOLDS_PROXY_TREND_WORSENING",
+                    code="FSI_REYNOLDS_NUMBER_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
-                        "FSI Reynolds proxy drop trend ratio "
-                        f"{fsi_reynolds_proxy_drop_trend_ratio:.3f} exceeds threshold "
-                        f"{fsi_max_reynolds_proxy_drop_trend_ratio_threshold:.3f}"
+                        "FSI Reynolds number drop trend ratio "
+                        f"{fsi_reynolds_number_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{fsi_max_reynolds_number_drop_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
@@ -14740,8 +14740,8 @@ def evaluate_release_readiness(
         "nonlinear_max_path_mix_effective_modulus_scale_drop_trend_ratio_threshold": nonlinear_max_path_mix_effective_modulus_scale_drop_trend_ratio_threshold,
         "nonlinear_path_mix_material_spread_ratio_trend_ratio": nonlinear_path_mix_material_spread_ratio_trend_ratio,
         "nonlinear_max_path_mix_material_spread_ratio_trend_ratio_threshold": nonlinear_max_path_mix_material_spread_ratio_trend_ratio_threshold,
-        "cfd_min_reynolds_proxy": cfd_min_reynolds_proxy,
-        "cfd_min_reynolds_proxy_threshold": cfd_min_reynolds_proxy_threshold,
+        "cfd_min_reynolds_number": cfd_min_reynolds_number,
+        "cfd_min_reynolds_number_threshold": cfd_min_reynolds_number_threshold,
         "cfd_min_reference_density_kg_per_m3": cfd_min_reference_density_kg_per_m3,
         "cfd_min_reference_density_kg_per_m3_threshold": cfd_min_reference_density_kg_per_m3_threshold,
         "cfd_min_dynamic_viscosity_pa_s": cfd_min_dynamic_viscosity_pa_s,
@@ -14752,8 +14752,8 @@ def evaluate_release_readiness(
         "cfd_max_turbulence_intensity_threshold": cfd_max_turbulence_intensity_threshold,
         "cfd_min_profile_point_count": cfd_min_profile_point_count,
         "cfd_min_profile_point_count_threshold": cfd_min_profile_point_count_threshold,
-        "cht_min_reynolds_proxy": cht_min_reynolds_proxy,
-        "cht_min_reynolds_proxy_threshold": cht_min_reynolds_proxy_threshold,
+        "cht_min_reynolds_number": cht_min_reynolds_number,
+        "cht_min_reynolds_number_threshold": cht_min_reynolds_number_threshold,
         "cht_min_applied_temperature_delta_k": cht_min_applied_temperature_delta_k,
         "cht_min_applied_temperature_delta_k_threshold": cht_min_applied_temperature_delta_k_threshold,
         "cht_min_reference_density_kg_per_m3": cht_min_reference_density_kg_per_m3,
@@ -14770,8 +14770,8 @@ def evaluate_release_readiness(
         "cht_min_step_count_threshold": cht_min_step_count_threshold,
         "cht_max_time_step_s": cht_max_time_step_s,
         "cht_max_time_step_s_threshold": cht_max_time_step_s_threshold,
-        "fsi_min_reynolds_proxy": fsi_min_reynolds_proxy,
-        "fsi_min_reynolds_proxy_threshold": fsi_min_reynolds_proxy_threshold,
+        "fsi_min_reynolds_number": fsi_min_reynolds_number,
+        "fsi_min_reynolds_number_threshold": fsi_min_reynolds_number_threshold,
         "fsi_min_structural_step_count": fsi_min_structural_step_count,
         "fsi_min_structural_step_count_threshold": fsi_min_structural_step_count_threshold,
         "fsi_min_reference_density_kg_per_m3": fsi_min_reference_density_kg_per_m3,
@@ -14790,8 +14790,8 @@ def evaluate_release_readiness(
         "fsi_max_time_step_s_threshold": fsi_max_time_step_s_threshold,
         "fsi_min_cfd_profile_point_count": fsi_min_cfd_profile_point_count,
         "fsi_min_cfd_profile_point_count_threshold": fsi_min_cfd_profile_point_count_threshold,
-        "cfd_reynolds_proxy_drop_trend_ratio": cfd_reynolds_proxy_drop_trend_ratio,
-        "cfd_max_reynolds_proxy_drop_trend_ratio_threshold": cfd_max_reynolds_proxy_drop_trend_ratio_threshold,
+        "cfd_reynolds_number_drop_trend_ratio": cfd_reynolds_number_drop_trend_ratio,
+        "cfd_max_reynolds_number_drop_trend_ratio_threshold": cfd_max_reynolds_number_drop_trend_ratio_threshold,
         "cfd_reference_density_drop_trend_ratio": cfd_reference_density_drop_trend_ratio,
         "cfd_max_reference_density_drop_trend_ratio_threshold": cfd_max_reference_density_drop_trend_ratio_threshold,
         "cfd_dynamic_viscosity_drop_trend_ratio": cfd_dynamic_viscosity_drop_trend_ratio,
@@ -14802,8 +14802,8 @@ def evaluate_release_readiness(
         "cfd_max_turbulence_intensity_trend_ratio_threshold": cfd_max_turbulence_intensity_trend_ratio_threshold,
         "cfd_profile_point_count_drop_trend_ratio": cfd_profile_point_count_drop_trend_ratio,
         "cfd_max_profile_point_count_drop_trend_ratio_threshold": cfd_max_profile_point_count_drop_trend_ratio_threshold,
-        "cht_reynolds_proxy_drop_trend_ratio": cht_reynolds_proxy_drop_trend_ratio,
-        "cht_max_reynolds_proxy_drop_trend_ratio_threshold": cht_max_reynolds_proxy_drop_trend_ratio_threshold,
+        "cht_reynolds_number_drop_trend_ratio": cht_reynolds_number_drop_trend_ratio,
+        "cht_max_reynolds_number_drop_trend_ratio_threshold": cht_max_reynolds_number_drop_trend_ratio_threshold,
         "cht_applied_temperature_delta_drop_trend_ratio": cht_applied_temperature_delta_drop_trend_ratio,
         "cht_max_applied_temperature_delta_drop_trend_ratio_threshold": cht_max_applied_temperature_delta_drop_trend_ratio_threshold,
         "cht_reference_density_drop_trend_ratio": cht_reference_density_drop_trend_ratio,
@@ -14820,8 +14820,8 @@ def evaluate_release_readiness(
         "cht_max_step_count_drop_trend_ratio_threshold": cht_max_step_count_drop_trend_ratio_threshold,
         "cht_time_step_s_trend_ratio": cht_time_step_s_trend_ratio,
         "cht_max_time_step_s_trend_ratio_threshold": cht_max_time_step_s_trend_ratio_threshold,
-        "fsi_reynolds_proxy_drop_trend_ratio": fsi_reynolds_proxy_drop_trend_ratio,
-        "fsi_max_reynolds_proxy_drop_trend_ratio_threshold": fsi_max_reynolds_proxy_drop_trend_ratio_threshold,
+        "fsi_reynolds_number_drop_trend_ratio": fsi_reynolds_number_drop_trend_ratio,
+        "fsi_max_reynolds_number_drop_trend_ratio_threshold": fsi_max_reynolds_number_drop_trend_ratio_threshold,
         "fsi_structural_step_count_drop_trend_ratio": fsi_structural_step_count_drop_trend_ratio,
         "fsi_max_structural_step_count_drop_trend_ratio_threshold": fsi_max_structural_step_count_drop_trend_ratio_threshold,
         "fsi_reference_density_drop_trend_ratio": fsi_reference_density_drop_trend_ratio,
@@ -15742,8 +15742,8 @@ def markdown_summary(result: dict) -> str:
     lines.append("")
     lines.append("### Coupled Flow Posture")
     lines.append(
-        "- CFD min Reynolds proxy/threshold: "
-        f"`{result.get('cfd_min_reynolds_proxy') if result.get('cfd_min_reynolds_proxy') is not None else '-'}`/`{result.get('cfd_min_reynolds_proxy_threshold') if result.get('cfd_min_reynolds_proxy_threshold') is not None else '-'}`"
+        "- CFD min Reynolds number/threshold: "
+        f"`{result.get('cfd_min_reynolds_number') if result.get('cfd_min_reynolds_number') is not None else '-'}`/`{result.get('cfd_min_reynolds_number_threshold') if result.get('cfd_min_reynolds_number_threshold') is not None else '-'}`"
     )
     lines.append(
         "- CFD density/viscosity/velocity/turbulence/profile thresholds: "
@@ -15754,8 +15754,8 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('cfd_min_profile_point_count') if result.get('cfd_min_profile_point_count') is not None else '-'}`/`{result.get('cfd_min_profile_point_count_threshold') if result.get('cfd_min_profile_point_count_threshold') is not None else '-'}`"
     )
     lines.append(
-        "- CHT min Reynolds proxy and temperature delta K thresholds: "
-        f"`{result.get('cht_min_reynolds_proxy') if result.get('cht_min_reynolds_proxy') is not None else '-'}`/`{result.get('cht_min_reynolds_proxy_threshold') if result.get('cht_min_reynolds_proxy_threshold') is not None else '-'}` and `{result.get('cht_min_applied_temperature_delta_k') if result.get('cht_min_applied_temperature_delta_k') is not None else '-'}`/`{result.get('cht_min_applied_temperature_delta_k_threshold') if result.get('cht_min_applied_temperature_delta_k_threshold') is not None else '-'}`"
+        "- CHT min Reynolds number and temperature delta K thresholds: "
+        f"`{result.get('cht_min_reynolds_number') if result.get('cht_min_reynolds_number') is not None else '-'}`/`{result.get('cht_min_reynolds_number_threshold') if result.get('cht_min_reynolds_number_threshold') is not None else '-'}` and `{result.get('cht_min_applied_temperature_delta_k') if result.get('cht_min_applied_temperature_delta_k') is not None else '-'}`/`{result.get('cht_min_applied_temperature_delta_k_threshold') if result.get('cht_min_applied_temperature_delta_k_threshold') is not None else '-'}`"
     )
     lines.append(
         "- CHT density/viscosity/velocity/turbulence thresholds: "
@@ -15765,8 +15765,8 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('cht_max_turbulence_intensity') if result.get('cht_max_turbulence_intensity') is not None else '-'}`/`{result.get('cht_max_turbulence_intensity_threshold') if result.get('cht_max_turbulence_intensity_threshold') is not None else '-'}`"
     )
     lines.append(
-        "- FSI min Reynolds proxy and structural step-count thresholds: "
-        f"`{result.get('fsi_min_reynolds_proxy') if result.get('fsi_min_reynolds_proxy') is not None else '-'}`/`{result.get('fsi_min_reynolds_proxy_threshold') if result.get('fsi_min_reynolds_proxy_threshold') is not None else '-'}` and `{result.get('fsi_min_structural_step_count') if result.get('fsi_min_structural_step_count') is not None else '-'}`/`{result.get('fsi_min_structural_step_count_threshold') if result.get('fsi_min_structural_step_count_threshold') is not None else '-'}`"
+        "- FSI min Reynolds number and structural step-count thresholds: "
+        f"`{result.get('fsi_min_reynolds_number') if result.get('fsi_min_reynolds_number') is not None else '-'}`/`{result.get('fsi_min_reynolds_number_threshold') if result.get('fsi_min_reynolds_number_threshold') is not None else '-'}` and `{result.get('fsi_min_structural_step_count') if result.get('fsi_min_structural_step_count') is not None else '-'}`/`{result.get('fsi_min_structural_step_count_threshold') if result.get('fsi_min_structural_step_count_threshold') is not None else '-'}`"
     )
     lines.append(
         "- FSI density/viscosity/velocity/turbulence thresholds: "
@@ -15790,7 +15790,7 @@ def markdown_summary(result: dict) -> str:
     )
     lines.append(
         "- Coupled-flow trend ratios (CFD Reynolds, CHT Reynolds, CHT delta K, FSI Reynolds, FSI structural steps): "
-        f"`{result.get('cfd_reynolds_proxy_drop_trend_ratio') if result.get('cfd_reynolds_proxy_drop_trend_ratio') is not None else '-'}`/`{result.get('cht_reynolds_proxy_drop_trend_ratio') if result.get('cht_reynolds_proxy_drop_trend_ratio') is not None else '-'}`/`{result.get('cht_applied_temperature_delta_drop_trend_ratio') if result.get('cht_applied_temperature_delta_drop_trend_ratio') is not None else '-'}`/`{result.get('fsi_reynolds_proxy_drop_trend_ratio') if result.get('fsi_reynolds_proxy_drop_trend_ratio') is not None else '-'}`/`{result.get('fsi_structural_step_count_drop_trend_ratio') if result.get('fsi_structural_step_count_drop_trend_ratio') is not None else '-'}`"
+        f"`{result.get('cfd_reynolds_number_drop_trend_ratio') if result.get('cfd_reynolds_number_drop_trend_ratio') is not None else '-'}`/`{result.get('cht_reynolds_number_drop_trend_ratio') if result.get('cht_reynolds_number_drop_trend_ratio') is not None else '-'}`/`{result.get('cht_applied_temperature_delta_drop_trend_ratio') if result.get('cht_applied_temperature_delta_drop_trend_ratio') is not None else '-'}`/`{result.get('fsi_reynolds_number_drop_trend_ratio') if result.get('fsi_reynolds_number_drop_trend_ratio') is not None else '-'}`/`{result.get('fsi_structural_step_count_drop_trend_ratio') if result.get('fsi_structural_step_count_drop_trend_ratio') is not None else '-'}`"
     )
     lines.append(
         "- Coupled-flow profile-property trend ratios (CFD density/viscosity/velocity/turbulence/profile, CHT density/viscosity/velocity/turbulence, FSI density/viscosity/velocity/turbulence): "

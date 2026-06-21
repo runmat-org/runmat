@@ -967,13 +967,20 @@ impl AnalysisFieldDescriptor {
 
 fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
     let normalized = field_id.to_ascii_lowercase();
-    if normalized.contains("temperature_gradient") || normalized.contains("heat_flux") {
+    if normalized.contains("temperature_gradient")
+        || normalized.contains("heat_flux")
+        || normalized.contains("wall_shear_stress")
+        || normalized.contains("vorticity")
+        || normalized.contains("velocity")
+        || normalized.contains("traction")
+    {
         return AnalysisFieldKind::Vector;
     }
     if normalized.contains("von_mises")
         || normalized.contains("equivalent_plastic_strain")
         || normalized.contains("pressure")
         || normalized.contains("phase")
+        || normalized.contains("reynolds_number")
         || normalized.contains("temperature")
         || normalized.contains("energy")
         || normalized.contains("residual")
@@ -1011,7 +1018,13 @@ fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
     if normalized.contains("equivalent_plastic_strain") {
         return None;
     }
-    if normalized.contains("temperature_gradient") || normalized.contains("heat_flux") {
+    if normalized.contains("temperature_gradient")
+        || normalized.contains("heat_flux")
+        || normalized.contains("wall_shear_stress")
+        || normalized.contains("vorticity")
+        || normalized.contains("velocity")
+        || normalized.contains("traction")
+    {
         return Some(
             shape
                 .last()

@@ -18,21 +18,25 @@ use runmat_analysis_core::{
     ReferenceFrame,
 };
 use runmat_analysis_fea::{
+    fea_cht_energy_residual_field_id, fea_cht_fluid_temperature_field_id,
     fea_electro_thermal_temperature_field_id, fea_electro_thermal_thermal_residual_field_id,
-    fea_modal_mode_shape_field_id, fea_nonlinear_contact_gap_field_id,
-    fea_nonlinear_contact_pressure_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
-    fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
-    fea_nonlinear_residual_norm_field_id, fea_nonlinear_von_mises_field_id,
-    fea_thermal_boundary_heat_flux_field_id, fea_thermal_heat_flux_field_id,
-    fea_thermal_heat_source_field_id, fea_thermal_temperature_gradient_field_id,
-    fea_thermo_mechanical_coupling_residual_field_id, fea_thermo_mechanical_displacement_field_id,
-    fea_thermo_mechanical_temperature_field_id, fea_thermo_mechanical_thermal_strain_field_id,
-    fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
-    fea_transient_acceleration_field_id, fea_transient_kinetic_energy_field_id,
-    fea_transient_residual_norm_field_id, fea_transient_strain_energy_field_id,
-    fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
-    FeaProgressPhase, FeaProgressStatus, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
+    fea_fsi_coupling_iteration_count_field_id, fea_fsi_fluid_velocity_field_id,
+    fea_fsi_interface_pressure_field_id, fea_modal_mode_shape_field_id,
+    fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
+    fea_nonlinear_equivalent_plastic_strain_field_id, fea_nonlinear_load_factor_field_id,
+    fea_nonlinear_plastic_strain_field_id, fea_nonlinear_residual_norm_field_id,
+    fea_nonlinear_von_mises_field_id, fea_thermal_boundary_heat_flux_field_id,
+    fea_thermal_heat_flux_field_id, fea_thermal_heat_source_field_id,
+    fea_thermal_temperature_gradient_field_id, fea_thermo_mechanical_coupling_residual_field_id,
+    fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
+    fea_thermo_mechanical_thermal_strain_field_id, fea_thermo_mechanical_thermal_stress_field_id,
+    fea_thermo_mechanical_von_mises_field_id, fea_transient_acceleration_field_id,
+    fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
+    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
+    fea_transient_von_mises_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
+    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_REYNOLDS_NUMBER,
+    FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
     FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
     FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
     FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
@@ -4777,8 +4781,29 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_CFD_FLOW"
-            && diag.message.contains("reynolds_proxy=")
+            && diag.message.contains("reynolds_number=")
             && diag.message.contains("solve_family=steady_state")));
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("cfd results should be queryable");
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == FEA_FIELD_CFD_VELOCITY));
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == FEA_FIELD_CFD_PRESSURE));
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == FEA_FIELD_CFD_REYNOLDS_NUMBER));
 }
 
 #[test]
@@ -4816,7 +4841,7 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         .run
         .diagnostics
         .iter()
-        .any(|diag| diag.code == "FEA_CFD_FLOW" && diag.message.contains("reynolds_proxy=")));
+        .any(|diag| diag.code == "FEA_CFD_FLOW" && diag.message.contains("reynolds_number=")));
     assert!(envelope
         .data
         .run
@@ -4840,6 +4865,32 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         transient.displacement_snapshots.len()
     );
     assert_eq!(thermal.time_points_s.len(), 4);
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("cht results should be queryable");
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == FEA_FIELD_CHT_FLUID_VELOCITY));
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == FEA_FIELD_CHT_FLUID_PRESSURE));
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == fea_cht_fluid_temperature_field_id(0)));
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == fea_cht_energy_residual_field_id(0)));
 }
 
 #[test]
@@ -4877,7 +4928,7 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         .run
         .diagnostics
         .iter()
-        .any(|diag| diag.code == "FEA_CFD_FLOW" && diag.message.contains("reynolds_proxy=")));
+        .any(|diag| diag.code == "FEA_CFD_FLOW" && diag.message.contains("reynolds_number=")));
     assert!(envelope
         .data
         .run
@@ -4895,6 +4946,27 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         transient.time_points_s.len(),
         transient.displacement_snapshots.len()
     );
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("fsi results should be queryable");
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == fea_fsi_fluid_velocity_field_id(0)));
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == fea_fsi_interface_pressure_field_id(0)));
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == fea_fsi_coupling_iteration_count_field_id(0)));
 }
 
 #[test]

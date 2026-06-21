@@ -8,8 +8,9 @@ use runmat_analysis_fea::{
     FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
-    FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
 use runmat_runtime::analysis::{
@@ -97,7 +98,13 @@ fn assert_fallback_event_schema(event: &str) {
     } else {
         assert!(
             parts[1] == FEA_FIELD_STRUCTURAL_DISPLACEMENT
-                || parts[1] == FEA_FIELD_STRUCTURAL_VON_MISES,
+                || parts[1] == FEA_FIELD_STRUCTURAL_VON_MISES
+                || parts[1] == FEA_FIELD_STRUCTURAL_STRAIN
+                || parts[1] == FEA_FIELD_STRUCTURAL_STRESS
+                || parts[1] == FEA_FIELD_STRUCTURAL_REACTION_FORCE
+                || parts[1] == FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY
+                || parts[1] == FEA_FIELD_STRUCTURAL_RESIDUAL_NORM
+                || parts[1] == FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
             "unexpected fallback stage: {}",
             parts[1]
         );

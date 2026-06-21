@@ -2720,7 +2720,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "cfd_reynolds_proxy",
+            "name": "cfd_reynolds_number",
             "fixture_id": "cfd_steady_gpu_provider",
             "observed": 340000.0,
             "reference": 338000.0,
@@ -2790,7 +2790,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "cfd_reynolds_proxy",
+            "name": "cfd_reynolds_number",
             "fixture_id": "cfd_steady_cpu",
             "observed": 338397.79005524865,
             "reference": 338397.79005524865,
@@ -2846,7 +2846,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "cfd_reynolds_proxy",
+            "name": "cfd_reynolds_number",
             "fixture_id": "cfd_steady_gpu_fallback",
             "observed": 338397.79005524865,
             "reference": 338397.79005524865,
@@ -2909,7 +2909,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "cht_reynolds_proxy",
+            "name": "cht_reynolds_number",
             "fixture_id": "cht_coupled_gpu_provider",
             "observed": 338000.0,
             "reference": 338000.0,
@@ -3000,7 +3000,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "cht_reynolds_proxy",
+            "name": "cht_reynolds_number",
             "fixture_id": "cht_coupled_cpu",
             "observed": 338397.79005524865,
             "reference": 338397.79005524865,
@@ -3077,7 +3077,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "cht_reynolds_proxy",
+            "name": "cht_reynolds_number",
             "fixture_id": "cht_coupled_gpu_fallback",
             "observed": 338397.79005524865,
             "reference": 338397.79005524865,
@@ -3119,7 +3119,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "fsi_reynolds_proxy",
+            "name": "fsi_reynolds_number",
             "fixture_id": "fsi_coupled_cpu",
             "observed": 270718.2320441989,
             "reference": 270718.2320441989,
@@ -3203,7 +3203,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "fsi_reynolds_proxy",
+            "name": "fsi_reynolds_number",
             "fixture_id": "fsi_coupled_gpu_fallback",
             "observed": 270718.2320441989,
             "reference": 270718.2320441989,
@@ -3287,7 +3287,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "fsi_reynolds_proxy",
+            "name": "fsi_reynolds_number",
             "fixture_id": "fsi_coupled_gpu_provider",
             "observed": 271000.0,
             "reference": 270000.0,
