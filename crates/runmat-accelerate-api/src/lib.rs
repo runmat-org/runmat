@@ -220,6 +220,40 @@ pub struct GpuTensorHandle {
     pub buffer_id: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderSpectralRange {
+    Onesided,
+    Twosided,
+    Centered,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderSpectralFrameMode {
+    Sliding { hop: usize },
+    FoldedColumns { input_rows: usize },
+}
+
+#[derive(Clone, Debug)]
+pub struct ProviderSpectralRequest<'a> {
+    pub input: &'a GpuTensorHandle,
+    pub input_len: usize,
+    pub input_complex: bool,
+    pub window: &'a [f64],
+    pub nfft: usize,
+    pub frame_count: usize,
+    pub frame_mode: ProviderSpectralFrameMode,
+    pub range: ProviderSpectralRange,
+    pub denominator: f64,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProviderSpectralResult {
+    pub s: GpuTensorHandle,
+    pub ps: GpuTensorHandle,
+    pub rows: usize,
+    pub cols: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ApiDeviceInfo {
     pub device_id: u32,
@@ -1990,6 +2024,12 @@ pub trait AccelProvider: Send + Sync {
         _options: ProviderIirFilterOptions,
     ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {
         Box::pin(async move { Err(anyhow::anyhow!("iir_filter not supported by provider")) })
+    }
+    fn uniform_spectral_estimate<'a>(
+        &'a self,
+        _request: &'a ProviderSpectralRequest<'a>,
+    ) -> AccelProviderFuture<'a, ProviderSpectralResult> {
+        unsupported_future("uniform_spectral_estimate not supported by provider")
     }
     /// Reorder tensor dimensions according to `order`, expressed as zero-based indices.
     fn permute(
