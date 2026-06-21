@@ -4879,6 +4879,18 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
             && diag.message.contains("mass_balance_residual=")
             && diag.message.contains("pressure_drop_pa=")
     }));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_CFD_BOUNDARY_CONDITIONS"
+            && diag.message.contains("inlet_boundary_count=")
+            && diag.message.contains("outlet_boundary_count=")
+            && diag.message.contains("wall_boundary_count=")
+            && diag.message.contains("boundary_coverage_ratio=")
+    }));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_CFD_TRANSIENT_EVOLUTION"
+            && diag.message.contains("solve_family=steady_state")
+            && diag.message.contains("transient_scale_variation=")
+    }));
     let results = analysis_results_op(
         &envelope.data,
         AnalysisResultsQuery::default(),

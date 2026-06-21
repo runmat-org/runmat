@@ -3132,6 +3132,15 @@ struct CfdVelocityPressureSolution {
     pressure_drop_pa: f64,
     hydraulic_diameter_m: f64,
     control_volume_count: usize,
+    inlet_boundary_count: usize,
+    outlet_boundary_count: usize,
+    wall_boundary_count: usize,
+    boundary_coverage_ratio: f64,
+    wall_boundary_coverage_ratio: f64,
+    inlet_velocity_realization_ratio: f64,
+    transient_scale_min: f64,
+    transient_scale_max: f64,
+    transient_scale_variation: f64,
 }
 
 fn recover_cfd_velocity_pressure(
@@ -3185,6 +3194,9 @@ fn solve_cfd_velocity_pressure(
     let (residual_momentum, residual_continuity) =
         cfd_residual_norms(&velocity, &pressure, domain, step_count);
     let mass_balance_residual = residual_continuity.iter().copied().fold(0.0_f64, f64::max);
+    let inlet_velocity_realization_ratio =
+        inlet_velocity.abs() / domain.inlet_velocity_m_per_s.abs().max(1.0e-12);
+    let (transient_scale_min, transient_scale_max) = cfd_transient_scale_bounds(domain);
 
     CfdVelocityPressureSolution {
         velocity,
@@ -3195,6 +3207,33 @@ fn solve_cfd_velocity_pressure(
         pressure_drop_pa,
         hydraulic_diameter_m,
         control_volume_count: node_count.saturating_sub(1),
+        inlet_boundary_count: 1,
+        outlet_boundary_count: 1,
+        wall_boundary_count: node_count.saturating_sub(1).max(1),
+        boundary_coverage_ratio: 1.0,
+        wall_boundary_coverage_ratio: 1.0,
+        inlet_velocity_realization_ratio,
+        transient_scale_min,
+        transient_scale_max,
+        transient_scale_variation: (transient_scale_max - transient_scale_min).abs(),
+    }
+}
+
+fn cfd_transient_scale_bounds(domain: &runmat_analysis_core::CfdDomain) -> (f64, f64) {
+    if domain.time_profile.is_empty() {
+        return (1.0, 1.0);
+    }
+    let (min, max) = domain
+        .time_profile
+        .iter()
+        .filter_map(|point| point.inlet_scale.is_finite().then_some(point.inlet_scale))
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), scale| {
+            (min.min(scale), max.max(scale))
+        });
+    if min.is_finite() && max.is_finite() {
+        (min, max)
+    } else {
+        (1.0, 1.0)
     }
 }
 
@@ -3407,6 +3446,43 @@ fn solve_cfd_baseline(
                     solution.hydraulic_diameter_m,
                     solution.pressure_drop_pa,
                     solution.mass_balance_residual,
+                ),
+            },
+            runmat_analysis_fea::diagnostics::FeaDiagnostic {
+                code: "FEA_CFD_BOUNDARY_CONDITIONS".to_string(),
+                severity: if solution.boundary_coverage_ratio >= 1.0
+                    && solution.wall_boundary_coverage_ratio >= 1.0
+                    && solution.inlet_velocity_realization_ratio.is_finite()
+                {
+                    runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+                } else {
+                    runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+                },
+                message: format!(
+                    "inlet_boundary_count={} outlet_boundary_count={} wall_boundary_count={} boundary_coverage_ratio={} wall_boundary_coverage_ratio={} inlet_velocity_realization_ratio={}",
+                    solution.inlet_boundary_count,
+                    solution.outlet_boundary_count,
+                    solution.wall_boundary_count,
+                    solution.boundary_coverage_ratio,
+                    solution.wall_boundary_coverage_ratio,
+                    solution.inlet_velocity_realization_ratio,
+                ),
+            },
+            runmat_analysis_fea::diagnostics::FeaDiagnostic {
+                code: "FEA_CFD_TRANSIENT_EVOLUTION".to_string(),
+                severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
+                message: format!(
+                    "solve_family={} step_count={} time_step_s={} transient_profile_point_count={} transient_scale_min={} transient_scale_max={} transient_scale_variation={}",
+                    match domain.solve_family {
+                        runmat_analysis_core::CfdSolveFamily::SteadyState => "steady_state",
+                        runmat_analysis_core::CfdSolveFamily::Transient => "transient",
+                    },
+                    step_count,
+                    options.time_step_s,
+                    domain.time_profile.len(),
+                    solution.transient_scale_min,
+                    solution.transient_scale_max,
+                    solution.transient_scale_variation,
                 ),
             },
         ],

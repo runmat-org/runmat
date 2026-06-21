@@ -3691,6 +3691,76 @@ pub(super) fn run_fixture(
                 Some(2.0),
                 None,
             );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_inlet_boundary_count",
+                "FEA_CFD_BOUNDARY_CONDITIONS",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_BOUNDARY_CONDITIONS",
+                    "inlet_boundary_count",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_outlet_boundary_count",
+                "FEA_CFD_BOUNDARY_CONDITIONS",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_BOUNDARY_CONDITIONS",
+                    "outlet_boundary_count",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_wall_boundary_count",
+                "FEA_CFD_BOUNDARY_CONDITIONS",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_BOUNDARY_CONDITIONS",
+                    "wall_boundary_count",
+                ),
+                Some(2.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_boundary_coverage_ratio",
+                "FEA_CFD_BOUNDARY_CONDITIONS",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_BOUNDARY_CONDITIONS",
+                    "boundary_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_wall_boundary_coverage_ratio",
+                "FEA_CFD_BOUNDARY_CONDITIONS",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_BOUNDARY_CONDITIONS",
+                    "wall_boundary_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
         }
         if spec.id.starts_with("cht_coupled_") {
             push_threshold_assertion(
