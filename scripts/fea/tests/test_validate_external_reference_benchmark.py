@@ -4730,6 +4730,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "electro_thermal_benign_conduction_edge_count",
+            "fixture_id": "electro_thermal_joule_benign_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
+            "name": "electro_thermal_benign_topology_coverage_ratio",
+            "fixture_id": "electro_thermal_joule_benign_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
             "name": "electro_thermal_benign_ohms_law_residual_ratio",
             "fixture_id": "electro_thermal_joule_benign_gpu_provider",
             "observed": 0.0,
@@ -4751,7 +4765,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electro_thermal_benign_resistor_known_answer_coverage_ratio",
+            "name": "electro_thermal_benign_conduction_graph_coverage_ratio",
             "fixture_id": "electro_thermal_joule_benign_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,
@@ -4870,6 +4884,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "electro_thermal_pathological_conduction_edge_count",
+            "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
+            "name": "electro_thermal_pathological_topology_coverage_ratio",
+            "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
             "name": "electro_thermal_pathological_ohms_law_residual_ratio",
             "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
             "observed": 0.0,
@@ -4891,7 +4919,7 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "electro_thermal_pathological_resistor_known_answer_coverage_ratio",
+            "name": "electro_thermal_pathological_conduction_graph_coverage_ratio",
             "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,

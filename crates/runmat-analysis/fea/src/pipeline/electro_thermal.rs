@@ -13,6 +13,24 @@ use crate::{
 const VECTOR_COMPONENT_COUNT: usize = 3;
 const MIN_CONDUCTIVITY: f64 = 1.0e-12;
 
+#[derive(Debug, Clone, Copy)]
+struct ConductanceEdge {
+    from: usize,
+    to: usize,
+    conductance: f64,
+}
+
+#[derive(Debug)]
+struct ConductanceDomainGraph {
+    edges: Vec<ConductanceEdge>,
+    node_degrees: Vec<usize>,
+    boundary_node_count: usize,
+    max_node_degree: usize,
+    mean_node_degree: f64,
+    conductance_span_ratio: f64,
+    topology_coverage_ratio: f64,
+}
+
 #[derive(Default)]
 pub(crate) struct ElectroThermalFields {
     pub(crate) static_fields: Vec<AnalysisField>,
@@ -24,14 +42,16 @@ pub(crate) struct ElectroThermalFields {
 #[derive(Debug)]
 struct ElectroThermalPotentialSolve {
     potential: Vec<f64>,
-    segment_conductance: Vec<f64>,
-    segment_current: Vec<f64>,
+    graph: ConductanceDomainGraph,
+    edge_current: Vec<f64>,
+    nodal_unscaled_joule_heat: Vec<f64>,
     residual_norm: f64,
     equation_scale: f64,
     current_balance_residual: f64,
     potential_span_v: f64,
     integrated_joule_heat_w: f64,
     condition_estimate: f64,
+    source_current_a: f64,
 }
 
 pub(crate) fn recover_electro_thermal_fields(
@@ -45,48 +65,46 @@ pub(crate) fn recover_electro_thermal_fields(
     };
 
     let node_count = dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1);
-    let solve = solve_scalar_potential(summary, node_count);
+    let solve = solve_conductance_domain_graph(summary, node_count);
     let mut electric_field = Vec::with_capacity(node_count * VECTOR_COMPONENT_COUNT);
     let mut current_density = Vec::with_capacity(node_count * VECTOR_COMPONENT_COUNT);
-    let mut unscaled_joule_heat = Vec::with_capacity(node_count);
-    for index in 0..node_count {
-        let left_segment = index
-            .saturating_sub(1)
-            .min(solve.segment_current.len().saturating_sub(1));
-        let right_segment = index.min(solve.segment_current.len().saturating_sub(1));
-        let current = match solve.segment_current.len() {
-            0 => 0.0,
-            _ if index == 0 => solve.segment_current[0],
-            len if index >= len => solve.segment_current[len - 1],
-            _ => 0.5 * (solve.segment_current[left_segment] + solve.segment_current[right_segment]),
-        };
-        let conductance = match solve.segment_conductance.len() {
-            0 => MIN_CONDUCTIVITY,
-            _ if index == 0 => solve.segment_conductance[0],
-            len if index >= len => solve.segment_conductance[len - 1],
-            _ => {
-                0.5 * (solve.segment_conductance[left_segment]
-                    + solve.segment_conductance[right_segment])
-            }
-        };
-        let local_field = if conductance.abs() > MIN_CONDUCTIVITY {
-            current / conductance
-        } else {
-            0.0
-        };
-        let local_joule_heat = current * current / conductance.max(MIN_CONDUCTIVITY);
-
-        electric_field.extend_from_slice(&[local_field, 0.0, 0.0]);
-        current_density.extend_from_slice(&[current, 0.0, 0.0]);
-        unscaled_joule_heat.push(local_joule_heat.max(0.0));
+    let mut nodal_field_sum = vec![0.0_f64; node_count];
+    let mut nodal_current_sum = vec![0.0_f64; node_count];
+    let signed_span = solve
+        .potential
+        .first()
+        .zip(solve.potential.last())
+        .map(|(first, last)| first - last)
+        .unwrap_or(0.0)
+        .signum();
+    for (edge, current) in solve.graph.edges.iter().zip(solve.edge_current.iter()) {
+        let voltage_drop = solve.potential[edge.from] - solve.potential[edge.to];
+        let local_field = voltage_drop;
+        let oriented_current = current.abs() * signed_span;
+        nodal_field_sum[edge.from] += local_field;
+        nodal_field_sum[edge.to] += local_field;
+        nodal_current_sum[edge.from] += oriented_current;
+        nodal_current_sum[edge.to] += oriented_current;
     }
-    let unscaled_joule_integral = unscaled_joule_heat.iter().sum::<f64>();
+    for index in 0..node_count {
+        let degree = solve
+            .graph
+            .node_degrees
+            .get(index)
+            .copied()
+            .unwrap_or_default()
+            .max(1) as f64;
+        electric_field.extend_from_slice(&[nodal_field_sum[index] / degree, 0.0, 0.0]);
+        current_density.extend_from_slice(&[nodal_current_sum[index] / degree, 0.0, 0.0]);
+    }
+    let unscaled_joule_integral = solve.nodal_unscaled_joule_heat.iter().sum::<f64>();
     let heating_scale = if unscaled_joule_integral > 1.0e-12 {
         summary.joule_heating_scale.max(0.0) / unscaled_joule_integral
     } else {
         0.0
     };
-    let joule_heat = unscaled_joule_heat
+    let joule_heat = solve
+        .nodal_unscaled_joule_heat
         .iter()
         .map(|value| value * heating_scale)
         .collect::<Vec<_>>();
@@ -98,7 +116,7 @@ pub(crate) fn recover_electro_thermal_fields(
 
     let diagnostics = vec![
         electro_thermal_potential_solve_diagnostic(node_count, &solve),
-        electro_thermal_resistor_known_answer_diagnostic(node_count, &solve),
+        electro_thermal_conduction_conservation_diagnostic(node_count, &solve),
     ];
 
     let static_fields = vec![
@@ -177,99 +195,262 @@ pub(crate) fn recover_electro_thermal_fields(
     }
 }
 
-fn solve_scalar_potential(
+fn solve_conductance_domain_graph(
     summary: &ElectroThermalAssemblySummary,
     node_count: usize,
 ) -> ElectroThermalPotentialSolve {
     let node_count = node_count.max(1);
     let potential_span_v = summary.applied_voltage_v.abs();
+    let graph = build_conductance_domain_graph(summary, node_count);
     if node_count == 1 {
         return ElectroThermalPotentialSolve {
             potential: vec![summary.applied_voltage_v],
-            segment_conductance: Vec::new(),
-            segment_current: Vec::new(),
+            graph,
+            edge_current: Vec::new(),
+            nodal_unscaled_joule_heat: vec![0.0],
             residual_norm: 0.0,
             equation_scale: potential_span_v.max(1.0),
             current_balance_residual: 0.0,
             potential_span_v,
             integrated_joule_heat_w: 0.0,
             condition_estimate: 1.0,
+            source_current_a: 0.0,
         };
     }
 
-    let segment_count = node_count - 1;
-    let segment_conductance = conductivity_profile(summary, segment_count);
-    let resistance_sum = segment_conductance
-        .iter()
-        .map(|conductance| 1.0 / conductance.max(MIN_CONDUCTIVITY))
-        .sum::<f64>()
-        .max(MIN_CONDUCTIVITY);
-    let signed_current = summary.applied_voltage_v / resistance_sum;
-    let mut potential = Vec::with_capacity(node_count);
-    let mut cursor = summary.applied_voltage_v;
-    potential.push(cursor);
-    for conductance in &segment_conductance {
-        cursor -= signed_current / conductance.max(MIN_CONDUCTIVITY);
-        potential.push(cursor);
-    }
-    if let Some(last) = potential.last_mut() {
-        *last = 0.0;
+    let mut potential = vec![0.0_f64; node_count];
+    potential[0] = summary.applied_voltage_v;
+    potential[node_count - 1] = 0.0;
+    let interior_count = node_count.saturating_sub(2);
+    if interior_count > 0 {
+        let mut matrix = vec![vec![0.0_f64; interior_count]; interior_count];
+        let mut rhs = vec![0.0_f64; interior_count];
+        for edge in &graph.edges {
+            let conductance = edge.conductance.max(MIN_CONDUCTIVITY);
+            accumulate_graph_equation(
+                edge.from,
+                edge.to,
+                conductance,
+                node_count,
+                &mut matrix,
+                &mut rhs,
+                &potential,
+            );
+        }
+        let interior = solve_dense_system(matrix, rhs);
+        for (offset, value) in interior.into_iter().enumerate() {
+            potential[offset + 1] = value;
+        }
     }
 
-    let segment_current = segment_conductance
+    let edge_current = graph
+        .edges
         .iter()
-        .enumerate()
-        .map(|(index, conductance)| {
-            let voltage_drop = potential[index] - potential[index + 1];
-            conductance * voltage_drop
+        .map(|edge| {
+            let voltage_drop = potential[edge.from] - potential[edge.to];
+            edge.conductance.max(MIN_CONDUCTIVITY) * voltage_drop
         })
         .collect::<Vec<_>>();
 
-    let equation_scale = segment_current
+    let equation_scale = edge_current
         .iter()
         .map(|value| value.abs())
         .fold(0.0_f64, f64::max)
         .max(potential_span_v)
         .max(1.0);
-    let max_residual = segment_current
-        .windows(2)
-        .map(|pair| (pair[0] - pair[1]).abs())
+    let nodal_balance = graph_current_balance(&graph, &edge_current, node_count);
+    let max_residual = nodal_balance[1..node_count - 1]
+        .iter()
+        .map(|value| value.abs())
         .fold(0.0_f64, f64::max);
     let residual_norm = max_residual / equation_scale;
+    let source_current_a = nodal_balance[0];
+    let ground_current_a = -nodal_balance[node_count - 1];
     let current_balance_residual =
-        if let (Some(first), Some(last)) = (segment_current.first(), segment_current.last()) {
-            (first - last).abs() / first.abs().max(last.abs()).max(1.0e-12)
-        } else {
+        if source_current_a.abs() <= 1.0e-12 && ground_current_a.abs() <= 1.0e-12 {
             0.0
+        } else {
+            (source_current_a - ground_current_a).abs()
+                / source_current_a
+                    .abs()
+                    .max(ground_current_a.abs())
+                    .max(1.0e-12)
         };
-    let integrated_joule_heat_w = segment_current
+    let mut nodal_unscaled_joule_heat = vec![0.0_f64; node_count];
+    let integrated_joule_heat_w = graph
+        .edges
         .iter()
-        .zip(segment_conductance.iter())
-        .map(|(current, conductance)| current * current / conductance.max(MIN_CONDUCTIVITY))
+        .zip(edge_current.iter())
+        .map(|(edge, current)| {
+            let edge_heat = current * current / edge.conductance.max(MIN_CONDUCTIVITY);
+            nodal_unscaled_joule_heat[edge.from] += 0.5 * edge_heat;
+            nodal_unscaled_joule_heat[edge.to] += 0.5 * edge_heat;
+            edge_heat
+        })
         .sum::<f64>()
         .abs();
-    let (min_conductance, max_conductance) = segment_conductance
-        .iter()
-        .fold((f64::INFINITY, 0.0_f64), |(min_value, max_value), value| {
-            (min_value.min(*value), max_value.max(*value))
-        });
-    let condition_estimate = if min_conductance.is_finite() && min_conductance > 0.0 {
-        (max_conductance / min_conductance).max(1.0)
-    } else {
-        1.0
-    };
+    let condition_estimate = graph.conductance_span_ratio * graph.max_node_degree.max(1) as f64;
 
     ElectroThermalPotentialSolve {
         potential,
-        segment_conductance,
-        segment_current,
+        graph,
+        edge_current,
+        nodal_unscaled_joule_heat,
         residual_norm,
         equation_scale,
         current_balance_residual,
         potential_span_v,
         integrated_joule_heat_w,
         condition_estimate,
+        source_current_a,
     }
+}
+
+fn build_conductance_domain_graph(
+    summary: &ElectroThermalAssemblySummary,
+    node_count: usize,
+) -> ConductanceDomainGraph {
+    let edge_count = node_count.saturating_sub(1);
+    let conductance = conductivity_profile(summary, edge_count);
+    let edges = conductance
+        .into_iter()
+        .enumerate()
+        .map(|(index, conductance)| ConductanceEdge {
+            from: index,
+            to: index + 1,
+            conductance,
+        })
+        .collect::<Vec<_>>();
+    let mut node_degrees = vec![0_usize; node_count];
+    for edge in &edges {
+        node_degrees[edge.from] += 1;
+        node_degrees[edge.to] += 1;
+    }
+    let max_node_degree = node_degrees.iter().copied().max().unwrap_or_default();
+    let mean_node_degree = if node_count == 0 {
+        0.0
+    } else {
+        node_degrees.iter().sum::<usize>() as f64 / node_count as f64
+    };
+    let (min_conductance, max_conductance) =
+        edges
+            .iter()
+            .fold((f64::INFINITY, 0.0_f64), |(min_value, max_value), edge| {
+                (
+                    min_value.min(edge.conductance),
+                    max_value.max(edge.conductance),
+                )
+            });
+    let conductance_span_ratio = if min_conductance.is_finite() && min_conductance > 0.0 {
+        (max_conductance / min_conductance).max(1.0)
+    } else {
+        1.0
+    };
+    let covered_nodes = node_degrees.iter().filter(|degree| **degree > 0).count();
+    let topology_coverage_ratio = if node_count == 0 {
+        0.0
+    } else if node_count == 1 {
+        1.0
+    } else {
+        covered_nodes as f64 / node_count as f64
+    };
+
+    ConductanceDomainGraph {
+        edges,
+        node_degrees,
+        boundary_node_count: node_count.min(2),
+        max_node_degree,
+        mean_node_degree,
+        conductance_span_ratio,
+        topology_coverage_ratio,
+    }
+}
+
+fn accumulate_graph_equation(
+    from: usize,
+    to: usize,
+    conductance: f64,
+    node_count: usize,
+    matrix: &mut [Vec<f64>],
+    rhs: &mut [f64],
+    boundary_potential: &[f64],
+) {
+    for (node, other) in [(from, to), (to, from)] {
+        if node == 0 || node + 1 == node_count {
+            continue;
+        }
+        let row = node - 1;
+        matrix[row][row] += conductance;
+        if other == 0 || other + 1 == node_count {
+            rhs[row] += conductance * boundary_potential[other];
+        } else {
+            let col = other - 1;
+            matrix[row][col] -= conductance;
+        }
+    }
+}
+
+fn solve_dense_system(mut matrix: Vec<Vec<f64>>, mut rhs: Vec<f64>) -> Vec<f64> {
+    let n = rhs.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    for pivot in 0..n {
+        let mut pivot_row = pivot;
+        let mut pivot_value = matrix[pivot][pivot].abs();
+        for (row, values) in matrix.iter().enumerate().skip(pivot + 1) {
+            let candidate = values[pivot].abs();
+            if candidate > pivot_value {
+                pivot_row = row;
+                pivot_value = candidate;
+            }
+        }
+        if pivot_row != pivot {
+            matrix.swap(pivot, pivot_row);
+            rhs.swap(pivot, pivot_row);
+        }
+        let diagonal = matrix[pivot][pivot];
+        if diagonal.abs() <= MIN_CONDUCTIVITY {
+            continue;
+        }
+        for row in (pivot + 1)..n {
+            let factor = matrix[row][pivot] / diagonal;
+            if factor.abs() <= f64::EPSILON {
+                continue;
+            }
+            matrix[row][pivot] = 0.0;
+            for col in (pivot + 1)..n {
+                matrix[row][col] -= factor * matrix[pivot][col];
+            }
+            rhs[row] -= factor * rhs[pivot];
+        }
+    }
+    let mut solution = vec![0.0_f64; n];
+    for row in (0..n).rev() {
+        let trailing = ((row + 1)..n)
+            .map(|col| matrix[row][col] * solution[col])
+            .sum::<f64>();
+        let diagonal = matrix[row][row];
+        solution[row] = if diagonal.abs() > MIN_CONDUCTIVITY {
+            (rhs[row] - trailing) / diagonal
+        } else {
+            0.0
+        };
+    }
+    solution
+}
+
+fn graph_current_balance(
+    graph: &ConductanceDomainGraph,
+    edge_current: &[f64],
+    node_count: usize,
+) -> Vec<f64> {
+    let mut balance = vec![0.0_f64; node_count];
+    for (edge, current) in graph.edges.iter().zip(edge_current.iter()) {
+        balance[edge.from] += *current;
+        balance[edge.to] -= *current;
+    }
+    balance
 }
 
 fn conductivity_profile(summary: &ElectroThermalAssemblySummary, segment_count: usize) -> Vec<f64> {
@@ -305,9 +486,14 @@ fn electro_thermal_potential_solve_diagnostic(
         code: "FEA_ET_POTENTIAL_SOLVE".to_string(),
         severity,
         message: format!(
-            "basis=resistor_network node_count={} segment_count={} potential_span_v={} residual_norm={} equation_scale={} current_balance_residual={} integrated_joule_heat_w={} condition_estimate={}",
+            "basis=conductance_domain_graph node_count={} edge_count={} boundary_node_count={} max_node_degree={} mean_node_degree={} conductance_span_ratio={} topology_coverage_ratio={} potential_span_v={} residual_norm={} equation_scale={} current_balance_residual={} integrated_joule_heat_w={} condition_estimate={}",
             node_count,
-            solve.segment_conductance.len(),
+            solve.graph.edges.len(),
+            solve.graph.boundary_node_count,
+            solve.graph.max_node_degree,
+            solve.graph.mean_node_degree,
+            solve.graph.conductance_span_ratio,
+            solve.graph.topology_coverage_ratio,
             solve.potential_span_v,
             solve.residual_norm,
             solve.equation_scale,
@@ -318,28 +504,24 @@ fn electro_thermal_potential_solve_diagnostic(
     }
 }
 
-fn electro_thermal_resistor_known_answer_diagnostic(
+fn electro_thermal_conduction_conservation_diagnostic(
     node_count: usize,
     solve: &ElectroThermalPotentialSolve,
 ) -> FeaDiagnostic {
-    let coverage_ratio = resistor_known_answer_coverage_ratio(node_count, solve);
+    let coverage_ratio = conduction_graph_coverage_ratio(node_count, solve);
     let ohms_law_residual_ratio = solve
-        .segment_conductance
+        .graph
+        .edges
         .iter()
-        .zip(solve.segment_current.iter())
-        .enumerate()
-        .map(|(index, (conductance, current))| {
-            let voltage_drop = solve.potential[index] - solve.potential[index + 1];
-            let expected_current = conductance * voltage_drop;
+        .zip(solve.edge_current.iter())
+        .map(|(edge, current)| {
+            let voltage_drop = solve.potential[edge.from] - solve.potential[edge.to];
+            let expected_current = edge.conductance * voltage_drop;
             (current - expected_current).abs()
                 / current.abs().max(expected_current.abs()).max(1.0e-12)
         })
         .fold(0.0_f64, f64::max);
-    let input_power_w = solve
-        .segment_current
-        .first()
-        .map(|current| current.abs() * solve.potential_span_v)
-        .unwrap_or(0.0);
+    let input_power_w = solve.source_current_a.abs() * solve.potential_span_v;
     let joule_heat_balance_ratio = if input_power_w > 1.0e-12 {
         solve.integrated_joule_heat_w / input_power_w
     } else if solve.integrated_joule_heat_w <= 1.0e-12 {
@@ -359,12 +541,12 @@ fn electro_thermal_resistor_known_answer_diagnostic(
     };
 
     FeaDiagnostic {
-        code: "FEA_ET_RESISTOR_KNOWN_ANSWER".to_string(),
+        code: "FEA_ET_CONDUCTION_CONSERVATION".to_string(),
         severity,
         message: format!(
-            "basis=resistor_network node_count={} segment_count={} ohms_law_residual_ratio={} joule_heat_balance_ratio={} potential_monotonic_edge_fraction={} resistor_known_answer_coverage_ratio={}",
+            "basis=conductance_domain_graph node_count={} edge_count={} ohms_law_residual_ratio={} joule_heat_balance_ratio={} potential_monotonic_edge_fraction={} conduction_graph_coverage_ratio={}",
             node_count,
-            solve.segment_conductance.len(),
+            solve.graph.edges.len(),
             ohms_law_residual_ratio,
             joule_heat_balance_ratio,
             potential_monotonic_edge_fraction,
@@ -455,21 +637,19 @@ fn normalized_profile_residual(source: &[f64], response: &[f64]) -> f64 {
         .fold(0.0_f64, f64::max)
 }
 
-fn resistor_known_answer_coverage_ratio(
-    node_count: usize,
-    solve: &ElectroThermalPotentialSolve,
-) -> f64 {
+fn conduction_graph_coverage_ratio(node_count: usize, solve: &ElectroThermalPotentialSolve) -> f64 {
     if node_count >= 2
-        && solve.segment_conductance.len() == node_count - 1
-        && solve.segment_current.len() == node_count - 1
+        && !solve.graph.edges.is_empty()
+        && solve.edge_current.len() == solve.graph.edges.len()
         && solve.potential.len() == node_count
         && solve.potential_span_v.is_finite()
         && solve
-            .segment_conductance
+            .graph
+            .edges
             .iter()
-            .all(|value| value.is_finite() && *value > MIN_CONDUCTIVITY)
+            .all(|edge| edge.conductance.is_finite() && edge.conductance > MIN_CONDUCTIVITY)
     {
-        1.0
+        solve.graph.topology_coverage_ratio
     } else {
         0.0
     }
@@ -517,14 +697,16 @@ mod tests {
     }
 
     #[test]
-    fn scalar_potential_solve_balances_current() {
-        let solve = solve_scalar_potential(&summary(), 16);
+    fn conductance_domain_graph_solve_balances_current() {
+        let solve = solve_conductance_domain_graph(&summary(), 16);
 
         assert!((solve.potential[0] - 36.0).abs() <= 1.0e-9);
         assert!(solve.potential.last().copied().unwrap_or(1.0).abs() <= 1.0e-12);
         assert!(solve.residual_norm <= 1.0e-10);
         assert!(solve.current_balance_residual <= 1.0e-10);
         assert!(solve.integrated_joule_heat_w > 0.0);
+        assert_eq!(solve.graph.edges.len(), 15);
+        assert_eq!(solve.graph.max_node_degree, 2);
     }
 
     #[test]
@@ -537,13 +719,19 @@ mod tests {
         assert!(fields.diagnostics[0]
             .message
             .contains("current_balance_residual="));
-        assert_eq!(fields.diagnostics[1].code, "FEA_ET_RESISTOR_KNOWN_ANSWER");
+        assert!(fields.diagnostics[0]
+            .message
+            .contains("basis=conductance_domain_graph"));
+        assert_eq!(fields.diagnostics[1].code, "FEA_ET_CONDUCTION_CONSERVATION");
         assert!(fields.diagnostics[1]
             .message
             .contains("ohms_law_residual_ratio="));
         assert!(fields.diagnostics[1]
             .message
             .contains("joule_heat_balance_ratio="));
+        assert!(fields.diagnostics[1]
+            .message
+            .contains("conduction_graph_coverage_ratio="));
         assert_eq!(fields.diagnostics[2].code, "FEA_ET_THERMAL_SOURCE_COUPLING");
         assert!(fields.diagnostics[2]
             .message
