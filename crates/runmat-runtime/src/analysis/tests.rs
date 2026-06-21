@@ -6393,6 +6393,8 @@ fn analysis_run_modal_returns_native_modal_result() {
         modal.mode_shapes[0].field_id,
         fea_modal_mode_shape_field_id(1)
     );
+    assert_eq!(modal.mode_shapes[0].shape.len(), 2);
+    assert_eq!(modal.mode_shapes[0].shape[1], 3);
     assert_eq!(modal.eigenvalues_hz.len(), modal.residual_norms.len());
     assert!(modal.residual_norms.iter().all(|value| value.is_finite()));
     assert_eq!(modal.modal_payload_version, "modal_results/v1");
@@ -6644,6 +6646,8 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
         .expect("modal payload should propagate to results");
     assert!(!modal.eigenvalues_hz.is_empty());
     assert_eq!(modal.eigenvalues_hz.len(), modal.mode_shapes.len());
+    assert_eq!(modal.mode_shapes[0].shape.len(), 2);
+    assert_eq!(modal.mode_shapes[0].shape[1], 3);
     assert_eq!(modal.eigenvalues_hz.len(), modal.residual_norms.len());
     assert_eq!(modal.modal_payload_version, "modal_results/v1");
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);

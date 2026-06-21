@@ -162,15 +162,19 @@ pub fn run_modal_with_options(
         fields: run_fields,
     };
 
+    let mode_shape_node_count = summary.dof_count.div_ceil(3).max(1);
+    let mode_shape_value_count = mode_shape_node_count * 3;
     let mode_shapes = modal
         .mode_shapes
         .into_iter()
         .enumerate()
         .map(|(index, shape)| {
+            let mut values = shape;
+            values.resize(mode_shape_value_count, 0.0);
             AnalysisField::host_f64(
                 fea_modal_mode_shape_field_id(index + 1),
-                vec![shape.len()],
-                shape,
+                vec![mode_shape_node_count, 3],
+                values,
             )
         })
         .collect();

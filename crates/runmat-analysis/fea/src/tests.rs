@@ -319,6 +319,12 @@ fn modal_solver_emits_modes_for_modal_step_fixture() {
 
     assert!(!result.eigenvalues_hz.is_empty());
     assert_eq!(result.eigenvalues_hz.len(), result.mode_shapes.len());
+    assert_eq!(result.mode_shapes[0].shape.len(), 2);
+    assert_eq!(result.mode_shapes[0].shape[1], 3);
+    assert_eq!(
+        result.mode_shapes[0].element_count(),
+        result.mode_shapes[0].shape[0] * 3
+    );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_FREQUENCY_HZ).element_count(),
         result.eigenvalues_hz.len()

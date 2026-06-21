@@ -1015,6 +1015,8 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
         modal_results.mode_shapes[0].field_id,
         fea_modal_mode_shape_field_id(1)
     );
+    assert_eq!(modal_results.mode_shapes[0].shape.len(), 2);
+    assert_eq!(modal_results.mode_shapes[0].shape[1], 3);
     assert_eq!(modal_results.modal_payload_version, "modal_results/v1");
     assert_eq!(
         modal_results.eigenvalues_hz.len(),
