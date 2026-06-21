@@ -32,7 +32,8 @@ use runmat_analysis_fea::{
     FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
@@ -2015,6 +2016,8 @@ fn analysis_results_describes_structural_l2_fields() {
                 FEA_FIELD_STRUCTURAL_STRESS.to_string(),
                 FEA_FIELD_STRUCTURAL_REACTION_FORCE.to_string(),
                 FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY.to_string(),
+                FEA_FIELD_STRUCTURAL_RESIDUAL_NORM.to_string(),
+                FEA_FIELD_STRUCTURAL_EQUATION_SCALE.to_string(),
             ],
             include_field_values: false,
             include_diagnostics: false,
@@ -2065,6 +2068,14 @@ fn analysis_results_describes_structural_l2_fields() {
     );
     assert_eq!(
         descriptor(FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY).kind,
+        AnalysisFieldKind::Scalar
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_RESIDUAL_NORM).kind,
+        AnalysisFieldKind::Scalar
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_EQUATION_SCALE).kind,
         AnalysisFieldKind::Scalar
     );
 }

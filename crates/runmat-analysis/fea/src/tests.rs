@@ -14,7 +14,8 @@ use crate::{
     FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 
@@ -74,6 +75,8 @@ fn canonical_cantilever_benchmark_runs() {
         .iter()
         .all(|value| value.is_finite()));
     assert!(host_field(&result, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)[0] > 0.0);
+    assert!(host_field(&result, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM)[0] <= 1.0e-6);
+    assert!(host_field(&result, FEA_FIELD_STRUCTURAL_EQUATION_SCALE)[0] >= 1.0);
 }
 
 #[test]
@@ -85,6 +88,14 @@ fn convergence_diagnostics_are_emitted() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_CONVERGENCE"));
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_STRUCTURAL_RESIDUAL"));
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_STRUCTURAL_ENERGY"));
 }
 
 #[test]
@@ -123,6 +134,10 @@ fn cpu_gpu_parity_respects_tolerance_policy() {
     let cpu_reactions = host_field(&cpu, FEA_FIELD_STRUCTURAL_REACTION_FORCE);
     let gpu_reactions = host_field(&gpu, FEA_FIELD_STRUCTURAL_REACTION_FORCE);
     assert_vectors_within_tolerance(cpu_reactions, gpu_reactions, tol);
+
+    let cpu_residual = host_field(&cpu, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM);
+    let gpu_residual = host_field(&gpu, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM);
+    assert_vectors_within_tolerance(cpu_residual, gpu_residual, tol);
 }
 
 #[test]

@@ -2,7 +2,11 @@ use runmat_analysis_core::{validate_model, AnalysisModel};
 
 use crate::{
     assembly::assemble_linear_system,
-    contracts::{ComputeBackend, FeaRunError, FeaRunResult, LinearStaticSolveOptions},
+    contracts::{
+        ComputeBackend, FeaRunError, FeaRunResult, LinearStaticSolveOptions,
+        FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+        FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+    },
     diagnostics::{
         builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
         FeaDiagnostic, FeaDiagnosticSeverity,
@@ -133,6 +137,36 @@ pub fn run_linear_static_with_options(
             solve_result.preconditioner,
         ),
     }];
+    if let (Some(residual_norm), Some(equation_scale)) = (
+        scalar_field_value(&fields, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM),
+        scalar_field_value(&fields, FEA_FIELD_STRUCTURAL_EQUATION_SCALE),
+    ) {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_STRUCTURAL_RESIDUAL".to_string(),
+            severity: if residual_norm <= 1.0e-6 {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!(
+                "normalized_residual_norm={} equation_scale={}",
+                residual_norm, equation_scale
+            ),
+        });
+    }
+    if let Some(total_strain_energy) =
+        scalar_field_value(&fields, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)
+    {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_STRUCTURAL_ENERGY".to_string(),
+            severity: if total_strain_energy.is_finite() && total_strain_energy >= 0.0 {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!("total_strain_energy={total_strain_energy}"),
+        });
+    }
     extend_common_run_diagnostics(
         &mut diagnostics,
         CommonRunDiagnosticInputs {
@@ -166,4 +200,15 @@ pub fn run_linear_static_with_options(
         diagnostics,
         fields,
     })
+}
+
+fn scalar_field_value(
+    fields: &[runmat_analysis_core::AnalysisField],
+    field_id: &str,
+) -> Option<f64> {
+    fields
+        .iter()
+        .find(|field| field.field_id == field_id)
+        .and_then(runmat_analysis_core::AnalysisField::as_host_f64)
+        .and_then(|values| values.first().copied())
 }

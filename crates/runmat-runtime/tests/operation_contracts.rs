@@ -6,7 +6,8 @@ use runmat_analysis_fea::{
     FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
     FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
     FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
 use runmat_runtime::analysis::{
@@ -934,6 +935,16 @@ fn analysis_run_contract_is_v1_and_publishable_for_fixture() {
         .data
         .run
         .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .is_some());
+    assert!(envelope
+        .data
+        .run
+        .field(FEA_FIELD_STRUCTURAL_RESIDUAL_NORM)
+        .is_some());
+    assert!(envelope
+        .data
+        .run
+        .field(FEA_FIELD_STRUCTURAL_EQUATION_SCALE)
         .is_some());
     assert!(matches!(
         envelope

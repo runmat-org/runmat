@@ -1,11 +1,12 @@
 use runmat_analysis_core::AnalysisField;
 
 use crate::contracts::{
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
     FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
-use crate::operator::apply_k_unconstrained;
+use crate::operator::{apply_k, apply_k_unconstrained};
 use crate::{assembly::AssemblySummary, solve::linear::LinearSolveResult};
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
@@ -39,6 +40,7 @@ pub fn recover_result_fields(
     let internal_force = apply_k_unconstrained(&summary.operator, &solve_result.solution);
     let reaction_values = recover_reaction_force(summary, &internal_force);
     let strain_energy = recover_total_strain_energy(&solve_result.solution, &internal_force);
+    let residual_metrics = recover_residual_metrics(summary, &solve_result.solution);
 
     vec![
         AnalysisField::host_f64(
@@ -71,6 +73,16 @@ pub fn recover_result_fields(
             vec![1],
             vec![strain_energy],
         ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+            vec![1],
+            vec![residual_metrics.normalized_residual_norm],
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+            vec![1],
+            vec![residual_metrics.equation_scale],
+        ),
     ]
 }
 
@@ -86,6 +98,8 @@ fn empty_structural_fields() -> Vec<AnalysisField> {
             vec![0],
             Vec::new(),
         ),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, vec![0], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_EQUATION_SCALE, vec![0], Vec::new()),
     ]
 }
 
@@ -172,4 +186,39 @@ fn recover_total_strain_energy(displacement: &[f64], internal_force: &[f64]) -> 
         .zip(internal_force.iter())
         .map(|(u, force)| u * force)
         .sum::<f64>()
+}
+
+struct StructuralResidualMetrics {
+    normalized_residual_norm: f64,
+    equation_scale: f64,
+}
+
+fn recover_residual_metrics(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+) -> StructuralResidualMetrics {
+    let mut solution = displacement.to_vec();
+    solution.resize(summary.dof_count, 0.0);
+    let applied = apply_k(&summary.operator, &solution);
+    let residual_norm = applied
+        .iter()
+        .zip(summary.operator.rhs.iter())
+        .map(|(lhs, rhs)| {
+            let residual = lhs - rhs;
+            residual * residual
+        })
+        .sum::<f64>()
+        .sqrt();
+    let equation_scale = summary
+        .operator
+        .rhs
+        .iter()
+        .map(|value| value * value)
+        .sum::<f64>()
+        .sqrt()
+        .max(1.0);
+    StructuralResidualMetrics {
+        normalized_residual_norm: residual_norm / equation_scale,
+        equation_scale,
+    }
 }
