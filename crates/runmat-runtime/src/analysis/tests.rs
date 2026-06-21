@@ -4910,8 +4910,8 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
 
     assert_eq!(envelope.operation, "fea.run_cht");
     assert_eq!(envelope.op_version, "fea.run_cht/v1");
-    assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
-    assert!(envelope.data.transient_results.is_some());
+    assert_eq!(envelope.data.run.solver_method, "cht_conjugate_projection");
+    assert!(envelope.data.transient_results.is_none());
     assert!(envelope.data.thermal_results.is_some());
     assert!(envelope
         .data
@@ -4926,21 +4926,11 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         .iter()
         .any(|diag| diag.code == "FEA_CHT_COUPLING"
             && diag.message.contains("applied_temperature_delta_k=60")));
-    let transient = envelope
-        .data
-        .transient_results
-        .as_ref()
-        .expect("transient payload should exist");
     let thermal = envelope
         .data
         .thermal_results
         .as_ref()
         .expect("thermal payload should exist");
-    assert_eq!(transient.time_points_s.len(), 5);
-    assert_eq!(
-        transient.time_points_s.len(),
-        transient.displacement_snapshots.len()
-    );
     assert_eq!(thermal.time_points_s.len(), 4);
     let results = analysis_results_op(
         &envelope.data,

@@ -2861,10 +2861,9 @@ fn clone_host_field_as(
 
 fn build_cht_run_fields(
     domain: &runmat_analysis_core::CfdDomain,
-    transient_run: &runmat_analysis_fea::FeaTransientRunResult,
+    node_count: usize,
     thermal_run: &runmat_analysis_fea::FeaThermalRunResult,
 ) -> Vec<AnalysisField> {
-    let node_count = cfd_node_count_from_transient(transient_run);
     let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(domain, node_count, 0);
     let mut fields = vec![
         AnalysisField::host_f64(
@@ -3745,47 +3744,32 @@ pub fn analysis_run_cht_with_options_op(
         )
     })?;
 
-    let transient_run = run_transient_with_options(
-        model,
-        backend,
-        runmat_analysis_fea::solve::transient::TransientSolveOptions {
-            time_step_s: options.time_step_s,
-            min_time_step_s: options.time_step_s,
-            max_time_step_s: options.time_step_s,
-            step_count: options.step_count,
-            max_linear_iters: options.max_linear_iters,
-            tolerance: options.tolerance,
-            residual_target: options.tolerance,
-            adaptive_time_step: false,
-            max_step_retries: 0,
-            adapt_min_scale: 0.8,
-            adapt_max_scale: 1.2,
-            adapt_growth_exponent: 0.35,
-            adapt_retry_growth_cap: 1.05,
-            adapt_nonconverged_shrink: 0.75,
-            dt_bucket_rel_tolerance: 0.0,
-            progress_operation: ANALYSIS_RUN_CHT_OPERATION.to_string(),
-            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
-            thermo_mechanical_context: to_fea_thermo_mechanical_context(Some(thermo_options)),
-            electro_thermal_context: None,
-        },
-    )
-    .map_err(|err| {
-        map_fea_run_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
-            "RM.FEA.RUN_CHT.SOLVER_MODEL_INVALID",
-            "RM.FEA.RUN_CHT.CANCELLED",
-            model,
-            &context,
-            err,
-        )
-    })?;
-
-    let cht_fields = build_cht_run_fields(cfd_domain, &transient_run, &thermal_run);
-    let mut run = transient_run.run;
+    let node_count = cfd_node_count_from_model(model, prep_context);
+    let field_step = match cfd_domain.solve_family {
+        runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
+        runmat_analysis_core::CfdSolveFamily::Transient => options.step_count.saturating_sub(1),
+    };
+    let (fluid_velocity, fluid_pressure) =
+        recover_cfd_velocity_pressure(cfd_domain, node_count, field_step);
+    let (cfd_residual_momentum, cfd_residual_continuity) = cfd_residual_norms(
+        &fluid_velocity,
+        &fluid_pressure,
+        cfd_domain,
+        options.step_count,
+    );
+    let max_cfd_momentum_residual = cfd_residual_momentum
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
+    let max_cfd_continuity_residual = cfd_residual_continuity
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
+    let cht_fields = build_cht_run_fields(cfd_domain, node_count, &thermal_run);
+    let mut run = thermal_run.run.clone();
+    run.solver_method = "cht_conjugate_projection".to_string();
+    run.preconditioner = "thermal_cfd_projection".to_string();
     run.fields.extend(cht_fields);
-    run.diagnostics.extend(thermal_run.run.diagnostics.clone());
     let reynolds_number = cfd_reynolds_number(cfd_domain);
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
         code: "FEA_CFD_FLOW".to_string(),
@@ -3802,6 +3786,25 @@ pub fn analysis_run_cht_with_options_op(
                 runmat_analysis_core::CfdSolveFamily::Transient => "transient",
             },
             cfd_domain.time_profile.len(),
+        ),
+    });
+    let cfd_residual_severity = if max_cfd_momentum_residual <= options.residual_warn_threshold
+        && max_cfd_continuity_residual <= options.residual_warn_threshold
+    {
+        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+    } else {
+        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    };
+    run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+        code: "FEA_CFD_RESIDUAL".to_string(),
+        severity: cfd_residual_severity,
+        message: format!(
+            "max_momentum_residual={} max_continuity_residual={} residual_warn_threshold={} cfd_node_count={} cfd_step_count={}",
+            max_cfd_momentum_residual,
+            max_cfd_continuity_residual,
+            options.residual_warn_threshold,
+            node_count,
+            options.step_count,
         ),
     });
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -3824,35 +3827,29 @@ pub fn analysis_run_cht_with_options_op(
         );
     }
 
-    let transient_converged = run.diagnostics.iter().any(|item| {
-        item.code == "FEA_TRANSIENT_CONVERGENCE"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
-    });
-    let max_transient_residual = transient_run
-        .residual_norms
-        .iter()
-        .copied()
-        .fold(0.0_f64, f64::max);
     let max_thermal_residual = thermal_run
         .residual_norms
         .iter()
         .copied()
         .fold(0.0_f64, f64::max);
-    let solver_convergence =
-        if transient_converged && max_thermal_residual <= options.residual_warn_threshold {
-            QualityGate::Pass
-        } else {
-            QualityGate::Warn
-        };
-    let result_quality = if transient_run.displacement_snapshots.is_empty()
-        || transient_run.time_points_s.is_empty()
+    let solver_convergence = if max_cfd_momentum_residual <= options.residual_warn_threshold
+        && max_cfd_continuity_residual <= options.residual_warn_threshold
+        && max_thermal_residual <= options.residual_warn_threshold
+    {
+        QualityGate::Pass
+    } else {
+        QualityGate::Warn
+    };
+    let result_quality = if run.fields_are_empty()
         || thermal_run.temperature_snapshots.is_empty()
         || thermal_run.time_points_s.is_empty()
-        || transient_run.residual_norms.iter().any(|r| !r.is_finite())
         || thermal_run.residual_norms.iter().any(|r| !r.is_finite())
+        || !max_cfd_momentum_residual.is_finite()
+        || !max_cfd_continuity_residual.is_finite()
     {
         QualityGate::Fail
-    } else if max_transient_residual > options.residual_warn_threshold
+    } else if max_cfd_momentum_residual > options.residual_warn_threshold
+        || max_cfd_continuity_residual > options.residual_warn_threshold
         || max_thermal_residual > options.residual_warn_threshold
     {
         QualityGate::Warn
@@ -3867,12 +3864,14 @@ pub fn analysis_run_cht_with_options_op(
             detail: "cht solver convergence gate is warning".to_string(),
         });
     }
-    if max_transient_residual > options.residual_warn_threshold {
+    if max_cfd_momentum_residual > options.residual_warn_threshold
+        || max_cfd_continuity_residual > options.residual_warn_threshold
+    {
         quality_reasons.push(QualityReason {
-            code: QualityReasonCode::TransientResidualExceeded,
+            code: QualityReasonCode::SolverNotConverged,
             detail: format!(
-                "cht transient residual exceeds threshold {}",
-                options.residual_warn_threshold
+                "cht cfd residual exceeds threshold {}",
+                options.residual_warn_threshold,
             ),
         });
     }
@@ -3944,35 +3943,7 @@ pub fn analysis_run_cht_with_options_op(
             residual_norms: thermal_run.residual_norms,
             reference_temperature_k: thermal_run.reference_temperature_k,
         }),
-        transient_results: Some(TransientResultsData {
-            transient_payload_version: "transient_results/v1".to_string(),
-            time_points_s: transient_run.time_points_s,
-            displacement_snapshots: transient_run.displacement_snapshots,
-            velocity_snapshots: transient_run.velocity_snapshots,
-            acceleration_snapshots: transient_run.acceleration_snapshots,
-            von_mises_snapshots: transient_run.von_mises_snapshots,
-            kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
-            strain_energy_snapshots: transient_run.strain_energy_snapshots,
-            residual_norm_snapshots: transient_run.residual_norm_snapshots,
-            thermo_mechanical_temperature_snapshots: transient_run
-                .thermo_mechanical_temperature_snapshots,
-            thermo_mechanical_thermal_strain_snapshots: transient_run
-                .thermo_mechanical_thermal_strain_snapshots,
-            thermo_mechanical_thermal_stress_snapshots: transient_run
-                .thermo_mechanical_thermal_stress_snapshots,
-            thermo_mechanical_displacement_snapshots: transient_run
-                .thermo_mechanical_displacement_snapshots,
-            thermo_mechanical_von_mises_snapshots: transient_run
-                .thermo_mechanical_von_mises_snapshots,
-            thermo_mechanical_coupling_residual_snapshots: transient_run
-                .thermo_mechanical_coupling_residual_snapshots,
-            electro_thermal_temperature_snapshots: transient_run
-                .electro_thermal_temperature_snapshots,
-            electro_thermal_thermal_residual_snapshots: transient_run
-                .electro_thermal_thermal_residual_snapshots,
-            residual_norms: transient_run.residual_norms,
-            integration_method: TransientIntegrationMethod::ImplicitEuler,
-        }),
+        transient_results: None,
         nonlinear_results: None,
         electromagnetic_results: None,
         model_validity: QualityGate::Pass,
