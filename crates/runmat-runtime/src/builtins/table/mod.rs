@@ -103,6 +103,37 @@ const SPREADSHEET_IMPORT_OPTIONS_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 1] 
         default: None,
         description: "Name-value option pairs.",
     }];
+const DETECT_IMPORT_OPTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "opts",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Detected import options struct accepted by readtable/readmatrix.",
+}];
+const DETECT_IMPORT_OPTIONS_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] =
+    [BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text or spreadsheet file path to inspect.",
+    }];
+const DETECT_IMPORT_OPTIONS_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text or spreadsheet file path to inspect.",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValuePairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Detection overrides such as Delimiter, Range, Sheet, Encoding, or TextType.",
+    },
+];
 const TABLE_INPUTS_VALUES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "variables",
     ty: BuiltinParamType::Any,
@@ -218,6 +249,18 @@ const SPREADSHEET_IMPORT_OPTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &SPREADSHEET_IMPORT_OPTIONS_OUTPUT,
     },
 ];
+const DETECT_IMPORT_OPTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "opts = detectImportOptions(filename)",
+        inputs: &DETECT_IMPORT_OPTIONS_INPUTS_FILENAME,
+        outputs: &DETECT_IMPORT_OPTIONS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "opts = detectImportOptions(filename, nameValuePairs...)",
+        inputs: &DETECT_IMPORT_OPTIONS_INPUTS_NAME_VALUE,
+        outputs: &DETECT_IMPORT_OPTIONS_OUTPUT,
+    },
+];
 const TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "T = table(variables...)",
     inputs: &TABLE_INPUTS_VALUES,
@@ -295,6 +338,12 @@ pub const READTABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const SPREADSHEET_IMPORT_OPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SPREADSHEET_IMPORT_OPTIONS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const DETECT_IMPORT_OPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DETECT_IMPORT_OPTIONS_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,
@@ -509,6 +558,26 @@ async fn readtable_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value
 async fn spreadsheet_import_options_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let gathered = gather_values(&args).await?;
     spreadsheet_import_options(gathered)
+}
+
+#[runtime_builtin(
+    name = "detectImportOptions",
+    category = "io/tabular",
+    summary = "Inspect a text or spreadsheet file and create import options.",
+    keywords = "detectImportOptions,readtable,readmatrix,csv,tsv,xlsx,Delimiter,VariableTypes,VariableNames",
+    accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::struct_type),
+    descriptor(crate::builtins::table::DETECT_IMPORT_OPTIONS_DESCRIPTOR),
+    builtin_path = "crate::builtins::table"
+)]
+async fn detect_import_options_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let path_value = gather_if_needed_async(&path)
+        .await
+        .map_err(map_control_flow)?;
+    let args = gather_values(&rest).await?;
+    let options = ReadTableOptions::parse(&args)?;
+    let resolved = resolve_path(&path_value)?;
+    detect_import_options_from_file(&resolved, &options).await
 }
 
 #[runtime_builtin(
@@ -835,6 +904,457 @@ fn spreadsheet_import_options(args: Vec<Value>) -> BuiltinResult<Value> {
         idx += 2;
     }
     Ok(Value::Struct(options.into_struct()?))
+}
+
+async fn detect_import_options_from_file(
+    path: &Path,
+    options: &ReadTableOptions,
+) -> BuiltinResult<Value> {
+    match options.file_type {
+        ImportFileType::Spreadsheet => detect_spreadsheet_import_options(path, options).await,
+        ImportFileType::Text => detect_text_import_options(path, options).await,
+        ImportFileType::Auto if is_spreadsheet_path(path) => {
+            detect_spreadsheet_import_options(path, options).await
+        }
+        ImportFileType::Auto => detect_text_import_options(path, options).await,
+    }
+}
+
+async fn detect_text_import_options(
+    path: &Path,
+    options: &ReadTableOptions,
+) -> BuiltinResult<Value> {
+    if options.sheet.is_some() {
+        return Err(invalid_argument(
+            "detectImportOptions: Sheet is only valid for spreadsheet files",
+        ));
+    }
+    let bytes = read_file_bytes(path).await?;
+    let text = strip_utf8_bom(decode_text_bytes(&bytes, &options.encoding)?);
+    let mut raw_lines = text.lines().map(ToString::to_string).collect::<Vec<_>>();
+    if let Some(first) = raw_lines.first_mut() {
+        if first.starts_with('\u{FEFF}') {
+            *first = first.trim_start_matches('\u{FEFF}').to_string();
+        }
+    }
+    let delimiter = options
+        .delimiter
+        .clone()
+        .or_else(|| detect_delimiter(&raw_lines))
+        .unwrap_or(Delimiter::Whitespace);
+    let mut rows = parse_text_records(&text, &delimiter, options.empty_line_rule);
+    if options.num_header_lines > 0 {
+        rows = rows.into_iter().skip(options.num_header_lines).collect();
+    }
+    if let Some(range) = options.range {
+        rows = apply_import_range(rows, range);
+    }
+    detected_options_from_rows(
+        ImportFileType::Text,
+        rows,
+        options,
+        Some(delimiter),
+        options.sheet.as_ref(),
+    )
+}
+
+async fn detect_spreadsheet_import_options(
+    path: &Path,
+    options: &ReadTableOptions,
+) -> BuiltinResult<Value> {
+    if options.delimiter.is_some() {
+        return Err(invalid_argument(
+            "detectImportOptions: Delimiter is only valid for text files",
+        ));
+    }
+    let bytes = read_file_bytes(path).await?;
+    let cursor = Cursor::new(bytes);
+    let mut workbook = open_workbook_auto_from_rs(cursor).map_err(|err| {
+        table_error(
+            &TABLE_ERROR_UNSUPPORTED_FILE,
+            format!(
+                "detectImportOptions: unable to open spreadsheet '{}': {err}",
+                path.display()
+            ),
+        )
+    })?;
+    let range = match &options.sheet {
+        Some(SheetSelector::Name(name)) => workbook.worksheet_range(name).map_err(|err| {
+            invalid_argument(format!(
+                "detectImportOptions: unable to read sheet '{name}': {err:?}"
+            ))
+        })?,
+        Some(SheetSelector::Index(index)) => workbook
+            .worksheet_range_at(*index)
+            .ok_or_else(|| {
+                invalid_argument(format!(
+                    "detectImportOptions: sheet index {} exceeds bounds",
+                    index + 1
+                ))
+            })?
+            .map_err(|err| {
+                invalid_argument(format!(
+                    "detectImportOptions: unable to read sheet {}: {err:?}",
+                    index + 1
+                ))
+            })?,
+        None => workbook
+            .worksheet_range_at(0)
+            .ok_or_else(|| {
+                invalid_argument("detectImportOptions: spreadsheet contains no worksheets")
+            })?
+            .map_err(|err| {
+                invalid_argument(format!(
+                    "detectImportOptions: unable to read first sheet: {err:?}"
+                ))
+            })?,
+    };
+    let rows = spreadsheet_range_to_rows(&range, options)?;
+    detected_options_from_rows(
+        ImportFileType::Spreadsheet,
+        rows,
+        options,
+        None,
+        options.sheet.as_ref(),
+    )
+}
+
+fn detected_options_from_rows(
+    file_type: ImportFileType,
+    mut rows: Vec<Vec<ImportCell>>,
+    options: &ReadTableOptions,
+    delimiter: Option<Delimiter>,
+    sheet: Option<&SheetSelector>,
+) -> BuiltinResult<Value> {
+    let mut variable_names = options.variable_names.clone();
+    let read_variable_names = options
+        .read_variable_names
+        .unwrap_or_else(|| variable_names.is_none() && should_read_variable_names(&rows, options));
+    let header_rows_consumed = usize::from(read_variable_names && variable_names.is_none());
+    if header_rows_consumed > 0 && !rows.is_empty() {
+        variable_names = Some(
+            rows.remove(0)
+                .into_iter()
+                .map(|cell| cell.display_text())
+                .collect(),
+        );
+    }
+
+    let mut data_rows = rows;
+    let mut data_variable_names = variable_names.clone();
+    let row_name_header = if options.read_row_names {
+        for row in &mut data_rows {
+            if !row.is_empty() {
+                row.remove(0);
+            }
+        }
+        let mut header = None;
+        if let Some(names) = data_variable_names.as_mut() {
+            if !names.is_empty() {
+                header = Some(names.remove(0));
+            }
+        }
+        Some(
+            header
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| "Row".to_string()),
+        )
+    } else {
+        None
+    };
+
+    let column_count = import_column_count(&data_rows, &data_variable_names, options)?;
+    let data_names = import_variable_names(data_variable_names, column_count, options);
+    let names = if let Some(row_name_header) = row_name_header {
+        let mut names = Vec::with_capacity(data_names.len() + 1);
+        names.push(row_name_header);
+        names.extend(data_names);
+        names
+    } else {
+        data_names
+    };
+    let types = detected_variable_type_labels(&data_rows, options, column_count)?;
+    let output_num_header_lines = detected_output_header_lines(options, header_rows_consumed);
+    let output_range = detected_output_range(options.range, header_rows_consumed);
+
+    let mut out = StructValue::new();
+    out.insert("FileType", Value::String(import_file_type_label(file_type)));
+    if let Some(delimiter) = delimiter {
+        out.insert("Delimiter", Value::String(delimiter_label(&delimiter)));
+    }
+    out.insert("NumHeaderLines", Value::Num(output_num_header_lines as f64));
+    out.insert("ReadVariableNames", Value::Bool(false));
+    out.insert("ReadRowNames", Value::Bool(options.read_row_names));
+    out.insert("NumVariables", Value::Num(column_count as f64));
+    out.insert(
+        "VariableNames",
+        string_array_value(names, "detectImportOptions")?,
+    );
+    out.insert(
+        "VariableTypes",
+        string_array_value(types, "detectImportOptions")?,
+    );
+    if let Some(range) = output_range {
+        out.insert("Range", range_spec_value(range)?);
+        out.insert("DataRange", range_spec_value(range)?);
+    }
+    if let Some(sheet) = sheet {
+        out.insert("Sheet", sheet_value(sheet));
+    }
+    let mut treat_as_missing = options.treat_as_missing.iter().cloned().collect::<Vec<_>>();
+    treat_as_missing.sort();
+    out.insert(
+        "TreatAsMissing",
+        string_array_value(treat_as_missing, "detectImportOptions")?,
+    );
+    out.insert(
+        "PreserveVariableNames",
+        Value::Bool(options.preserve_variable_names),
+    );
+    out.insert(
+        "VariableNamingRule",
+        Value::String(if options.preserve_variable_names {
+            "preserve".to_string()
+        } else {
+            "modify".to_string()
+        }),
+    );
+    out.insert(
+        "EmptyLineRule",
+        Value::String(
+            match options.empty_line_rule {
+                EmptyLineRule::Skip => "skip",
+                EmptyLineRule::Read => "read",
+            }
+            .to_string(),
+        ),
+    );
+    out.insert(
+        "TextType",
+        Value::String(
+            match options.text_type {
+                TextImportType::String => "string",
+                TextImportType::Char => "char",
+            }
+            .to_string(),
+        ),
+    );
+    out.insert(
+        "DatetimeType",
+        Value::String(
+            match options.datetime_type {
+                DatetimeImportType::Datetime => "datetime",
+                DatetimeImportType::Text => "text",
+                DatetimeImportType::ExcelDatenum => "exceldatenum",
+            }
+            .to_string(),
+        ),
+    );
+    out.insert("Encoding", Value::String(options.encoding.clone()));
+    Ok(Value::Struct(out))
+}
+
+fn detected_variable_type_labels(
+    rows: &[Vec<ImportCell>],
+    options: &ReadTableOptions,
+    column_count: usize,
+) -> BuiltinResult<Vec<String>> {
+    if let Some(requested) = &options.variable_types {
+        let mut labels = requested
+            .iter()
+            .map(import_variable_type_label)
+            .collect::<Vec<_>>();
+        while labels.len() < column_count {
+            labels.push("auto".to_string());
+        }
+        labels.truncate(column_count);
+        return Ok(labels);
+    }
+    Ok((0..column_count)
+        .map(|col| {
+            let values = rows
+                .iter()
+                .map(|row| row.get(col).cloned().unwrap_or(ImportCell::Empty))
+                .collect::<Vec<_>>();
+            infer_import_type_label(&values, options)
+        })
+        .collect())
+}
+
+fn infer_import_type_label(values: &[ImportCell], options: &ReadTableOptions) -> String {
+    if values
+        .iter()
+        .all(|value| is_detected_numeric(value, options))
+    {
+        return "double".to_string();
+    }
+    if values
+        .iter()
+        .all(|value| is_detected_logical(value, options))
+    {
+        return "logical".to_string();
+    }
+    if !matches!(options.datetime_type, DatetimeImportType::Text)
+        && values
+            .iter()
+            .all(|value| is_detected_datetime(value, options))
+    {
+        return "datetime".to_string();
+    }
+    match options.text_type {
+        TextImportType::String => "string".to_string(),
+        TextImportType::Char => "char".to_string(),
+    }
+}
+
+fn is_detected_numeric(value: &ImportCell, options: &ReadTableOptions) -> bool {
+    match value {
+        ImportCell::Empty | ImportCell::Number(_) => true,
+        ImportCell::Text(text) => {
+            let token = unquote(text.trim()).trim();
+            options.is_missing(token) || parse_numeric(token).is_some()
+        }
+        _ => false,
+    }
+}
+
+fn is_detected_logical(value: &ImportCell, options: &ReadTableOptions) -> bool {
+    match value {
+        ImportCell::Empty | ImportCell::Logical(_) => true,
+        ImportCell::Text(text) => {
+            let token = unquote(text.trim()).trim();
+            options.is_missing(token) || parse_logical(token).is_some()
+        }
+        _ => false,
+    }
+}
+
+fn is_detected_datetime(value: &ImportCell, options: &ReadTableOptions) -> bool {
+    match value {
+        ImportCell::Empty | ImportCell::DateTime(_) => true,
+        ImportCell::Text(text) => {
+            let token = unquote(text.trim()).trim();
+            options.is_missing(token) || parse_iso_datetime_to_datenum(token).is_some()
+        }
+        _ => false,
+    }
+}
+
+fn import_variable_type_label(kind: &ImportVariableType) -> String {
+    match kind {
+        ImportVariableType::Auto => "auto",
+        ImportVariableType::Numeric(NumericDType::F64) => "double",
+        ImportVariableType::Numeric(NumericDType::F32) => "single",
+        ImportVariableType::Numeric(NumericDType::U8) => "uint8",
+        ImportVariableType::Numeric(NumericDType::U16) => "uint16",
+        ImportVariableType::Logical => "logical",
+        ImportVariableType::Text(TextImportType::String) => "string",
+        ImportVariableType::Text(TextImportType::Char) => "char",
+        ImportVariableType::CellStr => "cellstr",
+        ImportVariableType::Datetime => "datetime",
+        ImportVariableType::Duration => "duration",
+    }
+    .to_string()
+}
+
+fn detected_output_header_lines(options: &ReadTableOptions, header_rows_consumed: usize) -> usize {
+    if options.range.is_some() {
+        options.num_header_lines
+    } else {
+        options.num_header_lines + header_rows_consumed
+    }
+}
+
+fn detected_output_range(
+    range: Option<RangeSpec>,
+    header_rows_consumed: usize,
+) -> Option<RangeSpec> {
+    range.map(|mut range| {
+        range.start_row = range.start_row.saturating_add(header_rows_consumed);
+        range
+    })
+}
+
+fn import_file_type_label(file_type: ImportFileType) -> String {
+    match file_type {
+        ImportFileType::Text | ImportFileType::Auto => "text",
+        ImportFileType::Spreadsheet => "spreadsheet",
+    }
+    .to_string()
+}
+
+fn delimiter_label(delimiter: &Delimiter) -> String {
+    match delimiter {
+        Delimiter::Char('\t') => "\t".to_string(),
+        Delimiter::Char(ch) => ch.to_string(),
+        Delimiter::String(text) => text.clone(),
+        Delimiter::Whitespace => "whitespace".to_string(),
+    }
+}
+
+fn sheet_value(sheet: &SheetSelector) -> Value {
+    match sheet {
+        SheetSelector::Name(name) => Value::String(name.clone()),
+        SheetSelector::Index(index) => Value::Num((*index + 1) as f64),
+    }
+}
+
+fn range_spec_value(range: RangeSpec) -> BuiltinResult<Value> {
+    Ok(Value::String(range_spec_text(range)))
+}
+
+fn range_spec_text(range: RangeSpec) -> String {
+    let has_end = range.end_row.is_some() || range.end_col.is_some();
+    let include_start_col = range.start_col > 0 || range.end_col.is_some() || !has_end;
+    let include_start_row = range.start_row > 0 || range.end_row.is_some() || !has_end;
+    let start = range_ref_text(
+        range.start_row,
+        range.start_col,
+        include_start_row,
+        include_start_col,
+    );
+    if !has_end {
+        return start;
+    }
+
+    let end = range_ref_text(
+        range.end_row.unwrap_or(0),
+        range.end_col.unwrap_or(0),
+        range.end_row.is_some(),
+        range.end_col.is_some(),
+    );
+    format!("{start}:{end}")
+}
+
+fn range_ref_text(row: usize, col: usize, include_row: bool, include_col: bool) -> String {
+    let mut out = String::new();
+    if include_col {
+        out.push_str(&spreadsheet_column_label(col));
+    }
+    if include_row {
+        out.push_str(&(row + 1).to_string());
+    }
+    out
+}
+
+fn spreadsheet_column_label(mut col: usize) -> String {
+    let mut chars = Vec::new();
+    loop {
+        let rem = col % 26;
+        chars.push((b'A' + rem as u8) as char);
+        if col < 26 {
+            break;
+        }
+        col = col / 26 - 1;
+    }
+    chars.iter().rev().collect()
+}
+
+fn string_array_value(values: Vec<String>, context: &str) -> BuiltinResult<Value> {
+    let len = values.len();
+    StringArray::new(values, vec![1, len])
+        .map(Value::StringArray)
+        .map_err(|err| invalid_variable(format!("{context}: {err}")))
 }
 
 #[derive(Clone)]
@@ -1367,7 +1887,7 @@ async fn read_text_table(path: &Path, options: &ReadTableOptions) -> BuiltinResu
         ));
     }
     let bytes = read_file_bytes(path).await?;
-    let text = decode_text_bytes(&bytes, &options.encoding)?;
+    let text = strip_utf8_bom(decode_text_bytes(&bytes, &options.encoding)?);
     let mut raw_lines = text.lines().map(ToString::to_string).collect::<Vec<_>>();
     if let Some(first) = raw_lines.first_mut() {
         if first.starts_with('\u{FEFF}') {
@@ -1508,6 +2028,12 @@ fn decode_text_bytes(bytes: &[u8], encoding: &str) -> BuiltinResult<String> {
         ));
     }
     Ok(decoded.into_owned())
+}
+
+fn strip_utf8_bom(text: String) -> String {
+    text.strip_prefix('\u{FEFF}')
+        .map(ToString::to_string)
+        .unwrap_or(text)
 }
 
 #[derive(Clone, Debug)]
@@ -3910,10 +4436,152 @@ fn make_valid_variable_name(raw: &str, fallback_index: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    use async_trait::async_trait;
     use futures::executor::block_on;
+    #[cfg(not(target_arch = "wasm32"))]
+    use runmat_filesystem::{
+        DirEntry, FileHandle, FsMetadata, FsProvider, NativeFsProvider, OpenFlags,
+        SandboxFsProvider,
+    };
     use runmat_time::unix_timestamp_ms;
     use std::fs;
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::io;
     use std::io::Write;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    struct PrefixSandboxProvider {
+        prefix: &'static str,
+        sandbox: SandboxFsProvider,
+        native: NativeFsProvider,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl PrefixSandboxProvider {
+        fn is_virtual(&self, path: &Path) -> bool {
+            path.to_string_lossy().starts_with(self.prefix)
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[async_trait(?Send)]
+    impl FsProvider for PrefixSandboxProvider {
+        fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
+            if self.is_virtual(path) {
+                self.sandbox.open(path, flags)
+            } else {
+                self.native.open(path, flags)
+            }
+        }
+
+        async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+            if self.is_virtual(path) {
+                self.sandbox.read(path).await
+            } else {
+                self.native.read(path).await
+            }
+        }
+
+        async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+            if self.is_virtual(path) {
+                self.sandbox.write(path, data).await
+            } else {
+                self.native.write(path, data).await
+            }
+        }
+
+        async fn remove_file(&self, path: &Path) -> io::Result<()> {
+            if self.is_virtual(path) {
+                self.sandbox.remove_file(path).await
+            } else {
+                self.native.remove_file(path).await
+            }
+        }
+
+        async fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+            if self.is_virtual(path) {
+                self.sandbox.metadata(path).await
+            } else {
+                self.native.metadata(path).await
+            }
+        }
+
+        async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+            if self.is_virtual(path) {
+                self.sandbox.symlink_metadata(path).await
+            } else {
+                self.native.symlink_metadata(path).await
+            }
+        }
+
+        async fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+            if self.is_virtual(path) {
+                self.sandbox.read_dir(path).await
+            } else {
+                self.native.read_dir(path).await
+            }
+        }
+
+        async fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+            if self.is_virtual(path) {
+                self.sandbox.canonicalize(path).await
+            } else {
+                self.native.canonicalize(path).await
+            }
+        }
+
+        async fn create_dir(&self, path: &Path) -> io::Result<()> {
+            if self.is_virtual(path) {
+                self.sandbox.create_dir(path).await
+            } else {
+                self.native.create_dir(path).await
+            }
+        }
+
+        async fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+            if self.is_virtual(path) {
+                self.sandbox.create_dir_all(path).await
+            } else {
+                self.native.create_dir_all(path).await
+            }
+        }
+
+        async fn remove_dir(&self, path: &Path) -> io::Result<()> {
+            if self.is_virtual(path) {
+                self.sandbox.remove_dir(path).await
+            } else {
+                self.native.remove_dir(path).await
+            }
+        }
+
+        async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+            if self.is_virtual(path) {
+                self.sandbox.remove_dir_all(path).await
+            } else {
+                self.native.remove_dir_all(path).await
+            }
+        }
+
+        async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+            match (self.is_virtual(from), self.is_virtual(to)) {
+                (true, true) => self.sandbox.rename(from, to).await,
+                (false, false) => self.native.rename(from, to).await,
+                _ => Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "cross-provider rename is unsupported in test provider",
+                )),
+            }
+        }
+
+        async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
+            if self.is_virtual(path) {
+                self.sandbox.set_readonly(path, readonly).await
+            } else {
+                self.native.set_readonly(path, readonly).await
+            }
+        }
+    }
 
     fn unique_path(prefix: &str) -> PathBuf {
         let mut path = std::env::temp_dir();
@@ -3943,6 +4611,18 @@ mod tests {
 
     fn spreadsheet_options(args: Vec<Value>) -> StructValue {
         match block_on(spreadsheet_import_options_builtin(args)).expect("spreadsheetImportOptions")
+        {
+            Value::Struct(options) => options,
+            other => panic!("expected struct options, got {other:?}"),
+        }
+    }
+
+    fn detect_options(path: &Path, args: Vec<Value>) -> StructValue {
+        match block_on(detect_import_options_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            args,
+        ))
+        .expect("detectImportOptions")
         {
             Value::Struct(options) => options,
             other => panic!("expected struct options, got {other:?}"),
@@ -4211,6 +4891,307 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(labels.contains(&"opts = spreadsheetImportOptions()"));
         assert!(labels.contains(&"opts = spreadsheetImportOptions(nameValuePairs...)"));
+    }
+
+    #[test]
+    fn detect_import_options_registers_public_descriptor() {
+        assert!(runmat_builtins::builtin_function_by_name("detectImportOptions").is_some());
+        let labels = DETECT_IMPORT_OPTIONS_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"opts = detectImportOptions(filename)"));
+        assert!(labels.contains(&"opts = detectImportOptions(filename, nameValuePairs...)"));
+    }
+
+    #[test]
+    fn detect_import_options_infers_text_delimiter_names_and_types() {
+        let path = unique_path("detect_import_options_text");
+        fs::write(
+            &path,
+            "Name;Score;Flag;When\nAda;10;true;2026-06-01\nGrace;12;false;2026-06-02\n",
+        )
+        .expect("write sample");
+        let options = detect_options(&path, Vec::new());
+        assert_eq!(options.fields.get("FileType"), Some(&Value::from("text")));
+        assert_eq!(options.fields.get("Delimiter"), Some(&Value::from(";")));
+        assert_eq!(options.fields.get("NumHeaderLines"), Some(&Value::Num(1.0)));
+        assert_eq!(
+            options.fields.get("ReadVariableNames"),
+            Some(&Value::Bool(false))
+        );
+        match options.fields.get("VariableNames").unwrap() {
+            Value::StringArray(array) => assert_eq!(
+                array.data,
+                vec![
+                    "Name".to_string(),
+                    "Score".to_string(),
+                    "Flag".to_string(),
+                    "When".to_string()
+                ]
+            ),
+            other => panic!("expected string array, got {other:?}"),
+        }
+        match options.fields.get("VariableTypes").unwrap() {
+            Value::StringArray(array) => assert_eq!(
+                array.data,
+                vec![
+                    "string".to_string(),
+                    "double".to_string(),
+                    "logical".to_string(),
+                    "datetime".to_string()
+                ]
+            ),
+            other => panic!("expected string array, got {other:?}"),
+        }
+        let table = object(read_table(&path, vec![Value::Struct(options)]));
+        assert_eq!(
+            table_variable_names_from_object(&table).unwrap(),
+            vec![
+                "Name".to_string(),
+                "Score".to_string(),
+                "Flag".to_string(),
+                "When".to_string()
+            ]
+        );
+        match table_member_get(&table, &Value::from("Score")).unwrap() {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![10.0, 12.0]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn detect_import_options_struct_can_drive_readmatrix() {
+        let path = unique_path("detect_import_options_readmatrix");
+        fs::write(&path, "A,B\n1,2\n3,4\n").expect("write sample");
+        let options = detect_options(&path, Vec::new());
+        let matrix = block_on(
+            crate::builtins::io::tabular::readmatrix::readmatrix_builtin(
+                Value::from(path.to_string_lossy().to_string()),
+                vec![Value::Struct(options)],
+            ),
+        )
+        .expect("readmatrix");
+        match matrix {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![2, 2]);
+                assert_eq!(tensor.data, vec![1.0, 3.0, 2.0, 4.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn detect_import_options_strips_bom_from_detected_names() {
+        let path = unique_path("detect_import_options_bom");
+        fs::write(&path, "\u{FEFF}A,B\n1,2\n3,4\n").expect("write sample");
+        let options = detect_options(&path, Vec::new());
+        match options.fields.get("VariableNames").unwrap() {
+            Value::StringArray(array) => {
+                assert_eq!(array.data, vec!["A".to_string(), "B".to_string()])
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+        let table = object(read_table(&path, vec![Value::Struct(options)]));
+        assert_eq!(
+            table_variable_names_from_object(&table).unwrap(),
+            vec!["A".to_string(), "B".to_string()]
+        );
+        match table_member_get(&table, &Value::from("A")).unwrap() {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 3.0]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn detect_import_options_preserves_partial_ranges_for_replay() {
+        let path = unique_path("detect_import_options_partial_range");
+        fs::write(&path, "ID,A,B,C\nr1,1,2,3\nr2,4,5,6\nr3,7,8,9\n").expect("write sample");
+
+        let column_options = detect_options(&path, vec![Value::from("Range"), Value::from("C:D")]);
+        assert_eq!(
+            column_options.fields.get("Range"),
+            Some(&Value::from("C2:D"))
+        );
+        let table = object(read_table(&path, vec![Value::Struct(column_options)]));
+        assert_eq!(
+            table_variable_names_from_object(&table).unwrap(),
+            vec!["B".to_string(), "C".to_string()]
+        );
+        match table_member_get(&table, &Value::from("B")).unwrap() {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 5.0, 8.0]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+
+        fs::write(&path, "11,12\n21,22\n31,32\n41,42\n").expect("write numeric sample");
+        let row_options = detect_options(&path, vec![Value::from("Range"), Value::from("2:3")]);
+        assert_eq!(row_options.fields.get("Range"), Some(&Value::from("2:3")));
+        let table = object(read_table(&path, vec![Value::Struct(row_options)]));
+        match table_member_get(&table, &Value::from("Var2")).unwrap() {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![22.0, 32.0]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn detect_import_options_read_row_names_replays_through_readtable() {
+        let path = unique_path("detect_import_options_row_names");
+        fs::write(&path, "Row,Name,Score\nr1,Ada,10\nr2,Grace,12\n").expect("write sample");
+        let options = detect_options(&path, vec![Value::from("ReadRowNames"), Value::Bool(true)]);
+        assert_eq!(options.fields.get("NumVariables"), Some(&Value::Num(2.0)));
+        match options.fields.get("VariableNames").unwrap() {
+            Value::StringArray(array) => assert_eq!(
+                array.data,
+                vec!["Row".to_string(), "Name".to_string(), "Score".to_string()]
+            ),
+            other => panic!("expected string array, got {other:?}"),
+        }
+        let table = object(read_table(&path, vec![Value::Struct(options)]));
+        assert_eq!(
+            table_variable_names_from_object(&table).unwrap(),
+            vec!["Name".to_string(), "Score".to_string()]
+        );
+        let props = table_public_properties(&table).unwrap();
+        match props.fields.get(ROW_NAMES).unwrap() {
+            Value::StringArray(array) => {
+                assert_eq!(array.data, vec!["r1".to_string(), "r2".to_string()])
+            }
+            other => panic!("expected row names, got {other:?}"),
+        }
+        match table_member_get(&table, &Value::from("Score")).unwrap() {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![10.0, 12.0]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn detect_import_options_encoding_replays_through_readmatrix() {
+        let path = unique_path("detect_import_options_encoding_readmatrix");
+        fs::write(&path, b"Caf\xe9,Score\n1,2\n3,4\n").expect("write sample");
+        let options = detect_options(
+            &path,
+            vec![Value::from("Encoding"), Value::from("windows-1252")],
+        );
+        let matrix = block_on(
+            crate::builtins::io::tabular::readmatrix::readmatrix_builtin(
+                Value::from(path.to_string_lossy().to_string()),
+                vec![Value::Struct(options)],
+            ),
+        )
+        .expect("readmatrix");
+        match matrix {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![2, 2]);
+                assert_eq!(tensor.data, vec![1.0, 3.0, 2.0, 4.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        let _ = fs::remove_file(&path);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn detect_import_options_replays_through_filesystem_provider() {
+        let root = unique_path("detect_import_options_provider_root");
+        {
+            let _provider_lock = runmat_filesystem::provider_override_lock();
+            let provider = PrefixSandboxProvider {
+                prefix: "/provider",
+                sandbox: SandboxFsProvider::new(root.clone()).expect("sandbox provider"),
+                native: NativeFsProvider,
+            };
+            let _provider_guard =
+                runmat_filesystem::replace_provider(std::sync::Arc::new(provider));
+            block_on(runmat_filesystem::write_async(
+                "/provider.csv",
+                b"Name,Score\nAda,10\nGrace,12\n",
+            ))
+            .expect("write provider sample");
+
+            let virtual_path = Path::new("/provider.csv");
+            let options = detect_options(virtual_path, Vec::new());
+            let table = object(read_table(
+                virtual_path,
+                vec![Value::Struct(options.clone())],
+            ));
+            assert_eq!(
+                table_variable_names_from_object(&table).unwrap(),
+                vec!["Name".to_string(), "Score".to_string()]
+            );
+            match table_member_get(&table, &Value::from("Score")).unwrap() {
+                Value::Tensor(tensor) => assert_eq!(tensor.data, vec![10.0, 12.0]),
+                other => panic!("expected tensor, got {other:?}"),
+            }
+
+            block_on(runmat_filesystem::write_async(
+                "/provider_numeric.csv",
+                b"A,B\n1,2\n3,4\n",
+            ))
+            .expect("write provider numeric sample");
+            let matrix_options = detect_options(Path::new("/provider_numeric.csv"), Vec::new());
+            let matrix = block_on(
+                crate::builtins::io::tabular::readmatrix::readmatrix_builtin(
+                    Value::from("/provider_numeric.csv"),
+                    vec![Value::Struct(matrix_options)],
+                ),
+            )
+            .expect("readmatrix");
+            match matrix {
+                Value::Tensor(tensor) => {
+                    assert_eq!(tensor.shape, vec![2, 2]);
+                    assert_eq!(tensor.data, vec![1.0, 3.0, 2.0, 4.0]);
+                }
+                other => panic!("expected tensor, got {other:?}"),
+            }
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn detect_import_options_honors_overrides_and_range() {
+        let path = unique_path("detect_import_options_overrides");
+        fs::write(&path, "ignore me\nRaw A|Raw B\n5|yes\n6|no\n").expect("write sample");
+        let options = detect_options(
+            &path,
+            vec![
+                Value::from("Delimiter"),
+                Value::from("|"),
+                Value::from("NumHeaderLines"),
+                Value::Num(1.0),
+                Value::from("VariableNamingRule"),
+                Value::from("preserve"),
+                Value::from("TextType"),
+                Value::from("char"),
+            ],
+        );
+        assert_eq!(options.fields.get("Delimiter"), Some(&Value::from("|")));
+        assert_eq!(options.fields.get("NumHeaderLines"), Some(&Value::Num(2.0)));
+        assert_eq!(
+            options.fields.get("VariableNamingRule"),
+            Some(&Value::from("preserve"))
+        );
+        match options.fields.get("VariableNames").unwrap() {
+            Value::StringArray(array) => {
+                assert_eq!(array.data, vec!["Raw A".to_string(), "Raw B".to_string()])
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+        match options.fields.get("VariableTypes").unwrap() {
+            Value::StringArray(array) => {
+                assert_eq!(
+                    array.data,
+                    vec!["double".to_string(), "logical".to_string()]
+                )
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+        let _ = fs::remove_file(&path);
     }
 
     #[test]

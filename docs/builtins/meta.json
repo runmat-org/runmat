@@ -16703,6 +16703,94 @@
       ]
     },
     {
+      "name": "detectImportOptions",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "opts = detectImportOptions(filename)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Text or spreadsheet file path to inspect."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "opts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Detected import options struct accepted by readtable/readmatrix."
+            }
+          ]
+        },
+        {
+          "label": "opts = detectImportOptions(filename, nameValuePairs...)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Text or spreadsheet file path to inspect."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Detection overrides such as Delimiter, Range, Sheet, Encoding, or TextType."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "opts",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Detected import options struct accepted by readtable/readmatrix."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TABLE.INVALID_ARGUMENT",
+          "identifier": "RunMat:table:InvalidArgument",
+          "when": "Arguments or table metadata are invalid.",
+          "message": "table: invalid argument"
+        },
+        {
+          "code": "RM.TABLE.INVALID_INDEX",
+          "identifier": "RunMat:table:InvalidIndex",
+          "when": "Table indexing is invalid.",
+          "message": "table: invalid index"
+        },
+        {
+          "code": "RM.TABLE.INVALID_VARIABLE",
+          "identifier": "RunMat:table:InvalidVariable",
+          "when": "A table variable name or value is invalid.",
+          "message": "table: invalid variable"
+        },
+        {
+          "code": "RM.READTABLE.IO",
+          "identifier": "RunMat:readtable:IOError",
+          "when": "readtable cannot open or read the requested file.",
+          "message": "readtable: file read failed"
+        },
+        {
+          "code": "RM.READTABLE.UNSUPPORTED_FILE",
+          "identifier": "RunMat:readtable:UnsupportedFileType",
+          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
+          "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
       "name": "diag",
       "output_mode": "Fixed",
       "completion_policy": "Public",
