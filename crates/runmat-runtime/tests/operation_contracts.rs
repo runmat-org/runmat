@@ -1178,13 +1178,19 @@ fn analysis_run_acoustic_contract_is_v1_and_typed() {
     .expect("acoustic run should produce envelope");
     assert_eq!(envelope.operation, "fea.run_acoustic");
     assert_eq!(envelope.op_version, "fea.run_acoustic/v1");
-    assert!(envelope.data.modal_results.is_some());
+    assert!(envelope.data.modal_results.is_none());
     assert!(envelope
         .data
         .run
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_ACOUSTIC_HARMONIC_RESPONSE"));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_ACOUSTIC_HELMHOLTZ_RESIDUAL"));
     assert!(envelope
         .data
         .run
@@ -1201,7 +1207,7 @@ fn analysis_run_acoustic_contract_is_v1_and_typed() {
         ComputeBackend::Cpu,
         OperationContext::new(Some("trace-contract-acoustic-4".to_string()), None),
     )
-    .expect_err("acoustic run should reject models without modal step");
+    .expect_err("acoustic run should reject models without acoustic harmonic step marker");
     assert_eq!(invalid.operation, "fea.run_acoustic");
     assert_eq!(invalid.op_version, "fea.run_acoustic/v1");
     assert_eq!(invalid.error_code, "RM.FEA.RUN_ACOUSTIC.INVALID_MODEL");

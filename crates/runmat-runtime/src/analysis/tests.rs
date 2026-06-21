@@ -3444,7 +3444,7 @@ fn analysis_run_acoustic_rejects_models_without_modal_step() {
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect_err("acoustic run should fail for missing modal step");
+    .expect_err("acoustic run should fail for missing acoustic harmonic step marker");
 
     assert_eq!(err.operation, "fea.run_acoustic");
     assert_eq!(err.op_version, "fea.run_acoustic/v1");
@@ -5847,21 +5847,21 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
     assert_eq!(envelope.op_version, "fea.run_acoustic/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        "acoustic_harmonic_modal_response"
+        "acoustic_helmholtz_harmonic"
     );
-    let modal = envelope
-        .data
-        .modal_results
-        .as_ref()
-        .expect("acoustic basis payload should be present");
-    assert!(!modal.eigenvalues_hz.is_empty());
-    assert_eq!(modal.eigenvalues_hz.len(), modal.mode_shapes.len());
+    assert!(envelope.data.modal_results.is_none());
     assert!(envelope
         .data
         .run
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_ACOUSTIC_HARMONIC_RESPONSE"));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_ACOUSTIC_HELMHOLTZ_RESIDUAL"));
     assert!(envelope
         .data
         .run

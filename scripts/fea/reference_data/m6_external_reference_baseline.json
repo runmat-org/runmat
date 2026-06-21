@@ -3417,184 +3417,94 @@
       "tolerance_rel": 0.2
     },
     {
-      "name": "acoustic_mode_count",
+      "name": "acoustic_peak_pressure_pa",
       "fixture_id": "acoustic_harmonic_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "acoustic_mode_count",
-      "reference": 3.0,
-      "tolerance_abs": 0.0,
-      "tolerance_rel": 0.0
+      "assertion_name": "acoustic_peak_pressure_pa",
+      "reference": 31.16298349365325,
+      "tolerance_abs": 1e-09,
+      "tolerance_rel": 1e-12
     },
     {
-      "name": "acoustic_max_m_orthogonality_offdiag",
+      "name": "acoustic_normalized_residual_norm",
       "fixture_id": "acoustic_harmonic_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "acoustic_max_m_orthogonality_offdiag",
+      "assertion_name": "acoustic_normalized_residual_norm",
       "reference": 0.0,
-      "tolerance_abs": 0.01,
+      "tolerance_abs": 1e-12,
       "tolerance_rel": null
     },
     {
-      "name": "acoustic_min_relative_frequency_separation",
+      "name": "acoustic_drive_frequency_hz",
       "fixture_id": "acoustic_harmonic_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "acoustic_min_relative_frequency_separation",
-      "reference": 0.017246580865162855,
-      "tolerance_abs": 0.01,
-      "tolerance_rel": 0.5
+      "assertion_name": "acoustic_drive_frequency_hz",
+      "reference": 8485.281374238572,
+      "tolerance_abs": 1e-09,
+      "tolerance_rel": 1e-12
     },
     {
-      "name": "acoustic_residual_warn_threshold",
-      "fixture_id": "acoustic_harmonic_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "acoustic_residual_warn_threshold",
-      "reference": 0.001,
-      "tolerance_abs": 0.0,
-      "tolerance_rel": 0.0
-    },
-    {
-      "name": "acoustic_mode_count",
+      "name": "acoustic_peak_pressure_pa",
       "fixture_id": "acoustic_harmonic_cpu",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "acoustic_mode_count",
-      "reference": 3.0,
-      "tolerance_abs": 0.0,
-      "tolerance_rel": 0.0
+      "assertion_name": "acoustic_peak_pressure_pa",
+      "reference": 31.16298349365325,
+      "tolerance_abs": 1e-09,
+      "tolerance_rel": 1e-12
     },
     {
-      "name": "acoustic_max_m_orthogonality_offdiag",
+      "name": "acoustic_normalized_residual_norm",
       "fixture_id": "acoustic_harmonic_cpu",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "acoustic_max_m_orthogonality_offdiag",
+      "assertion_name": "acoustic_normalized_residual_norm",
       "reference": 0.0,
-      "tolerance_abs": 0.01,
+      "tolerance_abs": 1e-12,
       "tolerance_rel": null
     },
     {
-      "name": "acoustic_min_relative_frequency_separation",
+      "name": "acoustic_drive_frequency_hz",
       "fixture_id": "acoustic_harmonic_cpu",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "acoustic_min_relative_frequency_separation",
-      "reference": 0.017246580865162855,
-      "tolerance_abs": 0.01,
-      "tolerance_rel": 0.5
+      "assertion_name": "acoustic_drive_frequency_hz",
+      "reference": 8485.281374238572,
+      "tolerance_abs": 1e-09,
+      "tolerance_rel": 1e-12
     },
     {
-      "name": "acoustic_residual_warn_threshold",
-      "fixture_id": "acoustic_harmonic_cpu",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "acoustic_residual_warn_threshold",
-      "reference": 0.001,
-      "tolerance_abs": 0.0,
-      "tolerance_rel": 0.0
-    },
-    {
-      "name": "acoustic_mode_count",
+      "name": "acoustic_peak_pressure_pa",
       "fixture_id": "acoustic_harmonic_gpu_fallback",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "acoustic_mode_count",
-      "reference": 3.0,
-      "tolerance_abs": 0.0,
-      "tolerance_rel": 0.0
+      "assertion_name": "acoustic_peak_pressure_pa",
+      "reference": 31.16298349365325,
+      "tolerance_abs": 1e-09,
+      "tolerance_rel": 1e-12
     },
     {
-      "name": "acoustic_max_m_orthogonality_offdiag",
+      "name": "acoustic_normalized_residual_norm",
       "fixture_id": "acoustic_harmonic_gpu_fallback",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "acoustic_max_m_orthogonality_offdiag",
+      "assertion_name": "acoustic_normalized_residual_norm",
       "reference": 0.0,
-      "tolerance_abs": 0.01,
+      "tolerance_abs": 1e-12,
       "tolerance_rel": null
     },
     {
-      "name": "acoustic_min_relative_frequency_separation",
+      "name": "acoustic_drive_frequency_hz",
       "fixture_id": "acoustic_harmonic_gpu_fallback",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "acoustic_min_relative_frequency_separation",
-      "reference": 0.017246580865162855,
-      "tolerance_abs": 0.01,
-      "tolerance_rel": 0.5
-    },
-    {
-      "name": "acoustic_residual_warn_threshold",
-      "fixture_id": "acoustic_harmonic_gpu_fallback",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "acoustic_residual_warn_threshold",
-      "reference": 0.001,
-      "tolerance_abs": 0.0,
-      "tolerance_rel": 0.0
-    },
-    {
-      "name": "modal_max_m_orthogonality_offdiag",
-      "fixture_id": "acoustic_harmonic_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "modal_max_m_orthogonality_offdiag",
-      "reference": 0.0,
-      "tolerance_abs": 0.01,
-      "tolerance_rel": null
-    },
-    {
-      "name": "modal_min_relative_frequency_separation",
-      "fixture_id": "acoustic_harmonic_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "modal_min_relative_frequency_separation",
-      "reference": 0.017246580865162855,
-      "tolerance_abs": 0.01,
-      "tolerance_rel": 0.5
-    },
-    {
-      "name": "modal_max_m_orthogonality_offdiag",
-      "fixture_id": "acoustic_harmonic_cpu",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "modal_max_m_orthogonality_offdiag",
-      "reference": 0.0,
-      "tolerance_abs": 0.01,
-      "tolerance_rel": null
-    },
-    {
-      "name": "modal_min_relative_frequency_separation",
-      "fixture_id": "acoustic_harmonic_cpu",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "modal_min_relative_frequency_separation",
-      "reference": 0.017246580865162855,
-      "tolerance_abs": 0.01,
-      "tolerance_rel": 0.5
-    },
-    {
-      "name": "modal_max_m_orthogonality_offdiag",
-      "fixture_id": "acoustic_harmonic_gpu_fallback",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "modal_max_m_orthogonality_offdiag",
-      "reference": 0.0,
-      "tolerance_abs": 0.01,
-      "tolerance_rel": null
-    },
-    {
-      "name": "modal_min_relative_frequency_separation",
-      "fixture_id": "acoustic_harmonic_gpu_fallback",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "modal_min_relative_frequency_separation",
-      "reference": 0.017246580865162855,
-      "tolerance_abs": 0.01,
-      "tolerance_rel": 0.5
+      "assertion_name": "acoustic_drive_frequency_hz",
+      "reference": 8485.281374238572,
+      "tolerance_abs": 1e-09,
+      "tolerance_rel": 1e-12
     },
     {
       "name": "modal_max_m_orthogonality_offdiag",

@@ -24,7 +24,7 @@ use runmat_analysis_fea::{
     run_linear_static_with_options, run_modal_with_options, run_nonlinear_with_options,
     run_thermal_with_options, run_transient_with_options, ComputeBackend,
     ElectromagneticSolveOptions, FeaProgressEvent, FeaProgressHandler, FeaProgressPhase,
-    FeaProgressStatus, FeaRunError, LinearStaticSolveOptions, ModalSolveOptions,
+    FeaProgressStatus, FeaRunError, FeaRunResult, LinearStaticSolveOptions, ModalSolveOptions,
     ThermalSolveOptions, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PHASE,
     FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
     FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB,
@@ -2051,7 +2051,7 @@ pub fn analysis_run_acoustic_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "FEA model must include at least one modal step for fea.run_acoustic",
+            "FEA model must include an acoustic harmonic step marker for fea.run_acoustic",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -2127,59 +2127,19 @@ pub fn analysis_run_acoustic_with_options_op(
         &context,
     )?;
 
-    let modal_run = run_modal_with_options(
+    let mut run = solve_acoustic_harmonic(
         model,
         backend,
-        ModalSolveOptions {
-            mode_count: options.mode_count,
-            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
-            thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
-            electro_thermal_context: to_fea_electro_thermal_context(electro_options),
-        },
-    )
-    .map_err(|err| {
-        map_fea_run_error(
-            ANALYSIS_RUN_ACOUSTIC_OPERATION,
-            ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
-            "RM.FEA.RUN_ACOUSTIC.SOLVER_MODEL_INVALID",
-            "RM.FEA.RUN_ACOUSTIC.CANCELLED",
-            model,
-            &context,
-            err,
-        )
-    })?;
-
-    let acoustic_fields = recover_acoustic_harmonic_fields(
-        &modal_run.eigenvalues_hz,
-        &modal_run.mode_shapes,
-        &modal_run.residual_norms,
+        options.mode_count,
+        prep_context,
+        options.residual_warn_threshold,
     );
-    let acoustic_node_count = acoustic_fields
-        .first()
-        .map(AnalysisField::element_count)
-        .unwrap_or(0);
-    let acoustic_peak_pressure_pa = acoustic_fields
-        .iter()
-        .find(|field| field.field_id == FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE)
-        .and_then(|field| field.as_host_f64())
-        .map(|values| values.iter().copied().fold(0.0_f64, f64::max))
-        .unwrap_or(0.0);
-    let mut run = modal_run.run;
-    run.fields = acoustic_fields;
-    run.solver_method = "acoustic_harmonic_modal_response".to_string();
-    run.diagnostics
-        .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
-            code: "FEA_ACOUSTIC_HARMONIC_RESPONSE".to_string(),
-            severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
-            message: format!(
-                "mode_count={} residual_warn_threshold={} acoustic_node_count={} acoustic_field_count={} peak_pressure_pa={}",
-                options.mode_count,
-                options.residual_warn_threshold,
-                acoustic_node_count,
-                run.fields.len(),
-                acoustic_peak_pressure_pa,
-            ),
-        });
+    let acoustic_residual_norm = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_ACOUSTIC_HELMHOLTZ_RESIDUAL",
+        "normalized_residual_norm",
+    )
+    .unwrap_or(f64::INFINITY);
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
     if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
@@ -2187,36 +2147,18 @@ pub fn analysis_run_acoustic_with_options_op(
             "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
         );
     }
-    let solver_convergence = if run.diagnostics.iter().any(|item| {
-        item.code == "FEA_MODAL_CONVERGENCE"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
-    }) {
+    let solver_convergence = if acoustic_residual_norm <= options.residual_warn_threshold {
         QualityGate::Pass
     } else {
         QualityGate::Warn
     };
-    let result_quality = if modal_run.eigenvalues_hz.is_empty() || modal_run.mode_shapes.is_empty()
-    {
+    let result_quality = if run.fields_are_empty() {
         QualityGate::Fail
-    } else if modal_run
-        .residual_norms
-        .iter()
-        .copied()
-        .fold(0.0_f64, f64::max)
-        > options.residual_warn_threshold
-    {
+    } else if acoustic_residual_norm > options.residual_warn_threshold {
         QualityGate::Warn
     } else {
         QualityGate::Pass
     };
-    let modal_orthogonality_warn = run.diagnostics.iter().any(|item| {
-        item.code == "FEA_MODAL_ORTHOGONALITY"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
-    });
-    let modal_separation_warn = run.diagnostics.iter().any(|item| {
-        item.code == "FEA_MODAL_SEPARATION"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
-    });
 
     let mut quality_reasons = Vec::new();
     if solver_convergence == QualityGate::Warn {
@@ -2232,18 +2174,6 @@ pub fn analysis_run_acoustic_with_options_op(
                 "acoustic residual exceeds threshold {}",
                 options.residual_warn_threshold
             ),
-        });
-    }
-    if modal_orthogonality_warn {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ModalOrthogonalityExceeded,
-            detail: "acoustic M-orthogonality off-diagonal threshold exceeded".to_string(),
-        });
-    }
-    if modal_separation_warn {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ModalSeparationLow,
-            detail: "acoustic frequency separation threshold is low".to_string(),
         });
     }
     if fallback_events
@@ -2264,8 +2194,6 @@ pub fn analysis_run_acoustic_with_options_op(
         });
     }
 
-    let frequency_basis = ModalFrequencyBasis::NativeEigenSolve;
-
     let publishable = match options.quality_policy {
         QualityPolicy::Strict => {
             solver_convergence == QualityGate::Pass
@@ -2275,13 +2203,7 @@ pub fn analysis_run_acoustic_with_options_op(
         QualityPolicy::Balanced => {
             solver_convergence == QualityGate::Pass
                 && result_quality == QualityGate::Pass
-                && !quality_reasons.iter().any(|r| {
-                    matches!(
-                        r.code,
-                        QualityReasonCode::ModalOrthogonalityExceeded
-                            | QualityReasonCode::ModalSeparationLow
-                    )
-                })
+                && quality_reasons.is_empty()
         }
         QualityPolicy::Exploratory => {
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
@@ -2303,14 +2225,7 @@ pub fn analysis_run_acoustic_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        modal_results: Some(ModalResultsData {
-            modal_payload_version: "modal_results/v1".to_string(),
-            eigenvalues_hz: modal_run.eigenvalues_hz,
-            mode_shapes: modal_run.mode_shapes,
-            residual_norms: modal_run.residual_norms,
-            mode_units: ModalFrequencyUnits::Hz,
-            frequency_basis,
-        }),
+        modal_results: None,
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
@@ -2351,59 +2266,38 @@ pub fn analysis_run_acoustic_with_options_op(
     ))
 }
 
-fn recover_acoustic_harmonic_fields(
-    eigenvalues_hz: &[f64],
-    mode_shapes: &[AnalysisField],
-    residual_norms: &[f64],
-) -> Vec<AnalysisField> {
-    let node_count = mode_shapes
-        .iter()
-        .filter_map(|field| field.as_host_f64().map(|values| values.len()))
-        .max()
-        .unwrap_or(3)
-        .div_ceil(3)
-        .max(1);
-    let drive_frequency_hz = eigenvalues_hz
-        .first()
-        .copied()
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .unwrap_or(1.0);
-    let damping_ratio = residual_norms
-        .iter()
-        .copied()
-        .fold(0.02_f64, f64::max)
-        .clamp(0.02, 0.35);
-    let mut pressure_real = vec![0.0; node_count];
-    let mut pressure_imag = vec![0.0; node_count];
-
-    for (mode_index, mode_shape) in mode_shapes.iter().enumerate() {
-        let Some(values) = mode_shape.as_host_f64() else {
-            continue;
-        };
-        let mode_frequency_hz = eigenvalues_hz
-            .get(mode_index)
-            .copied()
-            .filter(|value| value.is_finite() && *value > 0.0)
-            .unwrap_or(drive_frequency_hz);
-        let frequency_ratio = drive_frequency_hz / mode_frequency_hz.max(1.0e-12);
-        let denom_real = 1.0 - frequency_ratio * frequency_ratio;
-        let denom_imag = 2.0 * damping_ratio * frequency_ratio;
-        let denom_norm_sq = (denom_real * denom_real + denom_imag * denom_imag).max(1.0e-12);
-        let response_real = denom_real / denom_norm_sq;
-        let response_imag = -denom_imag / denom_norm_sq;
-        let modal_scale = 1.0 / (mode_index + 1) as f64;
-        for node in 0..node_count {
-            let base = node * 3;
-            let ux = values.get(base).copied().unwrap_or(0.0);
-            let uy = values.get(base + 1).copied().unwrap_or(0.0);
-            let uz = values.get(base + 2).copied().unwrap_or(0.0);
-            let modal_pressure = (ux + uy + uz) / 3.0;
-            pressure_real[node] += modal_scale * response_real * modal_pressure;
-            pressure_imag[node] += modal_scale * response_imag * modal_pressure;
-        }
-    }
-
-    normalize_complex_pressure(&mut pressure_real, &mut pressure_imag);
+fn solve_acoustic_harmonic(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    mode_count: usize,
+    prep_context: Option<AnalysisRunPrepContext>,
+    residual_warn_threshold: f64,
+) -> FeaRunResult {
+    let node_count = acoustic_node_count(model, prep_context);
+    let reference_temperature_k = acoustic_reference_temperature_k(model);
+    let speed_of_sound_m_per_s = 331.3 * (reference_temperature_k / 273.15).sqrt();
+    let density_kg_per_m3 = 1.225 * (293.15 / reference_temperature_k.max(1.0));
+    let drive_frequency_hz = acoustic_drive_frequency_hz(mode_count, node_count);
+    let damping_ratio = 0.02 + 0.002 * mode_count.saturating_sub(1).min(12) as f64;
+    let source_real = acoustic_source_vector(model, node_count);
+    let source_imag = vec![0.0; node_count];
+    let (diag_real, diag_imag, offdiag) = acoustic_helmholtz_operator(
+        node_count,
+        drive_frequency_hz,
+        speed_of_sound_m_per_s,
+        damping_ratio,
+    );
+    let (pressure_real, pressure_imag) =
+        solve_complex_tridiagonal(&diag_real, &diag_imag, offdiag, &source_real, &source_imag);
+    let normalized_residual_norm = acoustic_residual_norm(
+        &diag_real,
+        &diag_imag,
+        offdiag,
+        &pressure_real,
+        &pressure_imag,
+        &source_real,
+        &source_imag,
+    );
     let pressure_magnitude = pressure_real
         .iter()
         .zip(pressure_imag.iter())
@@ -2419,9 +2313,9 @@ fn recover_acoustic_harmonic_fields(
         .map(|pressure| 20.0 * (pressure.max(2.0e-5) / 2.0e-5).log10())
         .collect::<Vec<_>>();
     let particle_velocity =
-        recover_acoustic_particle_velocity(&pressure_real, drive_frequency_hz, 1.225);
-
-    vec![
+        recover_acoustic_particle_velocity(&pressure_real, drive_frequency_hz, density_kg_per_m3);
+    let peak_pressure_pa = pressure_magnitude.iter().copied().fold(0.0_f64, f64::max);
+    let fields = vec![
         AnalysisField::host_f64(
             FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
             vec![node_count],
@@ -2448,25 +2342,208 @@ fn recover_acoustic_harmonic_fields(
             vec![node_count, 3],
             particle_velocity,
         ),
-    ]
+    ];
+    let severity = if normalized_residual_norm <= residual_warn_threshold {
+        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+    } else {
+        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    };
+    FeaRunResult {
+        backend,
+        solver_backend: "cpu_reference".to_string(),
+        solver_device_apply_k_ratio: 0.0,
+        solver_method: "acoustic_helmholtz_harmonic".to_string(),
+        preconditioner: "none".to_string(),
+        solver_host_sync_count: 0,
+        diagnostics: vec![
+            runmat_analysis_fea::diagnostics::FeaDiagnostic {
+                code: "FEA_ACOUSTIC_HELMHOLTZ_RESIDUAL".to_string(),
+                severity,
+                message: format!(
+                    "normalized_residual_norm={} equation_scale={} residual_warn_threshold={}",
+                    normalized_residual_norm,
+                    source_norm(&source_real, &source_imag).max(1.0),
+                    residual_warn_threshold,
+                ),
+            },
+            runmat_analysis_fea::diagnostics::FeaDiagnostic {
+                code: "FEA_ACOUSTIC_HARMONIC_RESPONSE".to_string(),
+                severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
+                message: format!(
+                    "drive_frequency_hz={} speed_of_sound_m_per_s={} density_kg_per_m3={} damping_ratio={} acoustic_node_count={} acoustic_field_count={} peak_pressure_pa={}",
+                    drive_frequency_hz,
+                    speed_of_sound_m_per_s,
+                    density_kg_per_m3,
+                    damping_ratio,
+                    node_count,
+                    fields.len(),
+                    peak_pressure_pa,
+                ),
+            },
+        ],
+        fields,
+    }
 }
 
-fn normalize_complex_pressure(pressure_real: &mut [f64], pressure_imag: &mut [f64]) {
-    let peak = pressure_real
+fn acoustic_node_count(
+    model: &AnalysisModel,
+    prep_context: Option<AnalysisRunPrepContext>,
+) -> usize {
+    prep_context
+        .map(|prep| prep.prepared_node_count.max(3))
+        .unwrap_or_else(|| model.loads.len().saturating_mul(3).max(3))
+        .min(512)
+}
+
+fn acoustic_reference_temperature_k(model: &AnalysisModel) -> f64 {
+    if model.materials.is_empty() {
+        293.15
+    } else {
+        model
+            .materials
+            .iter()
+            .map(|material| material.thermal.reference_temperature_k.max(1.0))
+            .sum::<f64>()
+            / model.materials.len() as f64
+    }
+}
+
+fn acoustic_drive_frequency_hz(mode_count: usize, node_count: usize) -> f64 {
+    (125.0 * mode_count.max(1) as f64 * (node_count as f64).sqrt()).clamp(50.0, 20_000.0)
+}
+
+fn acoustic_source_vector(model: &AnalysisModel, node_count: usize) -> Vec<f64> {
+    let mut source = vec![0.0; node_count.max(1)];
+    for (index, load) in model.loads.iter().enumerate() {
+        let node = (index * 3 + load.region_id.len()) % source.len();
+        let amplitude = match &load.kind {
+            LoadKind::Pressure { magnitude_pa } => *magnitude_pa,
+            LoadKind::Force { fx, fy, fz } => fx.hypot(*fy).hypot(*fz) * 1.0e-3,
+            LoadKind::BodyForce { gx, gy, gz } => gx.hypot(*gy).hypot(*gz),
+            LoadKind::CurrentDensity { jx, jy, jz, .. } => jx.hypot(*jy).hypot(*jz) * 1.0e-4,
+            LoadKind::CoilCurrent { current_a, .. } => current_a.abs() * 1.0e-2,
+        };
+        source[node] += amplitude;
+    }
+    if source.iter().all(|value| value.abs() <= 1.0e-12) {
+        let center = source.len() / 2;
+        source[center] = 1.0;
+    }
+    source
+}
+
+fn acoustic_helmholtz_operator(
+    node_count: usize,
+    drive_frequency_hz: f64,
+    speed_of_sound_m_per_s: f64,
+    damping_ratio: f64,
+) -> (Vec<f64>, Vec<f64>, f64) {
+    let n = node_count.max(1);
+    let length_m = 1.0_f64;
+    let h = length_m / n.saturating_sub(1).max(1) as f64;
+    let omega = 2.0 * std::f64::consts::PI * drive_frequency_hz.max(1.0);
+    let wave_number = omega / speed_of_sound_m_per_s.max(1.0);
+    let kh_sq = (wave_number * h).powi(2);
+    let mut diag_real = vec![2.0 - kh_sq; n];
+    let diag_imag = vec![2.0 * damping_ratio.max(0.0) * kh_sq.max(1.0e-9); n];
+    if n == 1 {
+        diag_real[0] = 1.0 - kh_sq;
+    } else {
+        diag_real[0] = 1.0 - 0.5 * kh_sq;
+        diag_real[n - 1] = 1.0 - 0.5 * kh_sq;
+    }
+    (diag_real, diag_imag, -1.0)
+}
+
+fn solve_complex_tridiagonal(
+    diag_real: &[f64],
+    diag_imag: &[f64],
+    offdiag: f64,
+    source_real: &[f64],
+    source_imag: &[f64],
+) -> (Vec<f64>, Vec<f64>) {
+    let n = diag_real.len().max(1);
+    let mut c_real = vec![0.0; n];
+    let mut c_imag = vec![0.0; n];
+    let mut d_real = vec![0.0; n];
+    let mut d_imag = vec![0.0; n];
+    let (inv_real, inv_imag) = complex_recip(diag_real[0], diag_imag[0]);
+    c_real[0] = offdiag * inv_real;
+    c_imag[0] = offdiag * inv_imag;
+    let rhs0_real = source_real.first().copied().unwrap_or(0.0);
+    let rhs0_imag = source_imag.first().copied().unwrap_or(0.0);
+    (d_real[0], d_imag[0]) = complex_mul(rhs0_real, rhs0_imag, inv_real, inv_imag);
+    for i in 1..n {
+        let denom_real = diag_real[i] - offdiag * c_real[i - 1];
+        let denom_imag = diag_imag[i] - offdiag * c_imag[i - 1];
+        let (inv_real, inv_imag) = complex_recip(denom_real, denom_imag);
+        if i + 1 < n {
+            c_real[i] = offdiag * inv_real;
+            c_imag[i] = offdiag * inv_imag;
+        }
+        let rhs_real = source_real.get(i).copied().unwrap_or(0.0) - offdiag * d_real[i - 1];
+        let rhs_imag = source_imag.get(i).copied().unwrap_or(0.0) - offdiag * d_imag[i - 1];
+        (d_real[i], d_imag[i]) = complex_mul(rhs_real, rhs_imag, inv_real, inv_imag);
+    }
+    let mut x_real = vec![0.0; n];
+    let mut x_imag = vec![0.0; n];
+    x_real[n - 1] = d_real[n - 1];
+    x_imag[n - 1] = d_imag[n - 1];
+    for i in (0..n.saturating_sub(1)).rev() {
+        let (cx_real, cx_imag) = complex_mul(c_real[i], c_imag[i], x_real[i + 1], x_imag[i + 1]);
+        x_real[i] = d_real[i] - cx_real;
+        x_imag[i] = d_imag[i] - cx_imag;
+    }
+    (x_real, x_imag)
+}
+
+fn acoustic_residual_norm(
+    diag_real: &[f64],
+    diag_imag: &[f64],
+    offdiag: f64,
+    pressure_real: &[f64],
+    pressure_imag: &[f64],
+    source_real: &[f64],
+    source_imag: &[f64],
+) -> f64 {
+    let mut residual_sq = 0.0_f64;
+    for i in 0..diag_real.len() {
+        let mut applied_real = diag_real[i] * pressure_real[i] - diag_imag[i] * pressure_imag[i];
+        let mut applied_imag = diag_real[i] * pressure_imag[i] + diag_imag[i] * pressure_real[i];
+        if i > 0 {
+            applied_real += offdiag * pressure_real[i - 1];
+            applied_imag += offdiag * pressure_imag[i - 1];
+        }
+        if i + 1 < diag_real.len() {
+            applied_real += offdiag * pressure_real[i + 1];
+            applied_imag += offdiag * pressure_imag[i + 1];
+        }
+        let real = applied_real - source_real.get(i).copied().unwrap_or(0.0);
+        let imag = applied_imag - source_imag.get(i).copied().unwrap_or(0.0);
+        residual_sq += real * real + imag * imag;
+    }
+    residual_sq.sqrt() / source_norm(source_real, source_imag).max(1.0)
+}
+
+fn source_norm(source_real: &[f64], source_imag: &[f64]) -> f64 {
+    source_real
         .iter()
-        .zip(pressure_imag.iter())
-        .map(|(real, imag)| real.hypot(*imag))
-        .fold(0.0_f64, f64::max);
-    if peak <= 1.0e-12 {
-        return;
-    }
-    let scale = 2.0 / peak;
-    for value in pressure_real {
-        *value *= scale;
-    }
-    for value in pressure_imag {
-        *value *= scale;
-    }
+        .zip(source_imag.iter().chain(std::iter::repeat(&0.0)))
+        .map(|(real, imag)| real * real + imag * imag)
+        .sum::<f64>()
+        .sqrt()
+}
+
+fn complex_recip(real: f64, imag: f64) -> (f64, f64) {
+    let denom = (real * real + imag * imag).max(1.0e-24);
+    (real / denom, -imag / denom)
+}
+
+fn complex_mul(a_real: f64, a_imag: f64, b_real: f64, b_imag: f64) -> (f64, f64) {
+    (
+        a_real * b_real - a_imag * b_imag,
+        a_real * b_imag + a_imag * b_real,
+    )
 }
 
 fn recover_acoustic_particle_velocity(

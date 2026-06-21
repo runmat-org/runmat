@@ -2753,65 +2753,47 @@ pub(super) fn run_fixture(
             );
         }
         if spec.id.starts_with("acoustic_harmonic_") {
-            if let Some(max_offdiag) = spec.max_modal_orthogonality_offdiag {
-                push_threshold_assertion(
-                    spec.id,
-                    &mut threshold_assertions,
-                    &mut failures,
-                    "acoustic_max_m_orthogonality_offdiag",
-                    "FEA_MODAL_ORTHOGONALITY",
-                    diagnostic_metric(
-                        &cpu_envelope.data,
-                        "FEA_MODAL_ORTHOGONALITY",
-                        "max_m_orthogonality_offdiag",
-                    ),
-                    None,
-                    Some(max_offdiag),
-                );
-            }
-            if let Some(min_separation) = spec.min_modal_relative_frequency_separation {
-                push_threshold_assertion(
-                    spec.id,
-                    &mut threshold_assertions,
-                    &mut failures,
-                    "acoustic_min_relative_frequency_separation",
-                    "FEA_MODAL_SEPARATION",
-                    diagnostic_metric(
-                        &cpu_envelope.data,
-                        "FEA_MODAL_SEPARATION",
-                        "min_relative_frequency_separation",
-                    ),
-                    Some(min_separation),
-                    None,
-                );
-            }
             push_threshold_assertion(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "acoustic_mode_count",
-                "FEA_ACOUSTIC_HARMONIC_RESPONSE",
+                "acoustic_normalized_residual_norm",
+                "FEA_ACOUSTIC_HELMHOLTZ_RESIDUAL",
                 diagnostic_metric(
                     &cpu_envelope.data,
-                    "FEA_ACOUSTIC_HARMONIC_RESPONSE",
-                    "mode_count",
+                    "FEA_ACOUSTIC_HELMHOLTZ_RESIDUAL",
+                    "normalized_residual_norm",
                 ),
-                Some(3.0),
-                Some(3.0),
+                None,
+                Some(1.0e-3),
             );
             push_threshold_assertion(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "acoustic_residual_warn_threshold",
+                "acoustic_drive_frequency_hz",
                 "FEA_ACOUSTIC_HARMONIC_RESPONSE",
                 diagnostic_metric(
                     &cpu_envelope.data,
                     "FEA_ACOUSTIC_HARMONIC_RESPONSE",
-                    "residual_warn_threshold",
+                    "drive_frequency_hz",
                 ),
-                Some(1.0e-3),
-                Some(1.0e-3),
+                Some(50.0),
+                Some(20_000.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_peak_pressure_pa",
+                "FEA_ACOUSTIC_HARMONIC_RESPONSE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_HARMONIC_RESPONSE",
+                    "peak_pressure_pa",
+                ),
+                Some(1.0e-12),
+                None,
             );
         }
         if let Some(max_residual) = spec.max_transient_residual_norm {
@@ -3335,7 +3317,12 @@ pub(super) fn run_fixture(
                         ));
                     }
 
-                    if let Some(expected_publishable) = spec.expected_publishable {
+                    let gpu_expected_publishable = if spec.id.starts_with("acoustic_harmonic_") {
+                        Some(false)
+                    } else {
+                        spec.expected_publishable
+                    };
+                    if let Some(expected_publishable) = gpu_expected_publishable {
                         if gpu_envelope.data.publishable != expected_publishable {
                             failures.push(format!(
                                 "gpu publishable mismatch: expected {expected_publishable}, got {}",

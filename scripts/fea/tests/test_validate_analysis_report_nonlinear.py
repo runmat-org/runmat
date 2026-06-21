@@ -658,34 +658,25 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             _record(
                 "acoustic_harmonic_gpu_provider",
                 {
-                    "acoustic_max_m_orthogonality_offdiag",
-                    "acoustic_min_relative_frequency_separation",
-                    "acoustic_mode_count",
-                    "acoustic_residual_warn_threshold",
-                    "modal_max_m_orthogonality_offdiag",
-                    "modal_min_relative_frequency_separation",
+                    "acoustic_normalized_residual_norm",
+                    "acoustic_drive_frequency_hz",
+                    "acoustic_peak_pressure_pa",
                 },
             ),
             _record(
                 "acoustic_harmonic_cpu",
                 {
-                    "acoustic_max_m_orthogonality_offdiag",
-                    "acoustic_min_relative_frequency_separation",
-                    "acoustic_mode_count",
-                    "acoustic_residual_warn_threshold",
-                    "modal_max_m_orthogonality_offdiag",
-                    "modal_min_relative_frequency_separation",
+                    "acoustic_normalized_residual_norm",
+                    "acoustic_drive_frequency_hz",
+                    "acoustic_peak_pressure_pa",
                 },
             ),
             _record(
                 "acoustic_harmonic_gpu_fallback",
                 {
-                    "acoustic_max_m_orthogonality_offdiag",
-                    "acoustic_min_relative_frequency_separation",
-                    "acoustic_mode_count",
-                    "acoustic_residual_warn_threshold",
-                    "modal_max_m_orthogonality_offdiag",
-                    "modal_min_relative_frequency_separation",
+                    "acoustic_normalized_residual_norm",
+                    "acoustic_drive_frequency_hz",
+                    "acoustic_peak_pressure_pa",
                 },
             ),
             _record(
@@ -1269,7 +1260,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             rc = self._run_main_with_report(path)
             self.assertEqual(rc, 1)
 
-    def test_fails_when_acoustic_cpu_mode_count_assertion_missing(self):
+    def test_fails_when_acoustic_cpu_peak_pressure_assertion_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             records = self._base_records()
             for record in records:
@@ -1277,7 +1268,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     record["threshold_assertions"] = [
                         item
                         for item in record["threshold_assertions"]
-                        if item["name"] != "acoustic_mode_count"
+                        if item["name"] != "acoustic_peak_pressure_pa"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"

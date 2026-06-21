@@ -275,14 +275,18 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS",
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG",
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION",
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_MODE_COUNT",
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD",
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_NORMALIZED_RESIDUAL_NORM",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_DRIVE_FREQUENCY_HZ",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_PEAK_PRESSURE_PA",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_DRIVE_FREQUENCY_HZ",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_NORMALIZED_RESIDUAL_NORM_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_DRIVE_FREQUENCY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_PEAK_PRESSURE_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_DRIVE_FREQUENCY_INCREASE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_MODAL_MAX_M_ORTHOGONALITY_OFFDIAG",
+            "RUNMAT_RELEASE_READINESS_MODAL_MIN_RELATIVE_FREQUENCY_SEPARATION",
+            "RUNMAT_RELEASE_READINESS_MODAL_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_MODAL_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_CORE_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS",
@@ -5776,23 +5780,34 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "acoustic_max_m_orthogonality_offdiag", "observed": 0.2},
+                    {"name": "acoustic_normalized_residual_norm", "observed": 0.2},
                     {
-                        "name": "acoustic_min_relative_frequency_separation",
-                        "observed": 0.002,
+                        "name": "acoustic_drive_frequency_hz",
+                        "observed": 25000.0,
                     },
-                    {"name": "acoustic_mode_count", "observed": 1.0},
-                    {"name": "acoustic_residual_warn_threshold", "observed": 0.003},
+                    {"name": "acoustic_peak_pressure_pa", "observed": 1.0e-14},
                 ],
             }
         )
-        os.environ["RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG"] = "0.05"
-        os.environ[
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION"
-        ] = "0.01"
-        os.environ["RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_MODE_COUNT"] = "3.0"
-        os.environ["RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD"] = (
-            "0.0015"
+        latest["records"].append(
+            {
+                "fixture_id": "acoustic_harmonic_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 101.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {
+                        "name": "acoustic_drive_frequency_hz",
+                        "observed": 25.0,
+                    },
+                ],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_NORMALIZED_RESIDUAL_NORM"] = "0.05"
+        os.environ["RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_DRIVE_FREQUENCY_HZ"] = "50.0"
+        os.environ["RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_PEAK_PRESSURE_PA"] = "1e-12"
+        os.environ["RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_DRIVE_FREQUENCY_HZ"] = (
+            "20000.0"
         )
         result = evaluate_release_readiness(
             latest,
@@ -5800,10 +5815,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             protected=False,
         )
         codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_HIGH", codes)
-        self.assertIn("ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION_LOW", codes)
-        self.assertIn("ACOUSTIC_MODE_COUNT_LOW", codes)
-        self.assertIn("ACOUSTIC_RESIDUAL_WARN_THRESHOLD_HIGH", codes)
+        self.assertIn("ACOUSTIC_NORMALIZED_RESIDUAL_NORM_HIGH", codes)
+        self.assertIn("ACOUSTIC_DRIVE_FREQUENCY_LOW", codes)
+        self.assertIn("ACOUSTIC_PEAK_PRESSURE_LOW", codes)
+        self.assertIn("ACOUSTIC_DRIVE_FREQUENCY_HIGH", codes)
 
     def test_acoustic_metrics_missing_is_fail_on_protected_branches(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
@@ -5828,13 +5843,26 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "acoustic_max_m_orthogonality_offdiag", "observed": 0.20},
+                    {"name": "acoustic_normalized_residual_norm", "observed": 0.20},
                     {
-                        "name": "acoustic_min_relative_frequency_separation",
-                        "observed": 0.01,
+                        "name": "acoustic_drive_frequency_hz",
+                        "observed": 75.0,
                     },
-                    {"name": "acoustic_mode_count", "observed": 2.0},
-                    {"name": "acoustic_residual_warn_threshold", "observed": 0.003},
+                    {"name": "acoustic_peak_pressure_pa", "observed": 2.0},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "acoustic_harmonic_cpu",
+                "publishable": True,
+                "gpu_run_ms": 110.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {
+                        "name": "acoustic_drive_frequency_hz",
+                        "observed": 12000.0,
+                    },
                 ],
             }
         )
@@ -5846,36 +5874,47 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
-                    {"name": "acoustic_max_m_orthogonality_offdiag", "observed": 0.05},
+                    {"name": "acoustic_normalized_residual_norm", "observed": 0.05},
                     {
-                        "name": "acoustic_min_relative_frequency_separation",
-                        "observed": 0.04,
+                        "name": "acoustic_drive_frequency_hz",
+                        "observed": 150.0,
                     },
-                    {"name": "acoustic_mode_count", "observed": 4.0},
-                    {"name": "acoustic_residual_warn_threshold", "observed": 0.001},
+                    {"name": "acoustic_peak_pressure_pa", "observed": 4.0},
+                ],
+            }
+        )
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "acoustic_harmonic_cpu",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {
+                        "name": "acoustic_drive_frequency_hz",
+                        "observed": 4000.0,
+                    },
                 ],
             }
         )
         os.environ[
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_RATIO"
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_NORMALIZED_RESIDUAL_NORM_TREND_RATIO"
         ] = "1.5"
         os.environ[
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO"
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_DRIVE_FREQUENCY_DROP_TREND_RATIO"
         ] = "1.5"
         os.environ[
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO"
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_PEAK_PRESSURE_DROP_TREND_RATIO"
         ] = "1.5"
         os.environ[
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO"
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_DRIVE_FREQUENCY_INCREASE_TREND_RATIO"
         ] = "1.5"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_WORSENING", codes)
-        self.assertIn(
-            "ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION_TREND_WORSENING", codes
-        )
-        self.assertIn("ACOUSTIC_MODE_COUNT_TREND_WORSENING", codes)
-        self.assertIn("ACOUSTIC_RESIDUAL_WARN_THRESHOLD_TREND_WORSENING", codes)
+        self.assertIn("ACOUSTIC_NORMALIZED_RESIDUAL_NORM_TREND_WORSENING", codes)
+        self.assertIn("ACOUSTIC_DRIVE_FREQUENCY_DROP_TREND_WORSENING", codes)
+        self.assertIn("ACOUSTIC_PEAK_PRESSURE_TREND_WORSENING", codes)
+        self.assertIn("ACOUSTIC_DRIVE_FREQUENCY_INCREASE_TREND_WORSENING", codes)
 
     def test_modal_metric_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
@@ -5894,9 +5933,9 @@ class ReleaseReadinessTests(unittest.TestCase):
                 ],
             }
         )
-        os.environ["RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG"] = "0.05"
+        os.environ["RUNMAT_RELEASE_READINESS_MODAL_MAX_M_ORTHOGONALITY_OFFDIAG"] = "0.05"
         os.environ[
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION"
+            "RUNMAT_RELEASE_READINESS_MODAL_MIN_RELATIVE_FREQUENCY_SEPARATION"
         ] = "0.01"
         result = evaluate_release_readiness(
             latest,
@@ -5955,10 +5994,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             }
         )
         os.environ[
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_RATIO"
+            "RUNMAT_RELEASE_READINESS_MODAL_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_RATIO"
         ] = "1.5"
         os.environ[
-            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO"
+            "RUNMAT_RELEASE_READINESS_MODAL_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO"
         ] = "1.5"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
@@ -8098,8 +8137,12 @@ class ReleaseReadinessTests(unittest.TestCase):
             summary,
         )
         self.assertIn("### Acoustic Posture", summary)
-        self.assertIn("Acoustic mode count/threshold", summary)
-        self.assertIn("Acoustic trend ratios (orthogonality, frequency separation, mode count, residual threshold)", summary)
+        self.assertIn("Acoustic normalized residual norm/threshold", summary)
+        self.assertIn("Acoustic peak pressure/threshold", summary)
+        self.assertIn(
+            "Acoustic trend ratios (residual, drive frequency drop, peak pressure drop, drive frequency increase)",
+            summary,
+        )
         self.assertIn("### Coupled Flow Posture", summary)
         self.assertIn("CFD min Reynolds number/threshold", summary)
         self.assertIn("Coupled-flow trend ratios (CFD Reynolds, CHT Reynolds, CHT delta K, FSI Reynolds, FSI structural steps)", summary)
