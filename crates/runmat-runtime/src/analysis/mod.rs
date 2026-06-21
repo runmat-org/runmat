@@ -4026,6 +4026,7 @@ fn build_cht_run_fields(
     thermal_run: &runmat_analysis_fea::FeaThermalRunResult,
 ) -> (Vec<AnalysisField>, ChtInterfaceClosure) {
     let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(domain, node_count, 0);
+    let mean_axial_velocity = mean_cfd_axial_velocity(&fluid_velocity);
     let mut fields = vec![
         AnalysisField::host_f64(
             FEA_FIELD_CHT_FLUID_VELOCITY,
@@ -4046,13 +4047,38 @@ fn build_cht_run_fields(
             .as_host_f64()
             .map(|values| values.to_vec())
             .unwrap_or_else(|| vec![thermal_run.reference_temperature_k; fallback_len]);
+        let mut heat_flux = thermal_run
+            .heat_flux_snapshots
+            .get(step_index)
+            .map(|field| field_scalar_magnitudes(field, fallback_len))
+            .unwrap_or_else(|| vec![0.0; fallback_len]);
+        heat_flux.resize(base_temperature.len(), 0.0);
+        let max_heat_flux = heat_flux
+            .iter()
+            .copied()
+            .map(f64::abs)
+            .fold(0.0_f64, f64::max);
+        let target_jump_k = 0.05_f64;
+        let interface_conductance_w_per_m2k = (max_heat_flux / target_jump_k).max(25.0);
+        let advection_shift_k = cht_advection_shift_k(
+            domain,
+            mean_axial_velocity,
+            &base_temperature,
+            thermal_run.reference_temperature_k,
+        );
+
         let mut fluid_temperature = Vec::with_capacity(base_temperature.len());
         let mut solid_temperature = Vec::with_capacity(base_temperature.len());
         let mut temperature_jump = Vec::with_capacity(base_temperature.len());
-        for base in &base_temperature {
-            fluid_temperature.push(*base);
-            solid_temperature.push(*base);
-            temperature_jump.push(0.0);
+        let denom = base_temperature.len().saturating_sub(1).max(1) as f64;
+        for (index, base) in base_temperature.iter().enumerate() {
+            let xi = index as f64 / denom;
+            let jump = heat_flux.get(index).copied().unwrap_or(0.0)
+                / interface_conductance_w_per_m2k.max(1.0e-12);
+            let center_temperature = *base + advection_shift_k * xi;
+            fluid_temperature.push(center_temperature + 0.5 * jump);
+            solid_temperature.push(center_temperature - 0.5 * jump);
+            temperature_jump.push(jump);
         }
         fields.push(AnalysisField::host_f64(
             fea_cht_fluid_temperature_field_id(step_index),
@@ -4065,13 +4091,31 @@ fn build_cht_run_fields(
             solid_temperature,
         ));
 
-        let heat_flux = thermal_run
-            .heat_flux_snapshots
-            .get(step_index)
-            .map(|field| field_scalar_magnitudes(field, fallback_len))
-            .unwrap_or_else(|| vec![0.0; fallback_len]);
         let interface_count = heat_flux.len().max(1);
         closure.interface_face_count = closure.interface_face_count.max(interface_count);
+        closure.max_temperature_jump_k = closure.max_temperature_jump_k.max(
+            temperature_jump
+                .iter()
+                .copied()
+                .map(f64::abs)
+                .fold(0.0_f64, f64::max),
+        );
+        closure.max_advection_temperature_shift_k = closure
+            .max_advection_temperature_shift_k
+            .max(advection_shift_k.abs());
+        closure.interface_conductance_w_per_m2k = closure
+            .interface_conductance_w_per_m2k
+            .max(interface_conductance_w_per_m2k);
+        let max_flux_temperature_law_residual_ratio = heat_flux
+            .iter()
+            .zip(temperature_jump.iter())
+            .map(|(flux, jump)| {
+                (interface_conductance_w_per_m2k * *jump - *flux).abs() / max_heat_flux.max(1.0e-12)
+            })
+            .fold(0.0_f64, f64::max);
+        closure.max_flux_temperature_law_residual_ratio = closure
+            .max_flux_temperature_law_residual_ratio
+            .max(max_flux_temperature_law_residual_ratio);
         let fluid_heat = heat_flux.iter().sum::<f64>();
         let solid_heat = -fluid_heat;
         let heat_balance_ratio =
@@ -4086,7 +4130,7 @@ fn build_cht_run_fields(
             closure.max_temperature_jump_k / thermal_scale_k.max(1.0e-12);
         closure.max_thermal_transport_residual_ratio = closure
             .max_thermal_transport_residual_ratio
-            .max(normalized_temperature_jump.max(heat_balance_ratio));
+            .max(max_flux_temperature_law_residual_ratio.max(heat_balance_ratio));
         closure.interface_temperature_continuity_ratio = closure
             .interface_temperature_continuity_ratio
             .max((1.0 - normalized_temperature_jump).clamp(0.0, 1.0));
@@ -4109,7 +4153,7 @@ fn build_cht_run_fields(
             vec![interface_count],
             temperature_jump,
         ));
-        let energy_residual = heat_balance_ratio;
+        let energy_residual = heat_balance_ratio.max(max_flux_temperature_law_residual_ratio);
         closure.max_energy_residual = closure.max_energy_residual.max(energy_residual);
         fields.push(AnalysisField::host_f64(
             fea_cht_energy_residual_field_id(step_index),
@@ -4121,6 +4165,34 @@ fn build_cht_run_fields(
     (fields, closure)
 }
 
+fn mean_cfd_axial_velocity(velocity: &[f64]) -> f64 {
+    let node_count = velocity.len() / 3;
+    if node_count == 0 {
+        return 0.0;
+    }
+    (0..node_count)
+        .map(|node| velocity.get(node * 3).copied().unwrap_or(0.0))
+        .sum::<f64>()
+        / node_count as f64
+}
+
+fn cht_advection_shift_k(
+    domain: &runmat_analysis_core::CfdDomain,
+    mean_axial_velocity_m_per_s: f64,
+    temperature: &[f64],
+    reference_temperature_k: f64,
+) -> f64 {
+    let thermal_span_k = temperature
+        .iter()
+        .map(|value| (value - reference_temperature_k).abs())
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let reynolds_ratio = (cfd_reynolds_number_for_velocity(domain, mean_axial_velocity_m_per_s)
+        / 1.0e5)
+        .clamp(0.0, 5.0);
+    thermal_span_k * reynolds_ratio * domain.turbulence_intensity.clamp(0.0, 1.0) * 2.0e-3
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct ChtInterfaceClosure {
     interface_face_count: usize,
@@ -4130,6 +4202,9 @@ struct ChtInterfaceClosure {
     mean_interface_heat_flux_w_per_m2: f64,
     max_thermal_transport_residual_ratio: f64,
     interface_temperature_continuity_ratio: f64,
+    max_advection_temperature_shift_k: f64,
+    interface_conductance_w_per_m2k: f64,
+    max_flux_temperature_law_residual_ratio: f64,
 }
 
 fn build_fsi_run_fields(
@@ -5107,6 +5182,7 @@ pub fn analysis_run_cht_with_options_op(
         &context,
     )?;
 
+    let solve_start = Instant::now();
     let thermal_run = run_thermal_with_options(
         model,
         backend,
@@ -5214,13 +5290,15 @@ pub fn analysis_run_cht_with_options_op(
             && cht_interface_closure.max_temperature_jump_k <= 0.1
             && cht_interface_closure.max_thermal_transport_residual_ratio
                 <= options.residual_warn_threshold
+            && cht_interface_closure.max_flux_temperature_law_residual_ratio
+                <= options.residual_warn_threshold
         {
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
         } else {
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "interface_face_count={} max_temperature_jump_k={} max_energy_residual={} heat_flux_balance_ratio={} mean_interface_heat_flux_w_per_m2={} thermal_transport_residual_ratio={} interface_temperature_continuity_ratio={}",
+            "interface_face_count={} max_temperature_jump_k={} max_energy_residual={} heat_flux_balance_ratio={} mean_interface_heat_flux_w_per_m2={} thermal_transport_residual_ratio={} interface_temperature_continuity_ratio={} max_advection_temperature_shift_k={} interface_conductance_w_per_m2k={} flux_temperature_law_residual_ratio={}",
             cht_interface_closure.interface_face_count,
             cht_interface_closure.max_temperature_jump_k,
             cht_interface_closure.max_energy_residual,
@@ -5228,8 +5306,21 @@ pub fn analysis_run_cht_with_options_op(
             cht_interface_closure.mean_interface_heat_flux_w_per_m2,
             cht_interface_closure.max_thermal_transport_residual_ratio,
             cht_interface_closure.interface_temperature_continuity_ratio,
+            cht_interface_closure.max_advection_temperature_shift_k,
+            cht_interface_closure.interface_conductance_w_per_m2k,
+            cht_interface_closure.max_flux_temperature_law_residual_ratio,
         ),
     });
+    let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
+    run.diagnostics
+        .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+            code: "FEA_CHT_COST".to_string(),
+            severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
+            message: format!(
+                "solve_ms={} step_count={} max_linear_iters={} tolerance={}",
+                solve_ms, options.step_count, options.max_linear_iters, options.tolerance,
+            ),
+        });
 
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
@@ -12332,6 +12423,7 @@ fn run_solve_ms(run: &AnalysisRunResult) -> Option<f64> {
         "FEA_TRANSIENT_COST",
         "FEA_MODAL_COST",
         "FEA_CFD_COST",
+        "FEA_CHT_COST",
     ] {
         if let Some(value) = diagnostic_metric(&run.run.diagnostics, code, "solve_ms") {
             return Some(value);

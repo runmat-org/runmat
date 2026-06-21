@@ -4661,8 +4661,50 @@ pub(super) fn run_fixture(
                     "FEA_CHT_INTERFACE_CLOSURE",
                     "interface_temperature_continuity_ratio",
                 ),
+                Some(0.999),
                 Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_advection_temperature_shift_k",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "max_advection_temperature_shift_k",
+                ),
+                Some(0.0),
+                Some(0.1),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_interface_conductance_w_per_m2k",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "interface_conductance_w_per_m2k",
+                ),
                 Some(1.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_flux_temperature_law_residual_ratio",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "flux_temperature_law_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-9),
             );
         }
         if spec.id.starts_with("fsi_coupled_") {

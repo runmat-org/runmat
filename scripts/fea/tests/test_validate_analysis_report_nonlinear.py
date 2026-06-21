@@ -1167,6 +1167,9 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "cht_heat_flux_balance_ratio",
                     "cht_thermal_transport_residual_ratio",
                     "cht_interface_temperature_continuity_ratio",
+                    "cht_advection_temperature_shift_k",
+                    "cht_interface_conductance_w_per_m2k",
+                    "cht_flux_temperature_law_residual_ratio",
                 },
             ),
             _record(
@@ -1190,6 +1193,9 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "cht_heat_flux_balance_ratio",
                     "cht_thermal_transport_residual_ratio",
                     "cht_interface_temperature_continuity_ratio",
+                    "cht_advection_temperature_shift_k",
+                    "cht_interface_conductance_w_per_m2k",
+                    "cht_flux_temperature_law_residual_ratio",
                 },
             ),
             _record(
@@ -1213,6 +1219,9 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "cht_heat_flux_balance_ratio",
                     "cht_thermal_transport_residual_ratio",
                     "cht_interface_temperature_continuity_ratio",
+                    "cht_advection_temperature_shift_k",
+                    "cht_interface_conductance_w_per_m2k",
+                    "cht_flux_temperature_law_residual_ratio",
                 },
             ),
             _record(

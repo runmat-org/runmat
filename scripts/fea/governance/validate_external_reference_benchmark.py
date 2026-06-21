@@ -689,6 +689,9 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "cht_heat_flux_balance_ratio",
         "cht_thermal_transport_residual_ratio",
         "cht_interface_temperature_continuity_ratio",
+        "cht_advection_temperature_shift_k",
+        "cht_interface_conductance_w_per_m2k",
+        "cht_flux_temperature_law_residual_ratio",
     },
     "cht_coupled_cpu": {
         "cht_reference_density_kg_per_m3",
@@ -709,6 +712,9 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "cht_heat_flux_balance_ratio",
         "cht_thermal_transport_residual_ratio",
         "cht_interface_temperature_continuity_ratio",
+        "cht_advection_temperature_shift_k",
+        "cht_interface_conductance_w_per_m2k",
+        "cht_flux_temperature_law_residual_ratio",
     },
     "cht_coupled_gpu_fallback": {
         "cht_reference_density_kg_per_m3",
@@ -729,6 +735,9 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "cht_heat_flux_balance_ratio",
         "cht_thermal_transport_residual_ratio",
         "cht_interface_temperature_continuity_ratio",
+        "cht_advection_temperature_shift_k",
+        "cht_interface_conductance_w_per_m2k",
+        "cht_flux_temperature_law_residual_ratio",
     },
     "fsi_coupled_gpu_provider": {
         "fsi_reference_density_kg_per_m3",

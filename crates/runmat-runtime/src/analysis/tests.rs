@@ -5354,6 +5354,11 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
             && diag
                 .message
                 .contains("interface_temperature_continuity_ratio=")
+            && diag.message.contains("max_advection_temperature_shift_k=")
+            && diag.message.contains("interface_conductance_w_per_m2k=")
+            && diag
+                .message
+                .contains("flux_temperature_law_residual_ratio=")
     }));
     let thermal = envelope
         .data
