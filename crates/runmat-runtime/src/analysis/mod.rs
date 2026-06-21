@@ -8198,57 +8198,69 @@ pub fn analysis_run_electromagnetic_with_options_op(
     );
     let em_source_realization_ratio = diagnostic_metric(
         &run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "source_realization_ratio",
     );
     let em_source_region_coverage_ratio = diagnostic_metric(
         &run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "source_region_coverage_ratio",
     );
     let em_source_material_alignment_ratio = diagnostic_metric(
         &run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "source_material_alignment_ratio",
     );
-    let em_source_overlap_ratio =
-        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "source_overlap_ratio");
+    let em_source_overlap_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "source_overlap_ratio",
+    );
     let em_source_interference_index = diagnostic_metric(
         &run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "source_interference_index",
     );
-    let em_boundary_anchor_ratio =
-        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "boundary_anchor_ratio");
+    let em_boundary_anchor_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "boundary_anchor_ratio",
+    );
     let em_boundary_condition_localization_ratio = diagnostic_metric(
         &run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "boundary_condition_localization_ratio",
     );
     let em_ground_anchor_effectiveness_ratio = diagnostic_metric(
         &run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "ground_anchor_effectiveness_ratio",
     );
     let em_insulation_leakage_ratio = diagnostic_metric(
         &run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "insulation_leakage_ratio",
     );
     let em_flux_divergence_ratio =
         diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "flux_divergence_ratio");
-    let em_energy_imbalance_ratio =
-        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "energy_imbalance_ratio");
-    let em_boundary_energy_ratio =
-        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "boundary_energy_ratio");
+    let em_energy_imbalance_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "energy_imbalance_ratio",
+    );
+    let em_boundary_energy_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "boundary_energy_ratio",
+    );
     let em_boundary_penalty_conditioning_contribution = diagnostic_metric(
         &run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "boundary_penalty_conditioning_contribution",
     );
     let em_source_region_energy_consistency_ratio = diagnostic_metric(
         &run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "source_region_energy_consistency_ratio",
     );
     let em_real_residual_norm =
@@ -9389,52 +9401,52 @@ pub fn analysis_results_op(
     );
     let electromagnetic_source_realization_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "source_realization_ratio",
     );
     let electromagnetic_source_region_coverage_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "source_region_coverage_ratio",
     );
     let electromagnetic_source_material_alignment_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "source_material_alignment_ratio",
     );
     let electromagnetic_source_localization_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "source_localization_ratio",
     );
     let electromagnetic_source_overlap_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "source_overlap_ratio",
     );
     let electromagnetic_source_interference_index = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "source_interference_index",
     );
     let electromagnetic_boundary_anchor_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "boundary_anchor_ratio",
     );
     let electromagnetic_boundary_condition_localization_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "boundary_condition_localization_ratio",
     );
     let electromagnetic_ground_anchor_effectiveness_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "ground_anchor_effectiveness_ratio",
     );
     let electromagnetic_insulation_leakage_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "insulation_leakage_ratio",
     );
     let electromagnetic_flux_divergence_ratio = diagnostic_metric(
@@ -9444,22 +9456,22 @@ pub fn analysis_results_op(
     );
     let electromagnetic_energy_imbalance_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "energy_imbalance_ratio",
     );
     let electromagnetic_boundary_energy_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "boundary_energy_ratio",
     );
     let electromagnetic_boundary_penalty_conditioning_contribution = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "boundary_penalty_conditioning_contribution",
     );
     let electromagnetic_source_region_energy_consistency_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
+        "FEA_EM_SOURCE_ENERGY",
         "source_region_energy_consistency_ratio",
     );
     let electromagnetic_real_residual_norm = diagnostic_metric(
@@ -10597,7 +10609,7 @@ pub fn analysis_trends_op(
                     .filter_map(|run| {
                         diagnostic_metric(
                             &run.run.diagnostics,
-                            "FEA_EM_STATIC",
+                            "FEA_EM_SOURCE_ENERGY",
                             "source_realization_ratio",
                         )
                     })
@@ -10613,7 +10625,7 @@ pub fn analysis_trends_op(
                     .filter_map(|run| {
                         diagnostic_metric(
                             &run.run.diagnostics,
-                            "FEA_EM_STATIC",
+                            "FEA_EM_SOURCE_ENERGY",
                             "source_region_coverage_ratio",
                         )
                     })
@@ -10629,7 +10641,7 @@ pub fn analysis_trends_op(
                     .filter_map(|run| {
                         diagnostic_metric(
                             &run.run.diagnostics,
-                            "FEA_EM_STATIC",
+                            "FEA_EM_SOURCE_ENERGY",
                             "source_material_alignment_ratio",
                         )
                     })
@@ -10645,7 +10657,7 @@ pub fn analysis_trends_op(
                 .filter_map(|run| {
                     diagnostic_metric(
                         &run.run.diagnostics,
-                        "FEA_EM_STATIC",
+                        "FEA_EM_SOURCE_ENERGY",
                         "source_overlap_ratio",
                     )
                 })
@@ -10661,7 +10673,7 @@ pub fn analysis_trends_op(
                     .filter_map(|run| {
                         diagnostic_metric(
                             &run.run.diagnostics,
-                            "FEA_EM_STATIC",
+                            "FEA_EM_SOURCE_ENERGY",
                             "source_interference_index",
                         )
                     })
@@ -10677,7 +10689,7 @@ pub fn analysis_trends_op(
                     .filter_map(|run| {
                         diagnostic_metric(
                             &run.run.diagnostics,
-                            "FEA_EM_STATIC",
+                            "FEA_EM_SOURCE_ENERGY",
                             "boundary_anchor_ratio",
                         )
                     })
@@ -10693,7 +10705,7 @@ pub fn analysis_trends_op(
                     .filter_map(|run| {
                         diagnostic_metric(
                             &run.run.diagnostics,
-                            "FEA_EM_STATIC",
+                            "FEA_EM_SOURCE_ENERGY",
                             "boundary_condition_localization_ratio",
                         )
                     })
@@ -10709,7 +10721,7 @@ pub fn analysis_trends_op(
                     .filter_map(|run| {
                         diagnostic_metric(
                             &run.run.diagnostics,
-                            "FEA_EM_STATIC",
+                            "FEA_EM_SOURCE_ENERGY",
                             "ground_anchor_effectiveness_ratio",
                         )
                     })
@@ -10725,7 +10737,7 @@ pub fn analysis_trends_op(
                     .filter_map(|run| {
                         diagnostic_metric(
                             &run.run.diagnostics,
-                            "FEA_EM_STATIC",
+                            "FEA_EM_SOURCE_ENERGY",
                             "insulation_leakage_ratio",
                         )
                     })
@@ -10756,7 +10768,7 @@ pub fn analysis_trends_op(
                     .filter_map(|run| {
                         diagnostic_metric(
                             &run.run.diagnostics,
-                            "FEA_EM_STATIC",
+                            "FEA_EM_SOURCE_ENERGY",
                             "energy_imbalance_ratio",
                         )
                     })
@@ -10772,7 +10784,7 @@ pub fn analysis_trends_op(
                     .filter_map(|run| {
                         diagnostic_metric(
                             &run.run.diagnostics,
-                            "FEA_EM_STATIC",
+                            "FEA_EM_SOURCE_ENERGY",
                             "boundary_energy_ratio",
                         )
                     })
@@ -10788,7 +10800,7 @@ pub fn analysis_trends_op(
                     .filter_map(|run| {
                         diagnostic_metric(
                             &run.run.diagnostics,
-                            "FEA_EM_STATIC",
+                            "FEA_EM_SOURCE_ENERGY",
                             "boundary_penalty_conditioning_contribution",
                         )
                     })
@@ -10804,7 +10816,7 @@ pub fn analysis_trends_op(
                     .filter_map(|run| {
                         diagnostic_metric(
                             &run.run.diagnostics,
-                            "FEA_EM_STATIC",
+                            "FEA_EM_SOURCE_ENERGY",
                             "source_region_energy_consistency_ratio",
                         )
                     })

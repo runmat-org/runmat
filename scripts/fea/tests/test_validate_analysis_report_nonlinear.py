@@ -45,8 +45,16 @@ CONTACT_FRICTIONLESS_COMPLEX_KNOWN_ANSWER_ASSERTIONS = {
     "contact_frictionless_complex_known_known_answer_coverage_ratio",
 }
 
+EM_SOURCE_ENERGY_ASSERTIONS = {
+    "electromagnetic_source_energy_diagnostic_coverage_ratio",
+    "electromagnetic_source_energy_consistency_ratio",
+    "electromagnetic_source_energy_imbalance_ratio",
+}
+
 
 def _record(fixture_id: str, assertion_names: set[str]) -> dict:
+    if fixture_id.startswith("electromagnetic_reference_"):
+        assertion_names = assertion_names | EM_SOURCE_ENERGY_ASSERTIONS
     record = {
         "fixture_id": fixture_id,
         "threshold_assertions": [

@@ -4071,6 +4071,15 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_EM_STATIC"));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_EM_SOURCE_ENERGY"
+            && diag.message.contains("source_region_coverage_ratio=")
+            && diag
+                .message
+                .contains("source_region_energy_consistency_ratio=")
+            && diag.message.contains("energy_imbalance_ratio=")
+            && diag.message.contains("boundary_energy_ratio=")
+    }));
     let em_cost_diag = envelope
         .data
         .run

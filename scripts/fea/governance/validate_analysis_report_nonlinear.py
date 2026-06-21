@@ -416,6 +416,9 @@ REQUIRED_FIXTURES = {
         "transient_prepared_cache_misses",
     },
     "electromagnetic_reference_homogeneous_gpu_provider": {
+        "electromagnetic_source_energy_diagnostic_coverage_ratio",
+        "electromagnetic_source_energy_consistency_ratio",
+        "electromagnetic_source_energy_imbalance_ratio",
         "em_homogeneous_sigma_omega_scale_mean",
         "em_homogeneous_sigma_omega_scale_spread_ratio",
         "em_homogeneous_sigma_omega_response_coverage_ratio",
@@ -457,6 +460,9 @@ REQUIRED_FIXTURES = {
         "em_homogeneous_known_answer_coverage_ratio",
     },
     "electromagnetic_reference_heterogeneous_gpu_provider": {
+        "electromagnetic_source_energy_diagnostic_coverage_ratio",
+        "electromagnetic_source_energy_consistency_ratio",
+        "electromagnetic_source_energy_imbalance_ratio",
         "em_heterogeneous_sigma_omega_scale_mean",
         "em_heterogeneous_sigma_omega_scale_spread_ratio",
         "em_heterogeneous_sigma_omega_response_coverage_ratio",
@@ -487,18 +493,27 @@ REQUIRED_FIXTURES = {
         "em_heterogeneous_boundary_anchor_ratio",
     },
     "electromagnetic_reference_boundary_penalty_stress_gpu_provider": {
+        "electromagnetic_source_energy_diagnostic_coverage_ratio",
+        "electromagnetic_source_energy_consistency_ratio",
+        "electromagnetic_source_energy_imbalance_ratio",
         "em_boundary_penalty_anchor_ratio",
         "em_boundary_penalty_conditioning_contribution",
         "em_boundary_penalty_real_residual_norm",
         "em_boundary_penalty_imag_residual_norm",
     },
     "electromagnetic_reference_multi_region_phased_source_gpu_provider": {
+        "electromagnetic_source_energy_diagnostic_coverage_ratio",
+        "electromagnetic_source_energy_consistency_ratio",
+        "electromagnetic_source_energy_imbalance_ratio",
         "em_phased_source_energy_consistency_ratio",
         "em_phased_source_interference_index",
         "em_phased_source_overlap_ratio",
         "em_phased_source_region_coverage_ratio",
     },
     "electromagnetic_reference_sparse_assignments_gpu_provider": {
+        "electromagnetic_source_energy_diagnostic_coverage_ratio",
+        "electromagnetic_source_energy_consistency_ratio",
+        "electromagnetic_source_energy_imbalance_ratio",
         "em_sparse_assignment_coverage_ratio",
         "em_sparse_fallback_coefficient_ratio",
         "em_sparse_source_realization_ratio",
@@ -508,6 +523,9 @@ REQUIRED_FIXTURES = {
         "em_sparse_energy_imbalance_ratio",
     },
     "electromagnetic_reference_fallback_heavy_gpu_provider": {
+        "electromagnetic_source_energy_diagnostic_coverage_ratio",
+        "electromagnetic_source_energy_consistency_ratio",
+        "electromagnetic_source_energy_imbalance_ratio",
         "em_fallback_heavy_assignment_coverage_ratio",
         "em_fallback_heavy_fallback_coefficient_ratio",
         "em_fallback_heavy_source_realization_ratio",
@@ -517,12 +535,18 @@ REQUIRED_FIXTURES = {
         "em_fallback_heavy_energy_imbalance_ratio",
     },
     "electromagnetic_reference_overlap_interference_gpu_provider": {
+        "electromagnetic_source_energy_diagnostic_coverage_ratio",
+        "electromagnetic_source_energy_consistency_ratio",
+        "electromagnetic_source_energy_imbalance_ratio",
         "em_overlap_source_interference_index",
         "em_overlap_source_region_coverage_ratio",
         "em_overlap_source_overlap_ratio",
         "em_overlap_source_material_alignment_ratio",
     },
     "electromagnetic_reference_boundary_kernel_gpu_provider": {
+        "electromagnetic_source_energy_diagnostic_coverage_ratio",
+        "electromagnetic_source_energy_consistency_ratio",
+        "electromagnetic_source_energy_imbalance_ratio",
         "em_boundary_kernel_boundary_localization_ratio",
         "em_boundary_kernel_ground_anchor_effectiveness_ratio",
         "em_boundary_kernel_insulation_leakage_ratio",
@@ -1071,6 +1095,12 @@ EM_APPLIED_CURRENT_REQUIRED_FIELDS = {
 
 EM_SOURCE_ENERGY_CONSISTENCY_REQUIRED_FIELDS = {
     "electromagnetic_source_region_energy_consistency_ratio",
+}
+
+EM_SOURCE_ENERGY_ASSERTION_REQUIRED_FIELDS = {
+    "electromagnetic_source_energy_diagnostic_coverage_ratio",
+    "electromagnetic_source_energy_consistency_ratio",
+    "electromagnetic_source_energy_imbalance_ratio",
 }
 
 EM_SOURCE_LOCALIZATION_REQUIRED_FIELDS = {

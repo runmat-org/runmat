@@ -916,6 +916,41 @@ pub fn run_electromagnetic_with_options(
             field_energy_integral,
         ),
     });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_EM_SOURCE_ENERGY".to_string(),
+        severity: if source_region_coverage_ratio >= 0.95
+            && source_material_alignment_ratio >= 0.95
+            && source_region_energy_consistency_ratio >= 0.2
+            && energy_imbalance_ratio <= 1.0
+            && source_overlap_ratio <= 1.0
+            && source_interference_index <= 1.0
+            && boundary_energy_ratio.is_finite()
+            && field_energy_integral.is_finite()
+            && field_energy_integral > 0.0
+        {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} boundary_condition_localization_ratio={} ground_anchor_effectiveness_ratio={} insulation_leakage_ratio={} energy_imbalance_ratio={} boundary_energy_ratio={} boundary_penalty_conditioning_contribution={} source_region_energy_consistency_ratio={} field_energy_integral={}",
+            source_realization_ratio,
+            source_region_coverage_ratio,
+            source_material_alignment_ratio,
+            source_localization_ratio,
+            source_overlap_ratio,
+            source_interference_index,
+            boundary_anchor_ratio,
+            boundary_condition_localization_ratio,
+            ground_anchor_effectiveness_ratio,
+            insulation_leakage_ratio,
+            energy_imbalance_ratio,
+            boundary_energy_ratio,
+            boundary_penalty_conditioning_contribution,
+            source_region_energy_consistency_ratio,
+            field_energy_integral,
+        ),
+    });
     let homogeneous_known_answer =
         em_homogeneous_known_answer_metrics(EmHomogeneousKnownAnswerInput {
             material_stats: &material_stats,

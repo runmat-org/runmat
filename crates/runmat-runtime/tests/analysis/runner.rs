@@ -7441,6 +7441,52 @@ pub(super) fn run_fixture(
                             "contact_frictionless_complex_known",
                         );
                     }
+                    if spec.id.starts_with("electromagnetic_reference_") {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electromagnetic_source_energy_diagnostic_coverage_ratio",
+                            "FEA_EM_SOURCE_ENERGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_SOURCE_ENERGY",
+                                "field_energy_integral",
+                            )
+                            .filter(|value| value.is_finite())
+                            .map(|_| 1.0),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electromagnetic_source_energy_consistency_ratio",
+                            "FEA_EM_SOURCE_ENERGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_SOURCE_ENERGY",
+                                "source_region_energy_consistency_ratio",
+                            ),
+                            Some(0.2),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electromagnetic_source_energy_imbalance_ratio",
+                            "FEA_EM_SOURCE_ENERGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_SOURCE_ENERGY",
+                                "energy_imbalance_ratio",
+                            ),
+                            Some(0.0),
+                            Some(1.0),
+                        );
+                    }
                     if spec.id == "electromagnetic_reference_homogeneous_gpu_provider" {
                         push_threshold_assertion(
                             spec.id,
