@@ -1,0 +1,103 @@
+{
+  "title": "importdata",
+  "category": "io/import",
+  "keywords": [
+    "importdata",
+    "text",
+    "csv",
+    "delimited",
+    "header",
+    "numeric import",
+    "instrument log"
+  ],
+  "summary": "Import numeric text data with optional headers.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the CPU. File import reads host text and constructs host tensors or structs."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::importdata::tests",
+    "integration": [
+      "builtins::io::importdata::tests::importdata_reads_plain_numeric_matrix",
+      "builtins::io::importdata::tests::importdata_detects_csv_header_and_colheaders",
+      "builtins::io::importdata::tests::importdata_honors_explicit_delimiter_and_header_lines",
+      "builtins::io::importdata::tests::importdata_preserves_rowheaders",
+      "builtins::io::importdata::tests::importdata_reports_mixed_unsupported_data"
+    ]
+  },
+  "description": "`A = importdata(filename)` imports legacy numeric text files, returning either a numeric matrix or a structure containing imported data plus header metadata.",
+  "behaviors": [
+    "Supports `importdata(filename)`, `importdata(filename, delimiterIn)`, and `importdata(filename, delimiterIn, headerlinesIn)`.",
+    "Automatically detects comma, tab, semicolon, pipe, or whitespace delimiters from non-empty lines when no delimiter is supplied.",
+    "Pure numeric files return a double tensor directly, matching MATLAB's convenient legacy behavior.",
+    "Files with header rows return a struct with `data`, `textdata`, and, when inferable, `colheaders`.",
+    "Files with leading row labels return a struct with `rowheaders` and numeric `data`.",
+    "Recognizes `NaN`, `Inf`, `+Inf`, and `-Inf`; empty numeric fields import as `NaN`.",
+    "Unsupported mixed text/numeric rows produce a descriptive parse error. Binary/image/audio/MAT import expansion should be handled by the dedicated import builtins as those domains mature."
+  ],
+  "examples": [
+    {
+      "description": "Import a plain numeric text matrix",
+      "input": "A = importdata(\"values.txt\")"
+    },
+    {
+      "description": "Import CSV data with a header row",
+      "input": "S = importdata(\"run.csv\");\nS.colheaders\nS.data"
+    },
+    {
+      "description": "Specify delimiter and header-line count",
+      "input": "S = importdata(\"log.dat\", '|', 2)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When does `importdata` return a struct?",
+      "answer": "It returns a struct when header text, column headers, or row headers are present. Pure numeric files return a tensor."
+    },
+    {
+      "question": "How does delimiter detection work?",
+      "answer": "RunMat samples non-empty lines and chooses a consistent comma, tab, semicolon, or pipe delimiter; otherwise it falls back to whitespace splitting."
+    },
+    {
+      "question": "Does this replace `readmatrix`?",
+      "answer": "No. `importdata` preserves MATLAB's legacy convenience behavior. Prefer `readmatrix` or `readtable` for new code that needs explicit import options."
+    }
+  ],
+  "links": [
+    {
+      "label": "readmatrix",
+      "url": "./readmatrix"
+    },
+    {
+      "label": "readtable",
+      "url": "./readtable"
+    },
+    {
+      "label": "dlmread",
+      "url": "./dlmread"
+    },
+    {
+      "label": "csvread",
+      "url": "./csvread"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/importdata.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/importdata.rs"
+  },
+  "gpu_residency": "`importdata` is a host file-I/O source. It returns host tensors or structs and does not create GPU-resident arrays.",
+  "gpu_behavior": [
+    "`importdata` does not launch provider kernels or participate in fusion."
+  ]
+}

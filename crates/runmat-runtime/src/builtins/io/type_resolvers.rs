@@ -33,6 +33,11 @@ pub fn input_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::String, Type::Num, Type::tensor()])
 }
 
+pub fn importdata_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Union(vec![Type::tensor(), Type::Struct { known_fields: None }])
+}
+
 pub fn fclose_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
@@ -536,6 +541,12 @@ mod tests {
         struct_type,
         &[],
         Type::Struct { known_fields: None }
+    );
+    assert_resolver!(
+        importdata_type_resolver,
+        importdata_type,
+        &[],
+        Type::Union(vec![Type::tensor(), Type::Struct { known_fields: None }])
     );
 
     assert_resolver!(csvread_type_resolver, tensor_type, &[], Type::tensor());

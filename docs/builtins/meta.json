@@ -31573,6 +31573,117 @@
       ]
     },
     {
+      "name": "importdata",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "A = importdata(filename)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "File to import."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Imported numeric matrix or import structure."
+            }
+          ]
+        },
+        {
+          "label": "A = importdata(filename, delimiterIn)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "File to import."
+            },
+            {
+              "name": "delimiterIn",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Delimiter to use for text files."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Imported numeric matrix or import structure."
+            }
+          ]
+        },
+        {
+          "label": "A = importdata(filename, delimiterIn, headerlinesIn)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "File to import."
+            },
+            {
+              "name": "delimiterIn",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Delimiter to use for text files."
+            },
+            {
+              "name": "headerlinesIn",
+              "ty": "IntegerScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Number of header lines to skip."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Imported numeric matrix or import structure."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.IMPORTDATA.ARGUMENT",
+          "identifier": "RunMat:importdata:InvalidArgument",
+          "when": "Filename, delimiter, or header line arguments are malformed.",
+          "message": "importdata: invalid argument"
+        },
+        {
+          "code": "RM.IMPORTDATA.IO",
+          "identifier": "RunMat:importdata:Io",
+          "when": "The input file cannot be read.",
+          "message": "importdata: unable to read file"
+        },
+        {
+          "code": "RM.IMPORTDATA.PARSE",
+          "identifier": "RunMat:importdata:Parse",
+          "when": "Text content cannot be imported as supported numeric/header data.",
+          "message": "importdata: unable to parse text data"
+        }
+      ]
+    },
+    {
       "name": "impulse",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
