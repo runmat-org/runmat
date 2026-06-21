@@ -1704,6 +1704,87 @@ fn analysis_run_linear_static_returns_typed_envelope() {
 }
 
 #[test]
+fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 65.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
+        },
+    );
+
+    let envelope = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Balanced,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
+        },
+        OperationContext::new(Some("trace-linear-thermo-fields".to_string()), None),
+    )
+    .expect("thermo-mechanical linear static run should pass");
+
+    assert!(envelope
+        .data
+        .run
+        .field(&fea_thermo_mechanical_temperature_field_id(0))
+        .is_some());
+    assert!(envelope
+        .data
+        .run
+        .field(&fea_thermo_mechanical_thermal_strain_field_id(0))
+        .is_some());
+    assert!(envelope
+        .data
+        .run
+        .field(&fea_thermo_mechanical_thermal_stress_field_id(0))
+        .is_some());
+    assert!(envelope
+        .data
+        .run
+        .field(&fea_thermo_mechanical_displacement_field_id(0))
+        .is_some());
+    assert!(envelope
+        .data
+        .run
+        .field(&fea_thermo_mechanical_von_mises_field_id(0))
+        .is_some());
+    assert!(envelope
+        .data
+        .run
+        .field(&fea_thermo_mechanical_coupling_residual_field_id(0))
+        .is_some());
+
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("thermo-mechanical linear static results should be queryable");
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == fea_thermo_mechanical_temperature_field_id(0)));
+    assert!(results.data.field_descriptors.iter().any(|descriptor| {
+        descriptor.field_id == fea_thermo_mechanical_coupling_residual_field_id(0)
+    }));
+}
+
+#[test]
 fn analysis_run_linear_static_persists_artifacts_through_runtime_filesystem_provider() {
     let _guard = analysis_test_guard();
     let _provider_lock = runmat_filesystem::provider_override_lock();

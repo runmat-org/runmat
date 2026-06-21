@@ -1,20 +1,24 @@
-use runmat_analysis_core::{validate_model, AnalysisModel};
+use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 
 use crate::{
     assembly::assemble_linear_system,
     contracts::{
         ComputeBackend, FeaRunError, FeaRunResult, LinearStaticSolveOptions,
-        FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
-        FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+        FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+        FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::{
         builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
         FeaDiagnostic, FeaDiagnosticSeverity,
     },
+    pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     post::fields::recover_result_fields,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::{backend::build_backend, linear::solve_linear_system},
 };
+
+const VECTOR_COMPONENT_COUNT: usize = 3;
 
 pub fn run_linear_static(
     model: &AnalysisModel,
@@ -105,7 +109,21 @@ pub fn run_linear_static_with_options(
         Some(3),
         Some(5),
     );
-    let fields = recover_result_fields(&summary, &solve_result);
+    let mut fields = recover_result_fields(&summary, &solve_result);
+    let thermo_mechanical_fields = recover_thermo_mechanical_snapshots(
+        summary.thermo_mechanical.as_ref(),
+        &[1.0],
+        &field_snapshot(&fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
+        &field_snapshot(&fields, FEA_FIELD_STRUCTURAL_VON_MISES),
+        &[solve_result.residual_norm],
+        element_count_for_dofs(summary.dof_count),
+    );
+    fields.extend(thermo_mechanical_fields.temperature_snapshots);
+    fields.extend(thermo_mechanical_fields.thermal_strain_snapshots);
+    fields.extend(thermo_mechanical_fields.thermal_stress_snapshots);
+    fields.extend(thermo_mechanical_fields.displacement_snapshots);
+    fields.extend(thermo_mechanical_fields.von_mises_snapshots);
+    fields.extend(thermo_mechanical_fields.coupling_residual_snapshots);
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::Postprocess,
@@ -211,4 +229,17 @@ fn scalar_field_value(
         .find(|field| field.field_id == field_id)
         .and_then(runmat_analysis_core::AnalysisField::as_host_f64)
         .and_then(|values| values.first().copied())
+}
+
+fn field_snapshot(fields: &[AnalysisField], field_id: &str) -> Vec<AnalysisField> {
+    fields
+        .iter()
+        .find(|field| field.field_id == field_id)
+        .cloned()
+        .into_iter()
+        .collect()
+}
+
+fn element_count_for_dofs(dof_count: usize) -> usize {
+    dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1)
 }

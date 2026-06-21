@@ -14,13 +14,14 @@ use crate::{
     fixtures::{fixture_model, FixtureId},
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
-    ComputeBackend, FeaRunResult, FeaThermoMechanicalContext, ModalSolveOptions,
-    ThermalSolveOptions, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
-    FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
-    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    ComputeBackend, FeaRunResult, FeaThermoMechanicalContext, LinearStaticSolveOptions,
+    ModalSolveOptions, ThermalSolveOptions, FEA_FIELD_MODAL_EIGENVALUE,
+    FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
+    FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
+    FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 
@@ -82,6 +83,57 @@ fn canonical_cantilever_benchmark_runs() {
     assert!(host_field(&result, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)[0] > 0.0);
     assert!(host_field(&result, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM)[0] <= 1.0e-6);
     assert!(host_field(&result, FEA_FIELD_STRUCTURAL_EQUATION_SCALE)[0] >= 1.0);
+}
+
+#[test]
+fn thermo_mechanical_linear_static_emits_coupled_fields() {
+    let model = fixture_model(FixtureId::ThermoMechanicalKickoff);
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 65.0,
+                thermal_expansion_coefficient: 1.2e-5,
+                field_source: None,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
+            }),
+            ..LinearStaticSolveOptions::default()
+        },
+    )
+    .expect("thermo-mechanical linear static solve should succeed");
+
+    assert_eq!(
+        field(&result, &fea_thermo_mechanical_temperature_field_id(0)).field_id,
+        fea_thermo_mechanical_temperature_field_id(0)
+    );
+    assert_eq!(
+        field(&result, &fea_thermo_mechanical_thermal_strain_field_id(0)).field_id,
+        fea_thermo_mechanical_thermal_strain_field_id(0)
+    );
+    assert_eq!(
+        field(&result, &fea_thermo_mechanical_thermal_stress_field_id(0)).field_id,
+        fea_thermo_mechanical_thermal_stress_field_id(0)
+    );
+    assert_eq!(
+        field(&result, &fea_thermo_mechanical_displacement_field_id(0)).field_id,
+        fea_thermo_mechanical_displacement_field_id(0)
+    );
+    assert_eq!(
+        field(&result, &fea_thermo_mechanical_von_mises_field_id(0)).field_id,
+        fea_thermo_mechanical_von_mises_field_id(0)
+    );
+    assert_eq!(
+        field(
+            &result,
+            &fea_thermo_mechanical_coupling_residual_field_id(0)
+        )
+        .field_id,
+        fea_thermo_mechanical_coupling_residual_field_id(0)
+    );
 }
 
 #[test]
