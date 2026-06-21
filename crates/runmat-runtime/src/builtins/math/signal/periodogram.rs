@@ -32,7 +32,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("periodogram-psd"),
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("fft_dim")],
+    provider_hooks: &[ProviderHook::Custom("uniform_spectral_estimate")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,

@@ -742,6 +742,12 @@ impl AccelProvider for WgpuProvider {
     ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {
         Box::pin(async move { self.iir_filter_exec(b, a, x, options).await })
     }
+    fn uniform_spectral_estimate<'a>(
+        &'a self,
+        request: &'a ProviderSpectralRequest<'a>,
+    ) -> AccelProviderFuture<'a, ProviderSpectralResult> {
+        Box::pin(async move { self.uniform_spectral_estimate_exec(request).await })
+    }
     fn conv2d(
         &self,
         signal: &GpuTensorHandle,
