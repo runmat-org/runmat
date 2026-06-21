@@ -1406,6 +1406,15 @@ fn spectral_selected_frequency_len(nfft: usize, range: ProviderSpectralRange) ->
 fn spectral_frame_shader_mode(mode: ProviderSpectralFrameMode) -> SpectralFrameShaderMode {
     match mode {
         ProviderSpectralFrameMode::Sliding { hop } => SpectralFrameShaderMode::Sliding { hop },
+        ProviderSpectralFrameMode::ColumnSliding {
+            hop,
+            input_rows,
+            frames_per_column,
+        } => SpectralFrameShaderMode::ColumnSliding {
+            hop,
+            input_rows,
+            frames_per_column,
+        },
         ProviderSpectralFrameMode::FoldedColumns { input_rows } => {
             SpectralFrameShaderMode::FoldedColumns { input_rows }
         }
