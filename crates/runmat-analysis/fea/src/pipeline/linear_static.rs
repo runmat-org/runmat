@@ -125,6 +125,7 @@ pub fn run_linear_static_with_options(
     fields.extend(thermo_mechanical_fields.displacement_snapshots);
     fields.extend(thermo_mechanical_fields.von_mises_snapshots);
     fields.extend(thermo_mechanical_fields.coupling_residual_snapshots);
+    let thermo_mechanical_diagnostics = thermo_mechanical_fields.diagnostics;
     let electro_thermal_fields = recover_electro_thermal_fields(
         summary.electro_thermal.as_ref(),
         &[1.0],
@@ -232,6 +233,7 @@ pub fn run_linear_static_with_options(
             effective_preconditioner: &solve_result.preconditioner,
         },
     );
+    diagnostics.extend(thermo_mechanical_diagnostics);
     diagnostics.extend(electro_thermal_diagnostics);
     diagnostics.extend(solve_result.diagnostics);
 

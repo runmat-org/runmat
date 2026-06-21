@@ -38,6 +38,17 @@ fn host_field<'a>(result: &'a FeaRunResult, field_id: &str) -> &'a [f64] {
         .expect("field should be host-backed")
 }
 
+fn assert_thermo_mechanical_consistency_diagnostic(
+    diagnostics: &[crate::diagnostics::FeaDiagnostic],
+) {
+    assert!(diagnostics.iter().any(|diag| {
+        diag.code == "FEA_TM_CONSISTENCY"
+            && diag.message.contains("constitutive_residual_ratio=")
+            && diag.message.contains("thermal_strain_energy_density_mean=")
+            && diag.message.contains("consistency_coverage_ratio=")
+    }));
+}
+
 #[test]
 fn canonical_cantilever_benchmark_runs() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -138,6 +149,7 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
         .field_id,
         fea_thermo_mechanical_coupling_residual_field_id(0)
     );
+    assert_thermo_mechanical_consistency_diagnostic(&result.diagnostics);
 }
 
 #[test]
@@ -588,6 +600,7 @@ fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
         result.thermo_mechanical_coupling_residual_snapshots[0].field_id,
         fea_thermo_mechanical_coupling_residual_field_id(0)
     );
+    assert_thermo_mechanical_consistency_diagnostic(&result.run.diagnostics);
 
     assert!(result
         .run
@@ -888,6 +901,7 @@ fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
     assert!(profile
         .message
         .contains("convergence_increment_target_peak="));
+    assert_thermo_mechanical_consistency_diagnostic(&result.run.diagnostics);
 }
 
 #[test]

@@ -271,6 +271,7 @@ pub fn run_transient_with_options(
         &residual_norm_values,
         summary.dof_count,
     );
+    run.diagnostics.extend(thermo_mechanical_fields.diagnostics);
     run.diagnostics.extend(electro_thermal_fields.diagnostics);
     run.fields.extend(electro_thermal_fields.static_fields);
 

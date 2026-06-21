@@ -3844,6 +3844,27 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "thermo_mech_constitutive_residual_ratio",
+            "fixture_id": "thermo_mech_kickoff_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "thermo_mech_thermal_strain_energy_density_mean",
+            "fixture_id": "thermo_mech_kickoff_gpu_provider",
+            "observed": 300.0,
+            "reference": 300.0,
+            "pass": True,
+        },
+        {
+            "name": "thermo_mech_consistency_coverage_ratio",
+            "fixture_id": "thermo_mech_kickoff_gpu_provider",
+            "observed": 0.9583333333333334,
+            "reference": 0.9583333333333334,
+            "pass": True,
+        },
+        {
             "name": "transient_max_residual_norm",
             "fixture_id": "thermo_mech_kickoff_gpu_provider",
             "observed": 7.270866941153783e-09,

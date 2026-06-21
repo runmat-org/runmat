@@ -6345,6 +6345,21 @@ def evaluate_release_readiness(
     ]
     thermo_required_assertion_specs = [
         (
+            "thermo_mech_kickoff_gpu_provider",
+            "thermo_mech_constitutive_residual_ratio",
+            None,
+        ),
+        (
+            "thermo_mech_kickoff_gpu_provider",
+            "thermo_mech_thermal_strain_energy_density_mean",
+            None,
+        ),
+        (
+            "thermo_mech_kickoff_gpu_provider",
+            "thermo_mech_consistency_coverage_ratio",
+            None,
+        ),
+        (
             "thermo_gradient_pathological_gpu_provider",
             "thermo_gradient_pathological_spread_ratio",
             None,

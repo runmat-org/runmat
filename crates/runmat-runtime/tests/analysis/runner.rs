@@ -4846,6 +4846,48 @@ pub(super) fn run_fixture(
                             Some(0.6),
                             Some(1.1),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_mech_constitutive_residual_ratio",
+                            "FEA_TM_CONSISTENCY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_CONSISTENCY",
+                                "constitutive_residual_ratio",
+                            ),
+                            Some(0.0),
+                            Some(1.0e-8),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_mech_thermal_strain_energy_density_mean",
+                            "FEA_TM_CONSISTENCY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_CONSISTENCY",
+                                "thermal_strain_energy_density_mean",
+                            ),
+                            Some(0.0),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_mech_consistency_coverage_ratio",
+                            "FEA_TM_CONSISTENCY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_CONSISTENCY",
+                                "consistency_coverage_ratio",
+                            ),
+                            Some(0.9),
+                            Some(1.0),
+                        );
                     } else if spec.id == "thermo_gradient_benign_gpu_provider" {
                         push_threshold_assertion(
                             spec.id,
