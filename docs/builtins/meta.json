@@ -70479,6 +70479,156 @@
       ]
     },
     {
+      "name": "writecell",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "bytesWritten = writecell(C, filename)",
+          "inputs": [
+            {
+              "name": "C",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell array to write."
+            },
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Output file path."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bytesWritten",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of bytes written to the destination file."
+            }
+          ]
+        },
+        {
+          "label": "bytesWritten = writecell(C, filename, name, optionValue)",
+          "inputs": [
+            {
+              "name": "C",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell array to write."
+            },
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Output file path."
+            },
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Option name."
+            },
+            {
+              "name": "optionValue",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Value for the preceding option name."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bytesWritten",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of bytes written to the destination file."
+            }
+          ]
+        },
+        {
+          "label": "bytesWritten = writecell(C, filename, nameValuePairs...)",
+          "inputs": [
+            {
+              "name": "C",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell array to write."
+            },
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Output file path."
+            },
+            {
+              "name": "nameValuePairs...",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name-value option pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "bytesWritten",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of bytes written to the destination file."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.WRITECELL.ARG_CONFIG",
+          "identifier": null,
+          "when": "Filename argument is missing or name-value options are malformed.",
+          "message": "writecell: invalid argument configuration"
+        },
+        {
+          "code": "RM.WRITECELL.FILENAME",
+          "identifier": null,
+          "when": "Filename is not a valid scalar path string.",
+          "message": "writecell: invalid filename input"
+        },
+        {
+          "code": "RM.WRITECELL.OPTION",
+          "identifier": null,
+          "when": "A provided option value is invalid.",
+          "message": "writecell: invalid option value"
+        },
+        {
+          "code": "RM.WRITECELL.DATA",
+          "identifier": null,
+          "when": "Input data cannot be converted into supported cell export rows.",
+          "message": "writecell: invalid input data"
+        },
+        {
+          "code": "RM.WRITECELL.DATA_SHAPE",
+          "identifier": null,
+          "when": "Input cell array has unsupported dimensionality.",
+          "message": "writecell: input must be 2-D"
+        },
+        {
+          "code": "RM.WRITECELL.IO",
+          "identifier": null,
+          "when": "The destination file cannot be opened or written.",
+          "message": "writecell: file write failed"
+        }
+      ]
+    },
+    {
       "name": "writematrix",
       "output_mode": "Fixed",
       "completion_policy": "Public",

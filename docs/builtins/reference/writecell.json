@@ -1,0 +1,112 @@
+{
+  "title": "writecell",
+  "category": "io/tabular",
+  "keywords": [
+    "writecell",
+    "csv",
+    "xlsx",
+    "xls",
+    "cell array",
+    "delimited text",
+    "spreadsheet",
+    "append",
+    "quote strings"
+  ],
+  "summary": "Write heterogeneous cell arrays to delimited text or spreadsheet files.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the CPU. gpuArray values inside cells are gathered automatically before serialisation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::tabular::writecell::tests",
+    "integration": [
+      "builtins::io::tabular::writecell::tests::writecell_writes_heterogeneous_csv",
+      "builtins::io::tabular::writecell::tests::writecell_honours_delimiter_quote_strings_and_append",
+      "builtins::io::tabular::writecell::tests::writecell_accepts_scalar_char_tensor_and_logical_cells",
+      "builtins::io::tabular::writecell::tests::writecell_rejects_nested_cells_and_nonscalar_arrays",
+      "builtins::io::tabular::writecell::tests::writecell_writes_xlsx_with_sheet_and_range"
+    ]
+  },
+  "description": "`writecell(C, filename)` serializes a 2-D cell array to delimited text or an Excel-compatible spreadsheet, preserving mixed numeric, logical, text, and empty cells.",
+  "behaviors": [
+    "Accepts 2-D cell arrays containing numeric scalars, logical scalars, string scalars, row character vectors, and empty numeric or logical arrays.",
+    "Nested cell arrays, complex values, and non-scalar arrays produce descriptive errors so unsupported data is not silently flattened.",
+    "File type is inferred from the filename extension. `.xls`, `.xlsx`, `.xlsm`, `.xlsb`, and `.ods` select spreadsheet output; other extensions select delimited text unless `'FileType'` overrides the choice.",
+    "Delimited text follows MATLAB-compatible delimiter defaults: comma for `.csv`, tab for `.tsv` and `.tab`, whitespace for `.txt`, `.dat`, and `.dlm`, and comma otherwise.",
+    "`'Delimiter'`, `'QuoteStrings'`, `'WriteMode'`, and `'LineEnding'` control text output. `'WriteMode','append'` appends rows to text files.",
+    "Spreadsheet output writes a single worksheet and supports `'Sheet'` and `'Range'` for worksheet name/index and top-left placement. Spreadsheet append is rejected until in-place workbook mutation is supported."
+  ],
+  "examples": [
+    {
+      "description": "Write heterogeneous cells to CSV",
+      "input": "C = {1.5, \"alpha\"; true, []};\nwritecell(C, \"out.csv\")"
+    },
+    {
+      "description": "Append rows to a pipe-delimited text file",
+      "input": "writecell({\"a,b\", 2}, \"report.txt\", 'Delimiter', '|', 'QuoteStrings', false);\nwritecell({\"tail\", 3}, \"report.txt\", 'Delimiter', '|', 'QuoteStrings', false, 'WriteMode', 'append')"
+    },
+    {
+      "description": "Write to a spreadsheet sheet and range",
+      "input": "writecell({\"Voltage\", 1.5, true}, \"measurements.xlsx\", 'Sheet', 'Data', 'Range', 'B2')"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `writecell` support heterogeneous data?",
+      "answer": "Yes. It is the tabular export path for mixed numeric, logical, text, and empty cell content."
+    },
+    {
+      "question": "Can `writecell` write Excel files?",
+      "answer": "Yes. RunMat writes minimal OOXML workbooks for Excel-compatible extensions and supports worksheet names and top-left ranges."
+    },
+    {
+      "question": "How are strings quoted in CSV output?",
+      "answer": "Strings are quoted by default and embedded double quotes are doubled. Set `'QuoteStrings', false` to write text values verbatim."
+    },
+    {
+      "question": "Can I append to an existing `.xlsx` file?",
+      "answer": "Not yet. Text append is supported. Spreadsheet append currently returns a clear option error rather than mutating an existing workbook partially."
+    }
+  ],
+  "links": [
+    {
+      "label": "writematrix",
+      "url": "./writematrix"
+    },
+    {
+      "label": "readmatrix",
+      "url": "./readmatrix"
+    },
+    {
+      "label": "xlsread",
+      "url": "./xlsread"
+    },
+    {
+      "label": "csvwrite",
+      "url": "./csvwrite"
+    },
+    {
+      "label": "dlmwrite",
+      "url": "./dlmwrite"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/tabular/writecell.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/writecell.rs"
+  },
+  "gpu_residency": "`writecell` is a file-I/O sink. Any GPU-resident tensors encountered in cells are gathered before formatting so the file reflects host-visible values.",
+  "gpu_behavior": [
+    "`writecell` does not launch provider kernels. It gathers resident inputs through the active acceleration provider and performs serialization on the host."
+  ]
+}
