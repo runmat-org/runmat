@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
 use crate::{
-    assembly::AssemblySummary,
+    assembly::{AssemblySummary, PrepRecoveryEdgeSummary, StructuralMaterialSummary},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     physics::{
         coupling::{electro_thermal, nonlinear as coupling_nonlinear, thermo_mechanical},
@@ -208,7 +208,8 @@ pub fn solve_nonlinear_system(
     let mut contact_severity_sum = 0.0_f64;
     let mut contact_first_severity = 0.0_f64;
     let mut contact_last_severity = 0.0_f64;
-    let element_count = element_count_for_dofs(summary.dof_count);
+    let recovery_topology = nonlinear_recovery_topology(summary);
+    let element_count = recovery_topology.element_count;
     let contact_count = contact_entity_count(contact_context);
     let mut max_equivalent_plastic_strain = 0.0_f64;
     let mut plastic_active_element_count = 0usize;
@@ -361,7 +362,7 @@ pub fn solve_nonlinear_system(
         let state = recover_increment_state(
             &accepted_displacement,
             load_factor,
-            element_count,
+            &recovery_topology,
             &summary.structural_material,
             plasticity_context,
             contact_context,
@@ -446,6 +447,22 @@ pub fn solve_nonlinear_system(
         message: format!(
             "prepared_build_ms={} solve_ms={} fallback_apply_count={}",
             transient_prepared_build_ms, solve_ms, transient_fallback_apply_count
+        ),
+    });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_NONLINEAR_STATE_TOPOLOGY".to_string(),
+        severity: if recovery_topology.element_count > 0 {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "basis={} element_count={} active_recovery_edge_count={} prep_recovery_edge_count={} constrained_recovery_edge_count={}",
+            recovery_topology.basis,
+            recovery_topology.element_count,
+            recovery_topology.active_recovery_edge_count,
+            recovery_topology.prep_recovery_edge_count,
+            recovery_topology.constrained_recovery_edge_count,
         ),
     });
     diagnostics.push(FeaDiagnostic {
@@ -663,13 +680,13 @@ struct IncrementState {
 fn recover_increment_state(
     displacement: &[f64],
     load_factor: f64,
-    element_count: usize,
-    material: &crate::assembly::StructuralMaterialSummary,
+    recovery_topology: &NonlinearRecoveryTopology,
+    material: &StructuralMaterialSummary,
     plasticity: Option<&FeaPlasticityConstitutiveContext>,
     contact: Option<&FeaContactInterfaceContext>,
     contact_count: usize,
 ) -> IncrementState {
-    let total_strain = recover_increment_strain(displacement, element_count);
+    let total_strain = recover_increment_strain(displacement, recovery_topology);
     let plastic_strain = recover_plastic_strain(
         &total_strain,
         load_factor,
@@ -709,27 +726,178 @@ fn recover_increment_state(
     }
 }
 
-fn element_count_for_dofs(dof_count: usize) -> usize {
-    dof_count
-        .div_ceil(VECTOR_COMPONENT_COUNT)
-        .saturating_sub(1)
-        .max(1)
+#[derive(Debug, Clone, PartialEq)]
+struct NonlinearRecoveryTopology {
+    basis: &'static str,
+    element_count: usize,
+    active_recovery_edge_count: usize,
+    prep_recovery_edge_count: usize,
+    constrained_recovery_edge_count: usize,
+    use_dof_adjacency_fallback: bool,
+    edges: Vec<NonlinearRecoveryEdge>,
 }
 
-fn recover_increment_strain(displacement: &[f64], element_count: usize) -> Vec<f64> {
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct NonlinearRecoveryEdge {
+    from_dof: usize,
+    to_dof: usize,
+    component: usize,
+    hop: usize,
+    shear_pair: (usize, usize),
+}
+
+fn nonlinear_recovery_topology(summary: &AssemblySummary) -> NonlinearRecoveryTopology {
+    let prep_edges = nonlinear_prep_recovery_edges(summary);
+    let constrained_recovery_edge_count = constrained_prep_recovery_edge_count(summary);
+    if !prep_edges.is_empty() {
+        return NonlinearRecoveryTopology {
+            basis: "prep_element_connectivity",
+            element_count: prep_edges.len(),
+            active_recovery_edge_count: prep_edges.len(),
+            prep_recovery_edge_count: prep_edges.len(),
+            constrained_recovery_edge_count,
+            use_dof_adjacency_fallback: false,
+            edges: prep_edges,
+        };
+    }
+
+    let fallback_count = summary
+        .dof_count
+        .div_ceil(VECTOR_COMPONENT_COUNT)
+        .saturating_sub(1)
+        .max(1);
+    let edges = (0..fallback_count)
+        .map(|element_index| {
+            let base = element_index * VECTOR_COMPONENT_COUNT;
+            let next = (element_index + 1) * VECTOR_COMPONENT_COUNT;
+            NonlinearRecoveryEdge {
+                from_dof: base,
+                to_dof: next,
+                component: element_index % VECTOR_COMPONENT_COUNT,
+                hop: VECTOR_COMPONENT_COUNT,
+                shear_pair: (
+                    (element_index + 1) % VECTOR_COMPONENT_COUNT,
+                    (element_index + 2) % VECTOR_COMPONENT_COUNT,
+                ),
+            }
+        })
+        .collect::<Vec<_>>();
+    NonlinearRecoveryTopology {
+        basis: "dof_adjacency_fallback",
+        element_count: fallback_count,
+        active_recovery_edge_count: edges.len(),
+        prep_recovery_edge_count: 0,
+        constrained_recovery_edge_count: 0,
+        use_dof_adjacency_fallback: true,
+        edges,
+    }
+}
+
+fn nonlinear_prep_recovery_edges(summary: &AssemblySummary) -> Vec<NonlinearRecoveryEdge> {
+    summary
+        .prep_recovery_edges
+        .iter()
+        .filter_map(|edge| nonlinear_prep_recovery_edge(summary, *edge))
+        .collect()
+}
+
+fn nonlinear_prep_recovery_edge(
+    summary: &AssemblySummary,
+    edge: PrepRecoveryEdgeSummary,
+) -> Option<NonlinearRecoveryEdge> {
+    let from_dof = edge.from_dof.min(edge.to_dof);
+    let to_dof = edge.from_dof.max(edge.to_dof);
+    if from_dof == to_dof
+        || to_dof >= summary.dof_count
+        || summary
+            .operator
+            .constrained
+            .get(from_dof)
+            .copied()
+            .unwrap_or(false)
+        || summary
+            .operator
+            .constrained
+            .get(to_dof)
+            .copied()
+            .unwrap_or(false)
+    {
+        return None;
+    }
+    let component = from_dof % VECTOR_COMPONENT_COUNT;
+    Some(NonlinearRecoveryEdge {
+        from_dof,
+        to_dof,
+        component,
+        hop: to_dof.abs_diff(from_dof).max(1),
+        shear_pair: (
+            (component + 1) % VECTOR_COMPONENT_COUNT,
+            (component + 2) % VECTOR_COMPONENT_COUNT,
+        ),
+    })
+}
+
+fn constrained_prep_recovery_edge_count(summary: &AssemblySummary) -> usize {
+    summary
+        .prep_recovery_edges
+        .iter()
+        .filter(|edge| {
+            let from_dof = edge.from_dof.min(edge.to_dof);
+            let to_dof = edge.from_dof.max(edge.to_dof);
+            to_dof < summary.dof_count
+                && (summary
+                    .operator
+                    .constrained
+                    .get(from_dof)
+                    .copied()
+                    .unwrap_or(false)
+                    || summary
+                        .operator
+                        .constrained
+                        .get(to_dof)
+                        .copied()
+                        .unwrap_or(false))
+        })
+        .count()
+}
+
+fn recover_increment_strain(
+    displacement: &[f64],
+    recovery_topology: &NonlinearRecoveryTopology,
+) -> Vec<f64> {
+    let element_count = recovery_topology.element_count;
     let mut padded = displacement.to_vec();
-    padded.resize((element_count + 1) * VECTOR_COMPONENT_COUNT, 0.0);
+    padded.resize(
+        displacement
+            .len()
+            .max((element_count + 1) * VECTOR_COMPONENT_COUNT),
+        0.0,
+    );
     let mut strain = vec![0.0; element_count * TENSOR_COMPONENT_COUNT];
-    for element_index in 0..element_count {
-        let base = element_index * VECTOR_COMPONENT_COUNT;
-        let next = (element_index + 1) * VECTOR_COMPONENT_COUNT;
-        let offset = element_index * TENSOR_COMPONENT_COUNT;
-        for component in 0..VECTOR_COMPONENT_COUNT {
-            strain[offset + component] = padded[next + component] - padded[base + component];
+    if recovery_topology.use_dof_adjacency_fallback {
+        for element_index in 0..element_count {
+            let base = element_index * VECTOR_COMPONENT_COUNT;
+            let next = (element_index + 1) * VECTOR_COMPONENT_COUNT;
+            let offset = element_index * TENSOR_COMPONENT_COUNT;
+            for component in 0..VECTOR_COMPONENT_COUNT {
+                strain[offset + component] = padded[next + component] - padded[base + component];
+            }
+            strain[offset + 3] = 0.5 * (strain[offset] + strain[offset + 1]);
+            strain[offset + 4] = 0.5 * (strain[offset + 1] + strain[offset + 2]);
+            strain[offset + 5] = 0.5 * (strain[offset] + strain[offset + 2]);
         }
-        strain[offset + 3] = 0.5 * (strain[offset] + strain[offset + 1]);
-        strain[offset + 4] = 0.5 * (strain[offset + 1] + strain[offset + 2]);
-        strain[offset + 5] = 0.5 * (strain[offset] + strain[offset + 2]);
+        return strain;
+    }
+
+    for (element_index, edge) in recovery_topology.edges.iter().enumerate() {
+        let offset = element_index * TENSOR_COMPONENT_COUNT;
+        let jump = padded.get(edge.to_dof).copied().unwrap_or(0.0)
+            - padded.get(edge.from_dof).copied().unwrap_or(0.0);
+        strain[offset + edge.component] = jump / edge.hop.max(1) as f64;
+        strain[offset + 3] = 0.5 * (strain[offset] + strain[offset + edge.shear_pair.0]);
+        strain[offset + 4] =
+            0.5 * (strain[offset + edge.shear_pair.0] + strain[offset + edge.shear_pair.1]);
+        strain[offset + 5] = 0.5 * (strain[offset] + strain[offset + edge.shear_pair.1]);
     }
     strain
 }
@@ -774,7 +942,7 @@ fn recover_equivalent_plastic_strain(plastic_strain: &[f64]) -> Vec<f64> {
 fn recover_von_mises(
     total_strain: &[f64],
     plastic_strain: &[f64],
-    material: &crate::assembly::StructuralMaterialSummary,
+    material: &StructuralMaterialSummary,
 ) -> Vec<f64> {
     total_strain
         .chunks_exact(TENSOR_COMPONENT_COUNT)
@@ -791,7 +959,7 @@ fn recover_von_mises(
 
 fn von_mises_from_strain(
     strain: &[f64; TENSOR_COMPONENT_COUNT],
-    material: &crate::assembly::StructuralMaterialSummary,
+    material: &StructuralMaterialSummary,
 ) -> f64 {
     let trace = strain[0] + strain[1] + strain[2];
     let sxx = material.lame_lambda_pa * trace + 2.0 * material.shear_modulus_pa * strain[0];

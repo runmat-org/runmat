@@ -2710,6 +2710,9 @@ fn push_plastic_state_threshold_assertions(
     run: &AnalysisRunResult,
     prefix: &str,
 ) {
+    push_nonlinear_state_topology_threshold_assertions(
+        fixture_id, assertions, failures, run, prefix,
+    );
     push_threshold_assertion(
         fixture_id,
         assertions,
@@ -2739,6 +2742,9 @@ fn push_contact_state_threshold_assertions(
     run: &AnalysisRunResult,
     prefix: &str,
 ) {
+    push_nonlinear_state_topology_threshold_assertions(
+        fixture_id, assertions, failures, run, prefix,
+    );
     push_threshold_assertion(
         fixture_id,
         assertions,
@@ -2767,6 +2773,39 @@ fn push_contact_state_threshold_assertions(
         "FEA_NONLINEAR_STATE",
         diagnostic_metric(run, "FEA_NONLINEAR_STATE", "min_contact_gap"),
         Some(0.0),
+        None,
+    );
+}
+
+fn push_nonlinear_state_topology_threshold_assertions(
+    fixture_id: &str,
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    run: &AnalysisRunResult,
+    prefix: &str,
+) {
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_topology_element_count"),
+        "FEA_NONLINEAR_STATE_TOPOLOGY",
+        diagnostic_metric(run, "FEA_NONLINEAR_STATE_TOPOLOGY", "element_count"),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_topology_active_recovery_edge_count"),
+        "FEA_NONLINEAR_STATE_TOPOLOGY",
+        diagnostic_metric(
+            run,
+            "FEA_NONLINEAR_STATE_TOPOLOGY",
+            "active_recovery_edge_count",
+        ),
+        Some(1.0),
         None,
     );
 }

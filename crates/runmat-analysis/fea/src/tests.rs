@@ -878,6 +878,14 @@ fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
     assert!(state.message.contains("max_equivalent_plastic_strain="));
     assert!(state.message.contains("contact_active_entity_count="));
     assert!(state.message.contains("max_contact_pressure="));
+    let topology = result
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_NONLINEAR_STATE_TOPOLOGY")
+        .expect("nonlinear state topology diagnostic should be present");
+    assert!(topology.message.contains("basis=dof_adjacency_fallback"));
+    assert!(topology.message.contains("active_recovery_edge_count="));
     let convergence = result
         .run
         .diagnostics
@@ -887,6 +895,55 @@ fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
     assert!(convergence.message.contains("iteration_spike_count="));
     assert!(convergence.message.contains("convergence_stall_count="));
     assert!(convergence.message.contains("backtrack_burst_count="));
+}
+
+#[test]
+fn nonlinear_prepared_state_recovery_uses_prep_connectivity_edges() {
+    let model = fixture_model(FixtureId::NonlinearLoadPathMix);
+    let result = crate::run_nonlinear_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        NonlinearSolveOptions {
+            prep_context: Some(FeaPrepContext {
+                prepared_mesh_count: 1,
+                prepared_node_count: 14,
+                prepared_element_count: 22,
+                mapped_region_count: 3,
+                min_scaled_jacobian: 0.84,
+                mean_aspect_ratio: 1.7,
+                inverted_element_count: 0,
+                mapped_load_count: 2,
+                mapped_bc_count: 1,
+                layout_seed: 29,
+                topology_dof_multiplier: 1.6,
+                topology_bandwidth_estimate: 4,
+                mapped_region_participation_ratio: 0.85,
+                topology_surface_patch_ratio: 0.2,
+                topology_volume_core_ratio: 0.7,
+                topology_mixed_family_ratio: 0.08,
+                topology_region_span_mean: 5.0,
+                topology_region_block_count: 3,
+                topology_region_mesh_mean: 3.5,
+                topology_region_mesh_variance: 0.5,
+                topology_triangle_family_ratio: 0.2,
+                topology_quad_family_ratio: 0.25,
+                topology_tet_family_ratio: 0.35,
+                topology_hex_family_ratio: 0.2,
+                calibration_profile_override: None,
+            }),
+            ..NonlinearSolveOptions::default()
+        },
+    )
+    .expect("prepared nonlinear solve should succeed");
+
+    let topology = result
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_NONLINEAR_STATE_TOPOLOGY")
+        .expect("nonlinear state topology diagnostic should be present");
+    assert!(topology.message.contains("basis=prep_element_connectivity"));
+    assert!(topology.message.contains("prep_recovery_edge_count="));
 }
 
 #[test]
