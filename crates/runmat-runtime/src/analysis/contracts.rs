@@ -1544,6 +1544,18 @@ pub struct NonlinearResultsData {
     pub load_factor_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub residual_norm_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub thermo_mechanical_temperature_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub thermo_mechanical_thermal_strain_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub thermo_mechanical_thermal_stress_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub thermo_mechanical_displacement_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub thermo_mechanical_von_mises_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub thermo_mechanical_coupling_residual_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     #[serde(default)]
     pub increment_norms: Vec<f64>,

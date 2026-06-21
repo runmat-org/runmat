@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
@@ -318,7 +318,7 @@ fn harness_artifact_root() -> PathBuf {
         .unwrap_or_else(default_harness_artifact_root)
 }
 
-fn harness_thermo_field_artifact_root(artifact_root: &PathBuf) -> PathBuf {
+fn harness_thermo_field_artifact_root(artifact_root: &Path) -> PathBuf {
     std::env::var("RUNMAT_THERMO_FIELD_ARTIFACT_ROOT")
         .ok()
         .map(PathBuf::from)

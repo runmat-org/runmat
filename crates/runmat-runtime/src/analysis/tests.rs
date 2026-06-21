@@ -24,6 +24,9 @@ use runmat_analysis_fea::{
     fea_nonlinear_residual_norm_field_id, fea_nonlinear_von_mises_field_id,
     fea_thermal_boundary_heat_flux_field_id, fea_thermal_heat_flux_field_id,
     fea_thermal_heat_source_field_id, fea_thermal_temperature_gradient_field_id,
+    fea_thermo_mechanical_coupling_residual_field_id, fea_thermo_mechanical_displacement_field_id,
+    fea_thermo_mechanical_temperature_field_id, fea_thermo_mechanical_thermal_strain_field_id,
+    fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
     fea_transient_acceleration_field_id, fea_transient_kinetic_energy_field_id,
     fea_transient_residual_norm_field_id, fea_transient_strain_energy_field_id,
     fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
@@ -4221,6 +4224,77 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         .quality_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::ThermoMechanicalNonlinearStress));
+
+    let nonlinear = run
+        .data
+        .nonlinear_results
+        .as_ref()
+        .expect("nonlinear results should be present");
+    assert_eq!(
+        nonlinear.thermo_mechanical_temperature_snapshots.len(),
+        nonlinear.load_factors.len()
+    );
+    assert_eq!(
+        nonlinear.thermo_mechanical_thermal_strain_snapshots.len(),
+        nonlinear.load_factors.len()
+    );
+    assert_eq!(
+        nonlinear.thermo_mechanical_thermal_stress_snapshots.len(),
+        nonlinear.load_factors.len()
+    );
+    assert_eq!(
+        nonlinear.thermo_mechanical_displacement_snapshots.len(),
+        nonlinear.load_factors.len()
+    );
+    assert_eq!(
+        nonlinear.thermo_mechanical_von_mises_snapshots.len(),
+        nonlinear.load_factors.len()
+    );
+    assert_eq!(
+        nonlinear
+            .thermo_mechanical_coupling_residual_snapshots
+            .len(),
+        nonlinear.load_factors.len()
+    );
+    assert_eq!(
+        nonlinear.thermo_mechanical_temperature_snapshots[0].field_id,
+        fea_thermo_mechanical_temperature_field_id(0)
+    );
+    assert_eq!(
+        nonlinear.thermo_mechanical_thermal_strain_snapshots[0].field_id,
+        fea_thermo_mechanical_thermal_strain_field_id(0)
+    );
+    assert_eq!(
+        nonlinear.thermo_mechanical_thermal_stress_snapshots[0].field_id,
+        fea_thermo_mechanical_thermal_stress_field_id(0)
+    );
+    assert_eq!(
+        nonlinear.thermo_mechanical_displacement_snapshots[0].field_id,
+        fea_thermo_mechanical_displacement_field_id(0)
+    );
+    assert_eq!(
+        nonlinear.thermo_mechanical_von_mises_snapshots[0].field_id,
+        fea_thermo_mechanical_von_mises_field_id(0)
+    );
+    assert_eq!(
+        nonlinear.thermo_mechanical_coupling_residual_snapshots[0].field_id,
+        fea_thermo_mechanical_coupling_residual_field_id(0)
+    );
+
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("thermo-mechanical nonlinear results should be queryable");
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == fea_thermo_mechanical_temperature_field_id(0)));
+    assert!(results.data.field_descriptors.iter().any(|descriptor| {
+        descriptor.field_id == fea_thermo_mechanical_coupling_residual_field_id(0)
+    }));
 }
 
 #[test]

@@ -5244,6 +5244,18 @@ pub fn analysis_run_nonlinear_with_options_op(
             contact_gap_snapshots: nonlinear_run.contact_gap_snapshots,
             load_factor_snapshots: nonlinear_run.load_factor_snapshots,
             residual_norm_snapshots: nonlinear_run.residual_norm_snapshots,
+            thermo_mechanical_temperature_snapshots: nonlinear_run
+                .thermo_mechanical_temperature_snapshots,
+            thermo_mechanical_thermal_strain_snapshots: nonlinear_run
+                .thermo_mechanical_thermal_strain_snapshots,
+            thermo_mechanical_thermal_stress_snapshots: nonlinear_run
+                .thermo_mechanical_thermal_stress_snapshots,
+            thermo_mechanical_displacement_snapshots: nonlinear_run
+                .thermo_mechanical_displacement_snapshots,
+            thermo_mechanical_von_mises_snapshots: nonlinear_run
+                .thermo_mechanical_von_mises_snapshots,
+            thermo_mechanical_coupling_residual_snapshots: nonlinear_run
+                .thermo_mechanical_coupling_residual_snapshots,
             residual_norms: nonlinear_run.residual_norms,
             increment_norms: nonlinear_run.increment_norms,
             iteration_counts: nonlinear_run.iteration_counts,
@@ -6425,6 +6437,24 @@ fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<Analysi
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
         for field in &nonlinear.residual_norm_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.thermo_mechanical_temperature_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.thermo_mechanical_thermal_strain_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.thermo_mechanical_thermal_stress_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.thermo_mechanical_displacement_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.thermo_mechanical_von_mises_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.thermo_mechanical_coupling_residual_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
     }

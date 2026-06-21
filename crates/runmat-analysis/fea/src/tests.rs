@@ -4,7 +4,10 @@ use crate::{
     fea_nonlinear_plastic_strain_field_id, fea_nonlinear_residual_norm_field_id,
     fea_nonlinear_von_mises_field_id, fea_thermal_boundary_heat_flux_field_id,
     fea_thermal_heat_flux_field_id, fea_thermal_heat_source_field_id,
-    fea_thermal_temperature_gradient_field_id, fea_transient_acceleration_field_id,
+    fea_thermal_temperature_gradient_field_id, fea_thermo_mechanical_coupling_residual_field_id,
+    fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
+    fea_thermo_mechanical_thermal_strain_field_id, fea_thermo_mechanical_thermal_stress_field_id,
+    fea_thermo_mechanical_von_mises_field_id, fea_transient_acceleration_field_id,
     fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
     fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
     fea_transient_von_mises_field_id,
@@ -597,6 +600,55 @@ fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
         },
     )
     .expect("thermo-mechanical nonlinear solve should succeed");
+
+    assert_eq!(
+        result.load_factors.len(),
+        result.thermo_mechanical_temperature_snapshots.len()
+    );
+    assert_eq!(
+        result.load_factors.len(),
+        result.thermo_mechanical_thermal_strain_snapshots.len()
+    );
+    assert_eq!(
+        result.load_factors.len(),
+        result.thermo_mechanical_thermal_stress_snapshots.len()
+    );
+    assert_eq!(
+        result.load_factors.len(),
+        result.thermo_mechanical_displacement_snapshots.len()
+    );
+    assert_eq!(
+        result.load_factors.len(),
+        result.thermo_mechanical_von_mises_snapshots.len()
+    );
+    assert_eq!(
+        result.load_factors.len(),
+        result.thermo_mechanical_coupling_residual_snapshots.len()
+    );
+    assert_eq!(
+        result.thermo_mechanical_temperature_snapshots[0].field_id,
+        fea_thermo_mechanical_temperature_field_id(0)
+    );
+    assert_eq!(
+        result.thermo_mechanical_thermal_strain_snapshots[0].field_id,
+        fea_thermo_mechanical_thermal_strain_field_id(0)
+    );
+    assert_eq!(
+        result.thermo_mechanical_thermal_stress_snapshots[0].field_id,
+        fea_thermo_mechanical_thermal_stress_field_id(0)
+    );
+    assert_eq!(
+        result.thermo_mechanical_displacement_snapshots[0].field_id,
+        fea_thermo_mechanical_displacement_field_id(0)
+    );
+    assert_eq!(
+        result.thermo_mechanical_von_mises_snapshots[0].field_id,
+        fea_thermo_mechanical_von_mises_field_id(0)
+    );
+    assert_eq!(
+        result.thermo_mechanical_coupling_residual_snapshots[0].field_id,
+        fea_thermo_mechanical_coupling_residual_field_id(0)
+    );
 
     let profile = result
         .run
