@@ -100,6 +100,13 @@ Those wrappers run the appropriate `wasm-pack test --node` and `wasm-pack test -
 They also regenerate the WASM builtin registry before running tests, so focused
 regressions exercise the same builtin catalog as packaged browser builds.
 
+The symptom-closure suite includes the shared signal compatibility harness in
+`crates/runmat-runtime/tests/fixtures/signal_compatibility_harness.m`. The same
+fixture is also run by the CLI integration test
+`test_signal_compatibility_harness_cli`, covering CSV import, MAT-file
+save/load, FFT magnitude/indexing, filter/conv, and signal window functions
+through both host and JavaScript filesystem providers.
+
 ## Macro UI Tests
 
 `runmat-macros` uses compile-fail fixtures for macro diagnostics.

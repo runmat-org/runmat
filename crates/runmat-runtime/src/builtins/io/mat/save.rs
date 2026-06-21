@@ -1,7 +1,7 @@
 //! MATLAB-compatible `save` builtin for RunMat.
 
 use std::collections::HashSet;
-use std::io::{BufWriter, Cursor, ErrorKind, Read, Write};
+use std::io::{BufWriter, Cursor, Write};
 use std::path::{Path, PathBuf};
 
 use futures::future::LocalBoxFuture;
@@ -11,14 +11,14 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, IntValue, NumericDType, StructValue, Value,
 };
-use runmat_filesystem::File;
+use runmat_filesystem::write_async;
 use runmat_macros::runtime_builtin;
 
 use super::format::{
     MatArray, MatClass, MatData, FLAG_COMPLEX, FLAG_LOGICAL, MAT_HEADER_LEN, MI_DOUBLE, MI_INT16,
     MI_INT32, MI_INT64, MI_INT8, MI_MATRIX, MI_SINGLE, MI_UINT16, MI_UINT32, MI_UINT64, MI_UINT8,
 };
-use super::load::decode_workspace_from_mat_bytes;
+use super::load::read_mat_file;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -336,7 +336,7 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let path = normalise_path(&path_value)?;
     let mut unique_entries = deduplicate_entries(entries);
     if request.append {
-        unique_entries = append_existing_entries(&path, unique_entries)?;
+        unique_entries = append_existing_entries(&path, unique_entries).await?;
     }
 
     let mut mat_vars = Vec::with_capacity(unique_entries.len());
@@ -347,7 +347,7 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         });
     }
 
-    write_mat_file(&path, &mat_vars)?;
+    write_mat_file(&path, &mat_vars).await?;
 
     Ok(Value::Num(0.0))
 }
@@ -534,52 +534,33 @@ fn deduplicate_entries(entries: Vec<(String, Value)>) -> Vec<(String, Value)> {
     unique_entries
 }
 
-fn append_existing_entries(
+async fn append_existing_entries(
     path: &Path,
     new_entries: Vec<(String, Value)>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
-    let mut entries = read_existing_entries_for_append(path)?;
+    let mut entries = read_existing_entries_for_append(path).await?;
     entries.extend(new_entries);
     Ok(deduplicate_entries(entries))
 }
 
-fn read_existing_entries_for_append(path: &Path) -> BuiltinResult<Vec<(String, Value)>> {
-    let mut file = match File::open(path) {
-        Ok(file) => file,
-        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => {
-            return Err(save_error_with_source(
-                &SAVE_ERROR_IO,
-                format!(
-                    "save: failed to open existing MAT-file '{}': {err}",
-                    path.display()
-                ),
-                err,
-            ));
+async fn read_existing_entries_for_append(path: &Path) -> BuiltinResult<Vec<(String, Value)>> {
+    match read_mat_file(path).await {
+        Ok(entries) => Ok(entries),
+        Err(err)
+            if err.message().contains("No such file") || err.message().contains("not found") =>
+        {
+            Ok(Vec::new())
         }
-    };
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(|err| {
-        save_error_with_source(
+        Err(err) => Err(save_error_with_source(
             &SAVE_ERROR_IO,
             format!(
-                "save: failed to read existing MAT-file '{}': {err}",
-                path.display()
-            ),
-            err,
-        )
-    })?;
-    decode_workspace_from_mat_bytes(&bytes).map_err(|err| {
-        save_error_with_source(
-            &SAVE_ERROR_IO,
-            format!(
-                "save: failed to decode existing MAT-file '{}': {}",
+                "save: failed to read existing MAT-file '{}': {}",
                 path.display(),
                 err.message()
             ),
             err,
-        )
-    })
+        )),
+    }
 }
 
 fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
@@ -940,41 +921,15 @@ fn tensor_dtype_mat_class(dtype: NumericDType) -> MatClass {
     }
 }
 
-fn write_mat_file(path: &Path, vars: &[MatVar]) -> BuiltinResult<()> {
-    let file = File::create(path).map_err(|e| {
+async fn write_mat_file(path: &Path, vars: &[MatVar]) -> BuiltinResult<()> {
+    let bytes = write_mat_bytes(vars)?;
+    write_async(path, &bytes).await.map_err(|e| {
         save_error_with_source(
             &SAVE_ERROR_IO,
-            format!("save: failed to open '{}': {e}", path.display()),
+            format!("save: failed to write '{}': {e}", path.display()),
             e,
         )
-    })?;
-    let mut writer = BufWriter::new(file);
-
-    let mut header = [0u8; MAT_HEADER_LEN];
-    let desc = b"MATLAB 5.0 MAT-file, RunMat save";
-    for (i, byte) in desc.iter().enumerate() {
-        header[i] = *byte;
-    }
-    header[124] = 0x00;
-    header[125] = 0x01;
-    header[126] = b'I';
-    header[127] = b'M';
-    writer.write_all(&header).map_err(|e| {
-        save_error_with_source(
-            &SAVE_ERROR_IO,
-            format!("save: failed to write header: {e}"),
-            e,
-        )
-    })?;
-
-    for var in vars {
-        let matrix_bytes = build_matrix_bytes(&var.array, Some(&var.name))?;
-        write_tagged(&mut writer, MI_MATRIX, &matrix_bytes)?;
-    }
-
-    writer
-        .flush()
-        .map_err(|e| save_error_with_source(&SAVE_ERROR_IO, format!("save: flush failed: {e}"), e))
+    })
 }
 
 pub async fn encode_workspace_to_mat_bytes(entries: &[(String, Value)]) -> BuiltinResult<Vec<u8>> {
@@ -1297,6 +1252,7 @@ pub(crate) mod tests {
     use once_cell::sync::OnceCell;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, NumericDType, StringArray, Tensor};
+    use runmat_filesystem::File;
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;
