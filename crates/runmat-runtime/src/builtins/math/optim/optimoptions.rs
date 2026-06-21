@@ -32,7 +32,7 @@ const OPTIMOPTIONS_INPUTS_SOLVER: [BuiltinParamDescriptor; 1] = [BuiltinParamDes
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Solver name, such as fminbnd, fzero, or fsolve.",
+    description: "Solver name, such as fminbnd, fzero, fsolve, or lsqcurvefit.",
 }];
 
 const OPTIMOPTIONS_INPUTS_SOLVER_PAIRS: [BuiltinParamDescriptor; 3] = [
@@ -41,7 +41,7 @@ const OPTIMOPTIONS_INPUTS_SOLVER_PAIRS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Solver name, such as fminbnd, fzero, or fsolve.",
+        description: "Solver name, such as fminbnd, fzero, fsolve, or lsqcurvefit.",
     },
     BuiltinParamDescriptor {
         name: "name",
@@ -191,8 +191,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "optimoptions",
     category = "math/optim",
-    summary = "Create or update a typed optimization options structure for fminbnd, fzero, and fsolve.",
-    keywords = "optimoptions,options,TolX,TolFun,MaxIter,MaxFunEvals,Display",
+    summary = "Create or update a typed optimization options structure for fminbnd, fzero, fsolve, and lsqcurvefit.",
+    keywords = "optimoptions,options,TolX,TolFun,FunctionTolerance,StepTolerance,MaxIter,MaxFunEvals,Display,Algorithm",
     accel = "cpu",
     type_resolver(optim_options_type),
     descriptor(crate::builtins::math::optim::optimoptions::OPTIMOPTIONS_DESCRIPTOR),
@@ -323,6 +323,7 @@ enum Solver {
     Fminbnd,
     Fzero,
     Fsolve,
+    Lsqcurvefit,
     Generic,
 }
 
@@ -332,6 +333,7 @@ impl Solver {
             Self::Fminbnd => "fminbnd",
             Self::Fzero => "fzero",
             Self::Fsolve => "fsolve",
+            Self::Lsqcurvefit => "lsqcurvefit",
             Self::Generic => "",
         }
     }
@@ -339,18 +341,19 @@ impl Solver {
     fn default_display(self) -> &'static str {
         match self {
             Self::Fminbnd => "notify",
-            Self::Fzero | Self::Fsolve | Self::Generic => "off",
+            Self::Fzero | Self::Fsolve | Self::Lsqcurvefit | Self::Generic => "off",
         }
     }
 
     fn accepts_tol_fun(self) -> bool {
-        matches!(self, Self::Fsolve | Self::Generic)
+        matches!(self, Self::Fsolve | Self::Lsqcurvefit | Self::Generic)
     }
 
     fn accepts_option(self, canonical: &str) -> bool {
         match canonical {
             "TolX" | "MaxIter" | "MaxFunEvals" | "Display" => true,
             "TolFun" => self.accepts_tol_fun(),
+            "Algorithm" => matches!(self, Self::Lsqcurvefit | Self::Generic),
             _ => false,
         }
     }
@@ -360,7 +363,18 @@ impl Solver {
             Self::Fminbnd | Self::Generic => {
                 matches!(display, "off" | "none" | "iter" | "notify" | "final")
             }
-            Self::Fzero | Self::Fsolve => matches!(display, "off" | "none" | "iter" | "final"),
+            Self::Fzero | Self::Fsolve | Self::Lsqcurvefit => {
+                matches!(display, "off" | "none" | "iter" | "final")
+            }
+        }
+    }
+
+    fn accepts_algorithm(self, algorithm: &str) -> bool {
+        match self {
+            Self::Lsqcurvefit | Self::Generic => {
+                matches!(algorithm, "levenberg-marquardt" | "trust-region-reflective")
+            }
+            _ => false,
         }
     }
 }
@@ -379,6 +393,7 @@ fn parse_solver_name(text: &str) -> BuiltinResult<Solver> {
         "fminbnd" => Ok(Solver::Fminbnd),
         "fzero" => Ok(Solver::Fzero),
         "fsolve" => Ok(Solver::Fsolve),
+        "lsqcurvefit" => Ok(Solver::Lsqcurvefit),
         other => Err(optimoptions_error_with(
             &OPTIMOPTIONS_ERROR_INVALID_SOLVER,
             format!("optimoptions: unsupported solver '{other}'"),
@@ -412,6 +427,14 @@ fn default_options(solver: Solver) -> StructValue {
             out.insert("Display", Value::from(solver.default_display()));
         }
         Solver::Fsolve => {
+            out.insert("TolX", Value::Num(1.0e-6));
+            out.insert("TolFun", Value::Num(1.0e-6));
+            out.insert("MaxIter", Value::Num(400.0));
+            out.insert("MaxFunEvals", Value::Num(40000.0));
+            out.insert("Display", Value::from(solver.default_display()));
+        }
+        Solver::Lsqcurvefit => {
+            out.insert("Algorithm", Value::from("levenberg-marquardt"));
             out.insert("TolX", Value::Num(1.0e-6));
             out.insert("TolFun", Value::Num(1.0e-6));
             out.insert("MaxIter", Value::Num(400.0));
@@ -520,6 +543,7 @@ fn normalized_option_value(solver: Solver, canonical: &str, value: &Value) -> Bu
             Ok(Value::Num(positive_integer_scalar(canonical, value)? as f64))
         }
         "Display" => Ok(Value::from(display_value(solver, value)?)),
+        "Algorithm" => Ok(Value::from(algorithm_value(solver, value)?)),
         _ => unreachable!("unsupported option passed accepts_option"),
     }
 }
@@ -605,6 +629,28 @@ fn display_value(solver: Solver, value: &Value) -> BuiltinResult<String> {
             format!(
                 "optimoptions: unsupported Display '{}' for {}",
                 display,
+                solver_label(solver)
+            ),
+        ))
+    }
+}
+
+fn algorithm_value(solver: Solver, value: &Value) -> BuiltinResult<String> {
+    let algorithm = expect_string_scalar(
+        value,
+        "optimoptions: Algorithm must be a character vector or string scalar",
+        &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+    )?
+    .trim()
+    .to_ascii_lowercase();
+    if solver.accepts_algorithm(&algorithm) {
+        Ok(algorithm)
+    } else {
+        Err(optimoptions_error_with(
+            &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+            format!(
+                "optimoptions: unsupported Algorithm '{}' for {}",
+                algorithm,
                 solver_label(solver)
             ),
         ))
@@ -744,6 +790,44 @@ mod tests {
         assert_eq!(num_field(&options, "MaxIter"), 400.0);
         assert_eq!(num_field(&options, "MaxFunEvals"), 40000.0);
         assert_eq!(string_field(&options, "Display"), "off");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn optimoptions_lsqcurvefit_defaults_match_solver() {
+        let options = struct_result(
+            run_optimoptions(vec![Value::from("lsqcurvefit")]).expect("optimoptions lsqcurvefit"),
+        );
+        assert_eq!(string_field(&options, "Solver"), "lsqcurvefit");
+        assert_eq!(string_field(&options, "Algorithm"), "levenberg-marquardt");
+        assert_eq!(num_field(&options, "TolX"), 1.0e-6);
+        assert_eq!(num_field(&options, "TolFun"), 1.0e-6);
+        assert_eq!(num_field(&options, "MaxIter"), 400.0);
+        assert_eq!(num_field(&options, "MaxFunEvals"), 40000.0);
+        assert_eq!(string_field(&options, "Display"), "off");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn optimoptions_lsqcurvefit_accepts_modern_tolerance_aliases_and_algorithm() {
+        let options = struct_result(
+            run_optimoptions(vec![
+                Value::from("lsqcurvefit"),
+                Value::from("FunctionTolerance"),
+                Value::Num(1.0e-9),
+                Value::from("StepTolerance"),
+                Value::Num(1.0e-8),
+                Value::from("Algorithm"),
+                Value::from("trust-region-reflective"),
+            ])
+            .expect("optimoptions lsqcurvefit aliases"),
+        );
+        assert_eq!(num_field(&options, "TolFun"), 1.0e-9);
+        assert_eq!(num_field(&options, "TolX"), 1.0e-8);
+        assert_eq!(
+            string_field(&options, "Algorithm"),
+            "trust-region-reflective"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
