@@ -23,7 +23,7 @@
       "bool"
     ],
     "broadcasting": "none",
-    "notes": "gpuArray inputs are gathered through the active provider and modulated on the host because RunMat does not yet represent complex-valued GPU tensor handles. The result is a host ComplexTensor."
+    "notes": "gpuArray inputs are gathered through the active provider for MATLAB-compatible symbol validation, then the complex modulation result is uploaded as complex-interleaved GPU storage."
   },
   "fusion": {
     "elementwise": false,
@@ -43,7 +43,7 @@
     "The default symbol order is `'gray'`; `'bin'` maps symbol `k` to angle `phaseoffset + 2*pi*k/M`.",
     "Custom symbol order vectors must have length `M`, contain each integer in `[0, M-1]` exactly once, and label constellation points counter-clockwise starting at `phaseoffset`.",
     "`InputType='bit'` groups rows by `log2(M)` bits per symbol with the first bit as the MSB, preserving remaining dimensions as independent channels.",
-    "`OutputDataType='single'` rounds real and imaginary samples through single precision before returning the host complex tensor.",
+    "`OutputDataType='single'` rounds real and imaginary samples through single precision before returning the complex tensor or resident complex gpuArray output.",
     "`PlotConstellation=true` is accepted as a recognized option but raises an explicit not-implemented error."
   ],
   "examples": [
@@ -67,7 +67,7 @@
   "faqs": [
     {
       "question": "Does pskmod execute on the GPU?",
-      "answer": "It accepts gpuArray inputs, but the current runtime gathers them to host memory and returns a host ComplexTensor because complex GPU tensor handles are not yet part of RunMat's value model."
+      "answer": "It accepts gpuArray inputs, gathers the real symbol buffer for MATLAB-compatible validation, and returns a resident complex-interleaved gpuArray output."
     },
     {
       "question": "Is custom symbol ordering supported?",
@@ -92,9 +92,9 @@
     "label": "`crates/runmat-runtime/src/builtins/comms/pskmod.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/comms/pskmod.rs"
   },
-  "gpu_residency": "The builtin declares `GatherImmediately` residency. A gpuArray input is downloaded once through the dispatcher and then mapped to complex host output.",
+  "gpu_residency": "The builtin declares `NewHandle` residency for gpuArray inputs. A gpuArray input is downloaded once for symbol validation, then the complex modulation result is uploaded as a complex-interleaved GPU handle.",
   "gpu_behavior": [
-    "RunMat's current accelerator API stores real-valued GPU buffers. Since `pskmod` necessarily produces complex-valued samples, the GPU-aware implementation preserves correctness by gathering device input and producing a `ComplexTensor` on the host.",
-    "The registered GPU metadata advertises the supported input scalar classes and the provider hook name future accelerators can use once complex GPU outputs are represented."
+    "RunMat represents complex GPU tensors as interleaved real/imaginary buffers with complex storage metadata, so downstream GPU-aware FFT and signal paths can consume the modulation output without a host result.",
+    "The registered GPU metadata advertises the supported input scalar classes and the provider hook name future accelerators can use for a direct modulation kernel."
   ]
 }

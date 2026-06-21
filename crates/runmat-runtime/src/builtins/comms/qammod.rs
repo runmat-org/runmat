@@ -22,12 +22,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[ProviderHook::Custom("qammod")],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Accepts gpuArray inputs by gathering through the active provider and returning a host ComplexTensor; complex GPU handles are not yet represented by the runtime.",
+    notes: "Accepts gpuArray inputs by gathering real symbols for MATLAB-compatible validation, then uploads the complex modulation result as complex-interleaved GPU storage.",
 };
 
 fn qammod_error(message: impl Into<String>) -> RuntimeError {
@@ -71,9 +71,24 @@ async fn qammod_gpu(
     order: usize,
     options: ParsedOptions,
 ) -> BuiltinResult<Value> {
+    let provider = runmat_accelerate_api::provider_for_handle(&handle)
+        .or_else(runmat_accelerate_api::provider)
+        .ok_or_else(|| qammod_error("qammod: no acceleration provider registered"))?;
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let symbols = SymbolInput::from_tensor(tensor)?;
-    modulate_symbols(symbols, order, &options)
+    let result = modulate_symbols(symbols, order, &options)?;
+    let Value::ComplexTensor(tensor) = result else {
+        return Err(qammod_error("qammod: expected complex modulation output"));
+    };
+    let out = gpu_helpers::upload_complex_tensor(provider, &tensor)
+        .map_err(|err| qammod_error(format!("qammod: {err}")))?;
+    if matches!(options.output_dtype, OutputDType::Single) {
+        runmat_accelerate_api::set_handle_precision(
+            &out,
+            runmat_accelerate_api::ProviderPrecision::F32,
+        );
+    }
+    Ok(gpu_helpers::complex_gpu_value(out))
 }
 
 #[derive(Clone, Debug)]
@@ -646,5 +661,53 @@ mod tests {
         ))
         .expect_err("expected out-of-range error");
         assert!(err.to_string().contains("range [0, 15]"));
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn qammod_wgpu_input_returns_complex_resident_output() {
+        use runmat_accelerate_api::{AccelProvider, GpuTensorStorage, HostTensorView};
+
+        match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) {
+            Ok(provider) => {
+                let input = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).unwrap();
+                let expected = qammod(Value::Tensor(input.clone()), 4, vec![]);
+                let view = HostTensorView {
+                    data: &input.data,
+                    shape: &input.shape,
+                };
+                let input_handle = provider.upload(&view).expect("upload");
+                let result = block_on(super::qammod_builtin(
+                    Value::GpuTensor(input_handle.clone()),
+                    Value::Num(4.0),
+                    vec![],
+                ))
+                .expect("gpu qammod");
+                let Value::GpuTensor(output_handle) = result else {
+                    panic!("expected resident gpu output");
+                };
+                assert_eq!(
+                    runmat_accelerate_api::handle_storage(&output_handle),
+                    GpuTensorStorage::ComplexInterleaved
+                );
+                let gathered = block_on(crate::dispatcher::gather_if_needed_async(
+                    &Value::GpuTensor(output_handle.clone()),
+                ))
+                .expect("gather output");
+                let Value::ComplexTensor(actual) = gathered else {
+                    panic!("expected gathered complex tensor");
+                };
+                assert_eq!(actual.shape, expected.shape);
+                assert_complex_close(&actual.data, &expected.data);
+                provider.free(&input_handle).ok();
+                provider.free(&output_handle).ok();
+            }
+            Err(err) => {
+                tracing::warn!("Skipping qammod_wgpu_input_returns_complex_resident_output: {err}");
+            }
+        }
+        runmat_accelerate::simple_provider::register_inprocess_provider();
     }
 }
