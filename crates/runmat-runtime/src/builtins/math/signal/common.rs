@@ -1,8 +1,5 @@
 use num_complex::Complex;
-use runmat_accelerate_api::{
-    GpuTensorHandle, ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
-    ProviderSpectralResult,
-};
+use runmat_accelerate_api::{GpuTensorHandle, ProviderSpectralRange};
 use runmat_builtins::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
@@ -174,11 +171,6 @@ pub(crate) fn vector_is_row(shape: &[usize]) -> bool {
     shape.first().copied().unwrap_or(1) == 1
 }
 
-pub(crate) type GpuSpectralFrameMode = ProviderSpectralFrameMode;
-pub(crate) type GpuSpectralRange = ProviderSpectralRange;
-pub(crate) type GpuSpectralRequest<'a> = ProviderSpectralRequest<'a>;
-pub(crate) type GpuSpectralResult = ProviderSpectralResult;
-
 pub(crate) fn gpu_vector_len(
     builtin: &'static str,
     label: &str,
@@ -216,45 +208,10 @@ pub(crate) fn gpu_matrix_shape(
     }
 }
 
-pub(crate) async fn gpu_uniform_spectral_estimate(
-    request: GpuSpectralRequest<'_>,
-) -> BuiltinResult<GpuSpectralResult> {
-    if request.window.is_empty()
-        || request.nfft == 0
-        || request.frame_count == 0
-        || !request.denominator.is_finite()
-        || request.denominator <= 0.0
-    {
-        return Err(signal_error(
-            "signal",
-            None,
-            "signal: invalid GPU spectral request",
-        ));
-    }
-
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(signal_error(
-            "signal",
-            None,
-            "signal: GPU provider unavailable",
-        ));
-    };
-    provider
-        .uniform_spectral_estimate(&request)
-        .await
-        .map_err(|e| {
-            signal_error(
-                "signal",
-                None,
-                format!("signal: GPU spectral estimate failed: {e}"),
-            )
-        })
-}
-
-pub(crate) fn selected_frequency_len(nfft: usize, range: GpuSpectralRange) -> usize {
+pub(crate) fn selected_frequency_len(nfft: usize, range: ProviderSpectralRange) -> usize {
     match range {
-        GpuSpectralRange::Onesided => nfft / 2 + 1,
-        GpuSpectralRange::Twosided | GpuSpectralRange::Centered => nfft,
+        ProviderSpectralRange::Onesided => nfft / 2 + 1,
+        ProviderSpectralRange::Twosided | ProviderSpectralRange::Centered => nfft,
     }
 }
 

@@ -1,6 +1,9 @@
 //! MATLAB-compatible periodogram power spectral density estimate.
 
 use num_complex::Complex;
+use runmat_accelerate_api::{
+    ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
+};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -14,9 +17,8 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::math::signal::common::{
-    centered_frequency_offset, centered_shift, gpu_matrix_shape, gpu_uniform_spectral_estimate,
-    parse_nonnegative_integer, parse_scalar_f64, value_to_complex_vector, GpuSpectralFrameMode,
-    GpuSpectralRange, GpuSpectralRequest,
+    centered_frequency_offset, centered_shift, gpu_matrix_shape, parse_nonnegative_integer,
+    parse_scalar_f64, value_to_complex_vector,
 };
 use crate::builtins::math::signal::type_resolvers::periodogram_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -354,7 +356,7 @@ async fn output_gpu(
     let input_len = rows
         .checked_mul(cols)
         .ok_or_else(|| periodogram_error(&PERIODOGRAM_ERROR_INTERNAL))?;
-    let estimate = gpu_uniform_spectral_estimate(GpuSpectralRequest {
+    let estimate = runmat_accelerate_api::uniform_spectral_estimate(ProviderSpectralRequest {
         input: handle,
         input_len,
         input_complex: runmat_accelerate_api::handle_storage(handle)
@@ -362,12 +364,12 @@ async fn output_gpu(
         window: &options.window,
         nfft,
         frame_count: cols,
-        frame_mode: GpuSpectralFrameMode::FoldedColumns { input_rows: rows },
+        frame_mode: ProviderSpectralFrameMode::FoldedColumns { input_rows: rows },
         range: gpu_range(options.range),
         denominator,
     })
     .await
-    .map_err(|err| periodogram_error_with_detail(&PERIODOGRAM_ERROR_INTERNAL, err.message()))?;
+    .map_err(|err| periodogram_error_with_detail(&PERIODOGRAM_ERROR_INTERNAL, err.to_string()))?;
     let Some(provider) = runmat_accelerate_api::provider() else {
         return Err(periodogram_error(&PERIODOGRAM_ERROR_INTERNAL));
     };
@@ -880,11 +882,11 @@ fn angular_frequency(frequency: f64, units: FrequencyUnits) -> f64 {
     }
 }
 
-fn gpu_range(range: FrequencyRange) -> GpuSpectralRange {
+fn gpu_range(range: FrequencyRange) -> ProviderSpectralRange {
     match range {
-        FrequencyRange::Onesided => GpuSpectralRange::Onesided,
-        FrequencyRange::Twosided => GpuSpectralRange::Twosided,
-        FrequencyRange::Centered => GpuSpectralRange::Centered,
+        FrequencyRange::Onesided => ProviderSpectralRange::Onesided,
+        FrequencyRange::Twosided => ProviderSpectralRange::Twosided,
+        FrequencyRange::Centered => ProviderSpectralRange::Centered,
     }
 }
 
