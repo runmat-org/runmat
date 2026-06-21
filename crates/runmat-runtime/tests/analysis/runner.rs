@@ -3814,6 +3814,78 @@ pub(super) fn run_fixture(
                 Some(max_growth),
             );
         }
+        if spec.id.starts_with("transient_") {
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "transient_initial_total_energy",
+                "FEA_TRANSIENT_ENERGY_BALANCE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_TRANSIENT_ENERGY_BALANCE",
+                    "initial_total_energy",
+                ),
+                Some(0.0),
+                Some(1.0e-12),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "transient_final_total_energy",
+                "FEA_TRANSIENT_ENERGY_BALANCE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_TRANSIENT_ENERGY_BALANCE",
+                    "final_total_energy",
+                ),
+                Some(0.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "transient_max_total_energy",
+                "FEA_TRANSIENT_ENERGY_BALANCE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_TRANSIENT_ENERGY_BALANCE",
+                    "max_total_energy",
+                ),
+                Some(0.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "transient_energy_balance_growth_ratio",
+                "FEA_TRANSIENT_ENERGY_BALANCE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_TRANSIENT_ENERGY_BALANCE",
+                    "energy_growth_ratio",
+                ),
+                Some(1.0),
+                Some(spec.max_transient_energy_growth_ratio.unwrap_or(10.0)),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "transient_max_step_energy_jump_ratio",
+                "FEA_TRANSIENT_ENERGY_BALANCE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_TRANSIENT_ENERGY_BALANCE",
+                    "max_step_energy_jump_ratio",
+                ),
+                None,
+                Some(10.0),
+            );
+        }
         let is_cfd_fixture =
             spec.id.starts_with("cfd_steady_") || spec.id.starts_with("cfd_transient_");
         if is_cfd_fixture {

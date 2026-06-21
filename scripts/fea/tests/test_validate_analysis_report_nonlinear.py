@@ -7,6 +7,15 @@ from pathlib import Path
 from scripts.fea.governance.validate_analysis_report_nonlinear import main
 
 
+TRANSIENT_ENERGY_BALANCE_ASSERTIONS = {
+    "transient_initial_total_energy",
+    "transient_final_total_energy",
+    "transient_max_total_energy",
+    "transient_energy_balance_growth_ratio",
+    "transient_max_step_energy_jump_ratio",
+}
+
+
 def _record(fixture_id: str, assertion_names: set[str]) -> dict:
     record = {
         "fixture_id": fixture_id,
@@ -904,14 +913,16 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 {
                     "transient_max_residual_norm",
                     "transient_max_energy_growth_ratio",
-                },
+                }
+                | TRANSIENT_ENERGY_BALANCE_ASSERTIONS,
             ),
             _record(
                 "transient_long_gpu_fallback",
                 {
                     "transient_max_residual_norm",
                     "transient_max_energy_growth_ratio",
-                },
+                }
+                | TRANSIENT_ENERGY_BALANCE_ASSERTIONS,
             ),
             _record(
                 "transient_long_gpu_provider",
@@ -926,14 +937,16 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "transient_adapt_decrease_steps",
                     "transient_physics_jump_ratio",
                     "transient_physics_nonfinite_count",
-                },
+                }
+                | TRANSIENT_ENERGY_BALANCE_ASSERTIONS,
             ),
             _record(
                 "transient_shock_cpu",
                 {
                     "transient_max_residual_norm",
                     "transient_max_energy_growth_ratio",
-                },
+                }
+                | TRANSIENT_ENERGY_BALANCE_ASSERTIONS,
             ),
             _record(
                 "transient_shock_gpu_provider",
@@ -944,7 +957,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "transient_prepared_cache_misses",
                     "transient_shock_physics_jump_ratio",
                     "transient_shock_physics_nonfinite_count",
-                },
+                }
+                | TRANSIENT_ENERGY_BALANCE_ASSERTIONS,
             ),
             _record(
                 "cfd_steady_gpu_provider",
@@ -1615,6 +1629,22 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "transient_max_residual_norm"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_transient_energy_balance_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "transient_shock_cpu":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "transient_energy_balance_growth_ratio"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"

@@ -5236,6 +5236,29 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "reference": 0.0172,
             "pass": True,
         },
+        *[
+            {
+                "name": name,
+                "fixture_id": fixture_id,
+                "observed": observed,
+                "reference": observed,
+                "pass": True,
+            }
+            for fixture_id, final_energy, max_energy in (
+                ("transient_long_cpu", 3.1e-3, 3.2e-3),
+                ("transient_long_gpu_fallback", 3.1e-3, 3.2e-3),
+                ("transient_long_gpu_provider", 3.1e-3, 3.2e-3),
+                ("transient_shock_cpu", 8.4e-3, 8.6e-3),
+                ("transient_shock_gpu_provider", 8.4e-3, 8.6e-3),
+            )
+            for name, observed in (
+                ("transient_initial_total_energy", 0.0),
+                ("transient_final_total_energy", final_energy),
+                ("transient_max_total_energy", max_energy),
+                ("transient_energy_balance_growth_ratio", 1.01),
+                ("transient_max_step_energy_jump_ratio", 0.25),
+            )
+        ],
         {
             "name": "transient_max_residual_norm",
             "fixture_id": "transient_long_cpu",

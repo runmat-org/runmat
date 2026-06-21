@@ -6,6 +6,15 @@ import sys
 from pathlib import Path
 
 
+TRANSIENT_ENERGY_BALANCE_REQUIRED_FIELDS = {
+    "transient_initial_total_energy",
+    "transient_final_total_energy",
+    "transient_max_total_energy",
+    "transient_energy_balance_growth_ratio",
+    "transient_max_step_energy_jump_ratio",
+}
+
+
 REQUIRED_FIXTURES = {
     "cantilever_gpu_provider": {
         "structural_normalized_residual_norm",
@@ -501,11 +510,13 @@ REQUIRED_FIXTURES = {
     "transient_long_cpu": {
         "transient_max_residual_norm",
         "transient_max_energy_growth_ratio",
-    },
+    }
+    | TRANSIENT_ENERGY_BALANCE_REQUIRED_FIELDS,
     "transient_long_gpu_fallback": {
         "transient_max_residual_norm",
         "transient_max_energy_growth_ratio",
-    },
+    }
+    | TRANSIENT_ENERGY_BALANCE_REQUIRED_FIELDS,
     "transient_long_gpu_provider": {
         "transient_max_residual_norm",
         "transient_max_energy_growth_ratio",
@@ -517,11 +528,13 @@ REQUIRED_FIXTURES = {
         "transient_adapt_decrease_steps",
         "transient_physics_jump_ratio",
         "transient_physics_nonfinite_count",
-    },
+    }
+    | TRANSIENT_ENERGY_BALANCE_REQUIRED_FIELDS,
     "transient_shock_cpu": {
         "transient_max_residual_norm",
         "transient_max_energy_growth_ratio",
-    },
+    }
+    | TRANSIENT_ENERGY_BALANCE_REQUIRED_FIELDS,
     "transient_shock_gpu_provider": {
         "transient_max_residual_norm",
         "transient_max_energy_growth_ratio",
@@ -529,7 +542,8 @@ REQUIRED_FIXTURES = {
         "transient_prepared_cache_misses",
         "transient_shock_physics_jump_ratio",
         "transient_shock_physics_nonfinite_count",
-    },
+    }
+    | TRANSIENT_ENERGY_BALANCE_REQUIRED_FIELDS,
     "cfd_steady_gpu_provider": {
         "cfd_reference_density_kg_per_m3",
         "cfd_dynamic_viscosity_pa_s",
