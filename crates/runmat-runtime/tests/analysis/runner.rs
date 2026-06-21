@@ -3,8 +3,8 @@ use super::manifest::default_options;
 use super::*;
 use runmat_analysis_core::AnalysisField;
 use runmat_analysis_fea::{
-    fea_thermal_temperature_field_id, FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
+    fea_thermal_temperature_field_id, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
 };
 use runmat_runtime::analysis::{
     AnalysisRunResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
@@ -126,10 +126,10 @@ fn thermo_field_signature(payload_hash: &str, approved_by: &str) -> String {
 fn primary_result_field_id(run_kind: AnalysisRunKind) -> String {
     match run_kind {
         AnalysisRunKind::Thermal => fea_thermal_temperature_field_id(0),
+        AnalysisRunKind::Acoustic => FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE.to_string(),
         AnalysisRunKind::Electromagnetic => FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY.to_string(),
         AnalysisRunKind::LinearStatic
         | AnalysisRunKind::Modal
-        | AnalysisRunKind::Acoustic
         | AnalysisRunKind::Transient
         | AnalysisRunKind::Cfd
         | AnalysisRunKind::Cht
@@ -2398,10 +2398,17 @@ fn validate_fallback_event_schema(event: &str) -> bool {
     let stage_ok = if parts[0] == "SOLVER_BACKEND_FALLBACK" {
         parts[1].starts_with("requested=")
     } else {
-        parts[1] == FEA_FIELD_STRUCTURAL_DISPLACEMENT || parts[1] == FEA_FIELD_STRUCTURAL_VON_MISES
+        is_namespace_field_id(parts[1])
     };
     let reason_ok = !parts[2].is_empty();
     category_ok && stage_ok && reason_ok
+}
+
+fn is_namespace_field_id(value: &str) -> bool {
+    value.contains('.')
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.')
 }
 
 fn compute_parity(left: &[f64], right: &[f64]) -> ParitySummary {
@@ -2783,8 +2790,12 @@ pub(super) fn run_fixture(
                 &mut threshold_assertions,
                 &mut failures,
                 "acoustic_mode_count",
-                "FEA_ACOUSTIC_PLACEHOLDER",
-                diagnostic_metric(&cpu_envelope.data, "FEA_ACOUSTIC_PLACEHOLDER", "mode_count"),
+                "FEA_ACOUSTIC_HARMONIC_RESPONSE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_HARMONIC_RESPONSE",
+                    "mode_count",
+                ),
                 Some(3.0),
                 Some(3.0),
             );
@@ -2793,10 +2804,10 @@ pub(super) fn run_fixture(
                 &mut threshold_assertions,
                 &mut failures,
                 "acoustic_residual_warn_threshold",
-                "FEA_ACOUSTIC_PLACEHOLDER",
+                "FEA_ACOUSTIC_HARMONIC_RESPONSE",
                 diagnostic_metric(
                     &cpu_envelope.data,
-                    "FEA_ACOUSTIC_PLACEHOLDER",
+                    "FEA_ACOUSTIC_HARMONIC_RESPONSE",
                     "residual_warn_threshold",
                 ),
                 Some(1.0e-3),
@@ -6543,10 +6554,11 @@ pub(super) fn run_fixture(
                     }
 
                     if let Some(tol) = spec.parity_tolerance {
+                        let cpu_primary_field_id = primary_result_field_id(spec.run_kind);
                         let cpu_results = analysis_results_op(
                             &cpu_envelope.data,
                             AnalysisResultsQuery {
-                                include_fields: vec![FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string()],
+                                include_fields: vec![cpu_primary_field_id],
                                 include_field_values: true,
                                 include_diagnostics: false,
                                 diagnostic_codes: Vec::new(),

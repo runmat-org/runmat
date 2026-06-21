@@ -974,6 +974,8 @@ fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
     }
     if normalized.contains("von_mises")
         || normalized.contains("equivalent_plastic_strain")
+        || normalized.contains("pressure")
+        || normalized.contains("phase")
         || normalized.contains("temperature")
         || normalized.contains("energy")
         || normalized.contains("residual")
@@ -1020,6 +1022,7 @@ fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
     if normalized.contains("displacement")
         || normalized.contains("mode_shape")
         || normalized.contains("reaction_force")
+        || normalized.contains("particle_velocity")
         || normalized.contains("vector")
         || normalized.contains("flux")
     {

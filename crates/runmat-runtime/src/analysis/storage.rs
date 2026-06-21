@@ -175,7 +175,7 @@ fn run_operation_version(run: &AnalysisRunResult) -> String {
         .run
         .diagnostics
         .iter()
-        .any(|diag| diag.code == "FEA_ACOUSTIC_PLACEHOLDER")
+        .any(|diag| diag.code == "FEA_ACOUSTIC_HARMONIC_RESPONSE")
     {
         "fea.run_acoustic/v1".to_string()
     } else if run.electromagnetic_results.is_some()

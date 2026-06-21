@@ -19,6 +19,13 @@ pub fn fea_modal_mode_shape_field_id(mode_number: usize) -> String {
     format!("modal.mode_shape.{mode_number}")
 }
 
+pub const FEA_FIELD_ACOUSTIC_PRESSURE_REAL: &str = "acoustic.pressure_real";
+pub const FEA_FIELD_ACOUSTIC_PRESSURE_IMAG: &str = "acoustic.pressure_imag";
+pub const FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE: &str = "acoustic.pressure_magnitude";
+pub const FEA_FIELD_ACOUSTIC_PHASE: &str = "acoustic.phase";
+pub const FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB: &str = "acoustic.sound_pressure_level_db";
+pub const FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY: &str = "acoustic.particle_velocity";
+
 pub fn fea_thermal_temperature_field_id(snapshot_index: usize) -> String {
     format!("thermal.temperature.{snapshot_index}")
 }

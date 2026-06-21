@@ -1,7 +1,8 @@
 use runmat_analysis_core::{AnalysisFieldValues, ElectromagneticDomain, ReferenceFrame};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::{
-    fea_modal_mode_shape_field_id, ComputeBackend, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    fea_modal_mode_shape_field_id, ComputeBackend, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
@@ -1125,7 +1126,17 @@ fn analysis_run_acoustic_contract_is_v1_and_typed() {
         .run
         .diagnostics
         .iter()
-        .any(|diag| diag.code == "FEA_ACOUSTIC_PLACEHOLDER"));
+        .any(|diag| diag.code == "FEA_ACOUSTIC_HARMONIC_RESPONSE"));
+    assert!(envelope
+        .data
+        .run
+        .field(FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE)
+        .is_some());
+    assert!(envelope
+        .data
+        .run
+        .field(FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY)
+        .is_some());
 
     let invalid = analysis_run_acoustic_op(
         &fixture_model(FixtureId::CantileverLinearStatic),

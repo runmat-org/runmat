@@ -26,9 +26,10 @@ use runmat_analysis_fea::{
     fea_transient_acceleration_field_id, fea_transient_kinetic_energy_field_id,
     fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
     fea_transient_von_mises_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
-    FEA_FIELD_EM_FLUX_DENSITY_PROXY, FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_EM_FLUX_DENSITY_PROXY,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
@@ -5271,7 +5272,7 @@ fn analysis_run_modal_returns_native_modal_result() {
 }
 
 #[test]
-fn analysis_run_acoustic_returns_modal_payload_and_acoustic_diagnostics() {
+fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
     let acoustic_model = analysis_create_model_op(
@@ -5290,19 +5291,19 @@ fn analysis_run_acoustic_returns_modal_payload_and_acoustic_diagnostics() {
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect("acoustic run should produce modal payload");
+    .expect("acoustic run should produce acoustic fields");
 
     assert_eq!(envelope.operation, "fea.run_acoustic");
     assert_eq!(envelope.op_version, "fea.run_acoustic/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        "matrix_free_subspace_iteration"
+        "acoustic_harmonic_modal_response"
     );
     let modal = envelope
         .data
         .modal_results
         .as_ref()
-        .expect("acoustic payload should be modal-shaped");
+        .expect("acoustic basis payload should be present");
     assert!(!modal.eigenvalues_hz.is_empty());
     assert_eq!(modal.eigenvalues_hz.len(), modal.mode_shapes.len());
     assert!(envelope
@@ -5310,7 +5311,37 @@ fn analysis_run_acoustic_returns_modal_payload_and_acoustic_diagnostics() {
         .run
         .diagnostics
         .iter()
-        .any(|diag| diag.code == "FEA_ACOUSTIC_PLACEHOLDER"));
+        .any(|diag| diag.code == "FEA_ACOUSTIC_HARMONIC_RESPONSE"));
+    assert!(envelope
+        .data
+        .run
+        .field(FEA_FIELD_ACOUSTIC_PRESSURE_REAL)
+        .is_some());
+    assert!(envelope
+        .data
+        .run
+        .field(FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE)
+        .is_some());
+    assert!(envelope
+        .data
+        .run
+        .field(FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY)
+        .is_some());
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("acoustic results should be queryable");
+    let field_ids = results
+        .data
+        .field_descriptors
+        .iter()
+        .map(|descriptor| descriptor.field_id.as_str())
+        .collect::<Vec<_>>();
+    assert!(field_ids.contains(&FEA_FIELD_ACOUSTIC_PRESSURE_REAL));
+    assert!(field_ids.contains(&FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE));
+    assert!(field_ids.contains(&FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY));
 }
 
 #[test]
