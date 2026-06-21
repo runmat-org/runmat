@@ -677,6 +677,19 @@ REQUIRED_FIXTURES = {
     },
 }
 
+REQUIRED_ERROR_FIXTURES = {
+    "acoustic_harmonic_missing_source": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_SOURCE",
+    },
+    "acoustic_harmonic_missing_boundary": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_BOUNDARY",
+    },
+}
+
 THERMO_REQUIRED_FIELDS = {
     "thermo_coupling_enabled",
     "thermo_coupling_fingerprint",
@@ -1046,6 +1059,23 @@ def main() -> int:
             errors.append(
                 f"fixture {fixture_id} missing threshold assertions: {', '.join(missing)}"
             )
+
+    for fixture_id, expected in REQUIRED_ERROR_FIXTURES.items():
+        record = records.get(fixture_id)
+        if record is None:
+            errors.append(f"missing fixture record: {fixture_id}")
+            continue
+        for field, expected_value in expected.items():
+            observed = record.get(field)
+            if observed != expected_value:
+                errors.append(
+                    f"fixture {fixture_id} expected {field}={expected_value!r}, got {observed!r}"
+                )
+
+    for fixture_id, required in REQUIRED_FIXTURES.items():
+        record = records.get(fixture_id)
+        if record is None:
+            continue
 
         if fixture_id in {
             "thermo_mech_kickoff_gpu_provider",

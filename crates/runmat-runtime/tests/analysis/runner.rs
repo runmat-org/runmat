@@ -750,6 +750,27 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             region_id: "acoustic_source".to_string(),
             kind: runmat_analysis_core::LoadKind::Pressure { magnitude_pa: 1.0 },
         }];
+        match spec_id {
+            "acoustic_harmonic_missing_source" => {
+                model.loads = vec![runmat_analysis_core::LoadCase {
+                    load_id: format!("load_acoustic_invalid_force_{}", spec_id),
+                    region_id: "acoustic_source".to_string(),
+                    kind: runmat_analysis_core::LoadKind::Force {
+                        fx: 1.0,
+                        fy: 0.0,
+                        fz: 0.0,
+                    },
+                }];
+            }
+            "acoustic_harmonic_missing_boundary" => {
+                model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
+                    bc_id: format!("bc_acoustic_invalid_structural_{}", spec_id),
+                    region_id: "acoustic_wall".to_string(),
+                    kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
+                }];
+            }
+            _ => {}
+        }
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
@@ -3128,7 +3149,7 @@ pub(super) fn run_fixture(
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
 
-    if spec.expect_validate_error.is_none() {
+    if spec.expect_validate_error.is_none() && spec.expect_run_error.is_none() {
         let cpu_start = Instant::now();
         let cpu_result = run_fixture_cpu(spec, &model);
         cpu_run_ms = Some(cpu_start.elapsed().as_secs_f64() * 1_000.0);

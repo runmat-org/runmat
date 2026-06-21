@@ -52,6 +52,18 @@ def _record(fixture_id: str, assertion_names: set[str]) -> dict:
     return record
 
 
+def _error_record(fixture_id: str, run_error_code: str) -> dict:
+    return {
+        "fixture_id": fixture_id,
+        "validate_ok": True,
+        "validate_error_code": None,
+        "run_ok": False,
+        "run_error_code": run_error_code,
+        "threshold_assertions": [],
+        "failures": [],
+    }
+
+
 class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
     def _base_records(self) -> list[dict]:
         return [
@@ -795,6 +807,14 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "acoustic_known_answer_coverage_ratio",
                 },
             ),
+            _error_record(
+                "acoustic_harmonic_missing_source",
+                "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_SOURCE",
+            ),
+            _error_record(
+                "acoustic_harmonic_missing_boundary",
+                "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_BOUNDARY",
+            ),
             _record(
                 "modal_large_cpu",
                 {
@@ -1431,6 +1451,18 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         for item in record["threshold_assertions"]
                         if item["name"] != "acoustic_peak_pressure_pa"
                     ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_acoustic_invalid_source_error_code_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "acoustic_harmonic_missing_source":
+                    record["run_error_code"] = None
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
             path.write_text(json.dumps({"records": records}))

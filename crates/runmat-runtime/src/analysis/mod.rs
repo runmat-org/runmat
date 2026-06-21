@@ -2060,6 +2060,77 @@ pub fn analysis_run_acoustic_with_options_op(
             ]),
         ));
     }
+    if !model
+        .materials
+        .iter()
+        .any(|material| material.acoustic.is_some())
+    {
+        return Err(operation_error(
+            ANALYSIS_RUN_ACOUSTIC_OPERATION,
+            ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_MATERIAL",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_acoustic requires at least one acoustic material with density and sound-speed data",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("material_count".to_string(), model.materials.len().to_string()),
+            ]),
+        ));
+    }
+    if !model.loads.iter().any(|load| match &load.kind {
+        LoadKind::Pressure { magnitude_pa } => magnitude_pa.is_finite() && magnitude_pa.abs() > 0.0,
+        _ => false,
+    }) {
+        return Err(operation_error(
+            ANALYSIS_RUN_ACOUSTIC_OPERATION,
+            ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_SOURCE",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_acoustic requires a nonzero acoustic pressure source load",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("load_count".to_string(), model.loads.len().to_string()),
+            ]),
+        ));
+    }
+    if !model.boundary_conditions.iter().any(|bc| {
+        matches!(
+            &bc.kind,
+            BoundaryConditionKind::AcousticRigidWall
+                | BoundaryConditionKind::AcousticRadiation
+                | BoundaryConditionKind::AcousticImpedance { .. }
+        )
+    }) {
+        return Err(operation_error(
+            ANALYSIS_RUN_ACOUSTIC_OPERATION,
+            ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_BOUNDARY",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_acoustic requires at least one acoustic boundary condition",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                (
+                    "boundary_condition_count".to_string(),
+                    model.boundary_conditions.len().to_string(),
+                ),
+            ]),
+        ));
+    }
 
     if options.mode_count == 0 {
         return Err(operation_error(
@@ -2919,17 +2990,9 @@ fn acoustic_source_vector(model: &AnalysisModel, node_count: usize) -> Vec<f64> 
         let node = (index * 3 + load.region_id.len()) % source.len();
         let amplitude = match &load.kind {
             LoadKind::Pressure { magnitude_pa } => *magnitude_pa,
-            LoadKind::Force { fx, fy, fz } => fx.hypot(*fy).hypot(*fz) * 1.0e-3,
-            LoadKind::BodyForce { gx, gy, gz } => gx.hypot(*gy).hypot(*gz),
-            LoadKind::CurrentDensity { jx, jy, jz, .. } => jx.hypot(*jy).hypot(*jz) * 1.0e-4,
-            LoadKind::CoilCurrent { current_a, .. } => current_a.abs() * 1.0e-2,
-            LoadKind::HeatSource { .. } => 0.0,
+            _ => 0.0,
         };
         source[node] += amplitude;
-    }
-    if source.iter().all(|value| value.abs() <= 1.0e-12) {
-        let center = source.len() / 2;
-        source[center] = 1.0;
     }
     source
 }

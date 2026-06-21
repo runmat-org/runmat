@@ -3455,6 +3455,78 @@ fn analysis_run_acoustic_rejects_models_without_modal_step() {
 }
 
 #[test]
+fn analysis_run_acoustic_rejects_models_without_acoustic_source() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let mut acoustic_model = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "acoustic_model_missing_source".to_string(),
+            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            prep_context: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("acoustic model should be created")
+    .data;
+    acoustic_model.loads = vec![LoadCase {
+        load_id: "load_structural_force_not_acoustic_source".to_string(),
+        region_id: "region_default".to_string(),
+        kind: LoadKind::Force {
+            fx: 1.0,
+            fy: 0.0,
+            fz: 0.0,
+        },
+    }];
+
+    let err = analysis_run_acoustic_op(
+        &acoustic_model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("acoustic run should reject models without acoustic pressure sources");
+
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_SOURCE"
+    );
+}
+
+#[test]
+fn analysis_run_acoustic_rejects_models_without_acoustic_boundary() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let mut acoustic_model = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "acoustic_model_missing_boundary".to_string(),
+            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            prep_context: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("acoustic model should be created")
+    .data;
+    acoustic_model.boundary_conditions = vec![BoundaryCondition {
+        bc_id: "bc_structural_fixed_not_acoustic_boundary".to_string(),
+        region_id: "region_default".to_string(),
+        kind: BoundaryConditionKind::Fixed,
+    }];
+
+    let err = analysis_run_acoustic_op(
+        &acoustic_model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("acoustic run should reject models without acoustic boundary conditions");
+
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_BOUNDARY"
+    );
+}
+
+#[test]
 fn analysis_run_transient_rejects_models_without_transient_step() {
     let _guard = analysis_test_guard();
     let model = sample_model();
