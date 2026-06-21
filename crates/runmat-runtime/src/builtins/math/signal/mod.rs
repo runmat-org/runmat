@@ -2,6 +2,7 @@
 
 pub(crate) mod blackman;
 pub mod butter;
+pub mod buttord;
 pub(crate) mod common;
 pub(crate) mod conv;
 pub(crate) mod conv2;

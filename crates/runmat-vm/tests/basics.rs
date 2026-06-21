@@ -73,6 +73,27 @@ fn hilbert_builtin_executes_for_fm_demod_shape() {
 }
 
 #[test]
+fn buttord_builtin_executes_for_butterworth_workflow() {
+    let input = r#"
+        [n, Wn] = buttord(0.2, 0.3, 1, 40);
+        [b, a] = butter(n, Wn);
+        out = [n, Wn, numel(b), numel(a)];
+    "#;
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected output tensor");
+    assert_eq!(out.data[0], 12.0);
+    assert!((out.data[1] - 0.2108).abs() < 5e-4);
+    assert_eq!(out.data[2], 13.0);
+    assert_eq!(out.data[3], 13.0);
+}
+
+#[test]
 fn pulstran_rectpuls_builtin_executes_for_impulse_train_shape() {
     let input = r#"
         t = -1:0.5:1;
