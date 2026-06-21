@@ -38517,6 +38517,719 @@
       ]
     },
     {
+      "name": "lsqcurvefit",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "x = lsqcurvefit(fun, x0, xdata, ydata)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Model callback evaluated as fun(x,xdata)."
+            },
+            {
+              "name": "x0",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial parameter guess."
+            },
+            {
+              "name": "xdata",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Independent data passed to the model callback."
+            },
+            {
+              "name": "ydata",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observed response data."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Estimated fit parameters with the same shape as x0."
+            }
+          ]
+        },
+        {
+          "label": "x = lsqcurvefit(fun, x0, xdata, ydata, lb, ub)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Model callback evaluated as fun(x,xdata)."
+            },
+            {
+              "name": "x0",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial parameter guess."
+            },
+            {
+              "name": "xdata",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Independent data passed to the model callback."
+            },
+            {
+              "name": "ydata",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observed response data."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper parameter bounds. Empty means unbounded."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Estimated fit parameters with the same shape as x0."
+            }
+          ]
+        },
+        {
+          "label": "x = lsqcurvefit(fun, x0, xdata, ydata, lb, ub, options)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Model callback evaluated as fun(x,xdata)."
+            },
+            {
+              "name": "x0",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial parameter guess."
+            },
+            {
+              "name": "xdata",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Independent data passed to the model callback."
+            },
+            {
+              "name": "ydata",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observed response data."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Options struct from optimset or optimoptions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Estimated fit parameters with the same shape as x0."
+            }
+          ]
+        },
+        {
+          "label": "[x, resnorm] = lsqcurvefit(___)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Model callback evaluated as fun(x,xdata)."
+            },
+            {
+              "name": "x0",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial parameter guess."
+            },
+            {
+              "name": "xdata",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Independent data passed to the model callback."
+            },
+            {
+              "name": "ydata",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observed response data."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Options struct from optimset or optimoptions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Estimated fit parameters with the same shape as x0."
+            },
+            {
+              "name": "resnorm",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Squared 2-norm of the final residual."
+            }
+          ]
+        },
+        {
+          "label": "[x, resnorm, residual] = lsqcurvefit(___)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Model callback evaluated as fun(x,xdata)."
+            },
+            {
+              "name": "x0",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial parameter guess."
+            },
+            {
+              "name": "xdata",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Independent data passed to the model callback."
+            },
+            {
+              "name": "ydata",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observed response data."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Options struct from optimset or optimoptions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Estimated fit parameters with the same shape as x0."
+            },
+            {
+              "name": "resnorm",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Squared 2-norm of the final residual."
+            },
+            {
+              "name": "residual",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Final model residual fun(x,xdata)-ydata."
+            }
+          ]
+        },
+        {
+          "label": "[x, resnorm, residual, exitflag] = lsqcurvefit(___)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Model callback evaluated as fun(x,xdata)."
+            },
+            {
+              "name": "x0",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial parameter guess."
+            },
+            {
+              "name": "xdata",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Independent data passed to the model callback."
+            },
+            {
+              "name": "ydata",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observed response data."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Options struct from optimset or optimoptions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Estimated fit parameters with the same shape as x0."
+            },
+            {
+              "name": "resnorm",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Squared 2-norm of the final residual."
+            },
+            {
+              "name": "residual",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Final model residual fun(x,xdata)-ydata."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver exit condition."
+            }
+          ]
+        },
+        {
+          "label": "[x, resnorm, residual, exitflag, output] = lsqcurvefit(___)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Model callback evaluated as fun(x,xdata)."
+            },
+            {
+              "name": "x0",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial parameter guess."
+            },
+            {
+              "name": "xdata",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Independent data passed to the model callback."
+            },
+            {
+              "name": "ydata",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observed response data."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Options struct from optimset or optimoptions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Estimated fit parameters with the same shape as x0."
+            },
+            {
+              "name": "resnorm",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Squared 2-norm of the final residual."
+            },
+            {
+              "name": "residual",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Final model residual fun(x,xdata)-ydata."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver exit condition."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Iteration and convergence metadata struct."
+            }
+          ]
+        },
+        {
+          "label": "[x, resnorm, residual, exitflag, output, lambda] = lsqcurvefit(___)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Model callback evaluated as fun(x,xdata)."
+            },
+            {
+              "name": "x0",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial parameter guess."
+            },
+            {
+              "name": "xdata",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Independent data passed to the model callback."
+            },
+            {
+              "name": "ydata",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observed response data."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Options struct from optimset or optimoptions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Estimated fit parameters with the same shape as x0."
+            },
+            {
+              "name": "resnorm",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Squared 2-norm of the final residual."
+            },
+            {
+              "name": "residual",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Final model residual fun(x,xdata)-ydata."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver exit condition."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Iteration and convergence metadata struct."
+            },
+            {
+              "name": "lambda",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Approximate bound multiplier struct with lower and upper fields."
+            }
+          ]
+        },
+        {
+          "label": "[x, resnorm, residual, exitflag, output, lambda, jacobian] = lsqcurvefit(___)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Model callback evaluated as fun(x,xdata)."
+            },
+            {
+              "name": "x0",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial parameter guess."
+            },
+            {
+              "name": "xdata",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Independent data passed to the model callback."
+            },
+            {
+              "name": "ydata",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Observed response data."
+            },
+            {
+              "name": "lb",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Lower parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "ub",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": "[]",
+              "description": "Upper parameter bounds. Empty means unbounded."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Options struct from optimset or optimoptions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Estimated fit parameters with the same shape as x0."
+            },
+            {
+              "name": "resnorm",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Squared 2-norm of the final residual."
+            },
+            {
+              "name": "residual",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Final model residual fun(x,xdata)-ydata."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver exit condition."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Iteration and convergence metadata struct."
+            },
+            {
+              "name": "lambda",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Approximate bound multiplier struct with lower and upper fields."
+            },
+            {
+              "name": "jacobian",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite-difference Jacobian of fun at the solution."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.LSQCURVEFIT.INVALID_ARGUMENT",
+          "identifier": "RunMat:lsqcurvefit:InvalidArgument",
+          "when": "Argument grammar, bounds, options, or output arity are invalid.",
+          "message": "lsqcurvefit: invalid argument"
+        },
+        {
+          "code": "RM.LSQCURVEFIT.INVALID_INPUT",
+          "identifier": "RunMat:lsqcurvefit:InvalidInput",
+          "when": "Initial guess, model callback, data shape, or solver semantics are invalid.",
+          "message": "lsqcurvefit: invalid input"
+        },
+        {
+          "code": "RM.LSQCURVEFIT.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:lsqcurvefit:TooManyOutputs",
+          "when": "`lsqcurvefit` is called with more than seven requested outputs.",
+          "message": "lsqcurvefit: too many output arguments"
+        }
+      ]
+    },
+    {
       "name": "lt",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -44890,7 +45603,7 @@
               "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Solver name, such as fminbnd, fzero, or fsolve."
+              "description": "Solver name, such as fminbnd, fzero, fsolve, or lsqcurvefit."
             }
           ],
           "outputs": [
@@ -44911,7 +45624,7 @@
               "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Solver name, such as fminbnd, fzero, or fsolve."
+              "description": "Solver name, such as fminbnd, fzero, fsolve, or lsqcurvefit."
             },
             {
               "name": "name",
