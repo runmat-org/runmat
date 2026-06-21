@@ -638,6 +638,16 @@ fn electro_thermal_transient_emits_coupled_fields() {
         result.electro_thermal_thermal_residual_snapshots[0].field_id,
         fea_electro_thermal_thermal_residual_field_id(0)
     );
+    let coupling = result
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_ET_COUPLING")
+        .expect("electro-thermal coupling diagnostic should be present");
+    assert!(coupling.message.contains("electrical_power_in_w="));
+    assert!(coupling.message.contains("integrated_joule_heat_w="));
+    assert!(coupling.message.contains("power_balance_ratio="));
+    assert!(coupling.message.contains("conservation_residual="));
 }
 
 #[test]

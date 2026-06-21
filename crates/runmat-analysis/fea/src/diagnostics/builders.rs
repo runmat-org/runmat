@@ -399,11 +399,26 @@ pub(crate) fn thermo_mechanical_diagnostic(
 pub(crate) fn electro_thermal_diagnostic(
     summary: &assembly::ElectroThermalAssemblySummary,
 ) -> FeaDiagnostic {
+    let electrical_power_in_w = summary.applied_voltage_v.powi(2)
+        * summary.base_electrical_conductivity_s_per_m.max(1.0e-9)
+        * summary.resistive_heating_coefficient.max(0.0)
+        / 1.0e6;
+    let integrated_joule_heat_w = summary.joule_heating_scale;
+    let power_balance_ratio = if electrical_power_in_w > 1.0e-12 {
+        integrated_joule_heat_w / electrical_power_in_w
+    } else {
+        1.0
+    };
+    let conservation_residual = (1.0 - power_balance_ratio).abs();
     FeaDiagnostic {
         code: "FEA_ET_COUPLING".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
+        severity: if conservation_residual <= 1.0e-6 {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
         message: format!(
-            "enabled={} reference_temperature_k={} applied_voltage_v={} base_electrical_conductivity_s_per_m={} resistive_heating_coefficient={} joule_heating_scale={} conductivity_spread_ratio={} temporal_profile_variation={} region_scale_count={} coupling_fingerprint={}",
+            "enabled={} reference_temperature_k={} applied_voltage_v={} base_electrical_conductivity_s_per_m={} resistive_heating_coefficient={} joule_heating_scale={} conductivity_spread_ratio={} temporal_profile_variation={} region_scale_count={} coupling_fingerprint={} electrical_power_in_w={} integrated_joule_heat_w={} power_balance_ratio={} conservation_residual={}",
             summary.enabled,
             summary.reference_temperature_k,
             summary.applied_voltage_v,
@@ -414,6 +429,10 @@ pub(crate) fn electro_thermal_diagnostic(
             summary.temporal_profile_variation,
             summary.region_scale_count,
             summary.coupling_fingerprint,
+            electrical_power_in_w,
+            integrated_joule_heat_w,
+            power_balance_ratio,
+            conservation_residual,
         ),
     }
 }
