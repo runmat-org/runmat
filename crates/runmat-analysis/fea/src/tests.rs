@@ -413,6 +413,18 @@ fn thermal_solver_emits_heat_transfer_fields() {
         result.boundary_heat_flux_snapshots[1].field_id,
         fea_thermal_boundary_heat_flux_field_id(1)
     );
+    assert_eq!(
+        result.boundary_heat_flux_snapshots[1].shape,
+        vec![6],
+        "thermal boundary heat flux should report six domain faces"
+    );
+    assert!(result
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_THERMAL_FIELD_RECOVERY"
+            && diag.message.contains("recovery_dimensions=")
+            && diag.message.contains("boundary_face_count=6")));
 }
 
 #[test]

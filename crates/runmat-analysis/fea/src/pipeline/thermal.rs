@@ -1,7 +1,7 @@
 use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 
 use crate::{
-    assembly::assemble_linear_system,
+    assembly::{assemble_linear_system, AssemblySummary},
     contracts::{
         fea_thermal_boundary_heat_flux_field_id, fea_thermal_heat_flux_field_id,
         fea_thermal_heat_source_field_id, fea_thermal_temperature_field_id,
@@ -17,7 +17,7 @@ use crate::{
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
-const BOUNDARY_HEAT_FLUX_COMPONENT_COUNT: usize = 2;
+const BOUNDARY_HEAT_FLUX_COMPONENT_COUNT: usize = 6;
 
 pub fn run_thermal(
     model: &AnalysisModel,
@@ -223,7 +223,9 @@ pub fn run_thermal_with_options(
             )
         })
         .collect::<Vec<_>>();
-    let temperature_gradient_raw = recover_temperature_gradients(&temperature_snapshots_raw);
+    let recovery_topology = ThermalRecoveryTopology::from_assembly(&summary, node_count);
+    let temperature_gradient_raw =
+        recover_temperature_gradients(&temperature_snapshots_raw, recovery_topology);
     let heat_flux_raw =
         recover_heat_flux_snapshots(&temperature_gradient_raw, constitutive.conductivity_mean);
     let heat_source_raw = recover_heat_source_snapshots(
@@ -232,7 +234,8 @@ pub fn run_thermal_with_options(
         constitutive.density_mean,
         constitutive.heat_capacity_mean,
     );
-    let boundary_heat_flux_raw = recover_boundary_heat_flux_snapshots(&heat_flux_raw, node_count);
+    let boundary_heat_flux_raw =
+        recover_boundary_heat_flux_snapshots(&heat_flux_raw, recovery_topology);
     let heat_balance = thermal_heat_balance(
         &temperature_snapshots_raw,
         &heat_source_raw,
@@ -401,6 +404,21 @@ pub fn run_thermal_with_options(
         ),
     });
     diagnostics.push(FeaDiagnostic {
+        code: "FEA_THERMAL_FIELD_RECOVERY".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "recovery_node_count={} recovery_dimensions={}x{}x{} recovery_spacing_x={} recovery_spacing_y={} recovery_spacing_z={} boundary_face_count={}",
+            recovery_topology.node_count,
+            recovery_topology.dims[0],
+            recovery_topology.dims[1],
+            recovery_topology.dims[2],
+            recovery_topology.spacing[0],
+            recovery_topology.spacing[1],
+            recovery_topology.spacing[2],
+            BOUNDARY_HEAT_FLUX_COMPONENT_COUNT,
+        ),
+    });
+    diagnostics.push(FeaDiagnostic {
         code: "FEA_THERMAL_HEAT_BALANCE".to_string(),
         severity: if heat_balance.residual_ratio <= 0.15 {
             FeaDiagnosticSeverity::Info
@@ -458,33 +476,132 @@ pub fn run_thermal_with_options(
     })
 }
 
-fn recover_temperature_gradients(temperature_snapshots: &[Vec<f64>]) -> Vec<Vec<f64>> {
+#[derive(Debug, Clone, Copy)]
+struct ThermalRecoveryTopology {
+    node_count: usize,
+    dims: [usize; VECTOR_COMPONENT_COUNT],
+    spacing: [f64; VECTOR_COMPONENT_COUNT],
+}
+
+impl ThermalRecoveryTopology {
+    fn from_assembly(summary: &AssemblySummary, node_count: usize) -> Self {
+        let graph = summary.prep_graph_assembly.as_ref();
+        let degree_mean = graph.map(|item| item.degree_mean).unwrap_or(0.0);
+        let connected_component_count = graph
+            .map(|item| item.connected_component_count)
+            .unwrap_or(1)
+            .max(1);
+        let component_scale = (node_count / connected_component_count).max(1);
+        let prefer_volume = node_count >= 27 || degree_mean >= 3.5;
+        let prefer_surface = node_count >= 9 || degree_mean >= 1.5;
+        let z_dim = if prefer_volume {
+            (component_scale as f64).cbrt().round().max(1.0) as usize
+        } else {
+            1
+        };
+        let y_dim = if prefer_surface {
+            ((component_scale as f64) / z_dim.max(1) as f64)
+                .sqrt()
+                .round()
+                .max(1.0) as usize
+        } else {
+            1
+        };
+        let x_dim = node_count
+            .div_ceil(y_dim.max(1).saturating_mul(z_dim.max(1)))
+            .max(1);
+        let dims = [x_dim, y_dim, z_dim];
+        let spacing = dims.map(|dim| {
+            if dim <= 1 {
+                1.0
+            } else {
+                1.0 / (dim - 1) as f64
+            }
+        });
+        Self {
+            node_count: node_count.max(1),
+            dims,
+            spacing,
+        }
+    }
+
+    fn coords(self, index: usize) -> [usize; VECTOR_COMPONENT_COUNT] {
+        let x_dim = self.dims[0].max(1);
+        let y_dim = self.dims[1].max(1);
+        let plane = x_dim.saturating_mul(y_dim).max(1);
+        let z = index / plane;
+        let rem = index % plane;
+        let y = rem / x_dim;
+        let x = rem % x_dim;
+        [x, y, z]
+    }
+
+    fn index(self, coords: [usize; VECTOR_COMPONENT_COUNT]) -> Option<usize> {
+        if coords
+            .iter()
+            .zip(self.dims.iter())
+            .any(|(coord, dim)| *coord >= *dim)
+        {
+            return None;
+        }
+        let index = coords[0]
+            + coords[1].saturating_mul(self.dims[0])
+            + coords[2].saturating_mul(self.dims[0].saturating_mul(self.dims[1]));
+        (index < self.node_count).then_some(index)
+    }
+}
+
+fn recover_temperature_gradients(
+    temperature_snapshots: &[Vec<f64>],
+    topology: ThermalRecoveryTopology,
+) -> Vec<Vec<f64>> {
     temperature_snapshots
         .iter()
         .map(|temperatures| {
             let node_count = temperatures.len().max(1);
             let mut gradient = vec![0.0; node_count * VECTOR_COMPONENT_COUNT];
             for index in 0..temperatures.len() {
-                let left = if index == 0 {
-                    temperatures[index]
-                } else {
-                    temperatures[index - 1]
-                };
-                let right = if index + 1 >= temperatures.len() {
-                    temperatures[index]
-                } else {
-                    temperatures[index + 1]
-                };
-                let spacing = if index == 0 || index + 1 >= temperatures.len() {
-                    1.0
-                } else {
-                    2.0
-                };
-                gradient[index * VECTOR_COMPONENT_COUNT] = (right - left) / spacing;
+                for axis in 0..VECTOR_COMPONENT_COUNT {
+                    gradient[index * VECTOR_COMPONENT_COUNT + axis] =
+                        thermal_axis_derivative(temperatures, topology, index, axis);
+                }
             }
             gradient
         })
         .collect()
+}
+
+fn thermal_axis_derivative(
+    temperatures: &[f64],
+    topology: ThermalRecoveryTopology,
+    index: usize,
+    axis: usize,
+) -> f64 {
+    if topology.dims[axis] <= 1 {
+        return 0.0;
+    }
+    let coords = topology.coords(index);
+    let mut prev_coords = coords;
+    let prev_index = if coords[axis] > 0 {
+        prev_coords[axis] -= 1;
+        topology.index(prev_coords)
+    } else {
+        None
+    };
+    let mut next_coords = coords;
+    let next_index = if coords[axis] + 1 < topology.dims[axis] {
+        next_coords[axis] += 1;
+        topology.index(next_coords)
+    } else {
+        None
+    };
+    let spacing = topology.spacing[axis].max(1.0e-12);
+    match (prev_index, next_index) {
+        (Some(prev), Some(next)) => (temperatures[next] - temperatures[prev]) / (2.0 * spacing),
+        (Some(prev), None) => (temperatures[index] - temperatures[prev]) / spacing,
+        (None, Some(next)) => (temperatures[next] - temperatures[index]) / spacing,
+        (None, None) => 0.0,
+    }
 }
 
 fn recover_heat_flux_snapshots(
@@ -531,17 +648,53 @@ fn recover_heat_source_snapshots(
 
 fn recover_boundary_heat_flux_snapshots(
     heat_flux_snapshots: &[Vec<f64>],
-    node_count: usize,
+    topology: ThermalRecoveryTopology,
 ) -> Vec<Vec<f64>> {
     heat_flux_snapshots
         .iter()
-        .map(|heat_flux| {
-            let left = heat_flux.first().copied().unwrap_or(0.0);
-            let right_index = node_count.saturating_sub(1) * VECTOR_COMPONENT_COUNT;
-            let right = heat_flux.get(right_index).copied().unwrap_or(left);
-            vec![left, right]
-        })
+        .map(|heat_flux| thermal_boundary_face_fluxes(heat_flux, topology))
         .collect()
+}
+
+fn thermal_boundary_face_fluxes(heat_flux: &[f64], topology: ThermalRecoveryTopology) -> Vec<f64> {
+    let mut boundary = vec![0.0; BOUNDARY_HEAT_FLUX_COMPONENT_COUNT];
+    for axis in 0..VECTOR_COMPONENT_COUNT {
+        if topology.dims[axis] <= 1 {
+            continue;
+        }
+        let min_face = thermal_face_average(heat_flux, topology, axis, 0);
+        let max_face = thermal_face_average(heat_flux, topology, axis, topology.dims[axis] - 1);
+        boundary[axis * 2] = -min_face;
+        boundary[axis * 2 + 1] = max_face;
+    }
+    boundary
+}
+
+fn thermal_face_average(
+    heat_flux: &[f64],
+    topology: ThermalRecoveryTopology,
+    axis: usize,
+    face_coord: usize,
+) -> f64 {
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    for node in 0..topology.node_count {
+        let coords = topology.coords(node);
+        if coords[axis] != face_coord {
+            continue;
+        }
+        let value = heat_flux
+            .get(node * VECTOR_COMPONENT_COUNT + axis)
+            .copied()
+            .unwrap_or(0.0);
+        sum += value;
+        count = count.saturating_add(1);
+    }
+    if count == 0 {
+        0.0
+    } else {
+        sum / count as f64
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -568,11 +721,7 @@ fn thermal_heat_balance(
         .sum::<f64>();
     let boundary_heat = boundary_heat_flux_snapshots
         .iter()
-        .map(|snapshot| {
-            let left_outward = -snapshot.first().copied().unwrap_or(0.0);
-            let right_outward = snapshot.get(1).copied().unwrap_or(0.0);
-            (left_outward + right_outward) * dt.max(1.0e-12)
-        })
+        .map(|snapshot| snapshot.iter().sum::<f64>() * dt.max(1.0e-12))
         .sum::<f64>();
     let volumetric_capacity = density_mean.max(0.0) * heat_capacity_mean.max(0.0);
     let stored_energy = if let Some(final_snapshot) = temperature_snapshots.last() {

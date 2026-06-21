@@ -3995,6 +3995,11 @@ fn analysis_run_thermal_returns_temperature_payload() {
             && diag.message.contains("numerical_loss=")
             && diag.message.contains("heat_balance_residual_ratio=")
     }));
+    assert!(run.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_THERMAL_FIELD_RECOVERY"
+            && diag.message.contains("recovery_dimensions=")
+            && diag.message.contains("boundary_face_count=6")
+    }));
     let results = analysis_results_op(
         &run.data,
         AnalysisResultsQuery::default(),
@@ -4012,6 +4017,7 @@ fn analysis_run_thermal_returns_temperature_payload() {
     assert_eq!(thermal.heat_flux_snapshots.len(), 6);
     assert_eq!(thermal.heat_source_snapshots.len(), 6);
     assert_eq!(thermal.boundary_heat_flux_snapshots.len(), 6);
+    assert_eq!(thermal.boundary_heat_flux_snapshots[0].shape, vec![6]);
     let field_ids = results
         .data
         .field_descriptors
