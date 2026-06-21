@@ -1,4 +1,5 @@
 use crate::{
+    fea_electro_thermal_temperature_field_id, fea_electro_thermal_thermal_residual_field_id,
     fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
     fea_nonlinear_equivalent_plastic_strain_field_id, fea_nonlinear_load_factor_field_id,
     fea_nonlinear_plastic_strain_field_id, fea_nonlinear_residual_norm_field_id,
@@ -14,14 +15,16 @@ use crate::{
     fixtures::{fixture_model, FixtureId},
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
-    ComputeBackend, FeaRunResult, FeaThermoMechanicalContext, LinearStaticSolveOptions,
-    ModalSolveOptions, ThermalSolveOptions, FEA_FIELD_MODAL_EIGENVALUE,
-    FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
-    FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
-    FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
-    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
-    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    ComputeBackend, FeaElectroThermalContext, FeaRunResult, FeaThermoMechanicalContext,
+    LinearStaticSolveOptions, ModalSolveOptions, ThermalSolveOptions,
+    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
+    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
+    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
+    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
+    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 
@@ -579,6 +582,62 @@ fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
         .expect("thermo transient profile diagnostic should be present");
     assert!(profile.message.contains("effective_residual_target_peak="));
     assert!(profile.message.contains("growth_limit_min="));
+}
+
+#[test]
+fn electro_thermal_transient_emits_coupled_fields() {
+    let model = fixture_model(FixtureId::ElectroThermalJouleBenign);
+    let result = crate::run_transient_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        TransientSolveOptions {
+            step_count: 12,
+            electro_thermal_context: Some(FeaElectroThermalContext {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_voltage_v: 36.0,
+                base_electrical_conductivity_s_per_m: 3.5e7,
+                resistive_heating_coefficient: 4.0e-4,
+                region_conductivity_scales: Vec::new(),
+                time_profile: Vec::new(),
+            }),
+            ..TransientSolveOptions::default()
+        },
+    )
+    .expect("electro-thermal transient solve should succeed");
+
+    assert!(result
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL)
+        .is_some());
+    assert!(result
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD)
+        .is_some());
+    assert!(result
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY)
+        .is_some());
+    assert!(result
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
+        .is_some());
+    assert_eq!(
+        result.electro_thermal_temperature_snapshots.len(),
+        result.time_points_s.len()
+    );
+    assert_eq!(
+        result.electro_thermal_thermal_residual_snapshots.len(),
+        result.time_points_s.len()
+    );
+    assert_eq!(
+        result.electro_thermal_temperature_snapshots[0].field_id,
+        fea_electro_thermal_temperature_field_id(0)
+    );
+    assert_eq!(
+        result.electro_thermal_thermal_residual_snapshots[0].field_id,
+        fea_electro_thermal_thermal_residual_field_id(0)
+    );
 }
 
 #[test]

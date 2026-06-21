@@ -11,6 +11,7 @@ use crate::{
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     operator::{apply_k_unconstrained, apply_m},
+    pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::transient::{solve_transient_system, TransientSolveOptions},
@@ -128,7 +129,7 @@ pub fn run_transient_with_options(
         .fold(0.0_f64, f64::max)
         * 1.0e11;
 
-    let run = FeaRunResult {
+    let mut run = FeaRunResult {
         backend,
         solver_backend: transient.solver_backend,
         solver_device_apply_k_ratio: if transient.device_apply_k_attempt_count == 0 {
@@ -257,6 +258,13 @@ pub fn run_transient_with_options(
         &residual_norm_values,
         element_count_for_dofs(summary.dof_count),
     );
+    let electro_thermal_fields = recover_electro_thermal_fields(
+        summary.electro_thermal.as_ref(),
+        &normalized_time_factors(&transient.time_points_s, displacement_snapshots.len()),
+        &residual_norm_values,
+        summary.dof_count,
+    );
+    run.fields.extend(electro_thermal_fields.static_fields);
 
     emit_phase(
         "fea.run_transient",
@@ -295,6 +303,9 @@ pub fn run_transient_with_options(
         thermo_mechanical_von_mises_snapshots: thermo_mechanical_fields.von_mises_snapshots,
         thermo_mechanical_coupling_residual_snapshots: thermo_mechanical_fields
             .coupling_residual_snapshots,
+        electro_thermal_temperature_snapshots: electro_thermal_fields.temperature_snapshots,
+        electro_thermal_thermal_residual_snapshots: electro_thermal_fields
+            .thermal_residual_snapshots,
         residual_norms: transient.residual_norms,
     })
 }

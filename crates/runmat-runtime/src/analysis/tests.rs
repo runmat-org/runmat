@@ -18,6 +18,7 @@ use runmat_analysis_core::{
     ReferenceFrame,
 };
 use runmat_analysis_fea::{
+    fea_electro_thermal_temperature_field_id, fea_electro_thermal_thermal_residual_field_id,
     fea_modal_mode_shape_field_id, fea_nonlinear_contact_gap_field_id,
     fea_nonlinear_contact_pressure_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
     fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
@@ -32,6 +33,8 @@ use runmat_analysis_fea::{
     fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
     FeaProgressPhase, FeaProgressStatus, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
     FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
+    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
+    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
     FEA_FIELD_EM_FLUX_DENSITY_PROXY, FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY,
     FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
     FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
@@ -2624,6 +2627,57 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
     assert!(results.data.summary.electro_nonlinear_severity.is_none());
     assert!(results.data.summary.plastic_nonlinear_severity.is_none());
     assert!(results.data.summary.contact_nonlinear_severity.is_none());
+    assert!(run
+        .data
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL)
+        .is_some());
+    assert!(run
+        .data
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD)
+        .is_some());
+    assert!(run
+        .data
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY)
+        .is_some());
+    assert!(run
+        .data
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
+        .is_some());
+    let transient = run
+        .data
+        .transient_results
+        .as_ref()
+        .expect("transient results should be present");
+    assert_eq!(
+        transient.electro_thermal_temperature_snapshots.len(),
+        transient.time_points_s.len()
+    );
+    assert_eq!(
+        transient.electro_thermal_thermal_residual_snapshots.len(),
+        transient.time_points_s.len()
+    );
+    assert_eq!(
+        transient.electro_thermal_temperature_snapshots[0].field_id,
+        fea_electro_thermal_temperature_field_id(0)
+    );
+    assert_eq!(
+        transient.electro_thermal_thermal_residual_snapshots[0].field_id,
+        fea_electro_thermal_thermal_residual_field_id(0)
+    );
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL));
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| { descriptor.field_id == fea_electro_thermal_temperature_field_id(0) }));
 }
 
 #[test]
@@ -2718,6 +2772,57 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
     assert!(results.data.summary.electro_transient_severity.is_some());
     assert!(results.data.summary.plastic_nonlinear_severity.is_none());
     assert!(results.data.summary.contact_nonlinear_severity.is_none());
+    assert!(run
+        .data
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL)
+        .is_some());
+    assert!(run
+        .data
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD)
+        .is_some());
+    assert!(run
+        .data
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY)
+        .is_some());
+    assert!(run
+        .data
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
+        .is_some());
+    let nonlinear = run
+        .data
+        .nonlinear_results
+        .as_ref()
+        .expect("nonlinear results should be present");
+    assert_eq!(
+        nonlinear.electro_thermal_temperature_snapshots.len(),
+        nonlinear.load_factors.len()
+    );
+    assert_eq!(
+        nonlinear.electro_thermal_thermal_residual_snapshots.len(),
+        nonlinear.load_factors.len()
+    );
+    assert_eq!(
+        nonlinear.electro_thermal_temperature_snapshots[0].field_id,
+        fea_electro_thermal_temperature_field_id(0)
+    );
+    assert_eq!(
+        nonlinear.electro_thermal_thermal_residual_snapshots[0].field_id,
+        fea_electro_thermal_thermal_residual_field_id(0)
+    );
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL));
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| { descriptor.field_id == fea_electro_thermal_temperature_field_id(0) }));
 }
 
 #[test]

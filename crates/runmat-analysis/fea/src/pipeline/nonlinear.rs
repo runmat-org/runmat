@@ -12,6 +12,7 @@ use crate::{
         FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
+    pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::nonlinear::{solve_nonlinear_system, NonlinearSolveOptions},
@@ -135,7 +136,7 @@ pub fn run_nonlinear_with_options(
         .fold(0.0_f64, f64::max)
         * 1.0e11;
 
-    let run = FeaRunResult {
+    let mut run = FeaRunResult {
         backend,
         solver_backend: nonlinear.solver_backend,
         solver_device_apply_k_ratio: if nonlinear.device_apply_k_attempt_count == 0 {
@@ -276,6 +277,13 @@ pub fn run_nonlinear_with_options(
         &nonlinear.residual_norms,
         element_count,
     );
+    let electro_thermal_fields = recover_electro_thermal_fields(
+        summary.electro_thermal.as_ref(),
+        &nonlinear.load_factors,
+        &nonlinear.residual_norms,
+        summary.dof_count,
+    );
+    run.fields.extend(electro_thermal_fields.static_fields);
 
     emit_phase(
         "fea.run_nonlinear",
@@ -315,6 +323,9 @@ pub fn run_nonlinear_with_options(
         thermo_mechanical_von_mises_snapshots: thermo_mechanical_fields.von_mises_snapshots,
         thermo_mechanical_coupling_residual_snapshots: thermo_mechanical_fields
             .coupling_residual_snapshots,
+        electro_thermal_temperature_snapshots: electro_thermal_fields.temperature_snapshots,
+        electro_thermal_thermal_residual_snapshots: electro_thermal_fields
+            .thermal_residual_snapshots,
         residual_norms: nonlinear.residual_norms,
         increment_norms: nonlinear.increment_norms,
         iteration_counts: nonlinear.iteration_counts,

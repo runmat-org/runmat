@@ -2922,6 +2922,10 @@ pub fn analysis_run_cfd_with_options_op(
                 .thermo_mechanical_von_mises_snapshots,
             thermo_mechanical_coupling_residual_snapshots: transient_run
                 .thermo_mechanical_coupling_residual_snapshots,
+            electro_thermal_temperature_snapshots: transient_run
+                .electro_thermal_temperature_snapshots,
+            electro_thermal_thermal_residual_snapshots: transient_run
+                .electro_thermal_thermal_residual_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -3499,6 +3503,10 @@ pub fn analysis_run_cht_with_options_op(
                 .thermo_mechanical_von_mises_snapshots,
             thermo_mechanical_coupling_residual_snapshots: transient_run
                 .thermo_mechanical_coupling_residual_snapshots,
+            electro_thermal_temperature_snapshots: transient_run
+                .electro_thermal_temperature_snapshots,
+            electro_thermal_thermal_residual_snapshots: transient_run
+                .electro_thermal_thermal_residual_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -3975,6 +3983,10 @@ pub fn analysis_run_fsi_with_options_op(
                 .thermo_mechanical_von_mises_snapshots,
             thermo_mechanical_coupling_residual_snapshots: transient_run
                 .thermo_mechanical_coupling_residual_snapshots,
+            electro_thermal_temperature_snapshots: transient_run
+                .electro_thermal_temperature_snapshots,
+            electro_thermal_thermal_residual_snapshots: transient_run
+                .electro_thermal_thermal_residual_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -4650,6 +4662,10 @@ pub fn analysis_run_transient_with_options_op(
                 .thermo_mechanical_von_mises_snapshots,
             thermo_mechanical_coupling_residual_snapshots: transient_run
                 .thermo_mechanical_coupling_residual_snapshots,
+            electro_thermal_temperature_snapshots: transient_run
+                .electro_thermal_temperature_snapshots,
+            electro_thermal_thermal_residual_snapshots: transient_run
+                .electro_thermal_thermal_residual_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -5304,6 +5320,10 @@ pub fn analysis_run_nonlinear_with_options_op(
                 .thermo_mechanical_von_mises_snapshots,
             thermo_mechanical_coupling_residual_snapshots: nonlinear_run
                 .thermo_mechanical_coupling_residual_snapshots,
+            electro_thermal_temperature_snapshots: nonlinear_run
+                .electro_thermal_temperature_snapshots,
+            electro_thermal_thermal_residual_snapshots: nonlinear_run
+                .electro_thermal_thermal_residual_snapshots,
             residual_norms: nonlinear_run.residual_norms,
             increment_norms: nonlinear_run.increment_norms,
             iteration_counts: nonlinear_run.iteration_counts,
@@ -6478,6 +6498,12 @@ fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<Analysi
         for field in &transient.thermo_mechanical_coupling_residual_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
+        for field in &transient.electro_thermal_temperature_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.electro_thermal_thermal_residual_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
     }
 
     if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
@@ -6521,6 +6547,12 @@ fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<Analysi
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
         for field in &nonlinear.thermo_mechanical_coupling_residual_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.electro_thermal_temperature_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.electro_thermal_thermal_residual_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
     }
@@ -7409,6 +7441,14 @@ pub fn analysis_results_op(
                         &transient.thermo_mechanical_coupling_residual_snapshots,
                         &query.transient_snapshot_indices,
                     );
+                let electro_thermal_temperature_snapshots = filter_analysis_fields_by_indices(
+                    &transient.electro_thermal_temperature_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let electro_thermal_thermal_residual_snapshots = filter_analysis_fields_by_indices(
+                    &transient.electro_thermal_thermal_residual_snapshots,
+                    &query.transient_snapshot_indices,
+                );
 
                 for &index in &query.transient_snapshot_indices {
                     let time_point = transient.time_points_s.get(index).copied().ok_or_else(|| {
@@ -7681,6 +7721,8 @@ pub fn analysis_results_op(
                     thermo_mechanical_displacement_snapshots,
                     thermo_mechanical_von_mises_snapshots,
                     thermo_mechanical_coupling_residual_snapshots,
+                    electro_thermal_temperature_snapshots,
+                    electro_thermal_thermal_residual_snapshots,
                     residual_norms,
                     integration_method: transient.integration_method,
                 })

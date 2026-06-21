@@ -12,6 +12,7 @@ use crate::{
         builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
         FeaDiagnostic, FeaDiagnosticSeverity,
     },
+    pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     post::fields::recover_result_fields,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
@@ -124,6 +125,15 @@ pub fn run_linear_static_with_options(
     fields.extend(thermo_mechanical_fields.displacement_snapshots);
     fields.extend(thermo_mechanical_fields.von_mises_snapshots);
     fields.extend(thermo_mechanical_fields.coupling_residual_snapshots);
+    let electro_thermal_fields = recover_electro_thermal_fields(
+        summary.electro_thermal.as_ref(),
+        &[1.0],
+        &[solve_result.residual_norm],
+        summary.dof_count,
+    );
+    fields.extend(electro_thermal_fields.static_fields);
+    fields.extend(electro_thermal_fields.temperature_snapshots);
+    fields.extend(electro_thermal_fields.thermal_residual_snapshots);
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::Postprocess,

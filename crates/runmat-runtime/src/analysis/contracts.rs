@@ -1533,6 +1533,10 @@ pub struct TransientResultsData {
     pub thermo_mechanical_von_mises_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub thermo_mechanical_coupling_residual_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub electro_thermal_temperature_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub electro_thermal_thermal_residual_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub integration_method: TransientIntegrationMethod,
 }
@@ -1568,6 +1572,10 @@ pub struct NonlinearResultsData {
     pub thermo_mechanical_von_mises_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub thermo_mechanical_coupling_residual_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub electro_thermal_temperature_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub electro_thermal_thermal_residual_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     #[serde(default)]
     pub increment_norms: Vec<f64>,
