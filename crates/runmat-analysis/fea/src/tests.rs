@@ -765,6 +765,16 @@ fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_NONLINEAR_COST"));
+    let state = result
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_NONLINEAR_STATE")
+        .expect("nonlinear state diagnostic should be present");
+    assert!(state.message.contains("plastic_active_element_count="));
+    assert!(state.message.contains("max_equivalent_plastic_strain="));
+    assert!(state.message.contains("contact_active_entity_count="));
+    assert!(state.message.contains("max_contact_pressure="));
     let convergence = result
         .run
         .diagnostics

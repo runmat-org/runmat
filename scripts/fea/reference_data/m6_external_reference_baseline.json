@@ -6367,6 +6367,26 @@
       "tolerance_rel": 0.2
     },
     {
+      "name": "plasticity_hardening_reference_complex_state_active_element_count",
+      "fixture_id": "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_hardening_reference_complex_state_active_element_count",
+      "reference": 2.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "plasticity_hardening_reference_complex_state_max_equivalent_plastic_strain",
+      "fixture_id": "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_hardening_reference_complex_state_max_equivalent_plastic_strain",
+      "reference": 0.04296939893689562,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": 0.5
+    },
+    {
       "name": "contact_frictionless_complex_load_realization_ratio",
       "fixture_id": "nonlinear_contact_frictionless_reference_complex_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -6375,6 +6395,36 @@
       "reference": 0.8537499999999999,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.2
+    },
+    {
+      "name": "contact_frictionless_complex_state_active_entity_count",
+      "fixture_id": "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_frictionless_complex_state_active_entity_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "contact_frictionless_complex_state_max_contact_pressure",
+      "fixture_id": "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_frictionless_complex_state_max_contact_pressure",
+      "reference": 3.5268185356673676e-05,
+      "tolerance_abs": 0.0001,
+      "tolerance_rel": 0.75
+    },
+    {
+      "name": "contact_frictionless_complex_state_min_contact_gap",
+      "fixture_id": "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_frictionless_complex_state_min_contact_gap",
+      "reference": 0.013970609845536105,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": 0.5
     },
     {
       "name": "plasticity_nonlinear_load_amplification_ratio",
@@ -6397,6 +6447,26 @@
       "tolerance_rel": 0.2
     },
     {
+      "name": "plasticity_nonlinear_state_active_element_count",
+      "fixture_id": "nonlinear_plasticity_benchmark_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_nonlinear_state_active_element_count",
+      "reference": 2.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "plasticity_nonlinear_state_max_equivalent_plastic_strain",
+      "fixture_id": "nonlinear_plasticity_benchmark_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_nonlinear_state_max_equivalent_plastic_strain",
+      "reference": 0.02060614210990777,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": 0.5
+    },
+    {
       "name": "contact_nonlinear_load_amplification_ratio",
       "fixture_id": "nonlinear_contact_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -6415,6 +6485,36 @@
       "reference": 0.8541666666666665,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.2
+    },
+    {
+      "name": "contact_nonlinear_state_active_entity_count",
+      "fixture_id": "nonlinear_contact_benchmark_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_nonlinear_state_active_entity_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "contact_nonlinear_state_max_contact_pressure",
+      "fixture_id": "nonlinear_contact_benchmark_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_nonlinear_state_max_contact_pressure",
+      "reference": 4.462055262456519e-06,
+      "tolerance_abs": 0.0001,
+      "tolerance_rel": 0.75
+    },
+    {
+      "name": "contact_nonlinear_state_min_contact_gap",
+      "fixture_id": "nonlinear_contact_benchmark_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_nonlinear_state_min_contact_gap",
+      "reference": 0.03497270914212565,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": 0.5
     },
     {
       "name": "contact_frictionless_load_amplification_ratio",
@@ -6437,6 +6537,36 @@
       "tolerance_rel": 0.2
     },
     {
+      "name": "contact_frictionless_state_active_entity_count",
+      "fixture_id": "nonlinear_contact_frictionless_reference_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_frictionless_state_active_entity_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "contact_frictionless_state_max_contact_pressure",
+      "fixture_id": "nonlinear_contact_frictionless_reference_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_frictionless_state_max_contact_pressure",
+      "reference": 5.45817157487036e-05,
+      "tolerance_abs": 0.0001,
+      "tolerance_rel": 0.75
+    },
+    {
+      "name": "contact_frictionless_state_min_contact_gap",
+      "fixture_id": "nonlinear_contact_frictionless_reference_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_frictionless_state_min_contact_gap",
+      "reference": 0.009972709142125648,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": 0.5
+    },
+    {
       "name": "plasticity_hardening_reference_load_amplification_ratio",
       "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -6455,6 +6585,26 @@
       "reference": 0.8293750000000001,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.2
+    },
+    {
+      "name": "plasticity_hardening_reference_state_active_element_count",
+      "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_hardening_reference_state_active_element_count",
+      "reference": 2.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "plasticity_hardening_reference_state_max_equivalent_plastic_strain",
+      "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_hardening_reference_state_max_equivalent_plastic_strain",
+      "reference": 0.016426503235466575,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": 0.5
     },
     {
       "name": "nonlinear_softening_failed_increments",

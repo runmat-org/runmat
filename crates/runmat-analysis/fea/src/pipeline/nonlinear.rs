@@ -7,9 +7,8 @@ use crate::{
         fea_nonlinear_displacement_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
         fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
         fea_nonlinear_residual_norm_field_id, fea_nonlinear_von_mises_field_id, ComputeBackend,
-        FeaContactInterfaceContext, FeaNonlinearRunResult, FeaPlasticityConstitutiveContext,
-        FeaRunError, FeaRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-        FEA_FIELD_STRUCTURAL_VON_MISES,
+        FeaContactInterfaceContext, FeaNonlinearRunResult, FeaRunError, FeaRunResult,
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     pipeline::electro_thermal::recover_electro_thermal_fields,
@@ -159,21 +158,6 @@ pub fn run_nonlinear_with_options(
     };
 
     let element_count = element_count_for_dofs(summary.dof_count);
-    let von_mises_values =
-        recover_von_mises_snapshots(&nonlinear.displacement_snapshots, summary.dof_count);
-    let plastic_strain_values = recover_plastic_strain_snapshots(
-        &nonlinear.displacement_snapshots,
-        &nonlinear.load_factors,
-        summary.dof_count,
-        options.plasticity_context.as_ref(),
-    );
-    let equivalent_plastic_strain_values =
-        recover_equivalent_plastic_strain_snapshots(&plastic_strain_values);
-    let (contact_pressure_values, contact_gap_values) = recover_contact_snapshots(
-        &nonlinear.displacement_snapshots,
-        &nonlinear.load_factors,
-        options.contact_context.as_ref(),
-    );
 
     let displacement_snapshots = nonlinear
         .displacement_snapshots
@@ -187,8 +171,10 @@ pub fn run_nonlinear_with_options(
             )
         })
         .collect::<Vec<_>>();
-    let von_mises_snapshots = von_mises_values
-        .into_iter()
+    let von_mises_snapshots = nonlinear
+        .von_mises_snapshots
+        .iter()
+        .cloned()
         .enumerate()
         .map(|(index, values)| {
             AnalysisField::host_f64(
@@ -198,8 +184,10 @@ pub fn run_nonlinear_with_options(
             )
         })
         .collect::<Vec<_>>();
-    let plastic_strain_snapshots = plastic_strain_values
-        .into_iter()
+    let plastic_strain_snapshots = nonlinear
+        .plastic_strain_snapshots
+        .iter()
+        .cloned()
         .enumerate()
         .map(|(index, values)| {
             AnalysisField::host_f64(
@@ -209,8 +197,10 @@ pub fn run_nonlinear_with_options(
             )
         })
         .collect::<Vec<_>>();
-    let equivalent_plastic_strain_snapshots = equivalent_plastic_strain_values
-        .into_iter()
+    let equivalent_plastic_strain_snapshots = nonlinear
+        .equivalent_plastic_strain_snapshots
+        .iter()
+        .cloned()
         .enumerate()
         .map(|(index, values)| {
             AnalysisField::host_f64(
@@ -221,8 +211,10 @@ pub fn run_nonlinear_with_options(
         })
         .collect::<Vec<_>>();
     let contact_count = contact_entity_count(options.contact_context.as_ref());
-    let contact_pressure_snapshots = contact_pressure_values
-        .into_iter()
+    let contact_pressure_snapshots = nonlinear
+        .contact_pressure_snapshots
+        .iter()
+        .cloned()
         .enumerate()
         .map(|(index, values)| {
             AnalysisField::host_f64(
@@ -232,8 +224,10 @@ pub fn run_nonlinear_with_options(
             )
         })
         .collect::<Vec<_>>();
-    let contact_gap_snapshots = contact_gap_values
-        .into_iter()
+    let contact_gap_snapshots = nonlinear
+        .contact_gap_snapshots
+        .iter()
+        .cloned()
         .enumerate()
         .map(|(index, values)| {
             AnalysisField::host_f64(
@@ -358,137 +352,6 @@ fn padded_vector_values(mut values: Vec<f64>, dof_count: usize) -> Vec<f64> {
     let shape = vector_shape(dof_count.max(values.len()));
     values.resize(shape.iter().product(), 0.0);
     values
-}
-
-fn recover_von_mises_snapshots(
-    displacement_snapshots: &[Vec<f64>],
-    dof_count: usize,
-) -> Vec<Vec<f64>> {
-    let element_count = element_count_for_dofs(dof_count);
-    displacement_snapshots
-        .iter()
-        .map(|snapshot| {
-            let strain = recover_increment_strain(snapshot, element_count);
-            strain
-                .chunks_exact(TENSOR_COMPONENT_COUNT)
-                .map(von_mises_from_tensor)
-                .collect::<Vec<_>>()
-        })
-        .collect()
-}
-
-fn recover_plastic_strain_snapshots(
-    displacement_snapshots: &[Vec<f64>],
-    load_factors: &[f64],
-    dof_count: usize,
-    plasticity: Option<&FeaPlasticityConstitutiveContext>,
-) -> Vec<Vec<f64>> {
-    let element_count = element_count_for_dofs(dof_count);
-    displacement_snapshots
-        .iter()
-        .enumerate()
-        .map(|(index, snapshot)| {
-            let Some(plasticity) = plasticity.filter(|context| context.enabled) else {
-                return vec![0.0; element_count * TENSOR_COMPONENT_COUNT];
-            };
-            let load_factor = load_factors
-                .get(index)
-                .copied()
-                .unwrap_or(1.0)
-                .clamp(0.0, 1.0);
-            let yield_strain = plasticity.yield_strain.max(0.0);
-            let hardening_scale = (1.0 + plasticity.hardening_modulus_ratio.max(0.0)).max(1.0);
-            recover_increment_strain(snapshot, element_count)
-                .into_iter()
-                .map(|strain| {
-                    let excess = (strain.abs() - yield_strain).max(0.0);
-                    strain.signum() * excess * load_factor / hardening_scale
-                })
-                .collect()
-        })
-        .collect()
-}
-
-fn recover_equivalent_plastic_strain_snapshots(
-    plastic_strain_snapshots: &[Vec<f64>],
-) -> Vec<Vec<f64>> {
-    plastic_strain_snapshots
-        .iter()
-        .map(|snapshot| {
-            snapshot
-                .chunks_exact(TENSOR_COMPONENT_COUNT)
-                .map(|tensor| {
-                    ((2.0 / 3.0) * tensor.iter().map(|value| value * value).sum::<f64>()).sqrt()
-                })
-                .collect()
-        })
-        .collect()
-}
-
-fn recover_contact_snapshots(
-    displacement_snapshots: &[Vec<f64>],
-    load_factors: &[f64],
-    contact: Option<&FeaContactInterfaceContext>,
-) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
-    let contact_count = contact_entity_count(contact);
-    displacement_snapshots
-        .iter()
-        .enumerate()
-        .map(|(index, snapshot)| {
-            let Some(contact) = contact.filter(|context| context.enabled) else {
-                return (Vec::new(), Vec::new());
-            };
-            let load_factor = load_factors
-                .get(index)
-                .copied()
-                .unwrap_or(1.0)
-                .clamp(0.0, 1.0);
-            let max_penetration = contact.max_penetration_ratio.max(0.0);
-            let penalty = contact.penalty_stiffness_scale.max(0.0);
-            let peak_displacement = snapshot
-                .iter()
-                .map(|value| value.abs())
-                .fold(0.0_f64, f64::max);
-            let mut pressure = Vec::with_capacity(contact_count);
-            let mut gap = Vec::with_capacity(contact_count);
-            for entity_index in 0..contact_count {
-                let entity_scale = 1.0 + 0.05 * entity_index as f64;
-                let closure = load_factor * max_penetration * (1.0 + peak_displacement * 1.0e3)
-                    / entity_scale;
-                let signed_gap = max_penetration - closure;
-                gap.push(signed_gap);
-                pressure.push(penalty * closure.max(0.0));
-            }
-            (pressure, gap)
-        })
-        .unzip()
-}
-
-fn recover_increment_strain(displacement: &[f64], element_count: usize) -> Vec<f64> {
-    let mut padded = displacement.to_vec();
-    padded.resize((element_count + 1) * VECTOR_COMPONENT_COUNT, 0.0);
-    let mut strain = vec![0.0; element_count * TENSOR_COMPONENT_COUNT];
-    for element_index in 0..element_count {
-        let base = element_index * VECTOR_COMPONENT_COUNT;
-        let next = (element_index + 1) * VECTOR_COMPONENT_COUNT;
-        for component in 0..VECTOR_COMPONENT_COUNT {
-            strain[element_index * TENSOR_COMPONENT_COUNT + component] =
-                padded[next + component] - padded[base + component];
-        }
-    }
-    strain
-}
-
-fn von_mises_from_tensor(tensor: &[f64]) -> f64 {
-    let sxx = tensor[0] * 1.0e11;
-    let syy = tensor[1] * 1.0e11;
-    let szz = tensor[2] * 1.0e11;
-    let txy = tensor[3] * 1.0e11;
-    let tyz = tensor[4] * 1.0e11;
-    let txz = tensor[5] * 1.0e11;
-    (0.5 * ((sxx - syy).powi(2) + (syy - szz).powi(2) + (szz - sxx).powi(2))
-        + 3.0 * (txy.powi(2) + tyz.powi(2) + txz.powi(2)))
-    .sqrt()
 }
 
 fn contact_entity_count(contact: Option<&FeaContactInterfaceContext>) -> usize {

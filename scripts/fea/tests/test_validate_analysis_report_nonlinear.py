@@ -160,6 +160,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "plasticity_nonlinear_severity_mean",
                     "plasticity_nonlinear_load_amplification_ratio",
                     "plasticity_nonlinear_load_realization_ratio",
+                    "plasticity_nonlinear_state_active_element_count",
+                    "plasticity_nonlinear_state_max_equivalent_plastic_strain",
                 },
             )
             | {
@@ -178,6 +180,9 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "contact_nonlinear_severity_mean",
                     "contact_nonlinear_load_amplification_ratio",
                     "contact_nonlinear_load_realization_ratio",
+                    "contact_nonlinear_state_active_entity_count",
+                    "contact_nonlinear_state_max_contact_pressure",
+                    "contact_nonlinear_state_min_contact_gap",
                 },
             )
             | {"contact_nonlinear_severity": 0.1},
@@ -188,6 +193,9 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "contact_frictionless_severity_mean",
                     "contact_frictionless_load_amplification_ratio",
                     "contact_frictionless_load_realization_ratio",
+                    "contact_frictionless_state_active_entity_count",
+                    "contact_frictionless_state_max_contact_pressure",
+                    "contact_frictionless_state_min_contact_gap",
                 },
             )
             | {"contact_nonlinear_severity": 0.1},
@@ -198,6 +206,9 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "contact_frictionless_complex_severity_mean",
                     "contact_frictionless_complex_load_amplification_ratio",
                     "contact_frictionless_complex_load_realization_ratio",
+                    "contact_frictionless_complex_state_active_entity_count",
+                    "contact_frictionless_complex_state_max_contact_pressure",
+                    "contact_frictionless_complex_state_min_contact_gap",
                 },
             )
             | {"contact_nonlinear_severity": 0.1},
@@ -208,6 +219,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "plasticity_hardening_reference_severity_mean",
                     "plasticity_hardening_reference_load_amplification_ratio",
                     "plasticity_hardening_reference_load_realization_ratio",
+                    "plasticity_hardening_reference_state_active_element_count",
+                    "plasticity_hardening_reference_state_max_equivalent_plastic_strain",
                 },
             ),
             _record(
@@ -217,6 +230,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "plasticity_hardening_reference_complex_severity_mean",
                     "plasticity_hardening_reference_complex_load_realization_ratio",
                     "plasticity_hardening_reference_complex_load_amplification_ratio",
+                    "plasticity_hardening_reference_complex_state_active_element_count",
+                    "plasticity_hardening_reference_complex_state_max_equivalent_plastic_strain",
                 },
             ),
             _record(

@@ -13,6 +13,9 @@ use crate::{
     FeaPlasticityConstitutiveContext, FeaPrepContext, FeaThermoMechanicalContext,
 };
 
+const VECTOR_COMPONENT_COUNT: usize = 3;
+const TENSOR_COMPONENT_COUNT: usize = 6;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NonlinearSolveOptions {
     pub increment_count: usize,
@@ -58,6 +61,11 @@ pub struct NonlinearSolveResult {
     pub total_increments: usize,
     pub load_factors: Vec<f64>,
     pub displacement_snapshots: Vec<Vec<f64>>,
+    pub von_mises_snapshots: Vec<Vec<f64>>,
+    pub plastic_strain_snapshots: Vec<Vec<f64>>,
+    pub equivalent_plastic_strain_snapshots: Vec<Vec<f64>>,
+    pub contact_pressure_snapshots: Vec<Vec<f64>>,
+    pub contact_gap_snapshots: Vec<Vec<f64>>,
     pub residual_norms: Vec<f64>,
     pub increment_norms: Vec<f64>,
     pub iteration_counts: Vec<usize>,
@@ -88,6 +96,11 @@ pub fn solve_nonlinear_system(
             total_increments: options.increment_count,
             load_factors: Vec::new(),
             displacement_snapshots: vec![vec![0.0; summary.dof_count]],
+            von_mises_snapshots: Vec::new(),
+            plastic_strain_snapshots: Vec::new(),
+            equivalent_plastic_strain_snapshots: Vec::new(),
+            contact_pressure_snapshots: Vec::new(),
+            contact_gap_snapshots: Vec::new(),
             residual_norms: Vec::new(),
             increment_norms: Vec::new(),
             iteration_counts: Vec::new(),
@@ -157,6 +170,11 @@ pub fn solve_nonlinear_system(
     let tangent_refresh_interval = options.tangent_refresh_interval.max(1);
 
     let mut displacement_snapshots = Vec::with_capacity(options.increment_count);
+    let mut von_mises_snapshots = Vec::with_capacity(options.increment_count);
+    let mut plastic_strain_snapshots = Vec::with_capacity(options.increment_count);
+    let mut equivalent_plastic_strain_snapshots = Vec::with_capacity(options.increment_count);
+    let mut contact_pressure_snapshots = Vec::with_capacity(options.increment_count);
+    let mut contact_gap_snapshots = Vec::with_capacity(options.increment_count);
     let mut residual_norms = Vec::with_capacity(options.increment_count);
     let mut increment_norms = Vec::with_capacity(options.increment_count);
     let mut iteration_counts = Vec::with_capacity(options.increment_count);
@@ -190,6 +208,13 @@ pub fn solve_nonlinear_system(
     let mut contact_severity_sum = 0.0_f64;
     let mut contact_first_severity = 0.0_f64;
     let mut contact_last_severity = 0.0_f64;
+    let element_count = element_count_for_dofs(summary.dof_count);
+    let contact_count = contact_entity_count(contact_context);
+    let mut max_equivalent_plastic_strain = 0.0_f64;
+    let mut plastic_active_element_count = 0usize;
+    let mut max_contact_pressure = 0.0_f64;
+    let mut min_contact_gap = f64::INFINITY;
+    let mut contact_active_entity_count = 0usize;
 
     for index in 0..options.increment_count {
         let load_factor = load_factors.get(index).copied().unwrap_or(1.0);
@@ -319,10 +344,10 @@ pub fn solve_nonlinear_system(
             iteration_spike_count = iteration_spike_count.saturating_add(1);
         }
 
-        if converged {
+        let accepted_displacement = if converged {
             converged_increments = converged_increments.saturating_add(1);
             previous = candidate.clone();
-            displacement_snapshots.push(candidate);
+            candidate
         } else {
             failed_increments = failed_increments.saturating_add(1);
             let damped = previous
@@ -331,8 +356,33 @@ pub fn solve_nonlinear_system(
                 .map(|(a, b)| a + 0.5 * (b - a))
                 .collect::<Vec<_>>();
             previous = damped.clone();
-            displacement_snapshots.push(damped);
+            damped
+        };
+        let state = recover_increment_state(
+            &accepted_displacement,
+            load_factor,
+            element_count,
+            &summary.structural_material,
+            plasticity_context,
+            contact_context,
+            contact_count,
+        );
+        max_equivalent_plastic_strain =
+            max_equivalent_plastic_strain.max(state.max_equivalent_plastic_strain);
+        plastic_active_element_count =
+            plastic_active_element_count.max(state.plastic_active_element_count);
+        max_contact_pressure = max_contact_pressure.max(state.max_contact_pressure);
+        if state.contact_active_entity_count > 0 {
+            min_contact_gap = min_contact_gap.min(state.min_contact_gap);
         }
+        contact_active_entity_count =
+            contact_active_entity_count.max(state.contact_active_entity_count);
+        displacement_snapshots.push(accepted_displacement);
+        von_mises_snapshots.push(state.von_mises);
+        plastic_strain_snapshots.push(state.plastic_strain);
+        equivalent_plastic_strain_snapshots.push(state.equivalent_plastic_strain);
+        contact_pressure_snapshots.push(state.contact_pressure);
+        contact_gap_snapshots.push(state.contact_gap);
         residual_norms.push(residual);
         increment_norms.push(increment_norm);
         iteration_counts.push(iterations.max(1));
@@ -396,6 +446,30 @@ pub fn solve_nonlinear_system(
         message: format!(
             "prepared_build_ms={} solve_ms={} fallback_apply_count={}",
             transient_prepared_build_ms, solve_ms, transient_fallback_apply_count
+        ),
+    });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_NONLINEAR_STATE".to_string(),
+        severity: if failed_increments == 0 {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "element_count={} plastic_enabled={} plastic_active_element_count={} max_equivalent_plastic_strain={} contact_enabled={} contact_entity_count={} contact_active_entity_count={} max_contact_pressure={} min_contact_gap={}",
+            element_count,
+            plasticity_context.is_some_and(|context| context.enabled),
+            plastic_active_element_count,
+            max_equivalent_plastic_strain,
+            contact_context.is_some_and(|context| context.enabled),
+            contact_count,
+            contact_active_entity_count,
+            max_contact_pressure,
+            if min_contact_gap.is_finite() {
+                min_contact_gap
+            } else {
+                0.0
+            },
         ),
     });
     if thermo_severity_peak > 0.0 {
@@ -534,6 +608,11 @@ pub fn solve_nonlinear_system(
         total_increments: options.increment_count,
         load_factors,
         displacement_snapshots,
+        von_mises_snapshots,
+        plastic_strain_snapshots,
+        equivalent_plastic_strain_snapshots,
+        contact_pressure_snapshots,
+        contact_gap_snapshots,
         residual_norms,
         increment_norms,
         iteration_counts,
@@ -551,6 +630,203 @@ pub fn solve_nonlinear_system(
         device_apply_k_count: transient.device_apply_k_count,
         device_apply_k_attempt_count: transient.device_apply_k_attempt_count,
         preconditioner: transient.preconditioner,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct IncrementState {
+    von_mises: Vec<f64>,
+    plastic_strain: Vec<f64>,
+    equivalent_plastic_strain: Vec<f64>,
+    contact_pressure: Vec<f64>,
+    contact_gap: Vec<f64>,
+    max_equivalent_plastic_strain: f64,
+    plastic_active_element_count: usize,
+    max_contact_pressure: f64,
+    min_contact_gap: f64,
+    contact_active_entity_count: usize,
+}
+
+fn recover_increment_state(
+    displacement: &[f64],
+    load_factor: f64,
+    element_count: usize,
+    material: &crate::assembly::StructuralMaterialSummary,
+    plasticity: Option<&FeaPlasticityConstitutiveContext>,
+    contact: Option<&FeaContactInterfaceContext>,
+    contact_count: usize,
+) -> IncrementState {
+    let total_strain = recover_increment_strain(displacement, element_count);
+    let plastic_strain = recover_plastic_strain(
+        &total_strain,
+        load_factor,
+        plasticity,
+        material.shear_modulus_pa,
+    );
+    let equivalent_plastic_strain = recover_equivalent_plastic_strain(&plastic_strain);
+    let von_mises = recover_von_mises(&total_strain, &plastic_strain, material);
+    let (contact_pressure, contact_gap) =
+        recover_contact_state(displacement, load_factor, contact, contact_count);
+    let max_equivalent_plastic_strain = equivalent_plastic_strain
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
+    let plastic_active_element_count = equivalent_plastic_strain
+        .iter()
+        .filter(|value| **value > 0.0)
+        .count();
+    let max_contact_pressure = contact_pressure.iter().copied().fold(0.0_f64, f64::max);
+    let min_contact_gap = contact_gap.iter().copied().fold(f64::INFINITY, f64::min);
+    let contact_active_entity_count = contact_pressure
+        .iter()
+        .zip(contact_gap.iter())
+        .filter(|(pressure, gap)| **pressure > 0.0 || **gap <= 0.0)
+        .count();
+    IncrementState {
+        von_mises,
+        plastic_strain,
+        equivalent_plastic_strain,
+        contact_pressure,
+        contact_gap,
+        max_equivalent_plastic_strain,
+        plastic_active_element_count,
+        max_contact_pressure,
+        min_contact_gap,
+        contact_active_entity_count,
+    }
+}
+
+fn element_count_for_dofs(dof_count: usize) -> usize {
+    dof_count
+        .div_ceil(VECTOR_COMPONENT_COUNT)
+        .saturating_sub(1)
+        .max(1)
+}
+
+fn recover_increment_strain(displacement: &[f64], element_count: usize) -> Vec<f64> {
+    let mut padded = displacement.to_vec();
+    padded.resize((element_count + 1) * VECTOR_COMPONENT_COUNT, 0.0);
+    let mut strain = vec![0.0; element_count * TENSOR_COMPONENT_COUNT];
+    for element_index in 0..element_count {
+        let base = element_index * VECTOR_COMPONENT_COUNT;
+        let next = (element_index + 1) * VECTOR_COMPONENT_COUNT;
+        let offset = element_index * TENSOR_COMPONENT_COUNT;
+        for component in 0..VECTOR_COMPONENT_COUNT {
+            strain[offset + component] = padded[next + component] - padded[base + component];
+        }
+        strain[offset + 3] = 0.5 * (strain[offset] + strain[offset + 1]);
+        strain[offset + 4] = 0.5 * (strain[offset + 1] + strain[offset + 2]);
+        strain[offset + 5] = 0.5 * (strain[offset] + strain[offset + 2]);
+    }
+    strain
+}
+
+fn recover_plastic_strain(
+    total_strain: &[f64],
+    load_factor: f64,
+    plasticity: Option<&FeaPlasticityConstitutiveContext>,
+    shear_modulus_pa: f64,
+) -> Vec<f64> {
+    let Some(plasticity) = plasticity.filter(|context| context.enabled) else {
+        return vec![0.0; total_strain.len()];
+    };
+    let yield_strain = plasticity.yield_strain.max(0.0);
+    let hardening_ratio = plasticity.hardening_modulus_ratio.max(0.0);
+    let saturation = plasticity.saturation_exponent.max(1.0e-9);
+    let hardening_modulus = (hardening_ratio * shear_modulus_pa.max(1.0)).max(0.0);
+    let plastic_modulus_ratio =
+        shear_modulus_pa.max(1.0) / (shear_modulus_pa.max(1.0) + hardening_modulus);
+    let load_scale = load_factor.clamp(0.0, 1.0);
+    total_strain
+        .iter()
+        .map(|strain| {
+            let excess = (strain.abs() - yield_strain).max(0.0);
+            if excess == 0.0 {
+                0.0
+            } else {
+                let saturation_scale = 1.0 - (-saturation * load_scale).exp();
+                strain.signum() * excess * plastic_modulus_ratio * saturation_scale
+            }
+        })
+        .collect()
+}
+
+fn recover_equivalent_plastic_strain(plastic_strain: &[f64]) -> Vec<f64> {
+    plastic_strain
+        .chunks_exact(TENSOR_COMPONENT_COUNT)
+        .map(|tensor| ((2.0 / 3.0) * tensor.iter().map(|value| value * value).sum::<f64>()).sqrt())
+        .collect()
+}
+
+fn recover_von_mises(
+    total_strain: &[f64],
+    plastic_strain: &[f64],
+    material: &crate::assembly::StructuralMaterialSummary,
+) -> Vec<f64> {
+    total_strain
+        .chunks_exact(TENSOR_COMPONENT_COUNT)
+        .zip(plastic_strain.chunks_exact(TENSOR_COMPONENT_COUNT))
+        .map(|(total, plastic)| {
+            let mut elastic = [0.0_f64; TENSOR_COMPONENT_COUNT];
+            for component in 0..TENSOR_COMPONENT_COUNT {
+                elastic[component] = total[component] - plastic[component];
+            }
+            von_mises_from_strain(&elastic, material)
+        })
+        .collect()
+}
+
+fn von_mises_from_strain(
+    strain: &[f64; TENSOR_COMPONENT_COUNT],
+    material: &crate::assembly::StructuralMaterialSummary,
+) -> f64 {
+    let trace = strain[0] + strain[1] + strain[2];
+    let sxx = material.lame_lambda_pa * trace + 2.0 * material.shear_modulus_pa * strain[0];
+    let syy = material.lame_lambda_pa * trace + 2.0 * material.shear_modulus_pa * strain[1];
+    let szz = material.lame_lambda_pa * trace + 2.0 * material.shear_modulus_pa * strain[2];
+    let txy = material.shear_modulus_pa * strain[3];
+    let tyz = material.shear_modulus_pa * strain[4];
+    let txz = material.shear_modulus_pa * strain[5];
+    (0.5 * ((sxx - syy).powi(2) + (syy - szz).powi(2) + (szz - sxx).powi(2))
+        + 3.0 * (txy.powi(2) + tyz.powi(2) + txz.powi(2)))
+    .sqrt()
+}
+
+fn recover_contact_state(
+    displacement: &[f64],
+    load_factor: f64,
+    contact: Option<&FeaContactInterfaceContext>,
+    contact_count: usize,
+) -> (Vec<f64>, Vec<f64>) {
+    let Some(contact) = contact.filter(|context| context.enabled) else {
+        return (Vec::new(), Vec::new());
+    };
+    let max_penetration = contact.max_penetration_ratio.max(0.0);
+    let penalty = contact.penalty_stiffness_scale.max(0.0);
+    let peak_displacement = displacement
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    let normal_approach =
+        (peak_displacement * load_factor.clamp(0.0, 1.0)).min(max_penetration * 1.25);
+    let friction_scale = 1.0 + contact.friction_coefficient.max(0.0) * 0.1;
+    let mut pressure = Vec::with_capacity(contact_count);
+    let mut gap = Vec::with_capacity(contact_count);
+    for entity_index in 0..contact_count {
+        let entity_scale = 1.0 + 0.05 * entity_index as f64;
+        let entity_approach = normal_approach / entity_scale;
+        let signed_gap = max_penetration - entity_approach;
+        gap.push(signed_gap);
+        pressure.push(penalty * entity_approach.max(0.0) * friction_scale);
+    }
+    (pressure, gap)
+}
+
+fn contact_entity_count(contact: Option<&FeaContactInterfaceContext>) -> usize {
+    if contact.is_some_and(|context| context.enabled) {
+        1
+    } else {
+        0
     }
 }
 

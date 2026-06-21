@@ -2009,6 +2009,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 saturation_exponent: plastic.saturation_exponent,
             });
         }
+        model.loads = plastic_load_cases_for_fixture(spec_id);
     }
 
     if let Some(contact) = contact_for_fixture(spec_id) {
@@ -2043,6 +2044,42 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             ),
         }];
     }
+}
+
+fn plastic_load_cases_for_fixture(spec_id: &str) -> Vec<runmat_analysis_core::LoadCase> {
+    let peak_force = match spec_id {
+        "nonlinear_plasticity_benchmark_gpu_provider" => 1.2e7,
+        "nonlinear_plastic_hardening_reference_gpu_provider" => 3.0e7,
+        "nonlinear_plastic_hardening_reference_complex_gpu_provider" => 4.2e7,
+        _ => 1.0e7,
+    };
+    vec![
+        runmat_analysis_core::LoadCase {
+            load_id: format!("plastic_axial_drive_{spec_id}"),
+            region_id: "plastic_drive_tip".to_string(),
+            kind: runmat_analysis_core::LoadKind::Force {
+                fx: peak_force,
+                fy: 0.0,
+                fz: 0.0,
+            },
+        },
+        runmat_analysis_core::LoadCase {
+            load_id: format!("plastic_shear_drive_{spec_id}"),
+            region_id: "plastic_drive_web".to_string(),
+            kind: runmat_analysis_core::LoadKind::Force {
+                fx: 0.0,
+                fy: -0.35 * peak_force,
+                fz: 0.12 * peak_force,
+            },
+        },
+        runmat_analysis_core::LoadCase {
+            load_id: format!("plastic_pressure_drive_{spec_id}"),
+            region_id: "plastic_drive_face".to_string(),
+            kind: runmat_analysis_core::LoadKind::Pressure {
+                magnitude_pa: 0.08 * peak_force,
+            },
+        },
+    ]
 }
 
 fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisModel) {
@@ -2492,6 +2529,74 @@ fn push_threshold_assertion(
             fixture_id, name, observed, min_allowed, max_allowed
         ));
     }
+}
+
+fn push_plastic_state_threshold_assertions(
+    fixture_id: &str,
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    run: &AnalysisRunResult,
+    prefix: &str,
+) {
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_active_element_count"),
+        "FEA_NONLINEAR_STATE",
+        diagnostic_metric(run, "FEA_NONLINEAR_STATE", "plastic_active_element_count"),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_max_equivalent_plastic_strain"),
+        "FEA_NONLINEAR_STATE",
+        diagnostic_metric(run, "FEA_NONLINEAR_STATE", "max_equivalent_plastic_strain"),
+        Some(1.0e-12),
+        None,
+    );
+}
+
+fn push_contact_state_threshold_assertions(
+    fixture_id: &str,
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    run: &AnalysisRunResult,
+    prefix: &str,
+) {
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_active_entity_count"),
+        "FEA_NONLINEAR_STATE",
+        diagnostic_metric(run, "FEA_NONLINEAR_STATE", "contact_active_entity_count"),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_max_contact_pressure"),
+        "FEA_NONLINEAR_STATE",
+        diagnostic_metric(run, "FEA_NONLINEAR_STATE", "max_contact_pressure"),
+        Some(1.0e-12),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_min_contact_gap"),
+        "FEA_NONLINEAR_STATE",
+        diagnostic_metric(run, "FEA_NONLINEAR_STATE", "min_contact_gap"),
+        Some(0.0),
+        None,
+    );
 }
 
 fn push_thermal_standalone_threshold_assertions(
@@ -5125,6 +5230,13 @@ pub(super) fn run_fixture(
                             Some(1.51),
                             Some(1.525),
                         );
+                        push_plastic_state_threshold_assertions(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                            "plasticity_nonlinear_state",
+                        );
                     }
                     if spec.id == "nonlinear_plastic_hardening_reference_gpu_provider" {
                         push_threshold_assertion(
@@ -5182,6 +5294,13 @@ pub(super) fn run_fixture(
                             ),
                             Some(1.51),
                             Some(1.525),
+                        );
+                        push_plastic_state_threshold_assertions(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                            "plasticity_hardening_reference_state",
                         );
                     }
                     if spec.id == "nonlinear_plastic_hardening_reference_complex_gpu_provider" {
@@ -5241,6 +5360,13 @@ pub(super) fn run_fixture(
                             Some(1.51),
                             Some(1.525),
                         );
+                        push_plastic_state_threshold_assertions(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                            "plasticity_hardening_reference_complex_state",
+                        );
                     }
                     if spec.id == "nonlinear_contact_benchmark_gpu_provider" {
                         push_threshold_assertion(
@@ -5298,6 +5424,13 @@ pub(super) fn run_fixture(
                             ),
                             Some(1.4),
                             Some(1.42),
+                        );
+                        push_contact_state_threshold_assertions(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                            "contact_nonlinear_state",
                         );
                     }
                     if spec.id == "nonlinear_contact_frictionless_reference_gpu_provider" {
@@ -5357,6 +5490,13 @@ pub(super) fn run_fixture(
                             Some(1.4),
                             Some(1.42),
                         );
+                        push_contact_state_threshold_assertions(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                            "contact_frictionless_state",
+                        );
                     }
                     if spec.id == "nonlinear_contact_frictionless_reference_complex_gpu_provider" {
                         push_threshold_assertion(
@@ -5414,6 +5554,13 @@ pub(super) fn run_fixture(
                             ),
                             Some(1.4),
                             Some(1.42),
+                        );
+                        push_contact_state_threshold_assertions(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                            "contact_frictionless_complex_state",
                         );
                     }
                     if spec.id == "electromagnetic_reference_homogeneous_gpu_provider" {
