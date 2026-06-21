@@ -857,6 +857,9 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "cfd_profile_point_count",
                     "cfd_max_momentum_residual",
                     "cfd_max_continuity_residual",
+                    "cfd_mass_balance_residual",
+                    "cfd_pressure_drop_pa",
+                    "cfd_control_volume_count",
                 },
             ),
             _record(
@@ -870,6 +873,9 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "cfd_profile_point_count",
                     "cfd_max_momentum_residual",
                     "cfd_max_continuity_residual",
+                    "cfd_mass_balance_residual",
+                    "cfd_pressure_drop_pa",
+                    "cfd_control_volume_count",
                 },
             ),
             _record(
@@ -883,6 +889,9 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "cfd_profile_point_count",
                     "cfd_max_momentum_residual",
                     "cfd_max_continuity_residual",
+                    "cfd_mass_balance_residual",
+                    "cfd_pressure_drop_pa",
+                    "cfd_control_volume_count",
                 },
             ),
             _record(

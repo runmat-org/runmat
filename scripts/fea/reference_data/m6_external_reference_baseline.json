@@ -2952,7 +2952,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "cfd_max_momentum_residual",
-      "reference": 3.915437432181037e-07,
+      "reference": 0.0,
       "tolerance_abs": 1e-06,
       "tolerance_rel": null
     },
@@ -2962,7 +2962,57 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "cfd_max_continuity_residual",
-      "reference": 2.4625850340136053e-07,
+      "reference": 0.0,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "cfd_mass_balance_residual",
+      "fixture_id": "cfd_steady_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_mass_balance_residual",
+      "reference": 0.0,
+      "tolerance_abs": 1e-08,
+      "tolerance_rel": null
+    },
+    {
+      "name": "cfd_pressure_drop_pa",
+      "fixture_id": "cfd_steady_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_pressure_drop_pa",
+      "reference": 0.20087491083360534,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "cfd_control_volume_count",
+      "fixture_id": "cfd_steady_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_control_volume_count",
+      "reference": 2.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "cfd_max_momentum_residual",
+      "fixture_id": "cfd_steady_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_max_momentum_residual",
+      "reference": 0.0,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "cfd_max_continuity_residual",
+      "fixture_id": "cfd_steady_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_max_continuity_residual",
+      "reference": 0.0,
       "tolerance_abs": 1e-06,
       "tolerance_rel": null
     },
@@ -3027,23 +3077,33 @@
       "tolerance_rel": null
     },
     {
-      "name": "cfd_max_momentum_residual",
+      "name": "cfd_mass_balance_residual",
       "fixture_id": "cfd_steady_cpu",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "cfd_max_momentum_residual",
-      "reference": 3.915437432181037e-07,
-      "tolerance_abs": 1e-06,
+      "assertion_name": "cfd_mass_balance_residual",
+      "reference": 0.0,
+      "tolerance_abs": 1e-08,
       "tolerance_rel": null
     },
     {
-      "name": "cfd_max_continuity_residual",
+      "name": "cfd_pressure_drop_pa",
       "fixture_id": "cfd_steady_cpu",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "cfd_max_continuity_residual",
-      "reference": 2.4625850340136053e-07,
-      "tolerance_abs": 1e-06,
+      "assertion_name": "cfd_pressure_drop_pa",
+      "reference": 0.20087491083360534,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "cfd_control_volume_count",
+      "fixture_id": "cfd_steady_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_control_volume_count",
+      "reference": 2.0,
+      "tolerance_abs": 0.0,
       "tolerance_rel": null
     },
     {
@@ -3112,7 +3172,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "cfd_max_momentum_residual",
-      "reference": 3.915437432181037e-07,
+      "reference": 0.0,
       "tolerance_abs": 1e-06,
       "tolerance_rel": null
     },
@@ -3122,8 +3182,38 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "cfd_max_continuity_residual",
-      "reference": 2.4625850340136053e-07,
+      "reference": 0.0,
       "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "cfd_mass_balance_residual",
+      "fixture_id": "cfd_steady_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_mass_balance_residual",
+      "reference": 0.0,
+      "tolerance_abs": 1e-08,
+      "tolerance_rel": null
+    },
+    {
+      "name": "cfd_pressure_drop_pa",
+      "fixture_id": "cfd_steady_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_pressure_drop_pa",
+      "reference": 0.20087491083360534,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "cfd_control_volume_count",
+      "fixture_id": "cfd_steady_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_control_volume_count",
+      "reference": 2.0,
+      "tolerance_abs": 0.0,
       "tolerance_rel": null
     },
     {

@@ -4844,11 +4844,11 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
     assert_eq!(envelope.op_version, "fea.run_cfd/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        "cfd_incompressible_projection"
+        "cfd_velocity_pressure_finite_volume"
     );
     assert_eq!(
         envelope.data.provenance.solver_method,
-        "cfd_incompressible_projection"
+        "cfd_velocity_pressure_finite_volume"
     );
     assert!(envelope.data.transient_results.is_none());
     assert!(envelope
@@ -4863,6 +4863,14 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
         diag.code == "FEA_CFD_RESIDUAL"
             && diag.message.contains("max_momentum_residual=")
             && diag.message.contains("max_continuity_residual=")
+    }));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_CFD_ASSEMBLY"
+            && diag
+                .message
+                .contains("basis=finite_volume_velocity_pressure")
+            && diag.message.contains("mass_balance_residual=")
+            && diag.message.contains("pressure_drop_pa=")
     }));
     let results = analysis_results_op(
         &envelope.data,

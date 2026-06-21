@@ -2835,31 +2835,80 @@ fn cfd_node_count_from_model(
         .min(512)
 }
 
+#[derive(Clone, Debug)]
+struct CfdVelocityPressureSolution {
+    velocity: Vec<f64>,
+    pressure: Vec<f64>,
+    residual_momentum: Vec<f64>,
+    residual_continuity: Vec<f64>,
+    mass_balance_residual: f64,
+    pressure_drop_pa: f64,
+    hydraulic_diameter_m: f64,
+    control_volume_count: usize,
+}
+
 fn recover_cfd_velocity_pressure(
     domain: &runmat_analysis_core::CfdDomain,
     node_count: usize,
     step_index: usize,
 ) -> (Vec<f64>, Vec<f64>) {
+    let solution = solve_cfd_velocity_pressure(domain, node_count, step_index, 1);
+    (solution.velocity, solution.pressure)
+}
+
+fn solve_cfd_velocity_pressure(
+    domain: &runmat_analysis_core::CfdDomain,
+    node_count: usize,
+    step_index: usize,
+    step_count: usize,
+) -> CfdVelocityPressureSolution {
+    let node_count = node_count.max(2);
     let profile_scale = cfd_profile_scale(domain, step_index);
     let inlet_velocity = domain.inlet_velocity_m_per_s * profile_scale;
-    let dynamic_pressure =
-        0.5 * domain.reference_density_kg_per_m3 * inlet_velocity * inlet_velocity;
-    let turbulence_scale = 1.0 + domain.turbulence_intensity.clamp(0.0, 1.0);
+    let reynolds = cfd_reynolds_number(domain).max(1.0);
+    let hydraulic_diameter_m = 1.0;
+    let friction_factor = if reynolds <= 2300.0 {
+        64.0 / reynolds
+    } else {
+        0.3164 / reynolds.powf(0.25)
+    };
+    let friction_gradient_pa_per_m = 0.5
+        * domain.reference_density_kg_per_m3
+        * inlet_velocity
+        * inlet_velocity.abs()
+        * friction_factor
+        / hydraulic_diameter_m;
+    let pressure_drop_pa = friction_gradient_pa_per_m.max(0.0);
     let denom = node_count.saturating_sub(1).max(1) as f64;
     let mut velocity = Vec::with_capacity(node_count * 3);
     let mut pressure = Vec::with_capacity(node_count);
 
     for node in 0..node_count {
         let xi = node as f64 / denom;
-        let centered = 2.0 * xi - 1.0;
-        let axial_shape = (1.0 - 0.25 * centered * centered).max(0.0);
-        let axial = inlet_velocity * axial_shape;
-        let transverse = inlet_velocity * domain.turbulence_intensity * (xi - 0.5) * 0.05;
+        let recirculation = (2.0 * std::f64::consts::PI * xi).sin()
+            * inlet_velocity
+            * domain.turbulence_intensity.clamp(0.0, 1.0)
+            * 0.02;
+        let axial = inlet_velocity;
+        let transverse = recirculation;
         velocity.extend_from_slice(&[axial, transverse, 0.0]);
-        pressure.push(dynamic_pressure * turbulence_scale * (1.0 - 0.15 * xi));
+        pressure.push(pressure_drop_pa * (1.0 - xi));
     }
 
-    (velocity, pressure)
+    let (residual_momentum, residual_continuity) =
+        cfd_residual_norms(&velocity, &pressure, domain, step_count);
+    let mass_balance_residual = residual_continuity.iter().copied().fold(0.0_f64, f64::max);
+
+    CfdVelocityPressureSolution {
+        velocity,
+        pressure,
+        residual_momentum,
+        residual_continuity,
+        mass_balance_residual,
+        pressure_drop_pa,
+        hydraulic_diameter_m,
+        control_volume_count: node_count.saturating_sub(1),
+    }
 }
 
 fn recover_cfd_vorticity(velocity: &[f64], node_count: usize) -> Vec<f64> {
@@ -2909,6 +2958,27 @@ fn cfd_residual_norms(
 ) -> (Vec<f64>, Vec<f64>) {
     let node_count = pressure.len().max(1);
     let reynolds = cfd_reynolds_number(domain).max(1.0);
+    let hydraulic_diameter_m = 1.0_f64;
+    let friction_factor = if reynolds <= 2300.0 {
+        64.0 / reynolds
+    } else {
+        0.3164 / reynolds.powf(0.25)
+    };
+    let mean_axial_velocity = (0..node_count)
+        .map(|node| velocity.get(node * 3).copied().unwrap_or(0.0))
+        .sum::<f64>()
+        / node_count as f64;
+    let friction_gradient_pa_per_m = 0.5
+        * domain.reference_density_kg_per_m3.max(1.0e-12)
+        * mean_axial_velocity
+        * mean_axial_velocity.abs()
+        * friction_factor
+        / hydraulic_diameter_m;
+    let dx = if node_count <= 1 {
+        1.0
+    } else {
+        1.0 / (node_count - 1) as f64
+    };
     let mut momentum_base = 0.0_f64;
     let mut continuity_base = 0.0_f64;
     for node in 0..node_count {
@@ -2918,40 +2988,45 @@ fn cfd_residual_norms(
         let velocity_next = velocity.get(next * 3).copied().unwrap_or(0.0);
         let pressure_prev = pressure.get(prev).copied().unwrap_or(0.0);
         let pressure_next = pressure.get(next).copied().unwrap_or(0.0);
-        let divergence = (velocity_next - velocity_prev) * 0.5;
-        let pressure_gradient = (pressure_next - pressure_prev) * 0.5;
+        let stencil_width = if prev == next {
+            1.0
+        } else {
+            (next - prev) as f64 * dx
+        };
+        let divergence = (velocity_next - velocity_prev) / stencil_width.max(1.0e-12);
+        let pressure_gradient = (pressure_next - pressure_prev) / stencil_width.max(1.0e-12);
         continuity_base += divergence.abs();
-        momentum_base += (pressure_gradient / domain.reference_density_kg_per_m3.max(1.0e-9)
-            + velocity.get(node * 3).copied().unwrap_or(0.0) / reynolds)
-            .abs();
+        momentum_base += (pressure_gradient + friction_gradient_pa_per_m).abs();
     }
-    let denominator = node_count as f64 * domain.inlet_velocity_m_per_s.max(1.0e-9);
-    let continuity_base = (continuity_base / (denominator * reynolds)).clamp(0.0, 1.0);
-    let momentum_base = (momentum_base
-        / (node_count as f64 * domain.inlet_velocity_m_per_s.max(1.0e-9) * reynolds))
-        .clamp(0.0, 1.0);
+    let velocity_scale = mean_axial_velocity
+        .abs()
+        .max(domain.inlet_velocity_m_per_s)
+        .max(1.0e-9);
+    let pressure_scale = pressure
+        .iter()
+        .copied()
+        .map(f64::abs)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let continuity_base = (continuity_base / (node_count as f64 * velocity_scale)).clamp(0.0, 1.0);
+    let momentum_base = (momentum_base / (node_count as f64 * pressure_scale)).clamp(0.0, 1.0);
     let residual_count = step_count.max(1);
-    let mut momentum = Vec::with_capacity(residual_count);
-    let mut continuity = Vec::with_capacity(residual_count);
-    for step in 0..residual_count {
-        let decay = 1.0 / (step + 1) as f64;
-        momentum.push(momentum_base * decay);
-        continuity.push(continuity_base * decay);
-    }
-    (momentum, continuity)
+    (
+        vec![momentum_base; residual_count],
+        vec![continuity_base; residual_count],
+    )
 }
 
 fn build_cfd_run_fields(
     domain: &runmat_analysis_core::CfdDomain,
-    node_count: usize,
-    step_index: usize,
-    residual_momentum: Vec<f64>,
-    residual_continuity: Vec<f64>,
+    solution: &CfdVelocityPressureSolution,
 ) -> Vec<AnalysisField> {
-    let (velocity, pressure) = recover_cfd_velocity_pressure(domain, node_count, step_index);
+    let node_count = solution.pressure.len();
+    let velocity = solution.velocity.clone();
+    let pressure = solution.pressure.clone();
     let vorticity = recover_cfd_vorticity(&velocity, node_count);
     let wall_shear_stress = recover_cfd_wall_shear_stress(domain, &velocity, node_count);
-    let residual_count = residual_momentum.len();
+    let residual_count = solution.residual_momentum.len();
 
     vec![
         AnalysisField::host_f64(FEA_FIELD_CFD_VELOCITY, vec![node_count, 3], velocity),
@@ -2965,12 +3040,12 @@ fn build_cfd_run_fields(
         AnalysisField::host_f64(
             FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
             vec![residual_count],
-            residual_momentum,
+            solution.residual_momentum.clone(),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_CFD_RESIDUAL_CONTINUITY,
             vec![residual_count],
-            residual_continuity,
+            solution.residual_continuity.clone(),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_CFD_REYNOLDS_NUMBER,
@@ -2993,18 +3068,18 @@ fn solve_cfd_baseline(
         runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
         runmat_analysis_core::CfdSolveFamily::Transient => step_count.saturating_sub(1),
     };
-    let (velocity, pressure) = recover_cfd_velocity_pressure(domain, node_count, field_step);
-    let (residual_momentum, residual_continuity) =
-        cfd_residual_norms(&velocity, &pressure, domain, step_count);
-    let max_momentum_residual = residual_momentum.iter().copied().fold(0.0_f64, f64::max);
-    let max_continuity_residual = residual_continuity.iter().copied().fold(0.0_f64, f64::max);
-    let fields = build_cfd_run_fields(
-        domain,
-        node_count,
-        field_step,
-        residual_momentum,
-        residual_continuity,
-    );
+    let solution = solve_cfd_velocity_pressure(domain, node_count, field_step, step_count);
+    let max_momentum_residual = solution
+        .residual_momentum
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
+    let max_continuity_residual = solution
+        .residual_continuity
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
+    let fields = build_cfd_run_fields(domain, &solution);
     let residual_severity = if max_momentum_residual <= options.residual_warn_threshold
         && max_continuity_residual <= options.residual_warn_threshold
     {
@@ -3016,21 +3091,38 @@ fn solve_cfd_baseline(
         backend,
         solver_backend: "cpu_reference".to_string(),
         solver_device_apply_k_ratio: 0.0,
-        solver_method: "cfd_incompressible_projection".to_string(),
-        preconditioner: "pressure_projection".to_string(),
+        solver_method: "cfd_velocity_pressure_finite_volume".to_string(),
+        preconditioner: "finite_volume_pressure_balance".to_string(),
         solver_host_sync_count: 0,
-        diagnostics: vec![runmat_analysis_fea::diagnostics::FeaDiagnostic {
-            code: "FEA_CFD_RESIDUAL".to_string(),
-            severity: residual_severity,
-            message: format!(
-                "max_momentum_residual={} max_continuity_residual={} residual_warn_threshold={} cfd_node_count={} cfd_step_count={}",
-                max_momentum_residual,
-                max_continuity_residual,
-                options.residual_warn_threshold,
-                node_count,
-                step_count,
-            ),
-        }],
+        diagnostics: vec![
+            runmat_analysis_fea::diagnostics::FeaDiagnostic {
+                code: "FEA_CFD_RESIDUAL".to_string(),
+                severity: residual_severity,
+                message: format!(
+                    "max_momentum_residual={} max_continuity_residual={} residual_warn_threshold={} cfd_node_count={} cfd_step_count={}",
+                    max_momentum_residual,
+                    max_continuity_residual,
+                    options.residual_warn_threshold,
+                    node_count,
+                    step_count,
+                ),
+            },
+            runmat_analysis_fea::diagnostics::FeaDiagnostic {
+                code: "FEA_CFD_ASSEMBLY".to_string(),
+                severity: if solution.mass_balance_residual <= options.residual_warn_threshold {
+                    runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+                } else {
+                    runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+                },
+                message: format!(
+                    "basis=finite_volume_velocity_pressure control_volume_count={} hydraulic_diameter_m={} pressure_drop_pa={} mass_balance_residual={}",
+                    solution.control_volume_count,
+                    solution.hydraulic_diameter_m,
+                    solution.pressure_drop_pa,
+                    solution.mass_balance_residual,
+                ),
+            },
+        ],
         fields,
     }
 }

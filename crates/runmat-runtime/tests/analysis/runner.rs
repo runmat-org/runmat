@@ -3541,6 +3541,44 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-4),
             );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_mass_balance_residual",
+                "FEA_CFD_ASSEMBLY",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_ASSEMBLY",
+                    "mass_balance_residual",
+                ),
+                Some(0.0),
+                Some(1.0e-8),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_pressure_drop_pa",
+                "FEA_CFD_ASSEMBLY",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_ASSEMBLY", "pressure_drop_pa"),
+                Some(0.1),
+                Some(10.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_control_volume_count",
+                "FEA_CFD_ASSEMBLY",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_ASSEMBLY",
+                    "control_volume_count",
+                ),
+                Some(2.0),
+                None,
+            );
         }
         if spec.id.starts_with("cht_coupled_") {
             push_threshold_assertion(

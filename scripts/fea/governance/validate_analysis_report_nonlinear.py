@@ -483,6 +483,9 @@ REQUIRED_FIXTURES = {
         "cfd_profile_point_count",
         "cfd_max_momentum_residual",
         "cfd_max_continuity_residual",
+        "cfd_mass_balance_residual",
+        "cfd_pressure_drop_pa",
+        "cfd_control_volume_count",
     },
     "cfd_steady_cpu": {
         "cfd_reference_density_kg_per_m3",
@@ -493,6 +496,9 @@ REQUIRED_FIXTURES = {
         "cfd_profile_point_count",
         "cfd_max_momentum_residual",
         "cfd_max_continuity_residual",
+        "cfd_mass_balance_residual",
+        "cfd_pressure_drop_pa",
+        "cfd_control_volume_count",
     },
     "cfd_steady_gpu_fallback": {
         "cfd_reference_density_kg_per_m3",
@@ -503,6 +509,9 @@ REQUIRED_FIXTURES = {
         "cfd_profile_point_count",
         "cfd_max_momentum_residual",
         "cfd_max_continuity_residual",
+        "cfd_mass_balance_residual",
+        "cfd_pressure_drop_pa",
+        "cfd_control_volume_count",
     },
     "cht_coupled_gpu_provider": {
         "cht_reference_density_kg_per_m3",
