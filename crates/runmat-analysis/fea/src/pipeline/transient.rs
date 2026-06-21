@@ -11,6 +11,7 @@ use crate::{
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     operator::{apply_k_unconstrained, apply_m},
+    pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::transient::{solve_transient_system, TransientSolveOptions},
 };
@@ -237,7 +238,8 @@ pub fn run_transient_with_options(
         })
         .collect::<Vec<_>>();
     let residual_norm_snapshots = residual_norm_values
-        .into_iter()
+        .iter()
+        .copied()
         .enumerate()
         .map(|(index, value)| {
             AnalysisField::host_f64(
@@ -247,6 +249,14 @@ pub fn run_transient_with_options(
             )
         })
         .collect::<Vec<_>>();
+    let thermo_mechanical_fields = recover_thermo_mechanical_snapshots(
+        summary.thermo_mechanical.as_ref(),
+        &normalized_time_factors(&transient.time_points_s, displacement_snapshots.len()),
+        &displacement_snapshots,
+        &von_mises_snapshots,
+        &residual_norm_values,
+        element_count_for_dofs(summary.dof_count),
+    );
 
     emit_phase(
         "fea.run_transient",
@@ -276,8 +286,38 @@ pub fn run_transient_with_options(
         kinetic_energy_snapshots,
         strain_energy_snapshots,
         residual_norm_snapshots,
+        thermo_mechanical_temperature_snapshots: thermo_mechanical_fields.temperature_snapshots,
+        thermo_mechanical_thermal_strain_snapshots: thermo_mechanical_fields
+            .thermal_strain_snapshots,
+        thermo_mechanical_thermal_stress_snapshots: thermo_mechanical_fields
+            .thermal_stress_snapshots,
+        thermo_mechanical_displacement_snapshots: thermo_mechanical_fields.displacement_snapshots,
+        thermo_mechanical_von_mises_snapshots: thermo_mechanical_fields.von_mises_snapshots,
+        thermo_mechanical_coupling_residual_snapshots: thermo_mechanical_fields
+            .coupling_residual_snapshots,
         residual_norms: transient.residual_norms,
     })
+}
+
+fn normalized_time_factors(time_points_s: &[f64], snapshot_count: usize) -> Vec<f64> {
+    if snapshot_count == 0 {
+        return Vec::new();
+    }
+    let end_time = time_points_s
+        .last()
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or((snapshot_count.saturating_sub(1)).max(1) as f64);
+    (0..snapshot_count)
+        .map(|index| {
+            time_points_s
+                .get(index)
+                .copied()
+                .unwrap_or(index as f64)
+                .clamp(0.0, end_time)
+                / end_time
+        })
+        .collect()
 }
 
 fn recover_velocity_snapshots(
@@ -407,6 +447,10 @@ fn vector_shape(dof_count: usize) -> Vec<usize> {
         dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1),
         VECTOR_COMPONENT_COUNT,
     ]
+}
+
+fn element_count_for_dofs(dof_count: usize) -> usize {
+    dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1)
 }
 
 fn padded_vector_values(mut values: Vec<f64>, dof_count: usize) -> Vec<f64> {

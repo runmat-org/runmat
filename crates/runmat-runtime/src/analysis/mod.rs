@@ -2910,6 +2910,18 @@ pub fn analysis_run_cfd_with_options_op(
             kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
             strain_energy_snapshots: transient_run.strain_energy_snapshots,
             residual_norm_snapshots: transient_run.residual_norm_snapshots,
+            thermo_mechanical_temperature_snapshots: transient_run
+                .thermo_mechanical_temperature_snapshots,
+            thermo_mechanical_thermal_strain_snapshots: transient_run
+                .thermo_mechanical_thermal_strain_snapshots,
+            thermo_mechanical_thermal_stress_snapshots: transient_run
+                .thermo_mechanical_thermal_stress_snapshots,
+            thermo_mechanical_displacement_snapshots: transient_run
+                .thermo_mechanical_displacement_snapshots,
+            thermo_mechanical_von_mises_snapshots: transient_run
+                .thermo_mechanical_von_mises_snapshots,
+            thermo_mechanical_coupling_residual_snapshots: transient_run
+                .thermo_mechanical_coupling_residual_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -3475,6 +3487,18 @@ pub fn analysis_run_cht_with_options_op(
             kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
             strain_energy_snapshots: transient_run.strain_energy_snapshots,
             residual_norm_snapshots: transient_run.residual_norm_snapshots,
+            thermo_mechanical_temperature_snapshots: transient_run
+                .thermo_mechanical_temperature_snapshots,
+            thermo_mechanical_thermal_strain_snapshots: transient_run
+                .thermo_mechanical_thermal_strain_snapshots,
+            thermo_mechanical_thermal_stress_snapshots: transient_run
+                .thermo_mechanical_thermal_stress_snapshots,
+            thermo_mechanical_displacement_snapshots: transient_run
+                .thermo_mechanical_displacement_snapshots,
+            thermo_mechanical_von_mises_snapshots: transient_run
+                .thermo_mechanical_von_mises_snapshots,
+            thermo_mechanical_coupling_residual_snapshots: transient_run
+                .thermo_mechanical_coupling_residual_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -3939,6 +3963,18 @@ pub fn analysis_run_fsi_with_options_op(
             kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
             strain_energy_snapshots: transient_run.strain_energy_snapshots,
             residual_norm_snapshots: transient_run.residual_norm_snapshots,
+            thermo_mechanical_temperature_snapshots: transient_run
+                .thermo_mechanical_temperature_snapshots,
+            thermo_mechanical_thermal_strain_snapshots: transient_run
+                .thermo_mechanical_thermal_strain_snapshots,
+            thermo_mechanical_thermal_stress_snapshots: transient_run
+                .thermo_mechanical_thermal_stress_snapshots,
+            thermo_mechanical_displacement_snapshots: transient_run
+                .thermo_mechanical_displacement_snapshots,
+            thermo_mechanical_von_mises_snapshots: transient_run
+                .thermo_mechanical_von_mises_snapshots,
+            thermo_mechanical_coupling_residual_snapshots: transient_run
+                .thermo_mechanical_coupling_residual_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -4602,6 +4638,18 @@ pub fn analysis_run_transient_with_options_op(
             kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
             strain_energy_snapshots: transient_run.strain_energy_snapshots,
             residual_norm_snapshots: transient_run.residual_norm_snapshots,
+            thermo_mechanical_temperature_snapshots: transient_run
+                .thermo_mechanical_temperature_snapshots,
+            thermo_mechanical_thermal_strain_snapshots: transient_run
+                .thermo_mechanical_thermal_strain_snapshots,
+            thermo_mechanical_thermal_stress_snapshots: transient_run
+                .thermo_mechanical_thermal_stress_snapshots,
+            thermo_mechanical_displacement_snapshots: transient_run
+                .thermo_mechanical_displacement_snapshots,
+            thermo_mechanical_von_mises_snapshots: transient_run
+                .thermo_mechanical_von_mises_snapshots,
+            thermo_mechanical_coupling_residual_snapshots: transient_run
+                .thermo_mechanical_coupling_residual_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -6412,6 +6460,24 @@ fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<Analysi
         for field in &transient.residual_norm_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
+        for field in &transient.thermo_mechanical_temperature_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.thermo_mechanical_thermal_strain_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.thermo_mechanical_thermal_stress_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.thermo_mechanical_displacement_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.thermo_mechanical_von_mises_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.thermo_mechanical_coupling_residual_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
     }
 
     if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
@@ -6480,6 +6546,19 @@ fn push_analysis_result_field(
         return;
     }
     fields.push(field.clone());
+}
+
+fn filter_analysis_fields_by_indices(
+    fields: &[AnalysisField],
+    indices: &[usize],
+) -> Vec<AnalysisField> {
+    if fields.is_empty() {
+        return Vec::new();
+    }
+    indices
+        .iter()
+        .filter_map(|index| fields.get(*index).cloned())
+        .collect()
 }
 
 pub(crate) fn analysis_run_field_ids(run_result: &AnalysisRunResult) -> Vec<String> {
@@ -7305,6 +7384,31 @@ pub fn analysis_results_op(
                 let mut residual_norm_snapshots =
                     Vec::with_capacity(query.transient_snapshot_indices.len());
                 let mut residual_norms = Vec::with_capacity(query.transient_snapshot_indices.len());
+                let thermo_mechanical_temperature_snapshots = filter_analysis_fields_by_indices(
+                    &transient.thermo_mechanical_temperature_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let thermo_mechanical_thermal_strain_snapshots = filter_analysis_fields_by_indices(
+                    &transient.thermo_mechanical_thermal_strain_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let thermo_mechanical_thermal_stress_snapshots = filter_analysis_fields_by_indices(
+                    &transient.thermo_mechanical_thermal_stress_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let thermo_mechanical_displacement_snapshots = filter_analysis_fields_by_indices(
+                    &transient.thermo_mechanical_displacement_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let thermo_mechanical_von_mises_snapshots = filter_analysis_fields_by_indices(
+                    &transient.thermo_mechanical_von_mises_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let thermo_mechanical_coupling_residual_snapshots =
+                    filter_analysis_fields_by_indices(
+                        &transient.thermo_mechanical_coupling_residual_snapshots,
+                        &query.transient_snapshot_indices,
+                    );
 
                 for &index in &query.transient_snapshot_indices {
                     let time_point = transient.time_points_s.get(index).copied().ok_or_else(|| {
@@ -7571,6 +7675,12 @@ pub fn analysis_results_op(
                     kinetic_energy_snapshots,
                     strain_energy_snapshots,
                     residual_norm_snapshots,
+                    thermo_mechanical_temperature_snapshots,
+                    thermo_mechanical_thermal_strain_snapshots,
+                    thermo_mechanical_thermal_stress_snapshots,
+                    thermo_mechanical_displacement_snapshots,
+                    thermo_mechanical_von_mises_snapshots,
+                    thermo_mechanical_coupling_residual_snapshots,
                     residual_norms,
                     integration_method: transient.integration_method,
                 })

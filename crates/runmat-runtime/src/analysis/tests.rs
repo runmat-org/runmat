@@ -5206,6 +5206,77 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         .quality_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::ThermoMechanicalTransientStress));
+
+    let transient = run
+        .data
+        .transient_results
+        .as_ref()
+        .expect("transient results should be present");
+    assert_eq!(
+        transient.thermo_mechanical_temperature_snapshots.len(),
+        transient.time_points_s.len()
+    );
+    assert_eq!(
+        transient.thermo_mechanical_thermal_strain_snapshots.len(),
+        transient.time_points_s.len()
+    );
+    assert_eq!(
+        transient.thermo_mechanical_thermal_stress_snapshots.len(),
+        transient.time_points_s.len()
+    );
+    assert_eq!(
+        transient.thermo_mechanical_displacement_snapshots.len(),
+        transient.time_points_s.len()
+    );
+    assert_eq!(
+        transient.thermo_mechanical_von_mises_snapshots.len(),
+        transient.time_points_s.len()
+    );
+    assert_eq!(
+        transient
+            .thermo_mechanical_coupling_residual_snapshots
+            .len(),
+        transient.time_points_s.len()
+    );
+    assert_eq!(
+        transient.thermo_mechanical_temperature_snapshots[0].field_id,
+        fea_thermo_mechanical_temperature_field_id(0)
+    );
+    assert_eq!(
+        transient.thermo_mechanical_thermal_strain_snapshots[0].field_id,
+        fea_thermo_mechanical_thermal_strain_field_id(0)
+    );
+    assert_eq!(
+        transient.thermo_mechanical_thermal_stress_snapshots[0].field_id,
+        fea_thermo_mechanical_thermal_stress_field_id(0)
+    );
+    assert_eq!(
+        transient.thermo_mechanical_displacement_snapshots[0].field_id,
+        fea_thermo_mechanical_displacement_field_id(0)
+    );
+    assert_eq!(
+        transient.thermo_mechanical_von_mises_snapshots[0].field_id,
+        fea_thermo_mechanical_von_mises_field_id(0)
+    );
+    assert_eq!(
+        transient.thermo_mechanical_coupling_residual_snapshots[0].field_id,
+        fea_thermo_mechanical_coupling_residual_field_id(0)
+    );
+
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("thermo-mechanical transient results should be queryable");
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == fea_thermo_mechanical_temperature_field_id(0)));
+    assert!(results.data.field_descriptors.iter().any(|descriptor| {
+        descriptor.field_id == fea_thermo_mechanical_coupling_residual_field_id(0)
+    }));
 }
 
 #[test]

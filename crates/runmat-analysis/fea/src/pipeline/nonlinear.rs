@@ -1,21 +1,18 @@
 use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 
 use crate::{
-    assembly::{assemble_linear_system, ThermoMechanicalAssemblySummary},
+    assembly::assemble_linear_system,
     contracts::{
         fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
         fea_nonlinear_displacement_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
         fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
-        fea_nonlinear_residual_norm_field_id, fea_nonlinear_von_mises_field_id,
-        fea_thermo_mechanical_coupling_residual_field_id,
-        fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
-        fea_thermo_mechanical_thermal_strain_field_id,
-        fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
-        ComputeBackend, FeaContactInterfaceContext, FeaNonlinearRunResult,
-        FeaPlasticityConstitutiveContext, FeaRunError, FeaRunResult,
-        FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
+        fea_nonlinear_residual_norm_field_id, fea_nonlinear_von_mises_field_id, ComputeBackend,
+        FeaContactInterfaceContext, FeaNonlinearRunResult, FeaPlasticityConstitutiveContext,
+        FeaRunError, FeaRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
+    pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::nonlinear::{solve_nonlinear_system, NonlinearSolveOptions},
 };
@@ -330,100 +327,6 @@ pub fn run_nonlinear_with_options(
         convergence_stall_count: nonlinear.convergence_stall_count,
         backtrack_burst_count: nonlinear.backtrack_burst_count,
     })
-}
-
-#[derive(Default)]
-struct ThermoMechanicalSnapshotFields {
-    temperature_snapshots: Vec<AnalysisField>,
-    thermal_strain_snapshots: Vec<AnalysisField>,
-    thermal_stress_snapshots: Vec<AnalysisField>,
-    displacement_snapshots: Vec<AnalysisField>,
-    von_mises_snapshots: Vec<AnalysisField>,
-    coupling_residual_snapshots: Vec<AnalysisField>,
-}
-
-fn recover_thermo_mechanical_snapshots(
-    summary: Option<&ThermoMechanicalAssemblySummary>,
-    load_factors: &[f64],
-    displacement_snapshots: &[AnalysisField],
-    von_mises_snapshots: &[AnalysisField],
-    residual_norms: &[f64],
-    element_count: usize,
-) -> ThermoMechanicalSnapshotFields {
-    let Some(summary) = summary.filter(|summary| summary.enabled) else {
-        return ThermoMechanicalSnapshotFields::default();
-    };
-
-    let mut fields = ThermoMechanicalSnapshotFields {
-        temperature_snapshots: Vec::with_capacity(load_factors.len()),
-        thermal_strain_snapshots: Vec::with_capacity(load_factors.len()),
-        thermal_stress_snapshots: Vec::with_capacity(load_factors.len()),
-        displacement_snapshots: Vec::with_capacity(load_factors.len()),
-        von_mises_snapshots: Vec::with_capacity(load_factors.len()),
-        coupling_residual_snapshots: Vec::with_capacity(load_factors.len()),
-    };
-
-    for (index, load_factor) in load_factors.iter().copied().enumerate() {
-        let temperature =
-            summary.reference_temperature_k + summary.applied_temperature_delta_k * load_factor;
-        fields.temperature_snapshots.push(AnalysisField::host_f64(
-            fea_thermo_mechanical_temperature_field_id(index),
-            vec![1],
-            vec![temperature],
-        ));
-
-        let strain_value = summary.thermal_strain_scale * load_factor;
-        let mut thermal_strain = vec![0.0; element_count * TENSOR_COMPONENT_COUNT];
-        let mut thermal_stress = vec![0.0; element_count * TENSOR_COMPONENT_COUNT];
-        for element in 0..element_count {
-            let base = element * TENSOR_COMPONENT_COUNT;
-            for component in 0..3 {
-                thermal_strain[base + component] = strain_value;
-                thermal_stress[base + component] =
-                    strain_value * summary.effective_modulus_scale * 1.0e9;
-            }
-        }
-        fields
-            .thermal_strain_snapshots
-            .push(AnalysisField::host_f64(
-                fea_thermo_mechanical_thermal_strain_field_id(index),
-                vec![element_count, TENSOR_COMPONENT_COUNT],
-                thermal_strain,
-            ));
-        fields
-            .thermal_stress_snapshots
-            .push(AnalysisField::host_f64(
-                fea_thermo_mechanical_thermal_stress_field_id(index),
-                vec![element_count, TENSOR_COMPONENT_COUNT],
-                thermal_stress,
-            ));
-
-        if let Some(displacement) = displacement_snapshots.get(index) {
-            let mut field = displacement.clone();
-            field.field_id = fea_thermo_mechanical_displacement_field_id(index);
-            fields.displacement_snapshots.push(field);
-        }
-        if let Some(von_mises) = von_mises_snapshots.get(index) {
-            let mut field = von_mises.clone();
-            field.field_id = fea_thermo_mechanical_von_mises_field_id(index);
-            fields.von_mises_snapshots.push(field);
-        }
-
-        let residual = residual_norms.get(index).copied().unwrap_or(f64::INFINITY)
-            * (1.0
-                + summary.spatial_gradient_index
-                + summary.temporal_profile_variation
-                + summary.assignment_heterogeneity_index);
-        fields
-            .coupling_residual_snapshots
-            .push(AnalysisField::host_f64(
-                fea_thermo_mechanical_coupling_residual_field_id(index),
-                vec![1],
-                vec![residual],
-            ));
-    }
-
-    fields
 }
 
 fn element_count_for_dofs(dof_count: usize) -> usize {
