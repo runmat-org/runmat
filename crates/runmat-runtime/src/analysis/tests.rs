@@ -162,6 +162,33 @@ fn sample_cfd_domain(
     }
 }
 
+fn sample_cfd_boundary_conditions(inlet_velocity_m_per_s: f64) -> Vec<BoundaryCondition> {
+    vec![
+        BoundaryCondition {
+            bc_id: "bc_cfd_inlet".to_string(),
+            region_id: "fluid_inlet".to_string(),
+            kind: BoundaryConditionKind::CfdInletVelocity {
+                velocity_m_per_s: inlet_velocity_m_per_s,
+            },
+        },
+        BoundaryCondition {
+            bc_id: "bc_cfd_outlet".to_string(),
+            region_id: "fluid_outlet".to_string(),
+            kind: BoundaryConditionKind::CfdOutletPressure { pressure_pa: 0.0 },
+        },
+        BoundaryCondition {
+            bc_id: "bc_cfd_wall_upper".to_string(),
+            region_id: "fluid_wall_upper".to_string(),
+            kind: BoundaryConditionKind::CfdNoSlipWall,
+        },
+        BoundaryCondition {
+            bc_id: "bc_cfd_wall_lower".to_string(),
+            region_id: "fluid_wall_lower".to_string(),
+            kind: BoundaryConditionKind::CfdNoSlipWall,
+        },
+    ]
+}
+
 fn sample_cht_model() -> AnalysisModel {
     let mut model = sample_model();
     model.steps = vec![
@@ -5146,6 +5173,7 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.steps[0].kind = AnalysisStepKind::Cfd;
+    model.boundary_conditions = sample_cfd_boundary_conditions(4.25);
     model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
 
     let envelope = analysis_run_cfd_with_options_op(
@@ -5185,6 +5213,7 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_CFD_FLOW"
+            && diag.message.contains("inlet_velocity=4.25")
             && diag.message.contains("reynolds_number=")
             && diag.message.contains("solve_family=steady_state")));
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
@@ -5202,10 +5231,14 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
     }));
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_CFD_BOUNDARY_CONDITIONS"
-            && diag.message.contains("inlet_boundary_count=")
-            && diag.message.contains("outlet_boundary_count=")
-            && diag.message.contains("wall_boundary_count=")
-            && diag.message.contains("boundary_coverage_ratio=")
+            && diag.message.contains("boundary_source=authored")
+            && diag.message.contains("authored_boundary_count=4")
+            && diag.message.contains("inlet_boundary_count=1")
+            && diag.message.contains("outlet_boundary_count=1")
+            && diag.message.contains("wall_boundary_count=2")
+            && diag.message.contains("no_slip_wall_boundary_count=2")
+            && diag.message.contains("boundary_coverage_ratio=1")
+            && diag.message.contains("nominal_inlet_velocity_m_per_s=4.25")
     }));
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_CFD_TRANSIENT_EVOLUTION"
@@ -5240,6 +5273,32 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
         .field_descriptors
         .iter()
         .any(|descriptor| descriptor.field_id == FEA_FIELD_CFD_REYNOLDS_NUMBER));
+}
+
+#[test]
+fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps[0].kind = AnalysisStepKind::Cfd;
+    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
+    model.boundary_conditions = vec![BoundaryCondition {
+        bc_id: "bc_cfd_inlet_only".to_string(),
+        region_id: "fluid_inlet".to_string(),
+        kind: BoundaryConditionKind::CfdInletVelocity {
+            velocity_m_per_s: 4.25,
+        },
+    }];
+
+    let err = analysis_run_cfd_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("partial authored cfd boundaries should fail validation");
+
+    assert_eq!(err.operation, "fea.run_cfd");
+    assert_eq!(err.op_version, "fea.run_cfd/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_BOUNDARY_CONDITIONS");
 }
 
 #[test]

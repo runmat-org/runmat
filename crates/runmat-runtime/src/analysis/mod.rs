@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
+use std::time::Instant;
 
 use chrono::Utc;
 use runmat_analysis_core::{
@@ -864,6 +865,44 @@ pub fn analysis_create_model_op(
         _ => None,
     };
 
+    let mut boundary_conditions = vec![default_bc];
+    if matches!(
+        intent.profile,
+        AnalysisCreateModelProfile::CfdSteadyState
+            | AnalysisCreateModelProfile::CfdTransient
+            | AnalysisCreateModelProfile::ChtCoupled
+            | AnalysisCreateModelProfile::FsiCoupled
+    ) {
+        let default_cfd_inlet_velocity = cfd
+            .as_ref()
+            .map(|domain| domain.inlet_velocity_m_per_s)
+            .unwrap_or(0.0);
+        boundary_conditions.extend([
+            BoundaryCondition {
+                bc_id: "bc_default_cfd_inlet".to_string(),
+                region_id: "inlet".to_string(),
+                kind: BoundaryConditionKind::CfdInletVelocity {
+                    velocity_m_per_s: default_cfd_inlet_velocity,
+                },
+            },
+            BoundaryCondition {
+                bc_id: "bc_default_cfd_outlet".to_string(),
+                region_id: "outlet".to_string(),
+                kind: BoundaryConditionKind::CfdOutletPressure { pressure_pa: 0.0 },
+            },
+            BoundaryCondition {
+                bc_id: "bc_default_cfd_wall_upper".to_string(),
+                region_id: "wall_upper".to_string(),
+                kind: BoundaryConditionKind::CfdNoSlipWall,
+            },
+            BoundaryCondition {
+                bc_id: "bc_default_cfd_wall_lower".to_string(),
+                region_id: "wall_lower".to_string(),
+                kind: BoundaryConditionKind::CfdNoSlipWall,
+            },
+        ]);
+    }
+
     let model = AnalysisModel {
         model_id: AnalysisModelId(intent.model_id),
         geometry_id: geometry.geometry_id.clone(),
@@ -877,7 +916,7 @@ pub fn analysis_create_model_op(
         electromagnetic,
         cfd,
         interfaces: Vec::new(),
-        boundary_conditions: vec![default_bc],
+        boundary_conditions,
         loads: vec![default_load],
         steps: default_steps,
     };
@@ -3276,7 +3315,14 @@ fn acoustic_axis_derivative(
 }
 
 fn cfd_reynolds_number(domain: &runmat_analysis_core::CfdDomain) -> f64 {
-    domain.reference_density_kg_per_m3 * domain.inlet_velocity_m_per_s
+    cfd_reynolds_number_for_velocity(domain, domain.inlet_velocity_m_per_s)
+}
+
+fn cfd_reynolds_number_for_velocity(
+    domain: &runmat_analysis_core::CfdDomain,
+    inlet_velocity_m_per_s: f64,
+) -> f64 {
+    domain.reference_density_kg_per_m3 * inlet_velocity_m_per_s.abs()
         / domain.dynamic_viscosity_pa_s
 }
 
@@ -3300,6 +3346,162 @@ fn cfd_node_count_from_model(
 }
 
 #[derive(Clone, Debug)]
+struct CfdBoundarySummary {
+    inlet_boundary_count: usize,
+    outlet_boundary_count: usize,
+    no_slip_wall_boundary_count: usize,
+    slip_wall_boundary_count: usize,
+    symmetry_boundary_count: usize,
+    authored_boundary_count: usize,
+    boundary_coverage_ratio: f64,
+    wall_boundary_coverage_ratio: f64,
+    nominal_inlet_velocity_m_per_s: f64,
+    outlet_pressure_pa: f64,
+}
+
+impl CfdBoundarySummary {
+    fn implicit_channel(domain: &runmat_analysis_core::CfdDomain, node_count: usize) -> Self {
+        Self {
+            inlet_boundary_count: 1,
+            outlet_boundary_count: 1,
+            no_slip_wall_boundary_count: node_count.saturating_sub(1).max(1),
+            slip_wall_boundary_count: 0,
+            symmetry_boundary_count: 0,
+            authored_boundary_count: 0,
+            boundary_coverage_ratio: 1.0,
+            wall_boundary_coverage_ratio: 1.0,
+            nominal_inlet_velocity_m_per_s: domain.inlet_velocity_m_per_s,
+            outlet_pressure_pa: 0.0,
+        }
+    }
+
+    fn from_model(
+        model: &AnalysisModel,
+        domain: &runmat_analysis_core::CfdDomain,
+        node_count: usize,
+    ) -> Self {
+        let mut inlet_velocity_sum = 0.0_f64;
+        let mut outlet_pressure_sum = 0.0_f64;
+        let mut summary = Self {
+            inlet_boundary_count: 0,
+            outlet_boundary_count: 0,
+            no_slip_wall_boundary_count: 0,
+            slip_wall_boundary_count: 0,
+            symmetry_boundary_count: 0,
+            authored_boundary_count: 0,
+            boundary_coverage_ratio: 0.0,
+            wall_boundary_coverage_ratio: 0.0,
+            nominal_inlet_velocity_m_per_s: domain.inlet_velocity_m_per_s,
+            outlet_pressure_pa: 0.0,
+        };
+
+        for boundary in &model.boundary_conditions {
+            match &boundary.kind {
+                BoundaryConditionKind::CfdInletVelocity { velocity_m_per_s } => {
+                    summary.inlet_boundary_count += 1;
+                    summary.authored_boundary_count += 1;
+                    inlet_velocity_sum += *velocity_m_per_s;
+                }
+                BoundaryConditionKind::CfdOutletPressure { pressure_pa } => {
+                    summary.outlet_boundary_count += 1;
+                    summary.authored_boundary_count += 1;
+                    outlet_pressure_sum += *pressure_pa;
+                }
+                BoundaryConditionKind::CfdNoSlipWall => {
+                    summary.no_slip_wall_boundary_count += 1;
+                    summary.authored_boundary_count += 1;
+                }
+                BoundaryConditionKind::CfdSlipWall => {
+                    summary.slip_wall_boundary_count += 1;
+                    summary.authored_boundary_count += 1;
+                }
+                BoundaryConditionKind::CfdSymmetry => {
+                    summary.symmetry_boundary_count += 1;
+                    summary.authored_boundary_count += 1;
+                }
+                _ => {}
+            }
+        }
+
+        if summary.authored_boundary_count == 0 {
+            return Self::implicit_channel(domain, node_count);
+        }
+
+        if summary.inlet_boundary_count > 0 {
+            summary.nominal_inlet_velocity_m_per_s =
+                inlet_velocity_sum / summary.inlet_boundary_count as f64;
+        }
+        if summary.outlet_boundary_count > 0 {
+            summary.outlet_pressure_pa = outlet_pressure_sum / summary.outlet_boundary_count as f64;
+        }
+
+        let wall_like_count = summary.no_slip_wall_boundary_count
+            + summary.slip_wall_boundary_count
+            + summary.symmetry_boundary_count;
+        let required_groups_present = usize::from(summary.inlet_boundary_count > 0)
+            + usize::from(summary.outlet_boundary_count > 0)
+            + usize::from(wall_like_count > 0);
+        summary.boundary_coverage_ratio = required_groups_present as f64 / 3.0;
+        summary.wall_boundary_coverage_ratio = if wall_like_count > 0 { 1.0 } else { 0.0 };
+        summary
+    }
+
+    fn wall_boundary_count(&self) -> usize {
+        self.no_slip_wall_boundary_count + self.slip_wall_boundary_count
+    }
+}
+
+fn validate_authored_cfd_boundary_conditions(model: &AnalysisModel) -> Result<(), String> {
+    let mut inlet_boundary_count = 0usize;
+    let mut outlet_boundary_count = 0usize;
+    let mut wall_like_boundary_count = 0usize;
+    let mut authored_boundary_count = 0usize;
+
+    for boundary in &model.boundary_conditions {
+        match &boundary.kind {
+            BoundaryConditionKind::CfdInletVelocity { velocity_m_per_s } => {
+                authored_boundary_count += 1;
+                inlet_boundary_count += 1;
+                if !velocity_m_per_s.is_finite() || *velocity_m_per_s < 0.0 {
+                    return Err(format!(
+                        "cfd inlet boundary {} requires finite non-negative velocity_m_per_s",
+                        boundary.bc_id
+                    ));
+                }
+            }
+            BoundaryConditionKind::CfdOutletPressure { pressure_pa } => {
+                authored_boundary_count += 1;
+                outlet_boundary_count += 1;
+                if !pressure_pa.is_finite() {
+                    return Err(format!(
+                        "cfd outlet boundary {} requires finite pressure_pa",
+                        boundary.bc_id
+                    ));
+                }
+            }
+            BoundaryConditionKind::CfdNoSlipWall
+            | BoundaryConditionKind::CfdSlipWall
+            | BoundaryConditionKind::CfdSymmetry => {
+                authored_boundary_count += 1;
+                wall_like_boundary_count += 1;
+            }
+            _ => {}
+        }
+    }
+
+    if authored_boundary_count == 0 {
+        return Ok(());
+    }
+    if inlet_boundary_count == 0 || outlet_boundary_count == 0 || wall_like_boundary_count == 0 {
+        return Err(format!(
+            "authored cfd boundaries require at least one inlet, outlet, and wall/symmetry boundary; got inlet={} outlet={} wall_like={}",
+            inlet_boundary_count, outlet_boundary_count, wall_like_boundary_count,
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug)]
 struct CfdVelocityPressureSolution {
     velocity: Vec<f64>,
     pressure: Vec<f64>,
@@ -3312,9 +3514,15 @@ struct CfdVelocityPressureSolution {
     inlet_boundary_count: usize,
     outlet_boundary_count: usize,
     wall_boundary_count: usize,
+    no_slip_wall_boundary_count: usize,
+    slip_wall_boundary_count: usize,
+    symmetry_boundary_count: usize,
+    authored_boundary_count: usize,
     boundary_coverage_ratio: f64,
     wall_boundary_coverage_ratio: f64,
     inlet_velocity_realization_ratio: f64,
+    nominal_inlet_velocity_m_per_s: f64,
+    outlet_pressure_pa: f64,
     transient_scale_min: f64,
     transient_scale_max: f64,
     transient_scale_variation: f64,
@@ -3333,20 +3541,24 @@ fn recover_cfd_velocity_pressure(
     node_count: usize,
     step_index: usize,
 ) -> (Vec<f64>, Vec<f64>) {
-    let solution = solve_cfd_velocity_pressure(domain, node_count, step_index, 1);
+    let boundary_summary = CfdBoundarySummary::implicit_channel(domain, node_count);
+    let solution =
+        solve_cfd_velocity_pressure(domain, &boundary_summary, node_count, step_index, 1);
     (solution.velocity, solution.pressure)
 }
 
 fn solve_cfd_velocity_pressure(
     domain: &runmat_analysis_core::CfdDomain,
+    boundary_summary: &CfdBoundarySummary,
     node_count: usize,
     step_index: usize,
     step_count: usize,
 ) -> CfdVelocityPressureSolution {
     let node_count = node_count.max(2);
     let profile_scale = cfd_profile_scale(domain, step_index);
-    let inlet_velocity = domain.inlet_velocity_m_per_s * profile_scale;
-    let reynolds = cfd_reynolds_number(domain).max(1.0);
+    let nominal_inlet_velocity = boundary_summary.nominal_inlet_velocity_m_per_s;
+    let inlet_velocity = nominal_inlet_velocity * profile_scale;
+    let reynolds = cfd_reynolds_number_for_velocity(domain, nominal_inlet_velocity).max(1.0);
     let hydraulic_diameter_m = 1.0;
     let friction_factor = if reynolds <= 2300.0 {
         64.0 / reynolds
@@ -3373,14 +3585,14 @@ fn solve_cfd_velocity_pressure(
         let axial = inlet_velocity;
         let transverse = recirculation;
         velocity.extend_from_slice(&[axial, transverse, 0.0]);
-        pressure.push(pressure_drop_pa * (1.0 - xi));
+        pressure.push(boundary_summary.outlet_pressure_pa + pressure_drop_pa * (1.0 - xi));
     }
 
     let (residual_momentum, residual_continuity) =
         cfd_residual_norms(&velocity, &pressure, domain, step_count);
     let mass_balance_residual = residual_continuity.iter().copied().fold(0.0_f64, f64::max);
     let inlet_velocity_realization_ratio =
-        inlet_velocity.abs() / domain.inlet_velocity_m_per_s.abs().max(1.0e-12);
+        inlet_velocity.abs() / nominal_inlet_velocity.abs().max(1.0e-12);
     let (transient_scale_min, transient_scale_max) = cfd_transient_scale_bounds(domain);
 
     CfdVelocityPressureSolution {
@@ -3392,12 +3604,18 @@ fn solve_cfd_velocity_pressure(
         pressure_drop_pa,
         hydraulic_diameter_m,
         control_volume_count: node_count.saturating_sub(1),
-        inlet_boundary_count: 1,
-        outlet_boundary_count: 1,
-        wall_boundary_count: node_count.saturating_sub(1).max(1),
-        boundary_coverage_ratio: 1.0,
-        wall_boundary_coverage_ratio: 1.0,
+        inlet_boundary_count: boundary_summary.inlet_boundary_count,
+        outlet_boundary_count: boundary_summary.outlet_boundary_count,
+        wall_boundary_count: boundary_summary.wall_boundary_count(),
+        no_slip_wall_boundary_count: boundary_summary.no_slip_wall_boundary_count,
+        slip_wall_boundary_count: boundary_summary.slip_wall_boundary_count,
+        symmetry_boundary_count: boundary_summary.symmetry_boundary_count,
+        authored_boundary_count: boundary_summary.authored_boundary_count,
+        boundary_coverage_ratio: boundary_summary.boundary_coverage_ratio,
+        wall_boundary_coverage_ratio: boundary_summary.wall_boundary_coverage_ratio,
         inlet_velocity_realization_ratio,
+        nominal_inlet_velocity_m_per_s: nominal_inlet_velocity,
+        outlet_pressure_pa: boundary_summary.outlet_pressure_pa,
         transient_scale_min,
         transient_scale_max,
         transient_scale_variation: (transient_scale_max - transient_scale_min).abs(),
@@ -3666,7 +3884,14 @@ fn solve_cfd_baseline(
         runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
         runmat_analysis_core::CfdSolveFamily::Transient => step_count.saturating_sub(1),
     };
-    let solution = solve_cfd_velocity_pressure(domain, node_count, field_step, step_count);
+    let boundary_summary = CfdBoundarySummary::from_model(model, domain, node_count);
+    let solution = solve_cfd_velocity_pressure(
+        domain,
+        &boundary_summary,
+        node_count,
+        field_step,
+        step_count,
+    );
     let max_momentum_residual = solution
         .residual_momentum
         .iter()
@@ -3732,12 +3957,19 @@ fn solve_cfd_baseline(
                     runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
                 },
                 message: format!(
-                    "inlet_boundary_count={} outlet_boundary_count={} wall_boundary_count={} boundary_coverage_ratio={} wall_boundary_coverage_ratio={} inlet_velocity_realization_ratio={}",
+                    "boundary_source={} authored_boundary_count={} inlet_boundary_count={} outlet_boundary_count={} wall_boundary_count={} no_slip_wall_boundary_count={} slip_wall_boundary_count={} symmetry_boundary_count={} boundary_coverage_ratio={} wall_boundary_coverage_ratio={} nominal_inlet_velocity_m_per_s={} outlet_pressure_pa={} inlet_velocity_realization_ratio={}",
+                    if solution.authored_boundary_count > 0 { "authored" } else { "implicit_channel" },
+                    solution.authored_boundary_count,
                     solution.inlet_boundary_count,
                     solution.outlet_boundary_count,
                     solution.wall_boundary_count,
+                    solution.no_slip_wall_boundary_count,
+                    solution.slip_wall_boundary_count,
+                    solution.symmetry_boundary_count,
                     solution.boundary_coverage_ratio,
                     solution.wall_boundary_coverage_ratio,
+                    solution.nominal_inlet_velocity_m_per_s,
+                    solution.outlet_pressure_pa,
                     solution.inlet_velocity_realization_ratio,
                 ),
             },
@@ -4281,6 +4513,24 @@ pub fn analysis_run_cfd_with_options_op(
             )]),
         ));
     }
+    if let Err(detail) = validate_authored_cfd_boundary_conditions(model) {
+        return Err(operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_CFD.INVALID_BOUNDARY_CONDITIONS",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            detail.clone(),
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("detail".to_string(), detail),
+            ]),
+        ));
+    }
 
     if !options.time_step_s.is_finite() || options.time_step_s <= 0.0 {
         return Err(operation_error(
@@ -4373,7 +4623,18 @@ pub fn analysis_run_cfd_with_options_op(
         &context,
     )?;
 
+    let solve_start = Instant::now();
     let mut run = solve_cfd_baseline(model, cfd_domain, backend, &options, prep_context);
+    let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
+    run.diagnostics
+        .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+            code: "FEA_CFD_COST".to_string(),
+            severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
+            message: format!(
+                "solve_ms={} step_count={} max_linear_iters={} tolerance={}",
+                solve_ms, options.step_count, options.max_linear_iters, options.tolerance,
+            ),
+        });
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
     if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
@@ -4382,7 +4643,9 @@ pub fn analysis_run_cfd_with_options_op(
         );
     }
 
-    let reynolds_number = cfd_reynolds_number(cfd_domain);
+    let flow_boundary_summary = CfdBoundarySummary::from_model(model, cfd_domain, 2);
+    let flow_inlet_velocity = flow_boundary_summary.nominal_inlet_velocity_m_per_s;
+    let reynolds_number = cfd_reynolds_number_for_velocity(cfd_domain, flow_inlet_velocity);
     let solve_family = match cfd_domain.solve_family {
         runmat_analysis_core::CfdSolveFamily::SteadyState => "steady_state",
         runmat_analysis_core::CfdSolveFamily::Transient => "transient",
@@ -4394,7 +4657,7 @@ pub fn analysis_run_cfd_with_options_op(
             "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={}",
             cfd_domain.reference_density_kg_per_m3,
             cfd_domain.dynamic_viscosity_pa_s,
-            cfd_domain.inlet_velocity_m_per_s,
+            flow_inlet_velocity,
             cfd_domain.turbulence_intensity,
             reynolds_number,
             solve_family,
@@ -12064,7 +12327,12 @@ fn resolve_run_prep_context(
 }
 
 fn run_solve_ms(run: &AnalysisRunResult) -> Option<f64> {
-    for code in ["FEA_NONLINEAR_COST", "FEA_TRANSIENT_COST", "FEA_MODAL_COST"] {
+    for code in [
+        "FEA_NONLINEAR_COST",
+        "FEA_TRANSIENT_COST",
+        "FEA_MODAL_COST",
+        "FEA_CFD_COST",
+    ] {
         if let Some(value) = diagnostic_metric(&run.run.diagnostics, code, "solve_ms") {
             return Some(value);
         }

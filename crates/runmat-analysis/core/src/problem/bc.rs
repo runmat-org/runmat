@@ -22,6 +22,15 @@ pub enum BoundaryConditionKind {
         ambient_temperature_k: f64,
         coefficient_w_per_m2k: f64,
     },
+    CfdInletVelocity {
+        velocity_m_per_s: f64,
+    },
+    CfdOutletPressure {
+        pressure_pa: f64,
+    },
+    CfdNoSlipWall,
+    CfdSlipWall,
+    CfdSymmetry,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

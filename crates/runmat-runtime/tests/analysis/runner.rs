@@ -728,6 +728,38 @@ fn electromagnetic_sweep_frequency_hz_for_fixture(spec_id: &str) -> Vec<f64> {
     vec![f0 * 0.75, f0 * 0.9, f0, f0 * 1.1, f0 * 1.25]
 }
 
+fn authored_cfd_boundaries_for_fixture(
+    spec_id: &str,
+    inlet_velocity_m_per_s: f64,
+) -> Vec<runmat_analysis_core::BoundaryCondition> {
+    vec![
+        runmat_analysis_core::BoundaryCondition {
+            bc_id: format!("bc_cfd_inlet_{}", spec_id),
+            region_id: "fluid_inlet".to_string(),
+            kind: runmat_analysis_core::BoundaryConditionKind::CfdInletVelocity {
+                velocity_m_per_s: inlet_velocity_m_per_s,
+            },
+        },
+        runmat_analysis_core::BoundaryCondition {
+            bc_id: format!("bc_cfd_outlet_{}", spec_id),
+            region_id: "fluid_outlet".to_string(),
+            kind: runmat_analysis_core::BoundaryConditionKind::CfdOutletPressure {
+                pressure_pa: 0.0,
+            },
+        },
+        runmat_analysis_core::BoundaryCondition {
+            bc_id: format!("bc_cfd_wall_upper_{}", spec_id),
+            region_id: "fluid_wall_upper".to_string(),
+            kind: runmat_analysis_core::BoundaryConditionKind::CfdNoSlipWall,
+        },
+        runmat_analysis_core::BoundaryCondition {
+            bc_id: format!("bc_cfd_wall_lower_{}", spec_id),
+            region_id: "fluid_wall_lower".to_string(),
+            kind: runmat_analysis_core::BoundaryConditionKind::CfdNoSlipWall,
+        },
+    ]
+}
+
 fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
     if spec_id.starts_with("acoustic_harmonic_") {
         model.steps = vec![runmat_analysis_core::AnalysisStep {
@@ -885,6 +917,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
+        model.boundary_conditions = authored_cfd_boundaries_for_fixture(spec_id, 5.0);
         model.cfd = Some(runmat_analysis_core::CfdDomain {
             enabled: true,
             solve_family: runmat_analysis_core::CfdSolveFamily::SteadyState,
@@ -903,6 +936,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
+        model.boundary_conditions = authored_cfd_boundaries_for_fixture(spec_id, 5.0);
         model.cfd = Some(runmat_analysis_core::CfdDomain {
             enabled: true,
             solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
