@@ -46,15 +46,9 @@ pub(crate) fn recover_electro_thermal_fields(
 
     let node_count = dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1);
     let solve = solve_scalar_potential(summary, node_count);
-    let heating_scale = if solve.integrated_joule_heat_w > 1.0e-12 {
-        summary.joule_heating_scale.max(0.0) / solve.integrated_joule_heat_w
-    } else {
-        0.0
-    };
-
     let mut electric_field = Vec::with_capacity(node_count * VECTOR_COMPONENT_COUNT);
     let mut current_density = Vec::with_capacity(node_count * VECTOR_COMPONENT_COUNT);
-    let mut joule_heat = Vec::with_capacity(node_count);
+    let mut unscaled_joule_heat = Vec::with_capacity(node_count);
     for index in 0..node_count {
         let left_segment = index
             .saturating_sub(1)
@@ -84,8 +78,23 @@ pub(crate) fn recover_electro_thermal_fields(
 
         electric_field.extend_from_slice(&[local_field, 0.0, 0.0]);
         current_density.extend_from_slice(&[current, 0.0, 0.0]);
-        joule_heat.push((local_joule_heat * heating_scale).max(0.0));
+        unscaled_joule_heat.push(local_joule_heat.max(0.0));
     }
+    let unscaled_joule_integral = unscaled_joule_heat.iter().sum::<f64>();
+    let heating_scale = if unscaled_joule_integral > 1.0e-12 {
+        summary.joule_heating_scale.max(0.0) / unscaled_joule_integral
+    } else {
+        0.0
+    };
+    let joule_heat = unscaled_joule_heat
+        .iter()
+        .map(|value| value * heating_scale)
+        .collect::<Vec<_>>();
+    let mean_joule_heat = if joule_heat.is_empty() {
+        0.0
+    } else {
+        joule_heat.iter().sum::<f64>() / joule_heat.len() as f64
+    };
 
     let diagnostics = vec![
         electro_thermal_potential_solve_diagnostic(node_count, &solve),
@@ -111,21 +120,34 @@ pub(crate) fn recover_electro_thermal_fields(
         AnalysisField::host_f64(
             FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
             vec![node_count],
-            joule_heat,
+            joule_heat.clone(),
         ),
     ];
 
     let mut temperature_snapshots = Vec::with_capacity(progress_factors.len());
     let mut thermal_residual_snapshots = Vec::with_capacity(progress_factors.len());
+    let mut final_temperature = vec![summary.reference_temperature_k; node_count];
     for (index, progress_factor) in progress_factors.iter().copied().enumerate() {
         let current_factor = progress_factor.clamp(0.0, 1.0);
-        let temperature_rise = summary.joule_heating_scale.max(0.0)
+        let mean_temperature_rise = summary.joule_heating_scale.max(0.0)
             * current_factor
             * (1.0 + summary.temporal_profile_variation);
+        let temperature = joule_heat
+            .iter()
+            .map(|source| {
+                let source_scale = if mean_joule_heat > 1.0e-12 {
+                    source / mean_joule_heat
+                } else {
+                    0.0
+                };
+                summary.reference_temperature_k + mean_temperature_rise * source_scale
+            })
+            .collect::<Vec<_>>();
+        final_temperature = temperature.clone();
         temperature_snapshots.push(AnalysisField::host_f64(
             fea_electro_thermal_temperature_field_id(index),
             vec![node_count],
-            vec![summary.reference_temperature_k + temperature_rise; node_count],
+            temperature,
         ));
 
         let residual = residual_norms
@@ -140,6 +162,12 @@ pub(crate) fn recover_electro_thermal_fields(
             vec![residual],
         ));
     }
+    let mut diagnostics = diagnostics;
+    diagnostics.push(electro_thermal_source_coupling_diagnostic(
+        summary,
+        &joule_heat,
+        &final_temperature,
+    ));
 
     ElectroThermalFields {
         static_fields,
@@ -345,6 +373,88 @@ fn electro_thermal_resistor_known_answer_diagnostic(
     }
 }
 
+fn electro_thermal_source_coupling_diagnostic(
+    summary: &ElectroThermalAssemblySummary,
+    joule_heat: &[f64],
+    final_temperature: &[f64],
+) -> FeaDiagnostic {
+    let joule_heat_integral_w = joule_heat.iter().sum::<f64>();
+    let target_joule_heat_w = summary.joule_heating_scale.max(0.0);
+    let joule_heat_realization_ratio = if target_joule_heat_w > 1.0e-12 {
+        joule_heat_integral_w / target_joule_heat_w
+    } else if joule_heat_integral_w <= 1.0e-12 {
+        1.0
+    } else {
+        0.0
+    };
+    let positive_source_count = joule_heat.iter().filter(|value| **value > 0.0).count();
+    let joule_source_coverage_ratio = if joule_heat.is_empty() {
+        0.0
+    } else {
+        positive_source_count as f64 / joule_heat.len() as f64
+    };
+    let temperature_rise = final_temperature
+        .iter()
+        .map(|value| (value - summary.reference_temperature_k).max(0.0))
+        .collect::<Vec<_>>();
+    let temperature_span_k = final_temperature.iter().copied().fold(
+        (f64::INFINITY, -f64::INFINITY),
+        |(min_value, max_value), value| (min_value.min(value), max_value.max(value)),
+    );
+    let temperature_span_k = if temperature_span_k.0.is_finite() && temperature_span_k.1.is_finite()
+    {
+        (temperature_span_k.1 - temperature_span_k.0).max(0.0)
+    } else {
+        0.0
+    };
+    let thermal_source_residual_ratio = normalized_profile_residual(joule_heat, &temperature_rise);
+    let thermal_temperature_source_alignment =
+        (1.0 - thermal_source_residual_ratio).clamp(0.0, 1.0);
+    let severity = if (joule_heat_realization_ratio - 1.0).abs() <= 1.0e-10
+        && joule_source_coverage_ratio >= 1.0
+        && thermal_source_residual_ratio <= 1.0e-10
+    {
+        FeaDiagnosticSeverity::Info
+    } else {
+        FeaDiagnosticSeverity::Warning
+    };
+
+    FeaDiagnostic {
+        code: "FEA_ET_THERMAL_SOURCE_COUPLING".to_string(),
+        severity,
+        message: format!(
+            "basis=joule_heat_field joule_heat_integral_w={} joule_heat_realization_ratio={} joule_source_coverage_ratio={} thermal_temperature_source_alignment={} thermal_source_residual_ratio={} temperature_span_k={}",
+            joule_heat_integral_w,
+            joule_heat_realization_ratio,
+            joule_source_coverage_ratio,
+            thermal_temperature_source_alignment,
+            thermal_source_residual_ratio,
+            temperature_span_k,
+        ),
+    }
+}
+
+fn normalized_profile_residual(source: &[f64], response: &[f64]) -> f64 {
+    if source.is_empty() || response.is_empty() || source.len() != response.len() {
+        return 1.0;
+    }
+    let source_mean = source.iter().sum::<f64>() / source.len() as f64;
+    let response_mean = response.iter().sum::<f64>() / response.len() as f64;
+    if source_mean <= 1.0e-12 && response_mean <= 1.0e-12 {
+        return 0.0;
+    }
+    if source_mean <= 1.0e-12 || response_mean <= 1.0e-12 {
+        return 1.0;
+    }
+    source
+        .iter()
+        .zip(response.iter())
+        .map(|(source_value, response_value)| {
+            ((source_value / source_mean) - (response_value / response_mean)).abs()
+        })
+        .fold(0.0_f64, f64::max)
+}
+
 fn resistor_known_answer_coverage_ratio(
     node_count: usize,
     solve: &ElectroThermalPotentialSolve,
@@ -422,7 +532,7 @@ mod tests {
         let fields = recover_electro_thermal_fields(Some(&summary()), &[1.0], &[0.01], 48);
 
         assert_eq!(fields.static_fields.len(), 4);
-        assert_eq!(fields.diagnostics.len(), 2);
+        assert_eq!(fields.diagnostics.len(), 3);
         assert_eq!(fields.diagnostics[0].code, "FEA_ET_POTENTIAL_SOLVE");
         assert!(fields.diagnostics[0]
             .message
@@ -434,5 +544,30 @@ mod tests {
         assert!(fields.diagnostics[1]
             .message
             .contains("joule_heat_balance_ratio="));
+        assert_eq!(fields.diagnostics[2].code, "FEA_ET_THERMAL_SOURCE_COUPLING");
+        assert!(fields.diagnostics[2]
+            .message
+            .contains("thermal_temperature_source_alignment="));
+    }
+
+    #[test]
+    fn recovered_temperature_snapshots_follow_joule_heat_field() {
+        let fields = recover_electro_thermal_fields(Some(&summary()), &[1.0], &[0.01], 48);
+        let joule_heat = fields.static_fields[3]
+            .as_host_f64()
+            .expect("joule heat should be a host field");
+        let temperature = fields.temperature_snapshots[0]
+            .as_host_f64()
+            .expect("temperature should be a host field");
+        let source_residual = normalized_profile_residual(
+            joule_heat,
+            &temperature
+                .iter()
+                .map(|value| value - summary().reference_temperature_k)
+                .collect::<Vec<_>>(),
+        );
+
+        assert!(source_residual <= 1.0e-12);
+        assert!((joule_heat.iter().sum::<f64>() - summary().joule_heating_scale).abs() <= 1.0e-10);
     }
 }

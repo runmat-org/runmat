@@ -3109,6 +3109,71 @@ fn push_thermal_standalone_threshold_assertions(
     );
 }
 
+fn push_electro_thermal_source_coupling_threshold_assertions(
+    fixture_id: &str,
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    run: &AnalysisRunResult,
+    prefix: &str,
+) {
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_joule_heat_realization_ratio"),
+        "FEA_ET_THERMAL_SOURCE_COUPLING",
+        diagnostic_metric(
+            run,
+            "FEA_ET_THERMAL_SOURCE_COUPLING",
+            "joule_heat_realization_ratio",
+        ),
+        Some(0.999_999),
+        Some(1.000_001),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_joule_source_coverage_ratio"),
+        "FEA_ET_THERMAL_SOURCE_COUPLING",
+        diagnostic_metric(
+            run,
+            "FEA_ET_THERMAL_SOURCE_COUPLING",
+            "joule_source_coverage_ratio",
+        ),
+        Some(1.0),
+        Some(1.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_thermal_temperature_source_alignment"),
+        "FEA_ET_THERMAL_SOURCE_COUPLING",
+        diagnostic_metric(
+            run,
+            "FEA_ET_THERMAL_SOURCE_COUPLING",
+            "thermal_temperature_source_alignment",
+        ),
+        Some(0.999_999),
+        Some(1.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_thermal_source_residual_ratio"),
+        "FEA_ET_THERMAL_SOURCE_COUPLING",
+        diagnostic_metric(
+            run,
+            "FEA_ET_THERMAL_SOURCE_COUPLING",
+            "thermal_source_residual_ratio",
+        ),
+        Some(0.0),
+        Some(1.0e-10),
+    );
+}
+
 fn push_linear_structural_threshold_assertions(
     fixture_id: &str,
     assertions: &mut Vec<ThresholdAssertionRecord>,
@@ -5739,6 +5804,13 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
+                        push_electro_thermal_source_coupling_threshold_assertions(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                            "electro_thermal_benign",
+                        );
                     } else if spec.id == "electro_thermal_joule_pathological_gpu_provider" {
                         push_threshold_assertion(
                             spec.id,
@@ -5907,6 +5979,13 @@ pub(super) fn run_fixture(
                             ),
                             Some(1.0),
                             Some(1.0),
+                        );
+                        push_electro_thermal_source_coupling_threshold_assertions(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                            "electro_thermal_pathological",
                         );
                     }
                     if spec.id == "nonlinear_assembly_gpu_provider" {
