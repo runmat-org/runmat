@@ -23,12 +23,26 @@ struct ConductanceEdge {
 #[derive(Debug)]
 struct ConductanceDomainGraph {
     edges: Vec<ConductanceEdge>,
+    topology: ElectroThermalDomainTopology,
     node_degrees: Vec<usize>,
     boundary_node_count: usize,
     max_node_degree: usize,
     mean_node_degree: f64,
     conductance_span_ratio: f64,
     topology_coverage_ratio: f64,
+}
+
+#[derive(Debug, Clone)]
+struct ElectroThermalDomainTopology {
+    conductive_node_count: usize,
+    conductive_edge_count: usize,
+    mapped_voltage_boundary_count: usize,
+    mapped_current_source_count: usize,
+    material_region_count: usize,
+    topology_component_count: usize,
+    source_boundary_alignment_ratio: f64,
+    domain_conductance_coverage_ratio: f64,
+    material_region_coverage_ratio: f64,
 }
 
 #[derive(Default)]
@@ -115,6 +129,7 @@ pub(crate) fn recover_electro_thermal_fields(
     };
 
     let diagnostics = vec![
+        electro_thermal_domain_topology_diagnostic(&solve),
         electro_thermal_potential_solve_diagnostic(node_count, &solve),
         electro_thermal_conduction_conservation_diagnostic(node_count, &solve),
     ];
@@ -355,8 +370,11 @@ fn build_conductance_domain_graph(
         covered_nodes as f64 / node_count as f64
     };
 
+    let topology = build_domain_topology(summary, node_count, &edges, &node_degrees);
+
     ConductanceDomainGraph {
         edges,
+        topology,
         node_degrees,
         boundary_node_count: node_count.min(2),
         max_node_degree,
@@ -364,6 +382,101 @@ fn build_conductance_domain_graph(
         conductance_span_ratio,
         topology_coverage_ratio,
     }
+}
+
+fn build_domain_topology(
+    summary: &ElectroThermalAssemblySummary,
+    node_count: usize,
+    edges: &[ConductanceEdge],
+    node_degrees: &[usize],
+) -> ElectroThermalDomainTopology {
+    let conductive_node_count = node_degrees.iter().filter(|degree| **degree > 0).count();
+    let mapped_voltage_boundary_count = if node_count >= 2 && summary.applied_voltage_v.is_finite()
+    {
+        2
+    } else if node_count == 1 && summary.applied_voltage_v.is_finite() {
+        1
+    } else {
+        0
+    };
+    let mapped_current_source_count = usize::from(
+        summary.joule_heating_scale.is_finite()
+            && summary.joule_heating_scale > 0.0
+            && summary.applied_voltage_v.abs() > 1.0e-12,
+    );
+    let material_region_count = summary.region_scale_count.max(1);
+    let topology_component_count = conductive_component_count(node_count, edges);
+    let voltage_terminals_complete = mapped_voltage_boundary_count >= node_count.min(2);
+    let source_boundary_aligned = mapped_current_source_count > 0
+        && voltage_terminals_complete
+        && topology_component_count == 1;
+    let source_boundary_alignment_ratio = if source_boundary_aligned
+        || (mapped_current_source_count == 0 && summary.joule_heating_scale <= 1.0e-12)
+    {
+        1.0
+    } else {
+        0.0
+    };
+    let valid_conductance_edges = edges
+        .iter()
+        .filter(|edge| edge.conductance.is_finite() && edge.conductance > MIN_CONDUCTIVITY)
+        .count();
+    let domain_conductance_coverage_ratio = if edges.is_empty() {
+        if node_count <= 1 {
+            1.0
+        } else {
+            0.0
+        }
+    } else {
+        valid_conductance_edges as f64 / edges.len() as f64
+    };
+    let material_region_coverage_ratio = if material_region_count > 0 && conductive_node_count > 0 {
+        1.0
+    } else {
+        0.0
+    };
+
+    ElectroThermalDomainTopology {
+        conductive_node_count,
+        conductive_edge_count: edges.len(),
+        mapped_voltage_boundary_count,
+        mapped_current_source_count,
+        material_region_count,
+        topology_component_count,
+        source_boundary_alignment_ratio,
+        domain_conductance_coverage_ratio,
+        material_region_coverage_ratio,
+    }
+}
+
+fn conductive_component_count(node_count: usize, edges: &[ConductanceEdge]) -> usize {
+    if node_count == 0 {
+        return 0;
+    }
+    let mut adjacency = vec![Vec::<usize>::new(); node_count];
+    for edge in edges {
+        adjacency[edge.from].push(edge.to);
+        adjacency[edge.to].push(edge.from);
+    }
+    let mut visited = vec![false; node_count];
+    let mut component_count = 0;
+    for start in 0..node_count {
+        if visited[start] || (adjacency[start].is_empty() && node_count > 1) {
+            continue;
+        }
+        component_count += 1;
+        let mut stack = vec![start];
+        visited[start] = true;
+        while let Some(node) = stack.pop() {
+            for next in adjacency[node].iter().copied() {
+                if !visited[next] {
+                    visited[next] = true;
+                    stack.push(next);
+                }
+            }
+        }
+    }
+    component_count.max(usize::from(node_count == 1))
 }
 
 fn accumulate_graph_equation(
@@ -471,6 +584,41 @@ fn conductivity_profile(summary: &ElectroThermalAssemblySummary, segment_count: 
             (base * profile * temporal_adjustment).max(MIN_CONDUCTIVITY)
         })
         .collect()
+}
+
+fn electro_thermal_domain_topology_diagnostic(
+    solve: &ElectroThermalPotentialSolve,
+) -> FeaDiagnostic {
+    let topology = &solve.graph.topology;
+    let severity = if topology.conductive_node_count == solve.potential.len()
+        && topology.conductive_edge_count == solve.graph.edges.len()
+        && topology.mapped_voltage_boundary_count >= solve.potential.len().min(2)
+        && topology.topology_component_count == 1
+        && topology.source_boundary_alignment_ratio >= 1.0
+        && topology.domain_conductance_coverage_ratio >= 1.0
+        && topology.material_region_coverage_ratio >= 1.0
+    {
+        FeaDiagnosticSeverity::Info
+    } else {
+        FeaDiagnosticSeverity::Warning
+    };
+
+    FeaDiagnostic {
+        code: "FEA_ET_DOMAIN_TOPOLOGY".to_string(),
+        severity,
+        message: format!(
+            "basis=electrical_domain_topology_graph conductive_node_count={} conductive_edge_count={} mapped_voltage_boundary_count={} mapped_current_source_count={} material_region_count={} topology_component_count={} source_boundary_alignment_ratio={} domain_conductance_coverage_ratio={} material_region_coverage_ratio={}",
+            topology.conductive_node_count,
+            topology.conductive_edge_count,
+            topology.mapped_voltage_boundary_count,
+            topology.mapped_current_source_count,
+            topology.material_region_count,
+            topology.topology_component_count,
+            topology.source_boundary_alignment_ratio,
+            topology.domain_conductance_coverage_ratio,
+            topology.material_region_coverage_ratio,
+        ),
+    }
 }
 
 fn electro_thermal_potential_solve_diagnostic(
@@ -714,26 +862,33 @@ mod tests {
         let fields = recover_electro_thermal_fields(Some(&summary()), &[1.0], &[0.01], 48);
 
         assert_eq!(fields.static_fields.len(), 4);
-        assert_eq!(fields.diagnostics.len(), 3);
-        assert_eq!(fields.diagnostics[0].code, "FEA_ET_POTENTIAL_SOLVE");
+        assert_eq!(fields.diagnostics.len(), 4);
+        assert_eq!(fields.diagnostics[0].code, "FEA_ET_DOMAIN_TOPOLOGY");
         assert!(fields.diagnostics[0]
+            .message
+            .contains("basis=electrical_domain_topology_graph"));
+        assert!(fields.diagnostics[0]
+            .message
+            .contains("source_boundary_alignment_ratio="));
+        assert_eq!(fields.diagnostics[1].code, "FEA_ET_POTENTIAL_SOLVE");
+        assert!(fields.diagnostics[1]
             .message
             .contains("current_balance_residual="));
-        assert!(fields.diagnostics[0]
+        assert!(fields.diagnostics[1]
             .message
             .contains("basis=conductance_domain_graph"));
-        assert_eq!(fields.diagnostics[1].code, "FEA_ET_CONDUCTION_CONSERVATION");
-        assert!(fields.diagnostics[1]
+        assert_eq!(fields.diagnostics[2].code, "FEA_ET_CONDUCTION_CONSERVATION");
+        assert!(fields.diagnostics[2]
             .message
             .contains("ohms_law_residual_ratio="));
-        assert!(fields.diagnostics[1]
+        assert!(fields.diagnostics[2]
             .message
             .contains("joule_heat_balance_ratio="));
-        assert!(fields.diagnostics[1]
+        assert!(fields.diagnostics[2]
             .message
             .contains("conduction_graph_coverage_ratio="));
-        assert_eq!(fields.diagnostics[2].code, "FEA_ET_THERMAL_SOURCE_COUPLING");
-        assert!(fields.diagnostics[2]
+        assert_eq!(fields.diagnostics[3].code, "FEA_ET_THERMAL_SOURCE_COUPLING");
+        assert!(fields.diagnostics[3]
             .message
             .contains("thermal_temperature_source_alignment="));
     }

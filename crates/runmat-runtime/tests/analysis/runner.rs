@@ -5951,6 +5951,104 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "electro_thermal_benign_conductive_node_count",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "conductive_node_count",
+                            ),
+                            Some(2.0),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_mapped_voltage_boundary_count",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "mapped_voltage_boundary_count",
+                            ),
+                            Some(2.0),
+                            Some(2.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_topology_component_count",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "topology_component_count",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_mapped_current_source_count",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "mapped_current_source_count",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_source_boundary_alignment_ratio",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "source_boundary_alignment_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_domain_conductance_coverage_ratio",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "domain_conductance_coverage_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_material_region_coverage_ratio",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "material_region_coverage_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "electro_thermal_benign_potential_residual_norm",
                             "FEA_ET_POTENTIAL_SOLVE",
                             diagnostic_metric(
@@ -6150,6 +6248,104 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.85),
                             Some(1.1),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_conductive_node_count",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "conductive_node_count",
+                            ),
+                            Some(2.0),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_mapped_voltage_boundary_count",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "mapped_voltage_boundary_count",
+                            ),
+                            Some(2.0),
+                            Some(2.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_topology_component_count",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "topology_component_count",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_mapped_current_source_count",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "mapped_current_source_count",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_source_boundary_alignment_ratio",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "source_boundary_alignment_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_domain_conductance_coverage_ratio",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "domain_conductance_coverage_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_material_region_coverage_ratio",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "material_region_coverage_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
                         );
                         push_threshold_assertion(
                             spec.id,
