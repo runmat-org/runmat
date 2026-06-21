@@ -3393,8 +3393,8 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
         {
             "name": "cht_max_temperature_jump_k",
             "fixture_id": "cht_coupled_gpu_provider",
-            "observed": 0.05,
-            "reference": 0.05,
+            "observed": 0.0,
+            "reference": 0.0,
             "pass": True,
         },
         {
@@ -3409,6 +3409,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "cht_coupled_gpu_provider",
             "observed": 0.0,
             "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "cht_thermal_transport_residual_ratio",
+            "fixture_id": "cht_coupled_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "cht_interface_temperature_continuity_ratio",
+            "fixture_id": "cht_coupled_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
             "pass": True,
         },
         {
@@ -3505,8 +3519,8 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
         {
             "name": "cht_max_temperature_jump_k",
             "fixture_id": "cht_coupled_cpu",
-            "observed": 0.05,
-            "reference": 0.05,
+            "observed": 0.0,
+            "reference": 0.0,
             "pass": True,
         },
         {
@@ -3521,6 +3535,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "cht_coupled_cpu",
             "observed": 0.0,
             "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "cht_thermal_transport_residual_ratio",
+            "fixture_id": "cht_coupled_cpu",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "cht_interface_temperature_continuity_ratio",
+            "fixture_id": "cht_coupled_cpu",
+            "observed": 1.0,
+            "reference": 1.0,
             "pass": True,
         },
         {
@@ -3617,8 +3645,8 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
         {
             "name": "cht_max_temperature_jump_k",
             "fixture_id": "cht_coupled_gpu_fallback",
-            "observed": 0.05,
-            "reference": 0.05,
+            "observed": 0.0,
+            "reference": 0.0,
             "pass": True,
         },
         {
@@ -3633,6 +3661,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "cht_coupled_gpu_fallback",
             "observed": 0.0,
             "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "cht_thermal_transport_residual_ratio",
+            "fixture_id": "cht_coupled_gpu_fallback",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "cht_interface_temperature_continuity_ratio",
+            "fixture_id": "cht_coupled_gpu_fallback",
+            "observed": 1.0,
+            "reference": 1.0,
             "pass": True,
         },
         {

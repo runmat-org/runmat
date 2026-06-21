@@ -5291,6 +5291,10 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
             && diag.message.contains("max_temperature_jump_k=")
             && diag.message.contains("max_energy_residual=")
             && diag.message.contains("heat_flux_balance_ratio=")
+            && diag.message.contains("thermal_transport_residual_ratio=")
+            && diag
+                .message
+                .contains("interface_temperature_continuity_ratio=")
     }));
     let thermal = envelope
         .data

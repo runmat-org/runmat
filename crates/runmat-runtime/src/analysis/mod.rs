@@ -3814,27 +3814,13 @@ fn build_cht_run_fields(
             .as_host_f64()
             .map(|values| values.to_vec())
             .unwrap_or_else(|| vec![thermal_run.reference_temperature_k; fallback_len]);
-        let residual = thermal_run
-            .residual_norms
-            .get(step_index)
-            .copied()
-            .filter(|value| value.is_finite())
-            .unwrap_or(0.0);
-        let jump_scale = (residual.abs() * 0.02).clamp(0.0, 0.05);
         let mut fluid_temperature = Vec::with_capacity(base_temperature.len());
         let mut solid_temperature = Vec::with_capacity(base_temperature.len());
         let mut temperature_jump = Vec::with_capacity(base_temperature.len());
-        for (index, base) in base_temperature.iter().enumerate() {
-            let normalized_position = if base_temperature.len() <= 1 {
-                0.0
-            } else {
-                index as f64 / (base_temperature.len() - 1) as f64
-            };
-            let jump = jump_scale * (1.0 + 0.1 * normalized_position);
-            fluid_temperature.push(*base + 0.5 * jump);
-            solid_temperature.push(*base - 0.5 * jump);
-            temperature_jump.push(jump);
-            closure.max_temperature_jump_k = closure.max_temperature_jump_k.max(jump.abs());
+        for base in &base_temperature {
+            fluid_temperature.push(*base);
+            solid_temperature.push(*base);
+            temperature_jump.push(0.0);
         }
         fields.push(AnalysisField::host_f64(
             fea_cht_fluid_temperature_field_id(step_index),
@@ -3859,6 +3845,19 @@ fn build_cht_run_fields(
         let heat_balance_ratio =
             (fluid_heat + solid_heat).abs() / (fluid_heat.abs() + solid_heat.abs() + 1.0e-12);
         closure.heat_flux_balance_ratio = closure.heat_flux_balance_ratio.max(heat_balance_ratio);
+        let thermal_scale_k = base_temperature
+            .iter()
+            .map(|value| (value - thermal_run.reference_temperature_k).abs())
+            .fold(0.0_f64, f64::max)
+            .max(1.0);
+        let normalized_temperature_jump =
+            closure.max_temperature_jump_k / thermal_scale_k.max(1.0e-12);
+        closure.max_thermal_transport_residual_ratio = closure
+            .max_thermal_transport_residual_ratio
+            .max(normalized_temperature_jump.max(heat_balance_ratio));
+        closure.interface_temperature_continuity_ratio = closure
+            .interface_temperature_continuity_ratio
+            .max((1.0 - normalized_temperature_jump).clamp(0.0, 1.0));
         let mean_heat_flux = if heat_flux.is_empty() {
             0.0
         } else {
@@ -3897,6 +3896,8 @@ struct ChtInterfaceClosure {
     max_energy_residual: f64,
     heat_flux_balance_ratio: f64,
     mean_interface_heat_flux_w_per_m2: f64,
+    max_thermal_transport_residual_ratio: f64,
+    interface_temperature_continuity_ratio: f64,
 }
 
 fn build_fsi_run_fields(
@@ -4873,18 +4874,22 @@ pub fn analysis_run_cht_with_options_op(
         severity: if cht_interface_closure.heat_flux_balance_ratio <= 1.0e-9
             && cht_interface_closure.max_energy_residual <= options.residual_warn_threshold
             && cht_interface_closure.max_temperature_jump_k <= 0.1
+            && cht_interface_closure.max_thermal_transport_residual_ratio
+                <= options.residual_warn_threshold
         {
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
         } else {
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "interface_face_count={} max_temperature_jump_k={} max_energy_residual={} heat_flux_balance_ratio={} mean_interface_heat_flux_w_per_m2={}",
+            "interface_face_count={} max_temperature_jump_k={} max_energy_residual={} heat_flux_balance_ratio={} mean_interface_heat_flux_w_per_m2={} thermal_transport_residual_ratio={} interface_temperature_continuity_ratio={}",
             cht_interface_closure.interface_face_count,
             cht_interface_closure.max_temperature_jump_k,
             cht_interface_closure.max_energy_residual,
             cht_interface_closure.heat_flux_balance_ratio,
             cht_interface_closure.mean_interface_heat_flux_w_per_m2,
+            cht_interface_closure.max_thermal_transport_residual_ratio,
+            cht_interface_closure.interface_temperature_continuity_ratio,
         ),
     });
 
@@ -4896,14 +4901,16 @@ pub fn analysis_run_cht_with_options_op(
         );
     }
 
-    let max_thermal_residual = thermal_run
-        .residual_norms
-        .iter()
-        .copied()
-        .fold(0.0_f64, f64::max);
+    let max_cht_transport_residual = cht_interface_closure
+        .max_thermal_transport_residual_ratio
+        .max(
+            cht_interface_closure
+                .max_energy_residual
+                .max(cht_interface_closure.heat_flux_balance_ratio),
+        );
     let solver_convergence = if max_cfd_momentum_residual <= options.residual_warn_threshold
         && max_cfd_continuity_residual <= options.residual_warn_threshold
-        && max_thermal_residual <= options.residual_warn_threshold
+        && max_cht_transport_residual <= options.residual_warn_threshold
     {
         QualityGate::Pass
     } else {
@@ -4915,11 +4922,12 @@ pub fn analysis_run_cht_with_options_op(
         || thermal_run.residual_norms.iter().any(|r| !r.is_finite())
         || !max_cfd_momentum_residual.is_finite()
         || !max_cfd_continuity_residual.is_finite()
+        || !max_cht_transport_residual.is_finite()
     {
         QualityGate::Fail
     } else if max_cfd_momentum_residual > options.residual_warn_threshold
         || max_cfd_continuity_residual > options.residual_warn_threshold
-        || max_thermal_residual > options.residual_warn_threshold
+        || max_cht_transport_residual > options.residual_warn_threshold
     {
         QualityGate::Warn
     } else {
@@ -4944,11 +4952,11 @@ pub fn analysis_run_cht_with_options_op(
             ),
         });
     }
-    if max_thermal_residual > options.residual_warn_threshold {
+    if max_cht_transport_residual > options.residual_warn_threshold {
         quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ThermalResidualExceeded,
+            code: QualityReasonCode::SolverNotConverged,
             detail: format!(
-                "cht thermal residual exceeds threshold {}",
+                "cht interface transport residual exceeds threshold {}",
                 options.residual_warn_threshold
             ),
         });
