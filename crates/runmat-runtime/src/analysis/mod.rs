@@ -6191,7 +6191,9 @@ pub fn analysis_run_electromagnetic_with_options_op(
                         err,
                     )
                 })?;
-        sweep_peak_flux_density.push(peak_abs_field_value(&sweep_run.flux_density_field));
+        sweep_peak_flux_density.push(peak_abs_field_value(
+            &sweep_run.magnetic_flux_density_magnitude_field,
+        ));
         sweep_solve_quality.push(sweep_run.solve_quality);
         sweep_runs.push(sweep_run);
     }
@@ -6744,8 +6746,25 @@ pub fn analysis_run_electromagnetic_with_options_op(
             electromagnetic_payload_version: "electromagnetic_results/v1".to_string(),
             reference_frequency_hz: em_run.reference_frequency_hz,
             applied_current_a: em_run.applied_current_a,
-            vector_potential_real: em_run.vector_potential_field,
-            magnetic_flux_density_magnitude: em_run.flux_density_field,
+            vector_potential_real: em_run.vector_potential_real_field,
+            vector_potential_imag: em_run.vector_potential_imag_field,
+            magnetic_flux_density_real: em_run.magnetic_flux_density_real_field,
+            magnetic_flux_density_imag: em_run.magnetic_flux_density_imag_field,
+            magnetic_flux_density_magnitude: em_run.magnetic_flux_density_magnitude_field,
+            magnetic_field_real: em_run.magnetic_field_real_field,
+            magnetic_field_imag: em_run.magnetic_field_imag_field,
+            current_density_real: em_run.current_density_real_field,
+            current_density_imag: em_run.current_density_imag_field,
+            electric_field_real: em_run.electric_field_real_field,
+            electric_field_imag: em_run.electric_field_imag_field,
+            power_loss_density: em_run.power_loss_density_field,
+            energy_density: em_run.energy_density_field,
+            residual_real: em_run.residual_real_field,
+            residual_imag: em_run.residual_imag_field,
+            electric_flux_density_real: em_run.electric_flux_density_real_field,
+            electric_flux_density_imag: em_run.electric_flux_density_imag_field,
+            poynting_vector_real: em_run.poynting_vector_real_field,
+            poynting_vector_imag: em_run.poynting_vector_imag_field,
             sweep_frequency_hz,
             sweep_peak_flux_density,
             sweep_solve_quality,
@@ -6923,16 +6942,29 @@ fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<Analysi
     }
 
     if let Some(electromagnetic) = run_result.electromagnetic_results.as_ref() {
-        push_analysis_result_field(
-            &mut fields,
-            &mut seen,
+        for field in [
             &electromagnetic.vector_potential_real,
-        );
-        push_analysis_result_field(
-            &mut fields,
-            &mut seen,
+            &electromagnetic.vector_potential_imag,
+            &electromagnetic.magnetic_flux_density_real,
+            &electromagnetic.magnetic_flux_density_imag,
             &electromagnetic.magnetic_flux_density_magnitude,
-        );
+            &electromagnetic.magnetic_field_real,
+            &electromagnetic.magnetic_field_imag,
+            &electromagnetic.current_density_real,
+            &electromagnetic.current_density_imag,
+            &electromagnetic.electric_field_real,
+            &electromagnetic.electric_field_imag,
+            &electromagnetic.power_loss_density,
+            &electromagnetic.energy_density,
+            &electromagnetic.residual_real,
+            &electromagnetic.residual_imag,
+            &electromagnetic.electric_flux_density_real,
+            &electromagnetic.electric_flux_density_imag,
+            &electromagnetic.poynting_vector_real,
+            &electromagnetic.poynting_vector_imag,
+        ] {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
     }
 
     fields

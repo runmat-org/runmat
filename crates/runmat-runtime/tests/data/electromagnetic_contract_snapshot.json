@@ -24,6 +24,9 @@
         "source_operation": "fea.run_electromagnetic"
       }
     },
+    "vector_potential_imag": {},
+    "magnetic_flux_density_real": {},
+    "magnetic_flux_density_imag": {},
     "magnetic_flux_density_magnitude": {
       "field_id": "em.magnetic_flux_density_magnitude",
       "display_name": "EM Magnetic Flux Density Magnitude",
@@ -45,6 +48,20 @@
         "source_operation": "fea.run_electromagnetic"
       }
     },
+    "magnetic_field_real": {},
+    "magnetic_field_imag": {},
+    "current_density_real": {},
+    "current_density_imag": {},
+    "electric_field_real": {},
+    "electric_field_imag": {},
+    "power_loss_density": {},
+    "energy_density": {},
+    "residual_real": {},
+    "residual_imag": {},
+    "electric_flux_density_real": {},
+    "electric_flux_density_imag": {},
+    "poynting_vector_real": {},
+    "poynting_vector_imag": {},
     "sweep_frequency_hz": [],
     "sweep_peak_flux_density": [],
     "sweep_solve_quality": [],

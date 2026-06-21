@@ -9,8 +9,15 @@ use crate::{
     assembly::assemble_linear_system,
     contracts::{
         ComputeBackend, ElectromagneticSolveOptions, FeaElectromagneticRunResult, FeaRunError,
-        FeaRunResult, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
-        FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
+        FeaRunResult, FEA_FIELD_EM_CURRENT_DENSITY_IMAG, FEA_FIELD_EM_CURRENT_DENSITY_REAL,
+        FEA_FIELD_EM_ELECTRIC_FIELD_IMAG, FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
+        FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_IMAG, FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL,
+        FEA_FIELD_EM_ENERGY_DENSITY, FEA_FIELD_EM_MAGNETIC_FIELD_IMAG,
+        FEA_FIELD_EM_MAGNETIC_FIELD_REAL, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_IMAG,
+        FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
+        FEA_FIELD_EM_POWER_LOSS_DENSITY, FEA_FIELD_EM_POYNTING_VECTOR_IMAG,
+        FEA_FIELD_EM_POYNTING_VECTOR_REAL, FEA_FIELD_EM_RESIDUAL_IMAG, FEA_FIELD_EM_RESIDUAL_REAL,
+        FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
     },
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     operator::{apply_k, OperatorSystem},
@@ -579,11 +586,12 @@ pub fn run_electromagnetic_with_options(
         .zip(vector_potential_imag.iter())
         .map(|(real, imag)| (real * real + imag * imag).sqrt())
         .collect::<Vec<_>>();
-    let flux_density = flux_density_from_complex_vector_potential(
-        &vector_potential_real,
-        &vector_potential_imag,
-        h,
-    );
+    let (flux_density_real, flux_density_imag, flux_density) =
+        flux_density_from_complex_vector_potential(
+            &vector_potential_real,
+            &vector_potential_imag,
+            h,
+        );
     let flux_magnitude_estimate =
         flux_density_from_magnitude_vector_potential(&vector_potential, h);
     let flux_phasor_coherence_ratio =
@@ -591,6 +599,8 @@ pub fn run_electromagnetic_with_options(
 
     let real_applied = apply_k(&summary.operator, &vector_potential_real);
     let imag_applied = apply_k(&summary.operator, &vector_potential_imag);
+    let mut residual_real_values = vec![0.0_f64; node_count];
+    let mut residual_imag_values = vec![0.0_f64; node_count];
     let mut coupled_residual_sq_sum = 0.0_f64;
     let mut real_residual_sq_sum = 0.0_f64;
     let mut imag_residual_sq_sum = 0.0_f64;
@@ -606,6 +616,8 @@ pub fn run_electromagnetic_with_options(
         let conductivity_real = conductivity_coupling_terms[i] * vector_potential_real[i];
         let residual_real = real_applied[i] - conductivity_imag - base_rhs_real[i];
         let residual_imag = imag_applied[i] + conductivity_real - base_rhs_imag[i];
+        residual_real_values[i] = residual_real;
+        residual_imag_values[i] = residual_imag;
         real_residual_sq_sum += residual_real * residual_real;
         imag_residual_sq_sum += residual_imag * residual_imag;
         coupled_residual_sq_sum += residual_real * residual_real + residual_imag * residual_imag;
@@ -872,6 +884,143 @@ pub fn run_electromagnetic_with_options(
         ),
     });
 
+    let vector_potential_real_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
+        vec![node_count],
+        vector_potential_real.clone(),
+    );
+    let vector_potential_imag_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
+        vec![node_count],
+        vector_potential_imag.clone(),
+    );
+    let magnetic_flux_density_real_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
+        vec![node_count, 3],
+        axial_vector_field_values(&flux_density_real),
+    );
+    let magnetic_flux_density_imag_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_IMAG,
+        vec![node_count, 3],
+        axial_vector_field_values(&flux_density_imag),
+    );
+    let magnetic_flux_density_magnitude_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
+        vec![node_count],
+        flux_density.clone(),
+    );
+
+    let mut magnetic_field_real = Vec::with_capacity(node_count);
+    let mut magnetic_field_imag = Vec::with_capacity(node_count);
+    let mut electric_field_real = Vec::with_capacity(node_count);
+    let mut electric_field_imag = Vec::with_capacity(node_count);
+    let mut current_density_real = Vec::with_capacity(node_count);
+    let mut current_density_imag = Vec::with_capacity(node_count);
+    let mut electric_flux_density_real = Vec::with_capacity(node_count);
+    let mut electric_flux_density_imag = Vec::with_capacity(node_count);
+    let mut power_loss_density = Vec::with_capacity(node_count);
+    let mut energy_density = Vec::with_capacity(node_count);
+    let mut poynting_vector_real = Vec::with_capacity(node_count);
+    let mut poynting_vector_imag = Vec::with_capacity(node_count);
+
+    for i in 0..node_count {
+        let mu = mu0 * node_mu_r[i].max(1.0e-9);
+        let epsilon = epsilon0 * node_eps_r[i].max(1.0e-9);
+        let sigma = node_sigma[i].max(0.0);
+        let h_real = flux_density_real[i] / mu;
+        let h_imag = flux_density_imag[i] / mu;
+        let e_real = omega * vector_potential_imag[i];
+        let e_imag = -omega * vector_potential_real[i];
+        let j_real = sigma * e_real;
+        let j_imag = sigma * e_imag;
+        magnetic_field_real.push(h_real);
+        magnetic_field_imag.push(h_imag);
+        electric_field_real.push(e_real);
+        electric_field_imag.push(e_imag);
+        current_density_real.push(j_real);
+        current_density_imag.push(j_imag);
+        electric_flux_density_real.push(epsilon * e_real);
+        electric_flux_density_imag.push(epsilon * e_imag);
+        power_loss_density.push(0.5 * sigma * (e_real * e_real + e_imag * e_imag));
+        energy_density.push(
+            0.25 * ((flux_density[i] * flux_density[i]) / mu
+                + epsilon * (e_real * e_real + e_imag * e_imag)),
+        );
+        poynting_vector_real.push(e_real * h_real + e_imag * h_imag);
+        poynting_vector_imag.push(e_imag * h_real - e_real * h_imag);
+    }
+
+    let magnetic_field_real_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_MAGNETIC_FIELD_REAL,
+        vec![node_count, 3],
+        axial_vector_field_values(&magnetic_field_real),
+    );
+    let magnetic_field_imag_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_MAGNETIC_FIELD_IMAG,
+        vec![node_count, 3],
+        axial_vector_field_values(&magnetic_field_imag),
+    );
+    let current_density_real_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_CURRENT_DENSITY_REAL,
+        vec![node_count, 3],
+        axial_vector_field_values(&current_density_real),
+    );
+    let current_density_imag_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_CURRENT_DENSITY_IMAG,
+        vec![node_count, 3],
+        axial_vector_field_values(&current_density_imag),
+    );
+    let electric_field_real_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
+        vec![node_count, 3],
+        axial_vector_field_values(&electric_field_real),
+    );
+    let electric_field_imag_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_ELECTRIC_FIELD_IMAG,
+        vec![node_count, 3],
+        axial_vector_field_values(&electric_field_imag),
+    );
+    let power_loss_density_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_POWER_LOSS_DENSITY,
+        vec![node_count],
+        power_loss_density,
+    );
+    let energy_density_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_ENERGY_DENSITY,
+        vec![node_count],
+        energy_density,
+    );
+    let residual_real_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_RESIDUAL_REAL,
+        vec![node_count],
+        residual_real_values,
+    );
+    let residual_imag_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_RESIDUAL_IMAG,
+        vec![node_count],
+        residual_imag_values,
+    );
+    let electric_flux_density_real_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL,
+        vec![node_count, 3],
+        axial_vector_field_values(&electric_flux_density_real),
+    );
+    let electric_flux_density_imag_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_IMAG,
+        vec![node_count, 3],
+        axial_vector_field_values(&electric_flux_density_imag),
+    );
+    let poynting_vector_real_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_POYNTING_VECTOR_REAL,
+        vec![node_count, 3],
+        axial_vector_field_values(&poynting_vector_real),
+    );
+    let poynting_vector_imag_field = AnalysisField::host_f64(
+        FEA_FIELD_EM_POYNTING_VECTOR_IMAG,
+        vec![node_count, 3],
+        axial_vector_field_values(&poynting_vector_imag),
+    );
+
     let run = FeaRunResult {
         backend,
         solver_backend: backend_kind.as_str().to_string(),
@@ -885,16 +1034,25 @@ pub fn run_electromagnetic_with_options(
         solver_host_sync_count: if backend == ComputeBackend::Gpu { 0 } else { 1 },
         diagnostics,
         fields: vec![
-            AnalysisField::host_f64(
-                FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
-                vec![node_count],
-                vector_potential.clone(),
-            ),
-            AnalysisField::host_f64(
-                FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
-                vec![node_count],
-                flux_density.clone(),
-            ),
+            vector_potential_real_field.clone(),
+            vector_potential_imag_field.clone(),
+            magnetic_flux_density_real_field.clone(),
+            magnetic_flux_density_imag_field.clone(),
+            magnetic_flux_density_magnitude_field.clone(),
+            magnetic_field_real_field.clone(),
+            magnetic_field_imag_field.clone(),
+            current_density_real_field.clone(),
+            current_density_imag_field.clone(),
+            electric_field_real_field.clone(),
+            electric_field_imag_field.clone(),
+            power_loss_density_field.clone(),
+            energy_density_field.clone(),
+            residual_real_field.clone(),
+            residual_imag_field.clone(),
+            electric_flux_density_real_field.clone(),
+            electric_flux_density_imag_field.clone(),
+            poynting_vector_real_field.clone(),
+            poynting_vector_imag_field.clone(),
         ],
     };
 
@@ -920,16 +1078,25 @@ pub fn run_electromagnetic_with_options(
         run,
         reference_frequency_hz: domain.reference_frequency_hz,
         applied_current_a: domain.applied_current_a,
-        vector_potential_field: AnalysisField::host_f64(
-            FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
-            vec![node_count],
-            vector_potential,
-        ),
-        flux_density_field: AnalysisField::host_f64(
-            FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
-            vec![node_count],
-            flux_density,
-        ),
+        vector_potential_real_field,
+        vector_potential_imag_field,
+        magnetic_flux_density_real_field,
+        magnetic_flux_density_imag_field,
+        magnetic_flux_density_magnitude_field,
+        magnetic_field_real_field,
+        magnetic_field_imag_field,
+        current_density_real_field,
+        current_density_imag_field,
+        electric_field_real_field,
+        electric_field_imag_field,
+        power_loss_density_field,
+        energy_density_field,
+        residual_real_field,
+        residual_imag_field,
+        electric_flux_density_real_field,
+        electric_flux_density_imag_field,
+        poynting_vector_real_field,
+        poynting_vector_imag_field,
         max_residual_norm,
         solve_quality,
     })
@@ -1754,22 +1921,42 @@ fn block_dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
-fn flux_density_from_complex_vector_potential(real: &[f64], imag: &[f64], h: f64) -> Vec<f64> {
+fn flux_density_from_complex_vector_potential(
+    real: &[f64],
+    imag: &[f64],
+    h: f64,
+) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let node_count = real.len().min(imag.len());
-    let mut flux_density = vec![0.0_f64; node_count];
+    let mut flux_density_real = vec![0.0_f64; node_count];
+    let mut flux_density_imag = vec![0.0_f64; node_count];
+    let mut flux_density_magnitude = vec![0.0_f64; node_count];
     if node_count < 2 || !h.is_finite() || h <= 0.0 {
-        return flux_density;
+        return (flux_density_real, flux_density_imag, flux_density_magnitude);
     }
 
     let inv_two_h = 0.5 / h;
     for i in 1..(node_count - 1) {
         let grad_real = (real[i + 1] - real[i - 1]) * inv_two_h;
         let grad_imag = (imag[i + 1] - imag[i - 1]) * inv_two_h;
-        flux_density[i] = (grad_real * grad_real + grad_imag * grad_imag).sqrt();
+        flux_density_real[i] = grad_real;
+        flux_density_imag[i] = grad_imag;
+        flux_density_magnitude[i] = (grad_real * grad_real + grad_imag * grad_imag).sqrt();
     }
-    flux_density[0] = flux_density[1];
-    flux_density[node_count - 1] = flux_density[node_count - 2];
-    flux_density
+    flux_density_real[0] = flux_density_real[1];
+    flux_density_real[node_count - 1] = flux_density_real[node_count - 2];
+    flux_density_imag[0] = flux_density_imag[1];
+    flux_density_imag[node_count - 1] = flux_density_imag[node_count - 2];
+    flux_density_magnitude[0] = flux_density_magnitude[1];
+    flux_density_magnitude[node_count - 1] = flux_density_magnitude[node_count - 2];
+    (flux_density_real, flux_density_imag, flux_density_magnitude)
+}
+
+fn axial_vector_field_values(values: &[f64]) -> Vec<f64> {
+    let mut vector_values = Vec::with_capacity(values.len() * 3);
+    for value in values {
+        vector_values.extend_from_slice(&[*value, 0.0, 0.0]);
+    }
+    vector_values
 }
 
 fn flux_density_from_magnitude_vector_potential(magnitude: &[f64], h: f64) -> Vec<f64> {
@@ -1994,7 +2181,7 @@ mod tests {
     fn complex_flux_density_reconstruction_preserves_quadrature_gradients() {
         let real = vec![0.0, 1.0, 0.0, -1.0, 0.0];
         let imag = vec![1.0, 0.0, -1.0, 0.0, 1.0];
-        let flux_density = flux_density_from_complex_vector_potential(&real, &imag, 0.25);
+        let (_, _, flux_density) = flux_density_from_complex_vector_potential(&real, &imag, 0.25);
 
         assert!(flux_density[2] > 3.5);
         assert!((flux_density[0] - flux_density[1]).abs() < 1.0e-12);
@@ -2005,7 +2192,7 @@ mod tests {
     fn complex_flux_density_reconstruction_zero_for_uniform_phasor() {
         let real = vec![2.0; 8];
         let imag = vec![-1.0; 8];
-        let flux_density = flux_density_from_complex_vector_potential(&real, &imag, 0.1);
+        let (_, _, flux_density) = flux_density_from_complex_vector_potential(&real, &imag, 0.1);
 
         assert!(flux_density.iter().all(|value| value.abs() <= 1.0e-12));
     }
@@ -2014,7 +2201,7 @@ mod tests {
     fn flux_phasor_coherence_ratio_drops_for_quadrature_variation() {
         let real = vec![0.0, 1.0, 0.0, -1.0, 0.0];
         let imag = vec![1.0, 0.0, -1.0, 0.0, 1.0];
-        let complex_flux = flux_density_from_complex_vector_potential(&real, &imag, 0.25);
+        let (_, _, complex_flux) = flux_density_from_complex_vector_potential(&real, &imag, 0.25);
         let magnitude = real
             .iter()
             .zip(imag.iter())
@@ -2033,7 +2220,7 @@ mod tests {
     fn flux_phasor_coherence_ratio_is_unity_for_in_phase_signal() {
         let real = vec![0.0, 0.5, 1.0, 1.5, 2.0];
         let imag = vec![0.0; 5];
-        let complex_flux = flux_density_from_complex_vector_potential(&real, &imag, 0.5);
+        let (_, _, complex_flux) = flux_density_from_complex_vector_potential(&real, &imag, 0.5);
         let magnitude = real
             .iter()
             .zip(imag.iter())

@@ -39,7 +39,10 @@ use runmat_analysis_fea::{
     FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
     FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
     FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
-    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
+    FEA_FIELD_EM_CURRENT_DENSITY_REAL, FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
+    FEA_FIELD_EM_ENERGY_DENSITY, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
+    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_RESIDUAL_REAL,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
     FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
     FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
@@ -3742,6 +3745,55 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
     assert_eq!(em_payload.sweep_solve_quality.len(), 1);
     assert!(em_payload.resonance_peak_frequency_hz.is_some());
     assert!(em_payload.resonance_peak_flux_density.is_some());
+    assert_eq!(
+        em_payload.vector_potential_real.field_id,
+        FEA_FIELD_EM_VECTOR_POTENTIAL_REAL
+    );
+    assert_eq!(
+        em_payload.vector_potential_imag.field_id,
+        FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG
+    );
+    assert_eq!(
+        em_payload.magnetic_flux_density_real.field_id,
+        FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL
+    );
+    assert_eq!(
+        em_payload.current_density_real.field_id,
+        FEA_FIELD_EM_CURRENT_DENSITY_REAL
+    );
+    assert_eq!(
+        em_payload.electric_field_real.field_id,
+        FEA_FIELD_EM_ELECTRIC_FIELD_REAL
+    );
+    assert_eq!(
+        em_payload.energy_density.field_id,
+        FEA_FIELD_EM_ENERGY_DENSITY
+    );
+    assert_eq!(
+        em_payload.residual_real.field_id,
+        FEA_FIELD_EM_RESIDUAL_REAL
+    );
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("em results should be queryable");
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG));
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL));
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == FEA_FIELD_EM_ELECTRIC_FIELD_REAL));
     let em_diag = envelope
         .data
         .run

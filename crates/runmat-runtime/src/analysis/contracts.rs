@@ -967,12 +967,18 @@ impl AnalysisFieldDescriptor {
 
 fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
     let normalized = field_id.to_ascii_lowercase();
+    if normalized.contains("magnitude") {
+        return AnalysisFieldKind::Scalar;
+    }
     if normalized.contains("temperature_gradient")
         || normalized.contains("heat_flux")
         || normalized.contains("wall_shear_stress")
         || normalized.contains("vorticity")
         || normalized.contains("velocity")
         || normalized.contains("traction")
+        || normalized.contains("magnetic_field")
+        || normalized.contains("electric_field")
+        || normalized.contains("current_density")
     {
         return AnalysisFieldKind::Vector;
     }
@@ -1015,6 +1021,9 @@ fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
     if normalized.contains("_proxy") {
         return None;
     }
+    if normalized.contains("magnitude") {
+        return None;
+    }
     if normalized.contains("equivalent_plastic_strain") {
         return None;
     }
@@ -1024,6 +1033,9 @@ fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
         || normalized.contains("vorticity")
         || normalized.contains("velocity")
         || normalized.contains("traction")
+        || normalized.contains("magnetic_field")
+        || normalized.contains("electric_field")
+        || normalized.contains("current_density")
     {
         return Some(
             shape
@@ -1617,7 +1629,24 @@ pub struct ElectromagneticResultsData {
     pub reference_frequency_hz: f64,
     pub applied_current_a: f64,
     pub vector_potential_real: AnalysisField,
+    pub vector_potential_imag: AnalysisField,
+    pub magnetic_flux_density_real: AnalysisField,
+    pub magnetic_flux_density_imag: AnalysisField,
     pub magnetic_flux_density_magnitude: AnalysisField,
+    pub magnetic_field_real: AnalysisField,
+    pub magnetic_field_imag: AnalysisField,
+    pub current_density_real: AnalysisField,
+    pub current_density_imag: AnalysisField,
+    pub electric_field_real: AnalysisField,
+    pub electric_field_imag: AnalysisField,
+    pub power_loss_density: AnalysisField,
+    pub energy_density: AnalysisField,
+    pub residual_real: AnalysisField,
+    pub residual_imag: AnalysisField,
+    pub electric_flux_density_real: AnalysisField,
+    pub electric_flux_density_imag: AnalysisField,
+    pub poynting_vector_real: AnalysisField,
+    pub poynting_vector_imag: AnalysisField,
     #[serde(default)]
     pub sweep_frequency_hz: Vec<f64>,
     #[serde(default)]

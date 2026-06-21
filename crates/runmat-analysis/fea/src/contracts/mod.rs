@@ -15,7 +15,24 @@ pub const FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY: &str = "structural.total_str
 pub const FEA_FIELD_STRUCTURAL_RESIDUAL_NORM: &str = "structural.residual_norm";
 pub const FEA_FIELD_STRUCTURAL_EQUATION_SCALE: &str = "structural.equation_scale";
 pub const FEA_FIELD_EM_VECTOR_POTENTIAL_REAL: &str = "em.vector_potential_real";
+pub const FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG: &str = "em.vector_potential_imag";
+pub const FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL: &str = "em.magnetic_flux_density_real";
+pub const FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_IMAG: &str = "em.magnetic_flux_density_imag";
 pub const FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE: &str = "em.magnetic_flux_density_magnitude";
+pub const FEA_FIELD_EM_MAGNETIC_FIELD_REAL: &str = "em.magnetic_field_real";
+pub const FEA_FIELD_EM_MAGNETIC_FIELD_IMAG: &str = "em.magnetic_field_imag";
+pub const FEA_FIELD_EM_CURRENT_DENSITY_REAL: &str = "em.current_density_real";
+pub const FEA_FIELD_EM_CURRENT_DENSITY_IMAG: &str = "em.current_density_imag";
+pub const FEA_FIELD_EM_ELECTRIC_FIELD_REAL: &str = "em.electric_field_real";
+pub const FEA_FIELD_EM_ELECTRIC_FIELD_IMAG: &str = "em.electric_field_imag";
+pub const FEA_FIELD_EM_POWER_LOSS_DENSITY: &str = "em.power_loss_density";
+pub const FEA_FIELD_EM_ENERGY_DENSITY: &str = "em.energy_density";
+pub const FEA_FIELD_EM_RESIDUAL_REAL: &str = "em.residual_real";
+pub const FEA_FIELD_EM_RESIDUAL_IMAG: &str = "em.residual_imag";
+pub const FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL: &str = "em.electric_flux_density_real";
+pub const FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_IMAG: &str = "em.electric_flux_density_imag";
+pub const FEA_FIELD_EM_POYNTING_VECTOR_REAL: &str = "em.poynting_vector_real";
+pub const FEA_FIELD_EM_POYNTING_VECTOR_IMAG: &str = "em.poynting_vector_imag";
 
 pub fn fea_modal_mode_shape_field_id(mode_number: usize) -> String {
     format!("modal.mode_shape.{mode_number}")
@@ -456,8 +473,25 @@ pub struct FeaElectromagneticRunResult {
     pub run: FeaRunResult,
     pub reference_frequency_hz: f64,
     pub applied_current_a: f64,
-    pub vector_potential_field: AnalysisField,
-    pub flux_density_field: AnalysisField,
+    pub vector_potential_real_field: AnalysisField,
+    pub vector_potential_imag_field: AnalysisField,
+    pub magnetic_flux_density_real_field: AnalysisField,
+    pub magnetic_flux_density_imag_field: AnalysisField,
+    pub magnetic_flux_density_magnitude_field: AnalysisField,
+    pub magnetic_field_real_field: AnalysisField,
+    pub magnetic_field_imag_field: AnalysisField,
+    pub current_density_real_field: AnalysisField,
+    pub current_density_imag_field: AnalysisField,
+    pub electric_field_real_field: AnalysisField,
+    pub electric_field_imag_field: AnalysisField,
+    pub power_loss_density_field: AnalysisField,
+    pub energy_density_field: AnalysisField,
+    pub residual_real_field: AnalysisField,
+    pub residual_imag_field: AnalysisField,
+    pub electric_flux_density_real_field: AnalysisField,
+    pub electric_flux_density_imag_field: AnalysisField,
+    pub poynting_vector_real_field: AnalysisField,
+    pub poynting_vector_imag_field: AnalysisField,
     pub max_residual_norm: f64,
     pub solve_quality: f64,
 }
