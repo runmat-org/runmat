@@ -1,0 +1,86 @@
+{
+  "title": "buttord",
+  "category": "math/signal",
+  "keywords": [
+    "buttord",
+    "Butterworth",
+    "filter order",
+    "IIR",
+    "signal processing"
+  ],
+  "summary": "Select the minimum Butterworth filter order.",
+  "references": [
+    "title: \"MATLAB buttord documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Order selection is scalar host-side analysis. GPU-resident frequency inputs are gathered automatically."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 5,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::buttord::tests"
+  },
+  "description": "`buttord(Wp, Ws, Rp, Rs)` computes the minimum Butterworth filter order and natural cutoff `Wn` that satisfy passband ripple `Rp` and stopband attenuation `Rs`. Digital frequencies use MATLAB's normalized convention where `1` is Nyquist; add `'s'` for analog rad/s designs.",
+  "behaviors": [
+    "`[n, Wn] = buttord(Wp, Ws, Rp, Rs)` returns an integer order `n` and cutoff `Wn` for use with `butter(n, Wn)`.",
+    "Scalar `Wp` and `Ws` select lowpass when `Wp < Ws` and highpass when `Wp > Ws`.",
+    "Two-element edge vectors select bandpass when the stopband encloses the passband and bandstop when the passband encloses the stopband.",
+    "Digital inputs must be finite, positive, and less than 1. Analog inputs must be finite and positive.",
+    "`Rs` must be greater than `Rp`, and both values are specified in decibels."
+  ],
+  "examples": [
+    {
+      "description": "Lowpass order selection",
+      "input": "[n, Wn] = buttord(0.2, 0.3, 1, 40);\n[b, a] = butter(n, Wn);"
+    },
+    {
+      "description": "Highpass order selection",
+      "input": "[n, Wn] = buttord(0.5, 0.3, 1, 40);\n[b, a] = butter(n, Wn, 'high');"
+    },
+    {
+      "description": "Bandpass order selection",
+      "input": "[n, Wn] = buttord([0.3 0.5], [0.2 0.6], 1, 30);\n[b, a] = butter(n, Wn, 'bandpass');"
+    },
+    {
+      "description": "Analog lowpass order selection",
+      "input": "[n, Wn] = buttord(10, 20, 1, 40, 's');\n[b, a] = butter(n, Wn, 's');"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What should I pass to `butter` after `buttord`?",
+      "answer": "Pass the returned `n` and `Wn` directly. For scalar highpass designs, also pass `'high'`; for two-element bandpass or bandstop designs, pass `'bandpass'` or `'stop'` to match the edge layout."
+    },
+    {
+      "question": "Does `buttord` run on the GPU?",
+      "answer": "No. It only computes small order/cutoff parameters on the host. Those parameters can feed `butter`, and the resulting coefficients can later be used by GPU-capable filtering paths."
+    }
+  ],
+  "links": [
+    {
+      "label": "butter",
+      "url": "./butter"
+    },
+    {
+      "label": "freqz",
+      "url": "./freqz"
+    },
+    {
+      "label": "filter",
+      "url": "./filter"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/buttord.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/buttord.rs"
+  }
+}
