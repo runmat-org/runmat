@@ -2691,6 +2691,126 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
 }
 
 #[test]
+fn analysis_run_transient_rejects_invalid_electro_thermal_voltage() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_invalid_electro_voltage".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+    set_model_electro_coupling(
+        &mut model,
+        ElectroThermalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_voltage_v: f64::NAN,
+            base_electrical_conductivity_s_per_m: 3.5e7,
+            resistive_heating_coefficient: 4.0e-4,
+            region_conductivity_scales: Vec::new(),
+            time_profile: Vec::new(),
+        },
+    );
+
+    let err = analysis_run_transient_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("transient run should reject invalid electro-thermal voltage");
+
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS"
+    );
+    assert_eq!(
+        err.context.get("applied_voltage_v").map(String::as_str),
+        Some("NaN")
+    );
+}
+
+#[test]
+fn analysis_run_transient_rejects_invalid_electro_thermal_conductivity_scale() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_invalid_electro_conductivity".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+    set_model_electro_coupling(
+        &mut model,
+        ElectroThermalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_voltage_v: 36.0,
+            base_electrical_conductivity_s_per_m: 3.5e7,
+            resistive_heating_coefficient: 4.0e-4,
+            region_conductivity_scales: vec![ElectroRegionConductivityScale {
+                region_id: "tip".to_string(),
+                conductivity_scale: 0.0,
+            }],
+            time_profile: Vec::new(),
+        },
+    );
+
+    let err = analysis_run_transient_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("transient run should reject invalid electro-thermal conductivity scale");
+
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS"
+    );
+    assert_eq!(
+        err.context.get("conductivity_scale").map(String::as_str),
+        Some("0")
+    );
+}
+
+#[test]
+fn analysis_run_transient_rejects_unmapped_electro_thermal_region() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model_with_material_assignment_mismatch();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_unmapped_electro_region".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+    set_model_electro_coupling(
+        &mut model,
+        ElectroThermalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_voltage_v: 36.0,
+            base_electrical_conductivity_s_per_m: 3.5e7,
+            resistive_heating_coefficient: 4.0e-4,
+            region_conductivity_scales: vec![ElectroRegionConductivityScale {
+                region_id: "not_a_model_region".to_string(),
+                conductivity_scale: 1.0,
+            }],
+            time_profile: Vec::new(),
+        },
+    );
+
+    let err = analysis_run_transient_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("transient run should reject unmapped electro-thermal regions");
+
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS"
+    );
+    assert_eq!(
+        err.context.get("region_id").map(String::as_str),
+        Some("not_a_model_region")
+    );
+}
+
+#[test]
 fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();

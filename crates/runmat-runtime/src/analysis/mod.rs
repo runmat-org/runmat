@@ -1783,7 +1783,9 @@ pub fn analysis_run_modal_with_options_op(
                 ANALYSIS_RUN_MODAL_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_MODAL.INVALID_OPTIONS",
+                    error_code: electro_thermal_invalid_options_error_code(
+                        ANALYSIS_RUN_MODAL_OPERATION,
+                    ),
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -2180,7 +2182,9 @@ pub fn analysis_run_acoustic_with_options_op(
                 ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_ACOUSTIC.INVALID_OPTIONS",
+                    error_code: electro_thermal_invalid_options_error_code(
+                        ANALYSIS_RUN_ACOUSTIC_OPERATION,
+                    ),
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -5827,7 +5831,9 @@ pub fn analysis_run_transient_with_options_op(
                 ANALYSIS_RUN_TRANSIENT_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_TRANSIENT.INVALID_OPTIONS",
+                    error_code: electro_thermal_invalid_options_error_code(
+                        ANALYSIS_RUN_TRANSIENT_OPERATION,
+                    ),
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -6412,7 +6418,9 @@ pub fn analysis_run_nonlinear_with_options_op(
                 ANALYSIS_RUN_NONLINEAR_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
+                    error_code: electro_thermal_invalid_options_error_code(
+                        ANALYSIS_RUN_NONLINEAR_OPERATION,
+                    ),
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -6915,7 +6923,7 @@ pub fn analysis_run_linear_static_with_options(
                 ANALYSIS_RUN_OP_VERSION,
                 &context,
                 OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_LINEAR_STATIC.INVALID_OPTIONS",
+                    error_code: electro_thermal_invalid_options_error_code(ANALYSIS_RUN_OPERATION),
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -10772,6 +10780,17 @@ fn to_fea_contact_interface_context(
         max_penetration_ratio: contact.max_penetration_ratio,
         friction_coefficient: contact.friction_coefficient,
     })
+}
+
+fn electro_thermal_invalid_options_error_code(operation: &str) -> &'static str {
+    match operation {
+        ANALYSIS_RUN_MODAL_OPERATION => "RM.FEA.RUN_MODAL.INVALID_ELECTRO_THERMAL_OPTIONS",
+        ANALYSIS_RUN_ACOUSTIC_OPERATION => "RM.FEA.RUN_ACOUSTIC.INVALID_ELECTRO_THERMAL_OPTIONS",
+        ANALYSIS_RUN_TRANSIENT_OPERATION => "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
+        ANALYSIS_RUN_NONLINEAR_OPERATION => "RM.FEA.RUN_NONLINEAR.INVALID_ELECTRO_THERMAL_OPTIONS",
+        ANALYSIS_RUN_OPERATION => "RM.FEA.RUN_LINEAR_STATIC.INVALID_ELECTRO_THERMAL_OPTIONS",
+        _ => "RM.FEA.RUN.INVALID_ELECTRO_THERMAL_OPTIONS",
+    }
 }
 
 fn validate_thermo_coupling_options(

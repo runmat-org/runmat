@@ -541,6 +541,18 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electro_transient_severity": 0.1,
                 "electro_nonlinear_severity": 0.1,
             },
+            _error_record(
+                "electro_thermal_invalid_voltage",
+                "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
+            ),
+            _error_record(
+                "electro_thermal_invalid_conductivity_scale",
+                "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
+            ),
+            _error_record(
+                "electro_thermal_unmapped_region",
+                "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
+            ),
             _record(
                 "electromagnetic_reference_homogeneous_gpu_provider",
                 {
@@ -1486,6 +1498,18 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             records = self._base_records()
             for record in records:
                 if record["fixture_id"] == "thermal_standalone_ramp_invalid_source":
+                    record["run_error_code"] = None
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_electro_invalid_voltage_error_code_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "electro_thermal_invalid_voltage":
                     record["run_error_code"] = None
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"

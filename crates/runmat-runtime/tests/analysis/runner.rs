@@ -571,6 +571,39 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
                 },
             ],
         }),
+        "electro_thermal_invalid_voltage" => Some(ElectroThermalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_voltage_v: f64::NAN,
+            base_electrical_conductivity_s_per_m: 3.8e7,
+            resistive_heating_coefficient: 3.5e-4,
+            region_conductivity_scales: Vec::new(),
+            time_profile: Vec::new(),
+        }),
+        "electro_thermal_invalid_conductivity_scale" => Some(ElectroThermalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_voltage_v: 36.0,
+            base_electrical_conductivity_s_per_m: 3.8e7,
+            resistive_heating_coefficient: 3.5e-4,
+            region_conductivity_scales: vec![ElectroRegionConductivityScale {
+                region_id: "tip_steel".to_string(),
+                conductivity_scale: 0.0,
+            }],
+            time_profile: Vec::new(),
+        }),
+        "electro_thermal_unmapped_region" => Some(ElectroThermalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_voltage_v: 36.0,
+            base_electrical_conductivity_s_per_m: 3.8e7,
+            resistive_heating_coefficient: 3.5e-4,
+            region_conductivity_scales: vec![ElectroRegionConductivityScale {
+                region_id: "electro_region_not_mapped".to_string(),
+                conductivity_scale: 1.0,
+            }],
+            time_profile: Vec::new(),
+        }),
         "nonlinear_load_path_mix_gpu_provider" => Some(ElectroThermalCouplingOptions {
             enabled: true,
             reference_temperature_k: 293.15,
@@ -1980,7 +2013,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         let mut region_conductivity_scales =
             Vec::with_capacity(electro.region_conductivity_scales.len());
         for (index, scale) in electro.region_conductivity_scales.into_iter().enumerate() {
-            let mapped_region_id = if index < material_region_ids.len() {
+            let mapped_region_id = if spec_id == "electro_thermal_unmapped_region" {
+                scale.region_id.clone()
+            } else if index < material_region_ids.len() {
                 material_region_ids[index].clone()
             } else {
                 let synthesized_region_id = format!("electro_region_{index}");

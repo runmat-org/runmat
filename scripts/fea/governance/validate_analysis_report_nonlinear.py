@@ -703,6 +703,21 @@ REQUIRED_ERROR_FIXTURES = {
         "run_ok": False,
         "run_error_code": "RM.FEA.RUN_THERMAL.INVALID_THERMAL_BOUNDARY",
     },
+    "electro_thermal_invalid_voltage": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
+    },
+    "electro_thermal_invalid_conductivity_scale": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
+    },
+    "electro_thermal_unmapped_region": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
+    },
 }
 
 THERMO_REQUIRED_FIELDS = {
