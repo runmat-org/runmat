@@ -7512,6 +7512,76 @@ pub(super) fn run_fixture(
                             Some(0.12),
                             Some(1.0),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_edge_dof_count",
+                            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                                "edge_dof_count",
+                            ),
+                            Some(1.0),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_element_count",
+                            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                                "element_count",
+                            ),
+                            Some(1.0),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_oriented_edge_count",
+                            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                                "oriented_edge_count",
+                            ),
+                            Some(1.0),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_gauge_anchor_count",
+                            "FEA_EM_GAUGE",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_GAUGE",
+                                "gauge_anchor_count",
+                            ),
+                            Some(1.0),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_gauge_anchor_residual_ratio",
+                            "FEA_EM_GAUGE",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_GAUGE",
+                                "gauge_anchor_residual_ratio",
+                            ),
+                            Some(0.0),
+                            Some(1.0e-9),
+                        );
                     }
                     if spec.id == "electromagnetic_reference_heterogeneous_gpu_provider" {
                         push_threshold_assertion(

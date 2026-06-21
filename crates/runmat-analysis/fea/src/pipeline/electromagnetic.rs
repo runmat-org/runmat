@@ -547,6 +547,18 @@ pub fn run_electromagnetic_with_options(
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1_000.0;
     let vector_potential_real = harmonic_solve.real_solution.clone();
     let vector_potential_imag = harmonic_solve.imag_solution.clone();
+    let maxwell_topology = MaxwellEdgeTopology::line_graph(node_count, h, &constrained);
+    let edge_vector_potential_real = maxwell_topology.edge_line_integrals(&vector_potential_real);
+    let edge_vector_potential_imag = maxwell_topology.edge_line_integrals(&vector_potential_imag);
+    let gauge_anchor_residual_ratio = maxwell_topology
+        .gauge_anchor_residual_ratio(&vector_potential_real, &vector_potential_imag);
+    let gauge_penalty_ratio = boundary_penalty_diag.iter().sum::<f64>()
+        / summary
+            .operator
+            .stiffness_diag
+            .iter()
+            .sum::<f64>()
+            .max(1.0e-9);
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_EM_HARMONIC_COUPLING".to_string(),
         severity: if harmonic_solve.converged {
@@ -573,6 +585,37 @@ pub fn run_electromagnetic_with_options(
         });
     }
     diagnostics.push(FeaDiagnostic {
+        code: "FEA_EM_MAXWELL_EDGE_TOPOLOGY".to_string(),
+        severity: if maxwell_topology.edge_count() > 0 {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "basis=line_edge_curl_conforming edge_dof_count={} element_count={} oriented_edge_count={} constrained_edge_count={} gauge_anchor_count={} curl_curl_energy_scale={}",
+            maxwell_topology.edge_count(),
+            maxwell_topology.element_count(),
+            maxwell_topology.oriented_edge_count(),
+            maxwell_topology.constrained_edge_count(),
+            maxwell_topology.gauge_anchor_count(),
+            maxwell_topology.curl_curl_energy_scale(),
+        ),
+    });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_EM_GAUGE".to_string(),
+        severity: if gauge_anchor_residual_ratio <= 1.0e-6 {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "gauge=vector_potential_ground_anchor gauge_anchor_count={} gauge_anchor_residual_ratio={} gauge_penalty_ratio={}",
+            maxwell_topology.gauge_anchor_count(),
+            gauge_anchor_residual_ratio,
+            gauge_penalty_ratio,
+        ),
+    });
+    diagnostics.push(FeaDiagnostic {
         code: "FEA_EM_COST".to_string(),
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
@@ -586,14 +629,9 @@ pub fn run_electromagnetic_with_options(
         .zip(vector_potential_imag.iter())
         .map(|(real, imag)| (real * real + imag * imag).sqrt())
         .collect::<Vec<_>>();
-    let (flux_density_real, flux_density_imag, flux_density) =
-        flux_density_from_complex_vector_potential(
-            &vector_potential_real,
-            &vector_potential_imag,
-            h,
-        );
-    let flux_magnitude_estimate =
-        flux_density_from_magnitude_vector_potential(&vector_potential, h);
+    let (flux_density_real, flux_density_imag, flux_density) = maxwell_topology
+        .curl_from_nodal_vector_potential(&vector_potential_real, &vector_potential_imag);
+    let flux_magnitude_estimate = maxwell_topology.curl_from_nodal_magnitude(&vector_potential);
     let flux_phasor_coherence_ratio =
         flux_phasor_coherence_ratio(&flux_density, &flux_magnitude_estimate);
 
@@ -659,6 +697,7 @@ pub fn run_electromagnetic_with_options(
                 .clamp(0.0, 1.0)
         };
     let field_energy_integral = flux_density.iter().map(|v| v * v).sum::<f64>();
+    let element_count = maxwell_topology.element_count();
     let max_flux_density = flux_density
         .iter()
         .copied()
@@ -666,7 +705,7 @@ pub fn run_electromagnetic_with_options(
         .max(1.0e-9);
     let mut divergence_sum = 0.0_f64;
     let mut divergence_count = 0usize;
-    for i in 1..(node_count.saturating_sub(1)) {
+    for i in 1..(element_count.saturating_sub(1)) {
         let divergence = ((flux_density[i + 1] - flux_density[i - 1]) / (2.0 * h)).abs();
         divergence_sum += divergence;
         divergence_count += 1;
@@ -764,13 +803,7 @@ pub fn run_electromagnetic_with_options(
         )
     };
     let condition_number_estimate = (max_diag / min_diag).max(1.0);
-    let boundary_penalty_conditioning_contribution = boundary_penalty_diag.iter().sum::<f64>()
-        / summary
-            .operator
-            .stiffness_diag
-            .iter()
-            .sum::<f64>()
-            .max(1.0e-9);
+    let boundary_penalty_conditioning_contribution = gauge_penalty_ratio;
     let mut region_source_energy = vec![0.0_f64; region_count];
     let mut region_field_energy = vec![0.0_f64; region_count];
     for i in 0..node_count {
@@ -886,51 +919,53 @@ pub fn run_electromagnetic_with_options(
 
     let vector_potential_real_field = AnalysisField::host_f64(
         FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
-        vec![node_count],
-        vector_potential_real.clone(),
+        vec![element_count],
+        edge_vector_potential_real.clone(),
     );
     let vector_potential_imag_field = AnalysisField::host_f64(
         FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
-        vec![node_count],
-        vector_potential_imag.clone(),
+        vec![element_count],
+        edge_vector_potential_imag.clone(),
     );
     let magnetic_flux_density_real_field = AnalysisField::host_f64(
         FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
-        vec![node_count, 3],
+        vec![element_count, 3],
         axial_vector_field_values(&flux_density_real),
     );
     let magnetic_flux_density_imag_field = AnalysisField::host_f64(
         FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_IMAG,
-        vec![node_count, 3],
+        vec![element_count, 3],
         axial_vector_field_values(&flux_density_imag),
     );
     let magnetic_flux_density_magnitude_field = AnalysisField::host_f64(
         FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
-        vec![node_count],
+        vec![element_count],
         flux_density.clone(),
     );
 
-    let mut magnetic_field_real = Vec::with_capacity(node_count);
-    let mut magnetic_field_imag = Vec::with_capacity(node_count);
-    let mut electric_field_real = Vec::with_capacity(node_count);
-    let mut electric_field_imag = Vec::with_capacity(node_count);
-    let mut current_density_real = Vec::with_capacity(node_count);
-    let mut current_density_imag = Vec::with_capacity(node_count);
-    let mut electric_flux_density_real = Vec::with_capacity(node_count);
-    let mut electric_flux_density_imag = Vec::with_capacity(node_count);
-    let mut power_loss_density = Vec::with_capacity(node_count);
-    let mut energy_density = Vec::with_capacity(node_count);
-    let mut poynting_vector_real = Vec::with_capacity(node_count);
-    let mut poynting_vector_imag = Vec::with_capacity(node_count);
+    let mut magnetic_field_real = Vec::with_capacity(element_count);
+    let mut magnetic_field_imag = Vec::with_capacity(element_count);
+    let mut electric_field_real = Vec::with_capacity(element_count);
+    let mut electric_field_imag = Vec::with_capacity(element_count);
+    let mut current_density_real = Vec::with_capacity(element_count);
+    let mut current_density_imag = Vec::with_capacity(element_count);
+    let mut electric_flux_density_real = Vec::with_capacity(element_count);
+    let mut electric_flux_density_imag = Vec::with_capacity(element_count);
+    let mut power_loss_density = Vec::with_capacity(element_count);
+    let mut energy_density = Vec::with_capacity(element_count);
+    let mut poynting_vector_real = Vec::with_capacity(element_count);
+    let mut poynting_vector_imag = Vec::with_capacity(element_count);
 
-    for i in 0..node_count {
-        let mu = mu0 * node_mu_r[i].max(1.0e-9);
-        let epsilon = epsilon0 * node_eps_r[i].max(1.0e-9);
-        let sigma = node_sigma[i].max(0.0);
+    for (i, edge) in maxwell_topology.edges.iter().enumerate() {
+        let mu = mu0 * edge.average(&node_mu_r).max(1.0e-9);
+        let epsilon = epsilon0 * edge.average(&node_eps_r).max(1.0e-9);
+        let sigma = edge.average(&node_sigma).max(0.0);
         let h_real = flux_density_real[i] / mu;
         let h_imag = flux_density_imag[i] / mu;
-        let e_real = omega * vector_potential_imag[i];
-        let e_imag = -omega * vector_potential_real[i];
+        let edge_a_real = edge.tangential_component(edge_vector_potential_real[i]);
+        let edge_a_imag = edge.tangential_component(edge_vector_potential_imag[i]);
+        let e_real = omega * edge_a_imag;
+        let e_imag = -omega * edge_a_real;
         let j_real = sigma * e_real;
         let j_imag = sigma * e_imag;
         magnetic_field_real.push(h_real);
@@ -952,42 +987,42 @@ pub fn run_electromagnetic_with_options(
 
     let magnetic_field_real_field = AnalysisField::host_f64(
         FEA_FIELD_EM_MAGNETIC_FIELD_REAL,
-        vec![node_count, 3],
+        vec![element_count, 3],
         axial_vector_field_values(&magnetic_field_real),
     );
     let magnetic_field_imag_field = AnalysisField::host_f64(
         FEA_FIELD_EM_MAGNETIC_FIELD_IMAG,
-        vec![node_count, 3],
+        vec![element_count, 3],
         axial_vector_field_values(&magnetic_field_imag),
     );
     let current_density_real_field = AnalysisField::host_f64(
         FEA_FIELD_EM_CURRENT_DENSITY_REAL,
-        vec![node_count, 3],
+        vec![element_count, 3],
         axial_vector_field_values(&current_density_real),
     );
     let current_density_imag_field = AnalysisField::host_f64(
         FEA_FIELD_EM_CURRENT_DENSITY_IMAG,
-        vec![node_count, 3],
+        vec![element_count, 3],
         axial_vector_field_values(&current_density_imag),
     );
     let electric_field_real_field = AnalysisField::host_f64(
         FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
-        vec![node_count, 3],
+        vec![element_count, 3],
         axial_vector_field_values(&electric_field_real),
     );
     let electric_field_imag_field = AnalysisField::host_f64(
         FEA_FIELD_EM_ELECTRIC_FIELD_IMAG,
-        vec![node_count, 3],
+        vec![element_count, 3],
         axial_vector_field_values(&electric_field_imag),
     );
     let power_loss_density_field = AnalysisField::host_f64(
         FEA_FIELD_EM_POWER_LOSS_DENSITY,
-        vec![node_count],
+        vec![element_count],
         power_loss_density,
     );
     let energy_density_field = AnalysisField::host_f64(
         FEA_FIELD_EM_ENERGY_DENSITY,
-        vec![node_count],
+        vec![element_count],
         energy_density,
     );
     let residual_real_field = AnalysisField::host_f64(
@@ -1002,22 +1037,22 @@ pub fn run_electromagnetic_with_options(
     );
     let electric_flux_density_real_field = AnalysisField::host_f64(
         FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL,
-        vec![node_count, 3],
+        vec![element_count, 3],
         axial_vector_field_values(&electric_flux_density_real),
     );
     let electric_flux_density_imag_field = AnalysisField::host_f64(
         FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_IMAG,
-        vec![node_count, 3],
+        vec![element_count, 3],
         axial_vector_field_values(&electric_flux_density_imag),
     );
     let poynting_vector_real_field = AnalysisField::host_f64(
         FEA_FIELD_EM_POYNTING_VECTOR_REAL,
-        vec![node_count, 3],
+        vec![element_count, 3],
         axial_vector_field_values(&poynting_vector_real),
     );
     let poynting_vector_imag_field = AnalysisField::host_f64(
         FEA_FIELD_EM_POYNTING_VECTOR_IMAG,
-        vec![node_count, 3],
+        vec![element_count, 3],
         axial_vector_field_values(&poynting_vector_imag),
     );
 
@@ -1921,6 +1956,162 @@ fn block_dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct MaxwellEdgeTopology {
+    edges: Vec<MaxwellEdge>,
+    gauge_anchor_nodes: Vec<usize>,
+}
+
+impl MaxwellEdgeTopology {
+    fn line_graph(node_count: usize, spacing: f64, constrained: &[bool]) -> Self {
+        let edge_count = node_count.saturating_sub(1);
+        let length = if spacing.is_finite() && spacing > 0.0 {
+            spacing
+        } else {
+            1.0
+        };
+        let edges = (0..edge_count)
+            .map(|from_node| {
+                let to_node = from_node + 1;
+                MaxwellEdge {
+                    from_node,
+                    to_node,
+                    orientation: 1.0,
+                    length,
+                    constrained: constrained.get(from_node).copied().unwrap_or(false)
+                        || constrained.get(to_node).copied().unwrap_or(false),
+                }
+            })
+            .collect::<Vec<_>>();
+        let gauge_anchor_nodes = constrained
+            .iter()
+            .enumerate()
+            .filter_map(|(index, value)| (*value).then_some(index))
+            .collect::<Vec<_>>();
+        Self {
+            edges,
+            gauge_anchor_nodes,
+        }
+    }
+
+    fn edge_count(&self) -> usize {
+        self.edges.len()
+    }
+
+    fn element_count(&self) -> usize {
+        self.edges.len()
+    }
+
+    fn oriented_edge_count(&self) -> usize {
+        self.edges
+            .iter()
+            .filter(|edge| edge.orientation.abs() > 0.0)
+            .count()
+    }
+
+    fn constrained_edge_count(&self) -> usize {
+        self.edges.iter().filter(|edge| edge.constrained).count()
+    }
+
+    fn gauge_anchor_count(&self) -> usize {
+        self.gauge_anchor_nodes.len()
+    }
+
+    fn curl_curl_energy_scale(&self) -> f64 {
+        self.edges
+            .iter()
+            .map(|edge| edge.curl_weight() * edge.curl_weight())
+            .sum::<f64>()
+    }
+
+    fn edge_line_integrals(&self, nodal_values: &[f64]) -> Vec<f64> {
+        self.edges
+            .iter()
+            .map(|edge| {
+                let from = nodal_values.get(edge.from_node).copied().unwrap_or(0.0);
+                let to = nodal_values.get(edge.to_node).copied().unwrap_or(0.0);
+                0.5 * (from + to) * edge.length * edge.orientation
+            })
+            .collect()
+    }
+
+    fn curl_from_nodal_vector_potential(
+        &self,
+        real: &[f64],
+        imag: &[f64],
+    ) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let mut flux_density_real = Vec::with_capacity(self.edges.len());
+        let mut flux_density_imag = Vec::with_capacity(self.edges.len());
+        let mut flux_density_magnitude = Vec::with_capacity(self.edges.len());
+        for edge in &self.edges {
+            let real_curl = edge.oriented_difference(real);
+            let imag_curl = edge.oriented_difference(imag);
+            flux_density_real.push(real_curl);
+            flux_density_imag.push(imag_curl);
+            flux_density_magnitude.push((real_curl * real_curl + imag_curl * imag_curl).sqrt());
+        }
+        (flux_density_real, flux_density_imag, flux_density_magnitude)
+    }
+
+    fn curl_from_nodal_magnitude(&self, magnitude: &[f64]) -> Vec<f64> {
+        self.edges
+            .iter()
+            .map(|edge| edge.oriented_difference(magnitude).abs())
+            .collect()
+    }
+
+    fn gauge_anchor_residual_ratio(&self, real: &[f64], imag: &[f64]) -> f64 {
+        let mut anchor_energy = 0.0_f64;
+        let mut total_energy = 0.0_f64;
+        for node_index in 0..real.len().max(imag.len()) {
+            let real_value = real.get(node_index).copied().unwrap_or(0.0);
+            let imag_value = imag.get(node_index).copied().unwrap_or(0.0);
+            let energy = real_value * real_value + imag_value * imag_value;
+            total_energy += energy;
+            if self.gauge_anchor_nodes.binary_search(&node_index).is_ok() {
+                anchor_energy += energy;
+            }
+        }
+        if total_energy <= 1.0e-18 {
+            0.0
+        } else {
+            (anchor_energy / total_energy).sqrt()
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MaxwellEdge {
+    from_node: usize,
+    to_node: usize,
+    orientation: f64,
+    length: f64,
+    constrained: bool,
+}
+
+impl MaxwellEdge {
+    fn curl_weight(&self) -> f64 {
+        self.orientation / self.length.max(1.0e-12)
+    }
+
+    fn oriented_difference(&self, values: &[f64]) -> f64 {
+        let from = values.get(self.from_node).copied().unwrap_or(0.0);
+        let to = values.get(self.to_node).copied().unwrap_or(0.0);
+        (to - from) * self.curl_weight()
+    }
+
+    fn average(&self, values: &[f64]) -> f64 {
+        let from = values.get(self.from_node).copied().unwrap_or(0.0);
+        let to = values.get(self.to_node).copied().unwrap_or(from);
+        0.5 * (from + to)
+    }
+
+    fn tangential_component(&self, line_integral: f64) -> f64 {
+        line_integral * self.orientation / self.length.max(1.0e-12)
+    }
+}
+
+#[cfg(test)]
 fn flux_density_from_complex_vector_potential(
     real: &[f64],
     imag: &[f64],
@@ -1959,6 +2150,7 @@ fn axial_vector_field_values(values: &[f64]) -> Vec<f64> {
     vector_values
 }
 
+#[cfg(test)]
 fn flux_density_from_magnitude_vector_potential(magnitude: &[f64], h: f64) -> Vec<f64> {
     let node_count = magnitude.len();
     let mut flux_density = vec![0.0_f64; node_count];
@@ -2001,7 +2193,7 @@ mod tests {
         dispersive_loss_scale_at_frequency, dispersive_phase_attenuation_for_loss_scale,
         flux_density_from_complex_vector_potential, flux_density_from_magnitude_vector_potential,
         flux_phasor_coherence_ratio, relative_permeability_scale_at_frequency,
-        relative_permittivity_scale_at_frequency,
+        relative_permittivity_scale_at_frequency, MaxwellEdgeTopology,
     };
 
     #[test]
@@ -2175,6 +2367,38 @@ mod tests {
         assert!(sample.has_relative_permeability_frequency_response);
         assert!(sample.relative_permittivity_scale > 0.0);
         assert!(sample.relative_permeability_scale > 0.0);
+    }
+
+    #[test]
+    fn maxwell_edge_topology_recovers_oriented_edge_curl() {
+        let topology = MaxwellEdgeTopology::line_graph(4, 0.25, &[true, false, false, true]);
+        let real = vec![0.0, 0.25, 0.50, 0.75];
+        let imag = vec![0.0, 0.0, 0.25, 0.25];
+
+        let edge_real = topology.edge_line_integrals(&real);
+        let (curl_real, curl_imag, curl_mag) =
+            topology.curl_from_nodal_vector_potential(&real, &imag);
+
+        assert_eq!(topology.edge_count(), 3);
+        assert_eq!(topology.element_count(), 3);
+        assert_eq!(topology.oriented_edge_count(), 3);
+        assert_eq!(topology.constrained_edge_count(), 2);
+        assert_eq!(topology.gauge_anchor_count(), 2);
+        assert!((edge_real[0] - 0.03125).abs() < 1.0e-12);
+        assert!(curl_real.iter().all(|value| (*value - 1.0).abs() < 1.0e-12));
+        assert!((curl_imag[1] - 1.0).abs() < 1.0e-12);
+        assert!(curl_mag[1] > curl_mag[0]);
+    }
+
+    #[test]
+    fn maxwell_edge_topology_reports_zero_gauge_residual_when_anchors_are_zero() {
+        let topology = MaxwellEdgeTopology::line_graph(5, 0.25, &[true, false, false, false, true]);
+        let real = vec![0.0, 0.5, 1.0, 0.5, 0.0];
+        let imag = vec![0.0, 0.2, 0.4, 0.2, 0.0];
+
+        let residual = topology.gauge_anchor_residual_ratio(&real, &imag);
+
+        assert!(residual <= 1.0e-12);
     }
 
     #[test]
