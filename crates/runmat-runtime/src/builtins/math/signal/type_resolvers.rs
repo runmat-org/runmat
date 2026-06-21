@@ -73,6 +73,12 @@ pub fn freqz_type(args: &[Type], context: &ResolveContext) -> Type {
     }
 }
 
+pub fn zplane_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Tensor {
+        shape: Some(vec![Some(1), None]),
+    }
+}
+
 pub fn butter_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.len() < 2 {
         return Type::Unknown;
