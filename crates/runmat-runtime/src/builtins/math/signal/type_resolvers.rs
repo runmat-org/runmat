@@ -24,6 +24,13 @@ pub fn deconv_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
+pub fn envelope_type(args: &[Type], _context: &ResolveContext) -> Type {
+    let Some(input) = args.first() else {
+        return Type::Unknown;
+    };
+    numeric_like(input)
+}
+
 pub fn filter_type(args: &[Type], _context: &ResolveContext) -> Type {
     let signal = args.get(2);
     match signal {

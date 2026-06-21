@@ -7,6 +7,7 @@ pub(crate) mod common;
 pub(crate) mod conv;
 pub(crate) mod conv2;
 pub mod deconv;
+pub(crate) mod envelope;
 pub mod filter;
 pub mod filtfilt;
 pub mod fir1;
