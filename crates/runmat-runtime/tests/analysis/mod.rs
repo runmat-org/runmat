@@ -362,6 +362,29 @@ use manifest::{fixture_manifest, manifest_specs};
 use runner::run_fixture;
 
 #[test]
+fn fea_conformance_manifest_uses_physical_fixture_language() {
+    let forbidden_terms = ["proxy", "placeholder"];
+    for spec in manifest_specs() {
+        let id = spec.id.to_ascii_lowercase();
+        let description = spec.description.to_ascii_lowercase();
+        for term in forbidden_terms {
+            assert!(
+                !id.contains(term),
+                "fixture id '{}' contains forbidden interim term '{}'",
+                spec.id,
+                term
+            );
+            assert!(
+                !description.contains(term),
+                "fixture description for '{}' contains forbidden interim term '{}'",
+                spec.id,
+                term
+            );
+        }
+    }
+}
+
+#[test]
 fn fea_benchmark_conformance_manifest_gates() {
     let artifact_root = harness_artifact_root();
     let thermo_field_artifact_root = harness_thermo_field_artifact_root(&artifact_root);

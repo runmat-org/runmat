@@ -612,11 +612,11 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
             resistive_heating_coefficient: 6.0e-4,
             region_conductivity_scales: vec![
                 ElectroRegionConductivityScale {
-                    region_id: "softening_proxy_region_0".to_string(),
+                    region_id: "softening_material_region_0".to_string(),
                     conductivity_scale: 1.2,
                 },
                 ElectroRegionConductivityScale {
-                    region_id: "softening_proxy_region_1".to_string(),
+                    region_id: "softening_material_region_1".to_string(),
                     conductivity_scale: 0.85,
                 },
             ],
