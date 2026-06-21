@@ -13,7 +13,6 @@
     "overwrite"
   ],
   "summary": "Copy files or folders in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

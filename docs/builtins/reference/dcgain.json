@@ -9,9 +9,6 @@
     "tf"
   ],
   "summary": "Evaluate steady-state gain of SISO transfer-function models.",
-  "references": [
-    "title: \"MATLAB dcgain documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

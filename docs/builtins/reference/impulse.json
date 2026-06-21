@@ -9,10 +9,6 @@
     "tf"
   ],
   "summary": "Compute or plot impulse responses in MATLAB and RunMat.",
-  "references": [
-    "title: \"MATLAB impulse documentation\"",
-    "title: \"Octave control package impulse documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

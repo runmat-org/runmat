@@ -10,7 +10,6 @@
     "gpu gather"
   ],
   "summary": "Serialize MATLAB values to UTF-8 JSON text in RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

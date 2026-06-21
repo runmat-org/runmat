@@ -9,7 +9,6 @@
     "substring replace"
   ],
   "summary": "Replace non-overlapping substring occurrences in text inputs with MATLAB-compatible container behavior.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

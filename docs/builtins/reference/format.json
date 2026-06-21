@@ -13,7 +13,6 @@
     "hex"
   ],
   "summary": "Set numeric display format for console output in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

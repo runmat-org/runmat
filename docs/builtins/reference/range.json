@@ -10,7 +10,6 @@
     "gpu"
   ],
   "summary": "Compute the span of array data as `max - min`, with MATLAB-compatible dimension and NaN controls.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": true,

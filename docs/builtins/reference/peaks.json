@@ -10,7 +10,6 @@
     "surface"
   ],
   "summary": "Generate the standard peaks test surface in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

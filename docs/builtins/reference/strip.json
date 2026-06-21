@@ -10,7 +10,6 @@
     "character arrays"
   ],
   "summary": "Remove leading and trailing characters from text inputs with MATLAB-compatible side and character-set options.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

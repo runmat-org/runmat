@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Measure function-handle execution time by repeated evaluation with MATLAB-compatible `timeit` behavior.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

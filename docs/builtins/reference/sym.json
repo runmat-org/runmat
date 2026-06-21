@@ -8,7 +8,6 @@
     "algebra"
   ],
   "summary": "Create a scalar symbolic variable or constant.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

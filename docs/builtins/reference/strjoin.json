@@ -8,7 +8,6 @@
     "row-wise join"
   ],
   "summary": "Join text elements using delimiters with MATLAB-compatible `strjoin` row-wise behavior.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

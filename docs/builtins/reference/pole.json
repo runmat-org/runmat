@@ -9,9 +9,6 @@
     "tf"
   ],
   "summary": "Return poles of SISO transfer-function models.",
-  "references": [
-    "title: \"MATLAB pole documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

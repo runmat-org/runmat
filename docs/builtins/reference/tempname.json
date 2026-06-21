@@ -9,7 +9,6 @@
     "temp directory"
   ],
   "summary": "Generate unique temporary paths in the system temp directory or a specified target folder.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

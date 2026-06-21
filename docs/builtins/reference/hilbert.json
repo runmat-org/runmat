@@ -9,9 +9,6 @@
     "complex"
   ],
   "summary": "Construct analytic signals with the Hilbert transform.",
-  "references": [
-    "title: \"MATLAB hilbert documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

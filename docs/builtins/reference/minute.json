@@ -8,7 +8,6 @@
     "clock minute"
   ],
   "summary": "Extract minute components from datetime values in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

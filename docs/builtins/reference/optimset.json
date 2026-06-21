@@ -10,7 +10,6 @@
     "Display"
   ],
   "summary": "Create or update optimization options structures with MATLAB-compatible name/value handling.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

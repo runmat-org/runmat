@@ -9,9 +9,6 @@
     "gpu"
   ],
   "summary": "Differentiate polynomials in MATLAB and RunMat.",
-  "references": [
-    "title: \"MATLAB polyder documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

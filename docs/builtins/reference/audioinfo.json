@@ -14,7 +14,6 @@
     "channels"
   ],
   "summary": "Read metadata from an audio file.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,7 +9,6 @@
     "dimensions"
   ],
   "summary": "Count elements in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

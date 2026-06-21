@@ -9,7 +9,6 @@
     "sequence"
   ],
   "summary": "Generate linearly spaced row vectors in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

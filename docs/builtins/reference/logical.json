@@ -9,7 +9,6 @@
     "mask array"
   ],
   "summary": "Convert values to logical type in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

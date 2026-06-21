@@ -9,7 +9,6 @@
     "pivoting"
   ],
   "summary": "Compute QR factorizations in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

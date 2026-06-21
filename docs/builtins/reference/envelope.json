@@ -10,9 +10,6 @@
     "signal processing"
   ],
   "summary": "Compute upper and lower signal envelopes.",
-  "references": [
-    "title: \"MATLAB envelope documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

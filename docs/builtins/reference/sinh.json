@@ -8,7 +8,6 @@
     "gpu"
   ],
   "summary": "Compute element-wise hyperbolic sine values across real and complex array inputs.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

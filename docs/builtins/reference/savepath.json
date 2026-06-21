@@ -9,7 +9,6 @@
     "persist path"
   ],
   "summary": "Write the current MATLAB search path to `pathdef.m` with MATLAB-compatible status diagnostics.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

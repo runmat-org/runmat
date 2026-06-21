@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Absolute value and complex magnitude for scalars and arrays in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

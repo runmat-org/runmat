@@ -9,7 +9,6 @@
     "gpuArray inequality"
   ],
   "summary": "Compute element-wise inequality comparisons in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

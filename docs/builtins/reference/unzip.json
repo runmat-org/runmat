@@ -10,7 +10,6 @@
     "url"
   ],
   "summary": "Extract files from ZIP archives in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

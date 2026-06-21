@@ -10,7 +10,6 @@
     "numeric import"
   ],
   "summary": "Read numeric, text, and raw data from spreadsheet files.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

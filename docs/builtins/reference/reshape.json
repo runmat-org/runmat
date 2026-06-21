@@ -9,7 +9,6 @@
     "auto dimension"
   ],
   "summary": "Reshape arrays to new dimensions without changing element order or values.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

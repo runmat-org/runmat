@@ -9,7 +9,6 @@
     "like"
   ],
   "summary": "Generate uniform random integers in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

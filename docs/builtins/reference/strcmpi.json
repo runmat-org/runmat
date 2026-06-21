@@ -9,7 +9,6 @@
     "cell array"
   ],
   "summary": "Compare text inputs for case-insensitive equality with MATLAB-compatible implicit expansion.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

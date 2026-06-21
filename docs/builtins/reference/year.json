@@ -8,7 +8,6 @@
     "calendar year"
   ],
   "summary": "Extract calendar year components from datetime values with MATLAB-compatible output shaping.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,7 +9,6 @@
     "implicit expansion"
   ],
   "summary": "Multiply arrays element-wise (`A .* B`) with MATLAB-compatible implicit expansion and complex support.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

@@ -8,7 +8,6 @@
     "dot indexing"
   ],
   "summary": "Dispatch overloaded object indexing operations to class-specific `Class.subsref` implementations.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

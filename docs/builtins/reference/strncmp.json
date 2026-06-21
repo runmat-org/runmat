@@ -9,7 +9,6 @@
     "case-sensitive"
   ],
   "summary": "Compare text inputs for case-sensitive equality up to N leading characters with MATLAB-compatible broadcasting.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

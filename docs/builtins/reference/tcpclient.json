@@ -9,7 +9,6 @@
     "client"
   ],
   "summary": "Open TCP client connections and return MATLAB-compatible client structs for socket I/O workflows.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
