@@ -213,8 +213,10 @@ pub fn run_linear_static_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis=operator_connectivity active_stiffness_edge_count={} constrained_edge_count={} recovery_element_count={} max_edge_displacement_jump={} mean_edge_stiffness_ratio={}",
+            "basis={} active_stiffness_edge_count={} prep_recovery_edge_count={} constrained_edge_count={} recovery_element_count={} max_edge_displacement_jump={} mean_edge_stiffness_ratio={}",
+            recovery_metrics.basis,
             recovery_metrics.active_stiffness_edge_count,
+            recovery_metrics.prep_recovery_edge_count,
             recovery_metrics.constrained_edge_count,
             recovery_metrics.recovery_element_count,
             recovery_metrics.max_edge_displacement_jump,

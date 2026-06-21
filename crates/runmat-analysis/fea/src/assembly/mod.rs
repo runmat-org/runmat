@@ -19,6 +19,7 @@ pub struct AssemblySummary {
     pub prep_element_assembly: Option<PrepElementAssemblySummary>,
     pub prep_element_connectivity: Option<PrepElementConnectivitySummary>,
     pub prep_graph_assembly: Option<PrepGraphAssemblySummary>,
+    pub prep_recovery_edges: Vec<PrepRecoveryEdgeSummary>,
     pub prep_calibration: Option<PrepCalibrationSummary>,
     pub prep_acceptance: Option<PrepAcceptanceSummary>,
     pub thermo_mechanical: Option<ThermoMechanicalAssemblySummary>,
@@ -109,6 +110,13 @@ pub struct PrepGraphAssemblySummary {
     pub ordering_fingerprint: u64,
     pub recommend_ilu0: bool,
     pub graph_fingerprint: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrepRecoveryEdgeSummary {
+    pub from_dof: usize,
+    pub to_dof: usize,
+    pub element_family_index: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -309,6 +317,7 @@ pub fn assemble_linear_system(
     let mut prep_element_assembly = None;
     let mut prep_element_connectivity = None;
     let mut prep_graph_assembly = None;
+    let mut prep_recovery_edges = Vec::new();
     let mut prep_calibration = None;
     let mut prep_acceptance = None;
     let mut thermo_mechanical = None;
@@ -472,16 +481,18 @@ pub fn assemble_linear_system(
 
     if let Some(prep) = prep_context {
         if let Some(element_summary) = prep_element_assembly.as_ref() {
-            let (connectivity_summary, graph_summary) = apply_prep_element_connectivity_scatter(
-                prep,
-                &constrained,
-                &mut stiffness_upper,
-                &mut mass_diag,
-                &mut damping_diag,
-                element_summary,
-            );
+            let (connectivity_summary, graph_summary, recovery_edges) =
+                apply_prep_element_connectivity_scatter(
+                    prep,
+                    &constrained,
+                    &mut stiffness_upper,
+                    &mut mass_diag,
+                    &mut damping_diag,
+                    element_summary,
+                );
             prep_element_connectivity = Some(connectivity_summary);
             prep_graph_assembly = Some(graph_summary);
+            prep_recovery_edges = recovery_edges;
         }
         if let Some(calibration) = apply_prep_calibration(
             prep,
@@ -742,6 +753,7 @@ pub fn assemble_linear_system(
         prep_element_assembly,
         prep_element_connectivity,
         prep_graph_assembly,
+        prep_recovery_edges,
         prep_calibration,
         prep_acceptance,
         thermo_mechanical,
@@ -921,7 +933,11 @@ fn apply_prep_element_connectivity_scatter(
     mass_diag: &mut [f64],
     damping_diag: &mut [f64],
     element_summary: &PrepElementAssemblySummary,
-) -> (PrepElementConnectivitySummary, PrepGraphAssemblySummary) {
+) -> (
+    PrepElementConnectivitySummary,
+    PrepGraphAssemblySummary,
+    Vec<PrepRecoveryEdgeSummary>,
+) {
     if stiffness_upper.is_empty() {
         let connectivity_summary = PrepElementConnectivitySummary {
             assembled_element_count: element_summary.assembled_element_count,
@@ -963,11 +979,19 @@ fn apply_prep_element_connectivity_scatter(
             recommend_ilu0: false,
             graph_fingerprint: graph_fingerprint(prep, 0, constrained.len().max(1), 0.0, 0.0),
         };
-        return (connectivity_summary, graph_summary);
+        return (connectivity_summary, graph_summary, Vec::new());
     }
 
     let node_count = constrained.len().max(1);
     let edges = build_prep_graph_edges(prep, node_count, element_summary);
+    let recovery_edges = edges
+        .iter()
+        .map(|(left, right, family_index)| PrepRecoveryEdgeSummary {
+            from_dof: *left,
+            to_dof: *right,
+            element_family_index: *family_index,
+        })
+        .collect::<Vec<_>>();
     let (degree_min, degree_max, degree_mean, degree_p95, component_count) =
         graph_degree_stats(node_count, &edges);
     let max_edges = node_count.saturating_mul(node_count.saturating_sub(1)) / 2;
@@ -1098,7 +1122,7 @@ fn apply_prep_element_connectivity_scatter(
         ),
     };
 
-    (connectivity_summary, graph_summary)
+    (connectivity_summary, graph_summary, recovery_edges)
 }
 
 fn apply_prep_calibration(

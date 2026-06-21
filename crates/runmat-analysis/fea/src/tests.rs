@@ -15,8 +15,8 @@ use crate::{
     fixtures::{fixture_model, FixtureId},
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
-    ComputeBackend, FeaElectroThermalContext, FeaRunResult, FeaThermoMechanicalContext,
-    LinearStaticSolveOptions, ModalSolveOptions, ThermalSolveOptions,
+    ComputeBackend, FeaElectroThermalContext, FeaPrepContext, FeaRunResult,
+    FeaThermoMechanicalContext, LinearStaticSolveOptions, ModalSolveOptions, ThermalSolveOptions,
     FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
     FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
     FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
@@ -197,6 +197,52 @@ fn convergence_diagnostics_are_emitted() {
         diag.code == "FEA_STRUCTURAL_FIELD_RECOVERY"
             && diag.message.contains("basis=operator_connectivity")
             && diag.message.contains("active_stiffness_edge_count=")
+    }));
+}
+
+#[test]
+fn prepared_structural_recovery_uses_prep_connectivity_edges() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            prep_context: Some(FeaPrepContext {
+                prepared_mesh_count: 1,
+                prepared_node_count: 12,
+                prepared_element_count: 18,
+                mapped_region_count: 2,
+                min_scaled_jacobian: 0.82,
+                mean_aspect_ratio: 1.6,
+                inverted_element_count: 0,
+                mapped_load_count: 1,
+                mapped_bc_count: 1,
+                layout_seed: 17,
+                topology_dof_multiplier: 1.4,
+                topology_bandwidth_estimate: 3,
+                mapped_region_participation_ratio: 0.8,
+                topology_surface_patch_ratio: 0.25,
+                topology_volume_core_ratio: 0.65,
+                topology_mixed_family_ratio: 0.05,
+                topology_region_span_mean: 4.0,
+                topology_region_block_count: 2,
+                topology_region_mesh_mean: 3.0,
+                topology_region_mesh_variance: 0.4,
+                topology_triangle_family_ratio: 0.2,
+                topology_quad_family_ratio: 0.3,
+                topology_tet_family_ratio: 0.3,
+                topology_hex_family_ratio: 0.2,
+                calibration_profile_override: None,
+            }),
+            ..LinearStaticSolveOptions::default()
+        },
+    )
+    .expect("prepared linear static solve should succeed");
+
+    assert!(result.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_STRUCTURAL_FIELD_RECOVERY"
+            && diag.message.contains("basis=prep_element_connectivity")
+            && diag.message.contains("prep_recovery_edge_count=")
     }));
 }
 
