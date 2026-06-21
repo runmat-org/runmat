@@ -5297,11 +5297,6 @@ fn analysis_run_modal_returns_native_modal_result() {
         orthogonality_descriptor.shape,
         vec![modal.eigenvalues_hz.len(), modal.eigenvalues_hz.len()]
     );
-    assert!(!envelope
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::ModalPlaceholder));
     assert!(envelope
         .data
         .quality_reasons

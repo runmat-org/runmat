@@ -1055,11 +1055,6 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
         .is_some());
     assert_eq!(modal_envelope.data.run_status, RunStatus::Degraded);
     assert!(!modal_envelope.data.publishable);
-    assert!(!modal_envelope
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::ModalPlaceholder));
     assert!(modal_envelope
         .data
         .quality_reasons

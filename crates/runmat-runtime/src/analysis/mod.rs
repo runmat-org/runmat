@@ -1898,19 +1898,7 @@ pub fn analysis_run_modal_with_options_op(
         });
     }
 
-    let frequency_basis = if run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_MODAL_PLACEHOLDER")
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ModalPlaceholder,
-            detail: "modal run path currently uses linear-static placeholder backend".to_string(),
-        });
-        ModalFrequencyBasis::PlaceholderLinearStatic
-    } else {
-        ModalFrequencyBasis::NativeEigenSolve
-    };
+    let frequency_basis = ModalFrequencyBasis::NativeEigenSolve;
 
     let publishable = match options.quality_policy {
         QualityPolicy::Strict => {
@@ -2266,15 +2254,7 @@ pub fn analysis_run_acoustic_with_options_op(
         });
     }
 
-    let frequency_basis = if run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_MODAL_PLACEHOLDER")
-    {
-        ModalFrequencyBasis::PlaceholderLinearStatic
-    } else {
-        ModalFrequencyBasis::NativeEigenSolve
-    };
+    let frequency_basis = ModalFrequencyBasis::NativeEigenSolve;
 
     let publishable = match options.quality_policy {
         QualityPolicy::Strict => {

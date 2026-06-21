@@ -197,7 +197,6 @@ pub enum QualityReasonCode {
     SolverNotConverged,
     SolverBackendFallback,
     FieldPromotionFallback,
-    ModalPlaceholder,
     ModalResidualExceeded,
     ModalOrthogonalityExceeded,
     ModalSeparationLow,
@@ -1610,7 +1609,6 @@ pub enum ModalFrequencyUnits {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModalFrequencyBasis {
-    PlaceholderLinearStatic,
     NativeEigenSolve,
 }
 
