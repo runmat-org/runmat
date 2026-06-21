@@ -1,0 +1,108 @@
+{
+  "title": "textscan",
+  "category": "io/import",
+  "keywords": [
+    "textscan",
+    "formatted text",
+    "format specifier",
+    "delimiter",
+    "header",
+    "csv",
+    "log import"
+  ],
+  "summary": "Parse formatted text from a string or file identifier.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the CPU. Formatted text parsing consumes host text and returns host cell arrays."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::textscan::tests",
+    "integration": [
+      "builtins::io::textscan::tests::textscan_reads_mixed_columns_from_text",
+      "builtins::io::textscan::tests::textscan_honors_delimiter_header_comments_and_treat_empty",
+      "builtins::io::textscan::tests::textscan_supports_repeat_skip_collect_and_quotes",
+      "builtins::io::textscan::tests::textscan_return_on_error_false_reports_parse_failure",
+      "builtins::io::textscan::tests::textscan_reads_from_registered_file_identifier",
+      "builtins::io::textscan::tests::textscan_honors_literals_in_format_spec",
+      "builtins::io::textscan::tests::textscan_width_and_char_conversions_leave_remainder",
+      "builtins::io::textscan::tests::textscan_collect_output_preserves_column_major_numeric_group",
+      "builtins::io::textscan::tests::textscan_repeated_file_read_preserves_next_record_position"
+    ]
+  },
+  "description": "`C = textscan(textOrFileID, formatSpec)` parses formatted text from a string or from the current position of a file identifier opened by `fopen`.",
+  "behaviors": [
+    "Accepts string, string-array scalar, row character-vector, numeric file identifier, or scalar numeric tensor file identifier as the first argument.",
+    "Supports optional repeat count `N` before name-value options.",
+    "Supports numeric conversions `%f`, `%e`, `%g`, `%d`, `%i`, and `%u`; text conversions `%s`, `%q`, `%c`, and character-set conversions such as `%[ABC]` and `%[^,]`.",
+    "Supports skipped conversions with `%*` and field widths such as `%5f` or `%10s`.",
+    "Text columns return cell columns of strings. Numeric columns return column tensors. With `'CollectOutput', true`, adjacent numeric columns are grouped into one numeric matrix.",
+    "Recognizes `Delimiter`, `MultipleDelimsAsOne`, `HeaderLines`, `TreatAsEmpty`, `CommentStyle`, `CollectOutput`, `ReturnOnError`, and `Whitespace` options.",
+    "Line comments and block comments are ignored while scanning input. Blank records are skipped after header/comment processing.",
+    "`ReturnOnError` defaults to true, returning data parsed before the first incompatible token. Set it to false to raise a parse error."
+  ],
+  "examples": [
+    {
+      "description": "Parse numeric and text columns",
+      "input": "C = textscan(\"1 alpha\\n2 beta\\n\", \"%f %s\");\nnums = C{1};\nlabels = C{2};"
+    },
+    {
+      "description": "Parse CSV with header and missing tokens",
+      "input": "txt = \"name,value\\nA,1.5\\nB,NA\\n\";\nC = textscan(txt, \"%s %f\", 'Delimiter', ',', 'HeaderLines', 1, 'TreatAsEmpty', 'NA');"
+    },
+    {
+      "description": "Read from a file identifier",
+      "input": "fid = fopen(\"log.txt\", \"r\");\nC = textscan(fid, \"%f %s\", 'HeaderLines', 1);\nfclose(fid);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `textscan` read filenames directly?",
+      "answer": "No. Like MATLAB, a text string is parsed as text content. Use `fopen` to get a file identifier when reading a file."
+    },
+    {
+      "question": "How are text outputs represented?",
+      "answer": "Text conversions return cell columns containing string values. Numeric conversions return dense double tensors."
+    },
+    {
+      "question": "When should I use `readmatrix` instead?",
+      "answer": "Use `readmatrix` for simple numeric delimited files. Use `textscan` when legacy code has explicit format strings, mixed text/numeric columns, comments, or skipped fields."
+    }
+  ],
+  "links": [
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    },
+    {
+      "label": "fclose",
+      "url": "./fclose"
+    },
+    {
+      "label": "importdata",
+      "url": "./importdata"
+    },
+    {
+      "label": "readmatrix",
+      "url": "./readmatrix"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/textscan.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/textscan.rs"
+  },
+  "gpu_residency": "`textscan` is a host file/string import source. It returns host cells and tensors and does not create GPU-resident arrays.",
+  "gpu_behavior": [
+    "`textscan` does not launch provider kernels or participate in fusion."
+  ]
+}

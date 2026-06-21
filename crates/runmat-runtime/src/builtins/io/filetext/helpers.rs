@@ -145,7 +145,7 @@ pub(crate) fn bytes_to_char_array(
     Ok(Value::CharArray(char_array))
 }
 
-fn decode_bytes(
+pub(crate) fn decode_bytes(
     bytes: &[u8],
     encoding: &str,
     builtin_name: &'static str,
