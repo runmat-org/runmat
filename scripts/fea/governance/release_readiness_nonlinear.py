@@ -2896,6 +2896,51 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_CFD_MIN_PROFILE_POINT_COUNT", "0.0"),
         )
     )
+    cfd_min_pressure_drop_balance_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_PRESSURE_DROP_BALANCE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CFD_MIN_PRESSURE_DROP_BALANCE_RATIO",
+                "0.999999",
+            ),
+        )
+    )
+    cfd_max_pressure_drop_balance_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_PRESSURE_DROP_BALANCE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CFD_MAX_PRESSURE_DROP_BALANCE_RATIO",
+                "1.000001",
+            ),
+        )
+    )
+    cfd_max_mass_flux_uniformity_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_MASS_FLUX_UNIFORMITY_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CFD_MAX_MASS_FLUX_UNIFORMITY_RATIO",
+                "1e-08",
+            ),
+        )
+    )
+    cfd_min_pressure_monotonic_cell_fraction_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_PRESSURE_MONOTONIC_CELL_FRACTION",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CFD_MIN_PRESSURE_MONOTONIC_CELL_FRACTION",
+                "1.0",
+            ),
+        )
+    )
+    cfd_min_known_answer_coverage_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_KNOWN_ANSWER_COVERAGE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CFD_MIN_KNOWN_ANSWER_COVERAGE_RATIO",
+                "1.0",
+            ),
+        )
+    )
     cht_min_reference_density_kg_per_m3_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_CHT_MIN_REFERENCE_DENSITY_KG_PER_M3",
@@ -5233,6 +5278,11 @@ def evaluate_release_readiness(
     cfd_min_inlet_velocity_m_per_s = None
     cfd_max_turbulence_intensity = None
     cfd_min_profile_point_count = None
+    cfd_min_pressure_drop_balance_ratio = None
+    cfd_max_pressure_drop_balance_ratio = None
+    cfd_max_mass_flux_uniformity_ratio = None
+    cfd_min_pressure_monotonic_cell_fraction = None
+    cfd_min_known_answer_coverage_ratio = None
     cht_min_reynolds_number = None
     cht_min_applied_temperature_delta_k = None
     cht_min_reference_density_kg_per_m3 = None
@@ -7105,6 +7155,46 @@ def evaluate_release_readiness(
                 "CFD profile point count",
             ),
             (
+                "cfd_steady_gpu_provider",
+                "cfd_pressure_drop_balance_ratio",
+                cfd_min_pressure_drop_balance_ratio_threshold,
+                "min",
+                "CFD_PRESSURE_DROP_BALANCE_RATIO_LOW",
+                "CFD pressure-drop balance ratio",
+            ),
+            (
+                "cfd_steady_gpu_provider",
+                "cfd_pressure_drop_balance_ratio",
+                cfd_max_pressure_drop_balance_ratio_threshold,
+                "max",
+                "CFD_PRESSURE_DROP_BALANCE_RATIO_HIGH",
+                "CFD pressure-drop balance ratio",
+            ),
+            (
+                "cfd_steady_gpu_provider",
+                "cfd_mass_flux_uniformity_ratio",
+                cfd_max_mass_flux_uniformity_ratio_threshold,
+                "max",
+                "CFD_MASS_FLUX_UNIFORMITY_RATIO_HIGH",
+                "CFD mass-flux uniformity ratio",
+            ),
+            (
+                "cfd_steady_gpu_provider",
+                "cfd_pressure_monotonic_cell_fraction",
+                cfd_min_pressure_monotonic_cell_fraction_threshold,
+                "min",
+                "CFD_PRESSURE_MONOTONIC_CELL_FRACTION_LOW",
+                "CFD pressure monotonic cell fraction",
+            ),
+            (
+                "cfd_steady_gpu_provider",
+                "cfd_known_answer_coverage_ratio",
+                cfd_min_known_answer_coverage_ratio_threshold,
+                "min",
+                "CFD_KNOWN_ANSWER_COVERAGE_RATIO_LOW",
+                "CFD known-answer coverage ratio",
+            ),
+            (
                 "cht_coupled_gpu_provider",
                 "cht_reynolds_number",
                 cht_min_reynolds_number_threshold,
@@ -7289,6 +7379,17 @@ def evaluate_release_readiness(
                 cfd_max_turbulence_intensity = observed
             elif assertion_name == "cfd_profile_point_count":
                 cfd_min_profile_point_count = observed
+            elif assertion_name == "cfd_pressure_drop_balance_ratio":
+                if mode == "min":
+                    cfd_min_pressure_drop_balance_ratio = observed
+                else:
+                    cfd_max_pressure_drop_balance_ratio = observed
+            elif assertion_name == "cfd_mass_flux_uniformity_ratio":
+                cfd_max_mass_flux_uniformity_ratio = observed
+            elif assertion_name == "cfd_pressure_monotonic_cell_fraction":
+                cfd_min_pressure_monotonic_cell_fraction = observed
+            elif assertion_name == "cfd_known_answer_coverage_ratio":
+                cfd_min_known_answer_coverage_ratio = observed
             elif assertion_name == "cht_reynolds_number":
                 cht_min_reynolds_number = observed
             elif assertion_name == "cht_reference_density_kg_per_m3":
@@ -14913,6 +15014,16 @@ def evaluate_release_readiness(
         "cfd_max_turbulence_intensity_threshold": cfd_max_turbulence_intensity_threshold,
         "cfd_min_profile_point_count": cfd_min_profile_point_count,
         "cfd_min_profile_point_count_threshold": cfd_min_profile_point_count_threshold,
+        "cfd_min_pressure_drop_balance_ratio": cfd_min_pressure_drop_balance_ratio,
+        "cfd_min_pressure_drop_balance_ratio_threshold": cfd_min_pressure_drop_balance_ratio_threshold,
+        "cfd_max_pressure_drop_balance_ratio": cfd_max_pressure_drop_balance_ratio,
+        "cfd_max_pressure_drop_balance_ratio_threshold": cfd_max_pressure_drop_balance_ratio_threshold,
+        "cfd_max_mass_flux_uniformity_ratio": cfd_max_mass_flux_uniformity_ratio,
+        "cfd_max_mass_flux_uniformity_ratio_threshold": cfd_max_mass_flux_uniformity_ratio_threshold,
+        "cfd_min_pressure_monotonic_cell_fraction": cfd_min_pressure_monotonic_cell_fraction,
+        "cfd_min_pressure_monotonic_cell_fraction_threshold": cfd_min_pressure_monotonic_cell_fraction_threshold,
+        "cfd_min_known_answer_coverage_ratio": cfd_min_known_answer_coverage_ratio,
+        "cfd_min_known_answer_coverage_ratio_threshold": cfd_min_known_answer_coverage_ratio_threshold,
         "cht_min_reynolds_number": cht_min_reynolds_number,
         "cht_min_reynolds_number_threshold": cht_min_reynolds_number_threshold,
         "cht_min_applied_temperature_delta_k": cht_min_applied_temperature_delta_k,
@@ -15913,6 +16024,14 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('cfd_min_inlet_velocity_m_per_s') if result.get('cfd_min_inlet_velocity_m_per_s') is not None else '-'}`/`{result.get('cfd_min_inlet_velocity_m_per_s_threshold') if result.get('cfd_min_inlet_velocity_m_per_s_threshold') is not None else '-'}`; "
         f"`{result.get('cfd_max_turbulence_intensity') if result.get('cfd_max_turbulence_intensity') is not None else '-'}`/`{result.get('cfd_max_turbulence_intensity_threshold') if result.get('cfd_max_turbulence_intensity_threshold') is not None else '-'}`; "
         f"`{result.get('cfd_min_profile_point_count') if result.get('cfd_min_profile_point_count') is not None else '-'}`/`{result.get('cfd_min_profile_point_count_threshold') if result.get('cfd_min_profile_point_count_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- CFD channel known-answer thresholds (pressure-drop min/max, mass-flux uniformity, pressure monotonicity, coverage): "
+        f"`{result.get('cfd_min_pressure_drop_balance_ratio') if result.get('cfd_min_pressure_drop_balance_ratio') is not None else '-'}`/`{result.get('cfd_min_pressure_drop_balance_ratio_threshold') if result.get('cfd_min_pressure_drop_balance_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('cfd_max_pressure_drop_balance_ratio') if result.get('cfd_max_pressure_drop_balance_ratio') is not None else '-'}`/`{result.get('cfd_max_pressure_drop_balance_ratio_threshold') if result.get('cfd_max_pressure_drop_balance_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('cfd_max_mass_flux_uniformity_ratio') if result.get('cfd_max_mass_flux_uniformity_ratio') is not None else '-'}`/`{result.get('cfd_max_mass_flux_uniformity_ratio_threshold') if result.get('cfd_max_mass_flux_uniformity_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('cfd_min_pressure_monotonic_cell_fraction') if result.get('cfd_min_pressure_monotonic_cell_fraction') is not None else '-'}`/`{result.get('cfd_min_pressure_monotonic_cell_fraction_threshold') if result.get('cfd_min_pressure_monotonic_cell_fraction_threshold') is not None else '-'}`; "
+        f"`{result.get('cfd_min_known_answer_coverage_ratio') if result.get('cfd_min_known_answer_coverage_ratio') is not None else '-'}`/`{result.get('cfd_min_known_answer_coverage_ratio_threshold') if result.get('cfd_min_known_answer_coverage_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
         "- CHT min Reynolds number and temperature delta K thresholds: "

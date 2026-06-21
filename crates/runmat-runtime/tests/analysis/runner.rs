@@ -3956,6 +3956,62 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_pressure_drop_balance_ratio",
+                "FEA_CFD_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_KNOWN_ANSWER",
+                    "pressure_drop_balance_ratio",
+                ),
+                Some(0.999_999),
+                Some(1.000_001),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_mass_flux_uniformity_ratio",
+                "FEA_CFD_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_KNOWN_ANSWER",
+                    "mass_flux_uniformity_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-8),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_pressure_monotonic_cell_fraction",
+                "FEA_CFD_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_KNOWN_ANSWER",
+                    "pressure_monotonic_cell_fraction",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_known_answer_coverage_ratio",
+                "FEA_CFD_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_KNOWN_ANSWER",
+                    "known_answer_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
         }
         if spec.id.starts_with("cht_coupled_") {
             push_threshold_assertion(

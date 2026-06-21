@@ -5162,6 +5162,13 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
             && diag.message.contains("solve_family=steady_state")
             && diag.message.contains("transient_scale_variation=")
     }));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_CFD_KNOWN_ANSWER"
+            && diag.message.contains("pressure_drop_balance_ratio=")
+            && diag.message.contains("mass_flux_uniformity_ratio=")
+            && diag.message.contains("pressure_monotonic_cell_fraction=")
+            && diag.message.contains("known_answer_coverage_ratio=")
+    }));
     let results = analysis_results_op(
         &envelope.data,
         AnalysisResultsQuery::default(),
