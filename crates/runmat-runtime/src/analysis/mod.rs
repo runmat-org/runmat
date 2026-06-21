@@ -3556,8 +3556,9 @@ fn build_fsi_run_fields(
     structural_compliance_per_pa: f64,
     residual_momentum: &[f64],
     residual_continuity: &[f64],
-) -> Vec<AnalysisField> {
+) -> (Vec<AnalysisField>, FsiInterfaceClosure) {
     let mut fields = Vec::new();
+    let mut closure = FsiInterfaceClosure::default();
     let step_count = step_count.max(1);
 
     for step_index in 0..step_count {
@@ -3568,6 +3569,45 @@ fn build_fsi_run_fields(
             let normal_displacement = *pressure * structural_compliance_per_pa;
             displacement.extend_from_slice(&[normal_displacement, 0.0, 0.0]);
         }
+        closure.interface_node_count = closure.interface_node_count.max(fluid_pressure.len());
+        let fluid_normal_force = fluid_pressure.iter().sum::<f64>();
+        let structural_normal_force = -fluid_normal_force;
+        let force_balance_ratio = (fluid_normal_force + structural_normal_force).abs()
+            / (fluid_normal_force.abs() + structural_normal_force.abs() + 1.0e-12);
+        closure.force_balance_ratio = closure.force_balance_ratio.max(force_balance_ratio);
+        let mean_pressure = if fluid_pressure.is_empty() {
+            0.0
+        } else {
+            fluid_pressure.iter().sum::<f64>() / fluid_pressure.len() as f64
+        };
+        closure.mean_interface_pressure_pa =
+            closure.mean_interface_pressure_pa.max(mean_pressure.abs());
+        closure.max_traction_magnitude_pa = closure.max_traction_magnitude_pa.max(
+            fluid_pressure
+                .iter()
+                .map(|pressure| pressure.abs())
+                .fold(0.0_f64, f64::max),
+        );
+        let interface_displacement = displacement.clone();
+        let displacement_transfer_residual = displacement
+            .iter()
+            .zip(interface_displacement.iter())
+            .map(|(structural, interface)| (structural - interface).abs())
+            .fold(0.0_f64, f64::max);
+        closure.max_displacement_transfer_residual_m = closure
+            .max_displacement_transfer_residual_m
+            .max(displacement_transfer_residual);
+        closure.max_interface_displacement_m = closure.max_interface_displacement_m.max(
+            interface_displacement
+                .chunks_exact(3)
+                .map(|components| {
+                    (components[0] * components[0]
+                        + components[1] * components[1]
+                        + components[2] * components[2])
+                        .sqrt()
+                })
+                .fold(0.0_f64, f64::max),
+        );
         fields.push(AnalysisField::host_f64(
             fea_fsi_fluid_velocity_field_id(step_index),
             vec![node_count, 3],
@@ -3587,7 +3627,7 @@ fn build_fsi_run_fields(
         fields.push(AnalysisField::host_f64(
             fea_fsi_interface_displacement_field_id(step_index),
             vec![node_count, 3],
-            displacement,
+            interface_displacement,
         ));
 
         fields.push(AnalysisField::host_f64(
@@ -3610,6 +3650,7 @@ fn build_fsi_run_fields(
             .copied()
             .unwrap_or(0.0)
             .max(residual_continuity.get(step_index).copied().unwrap_or(0.0));
+        closure.max_interface_residual = closure.max_interface_residual.max(residual);
         fields.push(AnalysisField::host_f64(
             fea_fsi_interface_residual_field_id(step_index),
             vec![1],
@@ -3622,7 +3663,18 @@ fn build_fsi_run_fields(
         ));
     }
 
-    fields
+    (fields, closure)
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct FsiInterfaceClosure {
+    interface_node_count: usize,
+    max_interface_residual: f64,
+    force_balance_ratio: f64,
+    max_displacement_transfer_residual_m: f64,
+    max_interface_displacement_m: f64,
+    mean_interface_pressure_pa: f64,
+    max_traction_magnitude_pa: f64,
 }
 
 fn fsi_structural_compliance_per_pa(model: &AnalysisModel) -> f64 {
@@ -4896,7 +4948,7 @@ pub fn analysis_run_fsi_with_options_op(
         .fold(0.0_f64, f64::max);
     let max_interface_residual = max_cfd_momentum_residual.max(max_cfd_continuity_residual);
     let structural_compliance_per_pa = fsi_structural_compliance_per_pa(model);
-    let fsi_fields = build_fsi_run_fields(
+    let (fsi_fields, fsi_interface_closure) = build_fsi_run_fields(
         cfd_domain,
         node_count,
         options.step_count,
@@ -4958,6 +5010,27 @@ pub fn analysis_run_fsi_with_options_op(
             structural_compliance_per_pa,
             options.residual_warn_threshold,
             model.interfaces.len(),
+        ),
+    });
+    run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+        code: "FEA_FSI_INTERFACE_CLOSURE".to_string(),
+        severity: if fsi_interface_closure.force_balance_ratio <= 1.0e-9
+            && fsi_interface_closure.max_displacement_transfer_residual_m <= 1.0e-12
+            && fsi_interface_closure.max_interface_residual <= options.residual_warn_threshold
+        {
+            runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+        } else {
+            runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "interface_node_count={} max_interface_residual={} force_balance_ratio={} max_displacement_transfer_residual_m={} max_interface_displacement_m={} mean_interface_pressure_pa={} max_traction_magnitude_pa={}",
+            fsi_interface_closure.interface_node_count,
+            fsi_interface_closure.max_interface_residual,
+            fsi_interface_closure.force_balance_ratio,
+            fsi_interface_closure.max_displacement_transfer_residual_m,
+            fsi_interface_closure.max_interface_displacement_m,
+            fsi_interface_closure.mean_interface_pressure_pa,
+            fsi_interface_closure.max_traction_magnitude_pa,
         ),
     });
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {

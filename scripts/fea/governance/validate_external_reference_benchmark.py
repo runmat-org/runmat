@@ -562,6 +562,9 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "fsi_max_momentum_residual",
         "fsi_max_continuity_residual",
         "fsi_max_interface_residual",
+        "fsi_interface_node_count",
+        "fsi_force_balance_ratio",
+        "fsi_max_displacement_transfer_residual_m",
     },
     "fsi_coupled_cpu": {
         "fsi_reference_density_kg_per_m3",
@@ -577,6 +580,9 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "fsi_max_momentum_residual",
         "fsi_max_continuity_residual",
         "fsi_max_interface_residual",
+        "fsi_interface_node_count",
+        "fsi_force_balance_ratio",
+        "fsi_max_displacement_transfer_residual_m",
     },
     "fsi_coupled_gpu_fallback": {
         "fsi_reference_density_kg_per_m3",
@@ -592,6 +598,9 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "fsi_max_momentum_residual",
         "fsi_max_continuity_residual",
         "fsi_max_interface_residual",
+        "fsi_interface_node_count",
+        "fsi_force_balance_ratio",
+        "fsi_max_displacement_transfer_residual_m",
     },
     "thermo_mech_kickoff_gpu_provider": {
         "thermo_mech_thermal_strain_scale",

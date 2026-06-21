@@ -989,6 +989,9 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "fsi_max_momentum_residual",
                     "fsi_max_continuity_residual",
                     "fsi_max_interface_residual",
+                    "fsi_interface_node_count",
+                    "fsi_force_balance_ratio",
+                    "fsi_max_displacement_transfer_residual_m",
                 },
             ),
             _record(
@@ -1007,6 +1010,9 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "fsi_max_momentum_residual",
                     "fsi_max_continuity_residual",
                     "fsi_max_interface_residual",
+                    "fsi_interface_node_count",
+                    "fsi_force_balance_ratio",
+                    "fsi_max_displacement_transfer_residual_m",
                 },
             ),
             _record(
@@ -1025,6 +1031,9 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "fsi_max_momentum_residual",
                     "fsi_max_continuity_residual",
                     "fsi_max_interface_residual",
+                    "fsi_interface_node_count",
+                    "fsi_force_balance_ratio",
+                    "fsi_max_displacement_transfer_residual_m",
                 },
             ),
         ]

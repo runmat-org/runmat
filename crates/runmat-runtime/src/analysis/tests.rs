@@ -5039,6 +5039,13 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         .iter()
         .any(|diag| diag.code == "FEA_FSI_INTERFACE_RESIDUAL"
             && diag.message.contains("max_interface_residual=")));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| diag.code
+        == "FEA_FSI_INTERFACE_CLOSURE"
+        && diag.message.contains("interface_node_count=")
+        && diag.message.contains("force_balance_ratio=")
+        && diag
+            .message
+            .contains("max_displacement_transfer_residual_m=")));
     assert!(envelope
         .data
         .run
