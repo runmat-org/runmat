@@ -1,10 +1,11 @@
 //! MATLAB-compatible `eig` builtin with host and GPU-aware semantics.
 //!
 //! Implements the dense eigenvalue decomposition for real and complex matrices,
-//! including the vector-only form, the `[V,D]` factorisation, and the
-//! three-output `[V,D,W]` variant that returns left eigenvectors. GPU inputs are
-//! currently gathered back to the host unless a provider implements the
-//! reserved `eig` hook; see the documentation string for full details.
+//! including the vector-only form, generalized `eig(A,B)` for nonsingular `B`,
+//! the `[V,D]` factorisation, and the three-output `[V,D,W]` variant that
+//! returns left eigenvectors. GPU inputs are currently gathered back to the host
+//! unless a provider implements the reserved `eig` hook; see the documentation
+//! string for full details.
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -102,7 +103,48 @@ const EIG_INPUTS_A_OPTIONS: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const EIG_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+const EIG_INPUTS_AB: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input square matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second square matrix in the generalized problem A*V = B*V*D.",
+    },
+];
+
+const EIG_INPUTS_AB_OPTIONS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input square matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second square matrix in the generalized problem A*V = B*V*D.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional selectors (`balance`, `nobalance`, `vector`, `matrix`).",
+    },
+];
+
+const EIG_SIGNATURES: [BuiltinSignatureDescriptor; 12] = [
     BuiltinSignatureDescriptor {
         label: "d = eig(A)",
         inputs: &EIG_INPUTS_A,
@@ -131,6 +173,36 @@ const EIG_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
     BuiltinSignatureDescriptor {
         label: "[V, D, W] = eig(A, options...)",
         inputs: &EIG_INPUTS_A_OPTIONS,
+        outputs: &EIG_OUTPUT_VDW,
+    },
+    BuiltinSignatureDescriptor {
+        label: "d = eig(A, B)",
+        inputs: &EIG_INPUTS_AB,
+        outputs: &EIG_OUTPUT_D,
+    },
+    BuiltinSignatureDescriptor {
+        label: "d = eig(A, B, options...)",
+        inputs: &EIG_INPUTS_AB_OPTIONS,
+        outputs: &EIG_OUTPUT_D,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[V, D] = eig(A, B)",
+        inputs: &EIG_INPUTS_AB,
+        outputs: &EIG_OUTPUT_VD,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[V, D] = eig(A, B, options...)",
+        inputs: &EIG_INPUTS_AB_OPTIONS,
+        outputs: &EIG_OUTPUT_VD,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[V, D, W] = eig(A, B)",
+        inputs: &EIG_INPUTS_AB,
+        outputs: &EIG_OUTPUT_VDW,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[V, D, W] = eig(A, B, options...)",
+        inputs: &EIG_INPUTS_AB_OPTIONS,
         outputs: &EIG_OUTPUT_VDW,
     },
 ];
@@ -182,7 +254,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Prefers the provider `eig` hook (WGPU reuploads host-computed results for real spectra) and falls back to the CPU implementation for complex spectra or unsupported options.",
+    notes: "Prefers the provider `eig` hook for standard eig(A) (WGPU reuploads host-computed results for real spectra) and falls back to the CPU implementation for generalized eig(A,B), complex spectra, or unsupported options.",
 };
 
 fn eig_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -335,8 +407,18 @@ impl Default for EigOptions {
     }
 }
 
+#[derive(Clone)]
+struct EigRequest {
+    b: Option<Value>,
+    options: EigOptions,
+}
+
 pub async fn evaluate(value: Value, args: &[Value], require_left: bool) -> BuiltinResult<EigEval> {
-    let options = parse_options(args)?;
+    let request = parse_request(args)?;
+    if let Some(b) = request.b {
+        return evaluate_generalized(value, b, request.options, require_left).await;
+    }
+    let options = request.options;
     match value {
         Value::GpuTensor(handle) => {
             if let Some(eval) = evaluate_gpu(&handle, options, require_left).await? {
@@ -387,10 +469,22 @@ async fn evaluate_host(
     compute_eigen(matrix, options, require_left)
 }
 
-fn parse_options(args: &[Value]) -> BuiltinResult<EigOptions> {
+async fn evaluate_generalized(
+    a_value: Value,
+    b_value: Value,
+    options: EigOptions,
+    require_left: bool,
+) -> BuiltinResult<EigEval> {
+    let a = value_to_complex_matrix(a_value).await?;
+    let b = value_to_complex_matrix(b_value).await?;
+    compute_generalized_eigen(a, b, options, require_left)
+}
+
+fn parse_request(args: &[Value]) -> BuiltinResult<EigRequest> {
     let mut opts = EigOptions::default();
+    let mut b = None;
     for (idx, arg) in args.iter().enumerate() {
-        if let Some(text) = tensor::value_to_string(arg) {
+        if let Some(text) = option_text(arg)? {
             match text.trim().to_ascii_lowercase().as_str() {
                 "balance" => opts.balance = true,
                 "nobalance" => opts.balance = false,
@@ -403,16 +497,29 @@ fn parse_options(args: &[Value]) -> BuiltinResult<EigOptions> {
                 }
             }
         } else if idx == 0 {
-            return Err(eig_invalid_argument(
-                "eig: generalized eigenvalue decomposition (eig(A,B)) is not implemented",
-            ));
+            b = Some(arg.clone());
         } else {
             return Err(eig_invalid_argument(
                 "eig: option arguments must be character vectors or string scalars",
             ));
         }
     }
-    Ok(opts)
+    Ok(EigRequest { b, options: opts })
+}
+
+fn option_text(value: &Value) -> BuiltinResult<Option<String>> {
+    match value {
+        Value::String(text) => Ok(Some(text.clone())),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(Some(array.data[0].clone())),
+        Value::StringArray(_) => Err(eig_invalid_argument(
+            "eig: option arguments must be character vectors or string scalars",
+        )),
+        Value::CharArray(chars) if chars.rows <= 1 => Ok(Some(chars.data.iter().collect())),
+        Value::CharArray(_) => Err(eig_invalid_argument(
+            "eig: option arguments must be character vectors or string scalars",
+        )),
+        _ => Ok(None),
+    }
 }
 
 fn compute_eigen(
@@ -452,10 +559,6 @@ fn compute_eigen(
     let balanced = maybe_balance(&matrix, options.balance);
     let (eigenvalues, right) = schur_eigendecompose(&balanced)?;
 
-    let eigenvalue_value = vector_to_value(&eigenvalues)?;
-    let diag_value = diag_matrix_value(&eigenvalues)?;
-    let right_value = matrix_to_value(&right)?;
-
     let left_value = if require_left {
         let left_matrix =
             compute_left_vectors(&balanced, &right, &eigenvalues).ok_or_else(|| {
@@ -463,10 +566,234 @@ fn compute_eigen(
                     "eig: unable to compute left eigenvectors for the requested matrix",
                 )
             })?;
-        Some(matrix_to_value(&left_matrix)?)
+        Some(left_matrix)
     } else {
         None
     };
+
+    build_eval(eigenvalues, right, left_value, options)
+}
+
+fn compute_generalized_eigen(
+    a: DMatrix<Complex64>,
+    b: DMatrix<Complex64>,
+    options: EigOptions,
+    require_left: bool,
+) -> BuiltinResult<EigEval> {
+    if a.nrows() != a.ncols() {
+        return Err(eig_invalid_input("eig: A matrix must be square"));
+    }
+    if b.nrows() != b.ncols() {
+        return Err(eig_invalid_input("eig: B matrix must be square"));
+    }
+    if a.shape() != b.shape() {
+        return Err(eig_invalid_input(
+            "eig: A and B must be the same size for generalized eigenvalue decomposition",
+        ));
+    }
+    let n = a.nrows();
+    if n == 0 {
+        return compute_eigen(a, options, require_left);
+    }
+
+    #[cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
+    {
+        compute_generalized_eigen_lapack(&a, &b, options, require_left)
+    }
+
+    #[cfg(not(all(feature = "blas-lapack", not(target_arch = "wasm32"))))]
+    {
+        compute_generalized_eigen_via_solve(a, b, options, require_left)
+    }
+}
+
+#[cfg(not(all(feature = "blas-lapack", not(target_arch = "wasm32"))))]
+fn compute_generalized_eigen_via_solve(
+    a: DMatrix<Complex64>,
+    b: DMatrix<Complex64>,
+    options: EigOptions,
+    require_left: bool,
+) -> BuiltinResult<EigEval> {
+    let lu = b.clone().lu();
+    let transformed = lu.solve(&a).ok_or_else(|| {
+        eig_invalid_input(
+            "eig: generalized eig(A,B) with singular B requires full QZ support, which is not yet available",
+        )
+    })?;
+    let (eigenvalues, right) = schur_eigendecompose(&transformed)?;
+
+    let left_value = if require_left {
+        let standard_left =
+            compute_left_vectors(&transformed, &right, &eigenvalues).ok_or_else(|| {
+                eig_internal_error(
+                    "eig: unable to compute left eigenvectors for the requested generalized problem",
+                )
+            })?;
+        let mut generalized_left = b.adjoint().lu().solve(&standard_left).ok_or_else(|| {
+            eig_invalid_input(
+                "eig: generalized eig(A,B) with singular B requires full QZ support, which is not yet available",
+            )
+        })?;
+        normalize_generalized_left(&mut generalized_left, &b, &right);
+        Some(generalized_left)
+    } else {
+        None
+    };
+
+    build_eval(eigenvalues, right, left_value, options)
+}
+
+#[cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
+fn compute_generalized_eigen_lapack(
+    a: &DMatrix<Complex64>,
+    b: &DMatrix<Complex64>,
+    options: EigOptions,
+    require_left: bool,
+) -> BuiltinResult<EigEval> {
+    let n = a.nrows();
+    let n_i32 = i32::try_from(n)
+        .map_err(|_| eig_invalid_input("eig: matrix is too large for LAPACK generalized eig"))?;
+    let mut a_copy = matrix_to_lapack_complex(a);
+    let mut b_copy = matrix_to_lapack_complex(b);
+    let mut alpha = vec![lapack::c64::new(0.0, 0.0); n];
+    let mut beta = vec![lapack::c64::new(0.0, 0.0); n];
+    let mut vl = vec![lapack::c64::new(0.0, 0.0); n * n];
+    let mut vr = vec![lapack::c64::new(0.0, 0.0); n * n];
+    let mut work = vec![lapack::c64::new(0.0, 0.0); 1];
+    let mut rwork = vec![0.0; 8 * n.max(1)];
+    let mut info = 0i32;
+    let jobvl = if require_left { b'V' } else { b'N' };
+    let jobvr = b'V';
+
+    unsafe {
+        lapack::zggev(
+            jobvl,
+            jobvr,
+            n_i32,
+            &mut a_copy,
+            n_i32,
+            &mut b_copy,
+            n_i32,
+            &mut alpha,
+            &mut beta,
+            &mut vl,
+            n_i32,
+            &mut vr,
+            n_i32,
+            &mut work,
+            -1,
+            &mut rwork,
+            &mut info,
+        );
+    }
+    if info != 0 {
+        return Err(eig_internal_error(format!(
+            "eig: LAPACK ZGGEV workspace query failed with info = {info}"
+        )));
+    }
+
+    let lwork = work[0].re.max(1.0) as i32;
+    work.resize(lwork as usize, lapack::c64::new(0.0, 0.0));
+    unsafe {
+        lapack::zggev(
+            jobvl,
+            jobvr,
+            n_i32,
+            &mut a_copy,
+            n_i32,
+            &mut b_copy,
+            n_i32,
+            &mut alpha,
+            &mut beta,
+            &mut vl,
+            n_i32,
+            &mut vr,
+            n_i32,
+            &mut work,
+            lwork,
+            &mut rwork,
+            &mut info,
+        );
+    }
+    if info < 0 {
+        return Err(eig_internal_error(format!(
+            "eig: LAPACK ZGGEV rejected argument {}",
+            -info
+        )));
+    }
+    if info > 0 {
+        return Err(eig_internal_error(format!(
+            "eig: LAPACK ZGGEV failed to converge with info = {info}"
+        )));
+    }
+
+    let eigenvalues = DVector::from_iterator(
+        n,
+        alpha
+            .iter()
+            .zip(beta.iter())
+            .map(|(alpha, beta)| lapack_ratio_to_eigenvalue(alpha, beta)),
+    );
+    let right = lapack_complex_to_matrix(&vr, n, n);
+    let left = if require_left {
+        let mut left = lapack_complex_to_matrix(&vl, n, n);
+        normalize_generalized_left(&mut left, b, &right);
+        Some(left)
+    } else {
+        None
+    };
+
+    build_eval(eigenvalues, right, left, options)
+}
+
+#[cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
+fn matrix_to_lapack_complex(matrix: &DMatrix<Complex64>) -> Vec<lapack::c64> {
+    matrix
+        .iter()
+        .map(|value| lapack::c64::new(value.re, value.im))
+        .collect()
+}
+
+#[cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
+fn lapack_complex_to_matrix(
+    values: &[lapack::c64],
+    rows: usize,
+    cols: usize,
+) -> DMatrix<Complex64> {
+    let data = values
+        .iter()
+        .map(|value| Complex64::new(value.re, value.im))
+        .collect::<Vec<_>>();
+    DMatrix::from_column_slice(rows, cols, &data)
+}
+
+#[cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
+fn lapack_ratio_to_eigenvalue(alpha: &lapack::c64, beta: &lapack::c64) -> Complex64 {
+    let alpha = Complex64::new(alpha.re, alpha.im);
+    let beta = Complex64::new(beta.re, beta.im);
+    if beta.norm() <= REAL_EPS {
+        if alpha.norm() <= REAL_EPS {
+            Complex64::new(f64::NAN, f64::NAN)
+        } else {
+            Complex64::new(f64::INFINITY, 0.0)
+        }
+    } else {
+        alpha / beta
+    }
+}
+
+fn build_eval(
+    eigenvalues: DVector<Complex64>,
+    right: DMatrix<Complex64>,
+    left: Option<DMatrix<Complex64>>,
+    options: EigOptions,
+) -> BuiltinResult<EigEval> {
+    let eigenvalue_value = vector_to_value(&eigenvalues)?;
+    let diag_value = diag_matrix_value(&eigenvalues)?;
+    let right_value = matrix_to_value(&right)?;
+    let left_value = left
+        .map(|left_matrix| matrix_to_value(&left_matrix))
+        .transpose()?;
 
     let spectral_output = if options.vector_output {
         eigenvalue_value.clone()
@@ -593,6 +920,24 @@ fn compute_left_vectors(
 fn normalize_left(left: &mut DMatrix<Complex64>, right: &DMatrix<Complex64>) {
     for i in 0..right.ncols() {
         let dot = left.column(i).dot(&right.column(i));
+        let finite = dot.re.is_finite() && dot.im.is_finite();
+        if dot.norm() > REAL_EPS && finite {
+            let scale = dot.conj();
+            for r in 0..left.nrows() {
+                left[(r, i)] /= scale;
+            }
+        }
+    }
+}
+
+fn normalize_generalized_left(
+    left: &mut DMatrix<Complex64>,
+    b: &DMatrix<Complex64>,
+    right: &DMatrix<Complex64>,
+) {
+    let b_right = b * right;
+    for i in 0..right.ncols() {
+        let dot = left.column(i).dot(&b_right.column(i));
         let finite = dot.re.is_finite() && dot.im.is_finite();
         if dot.norm() > REAL_EPS && finite {
             let scale = dot.conj();
@@ -788,6 +1133,12 @@ pub(crate) mod tests {
         assert!(labels.contains(&"[V, D] = eig(A, options...)"));
         assert!(labels.contains(&"[V, D, W] = eig(A)"));
         assert!(labels.contains(&"[V, D, W] = eig(A, options...)"));
+        assert!(labels.contains(&"d = eig(A, B)"));
+        assert!(labels.contains(&"d = eig(A, B, options...)"));
+        assert!(labels.contains(&"[V, D] = eig(A, B)"));
+        assert!(labels.contains(&"[V, D] = eig(A, B, options...)"));
+        assert!(labels.contains(&"[V, D, W] = eig(A, B)"));
+        assert!(labels.contains(&"[V, D, W] = eig(A, B, options...)"));
     }
 
     #[test]
@@ -800,6 +1151,9 @@ pub(crate) mod tests {
 
     fn column_vector_from_value(value: Value) -> Vec<Complex64> {
         match value {
+            Value::Num(v) => vec![Complex64::new(v, 0.0)],
+            Value::Int(v) => vec![Complex64::new(v.to_f64(), 0.0)],
+            Value::Complex(re, im) => vec![Complex64::new(re, im)],
             Value::Tensor(t) => t
                 .data
                 .iter()
@@ -827,6 +1181,18 @@ pub(crate) mod tests {
                     b[(r, c)]
                 );
             }
+        }
+    }
+
+    fn assert_values_close_unordered(mut actual: Vec<Complex64>, mut expected: Vec<Complex64>) {
+        actual.sort_by(|a, b| a.re.partial_cmp(&b.re).unwrap());
+        expected.sort_by(|a, b| a.re.partial_cmp(&b.re).unwrap());
+        assert_eq!(actual.len(), expected.len());
+        for (lhs, rhs) in actual.iter().zip(expected.iter()) {
+            assert!(
+                (lhs - rhs).norm() <= 1e-10,
+                "expected eigenvalue {rhs}, got {lhs}"
+            );
         }
     }
 
@@ -964,6 +1330,121 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn eig_generalized_identity_matches_standard() {
+        let a = Tensor::new(vec![1.0, 0.0, 0.0, 2.0], vec![2, 2]).unwrap();
+        let b = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
+        let result = eig_builtin(Value::Tensor(a), vec![Value::Tensor(b)]).expect("eig(A,B)");
+        let values = column_vector_from_value(result);
+        assert_values_close_unordered(
+            values,
+            vec![Complex64::new(1.0, 0.0), Complex64::new(2.0, 0.0)],
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn eig_generalized_diagonal_pair() {
+        let a = Tensor::new(vec![2.0, 0.0, 0.0, 9.0], vec![2, 2]).unwrap();
+        let b = Tensor::new(vec![1.0, 0.0, 0.0, 3.0], vec![2, 2]).unwrap();
+        let result = eig_builtin(Value::Tensor(a), vec![Value::Tensor(b)]).expect("eig(A,B)");
+        let values = column_vector_from_value(result);
+        assert_values_close_unordered(
+            values,
+            vec![Complex64::new(2.0, 0.0), Complex64::new(3.0, 0.0)],
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn eig_generalized_two_outputs_reconstruct() {
+        let a_tensor = Tensor::new(vec![4.0, 0.0, 1.0, 9.0], vec![2, 2]).unwrap();
+        let b_tensor = Tensor::new(vec![2.0, 0.0, 0.0, 3.0], vec![2, 2]).unwrap();
+        let eval = evaluate(
+            Value::Tensor(a_tensor.clone()),
+            &[Value::Tensor(b_tensor.clone())],
+            false,
+        )
+        .expect("evaluate");
+        let a = matrix_from_value(Value::Tensor(a_tensor));
+        let b = matrix_from_value(Value::Tensor(b_tensor));
+        let v = matrix_from_value(eval.right());
+        let d = matrix_from_value(eval.diagonal_matrix());
+        let lhs = &a * &v;
+        let rhs = &b * &v * &d;
+        assert_matrix_close(&lhs, &rhs, 1e-10);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn eig_generalized_three_outputs_satisfy_left_equation() {
+        let a_tensor = Tensor::new(vec![4.0, 0.0, 1.0, 9.0], vec![2, 2]).unwrap();
+        let b_tensor = Tensor::new(vec![2.0, 0.0, 0.0, 3.0], vec![2, 2]).unwrap();
+        let eval = evaluate(
+            Value::Tensor(a_tensor.clone()),
+            &[Value::Tensor(b_tensor.clone())],
+            true,
+        )
+        .expect("evaluate");
+        let a = matrix_from_value(Value::Tensor(a_tensor));
+        let b = matrix_from_value(Value::Tensor(b_tensor));
+        let v = matrix_from_value(eval.right());
+        let d = matrix_from_value(eval.diagonal_matrix());
+        let w = matrix_from_value(eval.left().expect("left eigenvectors"));
+
+        let identity = DMatrix::<Complex64>::identity(v.ncols(), v.ncols());
+        let gram = w.adjoint() * &b * &v;
+        assert_matrix_close(&gram, &identity, 1e-10);
+
+        let lhs = w.adjoint() * &a;
+        let rhs = &d * w.adjoint() * &b;
+        assert_matrix_close(&lhs, &rhs, 1e-10);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn eig_generalized_vector_option_returns_column_vector_second_output() {
+        let a = Tensor::new(vec![2.0, 0.0, 0.0, 9.0], vec![2, 2]).unwrap();
+        let b = Tensor::new(vec![1.0, 0.0, 0.0, 3.0], vec![2, 2]).unwrap();
+        let eval = evaluate(
+            Value::Tensor(a),
+            &[Value::Tensor(b), Value::from("vector")],
+            false,
+        )
+        .expect("evaluate");
+        match eval.diagonal() {
+            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 1]),
+            Value::ComplexTensor(ct) => assert_eq!(ct.shape, vec![2, 1]),
+            other => panic!("expected vector second output, got {other:?}"),
+        }
+        let _ = matrix_from_value(eval.diagonal_matrix());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(not(all(feature = "blas-lapack", not(target_arch = "wasm32"))))]
+    fn eig_generalized_singular_b_errors_with_qz_message() {
+        let a = Tensor::new(vec![1.0, 0.0, 0.0, 2.0], vec![2, 2]).unwrap();
+        let b = Tensor::new(vec![1.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
+        let err = evaluate(Value::Tensor(a), &[Value::Tensor(b)], false).unwrap_err();
+        assert_eq!(err.identifier(), EIG_ERROR_INVALID_INPUT.identifier);
+        let err = error_message(err);
+        assert!(err.contains("singular B"));
+        assert!(err.contains("QZ"));
+    }
+
+    #[cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
+    #[test]
+    fn eig_generalized_singular_b_returns_infinite_eigenvalue_with_lapack() {
+        let a = Tensor::new(vec![1.0, 0.0, 0.0, 2.0], vec![2, 2]).unwrap();
+        let b = Tensor::new(vec![1.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
+        let result = eig_builtin(Value::Tensor(a), vec![Value::Tensor(b)]).expect("eig(A,B)");
+        let values = column_vector_from_value(result);
+        assert!(values.iter().any(|value| (value.re - 1.0).abs() < 1e-10));
+        assert!(values.iter().any(|value| value.re.is_infinite()));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn eig_vector_option_gpu_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![2.0, 1.0, 0.0, 3.0], vec![2, 2]).unwrap();
@@ -1011,17 +1492,14 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn eig_handles_single_numeric_argument() {
+    fn eig_generalized_scalar_pair() {
         let args = vec![Value::Int(IntValue::I32(3))];
-        let err = evaluate(Value::Num(4.0), &args, false).unwrap_err();
-        assert_eq!(err.identifier(), EIG_ERROR_INVALID_ARGUMENT.identifier);
-        let err = error_message(err);
-        assert!(
-            err.contains("generalized")
-                || err.contains("option arguments must be")
-                || err.contains("unknown option"),
-            "unexpected error message: {err}"
-        );
+        let result = evaluate(Value::Num(4.0), &args, false)
+            .expect("scalar generalized eig")
+            .eigenvalues();
+        let values = column_vector_from_value(result);
+        assert_eq!(values.len(), 1);
+        assert!((values[0] - Complex64::new(4.0 / 3.0, 0.0)).norm() < 1e-10);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
