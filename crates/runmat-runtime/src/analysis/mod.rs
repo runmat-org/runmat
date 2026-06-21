@@ -8065,6 +8065,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
             )]),
         ));
     }
+    validate_electromagnetic_run_model(model, &context)?;
 
     let prep_context = resolve_run_prep_context(
         model,
@@ -8758,6 +8759,163 @@ pub fn analysis_run_electromagnetic_with_options_op(
         &context,
         result,
     ))
+}
+
+fn validate_electromagnetic_run_model(
+    model: &AnalysisModel,
+    context: &OperationContext,
+) -> Result<(), OperationErrorEnvelope> {
+    if let Some(material) = model.materials.iter().find(|material| {
+        material.electrical.as_ref().is_some_and(|electrical| {
+            !electrical.conductivity_s_per_m.is_finite()
+                || electrical.conductivity_s_per_m <= 0.0
+                || !electrical.relative_permittivity.is_finite()
+                || electrical.relative_permittivity <= 0.0
+                || !electrical.relative_permeability.is_finite()
+                || electrical.relative_permeability <= 0.0
+                || electrical
+                    .conductivity_frequency_response
+                    .iter()
+                    .any(|point| {
+                        !point.frequency_hz.is_finite()
+                            || point.frequency_hz <= 0.0
+                            || !point.conductivity_scale.is_finite()
+                            || point.conductivity_scale <= 0.0
+                            || point
+                                .dispersive_loss_scale
+                                .is_some_and(|value| !value.is_finite() || value < 0.0)
+                            || point
+                                .relative_permittivity_scale
+                                .is_some_and(|value| !value.is_finite() || value <= 0.0)
+                            || point
+                                .relative_permeability_scale
+                                .is_some_and(|value| !value.is_finite() || value <= 0.0)
+                    })
+        })
+    }) {
+        return Err(operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_ELECTROMAGNETIC_MATERIAL",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_electromagnetic requires finite positive electrical material coefficients",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("material_id".to_string(), material.material_id.clone()),
+            ]),
+        ));
+    }
+
+    let electrical_material_count = model
+        .materials
+        .iter()
+        .filter(|material| material.electrical.is_some())
+        .count();
+    if electrical_material_count == 0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_MATERIAL",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_electromagnetic requires at least one electrical material",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                (
+                    "material_count".to_string(),
+                    model.materials.len().to_string(),
+                ),
+            ]),
+        ));
+    }
+
+    let has_electromagnetic_source = model.loads.iter().any(|load| match &load.kind {
+        LoadKind::CurrentDensity {
+            jx,
+            jy,
+            jz,
+            phase_rad,
+            amplitude_scale,
+        } => {
+            jx.is_finite()
+                && jy.is_finite()
+                && jz.is_finite()
+                && phase_rad.is_finite()
+                && amplitude_scale.is_finite()
+                && *amplitude_scale > 0.0
+                && (jx.abs() + jy.abs() + jz.abs()) > 0.0
+        }
+        LoadKind::CoilCurrent {
+            current_a,
+            phase_rad,
+            amplitude_scale,
+        } => {
+            current_a.is_finite()
+                && current_a.abs() > 0.0
+                && phase_rad.is_finite()
+                && amplitude_scale.is_finite()
+                && *amplitude_scale > 0.0
+        }
+        _ => false,
+    });
+    if !has_electromagnetic_source {
+        return Err(operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_electromagnetic requires a nonzero current-density or coil-current source",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("load_count".to_string(), model.loads.len().to_string()),
+            ]),
+        ));
+    }
+
+    let has_electromagnetic_boundary = model.boundary_conditions.iter().any(|bc| {
+        matches!(
+            &bc.kind,
+            BoundaryConditionKind::MagneticInsulation
+                | BoundaryConditionKind::VectorPotentialGround
+        )
+    });
+    if !has_electromagnetic_boundary {
+        return Err(operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_BOUNDARY",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_electromagnetic requires magnetic insulation or vector-potential ground boundary data",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                (
+                    "boundary_condition_count".to_string(),
+                    model.boundary_conditions.len().to_string(),
+                ),
+            ]),
+        ));
+    }
+
+    Ok(())
 }
 
 fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<AnalysisField> {

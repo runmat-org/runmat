@@ -1033,6 +1033,21 @@ REQUIRED_ERROR_FIXTURES = {
         "run_ok": False,
         "run_error_code": "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_BOUNDARY",
     },
+    "electromagnetic_missing_material": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_MATERIAL",
+    },
+    "electromagnetic_missing_source": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE",
+    },
+    "electromagnetic_missing_boundary": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_BOUNDARY",
+    },
     "thermal_standalone_ramp_invalid_material": {
         "validate_ok": True,
         "run_ok": False,

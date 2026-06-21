@@ -667,6 +667,13 @@ fn electromagnetic_profile_for_fixture(spec_id: &str) -> Option<ElectromagneticF
                 kind: ElectromagneticFixtureKind::Homogeneous,
             })
         }
+        "electromagnetic_missing_material"
+        | "electromagnetic_missing_source"
+        | "electromagnetic_missing_boundary" => Some(ElectromagneticFixtureProfile {
+            reference_frequency_hz: 60.0,
+            applied_current_a: 120.0,
+            kind: ElectromagneticFixtureKind::Homogeneous,
+        }),
         "electromagnetic_reference_heterogeneous_gpu_provider" => {
             Some(ElectromagneticFixtureProfile {
                 reference_frequency_hz: 400.0,
@@ -2021,6 +2028,32 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             reference_frequency_hz: profile.reference_frequency_hz,
             applied_current_a: profile.applied_current_a,
         });
+        match spec_id {
+            "electromagnetic_missing_material" => {
+                for material in &mut model.materials {
+                    material.electrical = None;
+                }
+            }
+            "electromagnetic_missing_source" => {
+                model.loads = vec![runmat_analysis_core::LoadCase {
+                    load_id: "em_invalid_structural_force".to_string(),
+                    region_id: "em_region_homogeneous".to_string(),
+                    kind: runmat_analysis_core::LoadKind::Force {
+                        fx: 1.0,
+                        fy: 0.0,
+                        fz: 0.0,
+                    },
+                }];
+            }
+            "electromagnetic_missing_boundary" => {
+                model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
+                    bc_id: "em_invalid_structural_fixed".to_string(),
+                    region_id: "em_region_homogeneous".to_string(),
+                    kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
+                }];
+            }
+            _ => {}
+        }
     }
 
     let mut thermo = thermo_coupling_for_fixture(spec_id);

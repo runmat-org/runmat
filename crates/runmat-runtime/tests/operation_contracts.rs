@@ -1,4 +1,7 @@
-use runmat_analysis_core::{AnalysisFieldValues, ElectromagneticDomain, ReferenceFrame};
+use runmat_analysis_core::{
+    AnalysisFieldValues, BoundaryCondition, BoundaryConditionKind, ElectromagneticDomain, LoadCase,
+    LoadKind, MaterialElectricalModel, ReferenceFrame,
+};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::{
     fea_modal_mode_shape_field_id, fea_nonlinear_load_factor_field_id,
@@ -1509,6 +1512,28 @@ fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
         reference_frequency_hz: 60.0,
         applied_current_a: 120.0,
     });
+    model.materials[0].electrical = Some(MaterialElectricalModel::default());
+    model.boundary_conditions = vec![
+        BoundaryCondition {
+            bc_id: "em_contract_ground".to_string(),
+            region_id: "em_contract_region".to_string(),
+            kind: BoundaryConditionKind::VectorPotentialGround,
+        },
+        BoundaryCondition {
+            bc_id: "em_contract_insulation".to_string(),
+            region_id: "em_contract_region".to_string(),
+            kind: BoundaryConditionKind::MagneticInsulation,
+        },
+    ];
+    model.loads = vec![LoadCase {
+        load_id: "em_contract_source".to_string(),
+        region_id: "em_contract_region".to_string(),
+        kind: LoadKind::CoilCurrent {
+            current_a: 120.0,
+            phase_rad: 0.0,
+            amplitude_scale: 1.0,
+        },
+    }];
 
     let envelope = analysis_run_electromagnetic_op(
         &model,

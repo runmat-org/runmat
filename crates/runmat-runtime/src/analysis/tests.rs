@@ -4016,6 +4016,111 @@ fn analysis_run_electromagnetic_rejects_models_without_em_step() {
     assert_eq!(err.error_code, "RM.FEA.RUN_ELECTROMAGNETIC.REQUIRES_STEP");
 }
 
+fn configure_valid_em_authoring(model: &mut AnalysisModel) {
+    for material in &mut model.materials {
+        if material.electrical.is_none() {
+            material.electrical = Some(MaterialElectricalModel::default());
+        }
+    }
+    model.electromagnetic = Some(ElectromagneticDomain {
+        enabled: true,
+        reference_frequency_hz: 60.0,
+        applied_current_a: 120.0,
+    });
+    model.boundary_conditions = vec![
+        BoundaryCondition {
+            bc_id: "em_ground".to_string(),
+            region_id: "em_region".to_string(),
+            kind: BoundaryConditionKind::VectorPotentialGround,
+        },
+        BoundaryCondition {
+            bc_id: "em_insulation".to_string(),
+            region_id: "em_region".to_string(),
+            kind: BoundaryConditionKind::MagneticInsulation,
+        },
+    ];
+    model.loads = vec![LoadCase {
+        load_id: "em_source".to_string(),
+        region_id: "em_region".to_string(),
+        kind: LoadKind::CoilCurrent {
+            current_a: 120.0,
+            phase_rad: 0.0,
+            amplitude_scale: 1.0,
+        },
+    }];
+}
+
+#[test]
+fn analysis_run_electromagnetic_rejects_missing_electrical_material() {
+    let mut model = sample_model();
+    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    configure_valid_em_authoring(&mut model);
+    for material in &mut model.materials {
+        material.electrical = None;
+    }
+
+    let err = analysis_run_electromagnetic_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-em-run-missing-material".to_string()), None),
+    )
+    .expect_err("electromagnetic run should reject missing electrical material");
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_MATERIAL"
+    );
+}
+
+#[test]
+fn analysis_run_electromagnetic_rejects_missing_current_source() {
+    let mut model = sample_model();
+    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    configure_valid_em_authoring(&mut model);
+    model.loads = vec![LoadCase {
+        load_id: "structural_force".to_string(),
+        region_id: "em_region".to_string(),
+        kind: LoadKind::Force {
+            fx: 1.0,
+            fy: 0.0,
+            fz: 0.0,
+        },
+    }];
+
+    let err = analysis_run_electromagnetic_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-em-run-missing-source".to_string()), None),
+    )
+    .expect_err("electromagnetic run should reject missing current source");
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE"
+    );
+}
+
+#[test]
+fn analysis_run_electromagnetic_rejects_missing_em_boundary() {
+    let mut model = sample_model();
+    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    configure_valid_em_authoring(&mut model);
+    model.boundary_conditions = vec![BoundaryCondition {
+        bc_id: "structural_fixed".to_string(),
+        region_id: "em_region".to_string(),
+        kind: BoundaryConditionKind::Fixed,
+    }];
+
+    let err = analysis_run_electromagnetic_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-em-run-missing-boundary".to_string()), None),
+    )
+    .expect_err("electromagnetic run should reject missing EM boundary");
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_BOUNDARY"
+    );
+}
+
 #[test]
 fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
     let mut model = sample_model();
@@ -4055,6 +4160,7 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         reference_frequency_hz: 60.0,
         applied_current_a: 120.0,
     });
+    configure_valid_em_authoring(&mut model);
     let envelope = analysis_run_electromagnetic_op(
         &model,
         ComputeBackend::Cpu,
@@ -4241,6 +4347,7 @@ fn analysis_run_electromagnetic_sweep_emits_resonance_metrics() {
         reference_frequency_hz: 60.0,
         applied_current_a: 120.0,
     });
+    configure_valid_em_authoring(&mut model);
     let envelope = analysis_run_electromagnetic_with_options_op(
         &model,
         ComputeBackend::Cpu,

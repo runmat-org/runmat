@@ -1002,6 +1002,18 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "acoustic_harmonic_missing_boundary",
                 "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_BOUNDARY",
             ),
+            _error_record(
+                "electromagnetic_missing_material",
+                "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_MATERIAL",
+            ),
+            _error_record(
+                "electromagnetic_missing_source",
+                "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE",
+            ),
+            _error_record(
+                "electromagnetic_missing_boundary",
+                "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_BOUNDARY",
+            ),
             _record(
                 "modal_large_cpu",
                 {
