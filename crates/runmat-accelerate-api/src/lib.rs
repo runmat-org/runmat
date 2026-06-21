@@ -229,8 +229,17 @@ pub enum ProviderSpectralRange {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderSpectralFrameMode {
-    Sliding { hop: usize },
-    FoldedColumns { input_rows: usize },
+    Sliding {
+        hop: usize,
+    },
+    ColumnSliding {
+        hop: usize,
+        input_rows: usize,
+        frames_per_column: usize,
+    },
+    FoldedColumns {
+        input_rows: usize,
+    },
 }
 
 #[derive(Clone, Debug)]

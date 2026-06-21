@@ -12,8 +12,17 @@ pub(crate) struct SpectralFrameShaderConfig {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SpectralFrameShaderMode {
-    Sliding { hop: usize },
-    FoldedColumns { input_rows: usize },
+    Sliding {
+        hop: usize,
+    },
+    ColumnSliding {
+        hop: usize,
+        input_rows: usize,
+        frames_per_column: usize,
+    },
+    FoldedColumns {
+        input_rows: usize,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,9 +38,14 @@ pub(crate) fn spectral_frame_shader(
 ) -> String {
     let (ty, zero, _) = spectral_shader_numeric_fragments(precision);
     let input_complex = u32::from(config.input_complex);
-    let (mode, hop, input_rows) = match config.mode {
-        SpectralFrameShaderMode::Sliding { hop } => (0u32, hop, 0usize),
-        SpectralFrameShaderMode::FoldedColumns { input_rows } => (2u32, 0usize, input_rows),
+    let (mode, hop, input_rows, frames_per_column) = match config.mode {
+        SpectralFrameShaderMode::Sliding { hop } => (0u32, hop, 0usize, 1usize),
+        SpectralFrameShaderMode::ColumnSliding {
+            hop,
+            input_rows,
+            frames_per_column,
+        } => (1u32, hop, input_rows, frames_per_column),
+        SpectralFrameShaderMode::FoldedColumns { input_rows } => (2u32, 0usize, input_rows, 1usize),
     };
     let window_len = config.window_len;
     let nfft = config.nfft;
@@ -77,7 +91,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         if {mode}u == 0u {{
             source_index = col * {hop}u + row;
         }} else if {mode}u == 1u {{
-            source_index = col * {input_rows}u + row;
+            let segment = col % {frames_per_column}u;
+            let source_col = col / {frames_per_column}u;
+            source_index = source_col * {input_rows}u + segment * {hop}u + row;
         }} else {{
             source_index = col * {input_rows}u + row;
         }}
@@ -122,6 +138,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         mode = mode,
         hop = hop,
         input_rows = input_rows,
+        frames_per_column = frames_per_column,
         input_len = input_len,
         input_complex = input_complex,
     )
