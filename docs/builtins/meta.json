@@ -65356,6 +65356,102 @@
       ]
     },
     {
+      "name": "textscan",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "C = textscan(textOrFileID, formatSpec)",
+          "inputs": [
+            {
+              "name": "textOrFileID",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text or file identifier opened by fopen."
+            },
+            {
+              "name": "formatSpec",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Format specification such as '%f %s'."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell array containing one output per conversion, or collected groups."
+            }
+          ]
+        },
+        {
+          "label": "C = textscan(textOrFileID, formatSpec, args...)",
+          "inputs": [
+            {
+              "name": "textOrFileID",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input text or file identifier opened by fopen."
+            },
+            {
+              "name": "formatSpec",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Format specification such as '%f %s'."
+            },
+            {
+              "name": "args...",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional repeat count followed by name-value pairs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Cell array containing one output per conversion, or collected groups."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.TEXTSCAN.ARGUMENT",
+          "identifier": "RunMat:textscan:InvalidArgument",
+          "when": "Input, format specification, repeat count, or name-value options are malformed.",
+          "message": "textscan: invalid argument"
+        },
+        {
+          "code": "RM.TEXTSCAN.FORMAT",
+          "identifier": "RunMat:textscan:InvalidFormat",
+          "when": "Format specification cannot be parsed or contains unsupported conversions.",
+          "message": "textscan: invalid format specification"
+        },
+        {
+          "code": "RM.TEXTSCAN.FILE",
+          "identifier": "RunMat:textscan:File",
+          "when": "A file identifier is invalid or cannot be read.",
+          "message": "textscan: file read failed"
+        },
+        {
+          "code": "RM.TEXTSCAN.PARSE",
+          "identifier": "RunMat:textscan:Parse",
+          "when": "Input text cannot be parsed according to the format specification.",
+          "message": "textscan: parse failed"
+        }
+      ]
+    },
+    {
       "name": "tf",
       "output_mode": "Fixed",
       "completion_policy": "Public",
