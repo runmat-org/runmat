@@ -195,6 +195,11 @@ pub fn run_linear_static_with_options(
             },
             message: format!("total_strain_energy={total_strain_energy}"),
         });
+        diagnostics.push(structural_linear_known_answer_diagnostic(
+            total_strain_energy,
+            &summary.operator.rhs,
+            &solve_result.solution,
+        ));
     }
     let recovery_metrics = structural_field_recovery_metrics(&summary, &solve_result.solution);
     diagnostics.push(FeaDiagnostic {
@@ -249,6 +254,56 @@ pub fn run_linear_static_with_options(
         diagnostics,
         fields,
     })
+}
+
+fn structural_linear_known_answer_diagnostic(
+    total_strain_energy: f64,
+    rhs: &[f64],
+    displacement: &[f64],
+) -> FeaDiagnostic {
+    let external_work = rhs
+        .iter()
+        .zip(displacement.iter())
+        .map(|(force, displacement)| force * displacement)
+        .sum::<f64>();
+    let work_energy_ratio = if external_work.abs() > 1.0e-12 {
+        (2.0 * total_strain_energy) / external_work
+    } else if total_strain_energy.abs() <= 1.0e-12 {
+        1.0
+    } else {
+        0.0
+    };
+    let work_energy_residual_ratio = (work_energy_ratio - 1.0).abs();
+    let known_answer_coverage_ratio = if rhs.len() == displacement.len()
+        && !rhs.is_empty()
+        && total_strain_energy.is_finite()
+        && external_work.is_finite()
+    {
+        1.0
+    } else {
+        0.0
+    };
+    let severity = if known_answer_coverage_ratio >= 1.0
+        && total_strain_energy >= 0.0
+        && work_energy_residual_ratio <= 1.0e-8
+    {
+        FeaDiagnosticSeverity::Info
+    } else {
+        FeaDiagnosticSeverity::Warning
+    };
+
+    FeaDiagnostic {
+        code: "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER".to_string(),
+        severity,
+        message: format!(
+            "identity=linear_work_energy external_work={} total_strain_energy={} work_energy_ratio={} work_energy_residual_ratio={} known_answer_coverage_ratio={}",
+            external_work,
+            total_strain_energy,
+            work_energy_ratio,
+            work_energy_residual_ratio,
+            known_answer_coverage_ratio
+        ),
+    }
 }
 
 fn scalar_field_value(

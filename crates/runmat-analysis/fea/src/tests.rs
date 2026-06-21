@@ -158,6 +158,11 @@ fn convergence_diagnostics_are_emitted() {
         .iter()
         .any(|diag| diag.code == "FEA_STRUCTURAL_ENERGY"));
     assert!(result.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER"
+            && diag.message.contains("work_energy_ratio=")
+            && diag.message.contains("known_answer_coverage_ratio=")
+    }));
+    assert!(result.diagnostics.iter().any(|diag| {
         diag.code == "FEA_STRUCTURAL_FIELD_RECOVERY"
             && diag.message.contains("basis=operator_connectivity")
             && diag.message.contains("active_stiffness_edge_count=")

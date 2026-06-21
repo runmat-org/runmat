@@ -46,6 +46,9 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             for name, observed in (
                 ("structural_normalized_residual_norm", 1.4210854715202004e-17),
                 ("structural_total_strain_energy", 0.0047732955809046485),
+                ("structural_work_energy_ratio", 1.0),
+                ("structural_work_energy_residual_ratio", 0.0),
+                ("structural_known_answer_coverage_ratio", 1.0),
                 ("structural_active_stiffness_edge_count", 1.0),
                 ("structural_recovery_element_count", 1.0),
                 ("structural_max_edge_displacement_jump", 9.090958401813853e-6),

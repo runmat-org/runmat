@@ -10,6 +10,9 @@ REQUIRED_FIXTURES = {
     "cantilever_gpu_provider": {
         "structural_normalized_residual_norm",
         "structural_total_strain_energy",
+        "structural_work_energy_ratio",
+        "structural_work_energy_residual_ratio",
+        "structural_known_answer_coverage_ratio",
         "structural_active_stiffness_edge_count",
         "structural_recovery_element_count",
         "structural_max_edge_displacement_jump",
@@ -19,6 +22,9 @@ REQUIRED_FIXTURES = {
     "cantilever_gpu_fallback": {
         "structural_normalized_residual_norm",
         "structural_total_strain_energy",
+        "structural_work_energy_ratio",
+        "structural_work_energy_residual_ratio",
+        "structural_known_answer_coverage_ratio",
         "structural_active_stiffness_edge_count",
         "structural_recovery_element_count",
         "structural_max_edge_displacement_jump",

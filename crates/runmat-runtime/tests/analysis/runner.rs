@@ -2950,6 +2950,48 @@ fn push_linear_structural_threshold_assertions(
         fixture_id,
         assertions,
         failures,
+        "structural_work_energy_ratio",
+        "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER",
+            "work_energy_ratio",
+        ),
+        Some(0.999_999),
+        Some(1.000_001),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_work_energy_residual_ratio",
+        "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER",
+            "work_energy_residual_ratio",
+        ),
+        Some(0.0),
+        Some(1.0e-8),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_known_answer_coverage_ratio",
+        "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER",
+            "known_answer_coverage_ratio",
+        ),
+        Some(1.0),
+        Some(1.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
         "structural_active_stiffness_edge_count",
         "FEA_STRUCTURAL_FIELD_RECOVERY",
         diagnostic_metric(
