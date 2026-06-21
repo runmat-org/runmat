@@ -402,7 +402,10 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                 },
             ],
         }),
-        "thermo_ramp_smooth_gpu_provider" | "thermal_standalone_ramp_gpu_provider" => {
+        spec_id
+            if spec_id == "thermo_ramp_smooth_gpu_provider"
+                || spec_id.starts_with("thermal_standalone_ramp_") =>
+        {
             Some(ThermoMechanicalCouplingOptions {
                 enabled: true,
                 reference_temperature_k: 293.15,
@@ -2387,6 +2390,116 @@ fn push_threshold_assertion(
     }
 }
 
+fn push_thermal_standalone_threshold_assertions(
+    fixture_id: &str,
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    run: &AnalysisRunResult,
+) {
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_max_residual_norm",
+        "FEA_THERMAL_STABILITY",
+        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "max_residual_norm"),
+        Some(0.0),
+        Some(6.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_min_temperature_k",
+        "FEA_THERMAL_STABILITY",
+        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "min_temperature_k"),
+        Some(290.0),
+        Some(360.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_max_temperature_k",
+        "FEA_THERMAL_STABILITY",
+        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "max_temperature_k"),
+        Some(300.0),
+        Some(370.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_heat_balance_residual_ratio",
+        "FEA_THERMAL_HEAT_BALANCE",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_HEAT_BALANCE",
+            "heat_balance_residual_ratio",
+        ),
+        Some(0.0),
+        Some(0.25),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_conductivity_spread_ratio",
+        "FEA_THERMAL_CONSTITUTIVE",
+        diagnostic_metric(run, "FEA_THERMAL_CONSTITUTIVE", "conductivity_spread_ratio"),
+        Some(1.0),
+        Some(1.5),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_heat_capacity_spread_ratio",
+        "FEA_THERMAL_CONSTITUTIVE",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_CONSTITUTIVE",
+            "heat_capacity_spread_ratio",
+        ),
+        Some(1.0),
+        Some(1.5),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_spatial_gradient_index",
+        "FEA_THERMAL_OUTCOME",
+        diagnostic_metric(run, "FEA_THERMAL_OUTCOME", "spatial_gradient_index"),
+        Some(0.4),
+        Some(1.4),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_monotonic_response_fraction",
+        "FEA_THERMAL_OUTCOME",
+        diagnostic_metric(run, "FEA_THERMAL_OUTCOME", "monotonic_response_fraction"),
+        Some(0.9),
+        Some(1.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_response_realization_ratio",
+        "FEA_THERMAL_OUTCOME",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_OUTCOME",
+            "thermal_response_realization_ratio",
+        ),
+        Some(0.6),
+        Some(1.2),
+    );
+}
+
 fn validate_fallback_event_schema(event: &str) -> bool {
     let parts: Vec<&str> = event.splitn(3, ':').collect();
     if parts.len() != 3 {
@@ -3211,6 +3324,14 @@ pub(super) fn run_fixture(
                 Some(2.0),
             );
         }
+        if spec.id == "thermal_standalone_ramp_cpu" {
+            push_thermal_standalone_threshold_assertions(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                &cpu_envelope.data,
+            );
+        }
 
         if let Some(gpu_mode) = spec.gpu_mode {
             let gpu_start = Instant::now();
@@ -3992,118 +4113,12 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.08),
                         );
-                    } else if spec.id == "thermal_standalone_ramp_gpu_provider" {
-                        push_threshold_assertion(
+                    } else if spec.id.starts_with("thermal_standalone_ramp_") {
+                        push_thermal_standalone_threshold_assertions(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
-                            "thermal_standalone_max_residual_norm",
-                            "FEA_THERMAL_STABILITY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_THERMAL_STABILITY",
-                                "max_residual_norm",
-                            ),
-                            Some(0.0),
-                            Some(6.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermal_standalone_min_temperature_k",
-                            "FEA_THERMAL_STABILITY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_THERMAL_STABILITY",
-                                "min_temperature_k",
-                            ),
-                            Some(290.0),
-                            Some(360.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermal_standalone_max_temperature_k",
-                            "FEA_THERMAL_STABILITY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_THERMAL_STABILITY",
-                                "max_temperature_k",
-                            ),
-                            Some(300.0),
-                            Some(370.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermal_standalone_conductivity_spread_ratio",
-                            "FEA_THERMAL_CONSTITUTIVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_THERMAL_CONSTITUTIVE",
-                                "conductivity_spread_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.5),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermal_standalone_heat_capacity_spread_ratio",
-                            "FEA_THERMAL_CONSTITUTIVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_THERMAL_CONSTITUTIVE",
-                                "heat_capacity_spread_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.5),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermal_standalone_spatial_gradient_index",
-                            "FEA_THERMAL_OUTCOME",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_THERMAL_OUTCOME",
-                                "spatial_gradient_index",
-                            ),
-                            Some(0.4),
-                            Some(1.4),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermal_standalone_monotonic_response_fraction",
-                            "FEA_THERMAL_OUTCOME",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_THERMAL_OUTCOME",
-                                "monotonic_response_fraction",
-                            ),
-                            Some(0.9),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermal_standalone_response_realization_ratio",
-                            "FEA_THERMAL_OUTCOME",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_THERMAL_OUTCOME",
-                                "thermal_response_realization_ratio",
-                            ),
-                            Some(0.6),
-                            Some(1.2),
+                            &gpu_envelope.data,
                         );
                     } else if spec.id == "electro_thermal_joule_benign_gpu_provider" {
                         push_threshold_assertion(

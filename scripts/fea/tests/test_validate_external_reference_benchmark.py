@@ -3818,62 +3818,34 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "reference": 11.0,
             "pass": True,
         },
-        {
-            "name": "thermal_standalone_max_residual_norm",
-            "fixture_id": "thermal_standalone_ramp_gpu_provider",
-            "observed": 4.9638,
-            "reference": 4.9638,
-            "pass": True,
-        },
-        {
-            "name": "thermal_standalone_min_temperature_k",
-            "fixture_id": "thermal_standalone_ramp_gpu_provider",
-            "observed": 293.339,
-            "reference": 293.339,
-            "pass": True,
-        },
-        {
-            "name": "thermal_standalone_max_temperature_k",
-            "fixture_id": "thermal_standalone_ramp_gpu_provider",
-            "observed": 337.877,
-            "reference": 337.877,
-            "pass": True,
-        },
-        {
-            "name": "thermal_standalone_conductivity_spread_ratio",
-            "fixture_id": "thermal_standalone_ramp_gpu_provider",
-            "observed": 1.0,
-            "reference": 1.0,
-            "pass": True,
-        },
-        {
-            "name": "thermal_standalone_heat_capacity_spread_ratio",
-            "fixture_id": "thermal_standalone_ramp_gpu_provider",
-            "observed": 1.0,
-            "reference": 1.0,
-            "pass": True,
-        },
-        {
-            "name": "thermal_standalone_spatial_gradient_index",
-            "fixture_id": "thermal_standalone_ramp_gpu_provider",
-            "observed": 1.095,
-            "reference": 1.095,
-            "pass": True,
-        },
-        {
-            "name": "thermal_standalone_monotonic_response_fraction",
-            "fixture_id": "thermal_standalone_ramp_gpu_provider",
-            "observed": 1.0,
-            "reference": 1.0,
-            "pass": True,
-        },
-        {
-            "name": "thermal_standalone_response_realization_ratio",
-            "fixture_id": "thermal_standalone_ramp_gpu_provider",
-            "observed": 0.672,
-            "reference": 0.672,
-            "pass": True,
-        },
+        *[
+            {
+                "name": name,
+                "fixture_id": fixture_id,
+                "observed": observed,
+                "reference": observed,
+                "pass": True,
+            }
+            for fixture_id in (
+                "thermal_standalone_ramp_cpu",
+                "thermal_standalone_ramp_gpu_provider",
+                "thermal_standalone_ramp_gpu_fallback",
+            )
+            for name, observed in (
+                ("thermal_standalone_max_residual_norm", 4.963781470198714),
+                ("thermal_standalone_min_temperature_k", 293.339),
+                ("thermal_standalone_max_temperature_k", 337.87747326361944),
+                (
+                    "thermal_standalone_heat_balance_residual_ratio",
+                    8.892701458688957e-15,
+                ),
+                ("thermal_standalone_conductivity_spread_ratio", 1.0),
+                ("thermal_standalone_heat_capacity_spread_ratio", 1.0),
+                ("thermal_standalone_spatial_gradient_index", 1.0950807831259657),
+                ("thermal_standalone_monotonic_response_fraction", 1.0),
+                ("thermal_standalone_response_realization_ratio", 0.671959951712075),
+            )
+        ],
         {
             "name": "electro_thermal_benign_time_scale_mean",
             "fixture_id": "electro_thermal_joule_benign_gpu_provider",

@@ -1374,6 +1374,37 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_cache_misses: None,
         },
         FixtureSpec {
+            id: "thermal_standalone_ramp_cpu",
+            description: "standalone thermal profile fixture on cpu with heat-balance diagnostics",
+            model: || {
+                let mut model = fixture_model(FixtureId::ThermoRampSmooth);
+                model.steps = vec![runmat_analysis_core::AnalysisStep {
+                    step_id: "thermal_1".to_string(),
+                    kind: runmat_analysis_core::AnalysisStepKind::Thermal,
+                }];
+                model
+            },
+            run_kind: AnalysisRunKind::Thermal,
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(true),
+            parity_tolerance: None,
+            gpu_mode: None,
+            residency_expectation: None,
+            max_solver_host_sync_count: None,
+            min_solver_device_apply_k_ratio: None,
+            expected_solver_backend: None,
+            modal_mode_count: None,
+            transient_step_count: Some(12),
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
+            min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
+        },
+        FixtureSpec {
             id: "thermal_standalone_ramp_gpu_provider",
             description: "standalone thermal profile fixture with provider-backed acceleration",
             model: || {
@@ -1392,6 +1423,40 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             gpu_mode: Some(GpuMode::WithProvider),
             residency_expectation: Some(ResidencyExpectation::HostFallback),
             max_solver_host_sync_count: Some(32),
+            min_solver_device_apply_k_ratio: Some(0.0),
+            expected_solver_backend: Some("runtime_tensor"),
+            modal_mode_count: None,
+            transient_step_count: Some(12),
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
+            min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
+        },
+        FixtureSpec {
+            id: "thermal_standalone_ramp_gpu_fallback",
+            description: "standalone thermal profile fixture with no-provider host fallback",
+            model: || {
+                let mut model = fixture_model(FixtureId::ThermoRampSmooth);
+                model.steps = vec![runmat_analysis_core::AnalysisStep {
+                    step_id: "thermal_1".to_string(),
+                    kind: runmat_analysis_core::AnalysisStepKind::Thermal,
+                }];
+                model
+            },
+            run_kind: AnalysisRunKind::Thermal,
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(true),
+            parity_tolerance: Some(ParityTolerance {
+                abs: 1e-12,
+                rel: 1e-12,
+            }),
+            gpu_mode: Some(GpuMode::WithoutProvider),
+            residency_expectation: Some(ResidencyExpectation::HostFallback),
+            max_solver_host_sync_count: Some(0),
             min_solver_device_apply_k_ratio: Some(0.0),
             expected_solver_backend: Some("runtime_tensor"),
             modal_mode_count: None,
