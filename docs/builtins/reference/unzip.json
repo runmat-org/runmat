@@ -1,0 +1,112 @@
+{
+  "title": "unzip",
+  "category": "io/archive",
+  "keywords": [
+    "unzip",
+    "zip",
+    "archive",
+    "extract",
+    "download",
+    "url"
+  ],
+  "summary": "Extract files from ZIP archives in MATLAB and RunMat.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "unzip performs host filesystem and optional HTTP I/O. GPU-resident path arguments are gathered before extraction; providers do not execute archive work."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::archive::unzip::tests",
+    "integration": [
+      "builtins::io::archive::unzip::tests::unzip_extracts_local_archive_to_output_folder",
+      "builtins::io::archive::unzip::tests::unzip_downloads_url_archive"
+    ]
+  },
+  "description": "`unzip(zipfilename)` extracts a ZIP archive into the current folder. `unzip(zipfilename, outputfolder)` extracts into the requested destination folder. The first argument can be a local file path or an HTTP/HTTPS URL, and `filenames = unzip(...)` returns a cell array of extracted file paths.",
+  "behaviors": [
+    "`unzip(zipfilename)` extracts all non-directory entries into the current working folder.",
+    "`unzip(zipfilename, outputfolder)` creates `outputfolder` when needed and extracts all entries beneath that folder.",
+    "`unzip(url, outputfolder)` downloads the archive over HTTP or HTTPS using RunMat's shared HTTP transport, then extracts it.",
+    "Returned filenames are a column cell array of character paths for regular files that were extracted. Directory entries are created as needed but are not included in the returned list.",
+    "Archive entries with absolute paths, user-relative paths, drive-prefixed names, or `..` parent traversal are rejected before writing, preventing zip-slip extraction outside the destination folder.",
+    "Remote ZIP downloads are capped before extraction, and extracted bytes are counted while streaming each entry so malformed archives cannot grow without bound.",
+    "ZIP entries compressed with the standard deflate method are supported. Unsupported or malformed ZIP archives raise a `RunMat:unzip:Zip` diagnostic.",
+    "`unzip` is a host I/O sink. It suppresses statement-form auto output, and when called with zero requested outputs it still extracts files but returns no value."
+  ],
+  "examples": [
+    {
+      "description": "Extract into the current folder",
+      "input": "unzip('sampleData.zip')"
+    },
+    {
+      "description": "Extract into a specific output folder",
+      "input": "files = unzip('sampleData.zip', 'data')"
+    },
+    {
+      "description": "Download and extract a ZIP archive",
+      "input": "files = unzip('https://example.com/sampleData.zip', tempdir)"
+    },
+    {
+      "description": "Use the returned file list",
+      "input": "files = unzip('measurements.zip', 'measurements');\nfirstFile = files{1};"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does unzip create the destination folder?",
+      "answer": "Yes. The output folder and any archive subfolders are created when needed."
+    },
+    {
+      "question": "Can unzip extract archives from URLs?",
+      "answer": "Yes. HTTP and HTTPS URLs are downloaded with RunMat's shared HTTP transport before extraction."
+    },
+    {
+      "question": "Are directory entries returned in filenames?",
+      "answer": "No. Directory entries are created, but the returned cell array contains regular extracted file paths."
+    },
+    {
+      "question": "How are unsafe ZIP paths handled?",
+      "answer": "RunMat rejects entries that would escape the destination folder, including absolute paths, `..` traversal, drive-prefixed names, and user-relative paths."
+    },
+    {
+      "question": "Does unzip run on the GPU?",
+      "answer": "No. Archive extraction is filesystem and network I/O, so it always runs on the host."
+    }
+  ],
+  "links": [
+    {
+      "label": "webread",
+      "url": "./webread"
+    },
+    {
+      "label": "tempdir",
+      "url": "./tempdir"
+    },
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "dir",
+      "url": "./dir"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/archive/unzip.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/archive/unzip.rs"
+  },
+  "gpu_residency": "No manual action is required. Path arguments are gathered to host values and extraction writes host filesystem files.",
+  "gpu_behavior": [
+    "`unzip` is registered as a host I/O operation. Fusion groups terminate before archive extraction and no Accelerate provider hooks are used."
+  ]
+}
