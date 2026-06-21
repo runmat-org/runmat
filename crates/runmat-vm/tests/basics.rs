@@ -142,6 +142,33 @@ fn periodogram_builtin_executes_for_psd_workflow() {
 }
 
 #[test]
+fn spectrogram_builtin_executes_for_stft_workflow() {
+    let input = r#"
+        fs = 32;
+        t = 0:63;
+        x = sin(2*pi*4*t/fs);
+        [s, f, tt, ps] = spectrogram(x, 32, 16, 32, fs);
+        [~, idx] = max(ps(:,1));
+        out = [size(s,1), size(s,2), numel(f), numel(tt), idx, f(idx), tt(1)];
+    "#;
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 7] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected output tensor");
+    assert_eq!(out.data[0], 17.0);
+    assert_eq!(out.data[1], 3.0);
+    assert_eq!(out.data[2], 17.0);
+    assert_eq!(out.data[3], 3.0);
+    assert_eq!(out.data[4], 5.0);
+    assert_eq!(out.data[5], 4.0);
+    assert_eq!(out.data[6], 0.5);
+}
+
+#[test]
 fn pulstran_rectpuls_builtin_executes_for_impulse_train_shape() {
     let input = r#"
         t = -1:0.5:1;

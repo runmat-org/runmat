@@ -18,7 +18,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Periodogram spectral estimation runs on the host. GPU-resident signal and window inputs are gathered automatically before FFT processing."
+    "notes": "Uniform-grid periodograms keep GPU-resident signal data on device through windowing, folded framing when needed, FFT, frequency selection, and power scaling. Explicit-frequency forms fall back to host execution."
   },
   "fusion": {
     "elementwise": false,
