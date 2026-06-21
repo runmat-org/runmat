@@ -1231,6 +1231,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "fsi_interface_node_count",
                     "fsi_force_balance_ratio",
                     "fsi_max_displacement_transfer_residual_m",
+                    "fsi_max_coupling_iteration_count",
+                    "fsi_pressure_feedback_residual_ratio",
                 },
             ),
             _record(
@@ -1252,6 +1254,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "fsi_interface_node_count",
                     "fsi_force_balance_ratio",
                     "fsi_max_displacement_transfer_residual_m",
+                    "fsi_max_coupling_iteration_count",
+                    "fsi_pressure_feedback_residual_ratio",
                 },
             ),
             _record(
@@ -1273,6 +1277,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "fsi_interface_node_count",
                     "fsi_force_balance_ratio",
                     "fsi_max_displacement_transfer_residual_m",
+                    "fsi_max_coupling_iteration_count",
+                    "fsi_pressure_feedback_residual_ratio",
                 },
             ),
         ]

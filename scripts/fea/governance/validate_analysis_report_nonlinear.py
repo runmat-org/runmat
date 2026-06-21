@@ -831,6 +831,8 @@ REQUIRED_FIXTURES = {
         "fsi_interface_node_count",
         "fsi_force_balance_ratio",
         "fsi_max_displacement_transfer_residual_m",
+        "fsi_max_coupling_iteration_count",
+        "fsi_pressure_feedback_residual_ratio",
     },
     "fsi_coupled_cpu": {
         "fsi_reference_density_kg_per_m3",
@@ -849,6 +851,8 @@ REQUIRED_FIXTURES = {
         "fsi_interface_node_count",
         "fsi_force_balance_ratio",
         "fsi_max_displacement_transfer_residual_m",
+        "fsi_max_coupling_iteration_count",
+        "fsi_pressure_feedback_residual_ratio",
     },
     "fsi_coupled_gpu_fallback": {
         "fsi_reference_density_kg_per_m3",
@@ -867,6 +871,8 @@ REQUIRED_FIXTURES = {
         "fsi_interface_node_count",
         "fsi_force_balance_ratio",
         "fsi_max_displacement_transfer_residual_m",
+        "fsi_max_coupling_iteration_count",
+        "fsi_pressure_feedback_residual_ratio",
     },
 }
 

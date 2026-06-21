@@ -3764,8 +3764,8 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
         {
             "name": "fsi_max_interface_residual",
             "fixture_id": "fsi_coupled_cpu",
-            "observed": 3.9153964979869523e-7,
-            "reference": 3.9153964979869523e-7,
+            "observed": 8.102392506925682e-09,
+            "reference": 8.102392506925682e-09,
             "pass": True,
         },
         {
@@ -3787,6 +3787,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "fsi_coupled_cpu",
             "observed": 0.0,
             "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_max_coupling_iteration_count",
+            "fixture_id": "fsi_coupled_cpu",
+            "observed": 24.0,
+            "reference": 24.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_pressure_feedback_residual_ratio",
+            "fixture_id": "fsi_coupled_cpu",
+            "observed": 8.102392506925682e-09,
+            "reference": 8.102392506925682e-09,
             "pass": True,
         },
         {
@@ -3876,8 +3890,8 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
         {
             "name": "fsi_max_interface_residual",
             "fixture_id": "fsi_coupled_gpu_fallback",
-            "observed": 3.9153964979869523e-7,
-            "reference": 3.9153964979869523e-7,
+            "observed": 8.102392506925682e-09,
+            "reference": 8.102392506925682e-09,
             "pass": True,
         },
         {
@@ -3899,6 +3913,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "fsi_coupled_gpu_fallback",
             "observed": 0.0,
             "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_max_coupling_iteration_count",
+            "fixture_id": "fsi_coupled_gpu_fallback",
+            "observed": 24.0,
+            "reference": 24.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_pressure_feedback_residual_ratio",
+            "fixture_id": "fsi_coupled_gpu_fallback",
+            "observed": 8.102392506925682e-09,
+            "reference": 8.102392506925682e-09,
             "pass": True,
         },
         {
@@ -3988,8 +4016,8 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
         {
             "name": "fsi_max_interface_residual",
             "fixture_id": "fsi_coupled_gpu_provider",
-            "observed": 3.9153964979869523e-7,
-            "reference": 3.9153964979869523e-7,
+            "observed": 8.102392506925682e-09,
+            "reference": 8.102392506925682e-09,
             "pass": True,
         },
         {
@@ -4011,6 +4039,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "fsi_coupled_gpu_provider",
             "observed": 0.0,
             "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_max_coupling_iteration_count",
+            "fixture_id": "fsi_coupled_gpu_provider",
+            "observed": 24.0,
+            "reference": 24.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_pressure_feedback_residual_ratio",
+            "fixture_id": "fsi_coupled_gpu_provider",
+            "observed": 8.102392506925682e-09,
+            "reference": 8.102392506925682e-09,
             "pass": True,
         },
         {

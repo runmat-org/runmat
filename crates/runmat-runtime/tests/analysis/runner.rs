@@ -4720,6 +4720,34 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
+                "fsi_max_coupling_iteration_count",
+                "FEA_FSI_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_INTERFACE_CLOSURE",
+                    "max_coupling_iteration_count",
+                ),
+                Some(1.0),
+                Some(128.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_pressure_feedback_residual_ratio",
+                "FEA_FSI_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_INTERFACE_CLOSURE",
+                    "pressure_feedback_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-8),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
                 "fsi_reference_density_kg_per_m3",
                 "FEA_CFD_FLOW",
                 diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "density"),
