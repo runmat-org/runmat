@@ -5593,6 +5593,7 @@ dependencies = [
  "calamine",
  "chrono",
  "encoding_rs",
+ "flate2",
  "futures",
  "getrandom 0.2.16",
  "glam",

@@ -39,7 +39,7 @@
     "`save(filename, '-struct', 'S')` saves each field of struct `S` as a separate variable. Provide additional field names (`'field1'`, `'field2'`) to restrict the set.",
     "`save filename -regexp '^foo' 'bar$'` saves every variable whose name matches any of the supplied regular expressions.",
     "Existing files are overwritten unless `-append` is specified. RunMat currently reports an error when `-append` or other numeric/text format flags (for example `-ascii`, `-double`, `-v6`, `-v7.3`) are requested.",
-    "Unsupported types (function handles, objects, opaque graphics handles) raise descriptive errors. Numeric, logical, character, string, cell, and struct data are stored using MATLAB Level-5 MAT-file layout.",
+    "Unsupported types (function handles, objects, opaque graphics handles) raise descriptive errors. Numeric, logical, character, string, cell, scalar struct, and real sparse data are stored using MATLAB Level-5 MAT-file layout.",
     "`save` returns `0` so scripts can treat it as a statement, matching MATLAB's void behaviour."
   ],
   "examples": [
@@ -75,7 +75,7 @@
   "faqs": [
     {
       "question": "Which MAT-file version is generated?",
-      "answer": "RunMat writes Level-5 (MATLAB 5.0) MAT-files, compatible with MATLAB R2006b and later as well as NumPy/Scipy readers. Structures and cell arrays are stored using standard `miMATRIX` elements."
+      "answer": "RunMat writes uncompressed Level-5 (MATLAB 5.0) MAT-files, compatible with MATLAB R2006b and later as well as NumPy/Scipy readers. Numeric arrays preserve RunMat's available numeric classes (`double`, `single`, `uint8`, and `uint16` tensors plus integer scalars), and real sparse matrices use standard `mxSPARSE` storage."
     },
     {
       "question": "Is `-append` supported?",
