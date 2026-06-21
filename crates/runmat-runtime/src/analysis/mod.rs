@@ -2909,6 +2909,7 @@ pub fn analysis_run_cfd_with_options_op(
             von_mises_snapshots: transient_run.von_mises_snapshots,
             kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
             strain_energy_snapshots: transient_run.strain_energy_snapshots,
+            residual_norm_snapshots: transient_run.residual_norm_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -3473,6 +3474,7 @@ pub fn analysis_run_cht_with_options_op(
             von_mises_snapshots: transient_run.von_mises_snapshots,
             kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
             strain_energy_snapshots: transient_run.strain_energy_snapshots,
+            residual_norm_snapshots: transient_run.residual_norm_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -3936,6 +3938,7 @@ pub fn analysis_run_fsi_with_options_op(
             von_mises_snapshots: transient_run.von_mises_snapshots,
             kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
             strain_energy_snapshots: transient_run.strain_energy_snapshots,
+            residual_norm_snapshots: transient_run.residual_norm_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -4598,6 +4601,7 @@ pub fn analysis_run_transient_with_options_op(
             von_mises_snapshots: transient_run.von_mises_snapshots,
             kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
             strain_energy_snapshots: transient_run.strain_energy_snapshots,
+            residual_norm_snapshots: transient_run.residual_norm_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -6391,6 +6395,9 @@ fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<Analysi
         for field in &transient.strain_energy_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
+        for field in &transient.residual_norm_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
     }
 
     if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
@@ -7257,6 +7264,8 @@ pub fn analysis_results_op(
                     Vec::with_capacity(query.transient_snapshot_indices.len());
                 let mut strain_energy_snapshots =
                     Vec::with_capacity(query.transient_snapshot_indices.len());
+                let mut residual_norm_snapshots =
+                    Vec::with_capacity(query.transient_snapshot_indices.len());
                 let mut residual_norms = Vec::with_capacity(query.transient_snapshot_indices.len());
 
                 for &index in &query.transient_snapshot_indices {
@@ -7449,6 +7458,33 @@ pub fn analysis_results_op(
                                     ]),
                                 )
                             })?;
+                    let residual_norm_snapshot = transient
+                        .residual_norm_snapshots
+                        .get(index)
+                        .cloned()
+                        .ok_or_else(|| {
+                            operation_error(
+                                ANALYSIS_RESULTS_OPERATION,
+                                ANALYSIS_RESULTS_OP_VERSION,
+                                &context,
+                                OperationErrorSpec {
+                                    error_code: "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                    error_type: OperationErrorType::Input,
+                                    retryable: false,
+                                    severity: OperationErrorSeverity::Error,
+                                },
+                                format!(
+                                    "requested transient snapshot index '{index}' is missing residual field data"
+                                ),
+                                BTreeMap::from([
+                                    ("requested_snapshot_index".to_string(), index.to_string()),
+                                    (
+                                        "available_residual_snapshot_count".to_string(),
+                                        transient.residual_norm_snapshots.len().to_string(),
+                                    ),
+                                ]),
+                            )
+                        })?;
 
                     if index > 0 {
                         let residual = transient.residual_norms.get(index - 1).copied().ok_or_else(|| {
@@ -7484,6 +7520,7 @@ pub fn analysis_results_op(
                     von_mises_snapshots.push(von_mises);
                     kinetic_energy_snapshots.push(kinetic_energy);
                     strain_energy_snapshots.push(strain_energy);
+                    residual_norm_snapshots.push(residual_norm_snapshot);
                 }
 
                 Some(TransientResultsData {
@@ -7495,6 +7532,7 @@ pub fn analysis_results_op(
                     von_mises_snapshots,
                     kinetic_energy_snapshots,
                     strain_energy_snapshots,
+                    residual_norm_snapshots,
                     residual_norms,
                     integration_method: transient.integration_method,
                 })

@@ -1519,6 +1519,8 @@ pub struct TransientResultsData {
     pub kinetic_energy_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub strain_energy_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub residual_norm_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub integration_method: TransientIntegrationMethod,
 }

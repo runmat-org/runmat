@@ -82,6 +82,10 @@ pub fn fea_transient_strain_energy_field_id(snapshot_index: usize) -> String {
     format!("transient.strain_energy.{snapshot_index}")
 }
 
+pub fn fea_transient_residual_norm_field_id(snapshot_index: usize) -> String {
+    format!("transient.residual_norm.{snapshot_index}")
+}
+
 pub fn fea_nonlinear_displacement_field_id(increment_index: usize) -> String {
     format!("nonlinear.displacement.{increment_index}")
 }
@@ -314,6 +318,7 @@ pub struct FeaTransientRunResult {
     pub von_mises_snapshots: Vec<AnalysisField>,
     pub kinetic_energy_snapshots: Vec<AnalysisField>,
     pub strain_energy_snapshots: Vec<AnalysisField>,
+    pub residual_norm_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
 }
 

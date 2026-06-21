@@ -24,12 +24,13 @@ use runmat_analysis_fea::{
     fea_thermal_boundary_heat_flux_field_id, fea_thermal_heat_flux_field_id,
     fea_thermal_heat_source_field_id, fea_thermal_temperature_gradient_field_id,
     fea_transient_acceleration_field_id, fea_transient_kinetic_energy_field_id,
-    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
-    fea_transient_von_mises_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
-    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_EM_FLUX_DENSITY_PROXY,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    fea_transient_residual_norm_field_id, fea_transient_strain_energy_field_id,
+    fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
+    FeaProgressPhase, FeaProgressStatus, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
+    FEA_FIELD_EM_FLUX_DENSITY_PROXY, FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY,
+    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
+    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
@@ -4405,6 +4406,10 @@ fn analysis_run_transient_returns_native_transient_result() {
         transient.strain_energy_snapshots.len()
     );
     assert_eq!(
+        transient.time_points_s.len(),
+        transient.residual_norm_snapshots.len()
+    );
+    assert_eq!(
         transient.velocity_snapshots[1].field_id,
         fea_transient_velocity_field_id(1)
     );
@@ -4424,6 +4429,21 @@ fn analysis_run_transient_returns_native_transient_result() {
         transient.strain_energy_snapshots[1].field_id,
         fea_transient_strain_energy_field_id(1)
     );
+    assert_eq!(
+        transient.residual_norm_snapshots[1].field_id,
+        fea_transient_residual_norm_field_id(1)
+    );
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("transient results should be queryable");
+    assert!(results
+        .data
+        .field_descriptors
+        .iter()
+        .any(|descriptor| descriptor.field_id == fea_transient_residual_norm_field_id(1)));
 }
 
 #[test]

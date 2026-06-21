@@ -4,10 +4,10 @@ use crate::{
     assembly::assemble_linear_system,
     contracts::{
         fea_transient_acceleration_field_id, fea_transient_displacement_field_id,
-        fea_transient_kinetic_energy_field_id, fea_transient_strain_energy_field_id,
-        fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
-        FeaRunError, FeaRunResult, FeaTransientRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-        FEA_FIELD_STRUCTURAL_VON_MISES,
+        fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
+        fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
+        fea_transient_von_mises_field_id, ComputeBackend, FeaRunError, FeaRunResult,
+        FeaTransientRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     operator::{apply_k_unconstrained, apply_m},
@@ -164,6 +164,10 @@ pub fn run_transient_with_options(
     let kinetic_energy_values = recover_kinetic_energy_snapshots(&summary, &velocity_values);
     let strain_energy_values =
         recover_strain_energy_snapshots(&summary, &transient.displacement_snapshots);
+    let residual_norm_values = recover_residual_norm_snapshots(
+        transient.displacement_snapshots.len(),
+        &transient.residual_norms,
+    );
 
     let displacement_snapshots = transient
         .displacement_snapshots
@@ -232,6 +236,17 @@ pub fn run_transient_with_options(
             )
         })
         .collect::<Vec<_>>();
+    let residual_norm_snapshots = residual_norm_values
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            AnalysisField::host_f64(
+                fea_transient_residual_norm_field_id(index),
+                vec![1],
+                vec![value],
+            )
+        })
+        .collect::<Vec<_>>();
 
     emit_phase(
         "fea.run_transient",
@@ -260,6 +275,7 @@ pub fn run_transient_with_options(
         von_mises_snapshots,
         kinetic_energy_snapshots,
         strain_energy_snapshots,
+        residual_norm_snapshots,
         residual_norms: transient.residual_norms,
     })
 }
@@ -367,6 +383,21 @@ fn recover_strain_energy_snapshots(
                 .zip(internal_force.iter())
                 .map(|(u, force)| u * force)
                 .sum::<f64>()
+        })
+        .collect()
+}
+
+fn recover_residual_norm_snapshots(snapshot_count: usize, residual_norms: &[f64]) -> Vec<f64> {
+    (0..snapshot_count)
+        .map(|index| {
+            if index == 0 {
+                0.0
+            } else {
+                residual_norms
+                    .get(index - 1)
+                    .copied()
+                    .unwrap_or(f64::INFINITY)
+            }
         })
         .collect()
 }

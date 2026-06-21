@@ -4,8 +4,9 @@ use crate::{
     fea_nonlinear_von_mises_field_id, fea_thermal_boundary_heat_flux_field_id,
     fea_thermal_heat_flux_field_id, fea_thermal_heat_source_field_id,
     fea_thermal_temperature_gradient_field_id, fea_transient_acceleration_field_id,
-    fea_transient_kinetic_energy_field_id, fea_transient_strain_energy_field_id,
-    fea_transient_velocity_field_id, fea_transient_von_mises_field_id,
+    fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
+    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
+    fea_transient_von_mises_field_id,
     fixtures::{fixture_model, FixtureId},
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
@@ -247,6 +248,10 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
         result.strain_energy_snapshots.len()
     );
     assert_eq!(
+        result.time_points_s.len(),
+        result.residual_norm_snapshots.len()
+    );
+    assert_eq!(
         result.velocity_snapshots[1].field_id,
         fea_transient_velocity_field_id(1)
     );
@@ -265,6 +270,16 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
     assert_eq!(
         result.strain_energy_snapshots[1].field_id,
         fea_transient_strain_energy_field_id(1)
+    );
+    assert_eq!(
+        result.residual_norm_snapshots[1].field_id,
+        fea_transient_residual_norm_field_id(1)
+    );
+    assert_eq!(
+        result.residual_norm_snapshots[1]
+            .as_host_f64()
+            .expect("residual field should be host-backed")[0],
+        result.residual_norms[0]
     );
     assert!(!result.residual_norms.is_empty());
     assert!(result
