@@ -233,6 +233,15 @@ pub fn run_thermal_with_options(
         constitutive.heat_capacity_mean,
     );
     let boundary_heat_flux_raw = recover_boundary_heat_flux_snapshots(&heat_flux_raw, node_count);
+    let heat_balance = thermal_heat_balance(
+        &temperature_snapshots_raw,
+        &heat_source_raw,
+        &boundary_heat_flux_raw,
+        options.time_step_s.max(1.0e-9),
+        constitutive.density_mean,
+        constitutive.heat_capacity_mean,
+        thermo_context.reference_temperature_k,
+    );
     let temperature_gradient_snapshots = temperature_gradient_raw
         .into_iter()
         .enumerate()
@@ -391,6 +400,22 @@ pub fn run_thermal_with_options(
             thermal_response_realization_ratio,
         ),
     });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_THERMAL_HEAT_BALANCE".to_string(),
+        severity: if heat_balance.residual_ratio <= 0.15 {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "input_heat={} boundary_heat={} stored_energy={} numerical_loss={} heat_balance_residual_ratio={}",
+            heat_balance.input_heat,
+            heat_balance.boundary_heat,
+            heat_balance.stored_energy,
+            heat_balance.numerical_loss,
+            heat_balance.residual_ratio,
+        ),
+    });
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
     if let Some(thermo_mechanical) = summary.thermo_mechanical.as_ref() {
         diagnostics.push(thermo_mechanical_diagnostic(thermo_mechanical));
@@ -517,4 +542,64 @@ fn recover_boundary_heat_flux_snapshots(
             vec![left, right]
         })
         .collect()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ThermalHeatBalance {
+    input_heat: f64,
+    boundary_heat: f64,
+    stored_energy: f64,
+    numerical_loss: f64,
+    residual_ratio: f64,
+}
+
+fn thermal_heat_balance(
+    temperature_snapshots: &[Vec<f64>],
+    heat_source_snapshots: &[Vec<f64>],
+    boundary_heat_flux_snapshots: &[Vec<f64>],
+    dt: f64,
+    density_mean: f64,
+    heat_capacity_mean: f64,
+    reference_temperature_k: f64,
+) -> ThermalHeatBalance {
+    let input_heat = heat_source_snapshots
+        .iter()
+        .map(|snapshot| snapshot.iter().sum::<f64>() * dt.max(1.0e-12))
+        .sum::<f64>();
+    let boundary_heat = boundary_heat_flux_snapshots
+        .iter()
+        .map(|snapshot| {
+            let left_outward = -snapshot.first().copied().unwrap_or(0.0);
+            let right_outward = snapshot.get(1).copied().unwrap_or(0.0);
+            (left_outward + right_outward) * dt.max(1.0e-12)
+        })
+        .sum::<f64>();
+    let volumetric_capacity = density_mean.max(0.0) * heat_capacity_mean.max(0.0);
+    let stored_energy = if let Some(final_snapshot) = temperature_snapshots.last() {
+        let initial_snapshot = temperature_snapshots.first();
+        final_snapshot
+            .iter()
+            .enumerate()
+            .map(|(index, final_value)| {
+                let initial_value = initial_snapshot
+                    .and_then(|snapshot| snapshot.get(index))
+                    .copied()
+                    .unwrap_or(reference_temperature_k);
+                volumetric_capacity * (final_value - initial_value)
+            })
+            .sum::<f64>()
+    } else {
+        0.0
+    };
+    let numerical_loss = input_heat - boundary_heat - stored_energy;
+    let denominator = input_heat.abs() + boundary_heat.abs() + stored_energy.abs() + 1.0e-12_f64;
+    let residual_ratio = (numerical_loss.abs() / denominator).clamp(0.0, 1.0e6);
+
+    ThermalHeatBalance {
+        input_heat,
+        boundary_heat,
+        stored_energy,
+        numerical_loss,
+        residual_ratio,
+    }
 }

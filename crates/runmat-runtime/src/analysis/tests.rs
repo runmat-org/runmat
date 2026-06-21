@@ -3987,6 +3987,14 @@ fn analysis_run_thermal_returns_temperature_payload() {
     assert_eq!(run.op_version, "fea.run_thermal/v1");
     assert!(run.data.thermal_results.is_some());
     assert!(run.data.transient_results.is_none());
+    assert!(run.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_THERMAL_HEAT_BALANCE"
+            && diag.message.contains("input_heat=")
+            && diag.message.contains("boundary_heat=")
+            && diag.message.contains("stored_energy=")
+            && diag.message.contains("numerical_loss=")
+            && diag.message.contains("heat_balance_residual_ratio=")
+    }));
     let results = analysis_results_op(
         &run.data,
         AnalysisResultsQuery::default(),
