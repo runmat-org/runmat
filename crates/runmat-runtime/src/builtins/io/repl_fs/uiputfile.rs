@@ -1,43 +1,38 @@
-//! MATLAB-compatible `uigetfile` builtin.
+//! MATLAB-compatible `uiputfile` builtin.
 
 use std::path::PathBuf;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
-use runmat_filesystem::{OpenFileDialogRequest, OpenFileDialogSelection};
+use runmat_filesystem::{SaveFileDialogRequest, SaveFileDialogSelection};
 use runmat_macros::runtime_builtin;
 
-use super::file_dialog::{
-    default_filters, ensure_same_directory, parse_filter_spec, scalar_text, selected_path_parts,
-    try_scalar_text,
-};
+use super::file_dialog::{default_filters, parse_filter_spec, scalar_text, selected_path_parts};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const NAME: &str = "uigetfile";
+const NAME: &str = "uiputfile";
 
-const UIGETFILE_OUTPUT_FILE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+const UIPUTFILE_OUTPUT_FILE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "file",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description:
-        "Selected filename, cell array of filenames for multiple selections, or 0 when cancelled.",
+    description: "Selected filename, or 0 when cancelled.",
 }];
 
-const UIGETFILE_OUTPUT_FILE_PATH: [BuiltinParamDescriptor; 2] = [
+const UIPUTFILE_OUTPUT_FILE_PATH: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "file",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Selected filename, cell array of filenames for multiple selections, or 0 when cancelled.",
+        description: "Selected filename, or 0 when cancelled.",
     },
     BuiltinParamDescriptor {
         name: "path",
@@ -48,13 +43,13 @@ const UIGETFILE_OUTPUT_FILE_PATH: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const UIGETFILE_OUTPUT_FILE_PATH_INDEX: [BuiltinParamDescriptor; 3] = [
+const UIPUTFILE_OUTPUT_FILE_PATH_INDEX: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "file",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Selected filename, cell array of filenames for multiple selections, or 0 when cancelled.",
+        description: "Selected filename, or 0 when cancelled.",
     },
     BuiltinParamDescriptor {
         name: "path",
@@ -72,9 +67,9 @@ const UIGETFILE_OUTPUT_FILE_PATH_INDEX: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const UIGETFILE_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const UIPUTFILE_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
 
-const UIGETFILE_INPUTS_FILTER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+const UIPUTFILE_INPUTS_FILTER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "filter",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Optional,
@@ -82,7 +77,7 @@ const UIGETFILE_INPUTS_FILTER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescri
     description: "File extension pattern, semicolon-delimited patterns, or an N-by-1/N-by-2 cell array of patterns and descriptions.",
 }];
 
-const UIGETFILE_INPUTS_FILTER_TITLE: [BuiltinParamDescriptor; 2] = [
+const UIPUTFILE_INPUTS_FILTER_TITLE: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "filter",
         ty: BuiltinParamType::Any,
@@ -99,31 +94,7 @@ const UIGETFILE_INPUTS_FILTER_TITLE: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const UIGETFILE_INPUTS_FILTER_TITLE_DEFAULT: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "filter",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"*.*\""),
-        description: "File extension pattern, semicolon-delimited patterns, or an N-by-1/N-by-2 cell array of patterns and descriptions.",
-    },
-    BuiltinParamDescriptor {
-        name: "title",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Dialog title.",
-    },
-    BuiltinParamDescriptor {
-        name: "defaultName",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Initial file or directory path for the dialog.",
-    },
-];
-
-const UIGETFILE_INPUTS_MULTISELECT: [BuiltinParamDescriptor; 5] = [
+const UIPUTFILE_INPUTS_FILTER_TITLE_DEFAULT: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "filter",
         ty: BuiltinParamType::Any,
@@ -145,94 +116,74 @@ const UIGETFILE_INPUTS_MULTISELECT: [BuiltinParamDescriptor; 5] = [
         default: None,
         description: "Initial file or directory path for the dialog.",
     },
-    BuiltinParamDescriptor {
-        name: "optionName",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"MultiSelect\""),
-        description: "Name-value option name. `MultiSelect` is supported.",
+];
+
+const UIPUTFILE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "file = uiputfile()",
+        inputs: &UIPUTFILE_INPUTS_NONE,
+        outputs: &UIPUTFILE_OUTPUT_FILE,
     },
-    BuiltinParamDescriptor {
-        name: "optionValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"off\""),
-        description: "`\"on\"`, `\"off\"`, or a scalar logical/numeric value.",
+    BuiltinSignatureDescriptor {
+        label: "file = uiputfile(filter)",
+        inputs: &UIPUTFILE_INPUTS_FILTER,
+        outputs: &UIPUTFILE_OUTPUT_FILE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[file, path] = uiputfile(filter, title)",
+        inputs: &UIPUTFILE_INPUTS_FILTER_TITLE,
+        outputs: &UIPUTFILE_OUTPUT_FILE_PATH,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[file, path, index] = uiputfile(filter, title, defaultName)",
+        inputs: &UIPUTFILE_INPUTS_FILTER_TITLE_DEFAULT,
+        outputs: &UIPUTFILE_OUTPUT_FILE_PATH_INDEX,
     },
 ];
 
-const UIGETFILE_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "file = uigetfile()",
-        inputs: &UIGETFILE_INPUTS_NONE,
-        outputs: &UIGETFILE_OUTPUT_FILE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "file = uigetfile(filter)",
-        inputs: &UIGETFILE_INPUTS_FILTER,
-        outputs: &UIGETFILE_OUTPUT_FILE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[file, path] = uigetfile(filter, title)",
-        inputs: &UIGETFILE_INPUTS_FILTER_TITLE,
-        outputs: &UIGETFILE_OUTPUT_FILE_PATH,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[file, path, index] = uigetfile(filter, title, defaultName)",
-        inputs: &UIGETFILE_INPUTS_FILTER_TITLE_DEFAULT,
-        outputs: &UIGETFILE_OUTPUT_FILE_PATH_INDEX,
-    },
-    BuiltinSignatureDescriptor {
-        label:
-            "[file, path, index] = uigetfile(filter, title, defaultName, \"MultiSelect\", value)",
-        inputs: &UIGETFILE_INPUTS_MULTISELECT,
-        outputs: &UIGETFILE_OUTPUT_FILE_PATH_INDEX,
-    },
-];
-
-const UIGETFILE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UIGETFILE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:uigetfile:InvalidArgument"),
-    when: "A filter, title, default path, or name-value option has an unsupported type or shape.",
-    message: "uigetfile: invalid argument",
+const UIPUTFILE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UIPUTFILE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:uiputfile:InvalidArgument"),
+    when: "A filter, title, or default path has an unsupported type or shape.",
+    message: "uiputfile: invalid argument",
 };
 
-const UIGETFILE_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UIGETFILE.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:uigetfile:TooManyOutputs"),
+const UIPUTFILE_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UIPUTFILE.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:uiputfile:TooManyOutputs"),
     when: "More than three output arguments are requested.",
-    message: "uigetfile: too many output arguments",
+    message: "uiputfile: too many output arguments",
 };
 
-const UIGETFILE_ERROR_HOST: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UIGETFILE.HOST",
-    identifier: Some("RunMat:uigetfile:HostError"),
-    when: "The active filesystem provider fails while opening the host file-selection UI.",
-    message: "uigetfile: file selection failed",
+const UIPUTFILE_ERROR_HOST: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UIPUTFILE.HOST",
+    identifier: Some("RunMat:uiputfile:HostError"),
+    when: "The active filesystem provider fails while opening the host save-file UI.",
+    message: "uiputfile: file selection failed",
 };
 
-const UIGETFILE_ERROR_INVALID_SELECTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UIGETFILE.INVALID_SELECTION",
-    identifier: Some("RunMat:uigetfile:InvalidSelection"),
-    when: "The active filesystem provider returns a malformed or internally inconsistent file selection.",
-    message: "uigetfile: invalid file selection",
+const UIPUTFILE_ERROR_INVALID_SELECTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UIPUTFILE.INVALID_SELECTION",
+    identifier: Some("RunMat:uiputfile:InvalidSelection"),
+    when: "The active filesystem provider returns a malformed save-file selection.",
+    message: "uiputfile: invalid file selection",
 };
 
-const UIGETFILE_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    UIGETFILE_ERROR_INVALID_ARGUMENT,
-    UIGETFILE_ERROR_TOO_MANY_OUTPUTS,
-    UIGETFILE_ERROR_HOST,
-    UIGETFILE_ERROR_INVALID_SELECTION,
+const UIPUTFILE_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    UIPUTFILE_ERROR_INVALID_ARGUMENT,
+    UIPUTFILE_ERROR_TOO_MANY_OUTPUTS,
+    UIPUTFILE_ERROR_HOST,
+    UIPUTFILE_ERROR_INVALID_SELECTION,
 ];
 
-pub const UIGETFILE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &UIGETFILE_SIGNATURES,
+pub const UIPUTFILE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &UIPUTFILE_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &UIGETFILE_ERRORS,
+    errors: &UIPUTFILE_ERRORS,
 };
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::uigetfile")]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::uiputfile")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Custom("io"),
@@ -245,10 +196,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "`uigetfile` is a host UI/filesystem interaction. GPU-resident textual arguments are gathered before dispatching to the provider.",
+    notes: "`uiputfile` is a host UI/filesystem interaction. GPU-resident textual arguments are gathered before dispatching to the provider.",
 };
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::uigetfile")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::uiputfile")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
     shape: ShapeRequirements::Any,
@@ -256,15 +207,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "`uigetfile` depends on host UI state and terminates fusion plans.",
+    notes: "`uiputfile` depends on host UI state and terminates fusion plans.",
 };
 
 #[derive(Clone, Debug)]
-struct UigetfileOptions {
-    request: OpenFileDialogRequest,
+struct UiputfileOptions {
+    request: SaveFileDialogRequest,
 }
 
-fn uigetfile_error(
+fn uiputfile_error(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
 ) -> RuntimeError {
@@ -281,20 +232,20 @@ fn uigetfile_error(
     builder.build()
 }
 
-fn invalid_argument(detail: impl AsRef<str>) -> RuntimeError {
-    uigetfile_error(&UIGETFILE_ERROR_INVALID_ARGUMENT, detail)
+fn invalid_argument(detail: String) -> RuntimeError {
+    uiputfile_error(&UIPUTFILE_ERROR_INVALID_ARGUMENT, detail)
 }
 
-fn invalid_selection(detail: impl AsRef<str>) -> RuntimeError {
-    uigetfile_error(&UIGETFILE_ERROR_INVALID_SELECTION, detail)
+fn invalid_selection(detail: String) -> RuntimeError {
+    uiputfile_error(&UIPUTFILE_ERROR_INVALID_SELECTION, detail)
 }
 
 fn too_many_outputs() -> RuntimeError {
-    uigetfile_error(&UIGETFILE_ERROR_TOO_MANY_OUTPUTS, "")
+    uiputfile_error(&UIPUTFILE_ERROR_TOO_MANY_OUTPUTS, "")
 }
 
 fn host_error(detail: impl AsRef<str>) -> RuntimeError {
-    uigetfile_error(&UIGETFILE_ERROR_HOST, detail)
+    uiputfile_error(&UIPUTFILE_ERROR_HOST, detail)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -309,19 +260,19 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 }
 
 #[runtime_builtin(
-    name = "uigetfile",
+    name = "uiputfile",
     category = "io/repl_fs",
-    summary = "Open a host file-selection dialog and return the selected file name and path.",
-    keywords = "uigetfile,file picker,file dialog,open file,filesystem,ui",
+    summary = "Open a host save-file dialog and return the selected file name and path.",
+    keywords = "uiputfile,file picker,file dialog,save file,filesystem,ui",
     accel = "sink",
-    type_resolver(crate::builtins::io::type_resolvers::uigetfile_type),
-    descriptor(crate::builtins::io::repl_fs::uigetfile::UIGETFILE_DESCRIPTOR),
-    builtin_path = "crate::builtins::io::repl_fs::uigetfile"
+    type_resolver(crate::builtins::io::type_resolvers::uiputfile_type),
+    descriptor(crate::builtins::io::repl_fs::uiputfile::UIPUTFILE_DESCRIPTOR),
+    builtin_path = "crate::builtins::io::repl_fs::uiputfile"
 )]
-async fn uigetfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn uiputfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let gathered = gather_arguments(&args).await?;
     let options = parse_options(&gathered)?;
-    let selection = runmat_filesystem::select_file_open_async(&options.request)
+    let selection = runmat_filesystem::select_file_save_async(&options.request)
         .await
         .map_err(|err| host_error(err.to_string()))?;
     outputs_for_selection(selection, &options)
@@ -339,37 +290,24 @@ async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     Ok(gathered)
 }
 
-fn parse_options(args: &[Value]) -> BuiltinResult<UigetfileOptions> {
-    let mut end = args.len();
-    let mut multiselect = false;
-    while end >= 2 {
-        let option_name = match try_scalar_text(&args[end - 2]) {
-            Some(name) => name,
-            None => break,
-        };
-        if !option_name.eq_ignore_ascii_case("MultiSelect") {
-            break;
-        }
-        multiselect = parse_multiselect(&args[end - 1])?;
-        end -= 2;
-    }
-    if end > 3 {
+fn parse_options(args: &[Value]) -> BuiltinResult<UiputfileOptions> {
+    if args.len() > 3 {
         return Err(invalid_argument(
-            "expected filter, title, defaultName, and optional 'MultiSelect' name-value pair",
+            "expected filter, title, and defaultName".to_string(),
         ));
     }
 
-    let filters = if end >= 1 {
+    let filters = if !args.is_empty() {
         parse_filter_spec(&args[0], invalid_argument)?
     } else {
         default_filters()
     };
-    let title = if end >= 2 {
+    let title = if args.len() >= 2 {
         Some(scalar_text(&args[1], "title", invalid_argument)?)
     } else {
         None
     };
-    let default_path = if end >= 3 {
+    let default_path = if args.len() >= 3 {
         Some(PathBuf::from(scalar_text(
             &args[2],
             "defaultName",
@@ -379,37 +317,18 @@ fn parse_options(args: &[Value]) -> BuiltinResult<UigetfileOptions> {
         None
     };
 
-    Ok(UigetfileOptions {
-        request: OpenFileDialogRequest {
+    Ok(UiputfileOptions {
+        request: SaveFileDialogRequest {
             title,
             default_path,
             filters,
-            multiselect,
         },
     })
 }
 
-fn parse_multiselect(value: &Value) -> BuiltinResult<bool> {
-    match value {
-        Value::Bool(enabled) => Ok(*enabled),
-        Value::Num(number) if number.is_finite() => Ok(*number != 0.0),
-        Value::Int(int) => Ok(!int.is_zero()),
-        other => {
-            let text = scalar_text(other, "MultiSelect value", invalid_argument)?;
-            match text.trim().to_ascii_lowercase().as_str() {
-                "on" | "true" | "yes" => Ok(true),
-                "off" | "false" | "no" => Ok(false),
-                _ => Err(invalid_argument(
-                    "MultiSelect must be 'on', 'off', true, or false",
-                )),
-            }
-        }
-    }
-}
-
 fn outputs_for_selection(
-    selection: Option<OpenFileDialogSelection>,
-    options: &UigetfileOptions,
+    selection: Option<SaveFileDialogSelection>,
+    options: &UiputfileOptions,
 ) -> BuiltinResult<Value> {
     let outputs = match selection {
         Some(selection) => selected_outputs(selection, options)?,
@@ -429,47 +348,20 @@ fn outputs_for_selection(
 }
 
 fn selected_outputs(
-    selection: OpenFileDialogSelection,
-    options: &UigetfileOptions,
+    selection: SaveFileDialogSelection,
+    options: &UiputfileOptions,
 ) -> BuiltinResult<Vec<Value>> {
-    if selection.paths.is_empty() {
-        return Err(invalid_selection("provider returned no selected paths"));
-    }
-
     let filter_index = selection.filter_index.unwrap_or(1);
     if filter_index == 0 || filter_index > options.request.filters.len() {
         return Err(invalid_selection(
-            "provider returned an invalid filter index",
-        ));
-    }
-    if !options.request.multiselect && selection.paths.len() > 1 {
-        return Err(invalid_selection(
-            "provider returned multiple paths for a single-selection request",
+            "provider returned an invalid filter index".to_string(),
         ));
     }
 
-    let first_path = selected_path_parts(&selection.paths[0], invalid_selection)?;
-    let directory = first_path.directory;
-    if options.request.multiselect && selection.paths.len() > 1 {
-        ensure_same_directory(&selection.paths, &directory, invalid_selection)?;
-        let mut names = Vec::with_capacity(selection.paths.len());
-        for path in &selection.paths {
-            names.push(Value::CharArray(CharArray::new_row(
-                &selected_path_parts(path, invalid_selection)?.file_name,
-            )));
-        }
-        let file_count = names.len();
-        let files = CellArray::new(names, 1, file_count).map_err(invalid_selection)?;
-        return Ok(vec![
-            Value::Cell(files),
-            Value::CharArray(CharArray::new_row(&directory)),
-            Value::Num(filter_index as f64),
-        ]);
-    }
-
+    let selected = selected_path_parts(&selection.path, invalid_selection)?;
     Ok(vec![
-        Value::CharArray(CharArray::new_row(&first_path.file_name)),
-        Value::CharArray(CharArray::new_row(&directory)),
+        Value::CharArray(runmat_builtins::CharArray::new_row(&selected.file_name)),
+        Value::CharArray(runmat_builtins::CharArray::new_row(&selected.directory)),
         Value::Num(filter_index as f64),
     ])
 }
@@ -478,7 +370,7 @@ fn selected_outputs(
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{CharArray, Tensor};
     use runmat_filesystem::{DirEntry, FileHandle, FsMetadata, FsProvider, OpenFlags};
     use std::io::{self, ErrorKind};
     use std::path::Path;
@@ -486,7 +378,7 @@ mod tests {
 
     fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
         let _guard = crate::output_count::push_output_count(outputs);
-        futures::executor::block_on(uigetfile_builtin(args))
+        futures::executor::block_on(uiputfile_builtin(args))
     }
 
     fn text(value: &Value) -> String {
@@ -505,8 +397,8 @@ mod tests {
 
     #[derive(Clone)]
     struct DialogProvider {
-        selection: Option<OpenFileDialogSelection>,
-        request: Arc<Mutex<Option<OpenFileDialogRequest>>>,
+        selection: Option<SaveFileDialogSelection>,
+        request: Arc<Mutex<Option<SaveFileDialogRequest>>>,
     }
 
     #[async_trait(?Send)]
@@ -567,10 +459,10 @@ mod tests {
             Err(unsupported())
         }
 
-        async fn select_file_open(
+        async fn select_file_save(
             &self,
-            request: &OpenFileDialogRequest,
-        ) -> io::Result<Option<OpenFileDialogSelection>> {
+            request: &SaveFileDialogRequest,
+        ) -> io::Result<Option<SaveFileDialogSelection>> {
             *self.request.lock().unwrap() = Some(request.clone());
             Ok(self.selection.clone())
         }
@@ -605,8 +497,8 @@ mod tests {
     }
 
     fn with_dialog_provider(
-        selection: Option<OpenFileDialogSelection>,
-        body: impl FnOnce(Arc<Mutex<Option<OpenFileDialogRequest>>>),
+        selection: Option<SaveFileDialogSelection>,
+        body: impl FnOnce(Arc<Mutex<Option<SaveFileDialogRequest>>>),
     ) {
         let _lock = runmat_filesystem::provider_override_lock();
         let request = Arc::new(Mutex::new(None));
@@ -621,15 +513,15 @@ mod tests {
     #[test]
     fn cancel_returns_zero_outputs() {
         with_dialog_provider(None, |_| {
-            let outputs = output_list(call(vec![], Some(2)).expect("uigetfile"));
+            let outputs = output_list(call(vec![], Some(2)).expect("uiputfile"));
             assert_eq!(outputs, vec![Value::Num(0.0), Value::Num(0.0)]);
         });
     }
 
     #[test]
     fn parses_filter_title_default_and_selection_outputs() {
-        let selection = OpenFileDialogSelection {
-            paths: vec![rooted_tmp_file("scores.xlsx")],
+        let selection = SaveFileDialogSelection {
+            path: rooted_tmp_file("scores.xlsx"),
             filter_index: Some(1),
         };
         with_dialog_provider(Some(selection), |request| {
@@ -637,82 +529,47 @@ mod tests {
                 call(
                     vec![
                         Value::CharArray(CharArray::new_row("*.xlsx;*.xls")),
-                        Value::CharArray(CharArray::new_row("Select spreadsheet")),
+                        Value::CharArray(CharArray::new_row("Save spreadsheet")),
                         Value::CharArray(CharArray::new_row(&rooted_tmp_path_text())),
                     ],
                     Some(3),
                 )
-                .expect("uigetfile"),
+                .expect("uiputfile"),
             );
             assert_eq!(text(&outputs[0]), "scores.xlsx");
             assert_eq!(text(&outputs[1]), rooted_tmp_dir_text());
             assert_eq!(outputs[2], Value::Num(1.0));
 
             let request = request.lock().unwrap().clone().expect("request");
-            assert_eq!(request.title.as_deref(), Some("Select spreadsheet"));
+            assert_eq!(request.title.as_deref(), Some("Save spreadsheet"));
             assert_eq!(request.default_path, Some(rooted_tmp_path()));
-            assert!(!request.multiselect);
             assert_eq!(request.filters[0].patterns, vec!["*.xlsx", "*.xls"]);
         });
     }
 
     #[test]
-    fn multiselect_returns_cell_array_for_multiple_files() {
-        let selection = OpenFileDialogSelection {
-            paths: vec![rooted_tmp_file("a.m"), rooted_tmp_file("b.m")],
+    fn accepts_backslash_separated_provider_path() {
+        let selection = SaveFileDialogSelection {
+            path: PathBuf::from(r"C:\data\scores.xlsx"),
             filter_index: Some(1),
         };
         with_dialog_provider(Some(selection), |_| {
-            let outputs = output_list(
-                call(
-                    vec![
-                        Value::CharArray(CharArray::new_row("*.m")),
-                        Value::CharArray(CharArray::new_row("Open")),
-                        Value::CharArray(CharArray::new_row(&rooted_tmp_path_text())),
-                        Value::CharArray(CharArray::new_row("MultiSelect")),
-                        Value::CharArray(CharArray::new_row("on")),
-                    ],
-                    Some(3),
-                )
-                .expect("uigetfile"),
-            );
-            match &outputs[0] {
-                Value::Cell(cell) => {
-                    assert_eq!(cell.rows, 1);
-                    assert_eq!(cell.cols, 2);
-                    assert_eq!(text(&cell.get(0, 0).expect("first file")), "a.m");
-                    assert_eq!(text(&cell.get(0, 1).expect("second file")), "b.m");
-                }
-                other => panic!("expected cell array, got {other:?}"),
-            }
-            assert_eq!(text(&outputs[1]), rooted_tmp_dir_text());
-            assert_eq!(outputs[2], Value::Num(1.0));
+            let outputs = output_list(call(vec![], Some(2)).expect("uiputfile"));
+            assert_eq!(text(&outputs[0]), "scores.xlsx");
+            assert_eq!(text(&outputs[1]), r"C:\data\");
         });
     }
 
     #[test]
-    fn rejects_multiple_single_select_provider_paths() {
-        let selection = OpenFileDialogSelection {
-            paths: vec![rooted_tmp_file("a.m"), rooted_tmp_file("b.m")],
-            filter_index: Some(1),
+    fn rejects_invalid_filter_index() {
+        let selection = SaveFileDialogSelection {
+            path: rooted_tmp_file("scores.xlsx"),
+            filter_index: Some(2),
         };
         with_dialog_provider(Some(selection), |_| {
             let err = call(vec![], Some(3)).expect_err("expected invalid selection");
-            assert_eq!(err.identifier(), Some("RunMat:uigetfile:InvalidSelection"));
-            assert!(err.message().contains("single-selection"));
-        });
-    }
-
-    #[test]
-    fn accepts_backslash_separated_provider_paths() {
-        let selection = OpenFileDialogSelection {
-            paths: vec![PathBuf::from(r"C:\data\scores.xlsx")],
-            filter_index: Some(1),
-        };
-        with_dialog_provider(Some(selection), |_| {
-            let outputs = output_list(call(vec![], Some(2)).expect("uigetfile"));
-            assert_eq!(text(&outputs[0]), "scores.xlsx");
-            assert_eq!(text(&outputs[1]), r"C:\data\");
+            assert_eq!(err.identifier(), Some("RunMat:uiputfile:InvalidSelection"));
+            assert!(err.message().contains("filter index"));
         });
     }
 
@@ -722,7 +579,7 @@ mod tests {
             let tensor = Tensor::new(vec![42.0], vec![1, 1]).expect("tensor");
             let err =
                 call(vec![Value::Tensor(tensor)], Some(1)).expect_err("expected invalid argument");
-            assert_eq!(err.identifier(), Some("RunMat:uigetfile:InvalidArgument"));
+            assert_eq!(err.identifier(), Some("RunMat:uiputfile:InvalidArgument"));
         });
     }
 
@@ -730,7 +587,7 @@ mod tests {
     fn rejects_too_many_outputs() {
         with_dialog_provider(None, |_| {
             let err = call(vec![], Some(4)).expect_err("expected too many outputs");
-            assert_eq!(err.identifier(), Some("RunMat:uigetfile:TooManyOutputs"));
+            assert_eq!(err.identifier(), Some("RunMat:uiputfile:TooManyOutputs"));
         });
     }
 }

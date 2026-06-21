@@ -230,6 +230,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: OPTIONAL_PATH_WORDS,
     },
     CommandVerb {
+        name: "uiputfile",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
         name: "which",
         arg_kind: REQUIRED_PATH_WORDS,
     },

@@ -505,6 +505,7 @@ fn zero_arg_filesystem_command_forms_are_allowed() {
         "tempdir",
         "tempname",
         "uigetfile",
+        "uiputfile",
         "who",
         "whos",
     ] {
