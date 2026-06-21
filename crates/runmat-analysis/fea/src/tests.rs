@@ -347,6 +347,14 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_TRANSIENT_CONVERGENCE"));
+    let energy_diag = result
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_TRANSIENT_ENERGY_BALANCE")
+        .expect("transient energy balance diagnostic should be emitted");
+    assert!(energy_diag.message.contains("max_total_energy="));
+    assert!(energy_diag.message.contains("energy_growth_ratio="));
 }
 
 #[test]

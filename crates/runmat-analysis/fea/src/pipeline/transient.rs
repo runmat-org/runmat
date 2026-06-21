@@ -9,7 +9,10 @@ use crate::{
         fea_transient_von_mises_field_id, ComputeBackend, FeaRunError, FeaRunResult,
         FeaTransientRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
     },
-    diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
+    diagnostics::{
+        builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
+        FeaDiagnostic, FeaDiagnosticSeverity,
+    },
     operator::{apply_k_unconstrained, apply_m},
     pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
@@ -166,6 +169,10 @@ pub fn run_transient_with_options(
     let kinetic_energy_values = recover_kinetic_energy_snapshots(&summary, &velocity_values);
     let strain_energy_values =
         recover_strain_energy_snapshots(&summary, &transient.displacement_snapshots);
+    run.diagnostics.push(transient_energy_balance_diagnostic(
+        &kinetic_energy_values,
+        &strain_energy_values,
+    ));
     let residual_norm_values = recover_residual_norm_snapshots(
         transient.displacement_snapshots.len(),
         &transient.residual_norms,
@@ -451,6 +458,64 @@ fn recover_residual_norm_snapshots(snapshot_count: usize, residual_norms: &[f64]
             }
         })
         .collect()
+}
+
+fn transient_energy_balance_diagnostic(
+    kinetic_energy_values: &[f64],
+    strain_energy_values: &[f64],
+) -> FeaDiagnostic {
+    let snapshot_count = kinetic_energy_values.len().max(strain_energy_values.len());
+    let total_energy = (0..snapshot_count)
+        .map(|index| {
+            kinetic_energy_values.get(index).copied().unwrap_or(0.0)
+                + strain_energy_values.get(index).copied().unwrap_or(0.0)
+        })
+        .collect::<Vec<_>>();
+    let initial_total_energy = total_energy.first().copied().unwrap_or(0.0);
+    let final_total_energy = total_energy.last().copied().unwrap_or(0.0);
+    let max_total_energy = total_energy.iter().copied().fold(0.0_f64, f64::max);
+    let reference_energy = total_energy
+        .iter()
+        .copied()
+        .find(|value| value.is_finite() && *value > 1.0e-12)
+        .unwrap_or(max_total_energy.max(1.0));
+    let energy_growth_ratio = if reference_energy > 0.0 {
+        max_total_energy / reference_energy
+    } else {
+        0.0
+    };
+    let max_step_energy_jump_ratio = total_energy
+        .windows(2)
+        .map(|window| {
+            let previous = window[0].abs().max(reference_energy).max(1.0e-12);
+            (window[1] - window[0]).abs() / previous
+        })
+        .fold(0.0_f64, f64::max);
+    let metrics_are_finite = [
+        initial_total_energy,
+        final_total_energy,
+        max_total_energy,
+        energy_growth_ratio,
+        max_step_energy_jump_ratio,
+    ]
+    .iter()
+    .all(|value| value.is_finite());
+    FeaDiagnostic {
+        code: "FEA_TRANSIENT_ENERGY_BALANCE".to_string(),
+        severity: if metrics_are_finite && energy_growth_ratio <= 10.0 {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "initial_total_energy={} final_total_energy={} max_total_energy={} energy_growth_ratio={} max_step_energy_jump_ratio={}",
+            initial_total_energy,
+            final_total_energy,
+            max_total_energy,
+            energy_growth_ratio,
+            max_step_energy_jump_ratio,
+        ),
+    }
 }
 
 fn vector_shape(dof_count: usize) -> Vec<usize> {
