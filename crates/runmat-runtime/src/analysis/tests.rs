@@ -4086,6 +4086,18 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_EM_SWEEP"));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_EM_KNOWN_ANSWER"
+            && diag.message.contains("basis=homogeneous_current_line")
+            && diag
+                .message
+                .contains("homogeneous_material_residual_ratio=")
+            && diag
+                .message
+                .contains("source_energy_consistency_residual_ratio=")
+            && diag.message.contains("gauge_anchor_residual_ratio=")
+            && diag.message.contains("known_answer_coverage_ratio=")
+    }));
     let em_payload = envelope
         .data
         .electromagnetic_results

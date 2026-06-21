@@ -916,6 +916,21 @@ pub fn run_electromagnetic_with_options(
             field_energy_integral,
         ),
     });
+    let homogeneous_known_answer =
+        em_homogeneous_known_answer_metrics(EmHomogeneousKnownAnswerInput {
+            material_stats: &material_stats,
+            source_realization_ratio,
+            source_region_coverage_ratio,
+            source_material_alignment_ratio,
+            source_region_energy_consistency_ratio,
+            boundary_anchor_ratio,
+            gauge_anchor_residual_ratio,
+            flux_divergence_ratio,
+            field_energy_integral,
+        });
+    diagnostics.push(em_homogeneous_known_answer_diagnostic(
+        &homogeneous_known_answer,
+    ));
 
     let vector_potential_real_field = AnalysisField::host_f64(
         FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
@@ -2181,6 +2196,108 @@ fn flux_phasor_coherence_ratio(complex_flux: &[f64], magnitude_estimate_flux: &[
         1.0
     } else {
         (estimate_energy / complex_energy).clamp(0.0, 1.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EmHomogeneousKnownAnswerMetrics {
+    homogeneous_material_residual_ratio: f64,
+    source_energy_consistency_residual_ratio: f64,
+    gauge_anchor_residual_ratio: f64,
+    flux_divergence_ratio: f64,
+    source_realization_ratio: f64,
+    source_region_coverage_ratio: f64,
+    source_material_alignment_ratio: f64,
+    known_answer_coverage_ratio: f64,
+}
+
+struct EmHomogeneousKnownAnswerInput<'a> {
+    material_stats: &'a ElectromagneticMaterialStats,
+    source_realization_ratio: f64,
+    source_region_coverage_ratio: f64,
+    source_material_alignment_ratio: f64,
+    source_region_energy_consistency_ratio: f64,
+    boundary_anchor_ratio: f64,
+    gauge_anchor_residual_ratio: f64,
+    flux_divergence_ratio: f64,
+    field_energy_integral: f64,
+}
+
+fn em_homogeneous_known_answer_metrics(
+    input: EmHomogeneousKnownAnswerInput<'_>,
+) -> EmHomogeneousKnownAnswerMetrics {
+    let homogeneous_material_residual_ratio = [
+        (input.material_stats.conductivity_spread_ratio - 1.0).abs(),
+        (input.material_stats.relative_permittivity_spread_ratio - 1.0).abs(),
+        (input.material_stats.relative_permeability_spread_ratio - 1.0).abs(),
+        input.material_stats.assignment_heterogeneity_index,
+        input.material_stats.fallback_coefficient_ratio,
+        input.material_stats.region_coefficient_contrast_index,
+    ]
+    .into_iter()
+    .filter(|value| value.is_finite())
+    .fold(0.0_f64, f64::max);
+    let source_energy_consistency_residual_ratio =
+        (1.0 - input.source_region_energy_consistency_ratio).clamp(0.0, 1.0);
+    let known_answer_coverage_ratio = if homogeneous_material_residual_ratio <= 0.05
+        && input.source_realization_ratio >= 0.95
+        && input.source_region_coverage_ratio >= 0.95
+        && input.source_material_alignment_ratio >= 0.95
+        && source_energy_consistency_residual_ratio <= 0.05
+        && input.boundary_anchor_ratio >= 0.95
+        && input.gauge_anchor_residual_ratio.is_finite()
+        && input.flux_divergence_ratio.is_finite()
+        && input.field_energy_integral.is_finite()
+        && input.field_energy_integral > 0.0
+    {
+        1.0
+    } else {
+        0.0
+    };
+
+    EmHomogeneousKnownAnswerMetrics {
+        homogeneous_material_residual_ratio,
+        source_energy_consistency_residual_ratio,
+        gauge_anchor_residual_ratio: input.gauge_anchor_residual_ratio,
+        flux_divergence_ratio: input.flux_divergence_ratio,
+        source_realization_ratio: input.source_realization_ratio,
+        source_region_coverage_ratio: input.source_region_coverage_ratio,
+        source_material_alignment_ratio: input.source_material_alignment_ratio,
+        known_answer_coverage_ratio,
+    }
+}
+
+fn em_homogeneous_known_answer_diagnostic(
+    metrics: &EmHomogeneousKnownAnswerMetrics,
+) -> FeaDiagnostic {
+    let severity = if metrics.homogeneous_material_residual_ratio <= 0.05
+        && metrics.source_energy_consistency_residual_ratio <= 0.05
+        && metrics.gauge_anchor_residual_ratio <= 1.0e-6
+        && metrics.flux_divergence_ratio <= 0.35
+        && metrics.source_realization_ratio >= 0.95
+        && metrics.source_region_coverage_ratio >= 0.95
+        && metrics.source_material_alignment_ratio >= 0.95
+        && metrics.known_answer_coverage_ratio >= 1.0
+    {
+        FeaDiagnosticSeverity::Info
+    } else {
+        FeaDiagnosticSeverity::Warning
+    };
+
+    FeaDiagnostic {
+        code: "FEA_EM_KNOWN_ANSWER".to_string(),
+        severity,
+        message: format!(
+            "basis=homogeneous_current_line homogeneous_material_residual_ratio={} source_energy_consistency_residual_ratio={} gauge_anchor_residual_ratio={} flux_divergence_ratio={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} known_answer_coverage_ratio={}",
+            metrics.homogeneous_material_residual_ratio,
+            metrics.source_energy_consistency_residual_ratio,
+            metrics.gauge_anchor_residual_ratio,
+            metrics.flux_divergence_ratio,
+            metrics.source_realization_ratio,
+            metrics.source_region_coverage_ratio,
+            metrics.source_material_alignment_ratio,
+            metrics.known_answer_coverage_ratio,
+        ),
     }
 }
 

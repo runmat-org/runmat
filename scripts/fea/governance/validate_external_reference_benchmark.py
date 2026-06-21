@@ -258,6 +258,11 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "em_homogeneous_source_material_alignment_ratio",
         "em_homogeneous_source_region_coverage_ratio",
         "em_homogeneous_boundary_anchor_ratio",
+        "em_homogeneous_known_material_residual_ratio",
+        "em_homogeneous_known_source_energy_consistency_residual_ratio",
+        "em_homogeneous_known_gauge_anchor_residual_ratio",
+        "em_homogeneous_known_flux_divergence_ratio",
+        "em_homogeneous_known_answer_coverage_ratio",
     },
     "electromagnetic_reference_heterogeneous_gpu_provider": {
         "em_heterogeneous_sigma_omega_scale_mean",
