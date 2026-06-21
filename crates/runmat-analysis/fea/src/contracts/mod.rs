@@ -23,6 +23,22 @@ pub fn fea_thermal_temperature_field_id(snapshot_index: usize) -> String {
     format!("thermal.temperature.{snapshot_index}")
 }
 
+pub fn fea_thermal_temperature_gradient_field_id(snapshot_index: usize) -> String {
+    format!("thermal.temperature_gradient.{snapshot_index}")
+}
+
+pub fn fea_thermal_heat_flux_field_id(snapshot_index: usize) -> String {
+    format!("thermal.heat_flux.{snapshot_index}")
+}
+
+pub fn fea_thermal_heat_source_field_id(snapshot_index: usize) -> String {
+    format!("thermal.heat_source.{snapshot_index}")
+}
+
+pub fn fea_thermal_boundary_heat_flux_field_id(snapshot_index: usize) -> String {
+    format!("thermal.boundary_heat_flux.{snapshot_index}")
+}
+
 pub fn fea_transient_displacement_field_id(snapshot_index: usize) -> String {
     format!("transient.displacement.{snapshot_index}")
 }
@@ -287,6 +303,10 @@ pub struct FeaThermalRunResult {
     pub run: FeaRunResult,
     pub time_points_s: Vec<f64>,
     pub temperature_snapshots: Vec<AnalysisField>,
+    pub temperature_gradient_snapshots: Vec<AnalysisField>,
+    pub heat_flux_snapshots: Vec<AnalysisField>,
+    pub heat_source_snapshots: Vec<AnalysisField>,
+    pub boundary_heat_flux_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub reference_temperature_k: f64,
 }

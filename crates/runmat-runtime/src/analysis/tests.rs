@@ -21,6 +21,8 @@ use runmat_analysis_fea::{
     fea_modal_mode_shape_field_id, fea_nonlinear_contact_gap_field_id,
     fea_nonlinear_contact_pressure_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
     fea_nonlinear_plastic_strain_field_id, fea_nonlinear_von_mises_field_id,
+    fea_thermal_boundary_heat_flux_field_id, fea_thermal_heat_flux_field_id,
+    fea_thermal_heat_source_field_id, fea_thermal_temperature_gradient_field_id,
     fea_transient_acceleration_field_id, fea_transient_kinetic_energy_field_id,
     fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
     fea_transient_von_mises_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
@@ -3736,6 +3738,20 @@ fn analysis_run_thermal_returns_temperature_payload() {
         .expect("thermal results must be present");
     assert_eq!(thermal.time_points_s.len(), 6);
     assert_eq!(thermal.temperature_snapshots.len(), 6);
+    assert_eq!(thermal.temperature_gradient_snapshots.len(), 6);
+    assert_eq!(thermal.heat_flux_snapshots.len(), 6);
+    assert_eq!(thermal.heat_source_snapshots.len(), 6);
+    assert_eq!(thermal.boundary_heat_flux_snapshots.len(), 6);
+    let field_ids = results
+        .data
+        .field_descriptors
+        .iter()
+        .map(|descriptor| descriptor.field_id.as_str())
+        .collect::<Vec<_>>();
+    assert!(field_ids.contains(&fea_thermal_temperature_gradient_field_id(0).as_str()));
+    assert!(field_ids.contains(&fea_thermal_heat_flux_field_id(0).as_str()));
+    assert!(field_ids.contains(&fea_thermal_heat_source_field_id(0).as_str()));
+    assert!(field_ids.contains(&fea_thermal_boundary_heat_flux_field_id(0).as_str()));
     assert_eq!(results.data.summary.snapshot_count, 6);
 }
 

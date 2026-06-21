@@ -3,7 +3,9 @@ use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 use crate::{
     assembly::assemble_linear_system,
     contracts::{
-        fea_thermal_temperature_field_id, ComputeBackend, FeaRunError, FeaRunResult,
+        fea_thermal_boundary_heat_flux_field_id, fea_thermal_heat_flux_field_id,
+        fea_thermal_heat_source_field_id, fea_thermal_temperature_field_id,
+        fea_thermal_temperature_gradient_field_id, ComputeBackend, FeaRunError, FeaRunResult,
         FeaThermalRunResult, ThermalSolveOptions,
     },
     diagnostics::{
@@ -13,6 +15,9 @@ use crate::{
     physics::{coupling::thermo_mechanical, thermal::constitutive_stats},
     progress::{check_cancelled, emit_phase, is_cancelled, FeaProgressPhase, FeaProgressStatus},
 };
+
+const VECTOR_COMPONENT_COUNT: usize = 3;
+const BOUNDARY_HEAT_FLUX_COMPONENT_COUNT: usize = 2;
 
 pub fn run_thermal(
     model: &AnalysisModel,
@@ -218,6 +223,60 @@ pub fn run_thermal_with_options(
             )
         })
         .collect::<Vec<_>>();
+    let temperature_gradient_raw = recover_temperature_gradients(&temperature_snapshots_raw);
+    let heat_flux_raw =
+        recover_heat_flux_snapshots(&temperature_gradient_raw, constitutive.conductivity_mean);
+    let heat_source_raw = recover_heat_source_snapshots(
+        &temperature_snapshots_raw,
+        options.time_step_s.max(1.0e-9),
+        constitutive.density_mean,
+        constitutive.heat_capacity_mean,
+    );
+    let boundary_heat_flux_raw = recover_boundary_heat_flux_snapshots(&heat_flux_raw, node_count);
+    let temperature_gradient_snapshots = temperature_gradient_raw
+        .into_iter()
+        .enumerate()
+        .map(|(step, values)| {
+            AnalysisField::host_f64(
+                fea_thermal_temperature_gradient_field_id(step),
+                vec![node_count, VECTOR_COMPONENT_COUNT],
+                values,
+            )
+        })
+        .collect::<Vec<_>>();
+    let heat_flux_snapshots = heat_flux_raw
+        .into_iter()
+        .enumerate()
+        .map(|(step, values)| {
+            AnalysisField::host_f64(
+                fea_thermal_heat_flux_field_id(step),
+                vec![node_count, VECTOR_COMPONENT_COUNT],
+                values,
+            )
+        })
+        .collect::<Vec<_>>();
+    let heat_source_snapshots = heat_source_raw
+        .into_iter()
+        .enumerate()
+        .map(|(step, values)| {
+            AnalysisField::host_f64(
+                fea_thermal_heat_source_field_id(step),
+                vec![node_count],
+                values,
+            )
+        })
+        .collect::<Vec<_>>();
+    let boundary_heat_flux_snapshots = boundary_heat_flux_raw
+        .into_iter()
+        .enumerate()
+        .map(|(step, values)| {
+            AnalysisField::host_f64(
+                fea_thermal_boundary_heat_flux_field_id(step),
+                vec![BOUNDARY_HEAT_FLUX_COMPONENT_COUNT],
+                values,
+            )
+        })
+        .collect::<Vec<_>>();
     emit_phase(
         "fea.run_thermal",
         FeaProgressPhase::Postprocess,
@@ -365,7 +424,97 @@ pub fn run_thermal_with_options(
         run,
         time_points_s,
         temperature_snapshots,
+        temperature_gradient_snapshots,
+        heat_flux_snapshots,
+        heat_source_snapshots,
+        boundary_heat_flux_snapshots,
         residual_norms,
         reference_temperature_k: thermo_context.reference_temperature_k,
     })
+}
+
+fn recover_temperature_gradients(temperature_snapshots: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    temperature_snapshots
+        .iter()
+        .map(|temperatures| {
+            let node_count = temperatures.len().max(1);
+            let mut gradient = vec![0.0; node_count * VECTOR_COMPONENT_COUNT];
+            for index in 0..temperatures.len() {
+                let left = if index == 0 {
+                    temperatures[index]
+                } else {
+                    temperatures[index - 1]
+                };
+                let right = if index + 1 >= temperatures.len() {
+                    temperatures[index]
+                } else {
+                    temperatures[index + 1]
+                };
+                let spacing = if index == 0 || index + 1 >= temperatures.len() {
+                    1.0
+                } else {
+                    2.0
+                };
+                gradient[index * VECTOR_COMPONENT_COUNT] = (right - left) / spacing;
+            }
+            gradient
+        })
+        .collect()
+}
+
+fn recover_heat_flux_snapshots(
+    temperature_gradient_snapshots: &[Vec<f64>],
+    conductivity_mean: f64,
+) -> Vec<Vec<f64>> {
+    temperature_gradient_snapshots
+        .iter()
+        .map(|gradient| {
+            gradient
+                .iter()
+                .map(|component| -conductivity_mean.max(0.0) * component)
+                .collect()
+        })
+        .collect()
+}
+
+fn recover_heat_source_snapshots(
+    temperature_snapshots: &[Vec<f64>],
+    dt: f64,
+    density_mean: f64,
+    heat_capacity_mean: f64,
+) -> Vec<Vec<f64>> {
+    let volumetric_capacity = density_mean.max(0.0) * heat_capacity_mean.max(0.0);
+    temperature_snapshots
+        .iter()
+        .enumerate()
+        .map(|(step, temperatures)| {
+            if step == 0 {
+                return vec![0.0; temperatures.len()];
+            }
+            let previous = &temperature_snapshots[step - 1];
+            temperatures
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    let previous_value = previous.get(index).copied().unwrap_or(*value);
+                    volumetric_capacity * (value - previous_value) / dt
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn recover_boundary_heat_flux_snapshots(
+    heat_flux_snapshots: &[Vec<f64>],
+    node_count: usize,
+) -> Vec<Vec<f64>> {
+    heat_flux_snapshots
+        .iter()
+        .map(|heat_flux| {
+            let left = heat_flux.first().copied().unwrap_or(0.0);
+            let right_index = node_count.saturating_sub(1) * VECTOR_COMPONENT_COUNT;
+            let right = heat_flux.get(right_index).copied().unwrap_or(left);
+            vec![left, right]
+        })
+        .collect()
 }

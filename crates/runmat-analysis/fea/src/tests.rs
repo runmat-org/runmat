@@ -1,14 +1,16 @@
 use crate::{
     fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
     fea_nonlinear_equivalent_plastic_strain_field_id, fea_nonlinear_plastic_strain_field_id,
-    fea_nonlinear_von_mises_field_id, fea_transient_acceleration_field_id,
+    fea_nonlinear_von_mises_field_id, fea_thermal_boundary_heat_flux_field_id,
+    fea_thermal_heat_flux_field_id, fea_thermal_heat_source_field_id,
+    fea_thermal_temperature_gradient_field_id, fea_transient_acceleration_field_id,
     fea_transient_kinetic_energy_field_id, fea_transient_strain_energy_field_id,
     fea_transient_velocity_field_id, fea_transient_von_mises_field_id,
     fixtures::{fixture_model, FixtureId},
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
     ComputeBackend, FeaRunResult, FeaThermoMechanicalContext, ModalSolveOptions,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    ThermalSolveOptions, FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
     FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
@@ -213,6 +215,64 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_TRANSIENT_CONVERGENCE"));
+}
+
+#[test]
+fn thermal_solver_emits_heat_transfer_fields() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let result = crate::run_thermal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ThermalSolveOptions {
+            step_count: 4,
+            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 45.0,
+                thermal_expansion_coefficient: 1.2e-5,
+                field_source: None,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
+            }),
+            ..ThermalSolveOptions::default()
+        },
+    )
+    .expect("thermal solve should succeed");
+
+    assert_eq!(result.time_points_s.len(), 4);
+    assert_eq!(
+        result.time_points_s.len(),
+        result.temperature_snapshots.len()
+    );
+    assert_eq!(
+        result.time_points_s.len(),
+        result.temperature_gradient_snapshots.len()
+    );
+    assert_eq!(result.time_points_s.len(), result.heat_flux_snapshots.len());
+    assert_eq!(
+        result.time_points_s.len(),
+        result.heat_source_snapshots.len()
+    );
+    assert_eq!(
+        result.time_points_s.len(),
+        result.boundary_heat_flux_snapshots.len()
+    );
+    assert_eq!(
+        result.temperature_gradient_snapshots[1].field_id,
+        fea_thermal_temperature_gradient_field_id(1)
+    );
+    assert_eq!(
+        result.heat_flux_snapshots[1].field_id,
+        fea_thermal_heat_flux_field_id(1)
+    );
+    assert_eq!(
+        result.heat_source_snapshots[1].field_id,
+        fea_thermal_heat_source_field_id(1)
+    );
+    assert_eq!(
+        result.boundary_heat_flux_snapshots[1].field_id,
+        fea_thermal_boundary_heat_flux_field_id(1)
+    );
 }
 
 #[test]

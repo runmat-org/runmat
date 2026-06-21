@@ -969,6 +969,9 @@ impl AnalysisFieldDescriptor {
 
 fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
     let normalized = field_id.to_ascii_lowercase();
+    if normalized.contains("temperature_gradient") || normalized.contains("heat_flux") {
+        return AnalysisFieldKind::Vector;
+    }
     if normalized.contains("von_mises")
         || normalized.contains("equivalent_plastic_strain")
         || normalized.contains("temperature")
@@ -1004,6 +1007,15 @@ fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
     }
     if normalized.contains("equivalent_plastic_strain") {
         return None;
+    }
+    if normalized.contains("temperature_gradient") || normalized.contains("heat_flux") {
+        return Some(
+            shape
+                .last()
+                .copied()
+                .filter(|value| (2..=3).contains(value))
+                .unwrap_or(3),
+        );
     }
     if normalized.contains("displacement")
         || normalized.contains("mode_shape")
@@ -1476,6 +1488,14 @@ pub struct ThermalResultsData {
     pub thermal_payload_version: String,
     pub time_points_s: Vec<f64>,
     pub temperature_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub temperature_gradient_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub heat_flux_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub heat_source_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub boundary_heat_flux_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub reference_temperature_k: f64,
 }

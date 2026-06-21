@@ -3306,6 +3306,10 @@ pub fn analysis_run_cht_with_options_op(
             thermal_payload_version: "thermal_results/v1".to_string(),
             time_points_s: thermal_run.time_points_s,
             temperature_snapshots: thermal_run.temperature_snapshots,
+            temperature_gradient_snapshots: thermal_run.temperature_gradient_snapshots,
+            heat_flux_snapshots: thermal_run.heat_flux_snapshots,
+            heat_source_snapshots: thermal_run.heat_source_snapshots,
+            boundary_heat_flux_snapshots: thermal_run.boundary_heat_flux_snapshots,
             residual_norms: thermal_run.residual_norms,
             reference_temperature_k: thermal_run.reference_temperature_k,
         }),
@@ -4011,6 +4015,10 @@ pub fn analysis_run_thermal_with_options_op(
             thermal_payload_version: "thermal_results/v1".to_string(),
             time_points_s: thermal_run.time_points_s,
             temperature_snapshots: thermal_run.temperature_snapshots,
+            temperature_gradient_snapshots: thermal_run.temperature_gradient_snapshots,
+            heat_flux_snapshots: thermal_run.heat_flux_snapshots,
+            heat_source_snapshots: thermal_run.heat_source_snapshots,
+            boundary_heat_flux_snapshots: thermal_run.boundary_heat_flux_snapshots,
             residual_norms: thermal_run.residual_norms,
             reference_temperature_k: thermal_run.reference_temperature_k,
         }),
@@ -6209,6 +6217,18 @@ fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<Analysi
 
     if let Some(thermal) = run_result.thermal_results.as_ref() {
         for field in &thermal.temperature_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &thermal.temperature_gradient_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &thermal.heat_flux_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &thermal.heat_source_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &thermal.boundary_heat_flux_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
     }
