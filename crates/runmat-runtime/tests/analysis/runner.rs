@@ -3801,6 +3801,23 @@ pub(super) fn run_fixture(
             }
         }
 
+        if matches!(spec.run_kind, AnalysisRunKind::Modal) {
+            let observed = cpu_envelope
+                .data
+                .modal_results
+                .as_ref()
+                .and_then(|modal| modal.residual_norms.iter().copied().reduce(f64::max));
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "modal_max_residual_norm",
+                "FEA_MODAL_CONVERGENCE",
+                observed,
+                None,
+                Some(1.0e-1),
+            );
+        }
         if let Some(max_offdiag) = spec.max_modal_orthogonality_offdiag {
             let observed = diagnostic_metric(
                 &cpu_envelope.data,
