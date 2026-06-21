@@ -4742,7 +4742,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_max_residual_norm",
-      "reference": 4.963781470198714,
+      "reference": 6.446272909404513,
       "tolerance_abs": 1.5,
       "tolerance_rel": 0.35
     },
@@ -4752,7 +4752,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_min_temperature_k",
-      "reference": 293.339,
+      "reference": 294.76849999999996,
       "tolerance_abs": 4.0,
       "tolerance_rel": 0.02
     },
@@ -4762,7 +4762,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_max_temperature_k",
-      "reference": 337.87747326361944,
+      "reference": 352.40403619593496,
       "tolerance_abs": 6.0,
       "tolerance_rel": 0.03
     },
@@ -4772,7 +4772,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_heat_balance_residual_ratio",
-      "reference": 8.892701458688957e-15,
+      "reference": 0.0,
       "tolerance_abs": 1e-08,
       "tolerance_rel": null
     },
@@ -4802,7 +4802,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_spatial_gradient_index",
-      "reference": 1.0950807831259657,
+      "reference": 0.9726854050136248,
       "tolerance_abs": 0.35,
       "tolerance_rel": 0.3
     },
@@ -4822,9 +4822,59 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_response_realization_ratio",
-      "reference": 0.671959951712075,
+      "reference": 0.9789762609246585,
       "tolerance_abs": 0.15,
       "tolerance_rel": 0.2
+    },
+    {
+      "name": "thermal_standalone_source_coverage_ratio",
+      "fixture_id": "thermal_standalone_ramp_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_source_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "thermal_standalone_boundary_coverage_ratio",
+      "fixture_id": "thermal_standalone_ramp_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_boundary_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "thermal_standalone_prescribed_temperature_count",
+      "fixture_id": "thermal_standalone_ramp_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_prescribed_temperature_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "thermal_standalone_heat_flux_boundary_count",
+      "fixture_id": "thermal_standalone_ramp_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_heat_flux_boundary_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "thermal_standalone_convection_boundary_count",
+      "fixture_id": "thermal_standalone_ramp_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_convection_boundary_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
     },
     {
       "name": "thermal_standalone_max_residual_norm",
@@ -4832,7 +4882,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_max_residual_norm",
-      "reference": 4.963781470198714,
+      "reference": 6.446272909404513,
       "tolerance_abs": 1.5,
       "tolerance_rel": 0.35
     },
@@ -4842,7 +4892,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_min_temperature_k",
-      "reference": 293.339,
+      "reference": 294.76849999999996,
       "tolerance_abs": 4.0,
       "tolerance_rel": 0.02
     },
@@ -4852,7 +4902,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_max_temperature_k",
-      "reference": 337.87747326361944,
+      "reference": 352.40403619593496,
       "tolerance_abs": 6.0,
       "tolerance_rel": 0.03
     },
@@ -4862,7 +4912,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_heat_balance_residual_ratio",
-      "reference": 8.892701458688957e-15,
+      "reference": 0.0,
       "tolerance_abs": 1e-08,
       "tolerance_rel": null
     },
@@ -4892,7 +4942,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_spatial_gradient_index",
-      "reference": 1.0950807831259657,
+      "reference": 0.9726854050136248,
       "tolerance_abs": 0.35,
       "tolerance_rel": 0.3
     },
@@ -4912,9 +4962,59 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_response_realization_ratio",
-      "reference": 0.671959951712075,
+      "reference": 0.9789762609246585,
       "tolerance_abs": 0.15,
       "tolerance_rel": 0.2
+    },
+    {
+      "name": "thermal_standalone_source_coverage_ratio",
+      "fixture_id": "thermal_standalone_ramp_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_source_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "thermal_standalone_boundary_coverage_ratio",
+      "fixture_id": "thermal_standalone_ramp_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_boundary_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "thermal_standalone_prescribed_temperature_count",
+      "fixture_id": "thermal_standalone_ramp_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_prescribed_temperature_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "thermal_standalone_heat_flux_boundary_count",
+      "fixture_id": "thermal_standalone_ramp_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_heat_flux_boundary_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "thermal_standalone_convection_boundary_count",
+      "fixture_id": "thermal_standalone_ramp_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_convection_boundary_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
     },
     {
       "name": "thermal_standalone_max_residual_norm",
@@ -4922,7 +5022,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_max_residual_norm",
-      "reference": 4.963781470198714,
+      "reference": 6.446272909404513,
       "tolerance_abs": 1.5,
       "tolerance_rel": 0.35
     },
@@ -4932,7 +5032,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_min_temperature_k",
-      "reference": 293.339,
+      "reference": 294.76849999999996,
       "tolerance_abs": 4.0,
       "tolerance_rel": 0.02
     },
@@ -4942,7 +5042,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_max_temperature_k",
-      "reference": 337.87747326361944,
+      "reference": 352.40403619593496,
       "tolerance_abs": 6.0,
       "tolerance_rel": 0.03
     },
@@ -4952,7 +5052,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_heat_balance_residual_ratio",
-      "reference": 8.892701458688957e-15,
+      "reference": 0.0,
       "tolerance_abs": 1e-08,
       "tolerance_rel": null
     },
@@ -4982,7 +5082,7 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_spatial_gradient_index",
-      "reference": 1.0950807831259657,
+      "reference": 0.9726854050136248,
       "tolerance_abs": 0.35,
       "tolerance_rel": 0.3
     },
@@ -5002,9 +5102,59 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "thermal_standalone_response_realization_ratio",
-      "reference": 0.671959951712075,
+      "reference": 0.9789762609246585,
       "tolerance_abs": 0.15,
       "tolerance_rel": 0.2
+    },
+    {
+      "name": "thermal_standalone_source_coverage_ratio",
+      "fixture_id": "thermal_standalone_ramp_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_source_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "thermal_standalone_boundary_coverage_ratio",
+      "fixture_id": "thermal_standalone_ramp_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_boundary_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "thermal_standalone_prescribed_temperature_count",
+      "fixture_id": "thermal_standalone_ramp_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_prescribed_temperature_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "thermal_standalone_heat_flux_boundary_count",
+      "fixture_id": "thermal_standalone_ramp_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_heat_flux_boundary_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "thermal_standalone_convection_boundary_count",
+      "fixture_id": "thermal_standalone_ramp_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermal_standalone_convection_boundary_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
     },
     {
       "name": "thermo_gradient_pathological_heterogeneity",

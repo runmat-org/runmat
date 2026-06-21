@@ -3866,6 +3866,11 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
                 ("thermal_standalone_spatial_gradient_index", 1.0950807831259657),
                 ("thermal_standalone_monotonic_response_fraction", 1.0),
                 ("thermal_standalone_response_realization_ratio", 0.671959951712075),
+                ("thermal_standalone_source_coverage_ratio", 1.0),
+                ("thermal_standalone_boundary_coverage_ratio", 1.0),
+                ("thermal_standalone_prescribed_temperature_count", 1.0),
+                ("thermal_standalone_heat_flux_boundary_count", 1.0),
+                ("thermal_standalone_convection_boundary_count", 1.0),
             )
         ],
         {

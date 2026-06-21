@@ -435,6 +435,11 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         "thermal_standalone_spatial_gradient_index",
                         "thermal_standalone_monotonic_response_fraction",
                         "thermal_standalone_response_realization_ratio",
+                        "thermal_standalone_source_coverage_ratio",
+                        "thermal_standalone_boundary_coverage_ratio",
+                        "thermal_standalone_prescribed_temperature_count",
+                        "thermal_standalone_heat_flux_boundary_count",
+                        "thermal_standalone_convection_boundary_count",
                     },
                 )
                 for fixture_id in (

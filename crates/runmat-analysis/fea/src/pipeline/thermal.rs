@@ -1,4 +1,6 @@
-use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
+use runmat_analysis_core::{
+    validate_model, AnalysisField, AnalysisModel, BoundaryConditionKind, LoadKind,
+};
 
 use crate::{
     assembly::{assemble_linear_system, AssemblySummary},
@@ -100,6 +102,8 @@ pub fn run_thermal_with_options(
     };
 
     let constitutive = constitutive_stats(model);
+    let source_boundary =
+        thermal_source_boundary_summary(model, thermo_context.reference_temperature_k);
 
     let mut time_points_s = Vec::with_capacity(step_count);
     let mut temperature_snapshots_raw = Vec::with_capacity(step_count);
@@ -151,7 +155,11 @@ pub fn run_thermal_with_options(
         let effective_delta = (0.65 * thermo_context.applied_temperature_delta_k
             + 0.35 * region_avg_delta)
             * profile.scale
-            * transient_response_scale.max(0.05);
+            * transient_response_scale.max(0.05)
+            + source_boundary.source_temperature_delta_k
+                * transient_response_scale
+                * normalized_time.max(0.0)
+            + source_boundary.boundary_temperature_delta_k * profile.scale;
 
         let mut target_temperatures = Vec::with_capacity(node_count);
         for i in 0..node_count {
@@ -434,6 +442,31 @@ pub fn run_thermal_with_options(
             heat_balance.residual_ratio,
         ),
     });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_THERMAL_SOURCE_BOUNDARY_MODEL".to_string(),
+        severity: if source_boundary.has_thermal_model_data() {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "thermal_source_count={} thermal_boundary_count={} prescribed_temperature_count={} heat_flux_boundary_count={} convection_boundary_count={} thermal_source_coverage_ratio={} thermal_boundary_coverage_ratio={} volumetric_heat_source_w_per_m3={} prescribed_temperature_mean_k={} boundary_heat_flux_w_per_m2={} convection_ambient_mean_k={} convection_coefficient_mean_w_per_m2k={} source_temperature_delta_k={} boundary_temperature_delta_k={}",
+            source_boundary.thermal_source_count,
+            source_boundary.thermal_boundary_count,
+            source_boundary.prescribed_temperature_count,
+            source_boundary.heat_flux_boundary_count,
+            source_boundary.convection_boundary_count,
+            source_boundary.source_coverage_ratio,
+            source_boundary.boundary_coverage_ratio,
+            source_boundary.volumetric_heat_source_w_per_m3,
+            source_boundary.prescribed_temperature_mean_k,
+            source_boundary.boundary_heat_flux_w_per_m2,
+            source_boundary.convection_ambient_mean_k,
+            source_boundary.convection_coefficient_mean_w_per_m2k,
+            source_boundary.source_temperature_delta_k,
+            source_boundary.boundary_temperature_delta_k,
+        ),
+    });
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
     if let Some(thermo_mechanical) = summary.thermo_mechanical.as_ref() {
         diagnostics.push(thermo_mechanical_diagnostic(thermo_mechanical));
@@ -704,6 +737,117 @@ struct ThermalHeatBalance {
     stored_energy: f64,
     numerical_loss: f64,
     residual_ratio: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ThermalSourceBoundarySummary {
+    thermal_source_count: usize,
+    thermal_boundary_count: usize,
+    prescribed_temperature_count: usize,
+    heat_flux_boundary_count: usize,
+    convection_boundary_count: usize,
+    source_coverage_ratio: f64,
+    boundary_coverage_ratio: f64,
+    volumetric_heat_source_w_per_m3: f64,
+    prescribed_temperature_mean_k: f64,
+    boundary_heat_flux_w_per_m2: f64,
+    convection_ambient_mean_k: f64,
+    convection_coefficient_mean_w_per_m2k: f64,
+    source_temperature_delta_k: f64,
+    boundary_temperature_delta_k: f64,
+}
+
+impl ThermalSourceBoundarySummary {
+    fn has_thermal_model_data(self) -> bool {
+        self.thermal_source_count > 0 || self.thermal_boundary_count > 0
+    }
+}
+
+fn thermal_source_boundary_summary(
+    model: &AnalysisModel,
+    reference_temperature_k: f64,
+) -> ThermalSourceBoundarySummary {
+    let mut thermal_source_count = 0usize;
+    let mut volumetric_heat_source_w_per_m3 = 0.0_f64;
+    for load in &model.loads {
+        if let LoadKind::HeatSource {
+            volumetric_w_per_m3,
+        } = load.kind
+        {
+            thermal_source_count += 1;
+            volumetric_heat_source_w_per_m3 += volumetric_w_per_m3;
+        }
+    }
+
+    let mut prescribed_temperature_count = 0usize;
+    let mut heat_flux_boundary_count = 0usize;
+    let mut convection_boundary_count = 0usize;
+    let mut prescribed_temperature_sum_k = 0.0_f64;
+    let mut boundary_heat_flux_w_per_m2 = 0.0_f64;
+    let mut convection_ambient_sum_k = 0.0_f64;
+    let mut convection_coefficient_sum_w_per_m2k = 0.0_f64;
+    for boundary_condition in &model.boundary_conditions {
+        match boundary_condition.kind {
+            BoundaryConditionKind::ThermalPrescribedTemperature { temperature_k } => {
+                prescribed_temperature_count += 1;
+                prescribed_temperature_sum_k += temperature_k;
+            }
+            BoundaryConditionKind::ThermalHeatFlux { heat_flux_w_per_m2 } => {
+                heat_flux_boundary_count += 1;
+                boundary_heat_flux_w_per_m2 += heat_flux_w_per_m2;
+            }
+            BoundaryConditionKind::ThermalConvection {
+                ambient_temperature_k,
+                coefficient_w_per_m2k,
+            } => {
+                convection_boundary_count += 1;
+                convection_ambient_sum_k += ambient_temperature_k;
+                convection_coefficient_sum_w_per_m2k += coefficient_w_per_m2k;
+            }
+            _ => {}
+        }
+    }
+    let thermal_boundary_count =
+        prescribed_temperature_count + heat_flux_boundary_count + convection_boundary_count;
+    let prescribed_temperature_mean_k = if prescribed_temperature_count == 0 {
+        reference_temperature_k
+    } else {
+        prescribed_temperature_sum_k / prescribed_temperature_count as f64
+    };
+    let convection_ambient_mean_k = if convection_boundary_count == 0 {
+        reference_temperature_k
+    } else {
+        convection_ambient_sum_k / convection_boundary_count as f64
+    };
+    let convection_coefficient_mean_w_per_m2k = if convection_boundary_count == 0 {
+        0.0
+    } else {
+        convection_coefficient_sum_w_per_m2k / convection_boundary_count as f64
+    };
+    let source_temperature_delta_k = (volumetric_heat_source_w_per_m3 / 1.0e6).clamp(-25.0, 25.0);
+    let prescribed_delta_k = prescribed_temperature_mean_k - reference_temperature_k;
+    let flux_delta_k = (boundary_heat_flux_w_per_m2 / 1.0e4).clamp(-15.0, 15.0);
+    let convection_delta_k = ((convection_ambient_mean_k - reference_temperature_k)
+        * convection_coefficient_mean_w_per_m2k
+        / 1.0e3)
+        .clamp(-15.0, 15.0);
+    ThermalSourceBoundarySummary {
+        thermal_source_count,
+        thermal_boundary_count,
+        prescribed_temperature_count,
+        heat_flux_boundary_count,
+        convection_boundary_count,
+        source_coverage_ratio: thermal_source_count as f64 / model.loads.len().max(1) as f64,
+        boundary_coverage_ratio: thermal_boundary_count as f64
+            / model.boundary_conditions.len().max(1) as f64,
+        volumetric_heat_source_w_per_m3,
+        prescribed_temperature_mean_k,
+        boundary_heat_flux_w_per_m2,
+        convection_ambient_mean_k,
+        convection_coefficient_mean_w_per_m2k,
+        source_temperature_delta_k,
+        boundary_temperature_delta_k: 0.45 * prescribed_delta_k + flux_delta_k + convection_delta_k,
+    }
 }
 
 fn thermal_heat_balance(

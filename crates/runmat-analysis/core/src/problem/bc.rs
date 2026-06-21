@@ -9,7 +9,19 @@ pub enum BoundaryConditionKind {
     VectorPotentialGround,
     AcousticRigidWall,
     AcousticRadiation,
-    AcousticImpedance { specific_impedance_pa_s_per_m: f64 },
+    AcousticImpedance {
+        specific_impedance_pa_s_per_m: f64,
+    },
+    ThermalPrescribedTemperature {
+        temperature_k: f64,
+    },
+    ThermalHeatFlux {
+        heat_flux_w_per_m2: f64,
+    },
+    ThermalConvection {
+        ambient_temperature_k: f64,
+        coefficient_w_per_m2k: f64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

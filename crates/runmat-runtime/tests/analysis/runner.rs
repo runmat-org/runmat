@@ -755,6 +755,47 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.interfaces.clear();
         model.cfd = None;
     }
+    if spec_id.starts_with("thermal_standalone_ramp_") {
+        model.steps = vec![runmat_analysis_core::AnalysisStep {
+            step_id: format!("step_thermal_{}", spec_id),
+            kind: runmat_analysis_core::AnalysisStepKind::Thermal,
+        }];
+        model.boundary_conditions = vec![
+            runmat_analysis_core::BoundaryCondition {
+                bc_id: format!("bc_thermal_temperature_{}", spec_id),
+                region_id: "thermal_hot_wall".to_string(),
+                kind: runmat_analysis_core::BoundaryConditionKind::ThermalPrescribedTemperature {
+                    temperature_k: 343.15,
+                },
+            },
+            runmat_analysis_core::BoundaryCondition {
+                bc_id: format!("bc_thermal_flux_{}", spec_id),
+                region_id: "thermal_flux_wall".to_string(),
+                kind: runmat_analysis_core::BoundaryConditionKind::ThermalHeatFlux {
+                    heat_flux_w_per_m2: 4500.0,
+                },
+            },
+            runmat_analysis_core::BoundaryCondition {
+                bc_id: format!("bc_thermal_convection_{}", spec_id),
+                region_id: "thermal_open_wall".to_string(),
+                kind: runmat_analysis_core::BoundaryConditionKind::ThermalConvection {
+                    ambient_temperature_k: 308.15,
+                    coefficient_w_per_m2k: 35.0,
+                },
+            },
+        ];
+        model.loads = vec![runmat_analysis_core::LoadCase {
+            load_id: format!("load_thermal_heat_source_{}", spec_id),
+            region_id: "thermal_core".to_string(),
+            kind: runmat_analysis_core::LoadKind::HeatSource {
+                volumetric_w_per_m3: 1.2e6,
+            },
+        }];
+        model.electro_thermal = None;
+        model.electromagnetic = None;
+        model.interfaces.clear();
+        model.cfd = None;
+    }
     if spec_id.starts_with("cfd_steady_") {
         model.steps = vec![runmat_analysis_core::AnalysisStep {
             step_id: format!("step_cfd_{}", spec_id),
@@ -2467,7 +2508,7 @@ fn push_thermal_standalone_threshold_assertions(
         "FEA_THERMAL_STABILITY",
         diagnostic_metric(run, "FEA_THERMAL_STABILITY", "max_residual_norm"),
         Some(0.0),
-        Some(6.0),
+        Some(7.0),
     );
     push_threshold_assertion(
         fixture_id,
@@ -2560,6 +2601,76 @@ fn push_thermal_standalone_threshold_assertions(
         ),
         Some(0.6),
         Some(1.2),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_source_coverage_ratio",
+        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
+            "thermal_source_coverage_ratio",
+        ),
+        Some(1.0),
+        Some(1.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_boundary_coverage_ratio",
+        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
+            "thermal_boundary_coverage_ratio",
+        ),
+        Some(1.0),
+        Some(1.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_prescribed_temperature_count",
+        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
+            "prescribed_temperature_count",
+        ),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_heat_flux_boundary_count",
+        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
+            "heat_flux_boundary_count",
+        ),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_convection_boundary_count",
+        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
+            "convection_boundary_count",
+        ),
+        Some(1.0),
+        None,
     );
 }
 

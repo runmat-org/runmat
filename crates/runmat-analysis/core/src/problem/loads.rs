@@ -36,6 +36,9 @@ pub enum LoadKind {
         #[serde(default = "default_em_source_amplitude_scale")]
         amplitude_scale: f64,
     },
+    HeatSource {
+        volumetric_w_per_m3: f64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

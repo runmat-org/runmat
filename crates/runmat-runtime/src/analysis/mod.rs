@@ -2649,6 +2649,7 @@ fn acoustic_source_vector(model: &AnalysisModel, node_count: usize) -> Vec<f64> 
             LoadKind::BodyForce { gx, gy, gz } => gx.hypot(*gy).hypot(*gz),
             LoadKind::CurrentDensity { jx, jy, jz, .. } => jx.hypot(*jy).hypot(*jz) * 1.0e-4,
             LoadKind::CoilCurrent { current_a, .. } => current_a.abs() * 1.0e-2,
+            LoadKind::HeatSource { .. } => 0.0,
         };
         source[node] += amplitude;
     }

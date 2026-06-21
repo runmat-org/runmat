@@ -170,6 +170,8 @@ struct FeaLoadDocument {
     phase_rad: Option<f64>,
     #[serde(default)]
     amplitude_scale: Option<f64>,
+    #[serde(default)]
+    volumetric_w_per_m3: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -180,6 +182,7 @@ enum FeaLoadType {
     BodyForce,
     CurrentDensity,
     CoilCurrent,
+    HeatSource,
 }
 
 #[derive(Debug, Deserialize)]
@@ -499,6 +502,12 @@ fn resolve_load(
             current_a: required_f64(load.current_a, "coil_current.current_a")?,
             phase_rad: load.phase_rad.unwrap_or_default(),
             amplitude_scale: load.amplitude_scale.unwrap_or(1.0),
+        },
+        FeaLoadType::HeatSource => LoadKind::HeatSource {
+            volumetric_w_per_m3: required_f64(
+                load.volumetric_w_per_m3,
+                "heat_source.volumetric_w_per_m3",
+            )?,
         },
     };
     Ok(LoadCase {

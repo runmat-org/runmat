@@ -1165,6 +1165,32 @@ fn create_boundary_condition_object_from_args(args: Vec<Value>) -> BuiltinResult
                 "specific_impedance_pa_s_per_m",
             )?,
         },
+        "thermalprescribedtemperature" => BoundaryConditionKind::ThermalPrescribedTemperature {
+            temperature_k: remove_required_f64(
+                &mut fields,
+                BOUNDARY_CONDITION_NAME,
+                "temperature_k",
+            )?,
+        },
+        "thermalheatflux" => BoundaryConditionKind::ThermalHeatFlux {
+            heat_flux_w_per_m2: remove_required_f64(
+                &mut fields,
+                BOUNDARY_CONDITION_NAME,
+                "heat_flux_w_per_m2",
+            )?,
+        },
+        "thermalconvection" => BoundaryConditionKind::ThermalConvection {
+            ambient_temperature_k: remove_required_f64(
+                &mut fields,
+                BOUNDARY_CONDITION_NAME,
+                "ambient_temperature_k",
+            )?,
+            coefficient_w_per_m2k: remove_required_f64(
+                &mut fields,
+                BOUNDARY_CONDITION_NAME,
+                "coefficient_w_per_m2k",
+            )?,
+        },
         _ => parse_scalar_enum::<BoundaryConditionKind>(&kind_text, "BoundaryConditionKind")?,
     };
     reject_unknown_fields(BOUNDARY_CONDITION_NAME, fields)?;
@@ -1214,6 +1240,13 @@ fn create_load_case_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             current_a: remove_required_f64(&mut fields, LOAD_CASE_NAME, "current_a")?,
             phase_rad: remove_optional_f64(&mut fields, "phase_rad")?.unwrap_or_default(),
             amplitude_scale: remove_optional_f64(&mut fields, "amplitude_scale")?.unwrap_or(1.0),
+        },
+        "heatsource" => LoadKind::HeatSource {
+            volumetric_w_per_m3: remove_required_f64(
+                &mut fields,
+                LOAD_CASE_NAME,
+                "volumetric_w_per_m3",
+            )?,
         },
         other => {
             return Err(builtin_error(

@@ -287,6 +287,7 @@ pub fn assemble_linear_system(
             runmat_analysis_core::LoadKind::CoilCurrent { current_a, .. } => {
                 rhs[base] += *current_a * 1.0e-2;
             }
+            runmat_analysis_core::LoadKind::HeatSource { .. } => {}
         }
     }
 
