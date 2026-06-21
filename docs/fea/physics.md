@@ -2,7 +2,7 @@
 title: "Physics Families"
 category: "FEA"
 section: "13.4"
-last_updated: "June 10, 2026"
+last_updated: "June 21, 2026"
 ---
 
 # Physics Families
@@ -15,7 +15,7 @@ Choose the physics family from the engineering question. The selected model prof
 | --- | --- | --- |
 | Linear static structural | Static displacement and stress response. | `linear_static` |
 | Modal structural | Natural modes and modal frequencies. | `modal` |
-| Acoustic harmonic | Acoustic response from a harmonic/modal baseline. | `acoustic` |
+| Acoustic harmonic | Acoustic pressure and particle-velocity response from a damped Helmholtz domain graph. | `acoustic` |
 | Thermal standalone | Temperature response and thermal quality signals. | `thermal` |
 | Structural transient | Structural response over time. | `transient` |
 | Nonlinear structural | Nonlinear, plasticity, contact, or increment-controlled response. | `nonlinear` |
@@ -58,7 +58,7 @@ All families return common run fields: `run_id`, fields, diagnostics, quality ga
 
 | Payload | Used by |
 | --- | --- |
-| `modal_results` | Modal and acoustic paths. |
+| `modal_results` | Modal paths. |
 | `thermal_results` | Thermal and coupled thermal paths. |
 | `transient_results` | Transient, CFD, CHT, and FSI paths where applicable. |
 | `nonlinear_results` | Nonlinear structural paths. |
@@ -68,8 +68,8 @@ All families return common run fields: `run_id`, fields, diagnostics, quality ga
 
 A family can be implemented and tested without being production-grade for every engineering use. Current support varies by family:
 
-- dedicated solver-backed paths exist for several structural, thermal, nonlinear, transient, modal, and electromagnetic workflows,
-- acoustic, CFD, CHT, and FSI currently have baseline paths with typed diagnostics and payloads,
+- dedicated solver-backed paths exist for several structural, thermal, nonlinear, transient, modal, acoustic, and electromagnetic workflows,
+- CFD, CHT, and FSI currently have baseline paths with typed diagnostics and payloads,
 - V&V maturity depends on known-answer tests, convergence checks, independent references, and governed thresholds.
 
 Use [Current Status](/docs/fea/status) before relying on a family for a workflow, and use [Verification & Validation](/docs/fea/validation) for the evidence standard.

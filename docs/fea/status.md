@@ -2,7 +2,7 @@
 title: "Current Status"
 category: "FEA"
 section: "13.9"
-last_updated: "June 11, 2026"
+last_updated: "June 21, 2026"
 ---
 
 # Current Status
@@ -51,8 +51,8 @@ V&V levels are defined in [Verification & Validation](/docs/fea/validation).
 | Family | What works today | Evidence | V&V | Boundary |
 | --- | --- | --- | --- | --- |
 | Linear static structural | Dedicated structural linear-static run path, study support, result persistence, quality gates. | Runtime contracts, solver tests, persisted result tests, GPU fallback/parity fixtures. | L2, with limited known-answer checks. | Linear static assumptions only; needs broader analytic, patch, convergence, and independent-reference evidence for production claims. |
-| Modal structural | Dedicated modal run path with modal payloads. | Modal residual, orthogonality, separation, contract, and fixture tests. | L2. | Needs known eigenfrequency references, modal convergence, and external solver comparisons. |
-| Acoustic harmonic | Acoustic operation with damped Helmholtz pressure solve, typed acoustic fields, and residual diagnostics. | `fea.run_acoustic/v1` contracts and acoustic fixture coverage. | L1-L2 baseline. | Baseline still needs impedance/radiation boundary depth, known-answer references, and convergence evidence before production claims. |
+| Modal structural | Dedicated modal run path with modal payloads. | Governed modal residual, orthogonality, separation, contract, and fixture tests. | L2. | Needs repeated/near-repeated mode cases, known eigenfrequency references, convergence studies, and external solver comparisons. |
+| Acoustic harmonic | Acoustic operation with damped Helmholtz domain-graph pressure solve, typed acoustic fields, frequency-response fields, residual diagnostics, material/source/boundary validation, and known-answer gates. | `fea.run_acoustic/v1` contracts, acoustic fixture coverage, external-reference checks, and report-validator gates. | L2 baseline. | Baseline still needs broader impedance/radiation boundary depth, mesh-convergence evidence, and external acoustic references before production claims. |
 | Thermal standalone | Thermal run path with thermal payloads and diagnostics. | Thermal operation tests, stability/constitutive diagnostics, fixture coverage. | L1-L2. | Needs heat-equation references, convergence, and external thermal comparisons. |
 | Structural transient | Dedicated transient path with time controls and transient payloads. | Transient contracts, residual/energy diagnostics, CPU/GPU fixture coverage. | L2. | Needs time-integration known answers and time-step convergence. |
 | Nonlinear structural | Dedicated nonlinear path with increment, line-search, plasticity/contact, and quality signals. | Nonlinear contracts, reference fixtures, policy divergence tests, governance scripts. | L2. | Needs independent nonlinear, plasticity, and contact references. |
@@ -71,7 +71,8 @@ V&V levels are defined in [Verification & Validation](/docs/fea/validation).
 | `geometry.prep_for_analysis`, `geometry.prep_artifact_health` | Contracted, tested, artifact-backed, and governance-linked. |
 | `fea.create_model`, `fea.validate` | Contracted and tested. |
 | `fea.run_linear_static`, `fea.run_modal`, `fea.run_thermal`, `fea.run_transient`, `fea.run_nonlinear`, `fea.run_electromagnetic` | Contracted, tested, artifact-backed, and dedicated or family-specific paths. |
-| `fea.run_acoustic`, `fea.run_cfd`, `fea.run_cht`, `fea.run_fsi` | Contracted, tested, artifact-backed baseline paths. |
+| `fea.run_acoustic` | Contracted, tested, artifact-backed, and backed by acoustic-specific domain-graph, known-answer, and invalid-authoring gates. |
+| `fea.run_cfd`, `fea.run_cht`, `fea.run_fsi` | Contracted, tested, artifact-backed baseline paths with governed diagnostics and typed invalid-authoring/error coverage. |
 | `fea.results`, `fea.results_compare`, `fea.trends` | Contracted and tested. |
 | `fea.validate_study`, `fea.plan_study`, `fea.run_study` | Contracted, tested, and artifact-backed. |
 | `fea.validate_study_sweep`, `fea.plan_study_sweep`, `fea.run_study_sweep` | Contracted, tested, and artifact-backed. |

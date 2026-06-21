@@ -2,7 +2,7 @@
 title: "Verification & Validation"
 category: "FEA"
 section: "13.7"
-last_updated: "June 10, 2026"
+last_updated: "June 21, 2026"
 ---
 
 # Verification & Validation
@@ -70,14 +70,14 @@ The main gaps for production-grade claims are:
 | Family | Current maturity | Main missing evidence |
 | --- | --- | --- |
 | Linear static structural | L2, with limited known-answer checks | More analytic, patch, mesh convergence, and independent references. |
-| Modal structural | L2 | Known eigenfrequency references, modal convergence, external solver comparisons. |
+| Modal structural | L2 | Repeated/near-repeated mode cases, known eigenfrequency references, modal convergence studies, external solver comparisons. |
 | Thermal standalone | L1-L2 | Heat-equation known answers, convergence, external thermal references. |
 | Structural transient | L2 | Time integration known answers, conservation checks, time-step convergence. |
 | Nonlinear structural | L2 | Independent nonlinear, plasticity, and contact references with tolerance envelopes. |
 | Thermo-mechanical | L1-L2 | Coupled known-answer cases and independent thermo-mechanical references. |
 | Electro-thermal | L1-L2 | Coupled electrical/thermal references and conservation checks. |
 | Electromagnetic | L1-L2 | Maxwell field validation, source/boundary realization references, larger workload studies. |
-| Acoustic harmonic | L1-L2 baseline | Acoustic-specific validation and external acoustic references. |
+| Acoustic harmonic | L2 baseline | Broader impedance/radiation validation, mesh convergence, and external acoustic references. |
 | CFD | L1-L2 baseline | Canonical CFD benchmarks, conservation checks, independent fluid references. |
 | CHT | L1-L2 baseline | Coupled fluid/thermal benchmarks and independent CHT references. |
 | FSI | L1-L2 baseline | Two-way FSI benchmarks and independent FSI references. |
