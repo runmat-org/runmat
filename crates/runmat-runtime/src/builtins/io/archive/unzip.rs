@@ -1,6 +1,5 @@
 //! MATLAB-compatible `unzip` builtin for RunMat.
 
-#[cfg(target_arch = "wasm32")]
 use std::io::Cursor;
 use std::io::{ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -165,7 +164,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Archive extraction runs on the host filesystem and gathers path arguments before I/O.",
+    notes: "Archive extraction runs through the active filesystem provider and gathers path arguments before I/O.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::archive::unzip")]
@@ -288,27 +287,8 @@ async fn extract_remote_archive(
     url_text: &str,
     output_folder: &Path,
 ) -> BuiltinResult<Vec<String>> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let temp = download_archive_to_temp_file(url_text)?;
-        let file = std::fs::File::open(&temp.path).map_err(|err| {
-            unzip_error_with_source(
-                &UNZIP_ERROR_IO,
-                format!(
-                    "unzip: unable to open temporary archive '{}': {err}",
-                    temp.path.display()
-                ),
-                err,
-            )
-        })?;
-        extract_archive(file, output_folder).await
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let bytes = download_archive(url_text)?;
-        extract_archive(Cursor::new(bytes), output_folder).await
-    }
+    let bytes = download_archive(url_text)?;
+    extract_archive(Cursor::new(bytes), output_folder).await
 }
 
 fn value_to_string_scalar(
@@ -379,19 +359,7 @@ async fn resolve_output_folder(text: Option<&str>) -> BuiltinResult<PathBuf> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-struct TempArchive {
-    path: PathBuf,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl Drop for TempArchive {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn download_archive_to_temp_file(url_text: &str) -> BuiltinResult<TempArchive> {
+fn download_archive(url_text: &str) -> BuiltinResult<Vec<u8>> {
     let url = Url::parse(url_text).map_err(|err| {
         unzip_error_with_source(
             &UNZIP_ERROR_FILENAME,
@@ -438,17 +406,7 @@ fn download_archive_to_temp_file(url_text: &str) -> BuiltinResult<TempArchive> {
         ensure_compressed_size_within_limit(length)?;
     }
 
-    let temp_path = unique_temp_archive_path();
-    let mut out = std::fs::File::create(&temp_path).map_err(|err| {
-        unzip_error_with_source(
-            &UNZIP_ERROR_IO,
-            format!(
-                "unzip: unable to create temporary archive '{}': {err}",
-                temp_path.display()
-            ),
-            err,
-        )
-    })?;
+    let mut bytes = Vec::new();
     let mut downloaded = 0u64;
     let mut buffer = [0u8; 64 * 1024];
     loop {
@@ -466,29 +424,9 @@ fn download_archive_to_temp_file(url_text: &str) -> BuiltinResult<TempArchive> {
             unzip_error_with(&UNZIP_ERROR_HTTP, "unzip: downloaded archive is too large")
         })?;
         ensure_compressed_size_within_limit(downloaded)?;
-        out.write_all(&buffer[..read]).map_err(|err| {
-            unzip_error_with_source(
-                &UNZIP_ERROR_IO,
-                format!(
-                    "unzip: unable to write temporary archive '{}': {err}",
-                    temp_path.display()
-                ),
-                err,
-            )
-        })?;
+        bytes.extend_from_slice(&buffer[..read]);
     }
-    Ok(TempArchive { path: temp_path })
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn unique_temp_archive_path() -> PathBuf {
-    let mut path = std::env::temp_dir();
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    path.push(format!("runmat_unzip_{}_{}.zip", std::process::id(), nanos));
-    path
+    Ok(bytes)
 }
 
 #[cfg(target_arch = "wasm32")]

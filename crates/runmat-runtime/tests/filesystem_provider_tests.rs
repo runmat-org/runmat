@@ -1,17 +1,20 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use pollster::block_on;
-use runmat_builtins::{NumericDType, Tensor, Value};
+use runmat_builtins::{CellArray, NumericDType, Tensor, Value};
 use runmat_filesystem::{self as vfs, SandboxFsProvider};
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_filesystem::{RemoteFsConfig, RemoteFsProvider};
 use runmat_runtime::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 use runmat_runtime::call_builtin;
+use runmat_runtime::call_builtin_async_with_outputs;
 use std::convert::TryFrom;
+use std::io::{Cursor, Write};
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 use tempfile::tempdir;
+use zip::write::SimpleFileOptions;
 
 fn assert_status_one(value: Value, label: &str) {
     assert_eq!(value, Value::Num(1.0), "{label} should return success");
@@ -164,6 +167,156 @@ fn exercise_repl_filesystem_builtins_through_provider() {
     );
 }
 
+fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (name, bytes) in entries {
+        zip.start_file(name, options).expect("start zip entry");
+        zip.write_all(bytes).expect("write zip entry");
+    }
+    zip.finish().expect("finish zip").into_inner()
+}
+
+fn wav_bytes(sample_rate: u32, channels: u16, bits: u16, frames: u32) -> Vec<u8> {
+    let block_align = channels * (bits / 8);
+    let byte_rate = sample_rate * block_align as u32;
+    let data_size = frames * block_align as u32;
+    let riff_size = 36 + data_size;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&riff_size.to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&channels.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&byte_rate.to_le_bytes());
+    bytes.extend_from_slice(&block_align.to_le_bytes());
+    bytes.extend_from_slice(&bits.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_size.to_le_bytes());
+    bytes.resize(bytes.len() + data_size as usize, 0);
+    bytes
+}
+
+fn assert_struct_field(value: &Value, name: &str, expected: &Value) {
+    let Value::Struct(fields) = value else {
+        panic!("expected struct output, got {value:?}");
+    };
+    assert_eq!(
+        fields.fields.get(name),
+        Some(expected),
+        "field {name} should match"
+    );
+}
+
+fn exercise_recent_import_export_builtins_through_provider() {
+    call_builtin("mkdir", &[Value::from("fixtures")]).expect("mkdir fixtures succeeds");
+    call_builtin("mkdir", &[Value::from("exports")]).expect("mkdir exports succeeds");
+
+    block_on(vfs::write_async("fixtures/numeric.csv", b"1,2\n3,4\n"))
+        .expect("write importdata fixture through provider");
+    let imported = call_builtin(
+        "importdata",
+        &[Value::from("fixtures/numeric.csv"), Value::from(",")],
+    )
+    .expect("importdata succeeds");
+    assert_eq!(
+        imported,
+        Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap())
+    );
+
+    let cell = CellArray::new(
+        vec![
+            Value::Num(1.0),
+            Value::from("alpha"),
+            Value::Bool(true),
+            Value::Num(4.0),
+        ],
+        2,
+        2,
+    )
+    .expect("cell array");
+    call_builtin(
+        "writecell",
+        &[
+            Value::Cell(cell),
+            Value::from("exports/cells.csv"),
+            Value::from("Delimiter"),
+            Value::from(","),
+        ],
+    )
+    .expect("writecell succeeds");
+    let written = block_on(vfs::read_to_string_async("exports/cells.csv"))
+        .expect("read writecell output through provider");
+    assert_eq!(written, "1,\"alpha\"\n1,4\n");
+
+    block_on(vfs::write_async(
+        "fixtures/textscan.txt",
+        b"10 ten\n20 twenty\n",
+    ))
+    .expect("write textscan fixture through provider");
+    let fid = block_on(call_builtin_async_with_outputs(
+        "fopen",
+        &[Value::from("fixtures/textscan.txt"), Value::from("r")],
+        1,
+    ))
+    .expect("fopen succeeds");
+    let Value::OutputList(open_values) = fid else {
+        panic!("expected fopen output list");
+    };
+    let Value::Num(fid) = open_values[0] else {
+        panic!("expected numeric fid");
+    };
+    let scanned = call_builtin("textscan", &[Value::Num(fid), Value::from("%f %s")])
+        .expect("textscan succeeds");
+    let Value::Cell(scanned_cells) = scanned else {
+        panic!("expected textscan cell output");
+    };
+    assert_eq!(
+        scanned_cells.get(0, 0).expect("numeric column"),
+        Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap())
+    );
+    let Value::Cell(words) = scanned_cells.get(0, 1).expect("text column") else {
+        panic!("expected string column cell");
+    };
+    assert_eq!(words.get(0, 0).unwrap(), Value::from("ten"));
+    assert_eq!(words.get(1, 0).unwrap(), Value::from("twenty"));
+    call_builtin("fclose", &[Value::Num(fid)]).expect("fclose succeeds");
+
+    block_on(vfs::write_async(
+        "fixtures/sound.wav",
+        wav_bytes(44_100, 2, 16, 4),
+    ))
+    .expect("write wav fixture through provider");
+    let info = call_builtin("audioinfo", &[Value::from("fixtures/sound.wav")])
+        .expect("audioinfo succeeds");
+    assert_struct_field(&info, "Format", &Value::from("WAV"));
+    assert_struct_field(&info, "SampleRate", &Value::Num(44_100.0));
+    assert_struct_field(&info, "NumChannels", &Value::Num(2.0));
+
+    block_on(vfs::write_async(
+        "fixtures/archive.zip",
+        zip_bytes(&[("nested/data.txt", b"zipped")]),
+    ))
+    .expect("write zip fixture through provider");
+    call_builtin(
+        "unzip",
+        &[
+            Value::from("fixtures/archive.zip"),
+            Value::from("exports/unzipped"),
+        ],
+    )
+    .expect("unzip succeeds");
+    let extracted = block_on(vfs::read_to_string_async(
+        "exports/unzipped/nested/data.txt",
+    ))
+    .expect("read unzip output through provider");
+    assert_eq!(extracted, "zipped");
+}
+
 #[test]
 fn sandbox_provider_supports_repl_and_tabular_builtins() {
     let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
@@ -175,6 +328,7 @@ fn sandbox_provider_supports_repl_and_tabular_builtins() {
     let _guard = vfs::replace_provider(sandbox);
 
     exercise_repl_filesystem_builtins_through_provider();
+    exercise_recent_import_export_builtins_through_provider();
 
     call_builtin("mkdir", &[Value::from("reports")]).expect("mkdir succeeds");
 
