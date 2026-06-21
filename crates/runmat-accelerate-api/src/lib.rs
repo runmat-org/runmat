@@ -254,6 +254,23 @@ pub struct ProviderSpectralResult {
     pub cols: usize,
 }
 
+pub async fn uniform_spectral_estimate(
+    request: ProviderSpectralRequest<'_>,
+) -> anyhow::Result<ProviderSpectralResult> {
+    if request.window.is_empty()
+        || request.nfft == 0
+        || request.frame_count == 0
+        || !request.denominator.is_finite()
+        || request.denominator <= 0.0
+    {
+        return Err(anyhow!("uniform_spectral_estimate: invalid request"));
+    }
+
+    let provider =
+        provider().ok_or_else(|| anyhow!("uniform_spectral_estimate: GPU provider unavailable"))?;
+    provider.uniform_spectral_estimate(&request).await
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ApiDeviceInfo {
     pub device_id: u32,
