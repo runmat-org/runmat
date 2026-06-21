@@ -4,18 +4,21 @@ use std::collections::HashMap;
 use std::io::{BufReader, Cursor, Read};
 use std::path::{Path, PathBuf};
 
+use flate2::read::ZlibDecoder;
 use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, StringArray, StructValue, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, LogicalArray, NumericDType, SparseTensor, StringArray,
+    StructValue, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
 use super::format::{
-    MatArray, MatClass, MatData, FLAG_COMPLEX, FLAG_LOGICAL, MAT_HEADER_LEN, MI_DOUBLE, MI_INT32,
-    MI_INT8, MI_MATRIX, MI_UINT16, MI_UINT32, MI_UINT8,
+    MatArray, MatClass, MatData, FLAG_COMPLEX, FLAG_LOGICAL, MAT_HEADER_LEN, MI_COMPRESSED,
+    MI_DOUBLE, MI_INT16, MI_INT32, MI_INT64, MI_INT8, MI_MATRIX, MI_SINGLE, MI_UINT16, MI_UINT32,
+    MI_UINT64, MI_UINT8, MI_UTF16, MI_UTF32, MI_UTF8,
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -537,6 +540,70 @@ pub fn decode_workspace_from_mat_bytes(bytes: &[u8]) -> BuiltinResult<Vec<(Strin
     read_mat_reader(&mut cursor)
 }
 
+#[derive(Clone, Copy, Debug)]
+enum Endian {
+    Little,
+    Big,
+}
+
+impl Endian {
+    fn read_u16(self, bytes: &[u8]) -> u16 {
+        match self {
+            Endian::Little => u16::from_le_bytes(bytes.try_into().unwrap()),
+            Endian::Big => u16::from_be_bytes(bytes.try_into().unwrap()),
+        }
+    }
+
+    fn read_i16(self, bytes: &[u8]) -> i16 {
+        match self {
+            Endian::Little => i16::from_le_bytes(bytes.try_into().unwrap()),
+            Endian::Big => i16::from_be_bytes(bytes.try_into().unwrap()),
+        }
+    }
+
+    fn read_u32(self, bytes: &[u8]) -> u32 {
+        match self {
+            Endian::Little => u32::from_le_bytes(bytes.try_into().unwrap()),
+            Endian::Big => u32::from_be_bytes(bytes.try_into().unwrap()),
+        }
+    }
+
+    fn read_i32(self, bytes: &[u8]) -> i32 {
+        match self {
+            Endian::Little => i32::from_le_bytes(bytes.try_into().unwrap()),
+            Endian::Big => i32::from_be_bytes(bytes.try_into().unwrap()),
+        }
+    }
+
+    fn read_u64(self, bytes: &[u8]) -> u64 {
+        match self {
+            Endian::Little => u64::from_le_bytes(bytes.try_into().unwrap()),
+            Endian::Big => u64::from_be_bytes(bytes.try_into().unwrap()),
+        }
+    }
+
+    fn read_i64(self, bytes: &[u8]) -> i64 {
+        match self {
+            Endian::Little => i64::from_le_bytes(bytes.try_into().unwrap()),
+            Endian::Big => i64::from_be_bytes(bytes.try_into().unwrap()),
+        }
+    }
+
+    fn read_f32(self, bytes: &[u8]) -> f32 {
+        match self {
+            Endian::Little => f32::from_le_bytes(bytes.try_into().unwrap()),
+            Endian::Big => f32::from_be_bytes(bytes.try_into().unwrap()),
+        }
+    }
+
+    fn read_f64(self, bytes: &[u8]) -> f64 {
+        match self {
+            Endian::Little => f64::from_le_bytes(bytes.try_into().unwrap()),
+            Endian::Big => f64::from_be_bytes(bytes.try_into().unwrap()),
+        }
+    }
+}
+
 fn read_mat_reader<R: Read>(reader: &mut R) -> BuiltinResult<Vec<(String, Value)>> {
     let mut header = [0u8; MAT_HEADER_LEN];
     reader.read_exact(&mut header).map_err(|err| {
@@ -546,18 +613,50 @@ fn read_mat_reader<R: Read>(reader: &mut R) -> BuiltinResult<Vec<(String, Value)
             err,
         )
     })?;
-    if header[126] != b'I' || header[127] != b'M' {
-        return Err(load_error("load: file is not a MATLAB Level-5 MAT-file"));
+
+    let description = String::from_utf8_lossy(&header[..116]);
+    if description.contains("MATLAB 7.3") || header.starts_with(b"\x89HDF\r\n\x1a\n") {
+        return Err(load_error(
+            "load: MATLAB v7.3 MAT-files are HDF5-backed and are not supported yet",
+        ));
     }
 
+    let endian = match (header[126], header[127]) {
+        (b'I', b'M') => Endian::Little,
+        (b'M', b'I') => Endian::Big,
+        _ => return Err(load_error("load: file is not a MATLAB Level-5 MAT-file")),
+    };
+
+    read_variables_from_elements(reader, endian)
+}
+
+fn read_variables_from_elements<R: Read>(
+    reader: &mut R,
+    endian: Endian,
+) -> BuiltinResult<Vec<(String, Value)>> {
     let mut variables = Vec::new();
-    while let Some(tagged) = read_tagged(reader, true)? {
-        if tagged.data_type != MI_MATRIX {
-            continue;
+    while let Some(tagged) = read_tagged(reader, true, endian)? {
+        match tagged.data_type {
+            MI_MATRIX => {
+                let parsed = parse_matrix(&tagged.data, endian)?;
+                let value = mat_array_to_value(parsed.array)?;
+                variables.push((parsed.name, value));
+            }
+            MI_COMPRESSED => {
+                let mut decoder = ZlibDecoder::new(Cursor::new(tagged.data));
+                let mut inflated = Vec::new();
+                decoder.read_to_end(&mut inflated).map_err(|err| {
+                    load_error_with_source(
+                        &LOAD_ERROR_IO,
+                        format!("load: failed to decompress MAT element: {err}"),
+                        err,
+                    )
+                })?;
+                let mut cursor = Cursor::new(inflated);
+                variables.extend(read_variables_from_elements(&mut cursor, endian)?);
+            }
+            _ => continue,
         }
-        let parsed = parse_matrix(&tagged.data)?;
-        let value = mat_array_to_value(parsed.array)?;
-        variables.push((parsed.name, value));
     }
     Ok(variables)
 }
@@ -567,25 +666,25 @@ struct ParsedMatrix {
     array: MatArray,
 }
 
-fn parse_matrix(buffer: &[u8]) -> BuiltinResult<ParsedMatrix> {
+fn parse_matrix(buffer: &[u8], endian: Endian) -> BuiltinResult<ParsedMatrix> {
     let mut cursor = Cursor::new(buffer);
 
-    let flags = read_tagged(&mut cursor, false)?
+    let flags = read_tagged(&mut cursor, false, endian)?
         .ok_or_else(|| load_error("load: matrix element missing array flags"))?;
     if flags.data_type != MI_UINT32 || flags.data.len() < 8 {
         return Err(load_error("load: invalid array flags block"));
     }
-    let flags0 = u32::from_le_bytes(flags.data[0..4].try_into().unwrap());
+    let flags0 = endian.read_u32(&flags.data[0..4]);
     let class_code = flags0 & 0xFF;
     let mut class = MatClass::from_class_code(class_code)
         .ok_or_else(|| load_error("load: unsupported MATLAB class"))?;
     let is_logical = (flags0 & FLAG_LOGICAL) != 0;
     let has_imag = (flags0 & FLAG_COMPLEX) != 0;
-    if matches!(class, MatClass::Double) && is_logical {
+    if is_logical {
         class = MatClass::Logical;
     }
 
-    let dims_elem = read_tagged(&mut cursor, false)?
+    let dims_elem = read_tagged(&mut cursor, false, endian)?
         .ok_or_else(|| load_error("load: matrix element missing dimensions"))?;
     if dims_elem.data_type != MI_INT32 {
         return Err(load_error("load: dimension block must use MI_INT32"));
@@ -595,7 +694,7 @@ fn parse_matrix(buffer: &[u8]) -> BuiltinResult<ParsedMatrix> {
     }
     let mut dims = Vec::with_capacity(dims_elem.data.len() / 4);
     for chunk in dims_elem.data.chunks_exact(4) {
-        let value = i32::from_le_bytes(chunk.try_into().unwrap());
+        let value = endian.read_i32(chunk);
         if value < 0 {
             return Err(load_error("load: negative dimensions are not supported"));
         }
@@ -606,14 +705,14 @@ fn parse_matrix(buffer: &[u8]) -> BuiltinResult<ParsedMatrix> {
         dims.push(1);
     }
 
-    let name_elem = read_tagged(&mut cursor, false)?
+    let name_elem = read_tagged(&mut cursor, false, endian)?
         .ok_or_else(|| load_error("load: matrix element missing name"))?;
     let name = match name_elem.data_type {
         MI_INT8 | MI_UINT8 => bytes_to_string(&name_elem.data),
-        MI_UINT16 => {
+        MI_UINT16 | MI_UTF16 => {
             let mut bytes = Vec::with_capacity(name_elem.data.len());
             for chunk in name_elem.data.chunks_exact(2) {
-                let code = u16::from_le_bytes(chunk.try_into().unwrap());
+                let code = endian.read_u16(chunk);
                 if code == 0 {
                     break;
                 }
@@ -629,83 +728,80 @@ fn parse_matrix(buffer: &[u8]) -> BuiltinResult<ParsedMatrix> {
     };
 
     let array = match class {
-        MatClass::Double => parse_double_array(&mut cursor, dims, has_imag)?,
-        MatClass::Logical => parse_logical_array(&mut cursor, dims)?,
-        MatClass::Char => parse_char_array(&mut cursor, dims)?,
-        MatClass::Cell => parse_cell_array(&mut cursor, dims)?,
-        MatClass::Struct => parse_struct(&mut cursor, dims)?,
+        MatClass::Double => parse_numeric_array(&mut cursor, class, dims, has_imag, endian)?,
+        MatClass::Single
+        | MatClass::Int8
+        | MatClass::UInt8
+        | MatClass::Int16
+        | MatClass::UInt16
+        | MatClass::Int32
+        | MatClass::UInt32
+        | MatClass::Int64
+        | MatClass::UInt64 => parse_numeric_array(&mut cursor, class, dims, has_imag, endian)?,
+        MatClass::Logical => parse_logical_array(&mut cursor, dims, endian)?,
+        MatClass::Char => parse_char_array(&mut cursor, dims, endian)?,
+        MatClass::Cell => parse_cell_array(&mut cursor, dims, endian)?,
+        MatClass::Struct => parse_struct(&mut cursor, dims, endian)?,
+        MatClass::Sparse => parse_sparse_array(&mut cursor, dims, has_imag, endian)?,
     };
 
     Ok(ParsedMatrix { name, array })
 }
 
-fn parse_double_array(
+fn parse_numeric_array(
     cursor: &mut Cursor<&[u8]>,
+    class: MatClass,
     dims: Vec<usize>,
     has_imag: bool,
+    endian: Endian,
 ) -> BuiltinResult<MatArray> {
-    let real_elem = read_tagged(cursor, false)?
+    let real_elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: numeric array missing real component"))?;
-    if real_elem.data_type != MI_DOUBLE || real_elem.data.len() % 8 != 0 {
-        return Err(load_error("load: numeric data must be stored as MI_DOUBLE"));
-    }
-    let mut real = Vec::with_capacity(real_elem.data.len() / 8);
-    for chunk in real_elem.data.chunks_exact(8) {
-        real.push(f64::from_le_bytes(chunk.try_into().unwrap()));
-    }
+    let real = decode_numeric_values(&real_elem, endian)?;
 
     let imag = if has_imag {
-        let imag_elem = read_tagged(cursor, false)?
+        let imag_elem = read_tagged(cursor, false, endian)?
             .ok_or_else(|| load_error("load: numeric array missing imaginary component"))?;
-        if imag_elem.data_type != MI_DOUBLE || imag_elem.data.len() % 8 != 0 {
-            return Err(load_error("load: imaginary component must be MI_DOUBLE"));
-        }
-        let mut imag = Vec::with_capacity(imag_elem.data.len() / 8);
-        for chunk in imag_elem.data.chunks_exact(8) {
-            imag.push(f64::from_le_bytes(chunk.try_into().unwrap()));
-        }
-        Some(imag)
+        Some(decode_numeric_values(&imag_elem, endian)?)
     } else {
         None
     };
 
-    Ok(MatArray {
-        class: MatClass::Double,
-        dims,
-        data: MatData::Double { real, imag },
-    })
+    let data = if class == MatClass::Double {
+        MatData::Double { real, imag }
+    } else {
+        MatData::Numeric { real, imag }
+    };
+
+    Ok(MatArray { class, dims, data })
 }
 
-fn parse_logical_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> BuiltinResult<MatArray> {
-    let elem = read_tagged(cursor, false)?
+fn parse_logical_array(
+    cursor: &mut Cursor<&[u8]>,
+    dims: Vec<usize>,
+    endian: Endian,
+) -> BuiltinResult<MatArray> {
+    let elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: logical array missing data block"))?;
-    if elem.data_type != MI_UINT8 {
-        return Err(load_error(
-            "load: logical arrays must be stored as MI_UINT8",
-        ));
-    }
+    let data = decode_numeric_values(&elem, endian)?
+        .into_iter()
+        .map(|v| if v != 0.0 { 1 } else { 0 })
+        .collect();
     Ok(MatArray {
         class: MatClass::Logical,
         dims,
-        data: MatData::Logical { data: elem.data },
+        data: MatData::Logical { data },
     })
 }
 
-fn parse_char_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> BuiltinResult<MatArray> {
-    let elem = read_tagged(cursor, false)?
+fn parse_char_array(
+    cursor: &mut Cursor<&[u8]>,
+    dims: Vec<usize>,
+    endian: Endian,
+) -> BuiltinResult<MatArray> {
+    let elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: character array missing data block"))?;
-    if elem.data_type != MI_UINT16 {
-        return Err(load_error(
-            "load: character data must be stored as MI_UINT16",
-        ));
-    }
-    if elem.data.len() % 2 != 0 {
-        return Err(load_error("load: malformed character data"));
-    }
-    let mut data = Vec::with_capacity(elem.data.len() / 2);
-    for chunk in elem.data.chunks_exact(2) {
-        data.push(u16::from_le_bytes(chunk.try_into().unwrap()));
-    }
+    let data = decode_char_codes(&elem, endian)?;
     Ok(MatArray {
         class: MatClass::Char,
         dims,
@@ -713,19 +809,23 @@ fn parse_char_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> BuiltinResu
     })
 }
 
-fn parse_cell_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> BuiltinResult<MatArray> {
+fn parse_cell_array(
+    cursor: &mut Cursor<&[u8]>,
+    dims: Vec<usize>,
+    endian: Endian,
+) -> BuiltinResult<MatArray> {
     let total: usize = dims
         .iter()
         .copied()
         .fold(1usize, |acc, d| acc.saturating_mul(d));
     let mut elements = Vec::with_capacity(total);
     for _ in 0..total {
-        let elem = read_tagged(cursor, false)?
+        let elem = read_tagged(cursor, false, endian)?
             .ok_or_else(|| load_error("load: cell element missing matrix payload"))?;
         if elem.data_type != MI_MATRIX {
             return Err(load_error("load: cell elements must be matrices"));
         }
-        let parsed = parse_matrix(&elem.data)?;
+        let parsed = parse_matrix(&elem.data, endian)?;
         elements.push(parsed.array);
     }
     Ok(MatArray {
@@ -735,21 +835,25 @@ fn parse_cell_array(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> BuiltinResu
     })
 }
 
-fn parse_struct(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> BuiltinResult<MatArray> {
+fn parse_struct(
+    cursor: &mut Cursor<&[u8]>,
+    dims: Vec<usize>,
+    endian: Endian,
+) -> BuiltinResult<MatArray> {
     if dims.len() != 2 || dims[0] != 1 || dims[1] != 1 {
         return Err(load_error("load: struct arrays are not supported yet"));
     }
-    let len_elem = read_tagged(cursor, false)?
+    let len_elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: struct missing maximum field length specifier"))?;
     if len_elem.data_type != MI_INT32 || len_elem.data.len() != 4 {
         return Err(load_error("load: struct field length must be MI_INT32"));
     }
-    let max_len = i32::from_le_bytes(len_elem.data[..4].try_into().unwrap());
+    let max_len = endian.read_i32(&len_elem.data[..4]);
     if max_len <= 0 {
         return Err(load_error("load: struct field length must be positive"));
     }
 
-    let names_elem = read_tagged(cursor, false)?
+    let names_elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: struct missing field name table"))?;
     if names_elem.data_type != MI_INT8 && names_elem.data_type != MI_UINT8 {
         return Err(load_error(
@@ -770,12 +874,12 @@ fn parse_struct(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> BuiltinResult<M
 
     let mut field_values = Vec::with_capacity(field_count);
     for _ in 0..field_count {
-        let elem = read_tagged(cursor, false)?
+        let elem = read_tagged(cursor, false, endian)?
             .ok_or_else(|| load_error("load: struct field missing matrix payload"))?;
         if elem.data_type != MI_MATRIX {
             return Err(load_error("load: struct fields must be matrices"));
         }
-        let parsed = parse_matrix(&elem.data)?;
+        let parsed = parse_matrix(&elem.data, endian)?;
         field_values.push(parsed.array);
     }
 
@@ -787,6 +891,196 @@ fn parse_struct(cursor: &mut Cursor<&[u8]>, dims: Vec<usize>) -> BuiltinResult<M
             field_values,
         },
     })
+}
+
+fn parse_sparse_array(
+    cursor: &mut Cursor<&[u8]>,
+    dims: Vec<usize>,
+    has_imag: bool,
+    endian: Endian,
+) -> BuiltinResult<MatArray> {
+    if has_imag {
+        return Err(load_error(
+            "load: complex sparse MAT arrays are not supported yet",
+        ));
+    }
+    let rows = dims.first().copied().unwrap_or(0);
+    let cols = dims.get(1).copied().unwrap_or(0);
+
+    let ir_elem = read_tagged(cursor, false, endian)?
+        .ok_or_else(|| load_error("load: sparse array missing row indices"))?;
+    let row_indices = decode_index_values(&ir_elem, endian, "sparse row indices")?;
+
+    let jc_elem = read_tagged(cursor, false, endian)?
+        .ok_or_else(|| load_error("load: sparse array missing column pointers"))?;
+    let col_ptrs = decode_index_values(&jc_elem, endian, "sparse column pointers")?;
+
+    let real_elem = read_tagged(cursor, false, endian)?
+        .ok_or_else(|| load_error("load: sparse array missing values"))?;
+    let values = decode_numeric_values(&real_elem, endian)?;
+
+    Ok(MatArray {
+        class: MatClass::Sparse,
+        dims,
+        data: MatData::Sparse {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            values,
+        },
+    })
+}
+
+fn decode_numeric_values(elem: &TaggedData, endian: Endian) -> BuiltinResult<Vec<f64>> {
+    let data = &elem.data;
+    match elem.data_type {
+        MI_INT8 => Ok(data.iter().map(|v| (*v as i8) as f64).collect()),
+        MI_UINT8 => Ok(data.iter().map(|v| *v as f64).collect()),
+        MI_INT16 => {
+            ensure_data_width(data, 2, "numeric int16 data")?;
+            Ok(data
+                .chunks_exact(2)
+                .map(|chunk| endian.read_i16(chunk) as f64)
+                .collect())
+        }
+        MI_UINT16 => {
+            ensure_data_width(data, 2, "numeric uint16 data")?;
+            Ok(data
+                .chunks_exact(2)
+                .map(|chunk| endian.read_u16(chunk) as f64)
+                .collect())
+        }
+        MI_INT32 => {
+            ensure_data_width(data, 4, "numeric int32 data")?;
+            Ok(data
+                .chunks_exact(4)
+                .map(|chunk| endian.read_i32(chunk) as f64)
+                .collect())
+        }
+        MI_UINT32 => {
+            ensure_data_width(data, 4, "numeric uint32 data")?;
+            Ok(data
+                .chunks_exact(4)
+                .map(|chunk| endian.read_u32(chunk) as f64)
+                .collect())
+        }
+        MI_SINGLE => {
+            ensure_data_width(data, 4, "numeric single data")?;
+            Ok(data
+                .chunks_exact(4)
+                .map(|chunk| endian.read_f32(chunk) as f64)
+                .collect())
+        }
+        MI_DOUBLE => {
+            ensure_data_width(data, 8, "numeric double data")?;
+            Ok(data
+                .chunks_exact(8)
+                .map(|chunk| endian.read_f64(chunk))
+                .collect())
+        }
+        MI_INT64 => {
+            ensure_data_width(data, 8, "numeric int64 data")?;
+            Ok(data
+                .chunks_exact(8)
+                .map(|chunk| endian.read_i64(chunk) as f64)
+                .collect())
+        }
+        MI_UINT64 => {
+            ensure_data_width(data, 8, "numeric uint64 data")?;
+            Ok(data
+                .chunks_exact(8)
+                .map(|chunk| endian.read_u64(chunk) as f64)
+                .collect())
+        }
+        _ => Err(load_error(format!(
+            "load: unsupported numeric data type {}",
+            elem.data_type
+        ))),
+    }
+}
+
+fn decode_char_codes(elem: &TaggedData, endian: Endian) -> BuiltinResult<Vec<u16>> {
+    match elem.data_type {
+        MI_INT8 | MI_UINT8 | MI_UTF8 => {
+            let text = String::from_utf8_lossy(&elem.data);
+            Ok(text
+                .chars()
+                .map(|ch| {
+                    if ch as u32 <= u16::MAX as u32 {
+                        ch as u16
+                    } else {
+                        0xFFFD
+                    }
+                })
+                .collect())
+        }
+        MI_UINT16 | MI_UTF16 => {
+            ensure_data_width(&elem.data, 2, "character UTF-16 data")?;
+            Ok(elem
+                .data
+                .chunks_exact(2)
+                .map(|chunk| endian.read_u16(chunk))
+                .collect())
+        }
+        MI_UTF32 => {
+            ensure_data_width(&elem.data, 4, "character UTF-32 data")?;
+            Ok(elem
+                .data
+                .chunks_exact(4)
+                .map(|chunk| {
+                    let code = endian.read_u32(chunk);
+                    if code <= u16::MAX as u32 {
+                        code as u16
+                    } else {
+                        0xFFFD
+                    }
+                })
+                .collect())
+        }
+        _ => Err(load_error("load: unsupported character data encoding")),
+    }
+}
+
+fn decode_index_values(
+    elem: &TaggedData,
+    endian: Endian,
+    label: &str,
+) -> BuiltinResult<Vec<usize>> {
+    match elem.data_type {
+        MI_INT32 => {
+            ensure_data_width(&elem.data, 4, label)?;
+            let mut out = Vec::with_capacity(elem.data.len() / 4);
+            for chunk in elem.data.chunks_exact(4) {
+                let value = endian.read_i32(chunk);
+                if value < 0 {
+                    return Err(load_error(format!(
+                        "load: {label} contain a negative index"
+                    )));
+                }
+                out.push(value as usize);
+            }
+            Ok(out)
+        }
+        MI_UINT32 => {
+            ensure_data_width(&elem.data, 4, label)?;
+            Ok(elem
+                .data
+                .chunks_exact(4)
+                .map(|chunk| endian.read_u32(chunk) as usize)
+                .collect())
+        }
+        _ => Err(load_error(format!(
+            "load: {label} must be MI_INT32/MI_UINT32"
+        ))),
+    }
+}
+
+fn ensure_data_width(data: &[u8], width: usize, label: &str) -> BuiltinResult<()> {
+    if data.len() % width != 0 {
+        return Err(load_error(format!("load: malformed {label}")));
+    }
+    Ok(())
 }
 
 fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
@@ -817,6 +1111,35 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
                     .map_err(|e| load_error(format!("load: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
+        }
+        MatData::Numeric { real, imag } => {
+            let len = real.len();
+            if let Some(imag) = imag {
+                if imag.len() != len {
+                    return Err(load_error(
+                        "load: complex data has mismatched real/imag parts",
+                    ));
+                }
+                if len == 1 {
+                    return Ok(Value::Complex(real[0], imag[0]));
+                }
+                let pairs: Vec<(f64, f64)> = real.into_iter().zip(imag).collect();
+                let tensor = ComplexTensor::new(pairs, array.dims.clone())
+                    .map_err(|e| load_error(format!("load: {e}")))?;
+                return Ok(Value::ComplexTensor(tensor));
+            }
+
+            if len == 1 {
+                if let Some(value) = numeric_scalar_to_int_value(array.class, real[0]) {
+                    return Ok(value);
+                }
+                return Ok(Value::Num(real[0]));
+            }
+
+            let dtype = numeric_tensor_dtype(array.class);
+            let tensor = Tensor::new_with_dtype(real, array.dims.clone(), dtype)
+                .map_err(|e| load_error(format!("load: {e}")))?;
+            Ok(Value::Tensor(tensor))
         }
         MatData::Logical { data } => {
             let total: usize = array
@@ -892,6 +1215,40 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
             }
             Ok(Value::Struct(st))
         }
+        MatData::Sparse {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            values,
+        } => {
+            let sparse = SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
+                .map_err(|e| load_error(format!("load: {e}")))?;
+            Ok(Value::SparseTensor(sparse))
+        }
+    }
+}
+
+fn numeric_scalar_to_int_value(class: MatClass, value: f64) -> Option<Value> {
+    match class {
+        MatClass::Int8 => Some(Value::Int(IntValue::I8(value as i8))),
+        MatClass::UInt8 => Some(Value::Int(IntValue::U8(value as u8))),
+        MatClass::Int16 => Some(Value::Int(IntValue::I16(value as i16))),
+        MatClass::UInt16 => Some(Value::Int(IntValue::U16(value as u16))),
+        MatClass::Int32 => Some(Value::Int(IntValue::I32(value as i32))),
+        MatClass::UInt32 => Some(Value::Int(IntValue::U32(value as u32))),
+        MatClass::Int64 => Some(Value::Int(IntValue::I64(value as i64))),
+        MatClass::UInt64 => Some(Value::Int(IntValue::U64(value as u64))),
+        _ => None,
+    }
+}
+
+fn numeric_tensor_dtype(class: MatClass) -> NumericDType {
+    match class {
+        MatClass::Single => NumericDType::F32,
+        MatClass::UInt8 => NumericDType::U8,
+        MatClass::UInt16 => NumericDType::U16,
+        _ => NumericDType::F64,
     }
 }
 
@@ -996,7 +1353,11 @@ struct TaggedData {
     data: Vec<u8>,
 }
 
-fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> BuiltinResult<Option<TaggedData>> {
+fn read_tagged<R: Read>(
+    reader: &mut R,
+    allow_eof: bool,
+    endian: Endian,
+) -> BuiltinResult<Option<TaggedData>> {
     let mut type_bytes = [0u8; 4];
     match reader.read_exact(&mut type_bytes) {
         Ok(()) => {}
@@ -1012,10 +1373,20 @@ fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> BuiltinResult<Option
         }
     }
 
-    let type_field = u32::from_le_bytes(type_bytes);
-    if (type_field & 0xFFFF0000) != 0 {
-        let data_type = type_field & 0x0000FFFF;
-        let num_bytes = ((type_field & 0xFFFF0000) >> 16) as usize;
+    if allow_eof && type_bytes == [0; 4] {
+        return Ok(None);
+    }
+
+    let type_field = endian.read_u32(&type_bytes);
+    let high = (type_field >> 16) & 0xFFFF;
+    let low = type_field & 0xFFFF;
+    let small = match endian {
+        Endian::Little if high != 0 => Some((low, high as usize)),
+        Endian::Big if high != 0 && low <= 4 => Some((high, low as usize)),
+        _ => None,
+    };
+
+    if let Some((data_type, num_bytes)) = small {
         let mut inline = [0u8; 4];
         reader.read_exact(&mut inline).map_err(|err| {
             load_error_with_source(
@@ -1036,7 +1407,7 @@ fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> BuiltinResult<Option
                 err,
             )
         })?;
-        let length = u32::from_le_bytes(len_bytes) as usize;
+        let length = endian.read_u32(&len_bytes) as usize;
         let mut data = vec![0u8; length];
         reader.read_exact(&mut data).map_err(|err| {
             load_error_with_source(
@@ -1045,7 +1416,11 @@ fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> BuiltinResult<Option
                 err,
             )
         })?;
-        let padding = (8 - (length % 8)) % 8;
+        let padding = if type_field == MI_COMPRESSED {
+            0
+        } else {
+            (8 - (length % 8)) % 8
+        };
         if padding != 0 {
             let mut pad = vec![0u8; padding];
             reader.read_exact(&mut pad).map_err(|err| {
@@ -1066,12 +1441,16 @@ fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> BuiltinResult<Option
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::io::mat::save::encode_workspace_to_mat_bytes;
     use crate::workspace::WorkspaceResolver;
+    use flate2::write::ZlibEncoder;
+    use flate2::Compression;
     use futures::executor::block_on;
     use runmat_builtins::StringArray;
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;
+    use std::io::Write;
     use tempfile::tempdir;
 
     runmat_thread_local! {
@@ -1119,6 +1498,23 @@ pub(crate) mod tests {
             }
             Ok(_) => panic!("expected error containing '{snippet}'"),
         }
+    }
+
+    fn wrap_payload_as_compressed(mat_bytes: &[u8]) -> Vec<u8> {
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&mat_bytes[MAT_HEADER_LEN..]).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut out = mat_bytes[..MAT_HEADER_LEN].to_vec();
+        out.extend_from_slice(&MI_COMPRESSED.to_le_bytes());
+        out.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+        out.extend_from_slice(&compressed);
+        out
+    }
+
+    fn load_entries_from_bytes(bytes: Vec<u8>) -> Vec<(String, Value)> {
+        let mut cursor = Cursor::new(bytes);
+        read_mat_reader(&mut cursor).expect("read MAT bytes")
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1285,6 +1681,77 @@ pub(crate) mod tests {
             }
             other => panic!("expected struct, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn load_compressed_level5_payload() {
+        let mat_bytes = block_on(encode_workspace_to_mat_bytes(&[
+            ("A".to_string(), Value::Num(123.0)),
+            ("B".to_string(), Value::from("text")),
+        ]))
+        .unwrap();
+        let compressed = wrap_payload_as_compressed(&mat_bytes);
+
+        let entries = load_entries_from_bytes(compressed);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, "A");
+        assert!(matches!(entries[0].1, Value::Num(123.0)));
+        assert_eq!(entries[1].0, "B");
+        match &entries[1].1 {
+            Value::CharArray(ca) => assert_eq!(ca.data.iter().collect::<String>(), "text"),
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn load_preserves_supported_numeric_mat_classes() {
+        let single = Tensor::new_with_dtype(vec![1.5, 2.5], vec![1, 2], NumericDType::F32)
+            .expect("single tensor");
+        let uint16 = Tensor::new_with_dtype(vec![10.0, 20.0], vec![1, 2], NumericDType::U16)
+            .expect("uint16 tensor");
+        let bytes = block_on(encode_workspace_to_mat_bytes(&[
+            ("s".to_string(), Value::Tensor(single)),
+            ("u16".to_string(), Value::Tensor(uint16)),
+            ("i".to_string(), Value::Int(IntValue::I16(-7))),
+        ]))
+        .unwrap();
+
+        let entries = load_entries_from_bytes(bytes);
+        let values: HashMap<_, _> = entries.into_iter().collect();
+        match values.get("s").unwrap() {
+            Value::Tensor(t) => {
+                assert_eq!(t.dtype, NumericDType::F32);
+                assert_eq!(t.data, vec![1.5, 2.5]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        match values.get("u16").unwrap() {
+            Value::Tensor(t) => {
+                assert_eq!(t.dtype, NumericDType::U16);
+                assert_eq!(t.data, vec![10.0, 20.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        assert_eq!(values.get("i"), Some(&Value::Int(IntValue::I16(-7))));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn load_save_real_sparse_roundtrip() {
+        let sparse = SparseTensor::new(3, 3, vec![0, 1, 1, 3], vec![1, 0, 2], vec![4.0, 5.0, 6.0])
+            .expect("sparse");
+        let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+            "S".to_string(),
+            Value::SparseTensor(sparse.clone()),
+        )]))
+        .unwrap();
+
+        let entries = load_entries_from_bytes(bytes);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, "S");
+        assert_eq!(entries[0].1, Value::SparseTensor(sparse));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -39,6 +39,7 @@ nalgebra = "0.32"
 rustfft = "6.2"
 futures = "0.3"
 async-recursion = "1.1"
+flate2 = "1.1"
 
 # BLAS/LAPACK bindings for high-performance linear algebra (optional)
 blas = { version = "0.22", optional = true }
