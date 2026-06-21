@@ -4987,8 +4987,11 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
 
     assert_eq!(envelope.operation, "fea.run_fsi");
     assert_eq!(envelope.op_version, "fea.run_fsi/v1");
-    assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
-    assert!(envelope.data.transient_results.is_some());
+    assert_eq!(
+        envelope.data.run.solver_method,
+        "fsi_partitioned_projection"
+    );
+    assert!(envelope.data.transient_results.is_none());
     assert!(envelope.data.thermal_results.is_none());
     assert!(envelope
         .data
@@ -5001,18 +5004,22 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         .run
         .diagnostics
         .iter()
+        .any(|diag| diag.code == "FEA_CFD_RESIDUAL"
+            && diag.message.contains("max_momentum_residual=")));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_FSI_INTERFACE_RESIDUAL"
+            && diag.message.contains("max_interface_residual=")));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
         .any(|diag| diag.code == "FEA_FSI_COUPLING"
             && diag.message.contains("cfd_profile_point_count=2")));
-    let transient = envelope
-        .data
-        .transient_results
-        .as_ref()
-        .expect("transient payload should exist");
-    assert_eq!(transient.time_points_s.len(), 5);
-    assert_eq!(
-        transient.time_points_s.len(),
-        transient.displacement_snapshots.len()
-    );
     let results = analysis_results_op(
         &envelope.data,
         AnalysisResultsQuery::default(),

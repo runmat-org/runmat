@@ -3,9 +3,9 @@ use super::manifest::default_options;
 use super::*;
 use runmat_analysis_core::AnalysisField;
 use runmat_analysis_fea::{
-    fea_thermal_temperature_field_id, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    fea_fsi_fluid_velocity_field_id, fea_thermal_temperature_field_id,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_VELOCITY,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
 };
 use runmat_runtime::analysis::{
     AnalysisRunResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
@@ -131,10 +131,10 @@ fn primary_result_field_id(run_kind: AnalysisRunKind) -> String {
         AnalysisRunKind::Electromagnetic => FEA_FIELD_EM_VECTOR_POTENTIAL_REAL.to_string(),
         AnalysisRunKind::Cfd => FEA_FIELD_CFD_VELOCITY.to_string(),
         AnalysisRunKind::Cht => FEA_FIELD_CHT_FLUID_VELOCITY.to_string(),
+        AnalysisRunKind::Fsi => fea_fsi_fluid_velocity_field_id(0),
         AnalysisRunKind::LinearStatic
         | AnalysisRunKind::Modal
         | AnalysisRunKind::Transient
-        | AnalysisRunKind::Fsi
         | AnalysisRunKind::Nonlinear => FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string(),
     }
 }
@@ -3060,6 +3060,48 @@ pub(super) fn run_fixture(
             );
         }
         if spec.id.starts_with("fsi_coupled_") {
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_max_momentum_residual",
+                "FEA_CFD_RESIDUAL",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_RESIDUAL",
+                    "max_momentum_residual",
+                ),
+                None,
+                Some(1.0e-4),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_max_continuity_residual",
+                "FEA_CFD_RESIDUAL",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_RESIDUAL",
+                    "max_continuity_residual",
+                ),
+                None,
+                Some(1.0e-4),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_max_interface_residual",
+                "FEA_FSI_INTERFACE_RESIDUAL",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_INTERFACE_RESIDUAL",
+                    "max_interface_residual",
+                ),
+                None,
+                Some(1.0e-4),
+            );
             push_threshold_assertion(
                 spec.id,
                 &mut threshold_assertions,

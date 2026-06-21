@@ -1305,14 +1305,29 @@ fn analysis_run_fsi_contract_is_v1_and_typed() {
     .expect("fsi run should return envelope");
     assert_eq!(envelope.operation, "fea.run_fsi");
     assert_eq!(envelope.op_version, "fea.run_fsi/v1");
-    assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
-    assert!(envelope.data.transient_results.is_some());
+    assert_eq!(
+        envelope.data.run.solver_method,
+        "fsi_partitioned_projection"
+    );
+    assert!(envelope.data.transient_results.is_none());
     assert!(envelope
         .data
         .run
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_CFD_FLOW"));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_CFD_RESIDUAL"));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_FSI_INTERFACE_RESIDUAL"));
     assert!(envelope
         .data
         .run

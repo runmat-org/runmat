@@ -453,10 +453,9 @@ REQUIRED_FIXTURES = {
         "fsi_time_step_s",
         "fsi_structural_step_count",
         "fsi_cfd_profile_point_count",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
-        "transient_prepared_cache_hit_ratio",
-        "transient_prepared_cache_misses",
+        "fsi_max_momentum_residual",
+        "fsi_max_continuity_residual",
+        "fsi_max_interface_residual",
     },
     "fsi_coupled_cpu": {
         "fsi_reference_density_kg_per_m3",
@@ -469,8 +468,9 @@ REQUIRED_FIXTURES = {
         "fsi_time_step_s",
         "fsi_structural_step_count",
         "fsi_cfd_profile_point_count",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
+        "fsi_max_momentum_residual",
+        "fsi_max_continuity_residual",
+        "fsi_max_interface_residual",
     },
     "fsi_coupled_gpu_fallback": {
         "fsi_reference_density_kg_per_m3",
@@ -483,8 +483,9 @@ REQUIRED_FIXTURES = {
         "fsi_time_step_s",
         "fsi_structural_step_count",
         "fsi_cfd_profile_point_count",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
+        "fsi_max_momentum_residual",
+        "fsi_max_continuity_residual",
+        "fsi_max_interface_residual",
     },
 }
 

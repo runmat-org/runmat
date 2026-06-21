@@ -3157,44 +3157,34 @@
       "tolerance_rel": 0.0
     },
     {
-      "name": "transient_max_residual_norm",
+      "name": "fsi_max_momentum_residual",
       "fixture_id": "fsi_coupled_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "transient_max_residual_norm",
-      "reference": 1.0752752029478579e-17,
+      "assertion_name": "fsi_max_momentum_residual",
+      "reference": 3.9153964979869523e-07,
       "tolerance_abs": 1e-06,
       "tolerance_rel": null
     },
     {
-      "name": "transient_max_energy_growth_ratio",
+      "name": "fsi_max_continuity_residual",
       "fixture_id": "fsi_coupled_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "transient_max_energy_growth_ratio",
-      "reference": 1.0000193285689896,
-      "tolerance_abs": 0.02,
-      "tolerance_rel": 0.03
+      "assertion_name": "fsi_max_continuity_residual",
+      "reference": 3.078231292517007e-07,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
     },
     {
-      "name": "transient_prepared_cache_hit_ratio",
+      "name": "fsi_max_interface_residual",
       "fixture_id": "fsi_coupled_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "transient_prepared_cache_hit_ratio",
-      "reference": 0.9166666666666666,
-      "tolerance_abs": 0.12,
-      "tolerance_rel": 0.15
-    },
-    {
-      "name": "transient_prepared_cache_misses",
-      "fixture_id": "fsi_coupled_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "transient_prepared_cache_misses",
-      "reference": 1.0,
-      "tolerance_abs": 2.0,
-      "tolerance_rel": 2.0
+      "assertion_name": "fsi_max_interface_residual",
+      "reference": 3.9153964979869523e-07,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
     },
     {
       "name": "fsi_reynolds_number",
@@ -3217,24 +3207,34 @@
       "tolerance_rel": 0.0
     },
     {
-      "name": "transient_max_residual_norm",
+      "name": "fsi_max_momentum_residual",
       "fixture_id": "fsi_coupled_cpu",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "transient_max_residual_norm",
-      "reference": 1.0752752029478579e-17,
+      "assertion_name": "fsi_max_momentum_residual",
+      "reference": 3.9153964979869523e-07,
       "tolerance_abs": 1e-06,
       "tolerance_rel": null
     },
     {
-      "name": "transient_max_energy_growth_ratio",
+      "name": "fsi_max_continuity_residual",
       "fixture_id": "fsi_coupled_cpu",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "transient_max_energy_growth_ratio",
-      "reference": 1.0000193285689896,
-      "tolerance_abs": 0.02,
-      "tolerance_rel": 0.03
+      "assertion_name": "fsi_max_continuity_residual",
+      "reference": 3.078231292517007e-07,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "fsi_max_interface_residual",
+      "fixture_id": "fsi_coupled_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "fsi_max_interface_residual",
+      "reference": 3.9153964979869523e-07,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
     },
     {
       "name": "fsi_reynolds_number",
@@ -3257,24 +3257,34 @@
       "tolerance_rel": 0.0
     },
     {
-      "name": "transient_max_residual_norm",
+      "name": "fsi_max_momentum_residual",
       "fixture_id": "fsi_coupled_gpu_fallback",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "transient_max_residual_norm",
-      "reference": 1.0752752029478579e-17,
+      "assertion_name": "fsi_max_momentum_residual",
+      "reference": 3.9153964979869523e-07,
       "tolerance_abs": 1e-06,
       "tolerance_rel": null
     },
     {
-      "name": "transient_max_energy_growth_ratio",
+      "name": "fsi_max_continuity_residual",
       "fixture_id": "fsi_coupled_gpu_fallback",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
-      "assertion_name": "transient_max_energy_growth_ratio",
-      "reference": 1.0000193285689896,
-      "tolerance_abs": 0.02,
-      "tolerance_rel": 0.03
+      "assertion_name": "fsi_max_continuity_residual",
+      "reference": 3.078231292517007e-07,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "fsi_max_interface_residual",
+      "fixture_id": "fsi_coupled_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "fsi_max_interface_residual",
+      "reference": 3.9153964979869523e-07,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
     },
     {
       "name": "thermo_gradient_pathological_spread_ratio",

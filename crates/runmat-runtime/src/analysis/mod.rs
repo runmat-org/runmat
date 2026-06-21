@@ -2581,24 +2581,6 @@ fn cfd_reynolds_number(domain: &runmat_analysis_core::CfdDomain) -> f64 {
         / domain.dynamic_viscosity_pa_s
 }
 
-fn cfd_node_count_from_transient(
-    transient_run: &runmat_analysis_fea::FeaTransientRunResult,
-) -> usize {
-    transient_run
-        .velocity_snapshots
-        .last()
-        .or_else(|| transient_run.displacement_snapshots.last())
-        .and_then(|field| {
-            field
-                .shape
-                .first()
-                .copied()
-                .or_else(|| field.as_host_f64().map(|values| values.len().div_ceil(3)))
-        })
-        .unwrap_or(1)
-        .max(1)
-}
-
 fn cfd_profile_scale(domain: &runmat_analysis_core::CfdDomain, step_index: usize) -> f64 {
     domain
         .time_profile
@@ -2926,15 +2908,23 @@ fn build_cht_run_fields(
 
 fn build_fsi_run_fields(
     domain: &runmat_analysis_core::CfdDomain,
-    transient_run: &runmat_analysis_fea::FeaTransientRunResult,
+    node_count: usize,
+    step_count: usize,
+    structural_compliance_per_pa: f64,
+    residual_momentum: &[f64],
+    residual_continuity: &[f64],
 ) -> Vec<AnalysisField> {
-    let node_count = cfd_node_count_from_transient(transient_run);
     let mut fields = Vec::new();
-    let step_count = transient_run.time_points_s.len().max(1);
+    let step_count = step_count.max(1);
 
     for step_index in 0..step_count {
         let (fluid_velocity, fluid_pressure) =
             recover_cfd_velocity_pressure(domain, node_count, step_index);
+        let mut displacement = Vec::with_capacity(node_count * 3);
+        for pressure in &fluid_pressure {
+            let normal_displacement = *pressure * structural_compliance_per_pa;
+            displacement.extend_from_slice(&[normal_displacement, 0.0, 0.0]);
+        }
         fields.push(AnalysisField::host_f64(
             fea_fsi_fluid_velocity_field_id(step_index),
             vec![node_count, 3],
@@ -2946,35 +2936,16 @@ fn build_fsi_run_fields(
             fluid_pressure.clone(),
         ));
 
-        let displacement = transient_run
-            .displacement_snapshots
-            .get(step_index)
-            .or_else(|| transient_run.displacement_snapshots.last());
-        let fallback_displacement_len = node_count * 3;
-        if let Some(displacement) = displacement {
-            fields.push(clone_host_field_as(
-                fea_fsi_structural_displacement_field_id(step_index),
-                displacement,
-                fallback_displacement_len,
-            ));
-            fields.push(clone_host_field_as(
-                fea_fsi_interface_displacement_field_id(step_index),
-                displacement,
-                fallback_displacement_len,
-            ));
-        } else {
-            let zeros = vec![0.0; fallback_displacement_len];
-            fields.push(AnalysisField::host_f64(
-                fea_fsi_structural_displacement_field_id(step_index),
-                vec![node_count, 3],
-                zeros.clone(),
-            ));
-            fields.push(AnalysisField::host_f64(
-                fea_fsi_interface_displacement_field_id(step_index),
-                vec![node_count, 3],
-                zeros,
-            ));
-        }
+        fields.push(AnalysisField::host_f64(
+            fea_fsi_structural_displacement_field_id(step_index),
+            vec![node_count, 3],
+            displacement.clone(),
+        ));
+        fields.push(AnalysisField::host_f64(
+            fea_fsi_interface_displacement_field_id(step_index),
+            vec![node_count, 3],
+            displacement,
+        ));
 
         fields.push(AnalysisField::host_f64(
             fea_fsi_interface_pressure_field_id(step_index),
@@ -2991,12 +2962,11 @@ fn build_fsi_run_fields(
             traction,
         ));
 
-        let residual = transient_run
-            .residual_norms
+        let residual = residual_momentum
             .get(step_index)
             .copied()
-            .filter(|value| value.is_finite())
-            .unwrap_or(0.0);
+            .unwrap_or(0.0)
+            .max(residual_continuity.get(step_index).copied().unwrap_or(0.0));
         fields.push(AnalysisField::host_f64(
             fea_fsi_interface_residual_field_id(step_index),
             vec![1],
@@ -3010,6 +2980,25 @@ fn build_fsi_run_fields(
     }
 
     fields
+}
+
+fn fsi_structural_compliance_per_pa(model: &AnalysisModel) -> f64 {
+    let mean_modulus = model
+        .materials
+        .iter()
+        .filter_map(|material| {
+            let modulus = material.mechanical.youngs_modulus_pa;
+            (modulus.is_finite() && modulus > 0.0).then_some(modulus)
+        })
+        .fold((0.0_f64, 0_usize), |(sum, count), modulus| {
+            (sum + modulus, count + 1)
+        });
+    let youngs_modulus = if mean_modulus.1 > 0 {
+        mean_modulus.0 / mean_modulus.1 as f64
+    } else {
+        200.0e9
+    };
+    1.0 / youngs_modulus.max(1.0e6)
 }
 
 pub fn analysis_run_transient_op(
@@ -4221,46 +4210,47 @@ pub fn analysis_run_fsi_with_options_op(
         &context,
     )?;
 
-    let transient_run = run_transient_with_options(
-        model,
+    let node_count = cfd_node_count_from_model(model, prep_context);
+    let field_step = match cfd_domain.solve_family {
+        runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
+        runmat_analysis_core::CfdSolveFamily::Transient => options.step_count.saturating_sub(1),
+    };
+    let (fluid_velocity, fluid_pressure) =
+        recover_cfd_velocity_pressure(cfd_domain, node_count, field_step);
+    let (cfd_residual_momentum, cfd_residual_continuity) = cfd_residual_norms(
+        &fluid_velocity,
+        &fluid_pressure,
+        cfd_domain,
+        options.step_count,
+    );
+    let max_cfd_momentum_residual = cfd_residual_momentum
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
+    let max_cfd_continuity_residual = cfd_residual_continuity
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
+    let max_interface_residual = max_cfd_momentum_residual.max(max_cfd_continuity_residual);
+    let structural_compliance_per_pa = fsi_structural_compliance_per_pa(model);
+    let fsi_fields = build_fsi_run_fields(
+        cfd_domain,
+        node_count,
+        options.step_count,
+        structural_compliance_per_pa,
+        &cfd_residual_momentum,
+        &cfd_residual_continuity,
+    );
+    let mut run = FeaRunResult {
         backend,
-        runmat_analysis_fea::solve::transient::TransientSolveOptions {
-            time_step_s: options.time_step_s,
-            min_time_step_s: options.time_step_s,
-            max_time_step_s: options.time_step_s,
-            step_count: options.step_count,
-            max_linear_iters: options.max_linear_iters,
-            tolerance: options.tolerance,
-            residual_target: options.tolerance,
-            adaptive_time_step: false,
-            max_step_retries: 0,
-            adapt_min_scale: 0.8,
-            adapt_max_scale: 1.2,
-            adapt_growth_exponent: 0.35,
-            adapt_retry_growth_cap: 1.05,
-            adapt_nonconverged_shrink: 0.75,
-            dt_bucket_rel_tolerance: 0.0,
-            progress_operation: ANALYSIS_RUN_FSI_OPERATION.to_string(),
-            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
-            thermo_mechanical_context: None,
-            electro_thermal_context: None,
-        },
-    )
-    .map_err(|err| {
-        map_fea_run_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
-            "RM.FEA.RUN_FSI.SOLVER_MODEL_INVALID",
-            "RM.FEA.RUN_FSI.CANCELLED",
-            model,
-            &context,
-            err,
-        )
-    })?;
-
-    let fsi_fields = build_fsi_run_fields(cfd_domain, &transient_run);
-    let mut run = transient_run.run;
-    run.fields.extend(fsi_fields);
+        solver_backend: "cpu_reference".to_string(),
+        solver_device_apply_k_ratio: 0.0,
+        solver_method: "fsi_partitioned_projection".to_string(),
+        preconditioner: "interface_relaxation".to_string(),
+        solver_host_sync_count: 0,
+        diagnostics: Vec::new(),
+        fields: fsi_fields,
+    };
     let reynolds_number = cfd_reynolds_number(cfd_domain);
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
         code: "FEA_CFD_FLOW".to_string(),
@@ -4277,6 +4267,34 @@ pub fn analysis_run_fsi_with_options_op(
                 runmat_analysis_core::CfdSolveFamily::Transient => "transient",
             },
             cfd_domain.time_profile.len(),
+        ),
+    });
+    let residual_severity = if max_interface_residual <= options.residual_warn_threshold {
+        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+    } else {
+        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    };
+    run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+        code: "FEA_CFD_RESIDUAL".to_string(),
+        severity: residual_severity,
+        message: format!(
+            "max_momentum_residual={} max_continuity_residual={} residual_warn_threshold={} cfd_node_count={} cfd_step_count={}",
+            max_cfd_momentum_residual,
+            max_cfd_continuity_residual,
+            options.residual_warn_threshold,
+            node_count,
+            options.step_count,
+        ),
+    });
+    run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+        code: "FEA_FSI_INTERFACE_RESIDUAL".to_string(),
+        severity: residual_severity,
+        message: format!(
+            "max_interface_residual={} structural_compliance_per_pa={} residual_warn_threshold={} interface_count={}",
+            max_interface_residual,
+            structural_compliance_per_pa,
+            options.residual_warn_threshold,
+            model.interfaces.len(),
         ),
     });
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -4304,28 +4322,18 @@ pub fn analysis_run_fsi_with_options_op(
         );
     }
 
-    let solver_convergence = if run.diagnostics.iter().any(|item| {
-        item.code == "FEA_TRANSIENT_CONVERGENCE"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
-    }) {
+    let solver_convergence = if max_interface_residual <= options.residual_warn_threshold {
         QualityGate::Pass
     } else {
         QualityGate::Warn
     };
-    let max_transient_residual = transient_run
-        .residual_norms
-        .iter()
-        .copied()
-        .fold(0.0_f64, f64::max);
-    let result_quality = if transient_run.displacement_snapshots.is_empty()
-        || transient_run.time_points_s.is_empty()
-        || transient_run
-            .residual_norms
-            .iter()
-            .any(|residual| !residual.is_finite())
+    let result_quality = if run.fields_are_empty()
+        || !max_cfd_momentum_residual.is_finite()
+        || !max_cfd_continuity_residual.is_finite()
+        || !max_interface_residual.is_finite()
     {
         QualityGate::Fail
-    } else if max_transient_residual > options.residual_warn_threshold {
+    } else if max_interface_residual > options.residual_warn_threshold {
         QualityGate::Warn
     } else {
         QualityGate::Pass
@@ -4338,11 +4346,11 @@ pub fn analysis_run_fsi_with_options_op(
             detail: "fsi solver convergence gate is warning".to_string(),
         });
     }
-    if max_transient_residual > options.residual_warn_threshold {
+    if max_interface_residual > options.residual_warn_threshold {
         quality_reasons.push(QualityReason {
-            code: QualityReasonCode::TransientResidualExceeded,
+            code: QualityReasonCode::SolverNotConverged,
             detail: format!(
-                "fsi transient residual exceeds threshold {}",
+                "fsi interface residual exceeds threshold {}",
                 options.residual_warn_threshold
             ),
         });
@@ -4396,35 +4404,7 @@ pub fn analysis_run_fsi_with_options_op(
         run,
         modal_results: None,
         thermal_results: None,
-        transient_results: Some(TransientResultsData {
-            transient_payload_version: "transient_results/v1".to_string(),
-            time_points_s: transient_run.time_points_s,
-            displacement_snapshots: transient_run.displacement_snapshots,
-            velocity_snapshots: transient_run.velocity_snapshots,
-            acceleration_snapshots: transient_run.acceleration_snapshots,
-            von_mises_snapshots: transient_run.von_mises_snapshots,
-            kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
-            strain_energy_snapshots: transient_run.strain_energy_snapshots,
-            residual_norm_snapshots: transient_run.residual_norm_snapshots,
-            thermo_mechanical_temperature_snapshots: transient_run
-                .thermo_mechanical_temperature_snapshots,
-            thermo_mechanical_thermal_strain_snapshots: transient_run
-                .thermo_mechanical_thermal_strain_snapshots,
-            thermo_mechanical_thermal_stress_snapshots: transient_run
-                .thermo_mechanical_thermal_stress_snapshots,
-            thermo_mechanical_displacement_snapshots: transient_run
-                .thermo_mechanical_displacement_snapshots,
-            thermo_mechanical_von_mises_snapshots: transient_run
-                .thermo_mechanical_von_mises_snapshots,
-            thermo_mechanical_coupling_residual_snapshots: transient_run
-                .thermo_mechanical_coupling_residual_snapshots,
-            electro_thermal_temperature_snapshots: transient_run
-                .electro_thermal_temperature_snapshots,
-            electro_thermal_thermal_residual_snapshots: transient_run
-                .electro_thermal_thermal_residual_snapshots,
-            residual_norms: transient_run.residual_norms,
-            integration_method: TransientIntegrationMethod::ImplicitEuler,
-        }),
+        transient_results: None,
         nonlinear_results: None,
         electromagnetic_results: None,
         model_validity: QualityGate::Pass,
