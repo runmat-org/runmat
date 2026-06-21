@@ -272,7 +272,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES_TREND_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.25",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_RATIO": "0.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM": "0.15",
             "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM": "0.15",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN": "0.9",
@@ -293,7 +293,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO": "0.55",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO": "0.55",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.55",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_PLACEHOLDER_QUALITY": "0.6",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOLVE_QUALITY": "0.6",
             "RUNMAT_RELEASE_READINESS_EM_MIN_FLUX_PHASOR_COHERENCE_RATIO": "0.5",
             "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNMENT_COVERAGE_RATIO": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_RATIO": "0.05",
@@ -323,7 +323,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.1",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_PLACEHOLDER_QUALITY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVE_QUALITY_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_PHASOR_COHERENCE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.1",
@@ -389,7 +389,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX": "0.7",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO": "0.15",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO": "0.45",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY": "1.0",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_RATIO": "1.0",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.65",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.72",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "0.98",
@@ -599,7 +599,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.35",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.45",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_RATIO": "0.45",
             "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM": "0.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM": "0.2",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN": "0.85",
@@ -620,7 +620,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO": "0.45",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO": "0.45",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.45",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_PLACEHOLDER_QUALITY": "0.5",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOLVE_QUALITY": "0.5",
             "RUNMAT_RELEASE_READINESS_EM_MIN_FLUX_PHASOR_COHERENCE_RATIO": "0.4",
             "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNMENT_COVERAGE_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_RATIO": "0.1",
@@ -650,7 +650,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.2",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_PLACEHOLDER_QUALITY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVE_QUALITY_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_PHASOR_COHERENCE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.2",
@@ -716,7 +716,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO": "0.12",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO": "0.4",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY": "1.05",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_RATIO": "1.05",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.75",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.68",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "1.02",
@@ -926,7 +926,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES_TREND_RATIO": "1.5",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.5",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.6",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_RATIO": "0.6",
             "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN": "0.75",
@@ -1025,7 +1025,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO": "0.1",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO": "0.35",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.9",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.6",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "1.1",
@@ -3333,8 +3333,8 @@ def evaluate_release_readiness(
     )
     em_max_flux_divergence_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY",
-            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY", "0.45"),
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_RATIO", "0.45"),
         )
     )
     em_max_real_residual_norm_threshold = float(
@@ -3546,8 +3546,8 @@ def evaluate_release_readiness(
     )
     em_min_solve_quality_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MIN_PLACEHOLDER_QUALITY",
-            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_PLACEHOLDER_QUALITY", "0.5"),
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOLVE_QUALITY",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_SOLVE_QUALITY", "0.5"),
         )
     )
     em_min_flux_phasor_coherence_ratio_threshold = float(
@@ -3624,8 +3624,8 @@ def evaluate_release_readiness(
     )
     em_max_condition_number_estimate_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_PROXY",
-            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_PROXY", "5.0"),
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CONDITION_NUMBER_ESTIMATE",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_CONDITION_NUMBER_ESTIMATE", "5.0"),
         )
     )
     em_max_fallback_apply_count_threshold = float(
@@ -3666,8 +3666,8 @@ def evaluate_release_readiness(
     )
     em_min_resonance_quality_factor_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_Q_PROXY",
-            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_Q_PROXY", "1.25"),
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_QUALITY_FACTOR",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_QUALITY_FACTOR", "1.25"),
         )
     )
     em_min_resonance_flux_gain_threshold = float(
@@ -3814,9 +3814,9 @@ def evaluate_release_readiness(
     )
     em_max_resonance_quality_factor_drop_trend_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_Q_PROXY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_QUALITY_FACTOR_DROP_TREND_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_Q_PROXY_DROP_TREND_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_QUALITY_FACTOR_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
@@ -4075,9 +4075,9 @@ def evaluate_release_readiness(
     )
     em_max_solve_quality_drop_trend_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_PLACEHOLDER_QUALITY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVE_QUALITY_DROP_TREND_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_PLACEHOLDER_QUALITY_DROP_TREND_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVE_QUALITY_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
@@ -4662,9 +4662,9 @@ def evaluate_release_readiness(
     )
     em_max_boundary_kernel_insulation_leakage_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY",
+                "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_RATIO",
                 "1.05",
             ),
         )
@@ -7517,7 +7517,7 @@ def evaluate_release_readiness(
                 "electromagnetic_flux_divergence_ratio",
                 "max",
                 em_max_flux_divergence_ratio_threshold,
-                "EM_FLUX_DIVERGENCE_PROXY_HIGH",
+                "EM_FLUX_DIVERGENCE_HIGH",
                 "max EM flux divergence ratio",
             ),
             (
@@ -7559,7 +7559,7 @@ def evaluate_release_readiness(
                 "electromagnetic_solve_quality",
                 "min",
                 em_min_solve_quality_threshold,
-                "EM_PLACEHOLDER_QUALITY_LOW",
+                "EM_SOLVE_QUALITY_LOW",
                 "min EM solve quality",
             ),
         ]
@@ -8208,7 +8208,7 @@ def evaluate_release_readiness(
                 "electromagnetic_reference_boundary_kernel_gpu_provider",
                 "em_boundary_kernel_insulation_leakage_ratio",
                 "max",
-                "EM_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY_HIGH",
+                "EM_BOUNDARY_KERNEL_INSULATION_LEAKAGE_HIGH",
                 "EM boundary-kernel insulation leakage ratio",
                 em_max_boundary_kernel_insulation_leakage_ratio_threshold,
             ),
@@ -8839,7 +8839,7 @@ def evaluate_release_readiness(
             if conditioning_breached:
                 reasons.append(
                     Reason(
-                        code="EM_SOLVER_CONDITIONING_PROXY_HIGH",
+                        code="EM_CONDITION_NUMBER_ESTIMATE_HIGH",
                         severity="fail" if protected else "warn",
                         detail=(
                             "max EM condition-number estimate "
@@ -9080,7 +9080,7 @@ def evaluate_release_readiness(
             (
                 "electromagnetic_resonance_quality_factor",
                 em_min_resonance_quality_factor_threshold,
-                "EM_RESONANCE_Q_PROXY_LOW",
+                "EM_RESONANCE_QUALITY_FACTOR_LOW",
                 "min EM resonance quality factor",
             ),
             (
@@ -12059,7 +12059,7 @@ def evaluate_release_readiness(
         ):
             reasons.append(
                 Reason(
-                    code="EM_SOLVER_CONDITIONING_PROXY_TREND_WORSENING",
+                    code="EM_CONDITION_NUMBER_ESTIMATE_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
                         "EM solver-conditioning trend ratio "
@@ -12358,7 +12358,7 @@ def evaluate_release_readiness(
         ):
             reasons.append(
                 Reason(
-                    code="EM_PLACEHOLDER_QUALITY_TREND_WORSENING",
+                    code="EM_SOLVE_QUALITY_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
                         "EM solve-quality drop trend ratio "
@@ -12488,7 +12488,7 @@ def evaluate_release_readiness(
         ):
             reasons.append(
                 Reason(
-                    code="EM_RESONANCE_Q_PROXY_TREND_WORSENING",
+                    code="EM_RESONANCE_QUALITY_FACTOR_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
                         "EM resonance quality-factor drop trend ratio "

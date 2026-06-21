@@ -389,7 +389,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_SHOCK_PHYSICS_NONFINITE_COUNT_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM",
             "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN",
@@ -411,7 +411,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_PLACEHOLDER_QUALITY",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOLVE_QUALITY",
             "RUNMAT_RELEASE_READINESS_EM_MIN_FLUX_PHASOR_COHERENCE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNMENT_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_RATIO",
@@ -422,13 +422,13 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_CONDITION_LOCALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_GROUND_ANCHOR_EFFECTIVENESS_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SOURCE_INTERFERENCE_INDEX",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_PROXY",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CONDITION_NUMBER_ESTIMATE",
             "RUNMAT_RELEASE_READINESS_EM_MIN_REFERENCE_FREQUENCY_HZ",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SWEEP_COUNT",
             "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FREQUENCY_HZ",
             "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FLUX_DENSITY",
             "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_BANDWIDTH_HZ",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_Q_PROXY",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_QUALITY_FACTOR",
             "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_FLUX_GAIN",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO",
@@ -447,7 +447,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_PEAK_FREQUENCY_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_PEAK_FLUX_DENSITY_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_BANDWIDTH_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_Q_PROXY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_QUALITY_FACTOR_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_FLUX_GAIN_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO",
@@ -470,7 +470,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REALIZATION_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_PLACEHOLDER_QUALITY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVE_QUALITY_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_PHASOR_COHERENCE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_TREND_RATIO",
@@ -538,7 +538,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO",
@@ -1964,7 +1964,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO"] = "0.2"
-        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY"] = "0.2"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_RATIO"] = "0.2"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM"] = "0.2"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM"] = "0.2"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN"] = "0.9"
@@ -2024,7 +2024,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO"] = "0.8"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO"] = "0.8"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO"] = "0.8"
-        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_PLACEHOLDER_QUALITY"] = "0.8"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOLVE_QUALITY"] = "0.8"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_FLUX_PHASOR_COHERENCE_RATIO"] = "0.8"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNMENT_COVERAGE_RATIO"] = "0.9"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_RATIO"] = "0.1"
@@ -2114,7 +2114,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO"
         ] = "0.35"
         os.environ[
-            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY"
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_RATIO"
         ] = "1.05"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE"] = "0.2"
         result = evaluate_release_readiness(latest, rolling, protected=False)
@@ -2148,7 +2148,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_DISPERSIVE_COUPLING_RATIO_HIGH", codes)
         self.assertIn("EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO_LOW", codes)
         self.assertIn("EM_FLUX_PHASOR_COHERENCE_RATIO_LOW", codes)
-        self.assertIn("EM_PLACEHOLDER_QUALITY_LOW", codes)
+        self.assertIn("EM_SOLVE_QUALITY_LOW", codes)
         self.assertIn("EM_CORE_ASSIGNMENT_COVERAGE_RATIO_LOW", codes)
         self.assertIn("EM_CORE_FALLBACK_COEFFICIENT_RATIO_HIGH", codes)
         self.assertIn("EM_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_HIGH", codes)
@@ -2179,7 +2179,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_OVERLAP_SOURCE_INTERFERENCE_INDEX_HIGH", codes)
         self.assertIn("EM_BOUNDARY_KERNEL_LOCALIZATION_RATIO_LOW", codes)
         self.assertIn("EM_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO_LOW", codes)
-        self.assertIn("EM_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY_HIGH", codes)
+        self.assertIn("EM_BOUNDARY_KERNEL_INSULATION_LEAKAGE_HIGH", codes)
         self.assertIn("EM_BREACH_RATE_HIGH", codes)
 
     def test_em_trend_worsening_reasons_are_emitted(self):
@@ -2234,7 +2234,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FREQUENCY_HZ"] = "1.0"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FLUX_DENSITY"] = "0.1"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_BANDWIDTH_HZ"] = "0.1"
-        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_Q_PROXY"] = "1.2"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_QUALITY_FACTOR"] = "1.2"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_FLUX_GAIN"] = "1.0"
         result = evaluate_release_readiness(latest, [], protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
@@ -2243,7 +2243,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_RESONANCE_PEAK_FREQUENCY_LOW", codes)
         self.assertIn("EM_RESONANCE_PEAK_FLUX_DENSITY_LOW", codes)
         self.assertIn("EM_RESONANCE_BANDWIDTH_LOW", codes)
-        self.assertIn("EM_RESONANCE_Q_PROXY_LOW", codes)
+        self.assertIn("EM_RESONANCE_QUALITY_FACTOR_LOW", codes)
         self.assertIn("EM_RESONANCE_FLUX_GAIN_LOW", codes)
 
     def test_em_sweep_resonance_fields_are_required_in_core_metric_missing_reason(self):
@@ -2471,10 +2471,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "electromagnetic_condition_number_estimate": 6.0,
             }
         )
-        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_PROXY"] = "5.0"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_CONDITION_NUMBER_ESTIMATE"] = "5.0"
         result = evaluate_release_readiness(latest, [], protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("EM_SOLVER_CONDITIONING_PROXY_HIGH", codes)
+        self.assertIn("EM_CONDITION_NUMBER_ESTIMATE_HIGH", codes)
 
     def test_em_fallback_apply_count_posture_reason_is_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
@@ -2618,7 +2618,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_TREND_RATIO"] = "1.5"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("EM_SOLVER_CONDITIONING_PROXY_TREND_WORSENING", codes)
+        self.assertIn("EM_CONDITION_NUMBER_ESTIMATE_TREND_WORSENING", codes)
 
     def test_em_fallback_apply_count_trend_worsening_reason_is_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
@@ -2884,7 +2884,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_PEAK_FLUX_DENSITY_TREND_RATIO"
         ] = "1.5"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_BANDWIDTH_TREND_RATIO"] = "1.5"
-        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_Q_PROXY_DROP_TREND_RATIO"] = (
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_QUALITY_FACTOR_DROP_TREND_RATIO"] = (
             "1.5"
         )
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_FLUX_GAIN_DROP_TREND_RATIO"] = (
@@ -2897,7 +2897,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_RESONANCE_PEAK_FREQUENCY_TREND_WORSENING", codes)
         self.assertIn("EM_RESONANCE_PEAK_FLUX_DENSITY_TREND_WORSENING", codes)
         self.assertIn("EM_RESONANCE_BANDWIDTH_TREND_WORSENING", codes)
-        self.assertIn("EM_RESONANCE_Q_PROXY_TREND_WORSENING", codes)
+        self.assertIn("EM_RESONANCE_QUALITY_FACTOR_TREND_WORSENING", codes)
         self.assertIn("EM_RESONANCE_FLUX_GAIN_TREND_WORSENING", codes)
 
     def test_em_flux_divergence_static_falls_back_to_homogeneous_assertion(self):
@@ -2914,10 +2914,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             }
         )
         rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
-        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY"] = "0.2"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_RATIO"] = "0.2"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("EM_FLUX_DIVERGENCE_PROXY_HIGH", codes)
+        self.assertIn("EM_FLUX_DIVERGENCE_HIGH", codes)
 
     def test_em_energy_imbalance_static_falls_back_to_homogeneous_assertion(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
@@ -3097,12 +3097,12 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "electromagnetic_solve_quality": 0.9,
             }
         )
-        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_PLACEHOLDER_QUALITY_DROP_TREND_RATIO"] = (
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_SOLVE_QUALITY_DROP_TREND_RATIO"] = (
             "1.5"
         )
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("EM_PLACEHOLDER_QUALITY_TREND_WORSENING", codes)
+        self.assertIn("EM_SOLVE_QUALITY_TREND_WORSENING", codes)
 
     def test_em_core_source_realization_trend_uses_homogeneous_assertion(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
