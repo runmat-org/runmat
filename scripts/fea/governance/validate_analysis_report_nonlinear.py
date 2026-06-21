@@ -747,6 +747,16 @@ REQUIRED_ERROR_FIXTURES = {
         "run_ok": False,
         "run_error_code": "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
     },
+    "cht_coupled_invalid_interface_mapping": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_CHT.INVALID_INTERFACE_MAPPING",
+    },
+    "fsi_coupled_invalid_interface_mapping": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_FSI.INVALID_INTERFACE_MAPPING",
+    },
 }
 
 THERMO_REQUIRED_FIELDS = {

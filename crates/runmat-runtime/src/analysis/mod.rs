@@ -4742,6 +4742,21 @@ pub fn analysis_run_cht_with_options_op(
             metadata,
         ));
     }
+    if let Err((detail, metadata)) = validate_coupled_flow_interfaces(model, "CHT") {
+        return Err(operation_error(
+            ANALYSIS_RUN_CHT_OPERATION,
+            ANALYSIS_RUN_CHT_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_CHT.INVALID_INTERFACE_MAPPING",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            detail,
+            metadata,
+        ));
+    }
     let applied_temperature_delta_k = thermo_options.applied_temperature_delta_k;
 
     let prep_context = resolve_run_prep_context(
@@ -5263,6 +5278,21 @@ pub fn analysis_run_fsi_with_options_op(
                 "residual_warn_threshold".to_string(),
                 options.residual_warn_threshold.to_string(),
             )]),
+        ));
+    }
+    if let Err((detail, metadata)) = validate_coupled_flow_interfaces(model, "FSI") {
+        return Err(operation_error(
+            ANALYSIS_RUN_FSI_OPERATION,
+            ANALYSIS_RUN_FSI_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_FSI.INVALID_INTERFACE_MAPPING",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            detail,
+            metadata,
         ));
     }
 
@@ -11197,6 +11227,32 @@ fn validate_contact_interface_options(
                 "friction_coefficient".to_string(),
                 options.friction_coefficient.to_string(),
             )]),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_coupled_flow_interfaces(
+    model: &AnalysisModel,
+    family: &str,
+) -> Result<(), (String, BTreeMap<String, String>)> {
+    if let Some(interface) = model.interfaces.first() {
+        return Err((
+            format!(
+                "{family} coupling does not accept structural contact interfaces as fluid/thermal interface mappings"
+            ),
+            BTreeMap::from([
+                ("interface_id".to_string(), interface.interface_id.clone()),
+                (
+                    "primary_region_id".to_string(),
+                    interface.primary_region_id.clone(),
+                ),
+                (
+                    "secondary_region_id".to_string(),
+                    interface.secondary_region_id.clone(),
+                ),
+                ("interface_kind".to_string(), "contact".to_string()),
+            ]),
         ));
     }
     Ok(())

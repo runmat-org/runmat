@@ -953,6 +953,20 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 },
             ],
         });
+        if spec_id == "cht_coupled_invalid_interface_mapping" {
+            model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
+                interface_id: format!("cht_invalid_contact_{spec_id}"),
+                primary_region_id: "fluid_channel".to_string(),
+                secondary_region_id: "solid_wall".to_string(),
+                kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
+                    runmat_analysis_core::ContactInterfaceModel {
+                        penalty_stiffness_scale: 1.0,
+                        max_penetration_ratio: 0.01,
+                        friction_coefficient: 0.0,
+                    },
+                ),
+            }];
+        }
     }
     if spec_id.starts_with("fsi_coupled_") {
         model.steps = vec![
@@ -986,6 +1000,20 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 },
             ],
         });
+        if spec_id == "fsi_coupled_invalid_interface_mapping" {
+            model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
+                interface_id: format!("fsi_invalid_contact_{spec_id}"),
+                primary_region_id: "fluid_channel".to_string(),
+                secondary_region_id: "structure_wall".to_string(),
+                kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
+                    runmat_analysis_core::ContactInterfaceModel {
+                        penalty_stiffness_scale: 1.0,
+                        max_penetration_ratio: 0.01,
+                        friction_coefficient: 0.0,
+                    },
+                ),
+            }];
+        }
     }
 
     if let Some(profile) = electromagnetic_profile_for_fixture(spec_id) {

@@ -3884,6 +3884,31 @@ fn analysis_run_cht_rejects_invalid_cfd_domain_parameters() {
 }
 
 #[test]
+fn analysis_run_cht_rejects_contact_interface_mapping() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_cht_model();
+    set_model_contact(
+        &mut model,
+        ContactInterfaceOptions {
+            enabled: true,
+            penalty_stiffness_scale: 1.0,
+            max_penetration_ratio: 0.01,
+            friction_coefficient: 0.0,
+        },
+    );
+    let err = analysis_run_cht_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("cht run should fail for contact interface mapping");
+
+    assert_eq!(err.operation, "fea.run_cht");
+    assert_eq!(err.op_version, "fea.run_cht/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_INTERFACE_MAPPING");
+}
+
+#[test]
 fn analysis_run_fsi_rejects_models_without_transient_step() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
@@ -3923,6 +3948,31 @@ fn analysis_run_fsi_rejects_invalid_cfd_domain_parameters() {
     assert_eq!(err.operation, "fea.run_fsi");
     assert_eq!(err.op_version, "fea.run_fsi/v1");
     assert_eq!(err.error_code, "RM.FEA.RUN_FSI.INVALID_OPTIONS");
+}
+
+#[test]
+fn analysis_run_fsi_rejects_contact_interface_mapping() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_fsi_model();
+    set_model_contact(
+        &mut model,
+        ContactInterfaceOptions {
+            enabled: true,
+            penalty_stiffness_scale: 1.0,
+            max_penetration_ratio: 0.01,
+            friction_coefficient: 0.0,
+        },
+    );
+    let err = analysis_run_fsi_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("fsi run should fail for contact interface mapping");
+
+    assert_eq!(err.operation, "fea.run_fsi");
+    assert_eq!(err.op_version, "fea.run_fsi/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_FSI.INVALID_INTERFACE_MAPPING");
 }
 
 #[test]

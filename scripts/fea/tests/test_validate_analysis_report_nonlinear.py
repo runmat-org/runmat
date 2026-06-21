@@ -570,6 +570,14 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electro_thermal_unmapped_region",
                 "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
             ),
+            _error_record(
+                "cht_coupled_invalid_interface_mapping",
+                "RM.FEA.RUN_CHT.INVALID_INTERFACE_MAPPING",
+            ),
+            _error_record(
+                "fsi_coupled_invalid_interface_mapping",
+                "RM.FEA.RUN_FSI.INVALID_INTERFACE_MAPPING",
+            ),
             _record(
                 "electromagnetic_reference_homogeneous_gpu_provider",
                 {
