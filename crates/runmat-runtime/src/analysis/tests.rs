@@ -5477,6 +5477,25 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         .run
         .diagnostics
         .iter()
+        .any(|diag| diag.code == "FEA_FSI_KNOWN_ANSWER"
+            && diag
+                .message
+                .contains("basis=pressure_loaded_wall_partitioned")
+            && diag
+                .message
+                .contains("pressure_loaded_wall_displacement_law_residual_ratio=")
+            && diag
+                .message
+                .contains("interface_traction_balance_residual_ratio=")
+            && diag
+                .message
+                .contains("partitioned_pressure_feedback_residual_ratio=")
+            && diag.message.contains("known_answer_coverage_ratio=")));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
         .any(|diag| diag.code == "FEA_FSI_COUPLING"
             && diag.message.contains("cfd_profile_point_count=2")));
     let results = analysis_results_op(

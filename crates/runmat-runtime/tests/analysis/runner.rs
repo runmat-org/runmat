@@ -4961,6 +4961,76 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
+                "fsi_pressure_loaded_wall_displacement_law_residual_ratio",
+                "FEA_FSI_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_KNOWN_ANSWER",
+                    "pressure_loaded_wall_displacement_law_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-9),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_interface_traction_balance_residual_ratio",
+                "FEA_FSI_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_KNOWN_ANSWER",
+                    "interface_traction_balance_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-9),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_known_answer_displacement_transfer_residual_m",
+                "FEA_FSI_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_KNOWN_ANSWER",
+                    "interface_displacement_transfer_residual_m",
+                ),
+                Some(0.0),
+                Some(1.0e-12),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_partitioned_pressure_feedback_residual_ratio",
+                "FEA_FSI_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_KNOWN_ANSWER",
+                    "partitioned_pressure_feedback_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-8),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_known_answer_coverage_ratio",
+                "FEA_FSI_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_KNOWN_ANSWER",
+                    "known_answer_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
                 "fsi_reference_density_kg_per_m3",
                 "FEA_CFD_FLOW",
                 diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "density"),

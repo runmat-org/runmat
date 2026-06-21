@@ -4532,6 +4532,75 @@ struct FsiInterfaceClosure {
     interface_stiffness_pa_per_m: f64,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct FsiKnownAnswerMetrics {
+    pressure_loaded_wall_displacement_law_residual_ratio: f64,
+    interface_traction_balance_residual_ratio: f64,
+    interface_displacement_transfer_residual_m: f64,
+    partitioned_pressure_feedback_residual_ratio: f64,
+    known_answer_coverage_ratio: f64,
+}
+
+fn fsi_known_answer_metrics(closure: &FsiInterfaceClosure) -> FsiKnownAnswerMetrics {
+    let known_answer_coverage_ratio = if closure.interface_node_count > 0
+        && closure.mean_interface_pressure_pa.is_finite()
+        && closure.mean_interface_pressure_pa > 0.0
+        && closure.max_traction_magnitude_pa.is_finite()
+        && closure.max_traction_magnitude_pa > 0.0
+        && closure.max_interface_displacement_m.is_finite()
+        && closure.max_interface_displacement_m > 0.0
+        && closure.interface_stiffness_pa_per_m.is_finite()
+        && closure.interface_stiffness_pa_per_m > 0.0
+        && closure
+            .max_pressure_displacement_law_residual_ratio
+            .is_finite()
+        && closure.force_balance_ratio.is_finite()
+        && closure.max_pressure_feedback_residual_ratio.is_finite()
+    {
+        1.0
+    } else {
+        0.0
+    };
+
+    FsiKnownAnswerMetrics {
+        pressure_loaded_wall_displacement_law_residual_ratio: closure
+            .max_pressure_displacement_law_residual_ratio,
+        interface_traction_balance_residual_ratio: closure.force_balance_ratio,
+        interface_displacement_transfer_residual_m: closure.max_displacement_transfer_residual_m,
+        partitioned_pressure_feedback_residual_ratio: closure.max_pressure_feedback_residual_ratio,
+        known_answer_coverage_ratio,
+    }
+}
+
+fn fsi_known_answer_diagnostic(
+    metrics: &FsiKnownAnswerMetrics,
+    tolerance: f64,
+) -> runmat_analysis_fea::diagnostics::FeaDiagnostic {
+    let severity = if metrics.pressure_loaded_wall_displacement_law_residual_ratio <= tolerance
+        && metrics.interface_traction_balance_residual_ratio <= 1.0e-9
+        && metrics.interface_displacement_transfer_residual_m <= 1.0e-12
+        && metrics.partitioned_pressure_feedback_residual_ratio <= tolerance
+        && metrics.known_answer_coverage_ratio >= 1.0
+    {
+        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+    } else {
+        runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    };
+
+    runmat_analysis_fea::diagnostics::FeaDiagnostic {
+        code: "FEA_FSI_KNOWN_ANSWER".to_string(),
+        severity,
+        message: format!(
+            "basis=pressure_loaded_wall_partitioned pressure_loaded_wall_displacement_law_residual_ratio={} interface_traction_balance_residual_ratio={} interface_displacement_transfer_residual_m={} partitioned_pressure_feedback_residual_ratio={} known_answer_coverage_ratio={}",
+            metrics.pressure_loaded_wall_displacement_law_residual_ratio,
+            metrics.interface_traction_balance_residual_ratio,
+            metrics.interface_displacement_transfer_residual_m,
+            metrics.partitioned_pressure_feedback_residual_ratio,
+            metrics.known_answer_coverage_ratio,
+        ),
+    }
+}
+
 fn fsi_structural_compliance_per_pa(model: &AnalysisModel) -> f64 {
     let mean_modulus = model
         .materials
@@ -5987,6 +6056,11 @@ pub fn analysis_run_fsi_with_options_op(
             fsi_interface_closure.interface_stiffness_pa_per_m,
         ),
     });
+    let fsi_known_answer = fsi_known_answer_metrics(&fsi_interface_closure);
+    run.diagnostics.push(fsi_known_answer_diagnostic(
+        &fsi_known_answer,
+        options.tolerance,
+    ));
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
         code: "FEA_FSI_COUPLING".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
