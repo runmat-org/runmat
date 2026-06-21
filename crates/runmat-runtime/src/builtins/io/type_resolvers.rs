@@ -276,6 +276,15 @@ pub fn readmatrix_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::tensor(), Type::logical()])
 }
 
+pub fn xlsread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Union(vec![
+        Type::tensor(),
+        Type::OutputList(vec![Type::tensor(), Type::cell()]),
+        Type::OutputList(vec![Type::tensor(), Type::cell(), Type::cell()]),
+    ])
+}
+
 pub fn data_dataset_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Struct { known_fields: None }
 }

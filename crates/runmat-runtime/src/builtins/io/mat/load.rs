@@ -1077,7 +1077,7 @@ fn decode_index_values(
 }
 
 fn ensure_data_width(data: &[u8], width: usize, label: &str) -> BuiltinResult<()> {
-    if data.len() % width != 0 {
+    if !data.len().is_multiple_of(width) {
         return Err(load_error(format!("load: malformed {label}")));
     }
     Ok(())
