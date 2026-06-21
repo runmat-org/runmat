@@ -9,7 +9,6 @@
     "forcecelloutput"
   ],
   "summary": "Locate starting indices of substring matches in text inputs with MATLAB-compatible output forms.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

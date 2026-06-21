@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Return element-wise sign values for real and complex numeric inputs.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

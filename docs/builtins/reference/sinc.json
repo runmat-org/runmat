@@ -9,9 +9,6 @@
     "complex"
   ],
   "summary": "Compute the normalized sinc function `sin(pi*x)/(pi*x)` element-wise.",
-  "references": [
-    "title: \"MATLAB sinc documentation\""
-  ],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

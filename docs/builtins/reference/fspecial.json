@@ -11,7 +11,6 @@
     "disk"
   ],
   "summary": "Generate standard 2-D filter kernels in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

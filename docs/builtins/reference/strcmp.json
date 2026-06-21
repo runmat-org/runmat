@@ -9,7 +9,6 @@
     "character vector"
   ],
   "summary": "Compare text inputs for exact case-sensitive equality with MATLAB-compatible implicit expansion.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

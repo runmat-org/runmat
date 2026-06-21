@@ -9,7 +9,6 @@
     "adaptive step"
   ],
   "summary": "Solve stiff ODE systems using adaptive implicit integration with MATLAB-compatible `ode15s` call forms.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

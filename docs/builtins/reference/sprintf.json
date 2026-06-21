@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Format data into character vectors using MATLAB-compatible `sprintf` conversion specifiers.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

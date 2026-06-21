@@ -9,7 +9,6 @@
     "MATLAB isfinite"
   ],
   "summary": "Test finite values element-wise in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

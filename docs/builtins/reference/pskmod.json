@@ -13,12 +13,6 @@
     "gpu"
   ],
   "summary": "Map integers or bit groups to PSK constellation points in MATLAB and RunMat.",
-  "references": [
-    {
-      "label": "MathWorks pskmod documentation",
-      "url": "https://www.mathworks.com/help/comm/ref/pskmod.html"
-    }
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

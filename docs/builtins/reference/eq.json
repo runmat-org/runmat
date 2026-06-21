@@ -10,7 +10,6 @@
     "gpuArray equality"
   ],
   "summary": "Compute element-wise equality in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

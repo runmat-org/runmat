@@ -9,7 +9,6 @@
     "function handle"
   ],
   "summary": "Approximate finite scalar definite integrals with MATLAB's legacy quad interface.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

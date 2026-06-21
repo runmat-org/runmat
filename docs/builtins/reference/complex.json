@@ -10,7 +10,6 @@
     "MATLAB complex"
   ],
   "summary": "Construct complex values from real and imaginary parts in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

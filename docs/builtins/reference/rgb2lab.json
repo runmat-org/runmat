@@ -10,7 +10,6 @@
     "image"
   ],
   "summary": "Convert sRGB image or colormap values to CIE L*a*b* with MATLAB-compatible D65 conversion defaults.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

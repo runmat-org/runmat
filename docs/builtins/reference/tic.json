@@ -9,7 +9,6 @@
     "performance"
   ],
   "summary": "Start a high-resolution stopwatch timer and optionally return a handle for paired `toc` reads.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

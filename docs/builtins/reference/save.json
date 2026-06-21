@@ -9,7 +9,6 @@
     "matlab save"
   ],
   "summary": "Persist variables from the current workspace to a MATLAB-compatible MAT-file.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

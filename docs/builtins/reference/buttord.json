@@ -9,9 +9,6 @@
     "signal processing"
   ],
   "summary": "Select the minimum Butterworth filter order.",
-  "references": [
-    "title: \"MATLAB buttord documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

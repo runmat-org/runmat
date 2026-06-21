@@ -9,7 +9,6 @@
     "rest client"
   ],
   "summary": "Create HTTP options structs for `webread` and `webwrite` with MATLAB-compatible defaults.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

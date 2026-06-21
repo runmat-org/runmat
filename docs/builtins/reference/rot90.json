@@ -11,7 +11,6 @@
     "counterclockwise"
   ],
   "summary": "Rotate matrices and N-D arrays by 90-degree increments with MATLAB-compatible direction rules.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

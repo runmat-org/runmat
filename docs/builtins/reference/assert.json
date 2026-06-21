@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Throw an error when a condition is false, matching MATLAB and RunMat assert semantics.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

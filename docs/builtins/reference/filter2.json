@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Apply 2-D correlation/convolution filters in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

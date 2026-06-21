@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Test whether values are matrices in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

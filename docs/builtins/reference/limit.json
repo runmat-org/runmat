@@ -8,7 +8,6 @@
     "lhopital"
   ],
   "summary": "Evaluate scalar symbolic limits by substitution and L'Hopital reduction.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -10,7 +10,6 @@
     "tokens"
   ],
   "summary": "Match text with regular expressions and return indices, matches, tokens, names, or splits in MATLAB-compatible forms.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

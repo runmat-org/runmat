@@ -9,7 +9,6 @@
     "implicit expansion"
   ],
   "summary": "Divide arrays element-wise with MATLAB-compatible implicit expansion, including complex and GPU-backed inputs.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

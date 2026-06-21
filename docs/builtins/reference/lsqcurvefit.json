@@ -10,7 +10,6 @@
     "bounds"
   ],
   "summary": "Fit nonlinear parametric curves in the least-squares sense.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

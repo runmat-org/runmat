@@ -9,10 +9,6 @@
     "gpu"
   ],
   "summary": "Compute polynomial roots from coefficient vectors with MATLAB-compatible ordering and complex output behavior.",
-  "references": [
-    "title: \"MATLAB roots documentation\"",
-    "title: \"Golub & Van Loan – Matrix Computations, Chapter 7\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

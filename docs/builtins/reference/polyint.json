@@ -9,9 +9,6 @@
     "gpu"
   ],
   "summary": "Integrate polynomial coefficient vectors in MATLAB and RunMat.",
-  "references": [
-    "title: \"MATLAB polyint documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

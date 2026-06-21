@@ -9,7 +9,6 @@
     "like"
   ],
   "summary": "Create arrays of ones in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

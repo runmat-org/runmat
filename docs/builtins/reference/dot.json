@@ -9,7 +9,6 @@
     "dimension"
   ],
   "summary": "Compute dot products in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": true,

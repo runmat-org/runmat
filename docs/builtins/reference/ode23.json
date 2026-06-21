@@ -9,7 +9,6 @@
     "adaptive step"
   ],
   "summary": "Solve nonstiff ODE systems using adaptive Bogacki-Shampine 3(2) integration.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

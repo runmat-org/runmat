@@ -10,7 +10,6 @@
     "gpuArray"
   ],
   "summary": "Test whether a value is a character array in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,7 +9,6 @@
     "implicit expansion"
   ],
   "summary": "Compute element-wise subtraction in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,
