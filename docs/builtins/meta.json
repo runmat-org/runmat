@@ -19053,6 +19053,177 @@
       ]
     },
     {
+      "name": "envelope",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "yupper = envelope(x)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite real-valued signal vector or matrix, processed column-wise."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "yupper",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Upper signal envelope."
+            }
+          ]
+        },
+        {
+          "label": "[yupper, ylower] = envelope(x)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite real-valued signal vector or matrix, processed column-wise."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "yupper",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Upper signal envelope."
+            },
+            {
+              "name": "ylower",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Lower signal envelope."
+            }
+          ]
+        },
+        {
+          "label": "yupper = envelope(x, n, method)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite real-valued signal vector or matrix, processed column-wise."
+            },
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter/window length for analytic or RMS mode, or peak separation for peak mode."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"analytic\"",
+              "description": "Envelope method: `analytic`, `rms`, or `peak`."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "yupper",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Upper signal envelope."
+            }
+          ]
+        },
+        {
+          "label": "[yupper, ylower] = envelope(x, n, method)",
+          "inputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite real-valued signal vector or matrix, processed column-wise."
+            },
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Filter/window length for analytic or RMS mode, or peak separation for peak mode."
+            },
+            {
+              "name": "method",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"analytic\"",
+              "description": "Envelope method: `analytic`, `rms`, or `peak`."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "yupper",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Upper signal envelope."
+            },
+            {
+              "name": "ylower",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Lower signal envelope."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ENVELOPE.ARG_COUNT",
+          "identifier": "RunMat:envelope:ArgCount",
+          "when": "The argument count is outside supported forms.",
+          "message": "envelope: expected envelope(x), envelope(x, n), or envelope(x, n, method)"
+        },
+        {
+          "code": "RM.ENVELOPE.INVALID_SIGNAL",
+          "identifier": "RunMat:envelope:InvalidSignal",
+          "when": "Input is not a finite real numeric vector or matrix.",
+          "message": "envelope: x must be a finite real numeric vector or matrix"
+        },
+        {
+          "code": "RM.ENVELOPE.INVALID_LENGTH",
+          "identifier": "RunMat:envelope:InvalidLength",
+          "when": "Filter/window length or peak separation is not a positive integer.",
+          "message": "envelope: n must be a positive integer scalar"
+        },
+        {
+          "code": "RM.ENVELOPE.INVALID_METHOD",
+          "identifier": "RunMat:envelope:InvalidMethod",
+          "when": "Method is not analytic, rms, or peak.",
+          "message": "envelope: method must be 'analytic', 'rms', or 'peak'"
+        },
+        {
+          "code": "RM.ENVELOPE.INTERNAL",
+          "identifier": "RunMat:envelope:Internal",
+          "when": "Envelope computation or output tensor assembly fails internally.",
+          "message": "envelope: internal error"
+        },
+        {
+          "code": "RM.ENVELOPE.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:envelope:TooManyOutputs",
+          "when": "More than two output arguments are requested.",
+          "message": "envelope: expected at most two output arguments"
+        }
+      ]
+    },
+    {
       "name": "eq",
       "output_mode": "Fixed",
       "completion_policy": "Public",
