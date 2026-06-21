@@ -71,6 +71,10 @@
   ],
   "links": [
     {
+      "label": "fminunc",
+      "url": "./fminunc"
+    },
+    {
       "label": "fzero",
       "url": "./fzero"
     },

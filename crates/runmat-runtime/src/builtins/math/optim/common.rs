@@ -163,6 +163,7 @@ pub(crate) fn canonical_option_name(name: &str) -> String {
         "maxfunevals" => "MaxFunEvals".to_string(),
         "display" => "Display".to_string(),
         "algorithm" => "Algorithm".to_string(),
+        "specifyobjectivegradient" | "gradobj" => "SpecifyObjectiveGradient".to_string(),
         _ => name.to_string(),
     }
 }

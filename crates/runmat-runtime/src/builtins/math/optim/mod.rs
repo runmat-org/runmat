@@ -3,6 +3,7 @@
 pub(crate) mod brent;
 pub(crate) mod common;
 pub mod fminbnd;
+pub mod fminunc;
 pub mod fsolve;
 pub mod fzero;
 pub mod integral;
