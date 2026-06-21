@@ -1,0 +1,97 @@
+{
+  "title": "detectImportOptions",
+  "category": "io/tabular",
+  "keywords": [
+    "detectImportOptions",
+    "readtable",
+    "readmatrix",
+    "csv",
+    "tsv",
+    "spreadsheet",
+    "VariableTypes",
+    "VariableNames"
+  ],
+  "summary": "Inspect text or spreadsheet data and create import options for tabular readers.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the host. The returned options are metadata consumed by later import calls."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::table::tests",
+    "integration": [
+      "builtins::table::tests::detect_import_options_infers_text_delimiter_names_and_types",
+      "builtins::table::tests::detect_import_options_struct_can_drive_readmatrix",
+      "builtins::table::tests::detect_import_options_honors_overrides_and_range"
+    ]
+  },
+  "description": "`opts = detectImportOptions(filename)` samples a delimited text or spreadsheet file and returns an editable scalar struct accepted by `readtable` and, for numeric text imports, `readmatrix`.",
+  "behaviors": [
+    "Detects text delimiters from comma, tab, semicolon, pipe, and whitespace-separated records unless `Delimiter` is supplied.",
+    "Infers variable names from a non-data header row and sets `NumHeaderLines` so readers import only data rows.",
+    "Infers `VariableTypes` as `double`, `logical`, `datetime`, or text (`string`/`char`) using the same token rules as `readtable`.",
+    "Honors supported overrides including `FileType`, `Delimiter`, `NumHeaderLines`, `Range`, `Sheet`, `VariableNames`, `VariableTypes`, `ReadVariableNames`, `ReadRowNames`, `TreatAsMissing`, `VariableNamingRule`, `TextType`, `DatetimeType`, `EmptyLineRule`, and `Encoding`.",
+    "For spreadsheet files, uses the same sheet/range reader as `readtable` and emits spreadsheet-compatible option fields.",
+    "The returned struct intentionally contains fields understood by current RunMat readers; unsupported MATLAB option fields are not emitted."
+  ],
+  "examples": [
+    {
+      "description": "Detect And Reuse CSV Import Options",
+      "input": "opts = detectImportOptions(\"measurements.csv\");\nT = readtable(\"measurements.csv\", opts);"
+    },
+    {
+      "description": "Override Detection Settings",
+      "input": "opts = detectImportOptions(\"log.txt\", 'Delimiter', '|', 'NumHeaderLines', 2);\nopts.VariableTypes(2) = \"double\";\nT = readtable(\"log.txt\", opts);"
+    },
+    {
+      "description": "Use Options With Numeric Imports",
+      "input": "opts = detectImportOptions(\"values.csv\");\nA = readmatrix(\"values.csv\", opts);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is the returned value a MATLAB import-options object?",
+      "answer": "RunMat represents import options as a scalar struct so field assignment and reader consumption work naturally in the current runtime."
+    },
+    {
+      "question": "Can I use the same options with `readmatrix`?",
+      "answer": "Yes for numeric text imports. `readmatrix` consumes fields such as `Delimiter`, `NumHeaderLines`, `Range`, and `TreatAsMissing` and ignores table-specific fields."
+    },
+    {
+      "question": "Does detection read the whole file?",
+      "answer": "RunMat currently reads the file into host memory and samples the parsed rows, matching the existing `readtable` import pipeline."
+    }
+  ],
+  "links": [
+    {
+      "label": "readtable",
+      "url": "./readtable"
+    },
+    {
+      "label": "readmatrix",
+      "url": "./readmatrix"
+    },
+    {
+      "label": "spreadsheetImportOptions",
+      "url": "./spreadsheetImportOptions"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/table/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"
+  },
+  "gpu_residency": "`detectImportOptions` performs file inspection on the host and returns host metadata. It does not create GPU-resident arrays.",
+  "gpu_behavior": [
+    "No acceleration provider hooks are used."
+  ]
+}

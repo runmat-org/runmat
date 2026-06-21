@@ -2,9 +2,10 @@
 
 use std::collections::HashSet;
 use std::convert::TryFrom;
-use std::io::{BufRead, BufReader};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use encoding_rs::{Encoding, UTF_8};
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -316,7 +317,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     descriptor(crate::builtins::io::tabular::readmatrix::READMATRIX_DESCRIPTOR),
     builtin_path = "crate::builtins::io::tabular::readmatrix"
 )]
-async fn readmatrix_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn readmatrix_builtin(
+    path: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let path_value = gather_if_needed_async(&path)
         .await
         .map_err(map_control_flow)?;
@@ -416,6 +420,12 @@ async fn apply_option(
     if name.eq_ignore_ascii_case("Range") {
         let range = parse_range(&effective_value)?;
         options.range = Some(range);
+        return Ok(());
+    }
+    if name.eq_ignore_ascii_case("Encoding") {
+        let encoding = value_to_string_scalar(&effective_value, "Encoding")?;
+        validate_encoding_label(&encoding)?;
+        options.encoding = encoding;
         return Ok(());
     }
     if is_like {
@@ -639,6 +649,7 @@ struct ReadMatrixOptions {
     empty_value: Option<f64>,
     range: Option<RangeSpec>,
     output_template: OutputTemplate,
+    encoding: String,
 }
 
 impl Default for ReadMatrixOptions {
@@ -652,6 +663,7 @@ impl Default for ReadMatrixOptions {
             empty_value: None,
             range: None,
             output_template: OutputTemplate::Double,
+            encoding: "utf-8".to_string(),
         }
     }
 }
@@ -1116,24 +1128,11 @@ fn tensor_to_gpu(
 }
 
 async fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> BuiltinResult<Tensor> {
-    let file = File::open_async(path).await.map_err(|err| {
-        readmatrix_error_with_source(
-            &READMATRIX_ERROR_IO_OPEN,
-            format!("readmatrix: unable to read '{}': {err}", path.display()),
-            err,
-        )
-    })?;
-    let reader = BufReader::new(file);
+    let bytes = read_file_bytes(path).await?;
+    let text = strip_utf8_bom(decode_text_bytes(&bytes, &options.encoding)?);
     let mut data_lines: Vec<(usize, String)> = Vec::new();
-    for (idx, line_result) in reader.lines().enumerate() {
+    for (idx, line) in text.lines().enumerate() {
         let line_number = idx + 1;
-        let line = line_result.map_err(|err| {
-            readmatrix_error_with_source(
-                &READMATRIX_ERROR_IO_READ,
-                format!("readmatrix: error reading '{}': {err}", path.display()),
-                err,
-            )
-        })?;
         let cleaned = line.trim_end_matches('\r');
         if line_number <= options.num_header_lines {
             continue;
@@ -1213,6 +1212,83 @@ async fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> Builti
     Tensor::new(data, vec![row_count, max_cols]).map_err(|e| {
         readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
     })
+}
+
+async fn read_file_bytes(path: &Path) -> BuiltinResult<Vec<u8>> {
+    let mut file = File::open_async(path).await.map_err(|err| {
+        readmatrix_error_with_source(
+            &READMATRIX_ERROR_IO_OPEN,
+            format!("readmatrix: unable to read '{}': {err}", path.display()),
+            err,
+        )
+    })?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(|err| {
+        readmatrix_error_with_source(
+            &READMATRIX_ERROR_IO_READ,
+            format!("readmatrix: error reading '{}': {err}", path.display()),
+            err,
+        )
+    })?;
+    Ok(bytes)
+}
+
+fn validate_encoding_label(label: &str) -> BuiltinResult<()> {
+    encoding_for_label(label).map(|_| ()).ok_or_else(|| {
+        readmatrix_error_with(
+            &READMATRIX_ERROR_OPTION_VALUE,
+            format!("readmatrix: unsupported Encoding '{label}'"),
+        )
+    })
+}
+
+fn encoding_for_label(label: &str) -> Option<&'static Encoding> {
+    let label = label.trim();
+    if label.is_empty()
+        || label.eq_ignore_ascii_case("auto")
+        || label.eq_ignore_ascii_case("default")
+        || label.eq_ignore_ascii_case("system")
+        || label.eq_ignore_ascii_case("native")
+        || label.eq_ignore_ascii_case("utf-8")
+        || label.eq_ignore_ascii_case("utf8")
+        || label.eq_ignore_ascii_case("unicode")
+    {
+        return Some(UTF_8);
+    }
+    Encoding::for_label(label.as_bytes())
+}
+
+fn decode_text_bytes(bytes: &[u8], encoding: &str) -> BuiltinResult<String> {
+    let (encoding, offset) = if encoding.trim().eq_ignore_ascii_case("auto") {
+        Encoding::for_bom(bytes).unwrap_or((UTF_8, 0))
+    } else {
+        (
+            encoding_for_label(encoding).ok_or_else(|| {
+                readmatrix_error_with(
+                    &READMATRIX_ERROR_OPTION_VALUE,
+                    format!("readmatrix: unsupported Encoding '{encoding}'"),
+                )
+            })?,
+            0,
+        )
+    };
+    let (decoded, _, had_errors) = encoding.decode(&bytes[offset..]);
+    if had_errors {
+        return Err(readmatrix_error_with(
+            &READMATRIX_ERROR_IO_READ,
+            format!(
+                "readmatrix: unable to decode file contents using encoding '{}'",
+                encoding.name()
+            ),
+        ));
+    }
+    Ok(decoded.into_owned())
+}
+
+fn strip_utf8_bom(text: String) -> String {
+    text.strip_prefix('\u{FEFF}')
+        .map(ToString::to_string)
+        .unwrap_or(text)
 }
 
 fn detect_delimiter(lines: &[(usize, String)]) -> Option<Delimiter> {
