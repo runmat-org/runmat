@@ -15,6 +15,36 @@ TRANSIENT_ENERGY_BALANCE_ASSERTIONS = {
     "transient_max_step_energy_jump_ratio",
 }
 
+PLASTIC_HARDENING_KNOWN_ANSWER_ASSERTIONS = {
+    "plasticity_hardening_reference_known_monotonic_equivalent_plastic_strain_fraction",
+    "plasticity_hardening_reference_known_active_element_coverage_ratio",
+    "plasticity_hardening_reference_known_final_to_peak_equivalent_plastic_strain_ratio",
+    "plasticity_hardening_reference_known_known_answer_coverage_ratio",
+}
+
+PLASTIC_HARDENING_COMPLEX_KNOWN_ANSWER_ASSERTIONS = {
+    "plasticity_hardening_reference_complex_known_monotonic_equivalent_plastic_strain_fraction",
+    "plasticity_hardening_reference_complex_known_active_element_coverage_ratio",
+    "plasticity_hardening_reference_complex_known_final_to_peak_equivalent_plastic_strain_ratio",
+    "plasticity_hardening_reference_complex_known_known_answer_coverage_ratio",
+}
+
+CONTACT_FRICTIONLESS_KNOWN_ANSWER_ASSERTIONS = {
+    "contact_frictionless_known_pressure_gap_consistency_residual",
+    "contact_frictionless_known_active_entity_coverage_ratio",
+    "contact_frictionless_known_nonpenetration_gap_min",
+    "contact_frictionless_known_friction_coefficient",
+    "contact_frictionless_known_known_answer_coverage_ratio",
+}
+
+CONTACT_FRICTIONLESS_COMPLEX_KNOWN_ANSWER_ASSERTIONS = {
+    "contact_frictionless_complex_known_pressure_gap_consistency_residual",
+    "contact_frictionless_complex_known_active_entity_coverage_ratio",
+    "contact_frictionless_complex_known_nonpenetration_gap_min",
+    "contact_frictionless_complex_known_friction_coefficient",
+    "contact_frictionless_complex_known_known_answer_coverage_ratio",
+}
+
 
 def _record(fixture_id: str, assertion_names: set[str]) -> dict:
     record = {
@@ -253,7 +283,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "contact_frictionless_state_active_entity_count",
                     "contact_frictionless_state_max_contact_pressure",
                     "contact_frictionless_state_min_contact_gap",
-                },
+                }
+                | CONTACT_FRICTIONLESS_KNOWN_ANSWER_ASSERTIONS,
             )
             | {"contact_nonlinear_severity": 0.1},
             _record(
@@ -266,7 +297,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "contact_frictionless_complex_state_active_entity_count",
                     "contact_frictionless_complex_state_max_contact_pressure",
                     "contact_frictionless_complex_state_min_contact_gap",
-                },
+                }
+                | CONTACT_FRICTIONLESS_COMPLEX_KNOWN_ANSWER_ASSERTIONS,
             )
             | {"contact_nonlinear_severity": 0.1},
             _record(
@@ -278,7 +310,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "plasticity_hardening_reference_load_realization_ratio",
                     "plasticity_hardening_reference_state_active_element_count",
                     "plasticity_hardening_reference_state_max_equivalent_plastic_strain",
-                },
+                }
+                | PLASTIC_HARDENING_KNOWN_ANSWER_ASSERTIONS,
             ),
             _record(
                 "nonlinear_plastic_hardening_reference_complex_gpu_provider",
@@ -289,7 +322,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "plasticity_hardening_reference_complex_load_amplification_ratio",
                     "plasticity_hardening_reference_complex_state_active_element_count",
                     "plasticity_hardening_reference_complex_state_max_equivalent_plastic_strain",
-                },
+                }
+                | PLASTIC_HARDENING_COMPLEX_KNOWN_ANSWER_ASSERTIONS,
             ),
             _record(
                 "thermo_mech_kickoff_gpu_provider",
@@ -1527,6 +1561,40 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "plasticity_hardening_reference_load_realization_ratio"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_plastic_known_answer_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "nonlinear_plastic_hardening_reference_gpu_provider":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"]
+                        != "plasticity_hardening_reference_known_monotonic_equivalent_plastic_strain_fraction"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_contact_known_answer_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "nonlinear_contact_frictionless_reference_gpu_provider":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"]
+                        != "contact_frictionless_known_pressure_gap_consistency_residual"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"

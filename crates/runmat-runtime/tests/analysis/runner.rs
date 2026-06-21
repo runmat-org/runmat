@@ -2737,6 +2737,142 @@ fn push_contact_state_threshold_assertions(
     );
 }
 
+fn push_plastic_known_answer_threshold_assertions(
+    fixture_id: &str,
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    run: &AnalysisRunResult,
+    prefix: &str,
+) {
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_monotonic_equivalent_plastic_strain_fraction"),
+        "FEA_PLASTIC_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_PLASTIC_KNOWN_ANSWER",
+            "monotonic_equivalent_plastic_strain_fraction",
+        ),
+        Some(1.0),
+        Some(1.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_active_element_coverage_ratio"),
+        "FEA_PLASTIC_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_PLASTIC_KNOWN_ANSWER",
+            "active_element_coverage_ratio",
+        ),
+        Some(1.0e-6),
+        Some(1.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_final_to_peak_equivalent_plastic_strain_ratio"),
+        "FEA_PLASTIC_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_PLASTIC_KNOWN_ANSWER",
+            "final_to_peak_equivalent_plastic_strain_ratio",
+        ),
+        Some(0.999_999),
+        Some(1.000_001),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_known_answer_coverage_ratio"),
+        "FEA_PLASTIC_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_PLASTIC_KNOWN_ANSWER",
+            "known_answer_coverage_ratio",
+        ),
+        Some(1.0),
+        Some(1.0),
+    );
+}
+
+fn push_contact_known_answer_threshold_assertions(
+    fixture_id: &str,
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    run: &AnalysisRunResult,
+    prefix: &str,
+) {
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_pressure_gap_consistency_residual"),
+        "FEA_CONTACT_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_CONTACT_KNOWN_ANSWER",
+            "pressure_gap_consistency_residual",
+        ),
+        Some(0.0),
+        Some(1.0e-12),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_active_entity_coverage_ratio"),
+        "FEA_CONTACT_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_CONTACT_KNOWN_ANSWER",
+            "active_entity_coverage_ratio",
+        ),
+        Some(1.0),
+        Some(1.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_nonpenetration_gap_min"),
+        "FEA_CONTACT_KNOWN_ANSWER",
+        diagnostic_metric(run, "FEA_CONTACT_KNOWN_ANSWER", "nonpenetration_gap_min"),
+        Some(0.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_friction_coefficient"),
+        "FEA_CONTACT_KNOWN_ANSWER",
+        diagnostic_metric(run, "FEA_CONTACT_KNOWN_ANSWER", "friction_coefficient"),
+        Some(0.0),
+        Some(0.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_known_answer_coverage_ratio"),
+        "FEA_CONTACT_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_CONTACT_KNOWN_ANSWER",
+            "known_answer_coverage_ratio",
+        ),
+        Some(1.0),
+        Some(1.0),
+    );
+}
+
 fn push_thermal_standalone_threshold_assertions(
     fixture_id: &str,
     assertions: &mut Vec<ThresholdAssertionRecord>,
@@ -6304,6 +6440,13 @@ pub(super) fn run_fixture(
                             &gpu_envelope.data,
                             "plasticity_hardening_reference_state",
                         );
+                        push_plastic_known_answer_threshold_assertions(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                            "plasticity_hardening_reference_known",
+                        );
                     }
                     if spec.id == "nonlinear_plastic_hardening_reference_complex_gpu_provider" {
                         push_threshold_assertion(
@@ -6368,6 +6511,13 @@ pub(super) fn run_fixture(
                             &mut failures,
                             &gpu_envelope.data,
                             "plasticity_hardening_reference_complex_state",
+                        );
+                        push_plastic_known_answer_threshold_assertions(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                            "plasticity_hardening_reference_complex_known",
                         );
                     }
                     if spec.id == "nonlinear_contact_benchmark_gpu_provider" {
@@ -6499,6 +6649,13 @@ pub(super) fn run_fixture(
                             &gpu_envelope.data,
                             "contact_frictionless_state",
                         );
+                        push_contact_known_answer_threshold_assertions(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                            "contact_frictionless_known",
+                        );
                     }
                     if spec.id == "nonlinear_contact_frictionless_reference_complex_gpu_provider" {
                         push_threshold_assertion(
@@ -6563,6 +6720,13 @@ pub(super) fn run_fixture(
                             &mut failures,
                             &gpu_envelope.data,
                             "contact_frictionless_complex_state",
+                        );
+                        push_contact_known_answer_threshold_assertions(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                            "contact_frictionless_complex_known",
                         );
                     }
                     if spec.id == "electromagnetic_reference_homogeneous_gpu_provider" {

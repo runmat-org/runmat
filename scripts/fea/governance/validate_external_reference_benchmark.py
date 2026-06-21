@@ -12,6 +12,36 @@ TRANSIENT_ENERGY_BALANCE_REQUIRED_FIELDS = {
     "transient_max_step_energy_jump_ratio",
 }
 
+PLASTIC_HARDENING_KNOWN_ANSWER_REQUIRED_FIELDS = {
+    "plasticity_hardening_reference_known_monotonic_equivalent_plastic_strain_fraction",
+    "plasticity_hardening_reference_known_active_element_coverage_ratio",
+    "plasticity_hardening_reference_known_final_to_peak_equivalent_plastic_strain_ratio",
+    "plasticity_hardening_reference_known_known_answer_coverage_ratio",
+}
+
+PLASTIC_HARDENING_COMPLEX_KNOWN_ANSWER_REQUIRED_FIELDS = {
+    "plasticity_hardening_reference_complex_known_monotonic_equivalent_plastic_strain_fraction",
+    "plasticity_hardening_reference_complex_known_active_element_coverage_ratio",
+    "plasticity_hardening_reference_complex_known_final_to_peak_equivalent_plastic_strain_ratio",
+    "plasticity_hardening_reference_complex_known_known_answer_coverage_ratio",
+}
+
+CONTACT_FRICTIONLESS_KNOWN_ANSWER_REQUIRED_FIELDS = {
+    "contact_frictionless_known_pressure_gap_consistency_residual",
+    "contact_frictionless_known_active_entity_coverage_ratio",
+    "contact_frictionless_known_nonpenetration_gap_min",
+    "contact_frictionless_known_friction_coefficient",
+    "contact_frictionless_known_known_answer_coverage_ratio",
+}
+
+CONTACT_FRICTIONLESS_COMPLEX_KNOWN_ANSWER_REQUIRED_FIELDS = {
+    "contact_frictionless_complex_known_pressure_gap_consistency_residual",
+    "contact_frictionless_complex_known_active_entity_coverage_ratio",
+    "contact_frictionless_complex_known_nonpenetration_gap_min",
+    "contact_frictionless_complex_known_friction_coefficient",
+    "contact_frictionless_complex_known_known_answer_coverage_ratio",
+}
+
 
 REQUIRED_METRICS_BY_FIXTURE = {
     "cantilever_gpu_provider": {
@@ -130,7 +160,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "contact_frictionless_state_active_entity_count",
         "contact_frictionless_state_max_contact_pressure",
         "contact_frictionless_state_min_contact_gap",
-    },
+    }
+    | CONTACT_FRICTIONLESS_KNOWN_ANSWER_REQUIRED_FIELDS,
     "nonlinear_plastic_hardening_reference_gpu_provider": {
         "plasticity_hardening_reference_severity_peak",
         "plasticity_hardening_reference_severity_mean",
@@ -138,7 +169,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "plasticity_hardening_reference_load_realization_ratio",
         "plasticity_hardening_reference_state_active_element_count",
         "plasticity_hardening_reference_state_max_equivalent_plastic_strain",
-    },
+    }
+    | PLASTIC_HARDENING_KNOWN_ANSWER_REQUIRED_FIELDS,
     "thermo_gradient_benign_gpu_provider": {
         "thermo_gradient_benign_spread_ratio",
         "thermo_gradient_benign_heterogeneity",
@@ -926,7 +958,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "plasticity_hardening_reference_complex_load_realization_ratio",
         "plasticity_hardening_reference_complex_state_active_element_count",
         "plasticity_hardening_reference_complex_state_max_equivalent_plastic_strain",
-    },
+    }
+    | PLASTIC_HARDENING_COMPLEX_KNOWN_ANSWER_REQUIRED_FIELDS,
     "nonlinear_contact_frictionless_reference_complex_gpu_provider": {
         "contact_frictionless_complex_severity_peak",
         "contact_frictionless_complex_severity_mean",
@@ -935,7 +968,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "contact_frictionless_complex_state_active_entity_count",
         "contact_frictionless_complex_state_max_contact_pressure",
         "contact_frictionless_complex_state_min_contact_gap",
-    },
+    }
+    | CONTACT_FRICTIONLESS_COMPLEX_KNOWN_ANSWER_REQUIRED_FIELDS,
     "acoustic_harmonic_gpu_provider": {
         "acoustic_normalized_residual_norm",
         "acoustic_drive_frequency_hz",

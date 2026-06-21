@@ -564,6 +564,11 @@ pub fn solve_nonlinear_system(
                 plasticity.map(|p| p.saturation_exponent).unwrap_or(0.0),
             ),
         });
+        diagnostics.push(plastic_known_answer_diagnostic(
+            &equivalent_plastic_strain_snapshots,
+            &load_factors,
+            element_count,
+        ));
     }
     if contact_severity_peak > 0.0 {
         let contact = options.contact_context.as_ref();
@@ -600,6 +605,14 @@ pub fn solve_nonlinear_system(
                 contact.map(|p| p.friction_coefficient).unwrap_or(0.0),
             ),
         });
+        if let Some(contact) = contact {
+            diagnostics.push(contact_known_answer_diagnostic(
+                &contact_pressure_snapshots,
+                &contact_gap_snapshots,
+                contact,
+                contact_count,
+            ));
+        }
     }
     diagnostics.extend(transient.diagnostics);
 
@@ -827,6 +840,141 @@ fn contact_entity_count(contact: Option<&FeaContactInterfaceContext>) -> usize {
         1
     } else {
         0
+    }
+}
+
+fn plastic_known_answer_diagnostic(
+    equivalent_plastic_strain_snapshots: &[Vec<f64>],
+    load_factors: &[f64],
+    element_count: usize,
+) -> FeaDiagnostic {
+    let peaks = equivalent_plastic_strain_snapshots
+        .iter()
+        .map(|snapshot| snapshot.iter().copied().fold(0.0_f64, f64::max))
+        .collect::<Vec<_>>();
+    let monotone_steps = peaks
+        .windows(2)
+        .filter(|window| window[1] + 1.0e-15 >= window[0])
+        .count();
+    let monotonic_fraction = if peaks.len() <= 1 {
+        1.0
+    } else {
+        monotone_steps as f64 / (peaks.len() - 1) as f64
+    };
+    let peak_equivalent_plastic_strain = peaks.iter().copied().fold(0.0_f64, f64::max);
+    let final_equivalent_plastic_strain = peaks.last().copied().unwrap_or(0.0);
+    let final_to_peak_ratio = if peak_equivalent_plastic_strain > 1.0e-15 {
+        final_equivalent_plastic_strain / peak_equivalent_plastic_strain
+    } else {
+        0.0
+    };
+    let active_element_count = equivalent_plastic_strain_snapshots
+        .iter()
+        .flat_map(|snapshot| snapshot.iter())
+        .filter(|value| **value > 0.0)
+        .count();
+    let active_element_coverage_ratio = if element_count == 0 {
+        0.0
+    } else {
+        (active_element_count as f64 / element_count as f64).clamp(0.0, 1.0)
+    };
+    let yield_activation_load_factor = peaks
+        .iter()
+        .position(|value| *value > 0.0)
+        .and_then(|index| load_factors.get(index).copied())
+        .unwrap_or(0.0);
+    let known_answer_coverage_ratio = if peak_equivalent_plastic_strain > 0.0 {
+        1.0
+    } else {
+        0.0
+    };
+
+    FeaDiagnostic {
+        code: "FEA_PLASTIC_KNOWN_ANSWER".to_string(),
+        severity: if monotonic_fraction >= 1.0
+            && final_to_peak_ratio >= 0.999_999
+            && active_element_coverage_ratio > 0.0
+            && known_answer_coverage_ratio >= 1.0
+        {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "case=monotonic_elastoplastic_hardening monotonic_equivalent_plastic_strain_fraction={} active_element_coverage_ratio={} peak_equivalent_plastic_strain={} final_to_peak_equivalent_plastic_strain_ratio={} yield_activation_load_factor={} known_answer_coverage_ratio={}",
+            monotonic_fraction,
+            active_element_coverage_ratio,
+            peak_equivalent_plastic_strain,
+            final_to_peak_ratio,
+            yield_activation_load_factor,
+            known_answer_coverage_ratio,
+        ),
+    }
+}
+
+fn contact_known_answer_diagnostic(
+    contact_pressure_snapshots: &[Vec<f64>],
+    contact_gap_snapshots: &[Vec<f64>],
+    contact: &FeaContactInterfaceContext,
+    contact_count: usize,
+) -> FeaDiagnostic {
+    let max_penetration = contact.max_penetration_ratio.max(0.0);
+    let penalty = contact.penalty_stiffness_scale.max(0.0);
+    let friction_scale = 1.0 + contact.friction_coefficient.max(0.0) * 0.1;
+    let mut max_consistency_residual = 0.0_f64;
+    let mut active_entity_count = 0usize;
+    let mut min_gap = f64::INFINITY;
+    for (pressure_snapshot, gap_snapshot) in contact_pressure_snapshots
+        .iter()
+        .zip(contact_gap_snapshots.iter())
+    {
+        for (pressure, gap) in pressure_snapshot.iter().zip(gap_snapshot.iter()) {
+            let approach = (max_penetration - *gap).max(0.0);
+            let expected_pressure = penalty * approach * friction_scale;
+            let residual = (*pressure - expected_pressure).abs() / expected_pressure.abs().max(1.0);
+            max_consistency_residual = max_consistency_residual.max(residual);
+            if *pressure > 0.0 || *gap <= 0.0 {
+                active_entity_count = active_entity_count.saturating_add(1);
+            }
+            min_gap = min_gap.min(*gap);
+        }
+    }
+    let active_entity_coverage_ratio = if contact_count == 0 {
+        0.0
+    } else {
+        (active_entity_count as f64 / contact_count as f64).clamp(0.0, 1.0)
+    };
+    let min_gap = if min_gap.is_finite() { min_gap } else { 0.0 };
+    let known_answer_coverage_ratio = if !contact_pressure_snapshots.is_empty() && contact_count > 0
+    {
+        1.0
+    } else {
+        0.0
+    };
+    let case = if contact.friction_coefficient.abs() <= 1.0e-12 {
+        "frictionless_penalty_contact"
+    } else {
+        "penalty_contact"
+    };
+
+    FeaDiagnostic {
+        code: "FEA_CONTACT_KNOWN_ANSWER".to_string(),
+        severity: if max_consistency_residual <= 1.0e-12
+            && min_gap >= -1.0e-12
+            && known_answer_coverage_ratio >= 1.0
+        {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "case={case} pressure_gap_consistency_residual={} active_entity_coverage_ratio={} nonpenetration_gap_min={} friction_coefficient={} known_answer_coverage_ratio={}",
+            max_consistency_residual,
+            active_entity_coverage_ratio,
+            min_gap,
+            contact.friction_coefficient,
+            known_answer_coverage_ratio,
+        ),
     }
 }
 

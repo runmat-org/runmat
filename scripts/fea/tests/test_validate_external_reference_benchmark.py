@@ -485,6 +485,57 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "reference": 1.0e-4,
             "pass": True,
         },
+        *[
+            {
+                "name": name,
+                "fixture_id": fixture_id,
+                "observed": observed,
+                "reference": observed,
+                "pass": True,
+            }
+            for fixture_id, prefix in (
+                (
+                    "nonlinear_contact_frictionless_reference_gpu_provider",
+                    "contact_frictionless_known",
+                ),
+                (
+                    "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+                    "contact_frictionless_complex_known",
+                ),
+            )
+            for name, observed in (
+                (f"{prefix}_pressure_gap_consistency_residual", 0.0),
+                (f"{prefix}_active_entity_coverage_ratio", 1.0),
+                (f"{prefix}_nonpenetration_gap_min", 1.0e-4),
+                (f"{prefix}_friction_coefficient", 0.0),
+                (f"{prefix}_known_answer_coverage_ratio", 1.0),
+            )
+        ],
+        *[
+            {
+                "name": name,
+                "fixture_id": fixture_id,
+                "observed": observed,
+                "reference": observed,
+                "pass": True,
+            }
+            for fixture_id, prefix in (
+                (
+                    "nonlinear_plastic_hardening_reference_gpu_provider",
+                    "plasticity_hardening_reference_known",
+                ),
+                (
+                    "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+                    "plasticity_hardening_reference_complex_known",
+                ),
+            )
+            for name, observed in (
+                (f"{prefix}_monotonic_equivalent_plastic_strain_fraction", 1.0),
+                (f"{prefix}_active_element_coverage_ratio", 1.0),
+                (f"{prefix}_final_to_peak_equivalent_plastic_strain_ratio", 1.0),
+                (f"{prefix}_known_answer_coverage_ratio", 1.0),
+            )
+        ],
         {
             "name": "thermo_gradient_benign_spread_ratio",
             "fixture_id": "thermo_gradient_benign_gpu_provider",
