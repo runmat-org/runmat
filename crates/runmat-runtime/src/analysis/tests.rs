@@ -5939,6 +5939,13 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
         .iter()
         .any(|diag| diag.code == "FEA_ACOUSTIC_FREQUENCY_RESPONSE"));
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_ACOUSTIC_KNOWN_ANSWER"
+            && diag.message.contains("tube_mode_alignment_error_ratio=")
+            && diag.message.contains("tube_pressure_variation_ratio=")
+            && diag.message.contains("cavity_mode_spacing_ratio=")
+            && diag.message.contains("known_answer_coverage_ratio=1")
+    }));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_ACOUSTIC_HARMONIC_RESPONSE"
             && diag.message.contains("acoustic_material_coverage_ratio=1")
     }));

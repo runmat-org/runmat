@@ -3518,6 +3518,76 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-3),
             );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_tube_mode_alignment_error_ratio",
+                "FEA_ACOUSTIC_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_KNOWN_ANSWER",
+                    "tube_mode_alignment_error_ratio",
+                ),
+                Some(0.0),
+                Some(0.5),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_tube_pressure_variation_ratio",
+                "FEA_ACOUSTIC_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_KNOWN_ANSWER",
+                    "tube_pressure_variation_ratio",
+                ),
+                Some(1.0e-12),
+                Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_cavity_mode_spacing_ratio",
+                "FEA_ACOUSTIC_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_KNOWN_ANSWER",
+                    "cavity_mode_spacing_ratio",
+                ),
+                Some(1.0e-9),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_cavity_reference_mode_count",
+                "FEA_ACOUSTIC_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_KNOWN_ANSWER",
+                    "cavity_reference_mode_count",
+                ),
+                Some(1.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_known_answer_coverage_ratio",
+                "FEA_ACOUSTIC_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_KNOWN_ANSWER",
+                    "known_answer_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
         }
         if matches!(
             spec.id,
