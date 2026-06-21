@@ -420,6 +420,14 @@ fn integral_accepts_named_function_handle() {
 }
 
 #[test]
+fn quad_accepts_anonymous_function_with_legacy_forwarded_args() {
+    let vars = execute_source("q = quad(@(x,a) a.*x, 0, 2, [], [], 3);").unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 6.0).abs() < 1e-8)));
+}
+
+#[test]
 fn fminbnd_accepts_anonymous_function() {
     let vars = execute_source("x = fminbnd(@(x) (x-2).^2, 0, 5);").unwrap();
     assert!(vars

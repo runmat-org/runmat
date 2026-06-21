@@ -49977,6 +49977,229 @@
       ]
     },
     {
+      "name": "quad",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "q = quad(fun, a, b)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar integrand callback."
+            },
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Lower integration bound."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Upper integration bound."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "q",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerical integral estimate."
+            }
+          ]
+        },
+        {
+          "label": "q = quad(fun, a, b, tol, trace, p1, p2, ...)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar integrand callback."
+            },
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Lower integration bound."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Upper integration bound."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "1e-6",
+              "description": "Absolute error tolerance. Empty uses the default."
+            },
+            {
+              "name": "trace",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "false",
+              "description": "Nonzero value prints legacy [fcnEvals, a, b-a, Q] trace rows."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments forwarded to the integrand."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "q",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerical integral estimate."
+            }
+          ]
+        },
+        {
+          "label": "[q, fcnt] = quad(fun, a, b)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar integrand callback."
+            },
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Lower integration bound."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Upper integration bound."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "q",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerical integral estimate."
+            },
+            {
+              "name": "fcnt",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of integrand evaluations."
+            }
+          ]
+        },
+        {
+          "label": "[q, fcnt] = quad(fun, a, b, tol, trace, p1, p2, ...)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar integrand callback."
+            },
+            {
+              "name": "a",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Lower integration bound."
+            },
+            {
+              "name": "b",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Upper integration bound."
+            },
+            {
+              "name": "tol",
+              "ty": "NumericScalar",
+              "arity": "Optional",
+              "default": "1e-6",
+              "description": "Absolute error tolerance. Empty uses the default."
+            },
+            {
+              "name": "trace",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "false",
+              "description": "Nonzero value prints legacy [fcnEvals, a, b-a, Q] trace rows."
+            },
+            {
+              "name": "p",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments forwarded to the integrand."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "q",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Numerical integral estimate."
+            },
+            {
+              "name": "fcnt",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of integrand evaluations."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.QUAD.INVALID_ARGUMENT",
+          "identifier": "RunMat:quad:InvalidArgument",
+          "when": "Tolerance, trace flag, or argument grammar is invalid.",
+          "message": "quad: invalid argument"
+        },
+        {
+          "code": "RM.QUAD.INVALID_INPUT",
+          "identifier": "RunMat:quad:InvalidInput",
+          "when": "Bounds, integrand values, or adaptive solver semantics are invalid.",
+          "message": "quad: invalid input"
+        },
+        {
+          "code": "RM.QUAD.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:quad:TooManyOutputs",
+          "when": "`quad` is called with more than two requested output arguments.",
+          "message": "quad: too many output arguments"
+        }
+      ]
+    },
+    {
       "name": "quiver",
       "output_mode": "Fixed",
       "completion_policy": "Public",

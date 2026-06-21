@@ -9,4 +9,5 @@ pub mod integral;
 pub mod linprog;
 pub mod optimoptions;
 pub mod optimset;
+pub mod quad;
 pub(crate) mod type_resolvers;
