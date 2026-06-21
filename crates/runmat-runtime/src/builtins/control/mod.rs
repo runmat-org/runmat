@@ -2,6 +2,7 @@
 
 use crate::RuntimeError;
 
+pub mod damp;
 pub mod db;
 pub mod dcgain;
 pub mod feedback;

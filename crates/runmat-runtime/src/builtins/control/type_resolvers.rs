@@ -66,6 +66,10 @@ pub fn dcgain_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Num
 }
 
+pub fn damp_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::tensor()
+}
+
 pub fn pole_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::tensor()
 }
