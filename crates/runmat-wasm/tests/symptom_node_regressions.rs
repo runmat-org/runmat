@@ -26,3 +26,8 @@ async fn tic_toc_loop_executes_without_runtime_error() {
 async fn symbolic_limit_workflow_executes_without_runtime_error() {
     shared::assert_symbolic_limit_workflow_executes_without_runtime_error().await;
 }
+
+#[wasm_bindgen_test(async)]
+async fn signal_compatibility_harness_executes_without_runtime_error() {
+    shared::assert_signal_compatibility_harness_executes_without_runtime_error().await;
+}
