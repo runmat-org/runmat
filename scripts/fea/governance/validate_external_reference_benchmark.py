@@ -5,6 +5,24 @@ from pathlib import Path
 
 
 REQUIRED_METRICS_BY_FIXTURE = {
+    "cantilever_gpu_provider": {
+        "structural_normalized_residual_norm",
+        "structural_total_strain_energy",
+        "structural_active_stiffness_edge_count",
+        "structural_recovery_element_count",
+        "structural_max_edge_displacement_jump",
+        "structural_von_mises_peak_pa",
+        "structural_stress_tensor_peak_pa",
+    },
+    "cantilever_gpu_fallback": {
+        "structural_normalized_residual_norm",
+        "structural_total_strain_energy",
+        "structural_active_stiffness_edge_count",
+        "structural_recovery_element_count",
+        "structural_max_edge_displacement_jump",
+        "structural_von_mises_peak_pa",
+        "structural_stress_tensor_peak_pa",
+    },
     "nonlinear_assembly_gpu_provider": {
         "nonlinear_total_increments",
         "nonlinear_failed_increments",

@@ -35,8 +35,9 @@ pub fn recover_result_fields(
     let node_count = dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1);
     displacement_values.resize(node_count * VECTOR_COMPONENT_COUNT, 0.0);
 
-    let element_count = node_count.saturating_sub(1).max(1);
-    let strain_values = recover_strain(&displacement_values, element_count);
+    let recovery_edges = structural_recovery_edges(summary);
+    let element_count = recovery_edges.len().max(1);
+    let strain_values = recover_strain(&displacement_values, &recovery_edges);
     let stress_values = recover_stress(&strain_values, summary.structural_material);
     let von_mises_values = recover_von_mises(&stress_values);
     let internal_force = apply_k_unconstrained(&summary.operator, &solve_result.solution);
@@ -88,6 +89,48 @@ pub fn recover_result_fields(
     ]
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StructuralFieldRecoveryMetrics {
+    pub active_stiffness_edge_count: usize,
+    pub constrained_edge_count: usize,
+    pub recovery_element_count: usize,
+    pub max_edge_displacement_jump: f64,
+    pub mean_edge_stiffness_ratio: f64,
+}
+
+pub fn structural_field_recovery_metrics(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+) -> StructuralFieldRecoveryMetrics {
+    let recovery_edges = structural_recovery_edges(summary);
+    let active_stiffness_edge_count = recovery_edges.len();
+    let constrained_edge_count = constrained_stiffness_edge_count(summary);
+    let mut max_edge_displacement_jump = 0.0_f64;
+    let mut stiffness_ratio_sum = 0.0_f64;
+    for edge in &recovery_edges {
+        let jump = displacement
+            .get(edge.to_dof)
+            .zip(displacement.get(edge.from_dof))
+            .map(|(right, left)| (right - left).abs())
+            .unwrap_or(0.0);
+        max_edge_displacement_jump = max_edge_displacement_jump.max(jump);
+        stiffness_ratio_sum += edge.stiffness_ratio;
+    }
+    let mean_edge_stiffness_ratio = if recovery_edges.is_empty() {
+        0.0
+    } else {
+        stiffness_ratio_sum / recovery_edges.len() as f64
+    };
+
+    StructuralFieldRecoveryMetrics {
+        active_stiffness_edge_count,
+        constrained_edge_count,
+        recovery_element_count: active_stiffness_edge_count.max(1),
+        max_edge_displacement_jump,
+        mean_edge_stiffness_ratio,
+    }
+}
+
 fn empty_structural_fields() -> Vec<AnalysisField> {
     vec![
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_DISPLACEMENT, vec![0, 3], Vec::new()),
@@ -105,16 +148,95 @@ fn empty_structural_fields() -> Vec<AnalysisField> {
     ]
 }
 
-fn recover_strain(displacement: &[f64], element_count: usize) -> Vec<f64> {
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct StructuralRecoveryEdge {
+    from_dof: usize,
+    to_dof: usize,
+    component: usize,
+    stiffness_ratio: f64,
+}
+
+fn structural_recovery_edges(summary: &AssemblySummary) -> Vec<StructuralRecoveryEdge> {
+    summary
+        .operator
+        .stiffness_upper
+        .iter()
+        .enumerate()
+        .filter_map(|(from_dof, stiffness)| {
+            let to_dof = from_dof + 1;
+            if to_dof >= summary.dof_count
+                || *stiffness <= 0.0
+                || summary
+                    .operator
+                    .constrained
+                    .get(from_dof)
+                    .copied()
+                    .unwrap_or(false)
+                || summary
+                    .operator
+                    .constrained
+                    .get(to_dof)
+                    .copied()
+                    .unwrap_or(false)
+            {
+                return None;
+            }
+            let left_diag = summary
+                .operator
+                .stiffness_diag
+                .get(from_dof)
+                .copied()
+                .unwrap_or(0.0);
+            let right_diag = summary
+                .operator
+                .stiffness_diag
+                .get(to_dof)
+                .copied()
+                .unwrap_or(0.0);
+            let diag_scale = (0.5 * (left_diag + right_diag)).abs().max(1.0);
+            Some(StructuralRecoveryEdge {
+                from_dof,
+                to_dof,
+                component: from_dof % VECTOR_COMPONENT_COUNT,
+                stiffness_ratio: (*stiffness / diag_scale).abs(),
+            })
+        })
+        .collect()
+}
+
+fn constrained_stiffness_edge_count(summary: &AssemblySummary) -> usize {
+    summary
+        .operator
+        .stiffness_upper
+        .iter()
+        .enumerate()
+        .filter(|(from_dof, stiffness)| {
+            let to_dof = from_dof + 1;
+            **stiffness > 0.0
+                && to_dof < summary.dof_count
+                && (summary
+                    .operator
+                    .constrained
+                    .get(*from_dof)
+                    .copied()
+                    .unwrap_or(false)
+                    || summary
+                        .operator
+                        .constrained
+                        .get(to_dof)
+                        .copied()
+                        .unwrap_or(false))
+        })
+        .count()
+}
+
+fn recover_strain(displacement: &[f64], recovery_edges: &[StructuralRecoveryEdge]) -> Vec<f64> {
+    let element_count = recovery_edges.len().max(1);
     let mut strain = vec![0.0; element_count * TENSOR_COMPONENT_COUNT];
-    for element_index in 0..element_count {
-        let base = element_index * VECTOR_COMPONENT_COUNT;
-        let next = (element_index + 1) * VECTOR_COMPONENT_COUNT;
-        for component in 0..VECTOR_COMPONENT_COUNT {
-            let value = displacement.get(next + component).copied().unwrap_or(0.0)
-                - displacement.get(base + component).copied().unwrap_or(0.0);
-            strain[element_index * TENSOR_COMPONENT_COUNT + component] = value;
-        }
+    for (element_index, edge) in recovery_edges.iter().enumerate() {
+        let jump = displacement.get(edge.to_dof).copied().unwrap_or(0.0)
+            - displacement.get(edge.from_dof).copied().unwrap_or(0.0);
+        strain[element_index * TENSOR_COMPONENT_COUNT + edge.component] = jump;
     }
     strain
 }

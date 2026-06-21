@@ -31,6 +31,28 @@ from scripts.fea.governance.validate_external_reference_benchmark import (
 
 def required_metrics_payload(*, cfd_density_pass: bool = True):
     return [
+        *[
+            {
+                "name": name,
+                "fixture_id": fixture_id,
+                "observed": observed,
+                "reference": observed,
+                "pass": True,
+            }
+            for fixture_id in (
+                "cantilever_gpu_provider",
+                "cantilever_gpu_fallback",
+            )
+            for name, observed in (
+                ("structural_normalized_residual_norm", 1.4210854715202004e-17),
+                ("structural_total_strain_energy", 0.0047732955809046485),
+                ("structural_active_stiffness_edge_count", 1.0),
+                ("structural_recovery_element_count", 1.0),
+                ("structural_max_edge_displacement_jump", 9.090958401813853e-6),
+                ("structural_von_mises_peak_pa", 1398608.984894439),
+                ("structural_stress_tensor_peak_pa", 2447565.7235652683),
+            )
+        ],
         {
             "name": "nonlinear_total_increments",
             "fixture_id": "nonlinear_assembly_gpu_provider",

@@ -6,6 +6,8 @@ use runmat_analysis_fea::{
     fea_fsi_fluid_velocity_field_id, fea_thermal_temperature_field_id,
     FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_VELOCITY,
     FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_runtime::analysis::{
     AnalysisRunResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
@@ -2357,6 +2359,17 @@ fn diagnostic_metric(
         .and_then(|diag| parse_metric_value(&diag.message, key))
 }
 
+fn analysis_result_field_max_abs(run: &AnalysisRunResult, field_id: &str) -> Option<f64> {
+    analysis_result_field(run, field_id)
+        .and_then(AnalysisField::as_host_f64)
+        .map(|values| {
+            values
+                .iter()
+                .map(|value| value.abs())
+                .fold(0.0_f64, f64::max)
+        })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn push_threshold_assertion(
     fixture_id: &str,
@@ -2497,6 +2510,98 @@ fn push_thermal_standalone_threshold_assertions(
         ),
         Some(0.6),
         Some(1.2),
+    );
+}
+
+fn push_linear_structural_threshold_assertions(
+    fixture_id: &str,
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    run: &AnalysisRunResult,
+) {
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_normalized_residual_norm",
+        "FEA_STRUCTURAL_RESIDUAL",
+        diagnostic_metric(run, "FEA_STRUCTURAL_RESIDUAL", "normalized_residual_norm"),
+        Some(0.0),
+        Some(1.0e-6),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_total_strain_energy",
+        "FEA_STRUCTURAL_ENERGY",
+        diagnostic_metric(run, "FEA_STRUCTURAL_ENERGY", "total_strain_energy").or_else(|| {
+            analysis_result_field_max_abs(run, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)
+        }),
+        Some(0.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_active_stiffness_edge_count",
+        "FEA_STRUCTURAL_FIELD_RECOVERY",
+        diagnostic_metric(
+            run,
+            "FEA_STRUCTURAL_FIELD_RECOVERY",
+            "active_stiffness_edge_count",
+        ),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_recovery_element_count",
+        "FEA_STRUCTURAL_FIELD_RECOVERY",
+        diagnostic_metric(
+            run,
+            "FEA_STRUCTURAL_FIELD_RECOVERY",
+            "recovery_element_count",
+        ),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_max_edge_displacement_jump",
+        "FEA_STRUCTURAL_FIELD_RECOVERY",
+        diagnostic_metric(
+            run,
+            "FEA_STRUCTURAL_FIELD_RECOVERY",
+            "max_edge_displacement_jump",
+        ),
+        Some(1.0e-12),
+        Some(1.0e-2),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_von_mises_peak_pa",
+        FEA_FIELD_STRUCTURAL_VON_MISES,
+        analysis_result_field_max_abs(run, FEA_FIELD_STRUCTURAL_VON_MISES),
+        Some(1.0e5),
+        Some(1.0e9),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_stress_tensor_peak_pa",
+        FEA_FIELD_STRUCTURAL_STRESS,
+        analysis_result_field_max_abs(run, FEA_FIELD_STRUCTURAL_STRESS),
+        Some(1.0e5),
+        Some(1.0e9),
     );
 }
 
@@ -2908,6 +3013,17 @@ pub(super) fn run_fixture(
                 ),
                 Some(1.0e-12),
                 None,
+            );
+        }
+        if matches!(
+            spec.id,
+            "cantilever_gpu_provider" | "cantilever_gpu_fallback"
+        ) {
+            push_linear_structural_threshold_assertions(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                &cpu_envelope.data,
             );
         }
         if let Some(max_residual) = spec.max_transient_residual_norm {

@@ -7,6 +7,146 @@
   },
   "metrics": [
     {
+      "name": "structural_normalized_residual_norm",
+      "fixture_id": "cantilever_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_normalized_residual_norm",
+      "reference": 1.4210854715202004e-17,
+      "tolerance_abs": 1e-08,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_total_strain_energy",
+      "fixture_id": "cantilever_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_total_strain_energy",
+      "reference": 0.0047732955809046485,
+      "tolerance_abs": 0.001,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_active_stiffness_edge_count",
+      "fixture_id": "cantilever_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_active_stiffness_edge_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_recovery_element_count",
+      "fixture_id": "cantilever_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_recovery_element_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_max_edge_displacement_jump",
+      "fixture_id": "cantilever_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_max_edge_displacement_jump",
+      "reference": 9.090958401813853e-06,
+      "tolerance_abs": 5e-06,
+      "tolerance_rel": 0.4
+    },
+    {
+      "name": "structural_von_mises_peak_pa",
+      "fixture_id": "cantilever_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_von_mises_peak_pa",
+      "reference": 1398608.984894439,
+      "tolerance_abs": 350000.0,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_stress_tensor_peak_pa",
+      "fixture_id": "cantilever_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_stress_tensor_peak_pa",
+      "reference": 2447565.7235652683,
+      "tolerance_abs": 650000.0,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_normalized_residual_norm",
+      "fixture_id": "cantilever_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_normalized_residual_norm",
+      "reference": 1.4210854715202004e-17,
+      "tolerance_abs": 1e-08,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_total_strain_energy",
+      "fixture_id": "cantilever_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_total_strain_energy",
+      "reference": 0.0047732955809046485,
+      "tolerance_abs": 0.001,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_active_stiffness_edge_count",
+      "fixture_id": "cantilever_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_active_stiffness_edge_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_recovery_element_count",
+      "fixture_id": "cantilever_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_recovery_element_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_max_edge_displacement_jump",
+      "fixture_id": "cantilever_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_max_edge_displacement_jump",
+      "reference": 9.090958401813853e-06,
+      "tolerance_abs": 5e-06,
+      "tolerance_rel": 0.4
+    },
+    {
+      "name": "structural_von_mises_peak_pa",
+      "fixture_id": "cantilever_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_von_mises_peak_pa",
+      "reference": 1398608.984894439,
+      "tolerance_abs": 350000.0,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_stress_tensor_peak_pa",
+      "fixture_id": "cantilever_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_stress_tensor_peak_pa",
+      "reference": 2447565.7235652683,
+      "tolerance_abs": 650000.0,
+      "tolerance_rel": 0.25
+    },
+    {
       "name": "plastic_reference_severity",
       "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
       "field": "plastic_nonlinear_severity",

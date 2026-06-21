@@ -14,7 +14,7 @@ use crate::{
     },
     pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
-    post::fields::recover_result_fields,
+    post::fields::{recover_result_fields, structural_field_recovery_metrics},
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::{backend::build_backend, linear::solve_linear_system},
 };
@@ -195,6 +195,25 @@ pub fn run_linear_static_with_options(
             message: format!("total_strain_energy={total_strain_energy}"),
         });
     }
+    let recovery_metrics = structural_field_recovery_metrics(&summary, &solve_result.solution);
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_STRUCTURAL_FIELD_RECOVERY".to_string(),
+        severity: if recovery_metrics.active_stiffness_edge_count > 0
+            && recovery_metrics.recovery_element_count > 0
+        {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "basis=operator_connectivity active_stiffness_edge_count={} constrained_edge_count={} recovery_element_count={} max_edge_displacement_jump={} mean_edge_stiffness_ratio={}",
+            recovery_metrics.active_stiffness_edge_count,
+            recovery_metrics.constrained_edge_count,
+            recovery_metrics.recovery_element_count,
+            recovery_metrics.max_edge_displacement_jump,
+            recovery_metrics.mean_edge_stiffness_ratio
+        ),
+    });
     extend_common_run_diagnostics(
         &mut diagnostics,
         CommonRunDiagnosticInputs {

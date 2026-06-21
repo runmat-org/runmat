@@ -56,6 +56,30 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
     def _base_records(self) -> list[dict]:
         return [
             _record(
+                "cantilever_gpu_provider",
+                {
+                    "structural_normalized_residual_norm",
+                    "structural_total_strain_energy",
+                    "structural_active_stiffness_edge_count",
+                    "structural_recovery_element_count",
+                    "structural_max_edge_displacement_jump",
+                    "structural_von_mises_peak_pa",
+                    "structural_stress_tensor_peak_pa",
+                },
+            ),
+            _record(
+                "cantilever_gpu_fallback",
+                {
+                    "structural_normalized_residual_norm",
+                    "structural_total_strain_energy",
+                    "structural_active_stiffness_edge_count",
+                    "structural_recovery_element_count",
+                    "structural_max_edge_displacement_jump",
+                    "structural_von_mises_peak_pa",
+                    "structural_stress_tensor_peak_pa",
+                },
+            ),
+            _record(
                 "nonlinear_assembly_gpu_provider",
                 {
                     "nonlinear_total_increments",
