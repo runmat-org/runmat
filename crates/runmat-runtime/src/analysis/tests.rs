@@ -18,12 +18,15 @@ use runmat_analysis_core::{
     ReferenceFrame,
 };
 use runmat_analysis_fea::{
-    fea_modal_mode_shape_field_id, fea_transient_acceleration_field_id,
-    fea_transient_kinetic_energy_field_id, fea_transient_strain_energy_field_id,
-    fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
-    FeaProgressPhase, FeaProgressStatus, FEA_FIELD_EM_FLUX_DENSITY_PROXY,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    fea_modal_mode_shape_field_id, fea_nonlinear_contact_gap_field_id,
+    fea_nonlinear_contact_pressure_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
+    fea_nonlinear_plastic_strain_field_id, fea_nonlinear_von_mises_field_id,
+    fea_transient_acceleration_field_id, fea_transient_kinetic_energy_field_id,
+    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
+    fea_transient_von_mises_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
+    FEA_FIELD_EM_FLUX_DENSITY_PROXY, FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
@@ -3865,6 +3868,46 @@ fn analysis_run_nonlinear_returns_native_nonlinear_result() {
         nonlinear.residual_norms.len(),
         nonlinear.iteration_counts.len()
     );
+    assert_eq!(
+        nonlinear.load_factors.len(),
+        nonlinear.von_mises_snapshots.len()
+    );
+    assert_eq!(
+        nonlinear.load_factors.len(),
+        nonlinear.plastic_strain_snapshots.len()
+    );
+    assert_eq!(
+        nonlinear.load_factors.len(),
+        nonlinear.equivalent_plastic_strain_snapshots.len()
+    );
+    assert_eq!(
+        nonlinear.load_factors.len(),
+        nonlinear.contact_pressure_snapshots.len()
+    );
+    assert_eq!(
+        nonlinear.load_factors.len(),
+        nonlinear.contact_gap_snapshots.len()
+    );
+    assert_eq!(
+        nonlinear.von_mises_snapshots[0].field_id,
+        fea_nonlinear_von_mises_field_id(0)
+    );
+    assert_eq!(
+        nonlinear.plastic_strain_snapshots[0].field_id,
+        fea_nonlinear_plastic_strain_field_id(0)
+    );
+    assert_eq!(
+        nonlinear.equivalent_plastic_strain_snapshots[0].field_id,
+        fea_nonlinear_equivalent_plastic_strain_field_id(0)
+    );
+    assert_eq!(
+        nonlinear.contact_pressure_snapshots[0].field_id,
+        fea_nonlinear_contact_pressure_field_id(0)
+    );
+    assert_eq!(
+        nonlinear.contact_gap_snapshots[0].field_id,
+        fea_nonlinear_contact_gap_field_id(0)
+    );
     assert!(nonlinear.tangent_rebuild_count > 0);
     assert!(nonlinear.iteration_spike_count <= nonlinear.load_factors.len());
     assert!(nonlinear.max_line_search_backtracks_per_increment > 0);
@@ -4227,6 +4270,17 @@ fn analysis_results_query_can_exclude_nonlinear_payload() {
         .summary
         .nonlinear_backtrack_burst_count
         .is_some());
+    let field_ids = results
+        .data
+        .field_descriptors
+        .iter()
+        .map(|descriptor| descriptor.field_id.as_str())
+        .collect::<Vec<_>>();
+    assert!(field_ids.contains(&fea_nonlinear_von_mises_field_id(0).as_str()));
+    assert!(field_ids.contains(&fea_nonlinear_plastic_strain_field_id(0).as_str()));
+    assert!(field_ids.contains(&fea_nonlinear_equivalent_plastic_strain_field_id(0).as_str()));
+    assert!(field_ids.contains(&fea_nonlinear_contact_pressure_field_id(0).as_str()));
+    assert!(field_ids.contains(&fea_nonlinear_contact_gap_field_id(0).as_str()));
 }
 
 #[test]
@@ -4250,6 +4304,11 @@ fn nonlinear_results_deserialize_with_missing_new_fields() {
     assert_eq!(parsed.iteration_spike_count, 0);
     assert_eq!(parsed.convergence_stall_count, 0);
     assert_eq!(parsed.backtrack_burst_count, 0);
+    assert!(parsed.von_mises_snapshots.is_empty());
+    assert!(parsed.plastic_strain_snapshots.is_empty());
+    assert!(parsed.equivalent_plastic_strain_snapshots.is_empty());
+    assert!(parsed.contact_pressure_snapshots.is_empty());
+    assert!(parsed.contact_gap_snapshots.is_empty());
 }
 
 #[test]

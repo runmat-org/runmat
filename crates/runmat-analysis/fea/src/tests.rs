@@ -1,7 +1,9 @@
 use crate::{
-    fea_transient_acceleration_field_id, fea_transient_kinetic_energy_field_id,
-    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
-    fea_transient_von_mises_field_id,
+    fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
+    fea_nonlinear_equivalent_plastic_strain_field_id, fea_nonlinear_plastic_strain_field_id,
+    fea_nonlinear_von_mises_field_id, fea_transient_acceleration_field_id,
+    fea_transient_kinetic_energy_field_id, fea_transient_strain_energy_field_id,
+    fea_transient_velocity_field_id, fea_transient_von_mises_field_id,
     fixtures::{fixture_model, FixtureId},
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
@@ -356,6 +358,43 @@ fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
     assert_eq!(result.load_factors.len(), result.residual_norms.len());
     assert_eq!(result.residual_norms.len(), result.increment_norms.len());
     assert_eq!(result.residual_norms.len(), result.iteration_counts.len());
+    assert_eq!(result.load_factors.len(), result.von_mises_snapshots.len());
+    assert_eq!(
+        result.load_factors.len(),
+        result.plastic_strain_snapshots.len()
+    );
+    assert_eq!(
+        result.load_factors.len(),
+        result.equivalent_plastic_strain_snapshots.len()
+    );
+    assert_eq!(
+        result.load_factors.len(),
+        result.contact_pressure_snapshots.len()
+    );
+    assert_eq!(
+        result.load_factors.len(),
+        result.contact_gap_snapshots.len()
+    );
+    assert_eq!(
+        result.von_mises_snapshots[0].field_id,
+        fea_nonlinear_von_mises_field_id(0)
+    );
+    assert_eq!(
+        result.plastic_strain_snapshots[0].field_id,
+        fea_nonlinear_plastic_strain_field_id(0)
+    );
+    assert_eq!(
+        result.equivalent_plastic_strain_snapshots[0].field_id,
+        fea_nonlinear_equivalent_plastic_strain_field_id(0)
+    );
+    assert_eq!(
+        result.contact_pressure_snapshots[0].field_id,
+        fea_nonlinear_contact_pressure_field_id(0)
+    );
+    assert_eq!(
+        result.contact_gap_snapshots[0].field_id,
+        fea_nonlinear_contact_gap_field_id(0)
+    );
     assert!(result
         .run
         .diagnostics

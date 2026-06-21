@@ -51,6 +51,26 @@ pub fn fea_nonlinear_displacement_field_id(increment_index: usize) -> String {
     format!("nonlinear.displacement.{increment_index}")
 }
 
+pub fn fea_nonlinear_von_mises_field_id(increment_index: usize) -> String {
+    format!("nonlinear.von_mises.{increment_index}")
+}
+
+pub fn fea_nonlinear_plastic_strain_field_id(increment_index: usize) -> String {
+    format!("nonlinear.plastic_strain.{increment_index}")
+}
+
+pub fn fea_nonlinear_equivalent_plastic_strain_field_id(increment_index: usize) -> String {
+    format!("nonlinear.equivalent_plastic_strain.{increment_index}")
+}
+
+pub fn fea_nonlinear_contact_pressure_field_id(increment_index: usize) -> String {
+    format!("nonlinear.contact_pressure.{increment_index}")
+}
+
+pub fn fea_nonlinear_contact_gap_field_id(increment_index: usize) -> String {
+    format!("nonlinear.contact_gap.{increment_index}")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ComputeBackend {
@@ -327,6 +347,11 @@ pub struct FeaNonlinearRunResult {
     pub run: FeaRunResult,
     pub load_factors: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
+    pub von_mises_snapshots: Vec<AnalysisField>,
+    pub plastic_strain_snapshots: Vec<AnalysisField>,
+    pub equivalent_plastic_strain_snapshots: Vec<AnalysisField>,
+    pub contact_pressure_snapshots: Vec<AnalysisField>,
+    pub contact_gap_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub increment_norms: Vec<f64>,
     pub iteration_counts: Vec<usize>,

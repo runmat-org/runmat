@@ -5086,6 +5086,11 @@ pub fn analysis_run_nonlinear_with_options_op(
             nonlinear_payload_version: "nonlinear_results/v1".to_string(),
             load_factors: nonlinear_run.load_factors,
             displacement_snapshots: nonlinear_run.displacement_snapshots,
+            von_mises_snapshots: nonlinear_run.von_mises_snapshots,
+            plastic_strain_snapshots: nonlinear_run.plastic_strain_snapshots,
+            equivalent_plastic_strain_snapshots: nonlinear_run.equivalent_plastic_strain_snapshots,
+            contact_pressure_snapshots: nonlinear_run.contact_pressure_snapshots,
+            contact_gap_snapshots: nonlinear_run.contact_gap_snapshots,
             residual_norms: nonlinear_run.residual_norms,
             increment_norms: nonlinear_run.increment_norms,
             iteration_counts: nonlinear_run.iteration_counts,
@@ -6231,6 +6236,21 @@ fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<Analysi
 
     if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
         for field in &nonlinear.displacement_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.von_mises_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.plastic_strain_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.equivalent_plastic_strain_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.contact_pressure_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.contact_gap_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
     }

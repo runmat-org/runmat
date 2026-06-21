@@ -970,6 +970,7 @@ impl AnalysisFieldDescriptor {
 fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
     let normalized = field_id.to_ascii_lowercase();
     if normalized.contains("von_mises")
+        || normalized.contains("equivalent_plastic_strain")
         || normalized.contains("temperature")
         || normalized.contains("energy")
         || normalized.contains("residual")
@@ -999,6 +1000,9 @@ fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
 fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
     let normalized = field_id.to_ascii_lowercase();
     if normalized.contains("_proxy") {
+        return None;
+    }
+    if normalized.contains("equivalent_plastic_strain") {
         return None;
     }
     if normalized.contains("displacement")
@@ -1500,6 +1504,16 @@ pub struct NonlinearResultsData {
     pub nonlinear_payload_version: String,
     pub load_factors: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub von_mises_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub plastic_strain_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub equivalent_plastic_strain_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub contact_pressure_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub contact_gap_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     #[serde(default)]
     pub increment_norms: Vec<f64>,
