@@ -4545,18 +4545,6 @@ pub fn analysis_run_transient_with_options_op(
             detail: "field promotion fell back to host-backed values".to_string(),
         });
     }
-    if run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_TRANSIENT_PLACEHOLDER")
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::TransientPlaceholder,
-            detail: "transient run path currently uses linear-static placeholder backend"
-                .to_string(),
-        });
-    }
-
     let publishable = match options.quality_policy {
         QualityPolicy::Strict => {
             solver_convergence == QualityGate::Pass

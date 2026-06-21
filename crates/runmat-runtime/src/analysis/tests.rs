@@ -4364,11 +4364,6 @@ fn analysis_run_transient_returns_native_transient_result() {
     assert_eq!(envelope.data.provenance.solver_method, "implicit_euler_pcg");
     assert_eq!(envelope.data.run_status, RunStatus::Publishable);
     assert!(envelope.data.publishable);
-    assert!(!envelope
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::TransientPlaceholder));
     assert!(envelope
         .data
         .run

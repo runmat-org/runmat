@@ -1217,11 +1217,6 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
     assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
     assert_eq!(envelope.data.run_status, RunStatus::Publishable);
     assert!(envelope.data.publishable);
-    assert!(!envelope
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::TransientPlaceholder));
     let transient = envelope
         .data
         .transient_results

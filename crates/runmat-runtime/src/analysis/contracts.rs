@@ -200,7 +200,6 @@ pub enum QualityReasonCode {
     ModalResidualExceeded,
     ModalOrthogonalityExceeded,
     ModalSeparationLow,
-    TransientPlaceholder,
     TransientResidualExceeded,
     TransientStabilityExceeded,
     TransientStepFailure,
@@ -1591,7 +1590,6 @@ pub struct ElectromagneticResultsData {
 #[serde(rename_all = "snake_case")]
 pub enum TransientIntegrationMethod {
     ImplicitEuler,
-    PlaceholderLinearStatic,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
