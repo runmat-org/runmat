@@ -282,6 +282,19 @@ pub struct OpenFileDialogSelection {
     pub filter_index: Option<usize>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SaveFileDialogRequest {
+    pub title: Option<String>,
+    pub default_path: Option<PathBuf>,
+    pub filters: Vec<OpenFileDialogFilter>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SaveFileDialogSelection {
+    pub path: PathBuf,
+    pub filter_index: Option<usize>,
+}
+
 impl DirEntry {
     pub fn new(path: PathBuf, file_name: OsString, file_type: FsFileType) -> Self {
         Self {
@@ -390,6 +403,13 @@ pub trait FsProvider: Send + Sync + 'static {
         &self,
         _request: &OpenFileDialogRequest,
     ) -> io::Result<Option<OpenFileDialogSelection>> {
+        Ok(None)
+    }
+
+    async fn select_file_save(
+        &self,
+        _request: &SaveFileDialogRequest,
+    ) -> io::Result<Option<SaveFileDialogSelection>> {
         Ok(None)
     }
 }
@@ -764,6 +784,17 @@ pub async fn select_file_open_async(
     }
     let provider = current_provider();
     provider.select_file_open(&resolved).await
+}
+
+pub async fn select_file_save_async(
+    request: &SaveFileDialogRequest,
+) -> io::Result<Option<SaveFileDialogSelection>> {
+    let mut resolved = request.clone();
+    if let Some(default_path) = resolved.default_path.as_mut() {
+        *default_path = resolve_path(default_path);
+    }
+    let provider = current_provider();
+    provider.select_file_save(&resolved).await
 }
 
 pub async fn data_manifest_descriptor_async(
@@ -1458,6 +1489,26 @@ mod tests {
 
         let selection =
             futures::executor::block_on(select_file_open_async(&request)).expect("select file");
+
+        assert_eq!(selection, None);
+    }
+
+    #[test]
+    fn select_file_save_defaults_to_cancelled_selection() {
+        let _guard = test_lock();
+        let provider: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
+        let _provider_guard = replace_provider(provider);
+        let request = SaveFileDialogRequest {
+            title: Some("Save".to_string()),
+            default_path: Some(PathBuf::from("data.mat")),
+            filters: vec![OpenFileDialogFilter {
+                patterns: vec!["*.mat".to_string()],
+                description: Some("MAT files".to_string()),
+            }],
+        };
+
+        let selection =
+            futures::executor::block_on(select_file_save_async(&request)).expect("select file");
 
         assert_eq!(selection, None);
     }
