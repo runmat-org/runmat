@@ -5248,7 +5248,7 @@
     },
     {
       "name": "nonlinear_softening_total_increments",
-      "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+      "fixture_id": "nonlinear_softening_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "nonlinear_softening_total_increments",
@@ -5258,7 +5258,7 @@
     },
     {
       "name": "nonlinear_softening_spike_count",
-      "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+      "fixture_id": "nonlinear_softening_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "nonlinear_softening_spike_count",
@@ -5268,7 +5268,7 @@
     },
     {
       "name": "nonlinear_softening_backtrack_bursts",
-      "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+      "fixture_id": "nonlinear_softening_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "nonlinear_softening_backtrack_bursts",
@@ -5428,7 +5428,7 @@
     },
     {
       "name": "plasticity_nonlinear_severity_peak",
-      "fixture_id": "nonlinear_plasticity_proxy_gpu_provider",
+      "fixture_id": "nonlinear_plasticity_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "plasticity_nonlinear_severity_peak",
@@ -5438,7 +5438,7 @@
     },
     {
       "name": "plasticity_nonlinear_severity_mean",
-      "fixture_id": "nonlinear_plasticity_proxy_gpu_provider",
+      "fixture_id": "nonlinear_plasticity_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "plasticity_nonlinear_severity_mean",
@@ -5448,7 +5448,7 @@
     },
     {
       "name": "contact_nonlinear_severity_peak",
-      "fixture_id": "nonlinear_contact_proxy_gpu_provider",
+      "fixture_id": "nonlinear_contact_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "contact_nonlinear_severity_peak",
@@ -5458,7 +5458,7 @@
     },
     {
       "name": "contact_nonlinear_severity_mean",
-      "fixture_id": "nonlinear_contact_proxy_gpu_provider",
+      "fixture_id": "nonlinear_contact_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "contact_nonlinear_severity_mean",
@@ -5718,7 +5718,7 @@
     },
     {
       "name": "plasticity_nonlinear_load_amplification_ratio",
-      "fixture_id": "nonlinear_plasticity_proxy_gpu_provider",
+      "fixture_id": "nonlinear_plasticity_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "plasticity_nonlinear_load_amplification_ratio",
@@ -5728,7 +5728,7 @@
     },
     {
       "name": "plasticity_nonlinear_load_realization_ratio",
-      "fixture_id": "nonlinear_plasticity_proxy_gpu_provider",
+      "fixture_id": "nonlinear_plasticity_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "plasticity_nonlinear_load_realization_ratio",
@@ -5738,7 +5738,7 @@
     },
     {
       "name": "contact_nonlinear_load_amplification_ratio",
-      "fixture_id": "nonlinear_contact_proxy_gpu_provider",
+      "fixture_id": "nonlinear_contact_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "contact_nonlinear_load_amplification_ratio",
@@ -5748,7 +5748,7 @@
     },
     {
       "name": "contact_nonlinear_load_realization_ratio",
-      "fixture_id": "nonlinear_contact_proxy_gpu_provider",
+      "fixture_id": "nonlinear_contact_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "contact_nonlinear_load_realization_ratio",
@@ -5798,7 +5798,7 @@
     },
     {
       "name": "nonlinear_softening_failed_increments",
-      "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+      "fixture_id": "nonlinear_softening_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "nonlinear_softening_failed_increments",
@@ -5808,7 +5808,7 @@
     },
     {
       "name": "nonlinear_softening_stall_count",
-      "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+      "fixture_id": "nonlinear_softening_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "nonlinear_softening_stall_count",

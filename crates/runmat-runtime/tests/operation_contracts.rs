@@ -1741,7 +1741,7 @@ fn analysis_run_nonlinear_policy_contract_divergence_is_explicit() {
 
 #[test]
 fn analysis_run_nonlinear_policy_diverges_on_harder_fixture_profile() {
-    let model = fixture_model(FixtureId::NonlinearSofteningProxy);
+    let model = fixture_model(FixtureId::NonlinearSofteningBenchmark);
     let run_with_policy = |policy| {
         analysis_run_nonlinear_with_options_op(
             &model,
@@ -2360,7 +2360,8 @@ fn analysis_results_by_run_id_contract_roundtrip() {
 
     assert_eq!(results.operation, "fea.results");
     assert_eq!(results.op_version, "fea.results/v1");
-    assert_eq!(results.data.summary.field_count, 2);
+    assert_eq!(results.data.summary.field_count, results.data.fields.len());
+    assert_eq!(results.data.summary.field_count, 8);
     assert_eq!(results.data.summary.mode_count, 0);
     assert!(results.data.summary.available_mode_indices.is_empty());
     assert_eq!(results.data.summary.min_frequency_hz, None);

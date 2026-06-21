@@ -73,8 +73,8 @@ pub struct PrepElementAssemblySummary {
 pub struct PrepElementConnectivitySummary {
     pub assembled_element_count: usize,
     pub stiffness_offdiag_nnz_count: usize,
-    pub mass_offdiag_proxy_nnz_count: usize,
-    pub damping_offdiag_proxy_nnz_count: usize,
+    pub mass_offdiag_nnz_count: usize,
+    pub damping_offdiag_nnz_count: usize,
     pub triangle_contrib_share: f64,
     pub quad_contrib_share: f64,
     pub tet_contrib_share: f64,
@@ -425,7 +425,7 @@ pub fn assemble_linear_system(
     }
 
     let bandwidth_stride = prep_context
-        .map(|prep| prep.topology_bandwidth_proxy.max(1) as usize)
+        .map(|prep| prep.topology_bandwidth_estimate.max(1) as usize)
         .unwrap_or(1);
     for i in 0..stiffness_upper.len() {
         let at_region_boundary = region_boundary_positions.binary_search(&i).is_ok();
@@ -787,7 +787,7 @@ fn topology_fingerprint(
         prep.topology_region_span_mean.to_bits(),
         prep.mapped_region_participation_ratio.to_bits(),
         prep.topology_dof_multiplier.to_bits(),
-        prep.topology_bandwidth_proxy as u64,
+        prep.topology_bandwidth_estimate as u64,
         prep.layout_seed,
     ] {
         hash ^= value;
@@ -829,7 +829,7 @@ fn apply_prep_native_element_assembly(
     let mut touched_diag = vec![false; dof_count];
     let mut touched_rhs = vec![false; dof_count];
     let mut element_cursor = 0usize;
-    let stride = (prep.topology_bandwidth_proxy.max(1) as usize + 1)
+    let stride = (prep.topology_bandwidth_estimate.max(1) as usize + 1)
         .saturating_add(prep.topology_region_block_count.saturating_sub(1));
     let span_scale = 1.0 + 0.08 * prep.topology_region_span_mean.clamp(1.0, 24.0) / 24.0;
 
@@ -906,8 +906,8 @@ fn apply_prep_element_connectivity_scatter(
         let connectivity_summary = PrepElementConnectivitySummary {
             assembled_element_count: element_summary.assembled_element_count,
             stiffness_offdiag_nnz_count: 0,
-            mass_offdiag_proxy_nnz_count: 0,
-            damping_offdiag_proxy_nnz_count: 0,
+            mass_offdiag_nnz_count: 0,
+            damping_offdiag_nnz_count: 0,
             triangle_contrib_share: 0.0,
             quad_contrib_share: 0.0,
             tet_contrib_share: 0.0,
@@ -919,8 +919,8 @@ fn apply_prep_element_connectivity_scatter(
                 ElementConnectivityFingerprintInputs {
                     element_summary,
                     stiffness_offdiag_nnz_count: 0,
-                    mass_offdiag_proxy_nnz_count: 0,
-                    damping_offdiag_proxy_nnz_count: 0,
+                    mass_offdiag_nnz_count: 0,
+                    damping_offdiag_nnz_count: 0,
                     mean_connectivity_hop: 0.0,
                     shares: [0.0; 5],
                     graph_fingerprint: 0,
@@ -1008,8 +1008,8 @@ fn apply_prep_element_connectivity_scatter(
     }
 
     let stiffness_offdiag_nnz_count = touched_stiffness.iter().filter(|&&hit| hit).count();
-    let mass_offdiag_proxy_nnz_count = touched_mass.iter().filter(|&&hit| hit).count();
-    let damping_offdiag_proxy_nnz_count = touched_damping.iter().filter(|&&hit| hit).count();
+    let mass_offdiag_nnz_count = touched_mass.iter().filter(|&&hit| hit).count();
+    let damping_offdiag_nnz_count = touched_damping.iter().filter(|&&hit| hit).count();
     let total_contrib = family_contrib.iter().sum::<f64>().max(1.0e-12);
     let shares = [
         family_contrib[0] / total_contrib,
@@ -1056,8 +1056,8 @@ fn apply_prep_element_connectivity_scatter(
     let connectivity_summary = PrepElementConnectivitySummary {
         assembled_element_count: element_summary.assembled_element_count,
         stiffness_offdiag_nnz_count,
-        mass_offdiag_proxy_nnz_count,
-        damping_offdiag_proxy_nnz_count,
+        mass_offdiag_nnz_count,
+        damping_offdiag_nnz_count,
         triangle_contrib_share: shares[0],
         quad_contrib_share: shares[1],
         tet_contrib_share: shares[2],
@@ -1069,8 +1069,8 @@ fn apply_prep_element_connectivity_scatter(
             ElementConnectivityFingerprintInputs {
                 element_summary,
                 stiffness_offdiag_nnz_count,
-                mass_offdiag_proxy_nnz_count,
-                damping_offdiag_proxy_nnz_count,
+                mass_offdiag_nnz_count,
+                damping_offdiag_nnz_count,
                 mean_connectivity_hop,
                 shares,
                 graph_fingerprint: graph_fingerprint_value,
@@ -1260,7 +1260,7 @@ fn build_prep_graph_edges(
         element_summary.mixed_element_count,
     ];
     let family_valence = [2usize, 3, 4, 5, 3];
-    let stride = (prep.topology_bandwidth_proxy.max(1) as usize)
+    let stride = (prep.topology_bandwidth_estimate.max(1) as usize)
         .saturating_add(prep.topology_region_block_count.max(1));
     let max_hop = prep
         .topology_region_span_mean
@@ -1501,8 +1501,8 @@ fn element_assembly_fingerprint(
 struct ElementConnectivityFingerprintInputs<'a> {
     element_summary: &'a PrepElementAssemblySummary,
     stiffness_offdiag_nnz_count: usize,
-    mass_offdiag_proxy_nnz_count: usize,
-    damping_offdiag_proxy_nnz_count: usize,
+    mass_offdiag_nnz_count: usize,
+    damping_offdiag_nnz_count: usize,
     mean_connectivity_hop: f64,
     shares: [f64; 5],
     graph_fingerprint: u64,
@@ -1518,15 +1518,15 @@ fn element_connectivity_fingerprint(
         inputs.element_summary.assembly_fingerprint,
         inputs.element_summary.assembled_element_count as u64,
         inputs.stiffness_offdiag_nnz_count as u64,
-        inputs.mass_offdiag_proxy_nnz_count as u64,
-        inputs.damping_offdiag_proxy_nnz_count as u64,
+        inputs.mass_offdiag_nnz_count as u64,
+        inputs.damping_offdiag_nnz_count as u64,
         inputs.mean_connectivity_hop.to_bits(),
         inputs.shares[0].to_bits(),
         inputs.shares[1].to_bits(),
         inputs.shares[2].to_bits(),
         inputs.shares[3].to_bits(),
         inputs.shares[4].to_bits(),
-        prep.topology_bandwidth_proxy as u64,
+        prep.topology_bandwidth_estimate as u64,
         inputs.graph_fingerprint,
     ] {
         hash ^= value;
@@ -1545,7 +1545,7 @@ fn graph_fingerprint(
     let mut hash = 1469598103934665603_u64;
     for value in [
         prep.layout_seed,
-        prep.topology_bandwidth_proxy as u64,
+        prep.topology_bandwidth_estimate as u64,
         prep.topology_region_block_count as u64,
         edge_count as u64,
         connected_component_count as u64,

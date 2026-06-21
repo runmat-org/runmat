@@ -7,7 +7,7 @@ pub struct ThermalConstitutiveStats {
     pub density_mean: f64,
     pub conductivity_spread_ratio: f64,
     pub heat_capacity_spread_ratio: f64,
-    pub diffusivity_proxy: f64,
+    pub diffusivity_estimate: f64,
     pub response_rate: f64,
 }
 
@@ -59,8 +59,8 @@ pub fn constitutive_stats(model: &AnalysisModel) -> ThermalConstitutiveStats {
             .unwrap_or(1.0);
         (max / min.max(1.0e-9)).clamp(1.0, 32.0)
     };
-    let diffusivity_proxy = conductivity_mean / (density_mean * heat_capacity_mean).max(1.0e-9);
-    let response_rate = (diffusivity_proxy * 5.0e6).clamp(0.02, 2.0);
+    let diffusivity_estimate = conductivity_mean / (density_mean * heat_capacity_mean).max(1.0e-9);
+    let response_rate = (diffusivity_estimate * 5.0e6).clamp(0.02, 2.0);
 
     ThermalConstitutiveStats {
         conductivity_mean,
@@ -68,7 +68,7 @@ pub fn constitutive_stats(model: &AnalysisModel) -> ThermalConstitutiveStats {
         density_mean,
         conductivity_spread_ratio,
         heat_capacity_spread_ratio,
-        diffusivity_proxy,
+        diffusivity_estimate,
         response_rate,
     }
 }
@@ -84,7 +84,7 @@ mod tests {
         let stats = constitutive_stats(&model);
         assert!(stats.conductivity_mean.is_finite());
         assert!(stats.heat_capacity_mean.is_finite());
-        assert!(stats.diffusivity_proxy.is_finite());
+        assert!(stats.diffusivity_estimate.is_finite());
         assert!(stats.response_rate >= 0.02 && stats.response_rate <= 2.0);
     }
 }

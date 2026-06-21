@@ -24,7 +24,7 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "nonlinear_stress_max_residual_norm",
         "nonlinear_stress_tangent_rebuild_count",
     },
-    "nonlinear_softening_proxy_gpu_provider": {
+    "nonlinear_softening_benchmark_gpu_provider": {
         "nonlinear_softening_total_increments",
         "nonlinear_softening_spike_count",
         "nonlinear_softening_backtrack_bursts",
@@ -48,13 +48,13 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "electro_nonlinear_temporal_variation",
         "electro_nonlinear_time_scale_mean",
     },
-    "nonlinear_plasticity_proxy_gpu_provider": {
+    "nonlinear_plasticity_benchmark_gpu_provider": {
         "plasticity_nonlinear_severity_peak",
         "plasticity_nonlinear_severity_mean",
         "plasticity_nonlinear_load_amplification_ratio",
         "plasticity_nonlinear_load_realization_ratio",
     },
-    "nonlinear_contact_proxy_gpu_provider": {
+    "nonlinear_contact_benchmark_gpu_provider": {
         "contact_nonlinear_severity_peak",
         "contact_nonlinear_severity_mean",
         "contact_nonlinear_load_amplification_ratio",

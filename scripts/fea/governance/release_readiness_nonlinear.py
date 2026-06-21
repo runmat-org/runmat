@@ -24,17 +24,17 @@ from scripts.fea.prep_calibration.evaluate_prep_calibration_drift import (
 NONLINEAR_FIXTURES = {
     "nonlinear_assembly_gpu_provider",
     "nonlinear_assembly_stress_gpu_provider",
-    "nonlinear_softening_proxy_gpu_provider",
+    "nonlinear_softening_benchmark_gpu_provider",
     "nonlinear_load_path_mix_gpu_provider",
 }
 
 KEY_PERFORMANCE_FIXTURES = {
     "nonlinear_assembly_gpu_provider",
     "nonlinear_assembly_stress_gpu_provider",
-    "nonlinear_softening_proxy_gpu_provider",
+    "nonlinear_softening_benchmark_gpu_provider",
     "nonlinear_load_path_mix_gpu_provider",
-    "nonlinear_plasticity_proxy_gpu_provider",
-    "nonlinear_contact_proxy_gpu_provider",
+    "nonlinear_plasticity_benchmark_gpu_provider",
+    "nonlinear_contact_benchmark_gpu_provider",
     "nonlinear_contact_frictionless_reference_gpu_provider",
     "nonlinear_plastic_hardening_reference_gpu_provider",
     "thermo_mech_kickoff_gpu_provider",
@@ -6712,7 +6712,7 @@ def evaluate_release_readiness(
         in {
             "nonlinear_assembly_gpu_provider",
             "nonlinear_assembly_stress_gpu_provider",
-            "nonlinear_softening_proxy_gpu_provider",
+            "nonlinear_softening_benchmark_gpu_provider",
             "nonlinear_load_path_mix_gpu_provider",
         }
     ]
@@ -6770,21 +6770,21 @@ def evaluate_release_readiness(
                 "nonlinear stress iteration spike count",
             ),
             (
-                "nonlinear_softening_proxy_gpu_provider",
+                "nonlinear_softening_benchmark_gpu_provider",
                 "nonlinear_softening_total_increments",
                 nonlinear_max_softening_total_increments_threshold,
                 "NONLINEAR_SOFTENING_TOTAL_INCREMENTS_HIGH",
                 "nonlinear softening total increments",
             ),
             (
-                "nonlinear_softening_proxy_gpu_provider",
+                "nonlinear_softening_benchmark_gpu_provider",
                 "nonlinear_softening_spike_count",
                 nonlinear_max_softening_spike_count_threshold,
                 "NONLINEAR_SOFTENING_SPIKE_COUNT_HIGH",
                 "nonlinear softening spike count",
             ),
             (
-                "nonlinear_softening_proxy_gpu_provider",
+                "nonlinear_softening_benchmark_gpu_provider",
                 "nonlinear_softening_backtrack_bursts",
                 nonlinear_max_softening_backtrack_bursts_threshold,
                 "NONLINEAR_SOFTENING_BACKTRACK_BURSTS_HIGH",
@@ -9518,12 +9518,12 @@ def evaluate_release_readiness(
 
     plastic_required_assertion_specs = [
         (
-            "nonlinear_plasticity_proxy_gpu_provider",
+            "nonlinear_plasticity_benchmark_gpu_provider",
             "plasticity_nonlinear_load_amplification_ratio",
             "plastic_load_amplification_ratio",
         ),
         (
-            "nonlinear_plasticity_proxy_gpu_provider",
+            "nonlinear_plasticity_benchmark_gpu_provider",
             "plasticity_nonlinear_load_realization_ratio",
             "plastic_load_realization_ratio",
         ),
@@ -9602,12 +9602,12 @@ def evaluate_release_readiness(
 
     contact_required_assertion_specs = [
         (
-            "nonlinear_contact_proxy_gpu_provider",
+            "nonlinear_contact_benchmark_gpu_provider",
             "contact_nonlinear_load_amplification_ratio",
             "contact_load_amplification_ratio",
         ),
         (
-            "nonlinear_contact_proxy_gpu_provider",
+            "nonlinear_contact_benchmark_gpu_provider",
             "contact_nonlinear_load_realization_ratio",
             "contact_load_realization_ratio",
         ),

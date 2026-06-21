@@ -259,7 +259,7 @@ fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions
 
 fn plasticity_for_fixture(spec_id: &str) -> Option<PlasticityConstitutiveOptions> {
     match spec_id {
-        "nonlinear_plasticity_proxy_gpu_provider" => Some(PlasticityConstitutiveOptions {
+        "nonlinear_plasticity_benchmark_gpu_provider" => Some(PlasticityConstitutiveOptions {
             enabled: true,
             yield_strain: 2.0e-4,
             hardening_modulus_ratio: 0.2,
@@ -287,7 +287,7 @@ fn plasticity_for_fixture(spec_id: &str) -> Option<PlasticityConstitutiveOptions
 
 fn contact_for_fixture(spec_id: &str) -> Option<ContactInterfaceOptions> {
     match spec_id {
-        "nonlinear_contact_proxy_gpu_provider" => Some(ContactInterfaceOptions {
+        "nonlinear_contact_benchmark_gpu_provider" => Some(ContactInterfaceOptions {
             enabled: true,
             penalty_stiffness_scale: 0.15,
             max_penetration_ratio: 0.035,
@@ -4302,7 +4302,7 @@ pub(super) fn run_fixture(
                             Some(2.0),
                         );
                     }
-                    if spec.id == "nonlinear_softening_proxy_gpu_provider" {
+                    if spec.id == "nonlinear_softening_benchmark_gpu_provider" {
                         push_threshold_assertion(
                             spec.id,
                             &mut threshold_assertions,
@@ -4550,7 +4550,7 @@ pub(super) fn run_fixture(
                             Some(0.98),
                         );
                     }
-                    if spec.id == "nonlinear_plasticity_proxy_gpu_provider" {
+                    if spec.id == "nonlinear_plasticity_benchmark_gpu_provider" {
                         push_threshold_assertion(
                             spec.id,
                             &mut threshold_assertions,
@@ -4724,7 +4724,7 @@ pub(super) fn run_fixture(
                             Some(1.525),
                         );
                     }
-                    if spec.id == "nonlinear_contact_proxy_gpu_provider" {
+                    if spec.id == "nonlinear_contact_benchmark_gpu_provider" {
                         push_threshold_assertion(
                             spec.id,
                             &mut threshold_assertions,

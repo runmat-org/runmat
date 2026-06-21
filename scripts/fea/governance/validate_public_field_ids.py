@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Validate public FEA field-id literals.
 
-This gate is deliberately scoped to field contract sources. Some legacy fixture
-ids still contain "proxy"; those are not public result field ids and should be
-renamed separately from this contract guard.
+This gate is deliberately scoped to field contract sources. Benchmark fixture
+ids and other non-field strings are checked by their own governance paths rather
+than by this contract guard.
 """
 
 from __future__ import annotations

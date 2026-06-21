@@ -26,7 +26,7 @@ REQUIRED_FIXTURES = {
         "nonlinear_stress_max_residual_norm",
         "nonlinear_stress_tangent_rebuild_count",
     },
-    "nonlinear_softening_proxy_gpu_provider": {
+    "nonlinear_softening_benchmark_gpu_provider": {
         "nonlinear_softening_total_increments",
         "nonlinear_softening_spike_count",
         "nonlinear_softening_backtrack_bursts",
@@ -50,13 +50,13 @@ REQUIRED_FIXTURES = {
         "electro_nonlinear_temporal_variation",
         "electro_nonlinear_time_scale_mean",
     },
-    "nonlinear_plasticity_proxy_gpu_provider": {
+    "nonlinear_plasticity_benchmark_gpu_provider": {
         "plasticity_nonlinear_severity_peak",
         "plasticity_nonlinear_severity_mean",
         "plasticity_nonlinear_load_amplification_ratio",
         "plasticity_nonlinear_load_realization_ratio",
     },
-    "nonlinear_contact_proxy_gpu_provider": {
+    "nonlinear_contact_benchmark_gpu_provider": {
         "contact_nonlinear_severity_peak",
         "contact_nonlinear_severity_mean",
         "contact_nonlinear_load_amplification_ratio",
@@ -620,7 +620,7 @@ PERFORMANCE_REQUIRED_FIELDS = {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
-    "nonlinear_softening_proxy_gpu_provider": {
+    "nonlinear_softening_benchmark_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
@@ -628,11 +628,11 @@ PERFORMANCE_REQUIRED_FIELDS = {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
-    "nonlinear_plasticity_proxy_gpu_provider": {
+    "nonlinear_plasticity_benchmark_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
-    "nonlinear_contact_proxy_gpu_provider": {
+    "nonlinear_contact_benchmark_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
@@ -897,7 +897,7 @@ def main() -> int:
             "electro_thermal_joule_benign_gpu_provider",
             "electro_thermal_joule_pathological_gpu_provider",
             "nonlinear_load_path_mix_gpu_provider",
-            "nonlinear_plasticity_proxy_gpu_provider",
+            "nonlinear_plasticity_benchmark_gpu_provider",
         }:
             missing_fields = sorted(
                 field for field in ELECTRO_REQUIRED_FIELDS if field not in record
@@ -908,7 +908,7 @@ def main() -> int:
                 )
 
         if fixture_id in {
-            "nonlinear_plasticity_proxy_gpu_provider",
+            "nonlinear_plasticity_benchmark_gpu_provider",
         }:
             missing_fields = sorted(
                 field for field in PLASTIC_REQUIRED_FIELDS if field not in record
@@ -919,7 +919,7 @@ def main() -> int:
                 )
 
         if fixture_id in {
-            "nonlinear_contact_proxy_gpu_provider",
+            "nonlinear_contact_benchmark_gpu_provider",
             "nonlinear_contact_frictionless_reference_gpu_provider",
             "nonlinear_contact_frictionless_reference_complex_gpu_provider",
         }:

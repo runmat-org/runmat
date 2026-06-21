@@ -44,9 +44,7 @@ class ValidatePublicFieldIdsTests(unittest.TestCase):
         self.assertEqual(main([str(path)]), 1)
 
     def test_ignores_non_field_fixture_ids(self):
-        path = self.write_contract(
-            '"nonlinear_softening_proxy_gpu_provider"\n"placeholder_fixture_name"'
-        )
+        path = self.write_contract('"fixture_name_without_field_namespace"')
 
         self.assertEqual(validate([path]), [])
 

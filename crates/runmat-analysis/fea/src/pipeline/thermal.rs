@@ -109,7 +109,7 @@ pub fn run_thermal_with_options(
     let mut max_temperature_k = f64::NEG_INFINITY;
     let dt = options.time_step_s.max(1.0e-9);
     let relax_gain = (constitutive.response_rate * dt * 10.0).clamp(0.05, 0.7);
-    let diffusion_gain = (constitutive.diffusivity_proxy * dt * 2.0e6).clamp(0.0, 0.2);
+    let diffusion_gain = (constitutive.diffusivity_estimate * dt * 2.0e6).clamp(0.0, 0.2);
 
     emit_phase(
         "fea.run_thermal",
@@ -371,11 +371,11 @@ pub fn run_thermal_with_options(
             FeaDiagnosticSeverity::Info
         },
         message: format!(
-            "conductivity_mean={} heat_capacity_mean={} density_mean={} diffusivity_proxy={} response_rate={} conductivity_spread_ratio={} heat_capacity_spread_ratio={}",
+            "conductivity_mean={} heat_capacity_mean={} density_mean={} diffusivity_estimate={} response_rate={} conductivity_spread_ratio={} heat_capacity_spread_ratio={}",
             constitutive.conductivity_mean,
             constitutive.heat_capacity_mean,
             constitutive.density_mean,
-            constitutive.diffusivity_proxy,
+            constitutive.diffusivity_estimate,
             constitutive.response_rate,
             constitutive.conductivity_spread_ratio,
             constitutive.heat_capacity_spread_ratio,

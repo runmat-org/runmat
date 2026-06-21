@@ -1180,9 +1180,9 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_cache_misses: None,
         },
         FixtureSpec {
-            id: "nonlinear_softening_proxy_gpu_provider",
+            id: "nonlinear_softening_benchmark_gpu_provider",
             description: "nonlinear softening-proxy fixture with provider-backed acceleration",
-            model: || fixture_model(FixtureId::NonlinearSofteningProxy),
+            model: || fixture_model(FixtureId::NonlinearSofteningBenchmark),
             run_kind: AnalysisRunKind::Nonlinear,
             expect_validate_error: None,
             expect_run_error: None,
@@ -1228,7 +1228,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_cache_misses: None,
         },
         FixtureSpec {
-            id: "nonlinear_plasticity_proxy_gpu_provider",
+            id: "nonlinear_plasticity_benchmark_gpu_provider",
             description:
                 "nonlinear plasticity-proxy stress fixture with provider-backed acceleration",
             model: || fixture_model(FixtureId::NonlinearLoadPathMix),
@@ -1253,7 +1253,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_cache_misses: None,
         },
         FixtureSpec {
-            id: "nonlinear_contact_proxy_gpu_provider",
+            id: "nonlinear_contact_benchmark_gpu_provider",
             description: "nonlinear contact-proxy stress fixture with provider-backed acceleration",
             model: || fixture_model(FixtureId::NonlinearLoadPathMix),
             run_kind: AnalysisRunKind::Nonlinear,

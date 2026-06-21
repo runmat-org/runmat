@@ -106,7 +106,7 @@ pub fn run_modal_with_options(
             model,
             summary: &summary,
             prep_context: options.prep_context,
-            iteration_metric: mode_shapes_iteration_proxy(&modal.residual_norms),
+            iteration_metric: mode_shapes_iteration_count_estimate(&modal.residual_norms),
             residual_metric: modal.residual_norms.iter().copied().fold(0.0_f64, f64::max),
             requested_preconditioner: "auto",
             effective_preconditioner: if backend == ComputeBackend::Gpu {
@@ -201,7 +201,7 @@ pub fn run_modal_with_options(
     })
 }
 
-fn mode_shapes_iteration_proxy(residual_norms: &[f64]) -> f64 {
+fn mode_shapes_iteration_count_estimate(residual_norms: &[f64]) -> f64 {
     residual_norms.len() as f64
 }
 

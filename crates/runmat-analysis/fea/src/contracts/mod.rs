@@ -284,7 +284,7 @@ pub struct FeaPrepContext {
     pub mapped_bc_count: usize,
     pub layout_seed: u64,
     pub topology_dof_multiplier: f64,
-    pub topology_bandwidth_proxy: u32,
+    pub topology_bandwidth_estimate: u32,
     pub mapped_region_participation_ratio: f64,
     pub topology_surface_patch_ratio: f64,
     pub topology_volume_core_ratio: f64,

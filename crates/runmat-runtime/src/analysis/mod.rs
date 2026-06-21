@@ -9357,7 +9357,7 @@ fn to_fea_prep_context(
         mapped_bc_count: prep.mapped_bc_count,
         layout_seed: prep.layout_seed,
         topology_dof_multiplier: prep.topology_dof_multiplier,
-        topology_bandwidth_proxy: prep.topology_bandwidth_proxy,
+        topology_bandwidth_estimate: prep.topology_bandwidth_estimate,
         mapped_region_participation_ratio: prep.mapped_region_participation_ratio,
         topology_surface_patch_ratio: prep.topology_surface_patch_ratio,
         topology_volume_core_ratio: prep.topology_volume_core_ratio,
@@ -10579,7 +10579,7 @@ fn resolve_run_prep_context(
             + 1.0)
             .min(4.0)
     };
-    let topology_bandwidth_proxy = artifact
+    let topology_bandwidth_estimate = artifact
         .prep
         .prepared_meshes
         .iter()
@@ -10649,7 +10649,7 @@ fn resolve_run_prep_context(
             seed
         },
         topology_dof_multiplier,
-        topology_bandwidth_proxy,
+        topology_bandwidth_estimate,
         mapped_region_participation_ratio,
         topology_surface_patch_ratio,
         topology_volume_core_ratio,

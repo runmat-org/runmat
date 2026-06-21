@@ -81,7 +81,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 },
             ),
             _record(
-                "nonlinear_softening_proxy_gpu_provider",
+                "nonlinear_softening_benchmark_gpu_provider",
                 {
                     "nonlinear_softening_total_increments",
                     "nonlinear_softening_spike_count",
@@ -130,7 +130,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electro_nonlinear_severity": 0.1,
             },
             _record(
-                "nonlinear_plasticity_proxy_gpu_provider",
+                "nonlinear_plasticity_benchmark_gpu_provider",
                 {
                     "plasticity_nonlinear_severity_peak",
                     "plasticity_nonlinear_severity_mean",
@@ -148,7 +148,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "plastic_nonlinear_severity": 0.1,
             },
             _record(
-                "nonlinear_contact_proxy_gpu_provider",
+                "nonlinear_contact_benchmark_gpu_provider",
                 {
                     "contact_nonlinear_severity_peak",
                     "contact_nonlinear_severity_mean",
@@ -953,7 +953,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             records = self._base_records()
             for record in records:
-                if record["fixture_id"] == "nonlinear_softening_proxy_gpu_provider":
+                if record["fixture_id"] == "nonlinear_softening_benchmark_gpu_provider":
                     record["threshold_assertions"] = [
                         item
                         for item in record["threshold_assertions"]
@@ -1157,11 +1157,11 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             rc = self._run_main_with_report(path)
             self.assertEqual(rc, 1)
 
-    def test_fails_when_plastic_proxy_load_realization_assertion_missing(self):
+    def test_fails_when_plastic_benchmark_load_realization_assertion_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             records = self._base_records()
             for record in records:
-                if record["fixture_id"] == "nonlinear_plasticity_proxy_gpu_provider":
+                if record["fixture_id"] == "nonlinear_plasticity_benchmark_gpu_provider":
                     record["threshold_assertions"] = [
                         item
                         for item in record["threshold_assertions"]
@@ -1173,11 +1173,11 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             rc = self._run_main_with_report(path)
             self.assertEqual(rc, 1)
 
-    def test_fails_when_contact_proxy_load_realization_assertion_missing(self):
+    def test_fails_when_contact_benchmark_load_realization_assertion_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             records = self._base_records()
             for record in records:
-                if record["fixture_id"] == "nonlinear_contact_proxy_gpu_provider":
+                if record["fixture_id"] == "nonlinear_contact_benchmark_gpu_provider":
                     record["threshold_assertions"] = [
                         item
                         for item in record["threshold_assertions"]

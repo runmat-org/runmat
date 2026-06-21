@@ -61,9 +61,9 @@ def report(
     fixtures = [
         "nonlinear_assembly_gpu_provider",
         "nonlinear_assembly_stress_gpu_provider",
-        "nonlinear_softening_proxy_gpu_provider",
+        "nonlinear_softening_benchmark_gpu_provider",
         "nonlinear_load_path_mix_gpu_provider",
-        "nonlinear_contact_proxy_gpu_provider",
+        "nonlinear_contact_benchmark_gpu_provider",
         "nonlinear_contact_frictionless_reference_gpu_provider",
         "nonlinear_contact_frictionless_reference_complex_gpu_provider",
         "nonlinear_plastic_hardening_reference_gpu_provider",
@@ -4342,7 +4342,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                         }
                     },
                 },
-                "nonlinear_softening_proxy_gpu_provider": {
+                "nonlinear_softening_benchmark_gpu_provider": {
                     "default_profile": "balanced",
                     "profiles": {
                         "balanced": {
@@ -4439,7 +4439,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 for fixture in [
                     "nonlinear_assembly_gpu_provider",
                     "nonlinear_assembly_stress_gpu_provider",
-                    "nonlinear_softening_proxy_gpu_provider",
+                    "nonlinear_softening_benchmark_gpu_provider",
                     "nonlinear_load_path_mix_gpu_provider",
                 ]
             },
@@ -5274,7 +5274,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         latest["records"].append(
             {
-                "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+                "fixture_id": "nonlinear_softening_benchmark_gpu_provider",
                 "publishable": True,
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
@@ -5471,7 +5471,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         latest["records"].append(
             {
-                "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+                "fixture_id": "nonlinear_softening_benchmark_gpu_provider",
                 "publishable": True,
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
@@ -5511,7 +5511,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         rolling[0]["records"].append(
             {
-                "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+                "fixture_id": "nonlinear_softening_benchmark_gpu_provider",
                 "publishable": True,
                 "gpu_run_ms": 95.0,
                 "gpu_speedup_ratio": 1.1,

@@ -837,7 +837,7 @@ fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
 #[test]
 fn nonlinear_harder_fixtures_emit_difficulty_profile_signals() {
     for fixture in [
-        FixtureId::NonlinearSofteningProxy,
+        FixtureId::NonlinearSofteningBenchmark,
         FixtureId::NonlinearLoadPathMix,
     ] {
         let model = fixture_model(fixture);

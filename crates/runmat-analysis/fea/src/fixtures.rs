@@ -15,7 +15,7 @@ pub enum FixtureId {
     TransientShock,
     NonlinearAssembly,
     NonlinearAssemblyStress,
-    NonlinearSofteningProxy,
+    NonlinearSofteningBenchmark,
     NonlinearLoadPathMix,
     NonlinearContactFrictionlessReference,
     NonlinearContactFrictionlessReferenceComplex,
@@ -43,7 +43,7 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::TransientShock => transient_shock_fixture(),
         FixtureId::NonlinearAssembly => nonlinear_assembly_fixture(),
         FixtureId::NonlinearAssemblyStress => nonlinear_assembly_stress_fixture(),
-        FixtureId::NonlinearSofteningProxy => nonlinear_softening_proxy_fixture(),
+        FixtureId::NonlinearSofteningBenchmark => nonlinear_softening_benchmark_fixture(),
         FixtureId::NonlinearLoadPathMix => nonlinear_load_path_mix_fixture(),
         FixtureId::NonlinearContactFrictionlessReference => {
             nonlinear_contact_frictionless_reference_fixture()
@@ -254,9 +254,9 @@ fn nonlinear_assembly_stress_fixture() -> AnalysisModel {
     model
 }
 
-fn nonlinear_softening_proxy_fixture() -> AnalysisModel {
+fn nonlinear_softening_benchmark_fixture() -> AnalysisModel {
     let mut model = nonlinear_assembly_stress_fixture();
-    model.model_id = AnalysisModelId("nonlinear_softening_proxy_fixture".to_string());
+    model.model_id = AnalysisModelId("nonlinear_softening_benchmark_fixture".to_string());
     model.materials = vec![
         MaterialModel {
             material_id: "mat_soft_polymer".to_string(),

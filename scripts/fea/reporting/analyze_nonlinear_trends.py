@@ -19,10 +19,10 @@ from scripts.fea.prep_calibration.evaluate_prep_calibration_drift import (
 NONLINEAR_FIXTURES = {
     "nonlinear_assembly_gpu_provider",
     "nonlinear_assembly_stress_gpu_provider",
-    "nonlinear_softening_proxy_gpu_provider",
+    "nonlinear_softening_benchmark_gpu_provider",
     "nonlinear_load_path_mix_gpu_provider",
-    "nonlinear_plasticity_proxy_gpu_provider",
-    "nonlinear_contact_proxy_gpu_provider",
+    "nonlinear_plasticity_benchmark_gpu_provider",
+    "nonlinear_contact_benchmark_gpu_provider",
     "nonlinear_contact_frictionless_reference_gpu_provider",
     "nonlinear_contact_frictionless_reference_complex_gpu_provider",
     "nonlinear_plastic_hardening_reference_gpu_provider",
@@ -68,7 +68,7 @@ def collect_metrics(reports, window):
                     else threshold_value(record, "nonlinear_stress_failed_increments")
                     if fixture == "nonlinear_assembly_stress_gpu_provider"
                     else threshold_value(record, "nonlinear_softening_failed_increments")
-                    if fixture == "nonlinear_softening_proxy_gpu_provider"
+                    if fixture == "nonlinear_softening_benchmark_gpu_provider"
                     else threshold_value(record, "nonlinear_path_mix_total_increments"),
                     "publishable": bool(record.get("publishable", False)),
                     "prep_acceptance_score": record.get("prep_acceptance_score"),

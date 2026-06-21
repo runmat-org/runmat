@@ -3707,7 +3707,7 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
     let envelope = analysis_run_electromagnetic_op(
         &model,
         ComputeBackend::Cpu,
-        OperationContext::new(Some("trace-em-run-placeholder".to_string()), None),
+        OperationContext::new(Some("trace-em-run-static".to_string()), None),
     )
     .expect("electromagnetic run should return static EM payload");
     assert_eq!(envelope.operation, "fea.run_electromagnetic");

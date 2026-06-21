@@ -20,7 +20,7 @@
         "conservative": { "acceptance_score_min": 0.6, "acceptance_score_max": 1.0, "thermo_spread_ratio_max": 1.18, "thermo_heterogeneity_index_max": 0.18 }
       }
     },
-    "nonlinear_softening_proxy_gpu_provider": {
+    "nonlinear_softening_benchmark_gpu_provider": {
       "default_profile": "conservative",
       "profiles": {
         "fast": { "acceptance_score_min": 0.35, "acceptance_score_max": 1.0, "thermo_spread_ratio_max": 1.36, "thermo_heterogeneity_index_max": 0.38 },

@@ -38,7 +38,7 @@ pub struct AnalysisRunPrepContext {
     pub mapped_bc_count: usize,
     pub layout_seed: u64,
     pub topology_dof_multiplier: f64,
-    pub topology_bandwidth_proxy: u32,
+    pub topology_bandwidth_estimate: u32,
     pub mapped_region_participation_ratio: f64,
     pub topology_surface_patch_ratio: f64,
     pub topology_volume_core_ratio: f64,
@@ -990,7 +990,6 @@ fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
         || normalized.contains("temperature")
         || normalized.contains("energy")
         || normalized.contains("residual")
-        || normalized.contains("_proxy")
     {
         return AnalysisFieldKind::Scalar;
     }
@@ -1018,9 +1017,6 @@ fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
 
 fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
     let normalized = field_id.to_ascii_lowercase();
-    if normalized.contains("_proxy") {
-        return None;
-    }
     if normalized.contains("magnitude") {
         return None;
     }
