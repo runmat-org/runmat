@@ -1481,6 +1481,16 @@ pub struct TransientResultsData {
     pub transient_payload_version: String,
     pub time_points_s: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub velocity_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub acceleration_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub von_mises_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub kinetic_energy_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub strain_energy_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub integration_method: TransientIntegrationMethod,
 }

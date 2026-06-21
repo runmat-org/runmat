@@ -27,6 +27,26 @@ pub fn fea_transient_displacement_field_id(snapshot_index: usize) -> String {
     format!("transient.displacement.{snapshot_index}")
 }
 
+pub fn fea_transient_velocity_field_id(snapshot_index: usize) -> String {
+    format!("transient.velocity.{snapshot_index}")
+}
+
+pub fn fea_transient_acceleration_field_id(snapshot_index: usize) -> String {
+    format!("transient.acceleration.{snapshot_index}")
+}
+
+pub fn fea_transient_von_mises_field_id(snapshot_index: usize) -> String {
+    format!("transient.von_mises.{snapshot_index}")
+}
+
+pub fn fea_transient_kinetic_energy_field_id(snapshot_index: usize) -> String {
+    format!("transient.kinetic_energy.{snapshot_index}")
+}
+
+pub fn fea_transient_strain_energy_field_id(snapshot_index: usize) -> String {
+    format!("transient.strain_energy.{snapshot_index}")
+}
+
 pub fn fea_nonlinear_displacement_field_id(increment_index: usize) -> String {
     format!("nonlinear.displacement.{increment_index}")
 }
@@ -234,6 +254,11 @@ pub struct FeaTransientRunResult {
     pub run: FeaRunResult,
     pub time_points_s: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
+    pub velocity_snapshots: Vec<AnalysisField>,
+    pub acceleration_snapshots: Vec<AnalysisField>,
+    pub von_mises_snapshots: Vec<AnalysisField>,
+    pub kinetic_energy_snapshots: Vec<AnalysisField>,
+    pub strain_energy_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
 }
 

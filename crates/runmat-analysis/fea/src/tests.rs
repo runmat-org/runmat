@@ -1,4 +1,7 @@
 use crate::{
+    fea_transient_acceleration_field_id, fea_transient_kinetic_energy_field_id,
+    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
+    fea_transient_von_mises_field_id,
     fixtures::{fixture_model, FixtureId},
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
@@ -167,6 +170,40 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
     assert_eq!(
         result.time_points_s.len(),
         result.displacement_snapshots.len()
+    );
+    assert_eq!(result.time_points_s.len(), result.velocity_snapshots.len());
+    assert_eq!(
+        result.time_points_s.len(),
+        result.acceleration_snapshots.len()
+    );
+    assert_eq!(result.time_points_s.len(), result.von_mises_snapshots.len());
+    assert_eq!(
+        result.time_points_s.len(),
+        result.kinetic_energy_snapshots.len()
+    );
+    assert_eq!(
+        result.time_points_s.len(),
+        result.strain_energy_snapshots.len()
+    );
+    assert_eq!(
+        result.velocity_snapshots[1].field_id,
+        fea_transient_velocity_field_id(1)
+    );
+    assert_eq!(
+        result.acceleration_snapshots[1].field_id,
+        fea_transient_acceleration_field_id(1)
+    );
+    assert_eq!(
+        result.von_mises_snapshots[1].field_id,
+        fea_transient_von_mises_field_id(1)
+    );
+    assert_eq!(
+        result.kinetic_energy_snapshots[1].field_id,
+        fea_transient_kinetic_energy_field_id(1)
+    );
+    assert_eq!(
+        result.strain_energy_snapshots[1].field_id,
+        fea_transient_strain_energy_field_id(1)
     );
     assert!(!result.residual_norms.is_empty());
     assert!(result

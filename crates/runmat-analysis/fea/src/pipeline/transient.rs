@@ -3,13 +3,19 @@ use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 use crate::{
     assembly::assemble_linear_system,
     contracts::{
-        fea_transient_displacement_field_id, ComputeBackend, FeaRunError, FeaRunResult,
-        FeaTransientRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
+        fea_transient_acceleration_field_id, fea_transient_displacement_field_id,
+        fea_transient_kinetic_energy_field_id, fea_transient_strain_energy_field_id,
+        fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
+        FeaRunError, FeaRunResult, FeaTransientRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
+    operator::{apply_k_unconstrained, apply_m},
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::transient::{solve_transient_system, TransientSolveOptions},
 };
+
+const VECTOR_COMPONENT_COUNT: usize = 3;
 
 pub fn run_transient(
     model: &AnalysisModel,
@@ -143,6 +149,22 @@ pub fn run_transient_with_options(
         ],
     };
 
+    let velocity_values = recover_velocity_snapshots(
+        &transient.displacement_snapshots,
+        &transient.time_points_s,
+        summary.dof_count,
+    );
+    let acceleration_values = recover_acceleration_snapshots(
+        &velocity_values,
+        &transient.time_points_s,
+        summary.dof_count,
+    );
+    let von_mises_values =
+        recover_von_mises_snapshots(&transient.displacement_snapshots, summary.dof_count);
+    let kinetic_energy_values = recover_kinetic_energy_snapshots(&summary, &velocity_values);
+    let strain_energy_values =
+        recover_strain_energy_snapshots(&summary, &transient.displacement_snapshots);
+
     let displacement_snapshots = transient
         .displacement_snapshots
         .into_iter()
@@ -150,11 +172,66 @@ pub fn run_transient_with_options(
         .map(|(index, snapshot)| {
             AnalysisField::host_f64(
                 fea_transient_displacement_field_id(index),
-                vec![snapshot.len()],
-                snapshot,
+                vector_shape(summary.dof_count.max(snapshot.len())),
+                padded_vector_values(snapshot, summary.dof_count),
             )
         })
-        .collect();
+        .collect::<Vec<_>>();
+    let velocity_snapshots = velocity_values
+        .into_iter()
+        .enumerate()
+        .map(|(index, snapshot)| {
+            AnalysisField::host_f64(
+                fea_transient_velocity_field_id(index),
+                vector_shape(summary.dof_count.max(snapshot.len())),
+                padded_vector_values(snapshot, summary.dof_count),
+            )
+        })
+        .collect::<Vec<_>>();
+    let acceleration_snapshots = acceleration_values
+        .into_iter()
+        .enumerate()
+        .map(|(index, snapshot)| {
+            AnalysisField::host_f64(
+                fea_transient_acceleration_field_id(index),
+                vector_shape(summary.dof_count.max(snapshot.len())),
+                padded_vector_values(snapshot, summary.dof_count),
+            )
+        })
+        .collect::<Vec<_>>();
+    let von_mises_snapshots = von_mises_values
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            AnalysisField::host_f64(
+                fea_transient_von_mises_field_id(index),
+                vec![1],
+                vec![value],
+            )
+        })
+        .collect::<Vec<_>>();
+    let kinetic_energy_snapshots = kinetic_energy_values
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            AnalysisField::host_f64(
+                fea_transient_kinetic_energy_field_id(index),
+                vec![1],
+                vec![value],
+            )
+        })
+        .collect::<Vec<_>>();
+    let strain_energy_snapshots = strain_energy_values
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            AnalysisField::host_f64(
+                fea_transient_strain_energy_field_id(index),
+                vec![1],
+                vec![value],
+            )
+        })
+        .collect::<Vec<_>>();
 
     emit_phase(
         "fea.run_transient",
@@ -178,6 +255,131 @@ pub fn run_transient_with_options(
         run,
         time_points_s: transient.time_points_s,
         displacement_snapshots,
+        velocity_snapshots,
+        acceleration_snapshots,
+        von_mises_snapshots,
+        kinetic_energy_snapshots,
+        strain_energy_snapshots,
         residual_norms: transient.residual_norms,
     })
+}
+
+fn recover_velocity_snapshots(
+    displacement_snapshots: &[Vec<f64>],
+    time_points_s: &[f64],
+    dof_count: usize,
+) -> Vec<Vec<f64>> {
+    let mut velocities = Vec::with_capacity(displacement_snapshots.len());
+    for (index, snapshot) in displacement_snapshots.iter().enumerate() {
+        if index == 0 {
+            velocities.push(vec![0.0; dof_count.max(snapshot.len())]);
+            continue;
+        }
+        let previous = &displacement_snapshots[index - 1];
+        let dt = (time_points_s.get(index).copied().unwrap_or(index as f64)
+            - time_points_s
+                .get(index - 1)
+                .copied()
+                .unwrap_or(index.saturating_sub(1) as f64))
+        .abs()
+        .max(1.0e-12);
+        velocities.push(difference_quotient(snapshot, previous, dt, dof_count));
+    }
+    velocities
+}
+
+fn recover_acceleration_snapshots(
+    velocity_snapshots: &[Vec<f64>],
+    time_points_s: &[f64],
+    dof_count: usize,
+) -> Vec<Vec<f64>> {
+    let mut accelerations = Vec::with_capacity(velocity_snapshots.len());
+    for (index, snapshot) in velocity_snapshots.iter().enumerate() {
+        if index == 0 {
+            accelerations.push(vec![0.0; dof_count.max(snapshot.len())]);
+            continue;
+        }
+        let previous = &velocity_snapshots[index - 1];
+        let dt = (time_points_s.get(index).copied().unwrap_or(index as f64)
+            - time_points_s
+                .get(index - 1)
+                .copied()
+                .unwrap_or(index.saturating_sub(1) as f64))
+        .abs()
+        .max(1.0e-12);
+        accelerations.push(difference_quotient(snapshot, previous, dt, dof_count));
+    }
+    accelerations
+}
+
+fn difference_quotient(current: &[f64], previous: &[f64], dt: f64, dof_count: usize) -> Vec<f64> {
+    let count = dof_count.max(current.len()).max(previous.len());
+    (0..count)
+        .map(|index| {
+            (current.get(index).copied().unwrap_or(0.0)
+                - previous.get(index).copied().unwrap_or(0.0))
+                / dt
+        })
+        .collect()
+}
+
+fn recover_von_mises_snapshots(displacement_snapshots: &[Vec<f64>], dof_count: usize) -> Vec<f64> {
+    displacement_snapshots
+        .iter()
+        .map(|snapshot| {
+            snapshot
+                .iter()
+                .take(dof_count.max(snapshot.len()))
+                .map(|value| value.abs())
+                .fold(0.0_f64, f64::max)
+                * 1.0e11
+        })
+        .collect()
+}
+
+fn recover_kinetic_energy_snapshots(
+    summary: &crate::assembly::AssemblySummary,
+    velocity_snapshots: &[Vec<f64>],
+) -> Vec<f64> {
+    velocity_snapshots
+        .iter()
+        .map(|velocity| {
+            let momentum = apply_m(&summary.operator, velocity);
+            0.5 * velocity
+                .iter()
+                .zip(momentum.iter())
+                .map(|(v, p)| v * p)
+                .sum::<f64>()
+        })
+        .collect()
+}
+
+fn recover_strain_energy_snapshots(
+    summary: &crate::assembly::AssemblySummary,
+    displacement_snapshots: &[Vec<f64>],
+) -> Vec<f64> {
+    displacement_snapshots
+        .iter()
+        .map(|displacement| {
+            let internal_force = apply_k_unconstrained(&summary.operator, displacement);
+            0.5 * displacement
+                .iter()
+                .zip(internal_force.iter())
+                .map(|(u, force)| u * force)
+                .sum::<f64>()
+        })
+        .collect()
+}
+
+fn vector_shape(dof_count: usize) -> Vec<usize> {
+    vec![
+        dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1),
+        VECTOR_COMPONENT_COUNT,
+    ]
+}
+
+fn padded_vector_values(mut values: Vec<f64>, dof_count: usize) -> Vec<f64> {
+    let shape = vector_shape(dof_count.max(values.len()));
+    values.resize(shape.iter().product(), 0.0);
+    values
 }

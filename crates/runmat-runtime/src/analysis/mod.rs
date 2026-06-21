@@ -2753,6 +2753,11 @@ pub fn analysis_run_cfd_with_options_op(
             transient_payload_version: "transient_results/v1".to_string(),
             time_points_s: transient_run.time_points_s,
             displacement_snapshots: transient_run.displacement_snapshots,
+            velocity_snapshots: transient_run.velocity_snapshots,
+            acceleration_snapshots: transient_run.acceleration_snapshots,
+            von_mises_snapshots: transient_run.von_mises_snapshots,
+            kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
+            strain_energy_snapshots: transient_run.strain_energy_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -3308,6 +3313,11 @@ pub fn analysis_run_cht_with_options_op(
             transient_payload_version: "transient_results/v1".to_string(),
             time_points_s: transient_run.time_points_s,
             displacement_snapshots: transient_run.displacement_snapshots,
+            velocity_snapshots: transient_run.velocity_snapshots,
+            acceleration_snapshots: transient_run.acceleration_snapshots,
+            von_mises_snapshots: transient_run.von_mises_snapshots,
+            kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
+            strain_energy_snapshots: transient_run.strain_energy_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -3766,6 +3776,11 @@ pub fn analysis_run_fsi_with_options_op(
             transient_payload_version: "transient_results/v1".to_string(),
             time_points_s: transient_run.time_points_s,
             displacement_snapshots: transient_run.displacement_snapshots,
+            velocity_snapshots: transient_run.velocity_snapshots,
+            acceleration_snapshots: transient_run.acceleration_snapshots,
+            von_mises_snapshots: transient_run.von_mises_snapshots,
+            kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
+            strain_energy_snapshots: transient_run.strain_energy_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -4431,6 +4446,11 @@ pub fn analysis_run_transient_with_options_op(
             transient_payload_version: "transient_results/v1".to_string(),
             time_points_s: transient_run.time_points_s,
             displacement_snapshots: transient_run.displacement_snapshots,
+            velocity_snapshots: transient_run.velocity_snapshots,
+            acceleration_snapshots: transient_run.acceleration_snapshots,
+            von_mises_snapshots: transient_run.von_mises_snapshots,
+            kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
+            strain_energy_snapshots: transient_run.strain_energy_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
@@ -6192,6 +6212,21 @@ fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<Analysi
         for field in &transient.displacement_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
+        for field in &transient.velocity_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.acceleration_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.von_mises_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.kinetic_energy_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.strain_energy_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
     }
 
     if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
@@ -7033,6 +7068,16 @@ pub fn analysis_results_op(
                 let mut time_points_s = Vec::with_capacity(query.transient_snapshot_indices.len());
                 let mut displacement_snapshots =
                     Vec::with_capacity(query.transient_snapshot_indices.len());
+                let mut velocity_snapshots =
+                    Vec::with_capacity(query.transient_snapshot_indices.len());
+                let mut acceleration_snapshots =
+                    Vec::with_capacity(query.transient_snapshot_indices.len());
+                let mut von_mises_snapshots =
+                    Vec::with_capacity(query.transient_snapshot_indices.len());
+                let mut kinetic_energy_snapshots =
+                    Vec::with_capacity(query.transient_snapshot_indices.len());
+                let mut strain_energy_snapshots =
+                    Vec::with_capacity(query.transient_snapshot_indices.len());
                 let mut residual_norms = Vec::with_capacity(query.transient_snapshot_indices.len());
 
                 for &index in &query.transient_snapshot_indices {
@@ -7086,6 +7131,145 @@ pub fn analysis_results_op(
                                 ]),
                             )
                         })?;
+                    let velocity = transient.velocity_snapshots.get(index).cloned().ok_or_else(|| {
+                        operation_error(
+                            ANALYSIS_RESULTS_OPERATION,
+                            ANALYSIS_RESULTS_OP_VERSION,
+                            &context,
+                            OperationErrorSpec {
+                                error_code: "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                error_type: OperationErrorType::Input,
+                                retryable: false,
+                                severity: OperationErrorSeverity::Error,
+                            },
+                            format!(
+                                "requested transient snapshot index '{index}' is missing velocity data"
+                            ),
+                            BTreeMap::from([
+                                ("requested_snapshot_index".to_string(), index.to_string()),
+                                (
+                                    "available_velocity_snapshot_count".to_string(),
+                                    transient.velocity_snapshots.len().to_string(),
+                                ),
+                            ]),
+                        )
+                    })?;
+                    let acceleration =
+                        transient
+                            .acceleration_snapshots
+                            .get(index)
+                            .cloned()
+                            .ok_or_else(|| {
+                                operation_error(
+                                    ANALYSIS_RESULTS_OPERATION,
+                                    ANALYSIS_RESULTS_OP_VERSION,
+                                    &context,
+                                    OperationErrorSpec {
+                                        error_code:
+                                            "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                        error_type: OperationErrorType::Input,
+                                        retryable: false,
+                                        severity: OperationErrorSeverity::Error,
+                                    },
+                                    format!(
+                                        "requested transient snapshot index '{index}' is missing acceleration data"
+                                    ),
+                                    BTreeMap::from([
+                                        ("requested_snapshot_index".to_string(), index.to_string()),
+                                        (
+                                            "available_acceleration_snapshot_count".to_string(),
+                                            transient.acceleration_snapshots.len().to_string(),
+                                        ),
+                                    ]),
+                                )
+                            })?;
+                    let von_mises =
+                        transient
+                            .von_mises_snapshots
+                            .get(index)
+                            .cloned()
+                            .ok_or_else(|| {
+                                operation_error(
+                                    ANALYSIS_RESULTS_OPERATION,
+                                    ANALYSIS_RESULTS_OP_VERSION,
+                                    &context,
+                                    OperationErrorSpec {
+                                        error_code:
+                                            "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                        error_type: OperationErrorType::Input,
+                                        retryable: false,
+                                        severity: OperationErrorSeverity::Error,
+                                    },
+                                    format!(
+                                        "requested transient snapshot index '{index}' is missing von Mises data"
+                                    ),
+                                    BTreeMap::from([
+                                        ("requested_snapshot_index".to_string(), index.to_string()),
+                                        (
+                                            "available_von_mises_snapshot_count".to_string(),
+                                            transient.von_mises_snapshots.len().to_string(),
+                                        ),
+                                    ]),
+                                )
+                            })?;
+                    let kinetic_energy =
+                        transient
+                            .kinetic_energy_snapshots
+                            .get(index)
+                            .cloned()
+                            .ok_or_else(|| {
+                                operation_error(
+                                    ANALYSIS_RESULTS_OPERATION,
+                                    ANALYSIS_RESULTS_OP_VERSION,
+                                    &context,
+                                    OperationErrorSpec {
+                                        error_code:
+                                            "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                        error_type: OperationErrorType::Input,
+                                        retryable: false,
+                                        severity: OperationErrorSeverity::Error,
+                                    },
+                                    format!(
+                                        "requested transient snapshot index '{index}' is missing kinetic energy data"
+                                    ),
+                                    BTreeMap::from([
+                                        ("requested_snapshot_index".to_string(), index.to_string()),
+                                        (
+                                            "available_kinetic_energy_snapshot_count".to_string(),
+                                            transient.kinetic_energy_snapshots.len().to_string(),
+                                        ),
+                                    ]),
+                                )
+                            })?;
+                    let strain_energy =
+                        transient
+                            .strain_energy_snapshots
+                            .get(index)
+                            .cloned()
+                            .ok_or_else(|| {
+                                operation_error(
+                                    ANALYSIS_RESULTS_OPERATION,
+                                    ANALYSIS_RESULTS_OP_VERSION,
+                                    &context,
+                                    OperationErrorSpec {
+                                        error_code:
+                                            "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                        error_type: OperationErrorType::Input,
+                                        retryable: false,
+                                        severity: OperationErrorSeverity::Error,
+                                    },
+                                    format!(
+                                        "requested transient snapshot index '{index}' is missing strain energy data"
+                                    ),
+                                    BTreeMap::from([
+                                        ("requested_snapshot_index".to_string(), index.to_string()),
+                                        (
+                                            "available_strain_energy_snapshot_count".to_string(),
+                                            transient.strain_energy_snapshots.len().to_string(),
+                                        ),
+                                    ]),
+                                )
+                            })?;
 
                     if index > 0 {
                         let residual = transient.residual_norms.get(index - 1).copied().ok_or_else(|| {
@@ -7116,12 +7300,22 @@ pub fn analysis_results_op(
 
                     time_points_s.push(time_point);
                     displacement_snapshots.push(snapshot);
+                    velocity_snapshots.push(velocity);
+                    acceleration_snapshots.push(acceleration);
+                    von_mises_snapshots.push(von_mises);
+                    kinetic_energy_snapshots.push(kinetic_energy);
+                    strain_energy_snapshots.push(strain_energy);
                 }
 
                 Some(TransientResultsData {
                     transient_payload_version: transient.transient_payload_version.clone(),
                     time_points_s,
                     displacement_snapshots,
+                    velocity_snapshots,
+                    acceleration_snapshots,
+                    von_mises_snapshots,
+                    kinetic_energy_snapshots,
+                    strain_energy_snapshots,
                     residual_norms,
                     integration_method: transient.integration_method,
                 })

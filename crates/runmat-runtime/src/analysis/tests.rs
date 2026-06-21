@@ -18,10 +18,12 @@ use runmat_analysis_core::{
     ReferenceFrame,
 };
 use runmat_analysis_fea::{
-    fea_modal_mode_shape_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
-    FEA_FIELD_EM_FLUX_DENSITY_PROXY, FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    fea_modal_mode_shape_field_id, fea_transient_acceleration_field_id,
+    fea_transient_kinetic_energy_field_id, fea_transient_strain_energy_field_id,
+    fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
+    FeaProgressPhase, FeaProgressStatus, FEA_FIELD_EM_FLUX_DENSITY_PROXY,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_PROXY, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
@@ -4296,6 +4298,46 @@ fn analysis_run_transient_returns_native_transient_result() {
     assert_eq!(
         transient.time_points_s.len(),
         transient.displacement_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.velocity_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.acceleration_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.von_mises_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.kinetic_energy_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.strain_energy_snapshots.len()
+    );
+    assert_eq!(
+        transient.velocity_snapshots[1].field_id,
+        fea_transient_velocity_field_id(1)
+    );
+    assert_eq!(
+        transient.acceleration_snapshots[1].field_id,
+        fea_transient_acceleration_field_id(1)
+    );
+    assert_eq!(
+        transient.von_mises_snapshots[1].field_id,
+        fea_transient_von_mises_field_id(1)
+    );
+    assert_eq!(
+        transient.kinetic_energy_snapshots[1].field_id,
+        fea_transient_kinetic_energy_field_id(1)
+    );
+    assert_eq!(
+        transient.strain_energy_snapshots[1].field_id,
+        fea_transient_strain_energy_field_id(1)
     );
 }
 
