@@ -5207,6 +5207,36 @@
       "tolerance_rel": 0.3
     },
     {
+      "name": "electro_thermal_benign_potential_residual_norm",
+      "fixture_id": "electro_thermal_joule_benign_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_thermal_benign_potential_residual_norm",
+      "reference": 0.0,
+      "tolerance_abs": 1e-08,
+      "tolerance_rel": null
+    },
+    {
+      "name": "electro_thermal_benign_current_balance_residual",
+      "fixture_id": "electro_thermal_joule_benign_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_thermal_benign_current_balance_residual",
+      "reference": 0.0,
+      "tolerance_abs": 1e-08,
+      "tolerance_rel": null
+    },
+    {
+      "name": "electro_thermal_benign_potential_span_v",
+      "fixture_id": "electro_thermal_joule_benign_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_thermal_benign_potential_span_v",
+      "reference": 36.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": null
+    },
+    {
       "name": "electro_thermal_pathological_joule_heating_scale",
       "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -5225,6 +5255,36 @@
       "reference": 1.0,
       "tolerance_abs": 0.2,
       "tolerance_rel": 0.2
+    },
+    {
+      "name": "electro_thermal_pathological_potential_residual_norm",
+      "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_thermal_pathological_potential_residual_norm",
+      "reference": 0.0,
+      "tolerance_abs": 1e-08,
+      "tolerance_rel": null
+    },
+    {
+      "name": "electro_thermal_pathological_current_balance_residual",
+      "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_thermal_pathological_current_balance_residual",
+      "reference": 0.0,
+      "tolerance_abs": 1e-08,
+      "tolerance_rel": null
+    },
+    {
+      "name": "electro_thermal_pathological_potential_span_v",
+      "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_thermal_pathological_potential_span_v",
+      "reference": 180.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": null
     },
     {
       "name": "plasticity_hardening_reference_complex_severity_peak",

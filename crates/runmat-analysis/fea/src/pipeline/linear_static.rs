@@ -131,6 +131,7 @@ pub fn run_linear_static_with_options(
         &[solve_result.residual_norm],
         summary.dof_count,
     );
+    let electro_thermal_diagnostics = electro_thermal_fields.diagnostics;
     fields.extend(electro_thermal_fields.static_fields);
     fields.extend(electro_thermal_fields.temperature_snapshots);
     fields.extend(electro_thermal_fields.thermal_residual_snapshots);
@@ -226,6 +227,7 @@ pub fn run_linear_static_with_options(
             effective_preconditioner: &solve_result.preconditioner,
         },
     );
+    diagnostics.extend(electro_thermal_diagnostics);
     diagnostics.extend(solve_result.diagnostics);
 
     emit_phase(

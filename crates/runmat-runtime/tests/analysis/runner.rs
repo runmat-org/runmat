@@ -4699,6 +4699,48 @@ pub(super) fn run_fixture(
                             Some(0.82),
                             Some(0.95),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_potential_residual_norm",
+                            "FEA_ET_POTENTIAL_SOLVE",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_POTENTIAL_SOLVE",
+                                "residual_norm",
+                            ),
+                            Some(0.0),
+                            Some(1.0e-8),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_current_balance_residual",
+                            "FEA_ET_POTENTIAL_SOLVE",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_POTENTIAL_SOLVE",
+                                "current_balance_residual",
+                            ),
+                            Some(0.0),
+                            Some(1.0e-8),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_potential_span_v",
+                            "FEA_ET_POTENTIAL_SOLVE",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_POTENTIAL_SOLVE",
+                                "potential_span_v",
+                            ),
+                            Some(35.9),
+                            Some(36.1),
+                        );
                     } else if spec.id == "electro_thermal_joule_pathological_gpu_provider" {
                         push_threshold_assertion(
                             spec.id,
@@ -4769,6 +4811,48 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.85),
                             Some(1.1),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_potential_residual_norm",
+                            "FEA_ET_POTENTIAL_SOLVE",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_POTENTIAL_SOLVE",
+                                "residual_norm",
+                            ),
+                            Some(0.0),
+                            Some(1.0e-8),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_current_balance_residual",
+                            "FEA_ET_POTENTIAL_SOLVE",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_POTENTIAL_SOLVE",
+                                "current_balance_residual",
+                            ),
+                            Some(0.0),
+                            Some(1.0e-8),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_potential_span_v",
+                            "FEA_ET_POTENTIAL_SOLVE",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_POTENTIAL_SOLVE",
+                                "potential_span_v",
+                            ),
+                            Some(179.9),
+                            Some(180.1),
                         );
                     }
                     if spec.id == "nonlinear_assembly_gpu_provider" {
