@@ -206,6 +206,7 @@ mod tests {
                     modulus_temp_coeff_per_k: -2.5e-4,
                     ..MaterialThermalModel::default()
                 },
+                acoustic: None,
                 electrical: None,
                 plastic: None,
             }],

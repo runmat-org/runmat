@@ -501,7 +501,12 @@ pub fn analysis_create_model_op(
         })
         .unwrap_or_else(|| fixed_region_id.clone());
 
-    let inferred_materials = infer_material_models(geometry);
+    let mut inferred_materials = infer_material_models(geometry);
+    if matches!(intent.profile, AnalysisCreateModelProfile::AcousticHarmonic) {
+        for material in &mut inferred_materials {
+            material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel::default());
+        }
+    }
     let inferred_assignments = infer_material_assignments(
         geometry,
         &inferred_materials,
@@ -591,18 +596,14 @@ pub fn analysis_create_model_op(
         ),
         AnalysisCreateModelProfile::AcousticHarmonic => (
             BoundaryCondition {
-                bc_id: "bc_default_fixed".to_string(),
+                bc_id: "bc_default_acoustic_rigid_wall".to_string(),
                 region_id: fixed_region_id,
-                kind: BoundaryConditionKind::Fixed,
+                kind: BoundaryConditionKind::AcousticRigidWall,
             },
             LoadCase {
                 load_id: "load_default_acoustic_harmonic_seed".to_string(),
                 region_id: load_region_id,
-                kind: LoadKind::BodyForce {
-                    gx: 0.0,
-                    gy: 0.0,
-                    gz: 0.0,
-                },
+                kind: LoadKind::Pressure { magnitude_pa: 1.0 },
             },
             vec![AnalysisStep {
                 step_id: "step_default_acoustic_harmonic".to_string(),
@@ -2275,11 +2276,15 @@ fn solve_acoustic_harmonic(
     residual_warn_threshold: f64,
 ) -> FeaRunResult {
     let node_count = acoustic_node_count(model, prep_context);
-    let reference_temperature_k = acoustic_reference_temperature_k(model);
-    let speed_of_sound_m_per_s = 331.3 * (reference_temperature_k / 273.15).sqrt();
-    let density_kg_per_m3 = 1.225 * (293.15 / reference_temperature_k.max(1.0));
+    let material_summary = acoustic_material_summary(model, mode_count);
+    let boundary_summary = acoustic_boundary_summary(
+        model,
+        material_summary.characteristic_impedance_pa_s_per_m(),
+    );
+    let speed_of_sound_m_per_s = material_summary.speed_of_sound_m_per_s;
+    let density_kg_per_m3 = material_summary.density_kg_per_m3;
     let drive_frequency_hz = acoustic_drive_frequency_hz(mode_count, node_count);
-    let damping_ratio = 0.02 + 0.002 * mode_count.saturating_sub(1).min(12) as f64;
+    let damping_ratio = material_summary.damping_ratio;
     let source_real = acoustic_source_vector(model, node_count);
     let source_imag = vec![0.0; node_count];
     let (diag_real, diag_imag, offdiag) = acoustic_helmholtz_operator(
@@ -2287,6 +2292,7 @@ fn solve_acoustic_harmonic(
         drive_frequency_hz,
         speed_of_sound_m_per_s,
         damping_ratio,
+        &boundary_summary,
     );
     let (pressure_real, pressure_imag) =
         solve_complex_tridiagonal(&diag_real, &diag_imag, offdiag, &source_real, &source_imag);
@@ -2326,6 +2332,7 @@ fn solve_acoustic_harmonic(
             *frequency_hz,
             speed_of_sound_m_per_s,
             damping_ratio,
+            &boundary_summary,
         );
         let (sweep_real, sweep_imag) = solve_complex_tridiagonal(
             &sweep_diag_real,
@@ -2423,7 +2430,7 @@ fn solve_acoustic_harmonic(
                 code: "FEA_ACOUSTIC_HARMONIC_RESPONSE".to_string(),
                 severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
                 message: format!(
-                    "drive_frequency_hz={} speed_of_sound_m_per_s={} density_kg_per_m3={} damping_ratio={} acoustic_node_count={} acoustic_field_count={} peak_pressure_pa={}",
+                    "drive_frequency_hz={} speed_of_sound_m_per_s={} density_kg_per_m3={} damping_ratio={} acoustic_node_count={} acoustic_field_count={} peak_pressure_pa={} acoustic_material_count={} acoustic_material_coverage_ratio={}",
                     drive_frequency_hz,
                     speed_of_sound_m_per_s,
                     density_kg_per_m3,
@@ -2431,6 +2438,27 @@ fn solve_acoustic_harmonic(
                     node_count,
                     acoustic_field_count,
                     peak_pressure_pa,
+                    material_summary.explicit_material_count,
+                    material_summary.coverage_ratio,
+                ),
+            },
+            runmat_analysis_fea::diagnostics::FeaDiagnostic {
+                code: "FEA_ACOUSTIC_BOUNDARY_MODEL".to_string(),
+                severity: if boundary_summary.has_acoustic_boundary_data() {
+                    runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+                } else {
+                    runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+                },
+                message: format!(
+                    "acoustic_boundary_count={} rigid_wall_count={} radiation_boundary_count={} impedance_boundary_count={} acoustic_boundary_coverage_ratio={} mean_specific_impedance_pa_s_per_m={} radiation_loss_factor={} impedance_loss_factor={}",
+                    boundary_summary.acoustic_boundary_count,
+                    boundary_summary.rigid_wall_count,
+                    boundary_summary.radiation_boundary_count,
+                    boundary_summary.impedance_boundary_count,
+                    boundary_summary.coverage_ratio,
+                    boundary_summary.mean_specific_impedance_pa_s_per_m,
+                    boundary_summary.radiation_loss_factor,
+                    boundary_summary.impedance_loss_factor,
                 ),
             },
             runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -2480,6 +2508,120 @@ fn acoustic_node_count(
         .min(512)
 }
 
+#[derive(Debug, Clone, Copy)]
+struct AcousticMaterialSummary {
+    density_kg_per_m3: f64,
+    speed_of_sound_m_per_s: f64,
+    damping_ratio: f64,
+    explicit_material_count: usize,
+    coverage_ratio: f64,
+}
+
+impl AcousticMaterialSummary {
+    fn characteristic_impedance_pa_s_per_m(self) -> f64 {
+        (self.density_kg_per_m3 * self.speed_of_sound_m_per_s).max(1.0)
+    }
+}
+
+fn acoustic_material_summary(model: &AnalysisModel, mode_count: usize) -> AcousticMaterialSummary {
+    let mut density_sum = 0.0;
+    let mut speed_sum = 0.0;
+    let mut damping_sum = 0.0;
+    let mut explicit_material_count = 0usize;
+    for material in &model.materials {
+        let Some(acoustic) = &material.acoustic else {
+            continue;
+        };
+        density_sum += acoustic.density_kg_per_m3.max(1.0e-9);
+        speed_sum += acoustic.speed_of_sound_m_per_s.max(1.0);
+        damping_sum += acoustic.damping_ratio.max(0.0);
+        explicit_material_count += 1;
+    }
+    if explicit_material_count == 0 {
+        let reference_temperature_k = acoustic_reference_temperature_k(model);
+        let speed_of_sound_m_per_s = 331.3 * (reference_temperature_k / 273.15).sqrt();
+        let density_kg_per_m3 = 1.225 * (293.15 / reference_temperature_k.max(1.0));
+        return AcousticMaterialSummary {
+            density_kg_per_m3,
+            speed_of_sound_m_per_s,
+            damping_ratio: 0.02 + 0.002 * mode_count.saturating_sub(1).min(12) as f64,
+            explicit_material_count,
+            coverage_ratio: 0.0,
+        };
+    }
+    let inv_count = 1.0 / explicit_material_count as f64;
+    AcousticMaterialSummary {
+        density_kg_per_m3: density_sum * inv_count,
+        speed_of_sound_m_per_s: speed_sum * inv_count,
+        damping_ratio: damping_sum * inv_count,
+        explicit_material_count,
+        coverage_ratio: explicit_material_count as f64 / model.materials.len().max(1) as f64,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AcousticBoundarySummary {
+    acoustic_boundary_count: usize,
+    rigid_wall_count: usize,
+    radiation_boundary_count: usize,
+    impedance_boundary_count: usize,
+    coverage_ratio: f64,
+    mean_specific_impedance_pa_s_per_m: f64,
+    radiation_loss_factor: f64,
+    impedance_loss_factor: f64,
+}
+
+impl AcousticBoundarySummary {
+    fn has_acoustic_boundary_data(self) -> bool {
+        self.acoustic_boundary_count > 0
+    }
+}
+
+fn acoustic_boundary_summary(
+    model: &AnalysisModel,
+    characteristic_impedance_pa_s_per_m: f64,
+) -> AcousticBoundarySummary {
+    let mut rigid_wall_count = 0usize;
+    let mut radiation_boundary_count = 0usize;
+    let mut impedance_boundary_count = 0usize;
+    let mut impedance_sum = 0.0;
+    for bc in &model.boundary_conditions {
+        match bc.kind {
+            BoundaryConditionKind::AcousticRigidWall => rigid_wall_count += 1,
+            BoundaryConditionKind::AcousticRadiation => radiation_boundary_count += 1,
+            BoundaryConditionKind::AcousticImpedance {
+                specific_impedance_pa_s_per_m,
+            } => {
+                impedance_boundary_count += 1;
+                impedance_sum += specific_impedance_pa_s_per_m.max(1.0);
+            }
+            _ => {}
+        }
+    }
+    let acoustic_boundary_count =
+        rigid_wall_count + radiation_boundary_count + impedance_boundary_count;
+    let mean_specific_impedance_pa_s_per_m = if impedance_boundary_count == 0 {
+        characteristic_impedance_pa_s_per_m
+    } else {
+        impedance_sum / impedance_boundary_count as f64
+    };
+    let impedance_ratio =
+        characteristic_impedance_pa_s_per_m / mean_specific_impedance_pa_s_per_m.max(1.0);
+    AcousticBoundarySummary {
+        acoustic_boundary_count,
+        rigid_wall_count,
+        radiation_boundary_count,
+        impedance_boundary_count,
+        coverage_ratio: acoustic_boundary_count as f64
+            / model.boundary_conditions.len().max(1) as f64,
+        mean_specific_impedance_pa_s_per_m,
+        radiation_loss_factor: 0.05 * radiation_boundary_count as f64,
+        impedance_loss_factor: 0.025
+            * impedance_boundary_count as f64
+            * impedance_ratio.clamp(0.1, 10.0),
+    }
+}
+
 fn acoustic_reference_temperature_k(model: &AnalysisModel) -> f64 {
     if model.materials.is_empty() {
         293.15
@@ -2522,6 +2664,7 @@ fn acoustic_helmholtz_operator(
     drive_frequency_hz: f64,
     speed_of_sound_m_per_s: f64,
     damping_ratio: f64,
+    boundary_summary: &AcousticBoundarySummary,
 ) -> (Vec<f64>, Vec<f64>, f64) {
     let n = node_count.max(1);
     let length_m = 1.0_f64;
@@ -2530,12 +2673,18 @@ fn acoustic_helmholtz_operator(
     let wave_number = omega / speed_of_sound_m_per_s.max(1.0);
     let kh_sq = (wave_number * h).powi(2);
     let mut diag_real = vec![2.0 - kh_sq; n];
-    let diag_imag = vec![2.0 * damping_ratio.max(0.0) * kh_sq.max(1.0e-9); n];
+    let mut diag_imag = vec![2.0 * damping_ratio.max(0.0) * kh_sq.max(1.0e-9); n];
+    let boundary_loss = (boundary_summary.radiation_loss_factor
+        + boundary_summary.impedance_loss_factor)
+        * (wave_number * h).abs().max(1.0e-9);
     if n == 1 {
         diag_real[0] = 1.0 - kh_sq;
+        diag_imag[0] += boundary_loss;
     } else {
         diag_real[0] = 1.0 - 0.5 * kh_sq;
         diag_real[n - 1] = 1.0 - 0.5 * kh_sq;
+        diag_imag[0] += boundary_loss;
+        diag_imag[n - 1] += boundary_loss;
     }
     (diag_real, diag_imag, -1.0)
 }
@@ -10960,6 +11109,7 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
                 modulus_temp_coeff_per_k: -2.5e-4,
                 ..MaterialThermalModel::default()
             },
+            acoustic: None,
             electrical: None,
             plastic: None,
         });
@@ -10978,6 +11128,7 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
                 modulus_temp_coeff_per_k: -2.5e-4,
                 ..MaterialThermalModel::default()
             },
+            acoustic: None,
             electrical: None,
             plastic: None,
         });

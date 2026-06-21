@@ -701,6 +701,55 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             step_id: format!("step_acoustic_{}", spec_id),
             kind: runmat_analysis_core::AnalysisStepKind::Modal,
         }];
+        for material in &mut model.materials {
+            material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel {
+                density_kg_per_m3: 1.225,
+                speed_of_sound_m_per_s: 343.0,
+                damping_ratio: 0.024,
+            });
+        }
+        if model.materials.is_empty() {
+            model.materials.push(runmat_analysis_core::MaterialModel {
+                material_id: "mat_acoustic_air".to_string(),
+                name: "Acoustic Air".to_string(),
+                mechanical: runmat_analysis_core::MaterialMechanicalModel {
+                    youngs_modulus_pa: 1.0,
+                    poisson_ratio: 0.0,
+                },
+                thermal: runmat_analysis_core::MaterialThermalModel::default(),
+                acoustic: Some(runmat_analysis_core::MaterialAcousticModel {
+                    density_kg_per_m3: 1.225,
+                    speed_of_sound_m_per_s: 343.0,
+                    damping_ratio: 0.024,
+                }),
+                electrical: None,
+                plastic: None,
+            });
+        }
+        model.boundary_conditions = vec![
+            runmat_analysis_core::BoundaryCondition {
+                bc_id: format!("bc_acoustic_rigid_{}", spec_id),
+                region_id: "acoustic_wall".to_string(),
+                kind: runmat_analysis_core::BoundaryConditionKind::AcousticRigidWall,
+            },
+            runmat_analysis_core::BoundaryCondition {
+                bc_id: format!("bc_acoustic_radiation_{}", spec_id),
+                region_id: "acoustic_open".to_string(),
+                kind: runmat_analysis_core::BoundaryConditionKind::AcousticRadiation,
+            },
+            runmat_analysis_core::BoundaryCondition {
+                bc_id: format!("bc_acoustic_impedance_{}", spec_id),
+                region_id: "acoustic_liner".to_string(),
+                kind: runmat_analysis_core::BoundaryConditionKind::AcousticImpedance {
+                    specific_impedance_pa_s_per_m: 420.0,
+                },
+            },
+        ];
+        model.loads = vec![runmat_analysis_core::LoadCase {
+            load_id: format!("load_acoustic_pressure_{}", spec_id),
+            region_id: "acoustic_source".to_string(),
+            kind: runmat_analysis_core::LoadKind::Pressure { magnitude_pa: 1.0 },
+        }];
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
@@ -836,6 +885,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         poisson_ratio: 0.31,
                     },
                     thermal: runmat_analysis_core::MaterialThermalModel::default(),
+                    acoustic: None,
                     electrical: None,
                     plastic: None,
                 }
@@ -3012,6 +3062,62 @@ pub(super) fn run_fixture(
                     "peak_pressure_pa",
                 ),
                 Some(1.0e-12),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_material_coverage_ratio",
+                "FEA_ACOUSTIC_HARMONIC_RESPONSE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_HARMONIC_RESPONSE",
+                    "acoustic_material_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_boundary_coverage_ratio",
+                "FEA_ACOUSTIC_BOUNDARY_MODEL",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_BOUNDARY_MODEL",
+                    "acoustic_boundary_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_radiation_boundary_count",
+                "FEA_ACOUSTIC_BOUNDARY_MODEL",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_BOUNDARY_MODEL",
+                    "radiation_boundary_count",
+                ),
+                Some(1.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_impedance_boundary_count",
+                "FEA_ACOUSTIC_BOUNDARY_MODEL",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_BOUNDARY_MODEL",
+                    "impedance_boundary_count",
+                ),
+                Some(1.0),
                 None,
             );
             push_threshold_assertion(

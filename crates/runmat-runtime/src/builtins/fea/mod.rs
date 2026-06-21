@@ -1,8 +1,9 @@
 use runmat_analysis_core::{
     AnalysisInterface, AnalysisInterfaceKind, AnalysisModel, AnalysisModelId, AnalysisStep,
     AnalysisStepKind, BoundaryCondition, BoundaryConditionKind, EvidenceConfidence, LoadCase,
-    LoadKind, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialPlasticModel, MaterialThermalModel, ReferenceFrame,
+    LoadKind, MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel,
+    MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
+    ReferenceFrame,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_builtins::{
@@ -1037,6 +1038,36 @@ fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             None
         }
     };
+    let acoustic = if let Some(value) = fields.remove("acoustic") {
+        Some(json_deserialize(
+            MATERIAL_NAME,
+            value,
+            "acoustic material model",
+        )?)
+    } else {
+        let mut acoustic = serde_json::to_value(MaterialAcousticModel::default())
+            .map_err(|err| builtin_error(MATERIAL_NAME, &ERROR_INTERNAL, err.to_string()))?;
+        let moved = move_known_fields(
+            &mut fields,
+            acoustic
+                .as_object_mut()
+                .expect("acoustic material model is object"),
+            &[
+                "density_kg_per_m3",
+                "speed_of_sound_m_per_s",
+                "damping_ratio",
+            ],
+        );
+        if moved {
+            Some(json_deserialize(
+                MATERIAL_NAME,
+                acoustic,
+                "acoustic material model",
+            )?)
+        } else {
+            None
+        }
+    };
     let plastic = if let Some(value) = fields.remove("plastic") {
         Some(json_deserialize(
             MATERIAL_NAME,
@@ -1069,6 +1100,7 @@ fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         name,
         mechanical,
         thermal,
+        acoustic,
         electrical,
         plastic,
     })
@@ -1124,7 +1156,18 @@ fn create_boundary_condition_object_from_args(args: Vec<Value>) -> BuiltinResult
     let bc_id = scalar_string(&args[0], BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
     let region_id = scalar_string(&args[1], BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
     let kind_text = scalar_string(&args[2], BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
-    let kind = parse_scalar_enum::<BoundaryConditionKind>(&kind_text, "BoundaryConditionKind")?;
+    let mut fields = json_fields_from_name_values(BOUNDARY_CONDITION_NAME, &args[3..])?;
+    let kind = match normalize_token(&kind_text).as_str() {
+        "acousticimpedance" => BoundaryConditionKind::AcousticImpedance {
+            specific_impedance_pa_s_per_m: remove_required_f64(
+                &mut fields,
+                BOUNDARY_CONDITION_NAME,
+                "specific_impedance_pa_s_per_m",
+            )?,
+        },
+        _ => parse_scalar_enum::<BoundaryConditionKind>(&kind_text, "BoundaryConditionKind")?,
+    };
+    reject_unknown_fields(BOUNDARY_CONDITION_NAME, fields)?;
     boundary_condition_to_object(BoundaryCondition {
         bc_id,
         region_id,

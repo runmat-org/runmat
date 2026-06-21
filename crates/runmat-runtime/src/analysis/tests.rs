@@ -89,6 +89,7 @@ fn sample_model() -> AnalysisModel {
                 modulus_temp_coeff_per_k: -2.5e-4,
                 ..MaterialThermalModel::default()
             },
+            acoustic: None,
             electrical: None,
             plastic: None,
         }],
@@ -133,6 +134,7 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
             modulus_temp_coeff_per_k: -7.0e-4,
             ..MaterialThermalModel::default()
         },
+        acoustic: None,
         electrical: None,
         plastic: None,
     });
@@ -4053,6 +4055,7 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
             specific_heat_j_per_kgk: 160.0,
             ..MaterialThermalModel::default()
         },
+        acoustic: None,
         electrical: None,
         plastic: None,
     });
@@ -5883,6 +5886,15 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_ACOUSTIC_FREQUENCY_RESPONSE"));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_ACOUSTIC_HARMONIC_RESPONSE"
+            && diag.message.contains("acoustic_material_coverage_ratio=1")
+    }));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_ACOUSTIC_BOUNDARY_MODEL"
+            && diag.message.contains("acoustic_boundary_coverage_ratio=1")
+            && diag.message.contains("rigid_wall_count=1")
+    }));
     assert!(envelope
         .data
         .run

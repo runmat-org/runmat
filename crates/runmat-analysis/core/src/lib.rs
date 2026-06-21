@@ -25,8 +25,8 @@ pub use problem::interfaces::{AnalysisInterface, AnalysisInterfaceKind, ContactI
 pub use problem::loads::{LoadCase, LoadKind};
 pub use problem::material_assignment::{EvidenceConfidence, MaterialAssignment};
 pub use problem::materials::{
-    ConductivityFrequencyPoint, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialPlasticModel, MaterialThermalModel,
+    ConductivityFrequencyPoint, MaterialAcousticModel, MaterialElectricalModel,
+    MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
 };
 pub use problem::model::{AnalysisModel, AnalysisModelId, ReferenceFrame};
 pub use problem::steps::{AnalysisStep, AnalysisStepKind};
@@ -53,6 +53,7 @@ mod tests {
                     poisson_ratio: 0.3,
                 },
                 thermal: MaterialThermalModel::default(),
+                acoustic: None,
                 electrical: None,
                 plastic: None,
             }],

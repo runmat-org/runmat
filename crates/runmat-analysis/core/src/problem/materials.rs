@@ -36,6 +36,18 @@ fn default_relative_permeability() -> f64 {
     1.0
 }
 
+fn default_acoustic_density_kg_per_m3() -> f64 {
+    1.225
+}
+
+fn default_speed_of_sound_m_per_s() -> f64 {
+    343.0
+}
+
+fn default_acoustic_damping_ratio() -> f64 {
+    0.02
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConductivityFrequencyPoint {
     pub frequency_hz: f64,
@@ -76,6 +88,26 @@ impl Default for MaterialThermalModel {
             conductivity_w_per_mk: default_thermal_conductivity_w_per_mk(),
             specific_heat_j_per_kgk: default_specific_heat_j_per_kgk(),
             expansion_coefficient_per_k: default_thermal_expansion_coefficient_per_k(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MaterialAcousticModel {
+    #[serde(default = "default_acoustic_density_kg_per_m3")]
+    pub density_kg_per_m3: f64,
+    #[serde(default = "default_speed_of_sound_m_per_s")]
+    pub speed_of_sound_m_per_s: f64,
+    #[serde(default = "default_acoustic_damping_ratio")]
+    pub damping_ratio: f64,
+}
+
+impl Default for MaterialAcousticModel {
+    fn default() -> Self {
+        Self {
+            density_kg_per_m3: default_acoustic_density_kg_per_m3(),
+            speed_of_sound_m_per_s: default_speed_of_sound_m_per_s(),
+            damping_ratio: default_acoustic_damping_ratio(),
         }
     }
 }
@@ -123,6 +155,8 @@ pub struct MaterialModel {
     pub mechanical: MaterialMechanicalModel,
     #[serde(default)]
     pub thermal: MaterialThermalModel,
+    #[serde(default)]
+    pub acoustic: Option<MaterialAcousticModel>,
     #[serde(default)]
     pub electrical: Option<MaterialElectricalModel>,
     #[serde(default)]

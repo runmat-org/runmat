@@ -89,6 +89,7 @@ fn cantilever_linear_static() -> AnalysisModel {
                 modulus_temp_coeff_per_k: -2.5e-4,
                 ..MaterialThermalModel::default()
             },
+            acoustic: None,
             electrical: None,
             plastic: None,
         }],
@@ -270,6 +271,7 @@ fn nonlinear_softening_benchmark_fixture() -> AnalysisModel {
                 modulus_temp_coeff_per_k: -1.2e-3,
                 ..MaterialThermalModel::default()
             },
+            acoustic: None,
             electrical: None,
             plastic: None,
         },
@@ -285,6 +287,7 @@ fn nonlinear_softening_benchmark_fixture() -> AnalysisModel {
                 modulus_temp_coeff_per_k: -3.6e-4,
                 ..MaterialThermalModel::default()
             },
+            acoustic: None,
             electrical: None,
             plastic: None,
         },
@@ -681,6 +684,7 @@ fn multi_material_assembly() -> AnalysisModel {
                 modulus_temp_coeff_per_k: -2.5e-4,
                 ..MaterialThermalModel::default()
             },
+            acoustic: None,
             electrical: None,
             plastic: None,
         },
@@ -696,6 +700,7 @@ fn multi_material_assembly() -> AnalysisModel {
                 modulus_temp_coeff_per_k: -3.6e-4,
                 ..MaterialThermalModel::default()
             },
+            acoustic: None,
             electrical: None,
             plastic: None,
         },
@@ -711,6 +716,7 @@ fn multi_material_assembly() -> AnalysisModel {
                 modulus_temp_coeff_per_k: -8.0e-4,
                 ..MaterialThermalModel::default()
             },
+            acoustic: None,
             electrical: None,
             plastic: None,
         },

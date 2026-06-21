@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use runmat_analysis_core::{
     AnalysisInterface, AnalysisModel, AnalysisModelId, AnalysisStep, BoundaryCondition,
     BoundaryConditionKind, CfdDomain, ElectroThermalDomain, ElectromagneticDomain,
-    EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment, MaterialElectricalModel,
-    MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
-    ReferenceFrame, ThermoMechanicalDomain,
+    EvidenceConfidence, LoadCase, LoadKind, MaterialAcousticModel, MaterialAssignment,
+    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialPlasticModel,
+    MaterialThermalModel, ReferenceFrame, ThermoMechanicalDomain,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{GeometryAsset, UnitSystem};
@@ -125,6 +125,8 @@ struct FeaMaterialDocument {
     mechanical: MaterialMechanicalModel,
     #[serde(default)]
     thermal: Option<MaterialThermalModel>,
+    #[serde(default)]
+    acoustic: Option<MaterialAcousticModel>,
     #[serde(default)]
     electrical: Option<MaterialElectricalModel>,
     #[serde(default)]
@@ -431,6 +433,7 @@ fn resolve_material(id: &str, material: &FeaMaterialDocument) -> MaterialModel {
         name: material.name.clone().unwrap_or_else(|| id.to_string()),
         mechanical: material.mechanical.clone(),
         thermal: material.thermal.clone().unwrap_or_default(),
+        acoustic: material.acoustic.clone(),
         electrical: material.electrical.clone(),
         plastic: material.plastic.clone(),
     }
