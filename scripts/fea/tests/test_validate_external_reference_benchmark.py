@@ -3206,6 +3206,46 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "reference": 1.0,
             "pass": True,
         },
+        *[
+            {
+                "name": name,
+                "fixture_id": fixture_id,
+                "observed": observed,
+                "reference": observed,
+                "pass": True,
+            }
+            for fixture_id in (
+                "cfd_transient_cpu",
+                "cfd_transient_gpu_provider",
+                "cfd_transient_gpu_fallback",
+            )
+            for name, observed in (
+                ("cfd_reference_density_kg_per_m3", 1.225),
+                ("cfd_dynamic_viscosity_pa_s", 1.81e-05),
+                ("cfd_inlet_velocity_m_per_s", 5.0),
+                ("cfd_turbulence_intensity", 0.06),
+                ("cfd_reynolds_number", 338397.79005524865),
+                ("cfd_profile_point_count", 2.0),
+                ("cfd_max_momentum_residual", 3.9e-7),
+                ("cfd_max_continuity_residual", 2.5e-7),
+                ("cfd_mass_balance_residual", 0.0),
+                ("cfd_pressure_drop_pa", 1.0),
+                ("cfd_pressure_drop_balance_ratio", 1.0),
+                ("cfd_mass_flux_uniformity_ratio", 0.0),
+                ("cfd_pressure_monotonic_cell_fraction", 1.0),
+                ("cfd_known_answer_coverage_ratio", 1.0),
+                ("cfd_control_volume_count", 2.0),
+                ("cfd_inlet_boundary_count", 1.0),
+                ("cfd_outlet_boundary_count", 1.0),
+                ("cfd_wall_boundary_count", 2.0),
+                ("cfd_boundary_coverage_ratio", 1.0),
+                ("cfd_wall_boundary_coverage_ratio", 1.0),
+                ("cfd_transient_step_count", 12.0),
+                ("cfd_transient_scale_min", 0.65),
+                ("cfd_transient_scale_max", 1.0),
+                ("cfd_transient_scale_variation", 0.35),
+            )
+        ],
         {
             "name": "cht_applied_temperature_delta_k",
             "fixture_id": "cht_coupled_gpu_provider",

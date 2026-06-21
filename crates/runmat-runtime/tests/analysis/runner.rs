@@ -895,6 +895,33 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             time_profile: Vec::new(),
         });
     }
+    if spec_id.starts_with("cfd_transient_") {
+        model.steps = vec![runmat_analysis_core::AnalysisStep {
+            step_id: format!("step_cfd_{}", spec_id),
+            kind: runmat_analysis_core::AnalysisStepKind::Cfd,
+        }];
+        model.thermo_mechanical = None;
+        model.electro_thermal = None;
+        model.interfaces.clear();
+        model.cfd = Some(runmat_analysis_core::CfdDomain {
+            enabled: true,
+            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
+            reference_density_kg_per_m3: 1.225,
+            dynamic_viscosity_pa_s: 1.81e-5,
+            inlet_velocity_m_per_s: 5.0,
+            turbulence_intensity: 0.06,
+            time_profile: vec![
+                runmat_analysis_core::CfdTimeProfilePoint {
+                    normalized_time: 0.0,
+                    inlet_scale: 0.65,
+                },
+                runmat_analysis_core::CfdTimeProfilePoint {
+                    normalized_time: 1.0,
+                    inlet_scale: 1.0,
+                },
+            ],
+        });
+    }
     if spec_id.starts_with("cht_coupled_") {
         model.steps = vec![
             runmat_analysis_core::AnalysisStep {
@@ -3787,7 +3814,14 @@ pub(super) fn run_fixture(
                 Some(max_growth),
             );
         }
-        if spec.id.starts_with("cfd_steady_") {
+        let is_cfd_fixture =
+            spec.id.starts_with("cfd_steady_") || spec.id.starts_with("cfd_transient_");
+        if is_cfd_fixture {
+            let expected_profile_point_count = if spec.id.starts_with("cfd_transient_") {
+                2.0
+            } else {
+                0.0
+            };
             push_threshold_assertion(
                 spec.id,
                 &mut threshold_assertions,
@@ -3845,8 +3879,8 @@ pub(super) fn run_fixture(
                 "cfd_profile_point_count",
                 "FEA_CFD_FLOW",
                 diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "profile_point_count"),
-                Some(0.0),
-                Some(0.0),
+                Some(expected_profile_point_count),
+                Some(expected_profile_point_count),
             );
             push_threshold_assertion(
                 spec.id,
@@ -4040,6 +4074,64 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
+            if spec.id.starts_with("cfd_transient_") {
+                push_threshold_assertion(
+                    spec.id,
+                    &mut threshold_assertions,
+                    &mut failures,
+                    "cfd_transient_step_count",
+                    "FEA_CFD_TRANSIENT_EVOLUTION",
+                    diagnostic_metric(
+                        &cpu_envelope.data,
+                        "FEA_CFD_TRANSIENT_EVOLUTION",
+                        "step_count",
+                    ),
+                    Some(12.0),
+                    Some(12.0),
+                );
+                push_threshold_assertion(
+                    spec.id,
+                    &mut threshold_assertions,
+                    &mut failures,
+                    "cfd_transient_scale_min",
+                    "FEA_CFD_TRANSIENT_EVOLUTION",
+                    diagnostic_metric(
+                        &cpu_envelope.data,
+                        "FEA_CFD_TRANSIENT_EVOLUTION",
+                        "transient_scale_min",
+                    ),
+                    Some(0.649_999),
+                    Some(0.650_001),
+                );
+                push_threshold_assertion(
+                    spec.id,
+                    &mut threshold_assertions,
+                    &mut failures,
+                    "cfd_transient_scale_max",
+                    "FEA_CFD_TRANSIENT_EVOLUTION",
+                    diagnostic_metric(
+                        &cpu_envelope.data,
+                        "FEA_CFD_TRANSIENT_EVOLUTION",
+                        "transient_scale_max",
+                    ),
+                    Some(1.0),
+                    Some(1.0),
+                );
+                push_threshold_assertion(
+                    spec.id,
+                    &mut threshold_assertions,
+                    &mut failures,
+                    "cfd_transient_scale_variation",
+                    "FEA_CFD_TRANSIENT_EVOLUTION",
+                    diagnostic_metric(
+                        &cpu_envelope.data,
+                        "FEA_CFD_TRANSIENT_EVOLUTION",
+                        "transient_scale_variation",
+                    ),
+                    Some(0.349_999),
+                    Some(0.350_001),
+                );
+            }
         }
         if spec.id.starts_with("cht_coupled_") {
             push_threshold_assertion(
