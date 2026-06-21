@@ -99,7 +99,7 @@
     },
     {
       "question": "Does `tf` implement response and stability helpers?",
-      "answer": "`step`, `impulse`, `nyquist`, `stepinfo`, `feedback`, `dcgain`, `pole`, and `isstable` are implemented as separate control builtins."
+      "answer": "`step`, `impulse`, `nyquist`, `stepinfo`, `feedback`, `dcgain`, `pole`, `damp`, and `isstable` are implemented as separate control builtins."
     },
     {
       "question": "Can I pass matrices of coefficients?",
@@ -126,6 +126,10 @@
     {
       "label": "step",
       "url": "./step"
+    },
+    {
+      "label": "damp",
+      "url": "./damp"
     }
   ],
   "source": {
