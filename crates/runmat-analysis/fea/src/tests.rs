@@ -49,6 +49,20 @@ fn assert_thermo_mechanical_consistency_diagnostic(
     }));
 }
 
+fn assert_thermo_mechanical_temperature_field_diagnostic(
+    diagnostics: &[crate::diagnostics::FeaDiagnostic],
+) {
+    assert!(diagnostics.iter().any(|diag| {
+        diag.code == "FEA_TM_TEMPERATURE_FIELD"
+            && diag
+                .message
+                .contains("temperature_field_basis=nodal_coupling")
+            && diag.message.contains("node_count=")
+            && diag.message.contains("strain_temperature_residual_ratio=")
+            && diag.message.contains("strain_temperature_coverage_ratio=")
+    }));
+}
+
 #[test]
 fn canonical_cantilever_benchmark_runs() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -126,6 +140,10 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
         fea_thermo_mechanical_temperature_field_id(0)
     );
     assert_eq!(
+        field(&result, &fea_thermo_mechanical_temperature_field_id(0)).shape,
+        vec![field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).shape[0]]
+    );
+    assert_eq!(
         field(&result, &fea_thermo_mechanical_thermal_strain_field_id(0)).field_id,
         fea_thermo_mechanical_thermal_strain_field_id(0)
     );
@@ -150,6 +168,7 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
         fea_thermo_mechanical_coupling_residual_field_id(0)
     );
     assert_thermo_mechanical_consistency_diagnostic(&result.diagnostics);
+    assert_thermo_mechanical_temperature_field_diagnostic(&result.diagnostics);
 }
 
 #[test]
@@ -581,6 +600,10 @@ fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
         fea_thermo_mechanical_temperature_field_id(0)
     );
     assert_eq!(
+        result.thermo_mechanical_temperature_snapshots[0].shape,
+        vec![result.displacement_snapshots[0].shape[0]]
+    );
+    assert_eq!(
         result.thermo_mechanical_thermal_strain_snapshots[0].field_id,
         fea_thermo_mechanical_thermal_strain_field_id(0)
     );
@@ -601,6 +624,7 @@ fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
         fea_thermo_mechanical_coupling_residual_field_id(0)
     );
     assert_thermo_mechanical_consistency_diagnostic(&result.run.diagnostics);
+    assert_thermo_mechanical_temperature_field_diagnostic(&result.run.diagnostics);
 
     assert!(result
         .run
@@ -869,6 +893,10 @@ fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
         fea_thermo_mechanical_temperature_field_id(0)
     );
     assert_eq!(
+        result.thermo_mechanical_temperature_snapshots[0].shape,
+        vec![result.displacement_snapshots[0].shape[0]]
+    );
+    assert_eq!(
         result.thermo_mechanical_thermal_strain_snapshots[0].field_id,
         fea_thermo_mechanical_thermal_strain_field_id(0)
     );
@@ -902,6 +930,7 @@ fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
         .message
         .contains("convergence_increment_target_peak="));
     assert_thermo_mechanical_consistency_diagnostic(&result.run.diagnostics);
+    assert_thermo_mechanical_temperature_field_diagnostic(&result.run.diagnostics);
 }
 
 #[test]
