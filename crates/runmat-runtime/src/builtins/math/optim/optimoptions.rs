@@ -32,7 +32,7 @@ const OPTIMOPTIONS_INPUTS_SOLVER: [BuiltinParamDescriptor; 1] = [BuiltinParamDes
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Solver name, such as fminbnd, fzero, fsolve, or lsqcurvefit.",
+    description: "Solver name, such as fminbnd, fminunc, fzero, fsolve, or lsqcurvefit.",
 }];
 
 const OPTIMOPTIONS_INPUTS_SOLVER_PAIRS: [BuiltinParamDescriptor; 3] = [
@@ -41,7 +41,7 @@ const OPTIMOPTIONS_INPUTS_SOLVER_PAIRS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Solver name, such as fminbnd, fzero, fsolve, or lsqcurvefit.",
+        description: "Solver name, such as fminbnd, fminunc, fzero, fsolve, or lsqcurvefit.",
     },
     BuiltinParamDescriptor {
         name: "name",
@@ -191,8 +191,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "optimoptions",
     category = "math/optim",
-    summary = "Create or update a typed optimization options structure for fminbnd, fzero, fsolve, and lsqcurvefit.",
-    keywords = "optimoptions,options,TolX,TolFun,FunctionTolerance,StepTolerance,MaxIter,MaxFunEvals,Display,Algorithm",
+    summary = "Create or update a typed optimization options structure for fminbnd, fminunc, fzero, fsolve, and lsqcurvefit.",
+    keywords = "optimoptions,options,TolX,TolFun,FunctionTolerance,StepTolerance,MaxIter,MaxFunEvals,Display,Algorithm,SpecifyObjectiveGradient",
     accel = "cpu",
     type_resolver(optim_options_type),
     descriptor(crate::builtins::math::optim::optimoptions::OPTIMOPTIONS_DESCRIPTOR),
@@ -321,6 +321,7 @@ where
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Solver {
     Fminbnd,
+    Fminunc,
     Fzero,
     Fsolve,
     Lsqcurvefit,
@@ -331,6 +332,7 @@ impl Solver {
     fn name(self) -> &'static str {
         match self {
             Self::Fminbnd => "fminbnd",
+            Self::Fminunc => "fminunc",
             Self::Fzero => "fzero",
             Self::Fsolve => "fsolve",
             Self::Lsqcurvefit => "lsqcurvefit",
@@ -341,26 +343,30 @@ impl Solver {
     fn default_display(self) -> &'static str {
         match self {
             Self::Fminbnd => "notify",
-            Self::Fzero | Self::Fsolve | Self::Lsqcurvefit | Self::Generic => "off",
+            Self::Fminunc | Self::Fzero | Self::Fsolve | Self::Lsqcurvefit | Self::Generic => "off",
         }
     }
 
     fn accepts_tol_fun(self) -> bool {
-        matches!(self, Self::Fsolve | Self::Lsqcurvefit | Self::Generic)
+        matches!(
+            self,
+            Self::Fminunc | Self::Fsolve | Self::Lsqcurvefit | Self::Generic
+        )
     }
 
     fn accepts_option(self, canonical: &str) -> bool {
         match canonical {
             "TolX" | "MaxIter" | "MaxFunEvals" | "Display" => true,
             "TolFun" => self.accepts_tol_fun(),
-            "Algorithm" => matches!(self, Self::Lsqcurvefit | Self::Generic),
+            "Algorithm" => matches!(self, Self::Fminunc | Self::Lsqcurvefit | Self::Generic),
+            "SpecifyObjectiveGradient" => matches!(self, Self::Fminunc | Self::Generic),
             _ => false,
         }
     }
 
     fn accepts_display(self, display: &str) -> bool {
         match self {
-            Self::Fminbnd | Self::Generic => {
+            Self::Fminbnd | Self::Fminunc | Self::Generic => {
                 matches!(display, "off" | "none" | "iter" | "notify" | "final")
             }
             Self::Fzero | Self::Fsolve | Self::Lsqcurvefit => {
@@ -371,8 +377,12 @@ impl Solver {
 
     fn accepts_algorithm(self, algorithm: &str) -> bool {
         match self {
+            Self::Fminunc => matches!(algorithm, "quasi-newton" | "bfgs"),
             Self::Lsqcurvefit | Self::Generic => {
-                matches!(algorithm, "levenberg-marquardt" | "trust-region-reflective")
+                matches!(
+                    algorithm,
+                    "quasi-newton" | "bfgs" | "levenberg-marquardt" | "trust-region-reflective"
+                )
             }
             _ => false,
         }
@@ -391,6 +401,7 @@ fn parse_solver(value: &Value) -> BuiltinResult<Solver> {
 fn parse_solver_name(text: &str) -> BuiltinResult<Solver> {
     match text.trim().to_ascii_lowercase().as_str() {
         "fminbnd" => Ok(Solver::Fminbnd),
+        "fminunc" => Ok(Solver::Fminunc),
         "fzero" => Ok(Solver::Fzero),
         "fsolve" => Ok(Solver::Fsolve),
         "lsqcurvefit" => Ok(Solver::Lsqcurvefit),
@@ -419,6 +430,15 @@ fn default_options(solver: Solver) -> StructValue {
             out.insert("MaxIter", Value::Num(500.0));
             out.insert("MaxFunEvals", Value::Num(500.0));
             out.insert("Display", Value::from(solver.default_display()));
+        }
+        Solver::Fminunc => {
+            out.insert("Algorithm", Value::from("quasi-newton"));
+            out.insert("TolX", Value::Num(1.0e-6));
+            out.insert("TolFun", Value::Num(1.0e-6));
+            out.insert("MaxIter", Value::Num(400.0));
+            out.insert("MaxFunEvals", Value::Num(40000.0));
+            out.insert("Display", Value::from(solver.default_display()));
+            out.insert("SpecifyObjectiveGradient", Value::Bool(false));
         }
         Solver::Fzero => {
             out.insert("TolX", Value::Num(1.0e-6));
@@ -544,6 +564,7 @@ fn normalized_option_value(solver: Solver, canonical: &str, value: &Value) -> Bu
         }
         "Display" => Ok(Value::from(display_value(solver, value)?)),
         "Algorithm" => Ok(Value::from(algorithm_value(solver, value)?)),
+        "SpecifyObjectiveGradient" => Ok(Value::Bool(logical_value(canonical, value)?)),
         _ => unreachable!("unsupported option passed accepts_option"),
     }
 }
@@ -610,6 +631,52 @@ fn numeric_scalar(field: &str, value: &Value) -> BuiltinResult<f64> {
             &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
             format!("optimoptions: option {field} must be finite"),
         ))
+    }
+}
+
+fn logical_value(field: &str, value: &Value) -> BuiltinResult<bool> {
+    match value {
+        Value::Bool(flag) => Ok(*flag),
+        Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => Ok(data[0] != 0),
+        Value::Num(n) => logical_from_number(field, *n),
+        Value::Int(i) => logical_from_number(field, i.to_f64()),
+        Value::Tensor(Tensor { data, .. }) if data.len() == 1 => {
+            logical_from_number(field, data[0])
+        }
+        Value::String(s) => logical_from_text(field, s),
+        Value::StringArray(sa) if sa.data.len() == 1 => logical_from_text(field, &sa.data[0]),
+        Value::CharArray(CharArray { data, rows: 1, .. }) => {
+            let text: String = data.iter().collect();
+            logical_from_text(field, &text)
+        }
+        other => Err(optimoptions_error_with(
+            &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+            format!("optimoptions: option {field} must be logical, got {other:?}"),
+        )),
+    }
+}
+
+fn logical_from_number(field: &str, value: f64) -> BuiltinResult<bool> {
+    if value == 0.0 {
+        Ok(false)
+    } else if value == 1.0 {
+        Ok(true)
+    } else {
+        Err(optimoptions_error_with(
+            &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+            format!("optimoptions: option {field} must be logical 0 or 1"),
+        ))
+    }
+}
+
+fn logical_from_text(field: &str, value: &str) -> BuiltinResult<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "on" | "true" | "yes" => Ok(true),
+        "off" | "false" | "no" => Ok(false),
+        other => Err(optimoptions_error_with(
+            &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+            format!("optimoptions: option {field} must be 'on' or 'off', got '{other}'"),
+        )),
     }
 }
 
@@ -714,6 +781,13 @@ mod tests {
         }
     }
 
+    fn bool_field(options: &StructValue, field: &str) -> bool {
+        match options.fields.get(field) {
+            Some(Value::Bool(value)) => *value,
+            other => panic!("expected bool field {field}, got {other:?}"),
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn optimoptions_descriptor_signatures_and_errors_cover_core_forms() {
@@ -790,6 +864,42 @@ mod tests {
         assert_eq!(num_field(&options, "MaxIter"), 400.0);
         assert_eq!(num_field(&options, "MaxFunEvals"), 40000.0);
         assert_eq!(string_field(&options, "Display"), "off");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn optimoptions_fminunc_defaults_match_solver() {
+        let options = struct_result(
+            run_optimoptions(vec![Value::from("fminunc")]).expect("optimoptions fminunc"),
+        );
+        assert_eq!(string_field(&options, "Solver"), "fminunc");
+        assert_eq!(string_field(&options, "Algorithm"), "quasi-newton");
+        assert_eq!(num_field(&options, "TolX"), 1.0e-6);
+        assert_eq!(num_field(&options, "TolFun"), 1.0e-6);
+        assert_eq!(num_field(&options, "MaxIter"), 400.0);
+        assert_eq!(num_field(&options, "MaxFunEvals"), 40000.0);
+        assert_eq!(string_field(&options, "Display"), "off");
+        assert!(!bool_field(&options, "SpecifyObjectiveGradient"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn optimoptions_fminunc_accepts_gradient_and_algorithm_options() {
+        let options = struct_result(
+            run_optimoptions(vec![
+                Value::from("fminunc"),
+                Value::from("SpecifyObjectiveGradient"),
+                Value::from("on"),
+                Value::from("Algorithm"),
+                Value::from("bfgs"),
+                Value::from("Display"),
+                Value::from("notify"),
+            ])
+            .expect("optimoptions fminunc"),
+        );
+        assert!(bool_field(&options, "SpecifyObjectiveGradient"));
+        assert_eq!(string_field(&options, "Algorithm"), "bfgs");
+        assert_eq!(string_field(&options, "Display"), "notify");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

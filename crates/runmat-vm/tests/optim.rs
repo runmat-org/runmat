@@ -5,6 +5,26 @@ use runmat_builtins::Value;
 use test_helpers::execute_source;
 
 #[test]
+fn fminunc_solves_quadratic_from_source() {
+    let vars = execute_source(
+        "fun = @(x) sum((x - [1; 2; 3]).^2); [x, fval, exitflag] = fminunc(fun, [0; 0; 0]); y = x(2);",
+    )
+    .unwrap();
+    assert!(vars.iter().any(|value| {
+        matches!(value, Value::Tensor(t) if t.shape == vec![3, 1] && (t.data[0] - 1.0).abs() < 1.0e-4 && (t.data[1] - 2.0).abs() < 1.0e-4 && (t.data[2] - 3.0).abs() < 1.0e-4)
+    }));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if n.abs() < 1.0e-7)));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 1.0).abs() < 1.0e-7)));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 2.0).abs() < 1.0e-4)));
+}
+
+#[test]
 fn linprog_solves_bounded_program_from_source() {
     let vars = execute_source(
         "f = [-1; -2]; A = [1 1]; b = 4; [x, fval, exitflag] = linprog(f, A, b, [], [], [0; 0], []); y = x(2);",
