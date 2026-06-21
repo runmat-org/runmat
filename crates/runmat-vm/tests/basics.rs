@@ -94,6 +94,30 @@ fn buttord_builtin_executes_for_butterworth_workflow() {
 }
 
 #[test]
+fn pwelch_builtin_executes_for_psd_workflow() {
+    let input = r#"
+        fs = 32;
+        t = 0:31;
+        x = sin(2*pi*4*t/fs);
+        [pxx, f] = pwelch(x, 32, 0, 32, fs);
+        [~, idx] = max(pxx);
+        out = [numel(pxx), numel(f), idx, f(idx)];
+    "#;
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected output tensor");
+    assert_eq!(out.data[0], 17.0);
+    assert_eq!(out.data[1], 17.0);
+    assert_eq!(out.data[2], 5.0);
+    assert_eq!(out.data[3], 4.0);
+}
+
+#[test]
 fn pulstran_rectpuls_builtin_executes_for_impulse_train_shape() {
     let input = r#"
         t = -1:0.5:1;

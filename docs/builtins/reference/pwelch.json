@@ -1,0 +1,107 @@
+{
+  "title": "pwelch",
+  "category": "math/signal",
+  "keywords": [
+    "pwelch",
+    "Welch",
+    "PSD",
+    "periodogram",
+    "spectral density",
+    "signal processing"
+  ],
+  "summary": "Estimate power spectral density using Welch's method.",
+  "references": [
+    "title: \"MATLAB pwelch documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Welch spectral estimation runs on the host. GPU-resident signal and window inputs are gathered automatically before FFT processing."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 6,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::pwelch::tests",
+    "integration": "crates/runmat-vm/tests/basics.rs"
+  },
+  "description": "`pwelch(x)` estimates the power spectral density of a signal by averaging modified periodograms of overlapped, windowed segments. Optional arguments select the window, overlap, FFT length, sampling frequency, frequency range, and spectrum scale.",
+  "behaviors": [
+    "`pxx = pwelch(x)` returns a one-sided PSD estimate for real inputs and a two-sided estimate for complex inputs.",
+    "Matrix inputs are processed column-wise; `pxx` has one output column per input column.",
+    "`[pxx, f] = pwelch(...)` also returns the frequency grid. Without `fs`, frequencies are in radians/sample; with `fs`, frequencies are in Hz.",
+    "The `window` argument may be a vector or a scalar segment length. A scalar creates a Hamming window of that length; `[]` uses a default Hamming window sized for roughly eight 50%-overlapped sections, capped at 256 samples.",
+    "`noverlap` defaults to half the window length and must be less than the window length.",
+    "`nfft` defaults to `max(256, length(window))`, must be at least the window length, and controls the FFT grid. A real frequency vector may be supplied in the same position to evaluate the PSD at explicit frequencies.",
+    "The optional range selector accepts `'onesided'`, `'twosided'`, or `'centered'`.",
+    "The optional spectrum type accepts `'psd'` (default) or `'power'`; `'power'` omits the density bandwidth normalization."
+  ],
+  "examples": [
+    {
+      "description": "PSD of a sine wave",
+      "input": "fs = 1000;\nt = (0:999) / fs;\nx = sin(2*pi*100*t);\n[pxx, f] = pwelch(x, hamming(256), 128, 512, fs);"
+    },
+    {
+      "description": "Use a scalar window length",
+      "input": "[pxx, w] = pwelch(randn(1,1024), 128, 64, 256);"
+    },
+    {
+      "description": "Two-sided spectrum",
+      "input": "x = exp(1i*2*pi*(0:127)/16);\n[pxx, w] = pwelch(x, 64, 32, 128, 'twosided');"
+    },
+    {
+      "description": "Centered spectrum in Hz",
+      "input": "[pxx, f] = pwelch(randn(1,512), [], [], 512, 2000, 'centered');"
+    },
+    {
+      "description": "Column-wise spectra for a matrix",
+      "input": "x = [sin(2*pi*(0:255)'/16), cos(2*pi*(0:255)'/32)];\n[pxx, f] = pwelch(x, 64, 32, 128, 'power');"
+    },
+    {
+      "description": "Evaluate at explicit normalized frequencies",
+      "input": "w = linspace(0, pi, 64);\n[pxx, wout] = pwelch(randn(1,512), hamming(128), 64, w);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can I pass a Hamming window from the `hamming` builtin?",
+      "answer": "Yes. `pwelch(x, hamming(n), noverlap, nfft, fs)` uses the provided window directly. Passing the scalar `n` instead creates the same kind of Hamming segment window internally."
+    },
+    {
+      "question": "Does `pwelch` include the Nyquist bin?",
+      "answer": "For one-sided output and even `nfft`, yes. The output length is `nfft/2 + 1`, with DC first and the Nyquist bin last."
+    },
+    {
+      "question": "Does `pwelch` plot when no outputs are requested?",
+      "answer": "RunMat currently returns values using normal output-count semantics instead of opening a plot. Use the returned `pxx` and frequency vector with plotting functions explicitly."
+    }
+  ],
+  "links": [
+    {
+      "label": "periodogram",
+      "url": "./periodogram"
+    },
+    {
+      "label": "spectrogram",
+      "url": "./spectrogram"
+    },
+    {
+      "label": "fft",
+      "url": "./fft"
+    },
+    {
+      "label": "hamming",
+      "url": "./hamming"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/pwelch.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/pwelch.rs"
+  }
+}
