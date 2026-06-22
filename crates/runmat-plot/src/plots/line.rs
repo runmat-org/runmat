@@ -124,10 +124,6 @@ impl LinePlot {
             ));
         }
 
-        if x_data.is_empty() {
-            return Err("Cannot create line plot with empty data".to_string());
-        }
-
         Ok(Self {
             x_data,
             y_data,
@@ -269,10 +265,6 @@ impl LinePlot {
                 x_data.len(),
                 y_data.len()
             ));
-        }
-
-        if x_data.is_empty() {
-            return Err("Cannot update with empty data".to_string());
         }
 
         self.x_data = x_data;
@@ -1010,10 +1002,11 @@ mod tests {
         let y = vec![0.0, 1.0];
         assert!(LinePlot::new(x, y).is_err());
 
-        // Empty data should fail
+        // Empty data is a valid empty line object.
         let empty_x: Vec<f64> = vec![];
         let empty_y: Vec<f64> = vec![];
-        assert!(LinePlot::new(empty_x, empty_y).is_err());
+        let empty = LinePlot::new(empty_x, empty_y).unwrap();
+        assert!(empty.is_empty());
     }
 
     #[test]

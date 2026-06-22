@@ -1,7 +1,7 @@
 use crate::core::{BoundingBox, Vertex};
 use crate::plots::{
-    AreaPlot, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar, Figure,
-    LegendEntry, LegendStyle, Line3Plot, LinePlot, MarkerStyle, PatchEdgeColorMode,
+    AreaPlot, AxesKind, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar,
+    Figure, LegendEntry, LegendStyle, Line3Plot, LinePlot, MarkerStyle, PatchEdgeColorMode,
     PatchFaceColorMode, PatchPlot, PlotElement, PlotType, QuiverPlot, ReferenceLine,
     ReferenceLineOrientation, Scatter3Plot, ScatterPlot, ShadingMode, StairsPlot, StemPlot,
     SurfacePlot, TextStyle,
@@ -645,6 +645,8 @@ impl From<SerializedLegendStyle> for LegendStyle {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SerializedAxesMetadata {
+    #[serde(default, skip_serializing_if = "is_cartesian_axes_kind")]
+    pub axes_kind: SerializedAxesKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -698,6 +700,36 @@ pub struct SerializedAxesMetadata {
     pub world_text_annotations: Vec<SerializedTextAnnotation>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SerializedAxesKind {
+    #[default]
+    Cartesian,
+    Polar,
+}
+
+fn is_cartesian_axes_kind(value: &SerializedAxesKind) -> bool {
+    *value == SerializedAxesKind::Cartesian
+}
+
+impl From<AxesKind> for SerializedAxesKind {
+    fn from(value: AxesKind) -> Self {
+        match value {
+            AxesKind::Cartesian => Self::Cartesian,
+            AxesKind::Polar => Self::Polar,
+        }
+    }
+}
+
+impl From<SerializedAxesKind> for AxesKind {
+    fn from(value: SerializedAxesKind) -> Self {
+        match value {
+            SerializedAxesKind::Cartesian => Self::Cartesian,
+            SerializedAxesKind::Polar => Self::Polar,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SerializedTextAnnotation {
@@ -709,6 +741,7 @@ pub struct SerializedTextAnnotation {
 impl From<AxesMetadata> for SerializedAxesMetadata {
     fn from(value: AxesMetadata) -> Self {
         Self {
+            axes_kind: value.axes_kind.into(),
             title: value.title,
             x_label: value.x_label,
             y_label: value.y_label,
@@ -749,6 +782,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
 impl From<SerializedAxesMetadata> for AxesMetadata {
     fn from(value: SerializedAxesMetadata) -> Self {
         Self {
+            axes_kind: value.axes_kind.into(),
             title: value.title,
             x_label: value.x_label,
             y_label: value.y_label,
@@ -2328,6 +2362,7 @@ mod tests {
         figure.set_axes_minor_grid_enabled(1, true);
         figure.set_axes_box_enabled(1, false);
         figure.set_axes_axis_equal(1, true);
+        figure.set_axes_kind(1, AxesKind::Polar);
         figure.set_axes_colorbar_enabled(1, true);
         figure.set_axes_colormap(1, ColorMap::Hot);
         figure.set_axes_color_limits(1, Some((0.0, 10.0)));
@@ -2352,6 +2387,7 @@ mod tests {
         assert!(meta.minor_grid_explicit);
         assert!(!meta.box_enabled);
         assert!(meta.axis_equal);
+        assert_eq!(meta.axes_kind, AxesKind::Polar);
         assert!(meta.colorbar_enabled);
         assert_eq!(format!("{:?}", meta.colormap), "Hot");
         assert_eq!(meta.color_limits, Some((0.0, 10.0)));
