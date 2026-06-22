@@ -1,0 +1,104 @@
+{
+  "title": "nan",
+  "category": "array/creation",
+  "keywords": [
+    "nan",
+    "array",
+    "single",
+    "gpu",
+    "like"
+  ],
+  "summary": "Create arrays filled with IEEE NaN values using MATLAB-compatible size, class, and `like` forms.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses provider constant-fill hooks when available; otherwise falls back to uploading a host NaN tensor."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::nan::tests",
+    "integration": "runmat-vm basics nan_constant_and_constructor_coexist"
+  },
+  "description": "`nan(...)` creates NaN-filled arrays across scalar, vector, matrix, and N-D size signatures, with MATLAB-compatible class and `'like'` option behavior.",
+  "behaviors": [
+    "`nan()` returns the scalar `NaN`.",
+    "`nan(n)` returns an `n x n` double array filled with `NaN`.",
+    "`nan(m, n, ...)` returns a dense double array with the requested dimensions.",
+    "`nan(sz)` accepts a size vector and returns an array with `prod(sz)` NaN elements.",
+    "`nan(A)` returns a NaN array with the same size as `A`.",
+    "`nan(___, 'single')` returns a single-precision numeric array.",
+    "`nan(___, 'like', prototype)` matches numeric precision and device residency for supported prototype arrays."
+  ],
+  "examples": [
+    {
+      "description": "Creating a 2x3 matrix of NaN values",
+      "input": "A = nan(2, 3)",
+      "output": "A = [NaN NaN NaN; NaN NaN NaN]"
+    },
+    {
+      "description": "Creating a single-precision NaN array",
+      "input": "A = nan(4, 1, 'single')",
+      "output": "A = [NaN; NaN; NaN; NaN]"
+    },
+    {
+      "description": "Creating a GPU-resident NaN array like a prototype",
+      "input": "G = gpuArray(rand(2,2));\nA = nan(2, 2, 'like', G)",
+      "output": "A = [NaN NaN; NaN NaN]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `nan` different from `NaN`?",
+      "answer": "Both bare identifiers resolve to the scalar IEEE NaN constant. The callable form `nan(...)` constructs NaN-filled arrays."
+    },
+    {
+      "question": "Does `nan(n)` create a row vector?",
+      "answer": "No. MATLAB compatibility requires `nan(n)` to create an `n x n` matrix. Use `nan(1, n)` or `nan(n, 1)` for vectors."
+    },
+    {
+      "question": "Can `nan` create GPU arrays?",
+      "answer": "Yes. With a GPU prototype, `nan(..., 'like', G)` asks the active acceleration provider to allocate a NaN-filled GPU tensor."
+    }
+  ],
+  "links": [
+    {
+      "label": "zeros",
+      "url": "./zeros"
+    },
+    {
+      "label": "ones",
+      "url": "./ones"
+    },
+    {
+      "label": "isnan",
+      "url": "./isnan"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/nan.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/nan.rs"
+  },
+  "gpu_residency": "When a GPU prototype is supplied, RunMat preserves residency by allocating the output through the active acceleration provider. If the provider cannot fill on device, RunMat falls back to a host NaN tensor and uploads it.",
+  "gpu_behavior": [
+    "Provider-backed `nan` construction uses constant-fill hooks, so fully resident GPU pipelines can create NaN arrays without first materializing a host tensor when provider support is available."
+  ]
+}
