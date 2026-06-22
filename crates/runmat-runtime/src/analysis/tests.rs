@@ -1820,14 +1820,34 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
         OperationContext::new(None, None),
     )
     .expect("thermo-mechanical linear static results should be queryable");
-    assert!(results
-        .data
-        .field_descriptors
-        .iter()
-        .any(|descriptor| descriptor.field_id == fea_thermo_mechanical_temperature_field_id(0)));
-    assert!(results.data.field_descriptors.iter().any(|descriptor| {
-        descriptor.field_id == fea_thermo_mechanical_coupling_residual_field_id(0)
-    }));
+    let descriptor = |field_id: &str| {
+        results
+            .data
+            .field_descriptors
+            .iter()
+            .find(|descriptor| descriptor.field_id == field_id)
+            .expect("thermo-mechanical descriptor should be present")
+    };
+    for field_id in [
+        fea_thermo_mechanical_temperature_field_id(0),
+        fea_thermo_mechanical_von_mises_field_id(0),
+        fea_thermo_mechanical_coupling_residual_field_id(0),
+    ] {
+        let descriptor = descriptor(&field_id);
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
+        assert_eq!(descriptor.component_count, None);
+    }
+    let displacement_descriptor = descriptor(&fea_thermo_mechanical_displacement_field_id(0));
+    assert_eq!(displacement_descriptor.kind, AnalysisFieldKind::Vector);
+    assert_eq!(displacement_descriptor.component_count, Some(3));
+    for field_id in [
+        fea_thermo_mechanical_thermal_strain_field_id(0),
+        fea_thermo_mechanical_thermal_stress_field_id(0),
+    ] {
+        let descriptor = descriptor(&field_id);
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Tensor);
+        assert_eq!(descriptor.component_count, Some(6));
+    }
 }
 
 #[test]
