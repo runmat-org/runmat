@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Falls back to the host when the active provider lacks unary_abs or when complex tensors must be gathered."
+    "notes": "Uses unary_abs to keep real GPU tensors resident and to compute real magnitudes from complex-interleaved GPU tensors. Falls back to the host only when the active provider lacks the hook or a host-only conversion is required."
   },
   "fusion": {
     "elementwise": true,
@@ -229,6 +229,6 @@
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's fusion planner and Accelerate layer track residency automatically, keeping tensors on the GPU whenever device execution is beneficial. Explicit `gpuArray`/`gather` calls remain available for MATLAB compatibility or when you need deterministic residency control (e.g., integrating with third-party GPU kernels).",
   "gpu_behavior": [
     "**Hook available:** The absolute value is computed directly on the device with no host transfers.",
-    "**Hook missing or unsupported dtype:** RunMat gathers the tensor to host memory, performs the CPU absolute value logic (including complex magnitudes), and optionally re-uploads downstream.\n\nComplex tensors are currently handled on the host because the in-process and WGPU providers emit real-valued magnitudes. Device providers are encouraged to add fused complex support."
+    "**Hook missing or unsupported dtype:** RunMat gathers the tensor to host memory, performs the CPU absolute value logic (including complex magnitudes), and optionally re-uploads downstream.\n\nWhen a provider supports complex-interleaved storage, `abs` computes magnitudes on the device and returns a real GPU tensor with the original shape."
   ]
 }

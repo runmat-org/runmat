@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses the provider's unary_conj hook for real-valued tensors; complex tensors gather to the host today while native complex kernels are still in flight. Fusion treats conj as a pass-through for real data so pipelines stay resident on GPU."
+    "notes": "Uses the provider's unary_conj hook for real-valued and complex-interleaved GPU tensors. Complex GPU inputs stay resident when the provider supports the hook; fusion treats conj as a pass-through for real data."
   },
   "fusion": {
     "elementwise": true,
