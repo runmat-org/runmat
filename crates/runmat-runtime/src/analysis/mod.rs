@@ -4267,6 +4267,25 @@ fn fluid_interface_face_count(topology: CfdDomainTopology) -> usize {
     .max(1)
 }
 
+fn fsi_interface_structural_coupling_edge_target(
+    topology: CfdDomainTopology,
+    interface_face_count: usize,
+) -> usize {
+    if interface_face_count < 2 {
+        return 0;
+    }
+    let line_edge_count = interface_face_count - 1;
+    let complete_graph_edge_count = interface_face_count * (interface_face_count - 1) / 2;
+    if topology.control_volume_connectivity_coverage_ratio > 0.0 {
+        topology
+            .control_volume_internal_face_count
+            .max(line_edge_count)
+            .min(complete_graph_edge_count)
+    } else {
+        line_edge_count
+    }
+}
+
 fn solve_cfd_finite_volume_run(
     model: &AnalysisModel,
     domain: &runmat_analysis_core::CfdDomain,
@@ -4917,7 +4936,7 @@ fn build_fsi_run_fields(
             recover_cfd_velocity_pressure(domain, topology, step_index);
         let interface_step = solve_fsi_partitioned_interface(
             &fluid_pressure,
-            fluid_interface_face_count(topology),
+            topology,
             structural_compliance_per_pa,
             max_linear_iters,
             tolerance,
@@ -5087,14 +5106,19 @@ struct FsiStructuralInterfaceResponse {
 
 fn solve_fsi_partitioned_interface(
     fluid_pressure: &[f64],
-    interface_face_count: usize,
+    topology: CfdDomainTopology,
     structural_compliance_per_pa: f64,
     max_linear_iters: usize,
     tolerance: f64,
 ) -> FsiPartitionedInterfaceStep {
     let max_linear_iters = max_linear_iters.max(1);
     let tolerance = tolerance.max(1.0e-12);
-    let pressure_scale = fluid_pressure
+    let interface_face_count = fluid_interface_face_count(topology);
+    let face_pressure = resample_scalar_profile(
+        &cell_centered_scalar_from_nodal(fluid_pressure),
+        interface_face_count,
+    );
+    let pressure_scale = face_pressure
         .iter()
         .map(|pressure| pressure.abs())
         .fold(0.0_f64, f64::max)
@@ -5105,24 +5129,29 @@ fn solve_fsi_partitioned_interface(
     let traction_relaxation = 0.65_f64;
     let interface_stiffness_pa_per_m = 1.0 / compliance;
     let feedback_stiffness_pa_per_m = 0.25 * interface_stiffness_pa_per_m;
-    let mut interface_pressure = vec![0.0; fluid_pressure.len()];
-    let mut structural_traction = vec![0.0; fluid_pressure.len()];
-    let mut structural_displacement = vec![0.0; fluid_pressure.len() * 3];
-    let mut interface_displacement = vec![0.0; fluid_pressure.len() * 3];
+    let structural_edge_target =
+        fsi_interface_structural_coupling_edge_target(topology, interface_face_count);
+    let mut interface_pressure = vec![0.0; face_pressure.len()];
+    let mut structural_traction = vec![0.0; face_pressure.len()];
+    let mut structural_face_displacement = vec![0.0; face_pressure.len() * 3];
+    let mut interface_face_displacement = vec![0.0; face_pressure.len() * 3];
     let mut iteration_count = 0_usize;
-    let mut pressure_feedback_residual_ratio = if fluid_pressure.is_empty() { 0.0 } else { 1.0 };
+    let mut pressure_feedback_residual_ratio = if face_pressure.is_empty() { 0.0 } else { 1.0 };
     let mut displacement_transfer_residual_ratio = 0.0_f64;
     let mut structural_traction_update_residual_ratio =
-        if fluid_pressure.is_empty() { 0.0 } else { 1.0 };
-    let mut structural_solve_residual_ratio = if fluid_pressure.is_empty() { 0.0 } else { 1.0 };
+        if face_pressure.is_empty() { 0.0 } else { 1.0 };
+    let mut structural_solve_residual_ratio = if face_pressure.is_empty() { 0.0 } else { 1.0 };
     let mut structural_coupling_edge_count = 0_usize;
 
     for iteration in 1..=max_linear_iters {
-        let target_pressure: Vec<f64> = fluid_pressure
+        let target_pressure: Vec<f64> = face_pressure
             .iter()
             .enumerate()
-            .map(|(node, pressure)| {
-                let displacement = interface_displacement.get(node * 3).copied().unwrap_or(0.0);
+            .map(|(face, pressure)| {
+                let displacement = interface_face_displacement
+                    .get(face * 3)
+                    .copied()
+                    .unwrap_or(0.0);
                 *pressure - feedback_stiffness_pa_per_m * displacement
             })
             .collect();
@@ -5132,14 +5161,15 @@ fn solve_fsi_partitioned_interface(
         let structural_response = solve_fsi_structural_interface_response(
             &interface_pressure,
             interface_stiffness_pa_per_m,
+            structural_edge_target,
         );
         structural_solve_residual_ratio = structural_response.residual_ratio;
         structural_coupling_edge_count =
             structural_coupling_edge_count.max(structural_response.coupling_edge_count);
-        for (node, displacement_x) in structural_response.displacement_x.iter().enumerate() {
-            structural_displacement[node * 3] = *displacement_x;
-            structural_displacement[node * 3 + 1] = 0.0;
-            structural_displacement[node * 3 + 2] = 0.0;
+        for (face, displacement_x) in structural_response.displacement_x.iter().enumerate() {
+            structural_face_displacement[face * 3] = *displacement_x;
+            structural_face_displacement[face * 3 + 1] = 0.0;
+            structural_face_displacement[face * 3 + 2] = 0.0;
         }
         let target_structural_traction = structural_response.reaction_pressure;
         for (traction, target) in structural_traction
@@ -5148,9 +5178,9 @@ fn solve_fsi_partitioned_interface(
         {
             *traction += traction_relaxation * (*target - *traction);
         }
-        for (interface, structural) in interface_displacement
+        for (interface, structural) in interface_face_displacement
             .iter_mut()
-            .zip(structural_displacement.iter())
+            .zip(structural_face_displacement.iter())
         {
             *interface += displacement_relaxation * (*structural - *interface);
         }
@@ -5160,15 +5190,15 @@ fn solve_fsi_partitioned_interface(
             .map(|(target, interface)| (target - interface).abs())
             .fold(0.0_f64, f64::max);
         pressure_feedback_residual_ratio = max_feedback_residual / pressure_scale;
-        let displacement_scale = structural_displacement
+        let displacement_scale = structural_face_displacement
             .iter()
             .copied()
             .map(f64::abs)
             .fold(0.0_f64, f64::max)
             .max(1.0e-18);
-        displacement_transfer_residual_ratio = structural_displacement
+        displacement_transfer_residual_ratio = structural_face_displacement
             .iter()
-            .zip(interface_displacement.iter())
+            .zip(interface_face_displacement.iter())
             .map(|(structural, interface)| (structural - interface).abs())
             .fold(0.0_f64, f64::max)
             / displacement_scale;
@@ -5187,8 +5217,11 @@ fn solve_fsi_partitioned_interface(
             break;
         }
     }
-    let structural_response =
-        solve_fsi_structural_interface_response(&interface_pressure, interface_stiffness_pa_per_m);
+    let structural_response = solve_fsi_structural_interface_response(
+        &interface_pressure,
+        interface_stiffness_pa_per_m,
+        structural_edge_target,
+    );
     structural_solve_residual_ratio = structural_solve_residual_ratio
         .max(structural_response.residual_ratio)
         .min(1.0);
@@ -5217,13 +5250,17 @@ fn solve_fsi_partitioned_interface(
             / (interface_work_j_per_m2.abs()
                 + (2.0 * structural_strain_energy_j_per_m2).abs()
                 + 1.0e-12);
-    let interface_face_pressure = resample_scalar_profile(
-        &cell_centered_scalar_from_nodal(&interface_pressure),
-        interface_face_count,
-    );
+    let interface_face_displacement_x = interface_face_displacement
+        .chunks_exact(3)
+        .map(|components| components[0])
+        .collect::<Vec<_>>();
+    let structural_displacement =
+        vector_field_from_x_profile(&structural_response.displacement_x, fluid_pressure.len());
+    let interface_displacement =
+        vector_field_from_x_profile(&interface_face_displacement_x, fluid_pressure.len());
 
     FsiPartitionedInterfaceStep {
-        interface_pressure: interface_face_pressure,
+        interface_pressure,
         structural_displacement,
         interface_displacement,
         iteration_count,
@@ -5246,9 +5283,10 @@ fn solve_fsi_partitioned_interface(
 fn solve_fsi_structural_interface_response(
     pressure_load: &[f64],
     interface_stiffness_pa_per_m: f64,
+    coupling_edge_target: usize,
 ) -> FsiStructuralInterfaceResponse {
-    let node_count = pressure_load.len();
-    if node_count == 0 {
+    let face_count = pressure_load.len();
+    if face_count == 0 {
         return FsiStructuralInterfaceResponse {
             displacement_x: Vec::new(),
             reaction_pressure: Vec::new(),
@@ -5259,19 +5297,22 @@ fn solve_fsi_structural_interface_response(
 
     let diagonal_stiffness = interface_stiffness_pa_per_m.max(1.0e-9);
     let coupling_stiffness = 0.20 * diagonal_stiffness;
-    let coupling_edge_count = node_count.saturating_sub(1);
-    let mut lower = vec![0.0; node_count.saturating_sub(1)];
-    let mut diagonal = vec![diagonal_stiffness; node_count];
-    let mut upper = vec![0.0; node_count.saturating_sub(1)];
-    for edge in 0..coupling_edge_count {
-        lower[edge] = -coupling_stiffness;
-        upper[edge] = -coupling_stiffness;
-        diagonal[edge] += coupling_stiffness;
-        diagonal[edge + 1] += coupling_stiffness;
+    let coupling_edges = fsi_interface_face_graph_edges(face_count, coupling_edge_target);
+    let mut operator = vec![vec![0.0; face_count]; face_count];
+    for (row, diagonal) in operator.iter_mut().enumerate() {
+        diagonal[row] = diagonal_stiffness;
+    }
+    for (left, right) in &coupling_edges {
+        operator[*left][*left] += coupling_stiffness;
+        operator[*right][*right] += coupling_stiffness;
+        operator[*left][*right] -= coupling_stiffness;
+        operator[*right][*left] -= coupling_stiffness;
     }
 
-    let displacement_x = solve_tridiagonal_system(&lower, &diagonal, &upper, pressure_load);
-    let reaction_pressure = apply_tridiagonal_operator(&lower, &diagonal, &upper, &displacement_x);
+    let mut matrix = operator.clone();
+    let mut rhs = pressure_load.to_vec();
+    let displacement_x = solve_dense_real_system(&mut matrix, &mut rhs);
+    let reaction_pressure = apply_dense_real_operator(&operator, &displacement_x);
     let pressure_scale = pressure_load
         .iter()
         .copied()
@@ -5289,8 +5330,92 @@ fn solve_fsi_structural_interface_response(
         displacement_x,
         reaction_pressure,
         residual_ratio,
-        coupling_edge_count,
+        coupling_edge_count: coupling_edges.len(),
     }
+}
+
+fn fsi_interface_face_graph_edges(face_count: usize, edge_target: usize) -> Vec<(usize, usize)> {
+    if face_count < 2 || edge_target == 0 {
+        return Vec::new();
+    }
+    let complete_graph_edge_count = face_count * (face_count - 1) / 2;
+    let edge_target = edge_target.min(complete_graph_edge_count);
+    let mut edges = Vec::with_capacity(edge_target);
+    for span in 1..face_count {
+        for left in 0..face_count - span {
+            edges.push((left, left + span));
+            if edges.len() == edge_target {
+                return edges;
+            }
+        }
+    }
+    edges
+}
+
+fn solve_dense_real_system(matrix: &mut [Vec<f64>], rhs: &mut [f64]) -> Vec<f64> {
+    let n = rhs.len();
+    for pivot in 0..n {
+        let mut pivot_row = pivot;
+        let mut pivot_abs = matrix[pivot][pivot].abs();
+        for (candidate, row) in matrix.iter().enumerate().skip(pivot + 1) {
+            let candidate_abs = row[pivot].abs();
+            if candidate_abs > pivot_abs {
+                pivot_row = candidate;
+                pivot_abs = candidate_abs;
+            }
+        }
+        if pivot_row != pivot {
+            matrix.swap(pivot, pivot_row);
+            rhs.swap(pivot, pivot_row);
+        }
+        if pivot_abs <= 1.0e-24 {
+            matrix[pivot][pivot] += 1.0e-9;
+        }
+        let pivot_value = matrix[pivot][pivot];
+        for row in pivot + 1..n {
+            let factor = matrix[row][pivot] / pivot_value;
+            matrix[row][pivot] = 0.0;
+            for col in pivot + 1..n {
+                matrix[row][col] -= factor * matrix[pivot][col];
+            }
+            rhs[row] -= factor * rhs[pivot];
+        }
+    }
+
+    let mut solution = vec![0.0; n];
+    for row in (0..n).rev() {
+        let mut accum = rhs[row];
+        for (col, value) in solution.iter().enumerate().skip(row + 1) {
+            accum -= matrix[row][col] * value;
+        }
+        solution[row] = accum
+            / matrix[row][row]
+                .abs()
+                .max(1.0e-18)
+                .copysign(matrix[row][row]);
+    }
+    solution
+}
+
+fn apply_dense_real_operator(matrix: &[Vec<f64>], x: &[f64]) -> Vec<f64> {
+    matrix
+        .iter()
+        .map(|row| {
+            row.iter()
+                .zip(x.iter())
+                .map(|(coefficient, value)| coefficient * value)
+                .sum::<f64>()
+        })
+        .collect()
+}
+
+fn vector_field_from_x_profile(x: &[f64], target_count: usize) -> Vec<f64> {
+    let profile = resample_scalar_profile(x, target_count);
+    let mut field = Vec::with_capacity(profile.len() * 3);
+    for displacement_x in profile {
+        field.extend_from_slice(&[displacement_x, 0.0, 0.0]);
+    }
+    field
 }
 
 fn solve_tridiagonal_system(

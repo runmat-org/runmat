@@ -6411,6 +6411,7 @@ fn fsi_prepared_topology_uses_boundary_faces_for_interface_fields() {
     );
     assert_eq!(fluid_interface_face_count(topology), 8);
     assert_eq!(closure.interface_face_count, 8);
+    assert_eq!(closure.structural_coupling_edge_count, 11);
     assert_eq!(pressure.shape, vec![8]);
     assert_eq!(traction.shape, vec![8, 3]);
 }
