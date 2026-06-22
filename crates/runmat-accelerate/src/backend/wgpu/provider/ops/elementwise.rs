@@ -144,6 +144,15 @@ impl WgpuProvider {
         Ok(handle)
     }
 
+    pub(crate) fn unary_sin_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_storage(a)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sin, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Sin, true)
+    }
+
     pub(crate) fn unary_sinc_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         if runmat_accelerate_api::handle_storage(a)
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
@@ -151,6 +160,24 @@ impl WgpuProvider {
             return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sinc, a);
         }
         self.complex_unary_exec(a, ComplexUnaryOp::Sinc, true)
+    }
+
+    pub(crate) fn unary_cos_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_storage(a)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Cos, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Cos, true)
+    }
+
+    pub(crate) fn unary_tan_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_storage(a)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Tan, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Tan, true)
     }
 
     pub(crate) fn unary_sign_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -1780,6 +1807,21 @@ mod tests {
         }
     }
 
+    fn sin_complex_host(re: f64, im: f64) -> (f64, f64) {
+        (re.sin() * im.cosh(), re.cos() * im.sinh())
+    }
+
+    fn cos_complex_host(re: f64, im: f64) -> (f64, f64) {
+        (re.cos() * im.cosh(), -re.sin() * im.sinh())
+    }
+
+    fn tan_complex_host(re: f64, im: f64) -> (f64, f64) {
+        let two_re = 2.0 * re;
+        let two_im = 2.0 * im;
+        let denom = two_re.cos() + two_im.cosh();
+        (two_re.sin() / denom, two_im.sinh() / denom)
+    }
+
     #[tokio::test]
     async fn wgpu_complex_binary_ops_match_cpu() {
         crate::backend::wgpu::provider::register_wgpu_provider(
@@ -1852,6 +1894,115 @@ mod tests {
         assert_interleaved_close(&sub_host.data, &expected_sub);
         assert_interleaved_close(&mul_host.data, &expected_mul);
         assert_interleaved_close(&div_host.data, &expected_div);
+    }
+
+    #[tokio::test]
+    async fn wgpu_complex_unary_trig_ops_match_cpu() {
+        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let input = [(0.5, 0.75), (2.0, -0.25), (-0.75, 0.5)];
+        let real = input.iter().map(|&(re, _)| re).collect::<Vec<_>>();
+        let imag = input.iter().map(|&(_, im)| im).collect::<Vec<_>>();
+        let handle = complex_pair(provider, &real, &imag, &[3, 1]).await;
+
+        let sin = provider.unary_sin(&handle).await.expect("complex sin");
+        let cos = provider.unary_cos(&handle).await.expect("complex cos");
+        let tan = provider.unary_tan(&handle).await.expect("complex tan");
+
+        for handle in [&sin, &cos, &tan] {
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+        }
+
+        let sin_host = provider.download(&sin).await.expect("download sin");
+        let cos_host = provider.download(&cos).await.expect("download cos");
+        let tan_host = provider.download(&tan).await.expect("download tan");
+        assert_eq!(sin_host.storage, GpuTensorStorage::ComplexInterleaved);
+        assert_eq!(cos_host.storage, GpuTensorStorage::ComplexInterleaved);
+        assert_eq!(tan_host.storage, GpuTensorStorage::ComplexInterleaved);
+        assert_eq!(sin_host.shape, vec![3, 1]);
+        assert_eq!(cos_host.shape, vec![3, 1]);
+        assert_eq!(tan_host.shape, vec![3, 1]);
+
+        assert_interleaved_close(
+            &sin_host.data,
+            &input.map(|(re, im)| sin_complex_host(re, im)),
+        );
+        assert_interleaved_close(
+            &cos_host.data,
+            &input.map(|(re, im)| cos_complex_host(re, im)),
+        );
+        assert_interleaved_close(
+            &tan_host.data,
+            &input.map(|(re, im)| tan_complex_host(re, im)),
+        );
+    }
+
+    #[tokio::test]
+    async fn wgpu_complex_unary_trig_large_imag_edges_are_not_nan() {
+        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+            crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let input = [
+            (0.0, 90.0),
+            (std::f64::consts::FRAC_PI_2, 90.0),
+            (0.0, 50.0),
+        ];
+        let real = input.iter().map(|&(re, _)| re).collect::<Vec<_>>();
+        let imag = input.iter().map(|&(_, im)| im).collect::<Vec<_>>();
+        let handle = complex_pair(provider, &real, &imag, &[3, 1]).await;
+
+        let sin = provider.unary_sin(&handle).await.expect("complex sin");
+        let cos = provider.unary_cos(&handle).await.expect("complex cos");
+        let tan = provider.unary_tan(&handle).await.expect("complex tan");
+
+        let sin_host = provider.download(&sin).await.expect("download sin");
+        let cos_host = provider.download(&cos).await.expect("download cos");
+        let tan_host = provider.download(&tan).await.expect("download tan");
+        assert_eq!(sin_host.shape, vec![3, 1]);
+        assert_eq!(cos_host.shape, vec![3, 1]);
+        assert_eq!(tan_host.shape, vec![3, 1]);
+
+        assert_eq!(sin_host.data[0], 0.0, "sin(0 + 90i) real lane");
+        assert!(
+            !sin_host.data[1].is_nan(),
+            "sin(0 + 90i) imag lane must not be NaN"
+        );
+        assert!(
+            !cos_host.data[0].is_nan(),
+            "cos(0 + 90i) real lane must not be NaN"
+        );
+        assert!(
+            cos_host.data[1].abs() < 1e-5,
+            "cos(0 + 90i) imag lane got {}",
+            cos_host.data[1]
+        );
+        assert!(
+            tan_host.data[4].abs() < 1e-5,
+            "tan(0 + 50i) real lane got {}",
+            tan_host.data[4]
+        );
+        assert!(
+            (tan_host.data[5] - 1.0).abs() < 1e-5,
+            "tan(0 + 50i) imag lane got {}",
+            tan_host.data[5]
+        );
+        for (idx, lane) in sin_host
+            .data
+            .iter()
+            .chain(cos_host.data.iter())
+            .chain(tan_host.data.iter())
+            .enumerate()
+        {
+            assert!(!lane.is_nan(), "lane {idx} was NaN");
+        }
     }
 
     #[tokio::test]

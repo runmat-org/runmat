@@ -123,6 +123,21 @@ fn sinc_complex_host(re: f64, im: f64) -> (f64, f64) {
     )
 }
 
+fn sin_complex_host(re: f64, im: f64) -> (f64, f64) {
+    (re.sin() * im.cosh(), re.cos() * im.sinh())
+}
+
+fn cos_complex_host(re: f64, im: f64) -> (f64, f64) {
+    (re.cos() * im.cosh(), -re.sin() * im.sinh())
+}
+
+fn tan_complex_host(re: f64, im: f64) -> (f64, f64) {
+    let two_re = 2.0 * re;
+    let two_im = 2.0 * im;
+    let denom = two_re.cos() + two_im.cosh();
+    (two_re.sin() / denom, two_im.sinh() / denom)
+}
+
 fn sign_scalar_host(value: f64) -> f64 {
     if value > 0.0 {
         1.0
@@ -3327,20 +3342,28 @@ impl AccelProvider for InProcessProvider {
 
     fn unary_sin<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            let storage = runmat_accelerate_api::handle_storage(a);
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out: Vec<f64> = abuf.iter().map(|&x| x.sin()).collect();
+            let out: Vec<f64> = if storage == GpuTensorStorage::ComplexInterleaved {
+                ensure!(
+                    abuf.len() % 2 == 0,
+                    "unary_sin: complex-interleaved buffer has odd length"
+                );
+                let mut out = Vec::with_capacity(abuf.len());
+                for pair in abuf.chunks_exact(2) {
+                    let (re, im) = sin_complex_host(pair[0], pair[1]);
+                    out.push(re);
+                    out.push(im);
+                }
+                out
+            } else {
+                abuf.iter().map(|&x| x.sin()).collect()
+            };
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: 0,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
         })
     }
     fn unary_sinc<'a>(
@@ -3534,20 +3557,28 @@ impl AccelProvider for InProcessProvider {
 
     fn unary_tan<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            let storage = runmat_accelerate_api::handle_storage(a);
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out: Vec<f64> = abuf.iter().map(|&x| x.tan()).collect();
+            let out: Vec<f64> = if storage == GpuTensorStorage::ComplexInterleaved {
+                ensure!(
+                    abuf.len() % 2 == 0,
+                    "unary_tan: complex-interleaved buffer has odd length"
+                );
+                let mut out = Vec::with_capacity(abuf.len());
+                for pair in abuf.chunks_exact(2) {
+                    let (re, im) = tan_complex_host(pair[0], pair[1]);
+                    out.push(re);
+                    out.push(im);
+                }
+                out
+            } else {
+                abuf.iter().map(|&x| x.tan()).collect()
+            };
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: 0,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
         })
     }
     fn unary_tanh<'a>(
@@ -3716,20 +3747,28 @@ impl AccelProvider for InProcessProvider {
 
     fn unary_cos<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            let storage = runmat_accelerate_api::handle_storage(a);
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out: Vec<f64> = abuf.iter().map(|&x| x.cos()).collect();
+            let out: Vec<f64> = if storage == GpuTensorStorage::ComplexInterleaved {
+                ensure!(
+                    abuf.len() % 2 == 0,
+                    "unary_cos: complex-interleaved buffer has odd length"
+                );
+                let mut out = Vec::with_capacity(abuf.len());
+                for pair in abuf.chunks_exact(2) {
+                    let (re, im) = cos_complex_host(pair[0], pair[1]);
+                    out.push(re);
+                    out.push(im);
+                }
+                out
+            } else {
+                abuf.iter().map(|&x| x.cos()).collect()
+            };
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: 0,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
         })
     }
 
@@ -6663,6 +6702,34 @@ mod tests {
             &provider,
             &rdiv,
             &[(0.4, -0.8), (-32.0 / 65.0, -4.0 / 65.0)],
+        );
+    }
+
+    #[test]
+    fn complex_unary_trig_preserves_storage() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(9_000_400, Ordering::Relaxed);
+        let values = [(0.5, 0.75), (2.0, -0.25)];
+        let handle = complex_handle(&provider, &values, &[1, 2]);
+
+        let sin = block_on(provider.unary_sin(&handle)).expect("sin");
+        let cos = block_on(provider.unary_cos(&handle)).expect("cos");
+        let tan = block_on(provider.unary_tan(&handle)).expect("tan");
+
+        assert_complex_close(
+            &provider,
+            &sin,
+            &values.map(|(re, im)| sin_complex_host(re, im)),
+        );
+        assert_complex_close(
+            &provider,
+            &cos,
+            &values.map(|(re, im)| cos_complex_host(re, im)),
+        );
+        assert_complex_close(
+            &provider,
+            &tan,
+            &values.map(|(re, im)| tan_complex_host(re, im)),
         );
     }
 }

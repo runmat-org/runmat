@@ -447,9 +447,7 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn unary_sin<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sin, a) },
-        )
+        Box::pin(async move { self.unary_sin_exec(a) })
     }
 
     fn unary_sinc<'a>(
@@ -532,9 +530,7 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn unary_tan<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Tan, a) },
-        )
+        Box::pin(async move { self.unary_tan_exec(a) })
     }
 
     fn unary_tanh<'a>(
@@ -588,9 +584,7 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn unary_cos<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Cos, a) },
-        )
+        Box::pin(async move { self.unary_cos_exec(a) })
     }
 
     fn unary_angle<'a>(

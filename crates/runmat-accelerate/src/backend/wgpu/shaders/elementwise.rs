@@ -7,7 +7,10 @@ pub(crate) enum ComplexUnaryOp {
     Abs,
     Conj,
     Angle,
+    Sin,
     Sinc,
+    Cos,
+    Tan,
     Sign,
 }
 
@@ -110,6 +113,48 @@ fn sinc_complex_lane(out_idx: u32) -> {ty} {{
             ty = ty,
             max_finite = max_finite,
         ),
+        ComplexUnaryOp::Sin | ComplexUnaryOp::Cos | ComplexUnaryOp::Tan => format!(
+            r#"
+fn zero_safe_mul_complex_unary(a: {ty}, b: {ty}) -> {ty} {{
+    if a == {ty}(0.0) {{
+        return {ty}(0.0);
+    }}
+    return a * b;
+}}
+
+fn sin_complex_lane(out_idx: u32) -> {ty} {{
+    let elem = out_idx / 2u;
+    let re = A.data[elem * 2u];
+    let im = A.data[elem * 2u + 1u];
+    let out_re = zero_safe_mul_complex_unary(sin(re), cosh(im));
+    let out_im = zero_safe_mul_complex_unary(cos(re), sinh(im));
+    return select(out_re, out_im, (out_idx % 2u) == 1u);
+}}
+
+fn cos_complex_lane(out_idx: u32) -> {ty} {{
+    let elem = out_idx / 2u;
+    let re = A.data[elem * 2u];
+    let im = A.data[elem * 2u + 1u];
+    let out_re = zero_safe_mul_complex_unary(cos(re), cosh(im));
+    let out_im = -zero_safe_mul_complex_unary(sin(re), sinh(im));
+    return select(out_re, out_im, (out_idx % 2u) == 1u);
+}}
+
+fn tan_complex_lane(out_idx: u32) -> {ty} {{
+    let elem = out_idx / 2u;
+    let re = A.data[elem * 2u];
+    let im = A.data[elem * 2u + 1u];
+    let two_re = {ty}(2.0) * re;
+    let two_im = {ty}(2.0) * im;
+    let inv_cosh = {ty}(1.0) / cosh(two_im);
+    let denom = {ty}(1.0) + (cos(two_re) * inv_cosh);
+    let out_re = (sin(two_re) * inv_cosh) / denom;
+    let out_im = tanh(two_im) / denom;
+    return select(out_re, out_im, (out_idx % 2u) == 1u);
+}}
+"#,
+            ty = ty,
+        ),
         ComplexUnaryOp::Sign => format!(
             r#"
 const HALF_MAX_FINITE_COMPLEX_UNARY: {ty} = {ty}({half_max_finite});
@@ -206,7 +251,10 @@ fn sign_complex_lane(out_idx: u32) -> {ty} {{
             "select(A.data[idx], -A.data[idx], (idx % 2u) == 1u)"
         }
         ComplexUnaryOp::Angle => "atan2(A.data[idx * 2u + 1u], A.data[idx * 2u])",
+        ComplexUnaryOp::Sin => "sin_complex_lane(idx)",
         ComplexUnaryOp::Sinc => "sinc_complex_lane(idx)",
+        ComplexUnaryOp::Cos => "cos_complex_lane(idx)",
+        ComplexUnaryOp::Tan => "tan_complex_lane(idx)",
         ComplexUnaryOp::Sign => "sign_complex_lane(idx)",
     };
     format!(
