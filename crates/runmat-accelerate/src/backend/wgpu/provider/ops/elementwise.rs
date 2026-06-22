@@ -144,6 +144,15 @@ impl WgpuProvider {
         Ok(handle)
     }
 
+    pub(crate) fn unary_sinc_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_storage(a)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sinc, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Sinc, true)
+    }
+
     pub(crate) fn unary_real_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(a)?;
         if runmat_accelerate_api::handle_storage(a)

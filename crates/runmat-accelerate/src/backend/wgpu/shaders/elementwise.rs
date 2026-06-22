@@ -7,6 +7,7 @@ pub(crate) enum ComplexUnaryOp {
     Abs,
     Conj,
     Angle,
+    Sinc,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,6 +37,58 @@ pub(crate) fn complex_unary_shader(op: ComplexUnaryOp, precision: NumericPrecisi
         NumericPrecision::F64 => "f64",
         NumericPrecision::F32 => "f32",
     };
+    let max_finite = match precision {
+        NumericPrecision::F64 => "1.7976931348623157e308",
+        NumericPrecision::F32 => "3.4028234663852886e38",
+    };
+    let extra_helpers = match op {
+        ComplexUnaryOp::Sinc => format!(
+            r#"
+const PI_COMPLEX_UNARY: {ty} = {ty}(3.141592653589793);
+const MAX_FINITE_COMPLEX_UNARY: {ty} = {ty}({max_finite});
+
+fn isfinite_complex_unary(x: {ty}) -> bool {{
+    return (x == x) && (abs(x) < MAX_FINITE_COMPLEX_UNARY);
+}}
+
+fn sinc_real_complex_unary(x: {ty}) -> {ty} {{
+    if x == {ty}(0.0) {{
+        return {ty}(1.0);
+    }}
+    let abs_x = abs(x);
+    if isfinite_complex_unary(x) && floor(abs_x) == abs_x {{
+        return {ty}(0.0);
+    }}
+    let scaled = PI_COMPLEX_UNARY * x;
+    return sin(scaled) / scaled;
+}}
+
+fn sinc_complex_lane(out_idx: u32) -> {ty} {{
+    let elem = out_idx / 2u;
+    let re = A.data[elem * 2u];
+    let im = A.data[elem * 2u + 1u];
+    if im == {ty}(0.0) {{
+        if (out_idx % 2u) == 0u {{
+            return sinc_real_complex_unary(re);
+        }}
+        return {ty}(0.0);
+    }}
+
+    let scaled_re = PI_COMPLEX_UNARY * re;
+    let scaled_im = PI_COMPLEX_UNARY * im;
+    let num_re = sin(scaled_re) * cosh(scaled_im);
+    let num_im = cos(scaled_re) * sinh(scaled_im);
+    let denom_norm = (scaled_re * scaled_re) + (scaled_im * scaled_im);
+    let out_re = ((num_re * scaled_re) + (num_im * scaled_im)) / denom_norm;
+    let out_im = ((num_im * scaled_re) - (num_re * scaled_im)) / denom_norm;
+    return select(out_re, out_im, (out_idx % 2u) == 1u);
+}}
+"#,
+            ty = ty,
+            max_finite = max_finite,
+        ),
+        _ => String::new(),
+    };
     let expression = match op {
         ComplexUnaryOp::Real => "A.data[idx * 2u]",
         ComplexUnaryOp::Imag => "A.data[idx * 2u + 1u]",
@@ -46,6 +99,7 @@ pub(crate) fn complex_unary_shader(op: ComplexUnaryOp, precision: NumericPrecisi
             "select(A.data[idx], -A.data[idx], (idx % 2u) == 1u)"
         }
         ComplexUnaryOp::Angle => "atan2(A.data[idx * 2u + 1u], A.data[idx * 2u])",
+        ComplexUnaryOp::Sinc => "sinc_complex_lane(idx)",
     };
     format!(
         r#"
@@ -64,6 +118,8 @@ struct Params {{
 @group(0) @binding(1) var<storage, read_write> Out: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
+{extra_helpers}
+
 @compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     let local = gid.x;
@@ -79,6 +135,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 "#,
         ty = ty,
         expression = expression,
+        extra_helpers = extra_helpers,
     )
 }
 
