@@ -1,6 +1,8 @@
 //! MATLAB-compatible `qammod` builtin for integer and bit-input rectangular QAM.
 
-use runmat_accelerate_api::{GpuTensorHandle, ProviderModulationRequest};
+use runmat_accelerate_api::{
+    GpuTensorHandle, ProviderBitModulationRequest, ProviderModulationRequest,
+};
 use runmat_builtins::{ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
@@ -27,7 +29,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Uses provider-side constellation modulation for gpuArray integer-symbol inputs and returns complex-interleaved GPU storage; providers without the hook fall back to host-compatible validation and re-upload.",
+    notes: "Uses provider-side constellation modulation for integer and bit gpuArray inputs and returns complex-interleaved GPU storage; providers without the hook fall back to host-compatible validation and re-upload.",
 };
 
 fn qammod_error(message: impl Into<String>) -> RuntimeError {
@@ -74,14 +76,30 @@ async fn qammod_gpu(
     let provider = runmat_accelerate_api::provider_for_handle(&handle)
         .or_else(runmat_accelerate_api::provider)
         .ok_or_else(|| qammod_error("qammod: no acceleration provider registered"))?;
-    if options.input_type == InputType::Integer {
-        let constellation = constellation_table(order, &options)?;
-        let request = ProviderModulationRequest {
-            input: &handle,
-            constellation: &constellation,
-        };
-        if let Ok(out) = provider.modulate_constellation(request).await {
-            return Ok(gpu_helpers::complex_gpu_value(out));
+    let constellation = constellation_table(order, &options)?;
+    match options.input_type {
+        InputType::Integer => {
+            let request = ProviderModulationRequest {
+                input: &handle,
+                constellation: &constellation,
+            };
+            if let Ok(out) = provider.modulate_constellation(request).await {
+                return Ok(gpu_helpers::complex_gpu_value(out));
+            }
+        }
+        InputType::Bit => {
+            let input_rows = handle.shape.first().copied().unwrap_or(0);
+            if input_rows > 0 {
+                let request = ProviderBitModulationRequest {
+                    input: &handle,
+                    input_rows,
+                    bits_per_symbol: bits_per_symbol(order)?,
+                    constellation: &constellation,
+                };
+                if let Ok(out) = provider.modulate_bits_constellation(request).await {
+                    return Ok(gpu_helpers::complex_gpu_value(out));
+                }
+            }
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
@@ -92,12 +110,6 @@ async fn qammod_gpu(
     };
     let out = gpu_helpers::upload_complex_tensor(provider, &tensor)
         .map_err(|err| qammod_error(format!("qammod: {err}")))?;
-    if matches!(options.output_dtype, OutputDType::Single) {
-        runmat_accelerate_api::set_handle_precision(
-            &out,
-            runmat_accelerate_api::ProviderPrecision::F32,
-        );
-    }
     Ok(gpu_helpers::complex_gpu_value(out))
 }
 
@@ -626,6 +638,7 @@ fn is_name_value_key(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
 
     fn qammod(x: Value, order: usize, rest: Vec<Value>) -> ComplexTensor {
@@ -766,6 +779,50 @@ mod tests {
         );
         assert_eq!(out.shape, vec![1, 2]);
         assert_complex_close(&out.data, &[(-1.0, 1.0), (1.0, -1.0)]);
+    }
+
+    #[test]
+    fn qammod_inprocess_gpu_bit_input_returns_complex_resident_output() {
+        use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
+
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]).unwrap();
+            let expected = qammod(
+                Value::Tensor(input.clone()),
+                16,
+                vec![Value::from("InputType"), Value::from("bit")],
+            );
+            let input_handle = provider
+                .upload(&HostTensorView {
+                    data: &input.data,
+                    shape: &input.shape,
+                })
+                .expect("upload");
+            let result = block_on(super::qammod_builtin(
+                Value::GpuTensor(input_handle.clone()),
+                Value::Num(16.0),
+                vec![Value::from("InputType"), Value::from("bit")],
+            ))
+            .expect("gpu qammod bit");
+            let Value::GpuTensor(output_handle) = result else {
+                panic!("expected resident gpu output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&output_handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(crate::dispatcher::gather_if_needed_async(
+                &Value::GpuTensor(output_handle.clone()),
+            ))
+            .expect("gather output");
+            let Value::ComplexTensor(actual) = gathered else {
+                panic!("expected gathered complex tensor");
+            };
+            assert_eq!(actual.shape, expected.shape);
+            assert_complex_close(&actual.data, &expected.data);
+            provider.free(&input_handle).ok();
+            provider.free(&output_handle).ok();
+        });
     }
 
     #[test]

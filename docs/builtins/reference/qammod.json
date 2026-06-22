@@ -22,7 +22,7 @@
       "bool"
     ],
     "broadcasting": "none",
-    "notes": "Integer-symbol gpuArray inputs use the active provider's modulation hook to produce complex-interleaved GPU storage directly. Bit-input gpuArrays are grouped with MATLAB-compatible validation and re-uploaded as complex-interleaved GPU storage."
+    "notes": "Integer-symbol and bit-input gpuArrays use the active provider's modulation hooks to produce complex-interleaved GPU storage directly. Providers without those hooks fall back to host-compatible validation and re-upload."
   },
   "fusion": {
     "elementwise": false,
@@ -71,7 +71,7 @@
   "faqs": [
     {
       "question": "Does qammod execute on the GPU?",
-      "answer": "Yes when the active provider implements the modulation hook. It maps resident integer-symbol gpuArrays directly to complex-interleaved gpuArray outputs."
+      "answer": "Yes when the active provider implements the modulation hooks. It maps resident integer-symbol and bit-input gpuArrays directly to complex-interleaved gpuArray outputs."
     },
     {
       "question": "Is bit input supported?",
@@ -92,9 +92,9 @@
     "label": "`crates/runmat-runtime/src/builtins/comms/qammod.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/comms/qammod.rs"
   },
-  "gpu_residency": "The builtin declares `NewHandle` residency for gpuArray inputs. Integer-symbol gpuArray inputs stay resident through provider-side constellation modulation. Bit-input gpuArrays are gathered only for bit grouping when the provider hook accepts integer symbols, then uploaded as complex-interleaved GPU handles.",
+  "gpu_residency": "The builtin declares `NewHandle` residency for gpuArray inputs. Integer-symbol and bit-input gpuArrays stay resident through provider-side constellation modulation when provider support is available.",
   "gpu_behavior": [
     "RunMat represents complex GPU tensors as interleaved real/imaginary buffers with complex storage metadata, so downstream GPU-aware FFT and signal paths can consume the modulation output without a host result.",
-    "The provider hook receives a validated constellation table and writes the complex output on device. It reads back only a compact validation state for MATLAB-compatible symbol errors."
+    "The provider hooks receive a validated constellation table and write the complex output on device. They read back only a compact validation state for MATLAB-compatible symbol or bit errors."
   ]
 }

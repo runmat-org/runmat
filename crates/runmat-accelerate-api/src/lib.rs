@@ -301,6 +301,17 @@ pub struct ProviderModulationRequest<'a> {
     pub constellation: &'a [f64],
 }
 
+#[derive(Clone, Debug)]
+pub struct ProviderBitModulationRequest<'a> {
+    pub input: &'a GpuTensorHandle,
+    /// Number of bit rows in the input before grouping.
+    pub input_rows: usize,
+    /// Number of input bits that form one output symbol.
+    pub bits_per_symbol: usize,
+    /// `(real, imag)` pairs interleaved by symbol index.
+    pub constellation: &'a [f64],
+}
+
 pub async fn uniform_spectral_estimate(
     request: ProviderSpectralRequest<'_>,
 ) -> anyhow::Result<ProviderSpectralResult> {
@@ -1608,6 +1619,15 @@ pub trait AccelProvider: Send + Sync {
         _request: ProviderModulationRequest<'a>,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("modulate_constellation not supported by provider")
+    }
+
+    /// Group a resident real/logical bit tensor into symbols, map through a complex
+    /// constellation table, and return complex-interleaved GPU storage.
+    fn modulate_bits_constellation<'a>(
+        &'a self,
+        _request: ProviderBitModulationRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("modulate_bits_constellation not supported by provider")
     }
 
     fn elem_hypot<'a>(
