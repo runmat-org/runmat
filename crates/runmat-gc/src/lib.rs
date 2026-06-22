@@ -371,9 +371,9 @@ static ROOT_SCANNER: once_cell::sync::Lazy<Arc<RootScanner>> =
 static WRITE_BARRIERS: once_cell::sync::Lazy<Arc<WriteBarrierManager>> =
     once_cell::sync::Lazy::new(|| Arc::new(WriteBarrierManager::new(true, false)));
 
-/// Helper function to dereference a GcPtr safely (now just uses normal dereferencing)
-pub fn gc_deref(ptr: GcPtr<Value>) -> Value {
-    (*ptr).clone()
+/// Helper function to clone a GC value through an explicitly raw pointer access.
+pub fn gc_deref(ptr: &GcPtr<Value>) -> Value {
+    unsafe { (&*ptr.as_raw()).clone() }
 }
 
 /// Global GC functions for easy access
@@ -516,7 +516,7 @@ mod tests {
         gc_test_context(|| {
             let value = Value::Num(42.0);
             let ptr = gc_allocate(value).expect("allocation failed");
-            assert_eq!(*ptr, Value::Num(42.0));
+            assert_eq!(gc_deref(&ptr), Value::Num(42.0));
         });
     }
 
@@ -572,7 +572,7 @@ mod tests {
             }
 
             let _ = gc_collect_minor().expect("collection failed");
-            assert_eq!(*protected, Value::Num(42.0));
+            assert_eq!(gc_deref(&protected), Value::Num(42.0));
 
             gc_remove_root(protected).expect("root removal failed");
         });
@@ -582,11 +582,11 @@ mod tests {
     fn test_gc_allocation_and_roots() {
         gc_test_context(|| {
             let v = gc_allocate(Value::Num(7.0)).expect("allocation failed");
-            assert_eq!(*v, Value::Num(7.0));
+            assert_eq!(gc_deref(&v), Value::Num(7.0));
 
             gc_add_root(v.clone()).expect("root add failed");
             let _ = gc_collect_minor().expect("collection failed");
-            assert_eq!(*v, Value::Num(7.0));
+            assert_eq!(gc_deref(&v), Value::Num(7.0));
 
             gc_remove_root(v).expect("root remove failed");
         });

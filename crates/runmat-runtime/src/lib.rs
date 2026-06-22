@@ -584,7 +584,7 @@ pub(crate) async fn notify_builtin(
         let mut args = Vec::new();
         args.push(target.clone());
         args.extend(rest.iter().cloned());
-        let cbv: Value = (*l.callback).clone();
+        let cbv: Value = unsafe { &*l.callback.as_raw() }.clone();
         let should_dispatch = match &cbv {
             Value::String(s) => !s.trim().is_empty(),
             Value::StringArray(sa) => sa.data.len() == 1 && !sa.data[0].trim().is_empty(),
@@ -2853,7 +2853,7 @@ mod tests {
             panic!("expected listener value");
         };
         assert!(matches!(
-            &*listener.callback,
+            unsafe { &*listener.callback.as_raw() },
             Value::BoundFunctionHandle { name, function }
                 if name == "event_callback" && *function == 61
         ));
@@ -2877,7 +2877,7 @@ mod tests {
             panic!("expected listener value");
         };
         assert!(matches!(
-            &*listener.callback,
+            unsafe { &*listener.callback.as_raw() },
             Value::BoundFunctionHandle { name, function }
                 if name == "pkg.event_callback" && *function == 62
         ));
@@ -2901,7 +2901,7 @@ mod tests {
             panic!("expected listener value");
         };
         assert!(matches!(
-            &*listener.callback,
+            unsafe { &*listener.callback.as_raw() },
             Value::BoundFunctionHandle { name, function }
                 if name == "event_callback" && *function == 63
         ));
@@ -2925,7 +2925,7 @@ mod tests {
             panic!("expected listener value");
         };
         assert!(matches!(
-            &*listener.callback,
+            unsafe { &*listener.callback.as_raw() },
             Value::BoundFunctionHandle { name, function }
                 if name == "event_callback" && *function == 64
         ));
@@ -2952,7 +2952,7 @@ mod tests {
             panic!("expected listener value");
         };
         assert!(matches!(
-            &*listener.callback,
+            unsafe { &*listener.callback.as_raw() },
             Value::BoundFunctionHandle { name, function }
                 if name == "event_callback" && *function == 66
         ));
@@ -2977,7 +2977,7 @@ mod tests {
             panic!("expected listener value");
         };
         assert!(matches!(
-            &*listener.callback,
+            unsafe { &*listener.callback.as_raw() },
             Value::Closure(runmat_builtins::Closure {
                 function_name,
                 bound_function: Some(65),

@@ -3,7 +3,6 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
 
 #[derive(Copy, Clone)]
 pub struct GcPtr<T> {
@@ -18,7 +17,7 @@ impl<T> GcPtr<T> {
     /// - `ptr` must point to a valid instance of `T` allocated by RunMat's GC and
     ///   remain alive for the duration of all uses of the returned `GcPtr`.
     /// - The caller is responsible for upholding aliasing and lifetime invariants
-    ///   when this pointer is dereferenced via `Deref`/`DerefMut`.
+    ///   when accessing the pointer through raw pointer APIs.
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         Self {
             ptr,
@@ -51,18 +50,6 @@ impl<T> GcPtr<T> {
     /// respected. Mutating a collected or shared object is undefined behavior.
     pub unsafe fn as_raw_mut(&self) -> *mut T {
         self.ptr as *mut T
-    }
-}
-
-impl<T> Deref for GcPtr<T> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        unsafe { &*self.ptr }
-    }
-}
-impl<T> DerefMut for GcPtr<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *(self.ptr as *mut T) }
     }
 }
 

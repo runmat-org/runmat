@@ -163,7 +163,7 @@ impl MarkSweepCollector {
         self.marked_objects.lock().insert(ptr_addr);
 
         let mut child_roots = Vec::new();
-        collect_value_roots(&*obj, &mut child_roots);
+        collect_value_roots(unsafe { &*obj.as_raw() }, &mut child_roots);
         for child in child_roots {
             if !child.is_null() {
                 self.mark_object(child, max_generation)?;

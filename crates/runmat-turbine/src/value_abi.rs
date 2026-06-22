@@ -102,7 +102,7 @@ impl TurbineValue {
                 }
                 let ptr =
                     unsafe { runmat_gc::GcPtr::<Value>::from_raw(self.payload as *const Value) };
-                Ok((*ptr).clone())
+                Ok(unsafe { (&*ptr.as_raw()).clone() })
             }
         }
     }

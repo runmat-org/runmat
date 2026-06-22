@@ -471,7 +471,7 @@ mod tests {
             .allocate(value, &stats)
             .expect("allocation should succeed");
 
-        assert_eq!(*ptr, Value::Num(42.0));
+        assert_eq!(unsafe { &*ptr.as_raw() }, &Value::Num(42.0));
     }
 
     #[test]

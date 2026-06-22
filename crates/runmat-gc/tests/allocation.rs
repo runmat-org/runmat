@@ -9,7 +9,7 @@ fn test_basic_allocation() {
         let value = Value::Num(42.0);
         let ptr = gc_allocate(value).expect("allocation should succeed");
 
-        assert_eq!(*ptr, Value::Num(42.0));
+        assert_eq!(gc_deref(&ptr), Value::Num(42.0));
         assert!(!ptr.is_null());
     });
 }
@@ -27,14 +27,17 @@ fn test_multiple_allocations() {
         let mut ptrs = Vec::new();
         for value in values {
             let ptr = gc_allocate(value.clone()).expect("allocation should succeed");
-            assert_eq!(*ptr, value);
+            assert_eq!(gc_deref(&ptr), value);
             ptrs.push(ptr);
         }
 
-        assert_eq!(*ptrs[0], Value::Num(1.0));
-        assert_eq!(*ptrs[1], Value::Int(runmat_builtins::IntValue::I32(2)));
-        assert_eq!(*ptrs[2], Value::Bool(true));
-        assert_eq!(*ptrs[3], Value::String("test".to_string()));
+        assert_eq!(gc_deref(&ptrs[0]), Value::Num(1.0));
+        assert_eq!(
+            gc_deref(&ptrs[1]),
+            Value::Int(runmat_builtins::IntValue::I32(2))
+        );
+        assert_eq!(gc_deref(&ptrs[2]), Value::Bool(true));
+        assert_eq!(gc_deref(&ptrs[3]), Value::String("test".to_string()));
     });
 }
 
@@ -47,7 +50,7 @@ fn test_matrix_allocation() {
 
         let ptr = gc_allocate(value).expect("allocation should succeed");
 
-        if let Value::Tensor(ref m) = *ptr {
+        if let Value::Tensor(ref m) = gc_deref(&ptr) {
             assert_eq!(m.rows, 2);
             assert_eq!(m.cols, 2);
             assert_eq!(m.data, vec![1.0, 2.0, 3.0, 4.0]);
@@ -70,7 +73,7 @@ fn test_cell_allocation() {
 
         let ptr = gc_allocate(cell).expect("allocation should succeed");
 
-        if let Value::Cell(ref contents) = *ptr {
+        if let Value::Cell(ref contents) = gc_deref(&ptr) {
             assert_eq!(contents.data.len(), 3);
             assert_eq!(&contents.data[0], &Value::Num(1.0));
             assert_eq!(&contents.data[1], &Value::String("nested".to_string()));
@@ -122,7 +125,7 @@ fn test_large_allocation() {
 
         let ptr = gc_allocate(value).expect("large allocation should succeed");
 
-        if let Value::Tensor(ref m) = *ptr {
+        if let Value::Tensor(ref m) = gc_deref(&ptr) {
             assert_eq!(m.rows, size);
             assert_eq!(m.cols, size);
             assert_eq!(m.data.len(), size * size);
@@ -191,7 +194,7 @@ fn test_nested_cell_allocation() {
 
         let ptr = gc_allocate(outer_cell).expect("allocation should succeed");
 
-        if let Value::Cell(ref outer_contents) = *ptr {
+        if let Value::Cell(ref outer_contents) = gc_deref(&ptr) {
             assert_eq!(outer_contents.data.len(), 2);
 
             if let Value::Cell(ref inner_contents) = outer_contents.data[0] {
@@ -220,15 +223,15 @@ fn test_allocation_with_roots() {
         gc_add_root(ptr1.clone()).expect("root registration should succeed");
         gc_add_root(ptr2.clone()).expect("root registration should succeed");
 
-        assert_eq!(*ptr1, Value::Num(1.0));
-        assert_eq!(*ptr2, Value::Num(2.0));
+        assert_eq!(gc_deref(&ptr1), Value::Num(1.0));
+        assert_eq!(gc_deref(&ptr2), Value::Num(2.0));
 
         // Force a collection - roots should keep their values alive
         let _collected = gc_collect_minor().expect("collection should succeed");
 
         // Values should still be accessible
-        assert_eq!(*ptr1, Value::Num(1.0));
-        assert_eq!(*ptr2, Value::Num(2.0));
+        assert_eq!(gc_deref(&ptr1), Value::Num(1.0));
+        assert_eq!(gc_deref(&ptr2), Value::Num(2.0));
 
         // Clean up roots
         gc_remove_root(ptr1).expect("root removal should succeed");
