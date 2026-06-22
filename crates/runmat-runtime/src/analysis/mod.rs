@@ -4226,6 +4226,47 @@ fn cell_centered_scalar_from_nodal(nodal: &[f64]) -> Vec<f64> {
     cell_values
 }
 
+fn resample_scalar_profile(values: &[f64], target_count: usize) -> Vec<f64> {
+    let target_count = target_count.max(1);
+    if values.is_empty() {
+        return vec![0.0; target_count];
+    }
+    if values.len() == target_count {
+        return values.to_vec();
+    }
+    if target_count == 1 {
+        return vec![values[0]];
+    }
+    let source_max = values.len().saturating_sub(1) as f64;
+    let target_max = target_count.saturating_sub(1) as f64;
+    (0..target_count)
+        .map(|target_index| {
+            let source_position = target_index as f64 * source_max / target_max.max(1.0);
+            let left = source_position.floor() as usize;
+            let right = source_position.ceil() as usize;
+            if left == right {
+                values.get(left).copied().unwrap_or(0.0)
+            } else {
+                let t = source_position - left as f64;
+                let left_value = values.get(left).copied().unwrap_or(0.0);
+                let right_value = values.get(right).copied().unwrap_or(left_value);
+                left_value * (1.0 - t) + right_value * t
+            }
+        })
+        .collect()
+}
+
+fn fluid_interface_face_count(topology: CfdDomainTopology) -> usize {
+    if topology.control_volume_connectivity_coverage_ratio > 0.0
+        && topology.control_volume_boundary_face_count > 0
+    {
+        topology.control_volume_boundary_face_count
+    } else {
+        topology.control_volume_count
+    }
+    .max(1)
+}
+
 fn solve_cfd_finite_volume_run(
     model: &AnalysisModel,
     domain: &runmat_analysis_core::CfdDomain,
@@ -4431,6 +4472,10 @@ fn build_cht_run_fields(
             .unwrap_or_else(|| vec![0.0; fallback_len]);
         if heat_flux.is_empty() {
             heat_flux.push(0.0);
+        }
+        let target_interface_count = fluid_interface_face_count(topology);
+        if heat_flux.len() != target_interface_count {
+            heat_flux = resample_scalar_profile(&heat_flux, target_interface_count);
         }
         let interface_count = heat_flux.len();
         let max_heat_flux = heat_flux
@@ -4872,6 +4917,7 @@ fn build_fsi_run_fields(
             recover_cfd_velocity_pressure(domain, topology, step_index);
         let interface_step = solve_fsi_partitioned_interface(
             &fluid_pressure,
+            fluid_interface_face_count(topology),
             structural_compliance_per_pa,
             max_linear_iters,
             tolerance,
@@ -5041,6 +5087,7 @@ struct FsiStructuralInterfaceResponse {
 
 fn solve_fsi_partitioned_interface(
     fluid_pressure: &[f64],
+    interface_face_count: usize,
     structural_compliance_per_pa: f64,
     max_linear_iters: usize,
     tolerance: f64,
@@ -5170,7 +5217,10 @@ fn solve_fsi_partitioned_interface(
             / (interface_work_j_per_m2.abs()
                 + (2.0 * structural_strain_energy_j_per_m2).abs()
                 + 1.0e-12);
-    let interface_face_pressure = cell_centered_scalar_from_nodal(&interface_pressure);
+    let interface_face_pressure = resample_scalar_profile(
+        &cell_centered_scalar_from_nodal(&interface_pressure),
+        interface_face_count,
+    );
 
     FsiPartitionedInterfaceStep {
         interface_pressure: interface_face_pressure,

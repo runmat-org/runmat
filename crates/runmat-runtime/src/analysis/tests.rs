@@ -1765,7 +1765,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
+            prep_context: Some(sample_analysis_run_prep_context()),
             prep_artifact_id: None,
             prep_calibration_profile: None,
         },
@@ -6098,8 +6098,14 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         .first()
         .and_then(|field| field.shape.first().copied())
         .expect("thermal heat-flux snapshot should carry a recovery domain");
+    let expected_interface_face_count =
+        fluid_interface_face_count(CfdDomainTopology::from_model(&model, None));
     assert_eq!(solid_temperature.shape, fluid_temperature.shape);
-    assert_eq!(interface_heat_flux.shape, vec![thermal_flux_face_count]);
+    assert!(expected_interface_face_count >= thermal_flux_face_count);
+    assert_eq!(
+        interface_heat_flux.shape,
+        vec![expected_interface_face_count]
+    );
     assert_eq!(interface_temperature_jump.shape, interface_heat_flux.shape);
     let results = analysis_results_op(
         &envelope.data,
@@ -6320,6 +6326,93 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
         assert_eq!(descriptor.component_count, None);
     }
+}
+
+#[test]
+fn cht_prepared_topology_uses_boundary_faces_for_interface_fields() {
+    let _guard = analysis_test_guard();
+    let model = sample_cht_model();
+    let cfd_domain = model.cfd.as_ref().expect("cfd domain should exist");
+    let prep_context = sample_analysis_run_prep_context();
+    let topology = CfdDomainTopology::from_model(&model, Some(prep_context));
+    let thermo_context = to_fea_thermo_mechanical_context(model_thermo_coupling_options(&model));
+    let thermal_run = run_thermal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ThermalSolveOptions {
+            step_count: 4,
+            time_step_s: 1.0e-3,
+            residual_target: 1.0e-4,
+            prep_context: to_fea_prep_context(Some(prep_context), None),
+            thermo_mechanical_context: thermo_context,
+        },
+    )
+    .expect("thermal run should succeed");
+
+    let (fields, closure) = build_cht_run_fields(
+        cfd_domain,
+        topology,
+        &thermal_run,
+        cht_interface_conductance_w_per_m2k(&model),
+        64,
+        1.0e-8,
+    );
+    let heat_flux = fields
+        .iter()
+        .find(|field| field.field_id == fea_cht_interface_heat_flux_field_id(0))
+        .expect("CHT heat flux field should be present");
+    let temperature_jump = fields
+        .iter()
+        .find(|field| field.field_id == fea_cht_interface_temperature_jump_field_id(0))
+        .expect("CHT temperature jump field should be present");
+
+    assert_eq!(
+        topology.basis,
+        CfdDomainTopologyBasis::PrepControlVolumeConnectivity
+    );
+    assert_eq!(fluid_interface_face_count(topology), 8);
+    assert_eq!(closure.interface_face_count, 8);
+    assert_eq!(heat_flux.shape, vec![8]);
+    assert_eq!(temperature_jump.shape, vec![8]);
+}
+
+#[test]
+fn fsi_prepared_topology_uses_boundary_faces_for_interface_fields() {
+    let _guard = analysis_test_guard();
+    let model = sample_fsi_model();
+    let cfd_domain = model.cfd.as_ref().expect("cfd domain should exist");
+    let prep_context = sample_analysis_run_prep_context();
+    let topology = CfdDomainTopology::from_model(&model, Some(prep_context));
+    let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(cfd_domain, topology, 0);
+    let (residual_momentum, residual_continuity) =
+        cfd_residual_norms(&fluid_velocity, &fluid_pressure, cfd_domain, topology, 4);
+    let (fields, closure) = build_fsi_run_fields(
+        cfd_domain,
+        topology,
+        4,
+        fsi_structural_compliance_per_pa(&model),
+        64,
+        1.0e-8,
+        &residual_momentum,
+        &residual_continuity,
+    );
+    let pressure = fields
+        .iter()
+        .find(|field| field.field_id == fea_fsi_interface_pressure_field_id(0))
+        .expect("FSI interface pressure field should be present");
+    let traction = fields
+        .iter()
+        .find(|field| field.field_id == fea_fsi_interface_traction_field_id(0))
+        .expect("FSI interface traction field should be present");
+
+    assert_eq!(
+        topology.basis,
+        CfdDomainTopologyBasis::PrepControlVolumeConnectivity
+    );
+    assert_eq!(fluid_interface_face_count(topology), 8);
+    assert_eq!(closure.interface_face_count, 8);
+    assert_eq!(pressure.shape, vec![8]);
+    assert_eq!(traction.shape, vec![8, 3]);
 }
 
 #[test]
