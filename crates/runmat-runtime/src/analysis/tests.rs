@@ -2707,6 +2707,34 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
     assert_eq!(electric_field.shape[1], 3);
     assert_eq!(current_density.shape, electric_field.shape);
     assert_eq!(joule_heat.shape, vec![electric_field.shape[0]]);
+    let descriptor = |field_id: &str| {
+        results
+            .data
+            .field_descriptors
+            .iter()
+            .find(|descriptor| descriptor.field_id == field_id)
+            .expect("electro-thermal descriptor should be present")
+    };
+    assert_eq!(
+        descriptor(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL).kind,
+        AnalysisFieldKind::Scalar
+    );
+    for field_id in [
+        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
+        FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
+    ] {
+        let descriptor = descriptor(field_id);
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
+        assert_eq!(descriptor.component_count, Some(3));
+    }
+    assert_eq!(
+        descriptor(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT).kind,
+        AnalysisFieldKind::Scalar
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT).component_count,
+        None
+    );
     let transient = run
         .data
         .transient_results
@@ -2728,11 +2756,6 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
         transient.electro_thermal_thermal_residual_snapshots[0].field_id,
         fea_electro_thermal_thermal_residual_field_id(0)
     );
-    assert!(results
-        .data
-        .field_descriptors
-        .iter()
-        .any(|descriptor| descriptor.field_id == FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL));
     assert!(results
         .data
         .field_descriptors
