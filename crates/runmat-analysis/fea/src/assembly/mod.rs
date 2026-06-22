@@ -884,6 +884,7 @@ pub fn assemble_linear_system(
         operator: OperatorSystem {
             dof_count,
             constrained,
+            stiffness_dense: None,
             stiffness_diag,
             stiffness_upper,
             mass_diag,

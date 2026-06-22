@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::apply_k,
+    operator::{apply_k, dense_stiffness},
     solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
     solve::{
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
@@ -181,6 +181,9 @@ fn graph_tuned_preconditioner(
     summary: &AssemblySummary,
     requested: SpdPreconditionerKind,
 ) -> SpdPreconditionerKind {
+    if dense_stiffness(&summary.operator).is_some() {
+        return SpdPreconditionerKind::Jacobi;
+    }
     if let Some(graph) = summary.prep_graph_assembly.as_ref() {
         if graph.recommend_ilu0 {
             return SpdPreconditionerKind::Ilu0;

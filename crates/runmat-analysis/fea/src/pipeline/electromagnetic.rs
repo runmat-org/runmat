@@ -518,6 +518,7 @@ pub fn run_electromagnetic_with_options(
     summary.operator = OperatorSystem {
         dof_count: node_count,
         constrained: constrained.clone(),
+        stiffness_dense: None,
         stiffness_diag,
         stiffness_upper,
         mass_diag: vec![1.0; node_count],
@@ -2632,6 +2633,7 @@ impl MaxwellEdgeTopology {
         OperatorSystem {
             dof_count: edge_count,
             constrained,
+            stiffness_dense: None,
             stiffness_diag,
             stiffness_upper,
             mass_diag,
@@ -3651,6 +3653,7 @@ mod tests {
         let nodal_operator = OperatorSystem {
             dof_count: 5,
             constrained: vec![true, false, false, false, true],
+            stiffness_dense: None,
             stiffness_diag: vec![10.0, 20.0, 30.0, 20.0, 10.0],
             stiffness_upper: vec![1.0, 1.0, 1.0, 1.0],
             mass_diag: vec![1.0; 5],

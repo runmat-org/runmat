@@ -188,6 +188,33 @@ fn dt_cache_key(dt: f64, nominal_dt: f64, rel_tol: f64) -> u64 {
 fn build_implicit_summary(summary: &AssemblySummary, rhs: &[f64], dt: f64) -> AssemblySummary {
     let mut implicit = summary.clone();
     implicit.operator.rhs = rhs.to_vec();
+    if let Some(dense) = implicit.operator.stiffness_dense.as_mut() {
+        let n = implicit.operator.dof_count;
+        for row in 0..n {
+            for col in 0..n {
+                let index = row * n + col;
+                dense[index] = if implicit.operator.constrained[row] {
+                    if row == col {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                } else {
+                    dt * summary.operator.stiffness_dense.as_ref().unwrap()[index]
+                        + if row == col {
+                            summary.operator.mass_diag[row]
+                        } else {
+                            0.0
+                        }
+                };
+            }
+        }
+        for i in 0..implicit.operator.dof_count {
+            implicit.operator.stiffness_diag[i] = dense[i * n + i];
+        }
+        implicit.operator.stiffness_upper.fill(0.0);
+        return implicit;
+    }
     for i in 0..implicit.operator.dof_count {
         if implicit.operator.constrained[i] {
             implicit.operator.stiffness_diag[i] = 1.0;

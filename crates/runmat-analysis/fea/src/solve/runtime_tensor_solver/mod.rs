@@ -4,6 +4,7 @@ use runmat_accelerate_api::{provider, GpuTensorHandle, HostTensorView};
 use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
+    operator::dense_stiffness,
     solve::{linear::LinearSolveResult, preconditioner::SpdPreconditionerKind},
 };
 
@@ -88,7 +89,7 @@ pub fn prepare_runtime_tensor_linear_system(
     summary: &AssemblySummary,
 ) -> Option<RuntimeTensorPreparedLinearSystem> {
     let n = summary.dof_count;
-    if n == 0 {
+    if n == 0 || dense_stiffness(&summary.operator).is_some() {
         return None;
     }
 
