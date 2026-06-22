@@ -36,7 +36,7 @@ pub fn gc_register_finalizer(
     ptr: GcHandle<Value>,
     f: std::sync::Arc<dyn GcFinalizer>,
 ) -> Result<()> {
-    let addr = unsafe { ptr.as_raw() } as usize;
+    let addr = ptr.addr();
     if addr == 0 {
         return Ok(());
     }
@@ -46,7 +46,7 @@ pub fn gc_register_finalizer(
 
 /// Remove any registered finalizer for the provided GC handle.
 pub fn gc_unregister_finalizer(ptr: GcHandle<Value>) -> Result<()> {
-    let addr = unsafe { ptr.as_raw() } as usize;
+    let addr = ptr.addr();
     if addr == 0 {
         return Ok(());
     }
@@ -434,7 +434,7 @@ impl GarbageCollector {
 
     /// Add a root to protect an object from collection
     pub fn add_root(&self, root: GcHandle<Value>) -> Result<()> {
-        let value_ptr = unsafe { root.as_raw() } as usize;
+        let value_ptr = root.addr();
         if value_ptr == 0 {
             return Ok(());
         }
@@ -444,7 +444,7 @@ impl GarbageCollector {
 
     /// Remove a root
     pub fn remove_root(&self, root: GcHandle<Value>) -> Result<()> {
-        let value_ptr = unsafe { root.as_raw() } as usize;
+        let value_ptr = root.addr();
         if value_ptr == 0 {
             return Ok(());
         }

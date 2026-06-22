@@ -61,16 +61,6 @@ impl<T> GcHandle<T> {
     pub unsafe fn as_raw(&self) -> *const T {
         self.ptr
     }
-
-    /// # Safety
-    ///
-    /// Returns a mutable raw pointer to the underlying object. The caller must
-    /// ensure exclusive access when mutating through this pointer, that the
-    /// object outlives all uses, and that aliasing/lifetime invariants are
-    /// respected. Mutating a collected or shared object is undefined behavior.
-    pub unsafe fn as_raw_mut(&self) -> *mut T {
-        self.ptr as *mut T
-    }
 }
 
 impl<T> PartialEq for GcHandle<T> {

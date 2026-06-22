@@ -537,7 +537,7 @@ mod tests {
         let target = allocator
             .allocate(Value::String("alive".to_string()), &stats)
             .expect("target allocation");
-        let target_addr = unsafe { target.as_raw() } as usize;
+        let target_addr = target.addr();
         let handle_value = Value::HandleObject(runmat_builtins::HandleRef {
             class_name: "TestHandle".to_string(),
             target,

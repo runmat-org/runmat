@@ -394,7 +394,7 @@ mod tests {
     use runmat_builtins::{Closure, HandleRef, Listener, ObjectInstance, StructValue};
 
     fn ptr_addr(ptr: GcHandle<Value>) -> usize {
-        (unsafe { ptr.as_raw() }) as usize
+        ptr.addr()
     }
 
     #[test]

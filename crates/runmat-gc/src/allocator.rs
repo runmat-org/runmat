@@ -485,7 +485,7 @@ mod tests {
             let ptr = allocator
                 .allocate(Value::Num(i as f64), &stats)
                 .expect("allocation should succeed");
-            let addr = unsafe { ptr.as_raw() } as usize;
+            let addr = ptr.addr();
             assert_eq!(addr % align, 0, "GC allocation was not Value-aligned");
         }
     }
