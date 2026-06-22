@@ -9140,6 +9140,51 @@ fn for_range_loop_uses_semantic_vm_without_rerunning_prefix() {
 }
 
 #[test]
+fn clear_before_for_range_loop_preserves_hidden_loop_slots() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "clear; n = 3; s = 0; for i = 1:n; s = s + i; end; y = s;";
+
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "6");
+}
+
+#[test]
+fn clear_before_indexed_for_loop_preserves_hidden_loop_slots() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "\
+        clear; \
+        L = pi; \
+        n = 3; \
+        dx = L / n; \
+        x = linspace(0, L, n); \
+        u = zeros(n, 1); \
+        for i = 1:n; \
+            x(i) = i * dx; \
+            u(i, 1) = sin(pi * x(i) / L); \
+        end; \
+        y = u(2, 1);";
+
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    match value {
+        runmat_builtins::Value::Num(actual) => {
+            let expected = (2.0 * std::f64::consts::PI / 3.0).sin();
+            assert!((actual - expected).abs() < 1e-12);
+        }
+        other => panic!("expected numeric scalar, got {other:?}"),
+    }
+}
+
+#[test]
 fn while_loop_uses_semantic_vm_without_rerunning_prefix() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "x = 0; while x < 3; x = x + 1; end; y = x;";
