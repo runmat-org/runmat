@@ -10,10 +10,10 @@ use runmat_accelerate_api::{
     ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
     ProviderEigResult, ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions,
     ProviderIirFilterResult, ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult,
-    ProviderLuResult, ProviderNanMode, ProviderNormOrder, ProviderPinvOptions,
-    ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions, ProviderQrPivot,
-    ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind, SetdiffOptions, SetdiffResult,
-    SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
+    ProviderLuResult, ProviderModulationRequest, ProviderNanMode, ProviderNormOrder,
+    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions,
+    ProviderQrPivot, ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind, SetdiffOptions,
+    SetdiffResult, SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -2398,6 +2398,73 @@ impl AccelProvider for InProcessProvider {
                 out_shape,
                 GpuTensorStorage::ComplexInterleaved,
             ))
+        })
+    }
+
+    fn modulate_constellation<'a>(
+        &'a self,
+        request: ProviderModulationRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(request.input)
+                    != GpuTensorStorage::ComplexInterleaved,
+                "modulate_constellation requires a real-valued symbol input"
+            );
+            ensure!(
+                !request.constellation.is_empty() && request.constellation.len().is_multiple_of(2),
+                "modulate_constellation requires interleaved real/imag constellation pairs"
+            );
+            let order = request.constellation.len() / 2;
+            let data = {
+                let guard = registry().lock().unwrap();
+                guard
+                    .get(&request.input.buffer_id)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("buffer not found: {}", request.input.buffer_id)
+                    })?
+                    .clone()
+            };
+            let logical_len = request
+                .input
+                .shape
+                .iter()
+                .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+                .ok_or_else(|| anyhow!("modulate_constellation: input shape overflow"))?;
+            ensure!(
+                logical_len == data.len(),
+                "modulate_constellation: input data length does not match shape"
+            );
+            let mut out = Vec::with_capacity(
+                logical_len
+                    .checked_mul(2)
+                    .ok_or_else(|| anyhow!("modulate_constellation: output length overflow"))?,
+            );
+            for value in data {
+                ensure!(
+                    value.is_finite(),
+                    "modulate_constellation: symbols must be finite integers"
+                );
+                let rounded = value.round();
+                ensure!(
+                    (value - rounded).abs() <= 1e-9 && rounded >= 0.0,
+                    "modulate_constellation: symbols must be nonnegative integers"
+                );
+                let symbol = rounded as usize;
+                ensure!(
+                    symbol < order,
+                    "modulate_constellation: symbols must be in range"
+                );
+                let point = symbol * 2;
+                out.push(request.constellation[point]);
+                out.push(request.constellation[point + 1]);
+            }
+            let handle = self.allocate_tensor_with_storage(
+                out,
+                request.input.shape.clone(),
+                GpuTensorStorage::ComplexInterleaved,
+            );
+            Ok(handle)
         })
     }
 

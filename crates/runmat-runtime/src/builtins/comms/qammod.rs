@@ -1,6 +1,6 @@
 //! MATLAB-compatible `qammod` builtin for integer-input rectangular QAM.
 
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{GpuTensorHandle, ProviderModulationRequest};
 use runmat_builtins::{ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
@@ -27,7 +27,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Accepts gpuArray inputs by gathering real symbols for MATLAB-compatible validation, then uploads the complex modulation result as complex-interleaved GPU storage.",
+    notes: "Uses provider-side constellation modulation for gpuArray integer-symbol inputs and returns complex-interleaved GPU storage; providers without the hook fall back to host-compatible validation and re-upload.",
 };
 
 fn qammod_error(message: impl Into<String>) -> RuntimeError {
@@ -74,6 +74,14 @@ async fn qammod_gpu(
     let provider = runmat_accelerate_api::provider_for_handle(&handle)
         .or_else(runmat_accelerate_api::provider)
         .ok_or_else(|| qammod_error("qammod: no acceleration provider registered"))?;
+    let constellation = constellation_table(order, &options)?;
+    let request = ProviderModulationRequest {
+        input: &handle,
+        constellation: &constellation,
+    };
+    if let Ok(out) = provider.modulate_constellation(request).await {
+        return Ok(gpu_helpers::complex_gpu_value(out));
+    }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let symbols = SymbolInput::from_tensor(tensor)?;
     let result = modulate_symbols(symbols, order, &options)?;
@@ -253,6 +261,19 @@ fn modulate_symbols(
     options: &ParsedOptions,
 ) -> BuiltinResult<Value> {
     validate_symbol_range(&symbols.data, order)?;
+    let constellation = constellation_table(order, options)?;
+    let mut out = Vec::with_capacity(symbols.data.len());
+    for symbol in symbols.data {
+        let point = symbol * 2;
+        out.push((constellation[point], constellation[point + 1]));
+    }
+
+    let tensor =
+        ComplexTensor::new(out, symbols.shape).map_err(|e| qammod_error(format!("qammod: {e}")))?;
+    Ok(Value::ComplexTensor(tensor))
+}
+
+fn constellation_table(order: usize, options: &ParsedOptions) -> BuiltinResult<Vec<f64>> {
     let layout = ConstellationLayout::for_order(order)?;
     let scale = if options.unit_average_power {
         1.0 / layout.average_power().sqrt()
@@ -263,9 +284,8 @@ fn modulate_symbols(
         SymbolMapping::Custom(mapping) => Some(invert_mapping(mapping, order)?),
         _ => None,
     };
-
-    let mut out = Vec::with_capacity(symbols.data.len());
-    for symbol in symbols.data {
+    let mut table = Vec::with_capacity(order * 2);
+    for symbol in 0..order {
         let point_index = match &options.mapping {
             SymbolMapping::Binary => symbol,
             SymbolMapping::Gray => layout.gray_point_index(symbol),
@@ -275,16 +295,17 @@ fn modulate_symbols(
                 .ok_or_else(|| qammod_error("qammod: invalid custom mapping"))?,
         };
         let (i_amp, q_amp) = layout.point_for_index(point_index);
-        let point = (i_amp * scale, q_amp * scale);
-        out.push(match options.output_dtype {
-            OutputDType::Double => point,
-            OutputDType::Single => ((point.0 as f32) as f64, (point.1 as f32) as f64),
-        });
+        let point = match options.output_dtype {
+            OutputDType::Double => (i_amp * scale, q_amp * scale),
+            OutputDType::Single => (
+                ((i_amp * scale) as f32) as f64,
+                ((q_amp * scale) as f32) as f64,
+            ),
+        };
+        table.push(point.0);
+        table.push(point.1);
     }
-
-    let tensor =
-        ComplexTensor::new(out, symbols.shape).map_err(|e| qammod_error(format!("qammod: {e}")))?;
-    Ok(Value::ComplexTensor(tensor))
+    Ok(table)
 }
 
 #[derive(Clone, Debug)]

@@ -285,6 +285,13 @@ pub struct ProviderEnvelopeResult {
     pub lower: GpuTensorHandle,
 }
 
+#[derive(Clone, Debug)]
+pub struct ProviderModulationRequest<'a> {
+    pub input: &'a GpuTensorHandle,
+    /// `(real, imag)` pairs interleaved by symbol index.
+    pub constellation: &'a [f64],
+}
+
 pub async fn uniform_spectral_estimate(
     request: ProviderSpectralRequest<'_>,
 ) -> anyhow::Result<ProviderSpectralResult> {
@@ -1572,6 +1579,15 @@ pub trait AccelProvider: Send + Sync {
         _imag: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("complex_from_real_imag not supported by provider")
+    }
+
+    /// Map a resident real-valued symbol tensor through a complex constellation
+    /// table and return complex-interleaved GPU storage.
+    fn modulate_constellation<'a>(
+        &'a self,
+        _request: ProviderModulationRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("modulate_constellation not supported by provider")
     }
 
     fn elem_hypot<'a>(

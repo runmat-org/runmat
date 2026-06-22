@@ -1,5 +1,7 @@
 use super::*;
-use runmat_accelerate_api::{ProviderEnvelopeRequest, ProviderEnvelopeResult};
+use runmat_accelerate_api::{
+    ProviderEnvelopeRequest, ProviderEnvelopeResult, ProviderModulationRequest,
+};
 
 impl AccelProvider for WgpuProvider {
     fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {
@@ -330,6 +332,13 @@ impl AccelProvider for WgpuProvider {
         imag: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.complex_from_real_imag_exec(real, imag) })
+    }
+
+    fn modulate_constellation<'a>(
+        &'a self,
+        request: ProviderModulationRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.modulate_constellation_exec(&request).await })
     }
 
     fn elem_ge<'a>(
