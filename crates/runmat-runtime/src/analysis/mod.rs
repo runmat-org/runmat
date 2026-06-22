@@ -8904,6 +8904,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             nonlinear_payload_version: "nonlinear_results/v1".to_string(),
             load_factors: nonlinear_run.load_factors,
             displacement_snapshots: nonlinear_run.displacement_snapshots,
+            rotation_snapshots: nonlinear_run.rotation_snapshots,
             von_mises_snapshots: nonlinear_run.von_mises_snapshots,
             plastic_strain_snapshots: nonlinear_run.plastic_strain_snapshots,
             equivalent_plastic_strain_snapshots: nonlinear_run.equivalent_plastic_strain_snapshots,
@@ -10347,6 +10348,9 @@ fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<Analysi
 
     if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
         for field in &nonlinear.displacement_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.rotation_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
         for field in &nonlinear.von_mises_snapshots {

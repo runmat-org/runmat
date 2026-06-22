@@ -3,16 +3,17 @@ use crate::{
     fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
     fea_nonlinear_equivalent_plastic_strain_field_id, fea_nonlinear_load_factor_field_id,
     fea_nonlinear_plastic_strain_field_id, fea_nonlinear_residual_norm_field_id,
-    fea_nonlinear_von_mises_field_id, fea_thermal_boundary_heat_flux_field_id,
-    fea_thermal_heat_flux_field_id, fea_thermal_heat_source_field_id,
-    fea_thermal_temperature_gradient_field_id, fea_thermo_mechanical_coupling_residual_field_id,
-    fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
-    fea_thermo_mechanical_thermal_strain_field_id, fea_thermo_mechanical_thermal_stress_field_id,
-    fea_thermo_mechanical_von_mises_field_id, fea_transient_acceleration_field_id,
-    fea_transient_angular_acceleration_field_id, fea_transient_angular_velocity_field_id,
-    fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
-    fea_transient_rotation_field_id, fea_transient_strain_energy_field_id,
-    fea_transient_velocity_field_id, fea_transient_von_mises_field_id,
+    fea_nonlinear_rotation_field_id, fea_nonlinear_von_mises_field_id,
+    fea_thermal_boundary_heat_flux_field_id, fea_thermal_heat_flux_field_id,
+    fea_thermal_heat_source_field_id, fea_thermal_temperature_gradient_field_id,
+    fea_thermo_mechanical_coupling_residual_field_id, fea_thermo_mechanical_displacement_field_id,
+    fea_thermo_mechanical_temperature_field_id, fea_thermo_mechanical_thermal_strain_field_id,
+    fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
+    fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
+    fea_transient_angular_velocity_field_id, fea_transient_kinetic_energy_field_id,
+    fea_transient_residual_norm_field_id, fea_transient_rotation_field_id,
+    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
+    fea_transient_von_mises_field_id,
     fixtures::{fixture_model, FixtureId},
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
@@ -1357,6 +1358,44 @@ fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
     assert!(convergence.message.contains("iteration_spike_count="));
     assert!(convergence.message.contains("convergence_stall_count="));
     assert!(convergence.message.contains("backtrack_burst_count="));
+}
+
+#[test]
+fn nonlinear_beam_moment_emits_rotation_snapshots() {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    model.steps = vec![runmat_analysis_core::AnalysisStep {
+        step_id: "beam_moment_nonlinear".to_string(),
+        kind: runmat_analysis_core::AnalysisStepKind::Nonlinear,
+    }];
+    let result = crate::run_nonlinear(&model, ComputeBackend::Cpu)
+        .expect("nonlinear beam moment solve should succeed");
+
+    assert_eq!(result.load_factors.len(), result.rotation_snapshots.len());
+    assert_eq!(
+        result.rotation_snapshots[0].field_id,
+        fea_nonlinear_rotation_field_id(0)
+    );
+    assert_eq!(result.rotation_snapshots[0].shape, vec![2, 3]);
+    let first_rotation = result.rotation_snapshots[0]
+        .as_host_f64()
+        .expect("rotation snapshot should be host-backed");
+    let final_rotation = result
+        .rotation_snapshots
+        .last()
+        .and_then(runmat_analysis_core::AnalysisField::as_host_f64)
+        .expect("final rotation snapshot should be host-backed");
+
+    assert!(final_rotation.iter().any(|value| value.abs() > 0.0));
+    assert!(
+        final_rotation
+            .iter()
+            .map(|value| value.abs())
+            .fold(0.0_f64, f64::max)
+            >= first_rotation
+                .iter()
+                .map(|value| value.abs())
+                .fold(0.0_f64, f64::max)
+    );
 }
 
 #[test]

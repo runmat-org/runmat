@@ -1954,6 +1954,8 @@ pub struct NonlinearResultsData {
     pub load_factors: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
     #[serde(default)]
+    pub rotation_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
     pub von_mises_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub plastic_strain_snapshots: Vec<AnalysisField>,

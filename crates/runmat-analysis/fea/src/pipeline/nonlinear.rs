@@ -1,14 +1,16 @@
 use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 
+use crate::assembly::{dofs::StructuralDofKind, AssemblySummary};
 use crate::{
     assembly::assemble_linear_system,
     contracts::{
         fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
         fea_nonlinear_displacement_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
         fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
-        fea_nonlinear_residual_norm_field_id, fea_nonlinear_von_mises_field_id, ComputeBackend,
-        FeaContactInterfaceContext, FeaNonlinearRunResult, FeaRunError, FeaRunResult,
-        FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
+        fea_nonlinear_residual_norm_field_id, fea_nonlinear_rotation_field_id,
+        fea_nonlinear_von_mises_field_id, ComputeBackend, FeaContactInterfaceContext,
+        FeaNonlinearRunResult, FeaRunError, FeaRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     pipeline::electro_thermal::recover_electro_thermal_fields,
@@ -160,6 +162,7 @@ pub fn run_nonlinear_with_options(
     };
 
     let element_count = element_count_for_dofs(summary.dof_count);
+    let rotation_values = recover_rotational_snapshots(&summary, &nonlinear.displacement_snapshots);
 
     let displacement_snapshots = nonlinear
         .displacement_snapshots
@@ -170,6 +173,17 @@ pub fn run_nonlinear_with_options(
                 fea_nonlinear_displacement_field_id(index),
                 vector_shape(snapshot.len()),
                 padded_vector_values(snapshot, summary.dof_count),
+            )
+        })
+        .collect::<Vec<_>>();
+    let rotation_snapshots = rotation_values
+        .into_iter()
+        .enumerate()
+        .map(|(index, snapshot)| {
+            AnalysisField::host_f64(
+                fea_nonlinear_rotation_field_id(index),
+                rotational_vector_shape(&summary),
+                snapshot,
             )
         })
         .collect::<Vec<_>>();
@@ -305,6 +319,7 @@ pub fn run_nonlinear_with_options(
         run,
         load_factors: nonlinear.load_factors,
         displacement_snapshots,
+        rotation_snapshots,
         von_mises_snapshots,
         plastic_strain_snapshots,
         equivalent_plastic_strain_snapshots,
@@ -336,6 +351,52 @@ pub fn run_nonlinear_with_options(
         convergence_stall_count: nonlinear.convergence_stall_count,
         backtrack_burst_count: nonlinear.backtrack_burst_count,
     })
+}
+
+fn recover_rotational_snapshots(
+    summary: &AssemblySummary,
+    snapshots: &[Vec<f64>],
+) -> Vec<Vec<f64>> {
+    if summary.structural_rotational_dof_count == 0 {
+        return Vec::new();
+    }
+    snapshots
+        .iter()
+        .map(|snapshot| recover_rotation_snapshot(summary, snapshot))
+        .collect()
+}
+
+fn recover_rotation_snapshot(summary: &AssemblySummary, snapshot: &[f64]) -> Vec<f64> {
+    let mut rotation = vec![0.0; rotational_vector_shape(summary).iter().product()];
+    for row in 0..summary.structural_dof_layout.total_dof_count() {
+        let Some(address) = summary.structural_dof_layout.address(row) else {
+            continue;
+        };
+        let Some(component) = rotational_component(address.kind) else {
+            continue;
+        };
+        let target = address.node_index * VECTOR_COMPONENT_COUNT + component;
+        if target < rotation.len() {
+            rotation[target] = snapshot.get(row).copied().unwrap_or(0.0);
+        }
+    }
+    rotation
+}
+
+fn rotational_vector_shape(summary: &AssemblySummary) -> Vec<usize> {
+    vec![
+        summary.structural_dof_layout.node_count(),
+        VECTOR_COMPONENT_COUNT,
+    ]
+}
+
+fn rotational_component(kind: StructuralDofKind) -> Option<usize> {
+    match kind {
+        StructuralDofKind::Rx => Some(0),
+        StructuralDofKind::Ry => Some(1),
+        StructuralDofKind::Rz => Some(2),
+        _ => None,
+    }
 }
 
 fn element_count_for_dofs(dof_count: usize) -> usize {

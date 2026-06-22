@@ -29,31 +29,31 @@ use runmat_analysis_fea::{
     fea_modal_mode_shape_field_id, fea_nonlinear_contact_gap_field_id,
     fea_nonlinear_contact_pressure_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
     fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
-    fea_nonlinear_residual_norm_field_id, fea_nonlinear_von_mises_field_id,
-    fea_thermal_boundary_heat_flux_field_id, fea_thermal_heat_flux_field_id,
-    fea_thermal_heat_source_field_id, fea_thermal_temperature_gradient_field_id,
-    fea_thermo_mechanical_coupling_residual_field_id, fea_thermo_mechanical_displacement_field_id,
-    fea_thermo_mechanical_temperature_field_id, fea_thermo_mechanical_thermal_strain_field_id,
-    fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
-    fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
-    fea_transient_angular_velocity_field_id, fea_transient_kinetic_energy_field_id,
-    fea_transient_residual_norm_field_id, fea_transient_rotation_field_id,
-    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
-    fea_transient_von_mises_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
-    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY,
-    FEA_FIELD_CFD_RESIDUAL_MOMENTUM, FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY,
-    FEA_FIELD_CFD_VORTICITY, FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE,
-    FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
-    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL,
-    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_EM_CURRENT_DENSITY_REAL,
-    FEA_FIELD_EM_ELECTRIC_FIELD_REAL, FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL,
-    FEA_FIELD_EM_ENERGY_DENSITY, FEA_FIELD_EM_MAGNETIC_FIELD_REAL,
-    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
-    FEA_FIELD_EM_POYNTING_VECTOR_REAL, FEA_FIELD_EM_RESIDUAL_REAL,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
-    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
-    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    fea_nonlinear_residual_norm_field_id, fea_nonlinear_rotation_field_id,
+    fea_nonlinear_von_mises_field_id, fea_thermal_boundary_heat_flux_field_id,
+    fea_thermal_heat_flux_field_id, fea_thermal_heat_source_field_id,
+    fea_thermal_temperature_gradient_field_id, fea_thermo_mechanical_coupling_residual_field_id,
+    fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
+    fea_thermo_mechanical_thermal_strain_field_id, fea_thermo_mechanical_thermal_stress_field_id,
+    fea_thermo_mechanical_von_mises_field_id, fea_transient_acceleration_field_id,
+    fea_transient_angular_acceleration_field_id, fea_transient_angular_velocity_field_id,
+    fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
+    fea_transient_rotation_field_id, fea_transient_strain_energy_field_id,
+    fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
+    FeaProgressPhase, FeaProgressStatus, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
+    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
+    FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
+    FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
+    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
+    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
+    FEA_FIELD_EM_CURRENT_DENSITY_REAL, FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
+    FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_ENERGY_DENSITY,
+    FEA_FIELD_EM_MAGNETIC_FIELD_REAL, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
+    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_POYNTING_VECTOR_REAL,
+    FEA_FIELD_EM_RESIDUAL_REAL, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
@@ -5498,6 +5498,59 @@ fn analysis_run_nonlinear_returns_native_nonlinear_result() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_NONLINEAR_CONVERGENCE"));
+}
+
+#[test]
+fn analysis_run_nonlinear_exposes_beam_rotation_snapshots() {
+    let _guard = analysis_test_guard();
+    let mut model = runmat_analysis_fea::fixtures::fixture_model(
+        runmat_analysis_fea::fixtures::FixtureId::StructuralBeamCantileverEndMomentReference,
+    );
+    model.steps = vec![AnalysisStep {
+        step_id: "beam_moment_nonlinear".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+
+    let envelope = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            increment_count: 8,
+            ..AnalysisNonlinearRunOptions::balanced()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("beam nonlinear run should succeed");
+    let nonlinear = envelope
+        .data
+        .nonlinear_results
+        .as_ref()
+        .expect("nonlinear payload should exist");
+
+    assert_eq!(
+        nonlinear.load_factors.len(),
+        nonlinear.rotation_snapshots.len()
+    );
+    assert_eq!(
+        nonlinear.rotation_snapshots[0].field_id,
+        fea_nonlinear_rotation_field_id(0)
+    );
+    assert_eq!(nonlinear.rotation_snapshots[0].shape, vec![2, 3]);
+
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("nonlinear beam results should be queryable");
+    let descriptor = results
+        .data
+        .field_descriptors
+        .iter()
+        .find(|descriptor| descriptor.field_id == fea_nonlinear_rotation_field_id(0))
+        .expect("nonlinear rotation descriptor should be present");
+    assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
+    assert_eq!(descriptor.component_count, Some(3));
 }
 
 #[test]

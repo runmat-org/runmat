@@ -189,6 +189,10 @@ pub fn fea_nonlinear_displacement_field_id(increment_index: usize) -> String {
     format!("nonlinear.displacement.{increment_index}")
 }
 
+pub fn fea_nonlinear_rotation_field_id(increment_index: usize) -> String {
+    format!("nonlinear.rotation.{increment_index}")
+}
+
 pub fn fea_nonlinear_von_mises_field_id(increment_index: usize) -> String {
     format!("nonlinear.von_mises.{increment_index}")
 }
@@ -679,6 +683,7 @@ pub struct FeaNonlinearRunResult {
     pub run: FeaRunResult,
     pub load_factors: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
+    pub rotation_snapshots: Vec<AnalysisField>,
     pub von_mises_snapshots: Vec<AnalysisField>,
     pub plastic_strain_snapshots: Vec<AnalysisField>,
     pub equivalent_plastic_strain_snapshots: Vec<AnalysisField>,
