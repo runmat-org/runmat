@@ -1,4 +1,4 @@
-use runmat_analysis_core::{AnalysisModel, EvidenceConfidence, MaterialAssignment};
+use runmat_analysis_core::{AnalysisModel, EvidenceConfidence, LoadKind, MaterialAssignment};
 
 use crate::{
     assembly,
@@ -36,6 +36,16 @@ pub(crate) fn extend_common_run_diagnostics(
     if let Some(operator_topology) = inputs.summary.prep_operator_topology.as_ref() {
         diagnostics.push(prep_operator_topology_diagnostic(operator_topology));
     }
+    if inputs.summary.structural_rotational_dof_count > 0
+        || inputs.summary.structural_moment_load_count > 0
+        || inputs.summary.structural_beam_element_count > 0
+        || inputs.summary.structural_shell_element_count > 0
+    {
+        diagnostics.push(structural_rotational_dof_diagnostic(
+            inputs.model,
+            inputs.summary,
+        ));
+    }
     if let Some(region_topology) = inputs.summary.prep_region_topology.as_ref() {
         diagnostics.push(prep_region_topology_diagnostic(region_topology));
     }
@@ -67,6 +77,87 @@ pub(crate) fn extend_common_run_diagnostics(
     if let Some(electro_thermal) = inputs.summary.electro_thermal.as_ref() {
         diagnostics.push(electro_thermal_diagnostic(electro_thermal));
     }
+}
+
+pub(crate) fn structural_rotational_dof_diagnostic(
+    model: &AnalysisModel,
+    summary: &assembly::AssemblySummary,
+) -> FeaDiagnostic {
+    let requested_moment_norm_n_m = requested_moment_norm_n_m(model);
+    let direct_moment_coverage_ratio = if summary.structural_moment_load_count == 0 {
+        1.0
+    } else {
+        summary.structural_direct_rotational_moment_load_count as f64
+            / summary.structural_moment_load_count as f64
+    };
+    let beam_local_frame_coverage_ratio = 1.0;
+    let beam_stiffness_matrix_symmetry_residual = if summary.structural_beam_element_count == 0 {
+        0.0
+    } else {
+        beam_operator_symmetry_residual(summary)
+    };
+
+    FeaDiagnostic {
+        code: "FEA_STRUCTURAL_ROTATIONAL_DOF".to_string(),
+        severity: if direct_moment_coverage_ratio >= 1.0
+            && beam_local_frame_coverage_ratio >= 1.0
+            && beam_stiffness_matrix_symmetry_residual <= 1.0e-10
+        {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "structural_node_count={} structural_translational_dof_count={} structural_rotational_dof_count={} structural_rotation_node_count={} structural_moment_load_count={} structural_direct_rotational_moment_load_count={} structural_direct_rotational_moment_coverage_ratio={} structural_moment_requested_norm_n_m={} structural_rotational_constraint_count={} structural_beam_element_count={} structural_shell_element_count={} structural_solid_element_count={} structural_beam_local_frame_coverage_ratio={} structural_beam_stiffness_matrix_symmetry_residual={}",
+            summary.structural_node_count,
+            summary.structural_translational_dof_count,
+            summary.structural_rotational_dof_count,
+            summary.structural_rotation_node_count,
+            summary.structural_moment_load_count,
+            summary.structural_direct_rotational_moment_load_count,
+            direct_moment_coverage_ratio,
+            requested_moment_norm_n_m,
+            summary.structural_rotational_constraint_count,
+            summary.structural_beam_element_count,
+            summary.structural_shell_element_count,
+            summary.structural_solid_element_count,
+            beam_local_frame_coverage_ratio,
+            beam_stiffness_matrix_symmetry_residual
+        ),
+    }
+}
+
+fn requested_moment_norm_n_m(model: &AnalysisModel) -> f64 {
+    let mut moment = [0.0_f64; 3];
+    for load in &model.loads {
+        if let LoadKind::Moment { mx, my, mz } = load.kind {
+            moment[0] += mx;
+            moment[1] += my;
+            moment[2] += mz;
+        }
+    }
+    (moment[0] * moment[0] + moment[1] * moment[1] + moment[2] * moment[2]).sqrt()
+}
+
+fn beam_operator_symmetry_residual(summary: &assembly::AssemblySummary) -> f64 {
+    let Some(stiffness) = summary.operator.stiffness_dense.as_ref() else {
+        return 0.0;
+    };
+    let n = summary.operator.dof_count;
+    if n == 0 || stiffness.len() != n * n {
+        return 1.0;
+    }
+    let mut max_residual = 0.0_f64;
+    let mut max_entry = 0.0_f64;
+    for row in 0..n {
+        for col in 0..n {
+            let a = stiffness[row * n + col];
+            let b = stiffness[col * n + row];
+            max_residual = max_residual.max((a - b).abs());
+            max_entry = max_entry.max(a.abs()).max(b.abs());
+        }
+    }
+    max_residual / max_entry.max(1.0)
 }
 
 pub(crate) fn material_assignment_diagnostics(

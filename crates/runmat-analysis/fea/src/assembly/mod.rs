@@ -1013,10 +1013,8 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
         .ok()?;
         let element_dofs =
             beam_element_dof_indices(&structural_dof_layout, node_i_index, node_j_index)?;
-        for local_row in 0..BEAM_ELEMENT_DOF_COUNT {
-            let global_row = element_dofs[local_row];
-            for local_col in 0..BEAM_ELEMENT_DOF_COUNT {
-                let global_col = element_dofs[local_col];
+        for (local_row, &global_row) in element_dofs.iter().enumerate() {
+            for (local_col, &global_col) in element_dofs.iter().enumerate() {
                 dense[global_row * dof_count + global_col] += stiffness[local_row][local_col];
             }
         }

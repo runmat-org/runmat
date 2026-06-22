@@ -196,18 +196,18 @@ fn add_symmetric(matrix: &mut BeamMatrix12, row: usize, col: usize, value: f64) 
 
 fn transform_transpose_multiply(transform: &BeamTransform12, local: &BeamMatrix12) -> BeamMatrix12 {
     let mut temp = [[0.0; BEAM_ELEMENT_DOF_COUNT]; BEAM_ELEMENT_DOF_COUNT];
-    for row in 0..BEAM_ELEMENT_DOF_COUNT {
-        for col in 0..BEAM_ELEMENT_DOF_COUNT {
-            temp[row][col] = (0..BEAM_ELEMENT_DOF_COUNT)
+    for (row, temp_row) in temp.iter_mut().enumerate() {
+        for (col, value) in temp_row.iter_mut().enumerate() {
+            *value = (0..BEAM_ELEMENT_DOF_COUNT)
                 .map(|idx| local[row][idx] * transform[idx][col])
                 .sum();
         }
     }
 
     let mut global = [[0.0; BEAM_ELEMENT_DOF_COUNT]; BEAM_ELEMENT_DOF_COUNT];
-    for row in 0..BEAM_ELEMENT_DOF_COUNT {
-        for col in 0..BEAM_ELEMENT_DOF_COUNT {
-            global[row][col] = (0..BEAM_ELEMENT_DOF_COUNT)
+    for (row, global_row) in global.iter_mut().enumerate() {
+        for (col, value) in global_row.iter_mut().enumerate() {
+            *value = (0..BEAM_ELEMENT_DOF_COUNT)
                 .map(|idx| transform[idx][row] * temp[idx][col])
                 .sum();
         }

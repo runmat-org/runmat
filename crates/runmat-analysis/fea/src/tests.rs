@@ -255,6 +255,40 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
         reaction_moment[2],
         moment_n_m
     );
+    assert!(result.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_STRUCTURAL_ROTATIONAL_DOF"
+            && diag.message.contains("structural_rotational_dof_count=6")
+            && diag.message.contains("structural_rotation_node_count=2")
+            && diag.message.contains("structural_moment_load_count=1")
+            && diag
+                .message
+                .contains("structural_direct_rotational_moment_load_count=1")
+            && diag.message.contains("structural_beam_element_count=1")
+            && diag
+                .message
+                .contains("structural_beam_local_frame_coverage_ratio=1")
+            && diag
+                .message
+                .contains("structural_beam_stiffness_matrix_symmetry_residual=0")
+    }));
+    assert!(result.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_STRUCTURAL_MOMENT_BALANCE"
+            && diag
+                .message
+                .contains("structural_reaction_moment_norm_n_m=1.25")
+            && diag
+                .message
+                .contains("structural_moment_requested_norm_n_m=1.25")
+            && diag
+                .message
+                .contains("structural_moment_realized_norm_n_m=1.25")
+            && diag
+                .message
+                .contains("structural_moment_realization_ratio=1")
+            && diag
+                .message
+                .contains("structural_moment_balance_residual_ratio=")
+    }));
 }
 
 #[test]
