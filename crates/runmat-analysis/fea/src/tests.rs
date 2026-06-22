@@ -548,6 +548,76 @@ fn thermal_solver_emits_heat_transfer_fields() {
 }
 
 #[test]
+fn prepared_thermal_recovery_uses_prep_edge_graph() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let result = crate::run_thermal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ThermalSolveOptions {
+            step_count: 4,
+            prep_context: Some(FeaPrepContext {
+                prepared_mesh_count: 1,
+                prepared_node_count: 14,
+                prepared_element_count: 24,
+                mapped_region_count: 2,
+                min_scaled_jacobian: 0.86,
+                mean_aspect_ratio: 1.4,
+                inverted_element_count: 0,
+                mapped_load_count: 1,
+                mapped_bc_count: 1,
+                layout_seed: 23,
+                topology_dof_multiplier: 1.5,
+                topology_bandwidth_estimate: 3,
+                mapped_region_participation_ratio: 0.85,
+                topology_surface_patch_ratio: 0.2,
+                topology_volume_core_ratio: 0.7,
+                topology_mixed_family_ratio: 0.05,
+                topology_region_span_mean: 4.0,
+                topology_region_block_count: 2,
+                topology_region_mesh_mean: 3.0,
+                topology_region_mesh_variance: 0.4,
+                topology_triangle_family_ratio: 0.2,
+                topology_quad_family_ratio: 0.25,
+                topology_tet_family_ratio: 0.35,
+                topology_hex_family_ratio: 0.2,
+                coordinate_span_x_m: 2.0,
+                coordinate_span_y_m: 0.5,
+                coordinate_span_z_m: 0.4,
+                coordinate_active_dimension_count: 3,
+                coordinate_characteristic_length_m: 0.2,
+                calibration_profile_override: None,
+            }),
+            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 50.0,
+                thermal_expansion_coefficient: 1.2e-5,
+                field_source: None,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
+            }),
+            ..ThermalSolveOptions::default()
+        },
+    )
+    .expect("prepared thermal solve should succeed");
+
+    let recovery = result
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_THERMAL_FIELD_RECOVERY")
+        .expect("thermal recovery diagnostic should be emitted");
+    assert!(recovery.message.contains("basis=prep_element_edge_graph"));
+    assert!(recovery.message.contains("prep_recovery_edge_count="));
+    assert_eq!(result.temperature_gradient_snapshots[1].shape[1], 3);
+    assert_eq!(
+        result.heat_flux_snapshots[1].shape,
+        result.temperature_gradient_snapshots[1].shape
+    );
+    assert_eq!(result.boundary_heat_flux_snapshots[1].shape, vec![6]);
+}
+
+#[test]
 fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
     let model = fixture_model(FixtureId::ModalLarge);
     let result = crate::run_modal_with_options(

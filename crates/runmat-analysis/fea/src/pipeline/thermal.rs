@@ -233,7 +233,7 @@ pub fn run_thermal_with_options(
         .collect::<Vec<_>>();
     let recovery_topology = ThermalRecoveryTopology::from_assembly(&summary, node_count);
     let temperature_gradient_raw =
-        recover_temperature_gradients(&temperature_snapshots_raw, recovery_topology);
+        recover_temperature_gradients(&temperature_snapshots_raw, &recovery_topology);
     let heat_flux_raw =
         recover_heat_flux_snapshots(&temperature_gradient_raw, constitutive.conductivity_mean);
     let heat_source_raw = recover_heat_source_snapshots(
@@ -243,7 +243,7 @@ pub fn run_thermal_with_options(
         constitutive.heat_capacity_mean,
     );
     let boundary_heat_flux_raw =
-        recover_boundary_heat_flux_snapshots(&heat_flux_raw, recovery_topology);
+        recover_boundary_heat_flux_snapshots(&heat_flux_raw, &recovery_topology);
     let heat_balance = thermal_heat_balance(
         &temperature_snapshots_raw,
         &heat_source_raw,
@@ -253,7 +253,7 @@ pub fn run_thermal_with_options(
         constitutive.heat_capacity_mean,
         thermo_context.reference_temperature_k,
     );
-    let thermal_elements = thermal_element_node_sets(recovery_topology);
+    let thermal_elements = thermal_element_node_sets(&recovery_topology);
     let element_count = thermal_elements.len().max(1);
     let temperature_gradient_snapshots = project_nodal_vector_snapshots_to_thermal_elements(
         &temperature_gradient_raw,
@@ -371,7 +371,7 @@ pub fn run_thermal_with_options(
     let known_answer = thermal_known_answer(
         &initial_snapshot,
         &final_snapshot,
-        recovery_topology,
+        &recovery_topology,
         thermo_context.reference_temperature_k,
         expected_known_answer_delta,
         source_boundary,
@@ -437,7 +437,8 @@ pub fn run_thermal_with_options(
         code: "FEA_THERMAL_FIELD_RECOVERY".to_string(),
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
-            "recovery_node_count={} recovery_dimensions={}x{}x{} recovery_spacing_x={} recovery_spacing_y={} recovery_spacing_z={} coordinate_active_dimension_count={} coordinate_characteristic_length_m={} boundary_face_count={}",
+            "basis={} recovery_node_count={} recovery_dimensions={}x{}x{} recovery_spacing_x={} recovery_spacing_y={} recovery_spacing_z={} coordinate_active_dimension_count={} coordinate_characteristic_length_m={} prep_recovery_edge_count={} boundary_face_count={}",
+            recovery_topology.basis.as_str(),
             recovery_topology.node_count,
             recovery_topology.dims[0],
             recovery_topology.dims[1],
@@ -447,6 +448,7 @@ pub fn run_thermal_with_options(
             recovery_topology.spacing[2],
             recovery_topology.active_dimension_count,
             recovery_topology.characteristic_length_m,
+            recovery_topology.prep_recovery_edge_count,
             BOUNDARY_HEAT_FLUX_COMPONENT_COUNT,
         ),
     });
@@ -554,13 +556,39 @@ pub fn run_thermal_with_options(
     })
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct ThermalRecoveryTopology {
     node_count: usize,
     dims: [usize; VECTOR_COMPONENT_COUNT],
     spacing: [f64; VECTOR_COMPONENT_COUNT],
     active_dimension_count: usize,
     characteristic_length_m: f64,
+    basis: ThermalRecoveryBasis,
+    prep_recovery_edge_count: usize,
+    prep_edge_elements: Vec<ThermalRecoveryEdge>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ThermalRecoveryBasis {
+    PrepElementEdgeGraph,
+    InferredLattice,
+}
+
+impl ThermalRecoveryBasis {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::PrepElementEdgeGraph => "prep_element_edge_graph",
+            Self::InferredLattice => "inferred_lattice",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ThermalRecoveryEdge {
+    from_node: usize,
+    to_node: usize,
+    axis: usize,
+    length_m: f64,
 }
 
 impl ThermalRecoveryTopology {
@@ -602,16 +630,25 @@ impl ThermalRecoveryTopology {
         let spacing = coordinate_summary
             .map(|item| thermal_axis_spacing(dims, item.span_m, characteristic_length_m))
             .unwrap_or_else(|| thermal_normalized_axis_spacing(dims));
+        let prep_edge_elements = thermal_prep_edge_elements(summary, node_count.max(1));
+        let basis = if prep_edge_elements.is_empty() {
+            ThermalRecoveryBasis::InferredLattice
+        } else {
+            ThermalRecoveryBasis::PrepElementEdgeGraph
+        };
         Self {
             node_count: node_count.max(1),
             dims,
             spacing,
             active_dimension_count,
             characteristic_length_m,
+            basis,
+            prep_recovery_edge_count: prep_edge_elements.len(),
+            prep_edge_elements,
         }
     }
 
-    fn coords(self, index: usize) -> [usize; VECTOR_COMPONENT_COUNT] {
+    fn coords(&self, index: usize) -> [usize; VECTOR_COMPONENT_COUNT] {
         let x_dim = self.dims[0].max(1);
         let y_dim = self.dims[1].max(1);
         let plane = x_dim.saturating_mul(y_dim).max(1);
@@ -622,7 +659,7 @@ impl ThermalRecoveryTopology {
         [x, y, z]
     }
 
-    fn index(self, coords: [usize; VECTOR_COMPONENT_COUNT]) -> Option<usize> {
+    fn index(&self, coords: [usize; VECTOR_COMPONENT_COUNT]) -> Option<usize> {
         if coords
             .iter()
             .zip(self.dims.iter())
@@ -635,6 +672,48 @@ impl ThermalRecoveryTopology {
             + coords[2].saturating_mul(self.dims[0].saturating_mul(self.dims[1]));
         (index < self.node_count).then_some(index)
     }
+}
+
+fn thermal_prep_edge_elements(
+    summary: &AssemblySummary,
+    node_count: usize,
+) -> Vec<ThermalRecoveryEdge> {
+    let active_dimension_count = summary
+        .prep_coordinates
+        .map(|coordinates| coordinates.active_dimension_count.max(1))
+        .unwrap_or(VECTOR_COMPONENT_COUNT)
+        .min(VECTOR_COMPONENT_COUNT);
+    let mut edges = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for edge in &summary.prep_recovery_edges {
+        let from_node = edge.from_dof / VECTOR_COMPONENT_COUNT;
+        let to_node = edge.to_dof / VECTOR_COMPONENT_COUNT;
+        if from_node == to_node || from_node >= node_count || to_node >= node_count {
+            continue;
+        }
+        let key = if from_node < to_node {
+            (from_node, to_node)
+        } else {
+            (to_node, from_node)
+        };
+        if !seen.insert(key) {
+            continue;
+        }
+        let from_component = edge.from_dof % VECTOR_COMPONENT_COUNT;
+        let to_component = edge.to_dof % VECTOR_COMPONENT_COUNT;
+        let axis = if from_component == to_component {
+            from_component
+        } else {
+            edge.element_family_index % active_dimension_count.max(1)
+        };
+        edges.push(ThermalRecoveryEdge {
+            from_node,
+            to_node,
+            axis: axis.min(VECTOR_COMPONENT_COUNT - 1),
+            length_m: finite_positive_or(edge.edge_length_m, 1.0),
+        });
+    }
+    edges
 }
 
 fn thermal_normalized_axis_spacing(
@@ -676,8 +755,11 @@ fn finite_positive_or(value: f64, fallback: f64) -> f64 {
 
 fn recover_temperature_gradients(
     temperature_snapshots: &[Vec<f64>],
-    topology: ThermalRecoveryTopology,
+    topology: &ThermalRecoveryTopology,
 ) -> Vec<Vec<f64>> {
+    if !topology.prep_edge_elements.is_empty() {
+        return recover_prep_edge_temperature_gradients(temperature_snapshots, topology);
+    }
     temperature_snapshots
         .iter()
         .map(|temperatures| {
@@ -694,9 +776,46 @@ fn recover_temperature_gradients(
         .collect()
 }
 
+fn recover_prep_edge_temperature_gradients(
+    temperature_snapshots: &[Vec<f64>],
+    topology: &ThermalRecoveryTopology,
+) -> Vec<Vec<f64>> {
+    temperature_snapshots
+        .iter()
+        .map(|temperatures| {
+            let node_count = temperatures.len().max(topology.node_count).max(1);
+            let mut gradient = vec![0.0; node_count * VECTOR_COMPONENT_COUNT];
+            let mut contribution_count = vec![0usize; node_count * VECTOR_COMPONENT_COUNT];
+            for edge in &topology.prep_edge_elements {
+                let Some(from_temperature) = temperatures.get(edge.from_node).copied() else {
+                    continue;
+                };
+                let Some(to_temperature) = temperatures.get(edge.to_node).copied() else {
+                    continue;
+                };
+                let derivative = (to_temperature - from_temperature) / edge.length_m.max(1.0e-12);
+                for node in [edge.from_node, edge.to_node] {
+                    let slot = node * VECTOR_COMPONENT_COUNT + edge.axis;
+                    if slot >= gradient.len() {
+                        continue;
+                    }
+                    gradient[slot] += derivative;
+                    contribution_count[slot] = contribution_count[slot].saturating_add(1);
+                }
+            }
+            for (value, count) in gradient.iter_mut().zip(contribution_count.iter()) {
+                if *count > 0 {
+                    *value /= *count as f64;
+                }
+            }
+            gradient
+        })
+        .collect()
+}
+
 fn thermal_axis_derivative(
     temperatures: &[f64],
-    topology: ThermalRecoveryTopology,
+    topology: &ThermalRecoveryTopology,
     index: usize,
     axis: usize,
 ) -> f64 {
@@ -840,7 +959,14 @@ fn average_nodal_scalar(snapshot: &[f64], element_nodes: &[usize]) -> f64 {
     }
 }
 
-fn thermal_element_node_sets(topology: ThermalRecoveryTopology) -> Vec<Vec<usize>> {
+fn thermal_element_node_sets(topology: &ThermalRecoveryTopology) -> Vec<Vec<usize>> {
+    if !topology.prep_edge_elements.is_empty() {
+        return topology
+            .prep_edge_elements
+            .iter()
+            .map(|edge| vec![edge.from_node, edge.to_node])
+            .collect();
+    }
     let x_cells = topology.dims[0].saturating_sub(1).max(1);
     let y_cells = topology.dims[1].saturating_sub(1).max(1);
     let z_cells = topology.dims[2].saturating_sub(1).max(1);
@@ -879,7 +1005,7 @@ fn thermal_axis_offsets(dim: usize) -> std::ops::RangeInclusive<usize> {
 
 fn recover_boundary_heat_flux_snapshots(
     heat_flux_snapshots: &[Vec<f64>],
-    topology: ThermalRecoveryTopology,
+    topology: &ThermalRecoveryTopology,
 ) -> Vec<Vec<f64>> {
     heat_flux_snapshots
         .iter()
@@ -887,7 +1013,10 @@ fn recover_boundary_heat_flux_snapshots(
         .collect()
 }
 
-fn thermal_boundary_face_fluxes(heat_flux: &[f64], topology: ThermalRecoveryTopology) -> Vec<f64> {
+fn thermal_boundary_face_fluxes(heat_flux: &[f64], topology: &ThermalRecoveryTopology) -> Vec<f64> {
+    if !topology.prep_edge_elements.is_empty() {
+        return thermal_prep_edge_boundary_fluxes(heat_flux, topology);
+    }
     let mut boundary = vec![0.0; BOUNDARY_HEAT_FLUX_COMPONENT_COUNT];
     for axis in 0..VECTOR_COMPONENT_COUNT {
         if topology.dims[axis] <= 1 {
@@ -901,9 +1030,40 @@ fn thermal_boundary_face_fluxes(heat_flux: &[f64], topology: ThermalRecoveryTopo
     boundary
 }
 
+fn thermal_prep_edge_boundary_fluxes(
+    heat_flux: &[f64],
+    topology: &ThermalRecoveryTopology,
+) -> Vec<f64> {
+    let mut boundary = vec![0.0; BOUNDARY_HEAT_FLUX_COMPONENT_COUNT];
+    let mut counts = [0usize; BOUNDARY_HEAT_FLUX_COMPONENT_COUNT];
+    for edge in &topology.prep_edge_elements {
+        let axis = edge.axis.min(VECTOR_COMPONENT_COUNT - 1);
+        let mut edge_flux = 0.0;
+        let mut edge_count = 0usize;
+        for node in [edge.from_node, edge.to_node] {
+            if let Some(value) = heat_flux.get(node * VECTOR_COMPONENT_COUNT + axis) {
+                edge_flux += *value;
+                edge_count = edge_count.saturating_add(1);
+            }
+        }
+        if edge_count == 0 {
+            continue;
+        }
+        let face_slot = axis * 2 + usize::from(edge_flux >= 0.0);
+        boundary[face_slot] += edge_flux.abs() / edge_count as f64;
+        counts[face_slot] = counts[face_slot].saturating_add(1);
+    }
+    for (value, count) in boundary.iter_mut().zip(counts.iter()) {
+        if *count > 0 {
+            *value /= *count as f64;
+        }
+    }
+    boundary
+}
+
 fn thermal_face_average(
     heat_flux: &[f64],
-    topology: ThermalRecoveryTopology,
+    topology: &ThermalRecoveryTopology,
     axis: usize,
     face_coord: usize,
 ) -> f64 {
@@ -1060,7 +1220,7 @@ fn thermal_source_boundary_summary(
 fn thermal_known_answer(
     initial_snapshot: &[f64],
     final_snapshot: &[f64],
-    topology: ThermalRecoveryTopology,
+    topology: &ThermalRecoveryTopology,
     reference_temperature_k: f64,
     expected_lumped_delta_k: f64,
     source_boundary: ThermalSourceBoundarySummary,
@@ -1111,7 +1271,7 @@ fn thermal_known_answer(
 
 fn thermal_slab_linear_profile_rms_ratio(
     final_snapshot: &[f64],
-    topology: ThermalRecoveryTopology,
+    topology: &ThermalRecoveryTopology,
 ) -> f64 {
     if final_snapshot.len() <= 2 {
         return 0.0;
@@ -1161,10 +1321,31 @@ fn thermal_slab_linear_profile_rms_ratio(
 
 fn thermal_slab_monotonic_edge_fraction(
     final_snapshot: &[f64],
-    topology: ThermalRecoveryTopology,
+    topology: &ThermalRecoveryTopology,
 ) -> f64 {
     if final_snapshot.len() <= 1 {
         return 1.0;
+    }
+    if !topology.prep_edge_elements.is_empty() {
+        let mut checked_edges = 0usize;
+        let mut monotonic_edges = 0usize;
+        for edge in &topology.prep_edge_elements {
+            let Some(from_temperature) = final_snapshot.get(edge.from_node) else {
+                continue;
+            };
+            let Some(to_temperature) = final_snapshot.get(edge.to_node) else {
+                continue;
+            };
+            checked_edges = checked_edges.saturating_add(1);
+            if *to_temperature + 1.0e-9 >= *from_temperature {
+                monotonic_edges = monotonic_edges.saturating_add(1);
+            }
+        }
+        return if checked_edges == 0 {
+            1.0
+        } else {
+            monotonic_edges as f64 / checked_edges as f64
+        };
     }
     let mut checked_edges = 0usize;
     let mut monotonic_edges = 0usize;
