@@ -122,6 +122,50 @@ fn sinc_complex_host(re: f64, im: f64) -> (f64, f64) {
     )
 }
 
+fn sign_scalar_host(value: f64) -> f64 {
+    if value > 0.0 {
+        1.0
+    } else if value < 0.0 {
+        -1.0
+    } else if value == 0.0 {
+        0.0
+    } else {
+        value
+    }
+}
+
+fn sign_complex_host(re: f64, im: f64) -> (f64, f64) {
+    if re == 0.0 && im == 0.0 {
+        return (0.0, 0.0);
+    }
+    if re.is_nan() || im.is_nan() {
+        return (f64::NAN, f64::NAN);
+    }
+    let re_inf = re.is_infinite();
+    let im_inf = im.is_infinite();
+    if re_inf || im_inf {
+        let real = if re_inf { re.signum() } else { 0.0 };
+        let imag = if im_inf { im.signum() } else { 0.0 };
+        let norm = (real * real + imag * imag).sqrt();
+        if norm == 0.0 {
+            return (real, imag);
+        }
+        return (real / norm, imag / norm);
+    }
+    let scale = re.abs().max(im.abs());
+    if scale == 0.0 {
+        return (0.0, 0.0);
+    }
+    let nr = re / scale;
+    let ni = im / scale;
+    let magnitude = (nr * nr + ni * ni).sqrt();
+    if magnitude == 0.0 {
+        (0.0, 0.0)
+    } else {
+        (nr / magnitude, ni / magnitude)
+    }
+}
+
 fn heaviside_scalar_host(value: f64) -> f64 {
     if value > 0.0 {
         1.0
@@ -3601,6 +3645,41 @@ impl AccelProvider for InProcessProvider {
             };
             drop(guard);
             Ok(self.allocate_tensor(out, a.shape.clone()))
+        })
+    }
+
+    fn unary_sign<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let out: Vec<f64> = if runmat_accelerate_api::handle_storage(a)
+                == GpuTensorStorage::ComplexInterleaved
+            {
+                ensure!(
+                    abuf.len() % 2 == 0,
+                    "unary_sign: complex-interleaved buffer has odd length"
+                );
+                let mut out = Vec::with_capacity(abuf.len());
+                for pair in abuf.chunks_exact(2) {
+                    let (re, im) = sign_complex_host(pair[0], pair[1]);
+                    out.push(re);
+                    out.push(im);
+                }
+                out
+            } else {
+                abuf.iter().copied().map(sign_scalar_host).collect()
+            };
+            drop(guard);
+            Ok(self.allocate_tensor_with_storage(
+                out,
+                a.shape.clone(),
+                runmat_accelerate_api::handle_storage(a),
+            ))
         })
     }
 

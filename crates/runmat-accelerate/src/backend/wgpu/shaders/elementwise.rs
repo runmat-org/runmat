@@ -8,6 +8,7 @@ pub(crate) enum ComplexUnaryOp {
     Conj,
     Angle,
     Sinc,
+    Sign,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,6 +41,28 @@ pub(crate) fn complex_unary_shader(op: ComplexUnaryOp, precision: NumericPrecisi
     let max_finite = match precision {
         NumericPrecision::F64 => "1.7976931348623157e308",
         NumericPrecision::F32 => "3.4028234663852886e38",
+    };
+    let half_max_finite = match precision {
+        NumericPrecision::F64 => "8.988465674311579e307",
+        NumericPrecision::F32 => "1.7014117331926443e38",
+    };
+    let sign_inf_helper = match precision {
+        NumericPrecision::F64 => {
+            r#"
+fn isinf_complex_unary(x: f64) -> bool {
+    let bits = bitcast<u64>(x) & 0x7fffffffffffffffu;
+    return bits == 0x7ff0000000000000u;
+}
+"#
+        }
+        NumericPrecision::F32 => {
+            r#"
+fn isinf_complex_unary(x: f32) -> bool {
+    let bits = bitcast<u32>(x) & 0x7fffffffu;
+    return bits == 0x7f800000u;
+}
+"#
+        }
     };
     let extra_helpers = match op {
         ComplexUnaryOp::Sinc => format!(
@@ -87,6 +110,90 @@ fn sinc_complex_lane(out_idx: u32) -> {ty} {{
             ty = ty,
             max_finite = max_finite,
         ),
+        ComplexUnaryOp::Sign => format!(
+            r#"
+const HALF_MAX_FINITE_COMPLEX_UNARY: {ty} = {ty}({half_max_finite});
+
+fn nan_complex_unary() -> {ty} {{
+    return {ty}(0.0) / {ty}(0.0);
+}}
+
+{sign_inf_helper}
+
+fn signum_complex_unary(x: {ty}) -> {ty} {{
+    if x > {ty}(0.0) {{
+        return {ty}(1.0);
+    }}
+    if x < {ty}(0.0) {{
+        return -{ty}(1.0);
+    }}
+    if x == {ty}(0.0) {{
+        return {ty}(0.0);
+    }}
+    return x;
+}}
+
+fn sign_complex_lane(out_idx: u32) -> {ty} {{
+    let elem = out_idx / 2u;
+    let re = A.data[elem * 2u];
+    let im = A.data[elem * 2u + 1u];
+    if (re != re) || (im != im) {{
+        return nan_complex_unary();
+    }}
+    if (re == {ty}(0.0)) && (im == {ty}(0.0)) {{
+        return {ty}(0.0);
+    }}
+
+    let re_inf = isinf_complex_unary(re);
+    let im_inf = isinf_complex_unary(im);
+    if re_inf || im_inf {{
+        let real = select({ty}(0.0), signum_complex_unary(re), re_inf);
+        let imag = select({ty}(0.0), signum_complex_unary(im), im_inf);
+        let norm = sqrt((real * real) + (imag * imag));
+        if norm == {ty}(0.0) {{
+            return select(real, imag, (out_idx % 2u) == 1u);
+        }}
+        let out_re = real / norm;
+        let out_im = imag / norm;
+        return select(out_re, out_im, (out_idx % 2u) == 1u);
+    }}
+
+    let abs_re = abs(re);
+    let abs_im = abs(im);
+    var out_re: {ty};
+    var out_im: {ty};
+    if abs_re >= abs_im {{
+        var denom_re = re;
+        var numer_im = im;
+        if abs_re > HALF_MAX_FINITE_COMPLEX_UNARY {{
+            denom_re = re * {ty}(0.5);
+            numer_im = im * {ty}(0.5);
+        }}
+        let ratio = numer_im / denom_re;
+        let denom = sqrt({ty}(1.0) + (ratio * ratio));
+        let sign_re = signum_complex_unary(re);
+        out_re = sign_re / denom;
+        out_im = (sign_re * ratio) / denom;
+    }} else {{
+        var denom_im = im;
+        var numer_re = re;
+        if abs_im > HALF_MAX_FINITE_COMPLEX_UNARY {{
+            denom_im = im * {ty}(0.5);
+            numer_re = re * {ty}(0.5);
+        }}
+        let ratio = numer_re / denom_im;
+        let denom = sqrt({ty}(1.0) + (ratio * ratio));
+        let sign_im = signum_complex_unary(im);
+        out_re = (sign_im * ratio) / denom;
+        out_im = sign_im / denom;
+    }}
+    return select(out_re, out_im, (out_idx % 2u) == 1u);
+}}
+"#,
+            ty = ty,
+            half_max_finite = half_max_finite,
+            sign_inf_helper = sign_inf_helper,
+        ),
         _ => String::new(),
     };
     let expression = match op {
@@ -100,6 +207,7 @@ fn sinc_complex_lane(out_idx: u32) -> {ty} {{
         }
         ComplexUnaryOp::Angle => "atan2(A.data[idx * 2u + 1u], A.data[idx * 2u])",
         ComplexUnaryOp::Sinc => "sinc_complex_lane(idx)",
+        ComplexUnaryOp::Sign => "sign_complex_lane(idx)",
     };
     format!(
         r#"
