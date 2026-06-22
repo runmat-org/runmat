@@ -5801,6 +5801,9 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
                 .message
                 .contains("basis=finite_volume_velocity_pressure")
             && diag.message.contains("topology_basis=implicit_channel")
+            && diag
+                .message
+                .contains("topology_geometry_source=implicit_channel")
             && diag.message.contains("domain_length_m=")
             && diag.message.contains("face_area_m2=")
             && diag.message.contains("control_volume_volume_m3=")
@@ -5913,12 +5916,19 @@ fn analysis_run_cfd_uses_prep_control_volume_topology() {
             && diag
                 .message
                 .contains("topology_basis=prep_control_volume_connectivity")
+            && diag
+                .message
+                .contains("topology_geometry_source=prep_element_geometry")
             && diag.message.contains("control_volume_count=15")
             && diag.message.contains("domain_length_m=2.4")
+            && diag.message.contains("face_area_m2=0.04")
             && diag.message.contains("face_area_m2=")
             && diag.message.contains("control_volume_volume_m3=")
             && diag.message.contains("courant_number=")
             && diag.message.contains("active_dimension_count=3")
+            && diag.message.contains("element_geometry_node_count=4")
+            && diag.message.contains("element_geometry_edge_count=5")
+            && diag.message.contains("element_geometry_coverage_ratio=1")
     }));
 }
 

@@ -3348,12 +3348,17 @@ fn cfd_node_count_from_model(
 #[derive(Clone, Copy, Debug)]
 struct CfdDomainTopology {
     basis: CfdDomainTopologyBasis,
+    geometry_source: CfdDomainGeometrySource,
     node_count: usize,
     control_volume_count: usize,
     domain_length_m: f64,
     hydraulic_diameter_m: f64,
+    face_area_m2: f64,
     dx_m: f64,
     active_dimension_count: usize,
+    element_geometry_node_count: usize,
+    element_geometry_edge_count: usize,
+    element_geometry_coverage_ratio: f64,
 }
 
 impl CfdDomainTopology {
@@ -3370,12 +3375,17 @@ impl CfdDomainTopology {
         let control_volume_count = node_count.saturating_sub(1).max(1);
         Self {
             basis: CfdDomainTopologyBasis::ImplicitChannel,
+            geometry_source: CfdDomainGeometrySource::ImplicitChannel,
             node_count,
             control_volume_count,
             domain_length_m: 1.0,
             hydraulic_diameter_m: 1.0,
+            face_area_m2: 1.0,
             dx_m: 1.0 / control_volume_count as f64,
             active_dimension_count: 1,
+            element_geometry_node_count: 0,
+            element_geometry_edge_count: 0,
+            element_geometry_coverage_ratio: 0.0,
         }
     }
 
@@ -3392,19 +3402,44 @@ impl CfdDomainTopology {
         } else {
             finite_positive_or(prep.coordinate_characteristic_length_m, 1.0)
         };
+        let coordinate_face_area_m2 = hydraulic_diameter_m.max(1.0e-12).powi(2);
+        let has_element_geometry = prep.element_geometry_coverage_ratio > 0.0
+            && prep.mean_element_area_m2.is_finite()
+            && prep.mean_element_area_m2 > 0.0;
+        let face_area_m2 = if has_element_geometry {
+            prep.mean_element_area_m2
+        } else {
+            coordinate_face_area_m2
+        };
+        let hydraulic_diameter_m = if has_element_geometry {
+            (4.0 * face_area_m2 / std::f64::consts::PI)
+                .sqrt()
+                .max(1.0e-12)
+        } else {
+            hydraulic_diameter_m
+        };
         Self {
             basis: CfdDomainTopologyBasis::PrepControlVolumeConnectivity,
+            geometry_source: if has_element_geometry {
+                CfdDomainGeometrySource::PrepElementGeometry
+            } else {
+                CfdDomainGeometrySource::CoordinateSpan
+            },
             node_count,
             control_volume_count,
             domain_length_m,
             hydraulic_diameter_m,
+            face_area_m2,
             dx_m: domain_length_m / control_volume_count as f64,
             active_dimension_count: prep.coordinate_active_dimension_count.max(1),
+            element_geometry_node_count: prep.element_geometry_node_count,
+            element_geometry_edge_count: prep.element_geometry_edge_count,
+            element_geometry_coverage_ratio: prep.element_geometry_coverage_ratio.clamp(0.0, 1.0),
         }
     }
 
     fn face_area_m2(self) -> f64 {
-        (self.hydraulic_diameter_m.max(1.0e-12)).powi(2)
+        self.face_area_m2.max(1.0e-12)
     }
 
     fn control_volume_volume_m3(self) -> f64 {
@@ -3423,6 +3458,23 @@ impl CfdDomainTopologyBasis {
         match self {
             Self::PrepControlVolumeConnectivity => "prep_control_volume_connectivity",
             Self::ImplicitChannel => "implicit_channel",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CfdDomainGeometrySource {
+    ImplicitChannel,
+    CoordinateSpan,
+    PrepElementGeometry,
+}
+
+impl CfdDomainGeometrySource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ImplicitChannel => "implicit_channel",
+            Self::CoordinateSpan => "coordinate_span",
+            Self::PrepElementGeometry => "prep_element_geometry",
         }
     }
 }
@@ -4073,8 +4125,9 @@ fn cfd_assembly_diagnostic(
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis=finite_volume_velocity_pressure topology_basis={} control_volume_count={} hydraulic_diameter_m={} domain_length_m={} dx_m={} face_area_m2={} control_volume_volume_m3={} nominal_mass_flow_rate_kg_per_s={} courant_number={} active_dimension_count={} pressure_drop_pa={} mass_balance_residual={}",
+            "basis=finite_volume_velocity_pressure topology_basis={} topology_geometry_source={} control_volume_count={} hydraulic_diameter_m={} domain_length_m={} dx_m={} face_area_m2={} control_volume_volume_m3={} nominal_mass_flow_rate_kg_per_s={} courant_number={} active_dimension_count={} element_geometry_node_count={} element_geometry_edge_count={} element_geometry_coverage_ratio={} pressure_drop_pa={} mass_balance_residual={}",
             topology.basis.as_str(),
+            topology.geometry_source.as_str(),
             topology.control_volume_count,
             topology.hydraulic_diameter_m,
             topology.domain_length_m,
@@ -4084,6 +4137,9 @@ fn cfd_assembly_diagnostic(
             nominal_mass_flow_rate_kg_per_s,
             courant_number,
             topology.active_dimension_count,
+            topology.element_geometry_node_count,
+            topology.element_geometry_edge_count,
+            topology.element_geometry_coverage_ratio,
             pressure_drop_pa,
             mass_balance_residual,
         ),
