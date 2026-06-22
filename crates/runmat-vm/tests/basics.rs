@@ -50,6 +50,25 @@ fn bare_random_builtin_identifiers_execute_as_zero_arg_calls() {
 }
 
 #[test]
+fn nan_constant_and_constructor_coexist() {
+    let input = "\
+        a = nan;
+        b = nan(2, 3);
+        c = NaN;
+        out = [isnan(a), numel(b), all(isnan(b(:))), isnan(c)];
+    ";
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected output tensor");
+    assert_eq!(out.data, vec![1.0, 6.0, 1.0, 1.0]);
+}
+
+#[test]
 fn hilbert_builtin_executes_for_fm_demod_shape() {
     let input = r#"
         t = 0:0.001:0.01;
