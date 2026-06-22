@@ -389,6 +389,72 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     )
 }
 
+pub(crate) fn analytic_signal_mask_shader(
+    transform_len: usize,
+    inner_stride: usize,
+    total_lanes: usize,
+    precision: NumericPrecision,
+) -> String {
+    let (ty, _, cast) = spectral_shader_numeric_fragments(precision);
+    format!(
+        r#"
+struct Tensor {{
+    data: array<{ty}>,
+}};
+
+struct Params {{
+    len: u32,
+    offset: u32,
+    _pad1: u32,
+    _pad2: u32,
+}};
+
+@group(0) @binding(0) var<storage, read> Input: Tensor;
+@group(0) @binding(1) var<storage, read_write> Out: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+fn analytic_multiplier(freq: u32) -> {ty} {{
+    if freq == 0u {{
+        return {cast}(1.0);
+    }}
+    if ({transform_len}u % 2u) == 0u {{
+        if freq < ({transform_len}u / 2u) {{
+            return {cast}(2.0);
+        }}
+        if freq == ({transform_len}u / 2u) {{
+            return {cast}(1.0);
+        }}
+        return {cast}(0.0);
+    }}
+    if freq <= ({transform_len}u / 2u) {{
+        return {cast}(2.0);
+    }}
+    return {cast}(0.0);
+}}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let local = gid.x;
+    if local >= params.len {{
+        return;
+    }}
+    let idx = params.offset + local;
+    if idx >= {total_lanes}u {{
+        return;
+    }}
+    let element = idx / 2u;
+    let freq = (element / {inner_stride}u) % {transform_len}u;
+    Out.data[idx] = Input.data[idx] * analytic_multiplier(freq);
+}}
+"#,
+        ty = ty,
+        cast = cast,
+        transform_len = transform_len,
+        inner_stride = inner_stride,
+        total_lanes = total_lanes,
+    )
+}
+
 pub(crate) fn envelope_analytic_bounds_shader(
     channel_len: usize,
     channel_count: usize,

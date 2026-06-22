@@ -286,6 +286,15 @@ pub struct ProviderEnvelopeResult {
 }
 
 #[derive(Clone, Debug)]
+pub struct ProviderHilbertRequest<'a> {
+    pub input: &'a GpuTensorHandle,
+    /// Optional FFT length along `dim`.
+    pub length: Option<usize>,
+    /// Zero-based transform dimension.
+    pub dim: usize,
+}
+
+#[derive(Clone, Debug)]
 pub struct ProviderModulationRequest<'a> {
     pub input: &'a GpuTensorHandle,
     /// `(real, imag)` pairs interleaved by symbol index.
@@ -336,6 +345,17 @@ pub async fn signal_envelope(
     let provider =
         provider().ok_or_else(|| anyhow!("signal_envelope: GPU provider unavailable"))?;
     provider.signal_envelope(&request).await
+}
+
+pub async fn signal_hilbert(
+    request: ProviderHilbertRequest<'_>,
+) -> anyhow::Result<GpuTensorHandle> {
+    if request.length == Some(0) {
+        return Err(anyhow!("signal_hilbert: invalid request"));
+    }
+
+    let provider = provider().ok_or_else(|| anyhow!("signal_hilbert: GPU provider unavailable"))?;
+    provider.signal_hilbert(&request).await
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2150,6 +2170,12 @@ pub trait AccelProvider: Send + Sync {
         _request: &'a ProviderEnvelopeRequest<'a>,
     ) -> AccelProviderFuture<'a, ProviderEnvelopeResult> {
         unsupported_future("signal_envelope not supported by provider")
+    }
+    fn signal_hilbert<'a>(
+        &'a self,
+        _request: &'a ProviderHilbertRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("signal_hilbert not supported by provider")
     }
     /// Reorder tensor dimensions according to `order`, expressed as zero-based indices.
     fn permute(

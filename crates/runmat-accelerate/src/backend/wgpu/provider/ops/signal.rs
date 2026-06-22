@@ -1,13 +1,13 @@
 use super::*;
 use crate::backend::wgpu::shaders::signal::{
-    envelope_analytic_bounds_shader, envelope_analytic_fir_bounds_shader,
-    envelope_analytic_mask_shader, envelope_center_real_to_complex_shader,
-    envelope_rms_bounds_shader, spectral_frame_shader, spectral_power_shader,
-    spectral_select_shader, SpectralFrameShaderConfig, SpectralFrameShaderMode,
-    SpectralRangeShaderMode,
+    analytic_signal_mask_shader, envelope_analytic_bounds_shader,
+    envelope_analytic_fir_bounds_shader, envelope_analytic_mask_shader,
+    envelope_center_real_to_complex_shader, envelope_rms_bounds_shader, spectral_frame_shader,
+    spectral_power_shader, spectral_select_shader, SpectralFrameShaderConfig,
+    SpectralFrameShaderMode, SpectralRangeShaderMode,
 };
 use runmat_accelerate_api::{
-    ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderEnvelopeResult,
+    ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderEnvelopeResult, ProviderHilbertRequest,
 };
 
 impl WgpuProvider {
@@ -146,6 +146,89 @@ impl WgpuProvider {
                 self.signal_envelope_rms_exec(request, window_len)
             }
         }
+    }
+
+    pub(crate) async fn signal_hilbert_exec(
+        &self,
+        request: &ProviderHilbertRequest<'_>,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(request.input)?;
+        ensure!(
+            entry.precision == self.precision,
+            "signal_hilbert: mixed precision tensors are not supported"
+        );
+        ensure!(
+            entry.storage == GpuTensorStorage::Real
+                && runmat_accelerate_api::handle_storage(request.input) == GpuTensorStorage::Real,
+            "signal_hilbert: complex input tensors are not supported"
+        );
+        ensure!(request.length != Some(0), "signal_hilbert: invalid request");
+
+        let spectrum = self
+            .fft_dim_exec(request.input, request.length, request.dim)
+            .await?;
+        let filtered_result = (|| -> Result<GpuTensorHandle> {
+            let spectrum_entry = self.get_entry(&spectrum)?;
+            ensure!(
+                spectrum_entry.storage == GpuTensorStorage::ComplexInterleaved,
+                "signal_hilbert: fft output was not complex"
+            );
+            ensure!(
+                spectrum_entry.len <= u32::MAX as usize,
+                "signal_hilbert: output too large"
+            );
+
+            let mut shape = spectrum_entry.shape.clone();
+            while shape.len() <= request.dim {
+                shape.push(1);
+            }
+            let transform_len = shape[request.dim];
+            ensure!(
+                transform_len > 0,
+                "signal_hilbert: invalid transform length"
+            );
+            let inner_stride = product_checked(&shape[..request.dim])
+                .ok_or_else(|| anyhow!("signal_hilbert: shape overflow"))?;
+            ensure!(
+                inner_stride > 0
+                    && inner_stride <= u32::MAX as usize
+                    && transform_len <= u32::MAX as usize,
+                "signal_hilbert: dimensions exceed GPU kernel limits"
+            );
+
+            let shader = analytic_signal_mask_shader(
+                transform_len,
+                inner_stride,
+                spectrum_entry.len,
+                self.precision,
+            );
+            self.fused_elementwise_with_telemetry_exec(
+                &shader,
+                std::slice::from_ref(&spectrum),
+                &spectrum_entry.shape,
+                spectrum_entry.len,
+            )
+        })();
+        let filtered = match filtered_result {
+            Ok(filtered) => filtered,
+            Err(err) => {
+                self.free_exec(&spectrum).ok();
+                return Err(err);
+            }
+        };
+        self.free_exec(&spectrum).ok();
+        runmat_accelerate_api::set_handle_storage(&filtered, GpuTensorStorage::ComplexInterleaved);
+
+        let analytic = match self.ifft_dim_exec(&filtered, None, request.dim).await {
+            Ok(analytic) => analytic,
+            Err(err) => {
+                self.free_exec(&filtered).ok();
+                return Err(err);
+            }
+        };
+        self.free_exec(&filtered).ok();
+        runmat_accelerate_api::set_handle_storage(&analytic, GpuTensorStorage::ComplexInterleaved);
+        Ok(analytic)
     }
 
     async fn signal_envelope_analytic_exec(
@@ -1658,9 +1741,12 @@ fn spectral_range_shader_mode(range: ProviderSpectralRange) -> SpectralRangeShad
 #[cfg(test)]
 mod tests {
     use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use num_complex::Complex;
     use runmat_accelerate_api::{
-        AccelProvider, HostTensorView, ProviderEnvelopeMethod, ProviderEnvelopeRequest,
+        AccelProvider, GpuTensorStorage, HostTensorView, ProviderEnvelopeMethod,
+        ProviderEnvelopeRequest, ProviderHilbertRequest,
     };
+    use rustfft::FftPlanner;
     use std::sync::{Mutex, OnceLock};
 
     fn with_wgpu_provider<F, R>(f: F) -> Option<R>
@@ -1698,6 +1784,131 @@ mod tests {
             upper.data
         })
         .unwrap_or_default()
+    }
+
+    fn run_hilbert(
+        values: &[f64],
+        shape: &[usize],
+        length: Option<usize>,
+        dim: usize,
+    ) -> Vec<(f64, f64)> {
+        with_wgpu_provider(|provider| {
+            let input = provider
+                .upload(&HostTensorView {
+                    data: values,
+                    shape,
+                })
+                .expect("upload");
+            let output = pollster::block_on(provider.signal_hilbert(&ProviderHilbertRequest {
+                input: &input,
+                length,
+                dim,
+            }))
+            .expect("hilbert");
+            let host = pollster::block_on(provider.download(&output)).expect("download");
+            assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
+            assert_eq!(host.data.len() % 2, 0);
+            provider.free(&input).ok();
+            provider.free(&output).ok();
+            host.data
+                .chunks_exact(2)
+                .map(|pair| (pair[0], pair[1]))
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    fn host_hilbert(
+        values: &[f64],
+        shape: &[usize],
+        length: Option<usize>,
+        dim: usize,
+    ) -> Vec<(f64, f64)> {
+        let mut ext_shape = shape.to_vec();
+        while ext_shape.len() <= dim {
+            ext_shape.push(1);
+        }
+        let current_len = ext_shape[dim];
+        let target_len = length.unwrap_or(current_len);
+        let inner_stride = ext_shape[..dim].iter().copied().product::<usize>();
+        let outer_stride = ext_shape[dim + 1..].iter().copied().product::<usize>();
+        let mut out = vec![Complex::new(0.0, 0.0); target_len * inner_stride * outer_stride];
+        let input = values
+            .iter()
+            .copied()
+            .map(|re| Complex::new(re, 0.0))
+            .collect::<Vec<_>>();
+        let mut planner = FftPlanner::<f64>::new();
+        let forward = (target_len > 1).then(|| planner.plan_fft_forward(target_len));
+        let inverse = (target_len > 1).then(|| planner.plan_fft_inverse(target_len));
+        let mut buffer = vec![Complex::new(0.0, 0.0); target_len];
+        let copy_len = current_len.min(target_len);
+
+        for outer in 0..outer_stride {
+            let base_in = outer * current_len * inner_stride;
+            let base_out = outer * target_len * inner_stride;
+            for inner in 0..inner_stride {
+                buffer.fill(Complex::new(0.0, 0.0));
+                for (freq, slot) in buffer.iter_mut().enumerate().take(copy_len) {
+                    *slot = input[base_in + inner + freq * inner_stride];
+                }
+                if let Some(plan) = &forward {
+                    plan.process(&mut buffer);
+                }
+                for (freq, slot) in buffer.iter_mut().enumerate() {
+                    *slot *= analytic_test_multiplier(freq, target_len);
+                }
+                if let Some(plan) = &inverse {
+                    plan.process(&mut buffer);
+                }
+                let scale = if target_len > 0 {
+                    1.0 / target_len as f64
+                } else {
+                    1.0
+                };
+                for (freq, value) in buffer.iter().enumerate() {
+                    out[base_out + inner + freq * inner_stride] = *value * scale;
+                }
+            }
+        }
+
+        out.into_iter().map(|value| (value.re, value.im)).collect()
+    }
+
+    fn analytic_test_multiplier(freq: usize, len: usize) -> f64 {
+        if freq == 0 {
+            1.0
+        } else if len.is_multiple_of(2) {
+            if freq < len / 2 {
+                2.0
+            } else if freq == len / 2 {
+                1.0
+            } else {
+                0.0
+            }
+        } else if freq <= len / 2 {
+            2.0
+        } else {
+            0.0
+        }
+    }
+
+    fn assert_complex_slices_close(actual: &[(f64, f64)], expected: &[(f64, f64)], tol: f64) {
+        assert_eq!(actual.len(), expected.len());
+        for (idx, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+            assert!(
+                (actual.0 - expected.0).abs() <= tol,
+                "real mismatch at {idx}: actual={} expected={}",
+                actual.0,
+                expected.0
+            );
+            assert!(
+                (actual.1 - expected.1).abs() <= tol,
+                "imag mismatch at {idx}: actual={} expected={}",
+                actual.1,
+                expected.1
+            );
+        }
     }
 
     #[test]
@@ -1740,5 +1951,64 @@ mod tests {
         for value in upper {
             assert!((value - 1.25).abs() < 1.0e-10);
         }
+    }
+
+    #[test]
+    fn signal_hilbert_provider_matches_row_cosine() {
+        let values = [1.0, 0.0, -1.0, 0.0];
+        let out = run_hilbert(&values, &[1, 4], None, 1);
+        if out.is_empty() {
+            return;
+        }
+        let expected = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
+        for (actual, expected) in out.iter().copied().zip(expected) {
+            assert!((actual.0 - expected.0).abs() < 1.0e-8);
+            assert!((actual.1 - expected.1).abs() < 1.0e-8);
+        }
+    }
+
+    #[test]
+    fn signal_hilbert_provider_operates_down_columns() {
+        let values = [1.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, -1.0];
+        let out = run_hilbert(&values, &[4, 2], None, 0);
+        if out.is_empty() {
+            return;
+        }
+        let expected = [
+            (1.0, 0.0),
+            (0.0, 1.0),
+            (-1.0, 0.0),
+            (0.0, -1.0),
+            (0.0, -1.0),
+            (1.0, 0.0),
+            (0.0, 1.0),
+            (-1.0, 0.0),
+        ];
+        for (actual, expected) in out.iter().copied().zip(expected) {
+            assert!((actual.0 - expected.0).abs() < 1.0e-8);
+            assert!((actual.1 - expected.1).abs() < 1.0e-8);
+        }
+    }
+
+    #[test]
+    fn signal_hilbert_provider_matches_host_for_padded_inner_stride() {
+        let values = [1.0, 4.0, 2.0, 5.0, 3.0, 6.0];
+        let out = run_hilbert(&values, &[2, 3], Some(5), 1);
+        if out.is_empty() {
+            return;
+        }
+        let expected = host_hilbert(&values, &[2, 3], Some(5), 1);
+        assert_complex_slices_close(&out, &expected, 1.0e-5);
+    }
+
+    #[test]
+    fn signal_hilbert_provider_matches_host_for_truncated_odd_signal() {
+        let values = [1.0, 2.0, 0.5, -1.0, 0.25];
+        let out = run_hilbert(&values, &[1, 5], Some(3), 1);
+        if out.is_empty() {
+            return;
+        }
+        let expected = host_hilbert(&values, &[1, 5], Some(3), 1);
+        assert_complex_slices_close(&out, &expected, 1.0e-5);
     }
 }
