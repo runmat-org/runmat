@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Falls back to the host when the active provider lacks unary_sign or when complex inputs require host-side normalisation."
+    "notes": "Providers may execute unary_sign on-device for real and complex-interleaved gpuArray inputs. The runtime falls back to host evaluation when the active provider lacks the hook."
   },
   "fusion": {
     "elementwise": true,
@@ -227,9 +227,9 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/sign.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/sign.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. RunMat's planner tracks residency and keeps tensors on the GPU whenever it is profitable. Explicit `gpuArray` / `gather` calls remain available for MATLAB compatibility or interoperability with external GPU code.",
+  "gpu_residency": "`sign` keeps real and complex-interleaved GPU tensors resident when the active provider exposes `unary_sign`. Complex gpuArray inputs return complex-interleaved gpuArray outputs.",
   "gpu_behavior": [
-    "**Hook available:** The sign is evaluated directly on the device with no host transfers.",
+    "**Hook available:** The sign is evaluated directly on the device with no host transfers, including complex normalization as `x ./ abs(x)`.",
     "**Hook missing or unsupported dtype:** RunMat gathers the tensor, applies the CPU logic (including complex handling), and continues execution transparently."
   ]
 }
