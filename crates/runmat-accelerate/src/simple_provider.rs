@@ -15,7 +15,7 @@ use runmat_accelerate_api::{
     ProviderQrPivot, ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind, SetdiffOptions,
     SetdiffResult, SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
 use runmat_runtime::builtins::common::broadcast::{
     broadcast_index as runtime_broadcast_index, broadcast_shapes as runtime_broadcast_shapes,
@@ -42,7 +42,8 @@ use runmat_runtime::builtins::math::linalg::structure::ishermitian::ishermitian_
 use runmat_runtime::builtins::math::linalg::structure::issymmetric::issymmetric_host_real_data;
 use runmat_runtime::builtins::math::linalg::structure::symrcm::symrcm_host_real_data;
 use runmat_runtime::builtins::math::reduction::{
-    compute_median_inplace, diff_tensor_host, gradient_real_tensor_host,
+    compute_median_inplace, diff_tensor_host, gradient_complex_tensor_host,
+    gradient_real_tensor_host,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -4522,6 +4523,32 @@ impl AccelProvider for InProcessProvider {
                 .ok_or_else(|| anyhow!("gradient_dim: unknown tensor handle {}", handle.buffer_id))?
                 .clone()
         };
+        if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved {
+            ensure!(
+                data.len() % 2 == 0,
+                "gradient_dim: complex-interleaved buffer has odd length"
+            );
+            let complex_data = data
+                .chunks_exact(2)
+                .map(|pair| (pair[0], pair[1]))
+                .collect::<Vec<_>>();
+            let tensor = ComplexTensor::new(complex_data, handle.shape.clone())
+                .map_err(|e| anyhow!("gradient_dim: {e}"))?;
+            let gradiented = gradient_complex_tensor_host(tensor, dim + 1, spacing)
+                .map_err(|e| anyhow!("gradient_dim: {e}"))?;
+            let ComplexTensor { data, shape, .. } = gradiented;
+            let mut interleaved = Vec::with_capacity(data.len() * 2);
+            for (re, im) in data {
+                interleaved.push(re);
+                interleaved.push(im);
+            }
+            return Ok(self.allocate_tensor_with_storage(
+                interleaved,
+                shape,
+                GpuTensorStorage::ComplexInterleaved,
+            ));
+        }
+
         let tensor =
             Tensor::new(data, handle.shape.clone()).map_err(|e| anyhow!("gradient_dim: {e}"))?;
         let gradiented = gradient_real_tensor_host(tensor, dim + 1, spacing)

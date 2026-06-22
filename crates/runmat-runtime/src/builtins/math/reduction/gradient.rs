@@ -335,17 +335,27 @@ async fn gradient_gpu_outputs(
     requested_dims: &[usize],
     all_spacings: &[f64],
 ) -> BuiltinResult<Vec<Value>> {
-    if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
-        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
-        return evaluate_host_gradient_outputs(gathered, requested_dims, all_spacings);
-    }
+    let complex_storage =
+        runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
 
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) =
+        runmat_accelerate_api::provider_for_handle(&handle).or_else(runmat_accelerate_api::provider)
+    {
+        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
         let mut outputs = Vec::with_capacity(requested_dims.len());
         for &dim in requested_dims {
             let spacing = spacing_for_dim(dim, requested_dims, all_spacings);
             match provider.gradient_dim(&handle, dim.saturating_sub(1), spacing) {
-                Ok(device_result) => outputs.push(gpu_helpers::resident_gpu_value(device_result)),
+                Ok(device_result) => {
+                    if complex_storage
+                        || runmat_accelerate_api::handle_storage(&device_result)
+                            == GpuTensorStorage::ComplexInterleaved
+                    {
+                        outputs.push(gpu_helpers::complex_gpu_value(device_result));
+                    } else {
+                        outputs.push(gpu_helpers::resident_gpu_value(device_result));
+                    }
+                }
                 Err(_) => {
                     let gathered =
                         gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
@@ -866,6 +876,96 @@ mod tests {
                 assert!(matches!(outputs[1], Value::GpuTensor(_)));
             }
             other => panic!("expected output list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gradient_inprocess_complex_gpu_matches_cpu_and_stays_resident() {
+        test_support::with_test_provider(|provider| {
+            let host = ComplexTensor::new(
+                vec![
+                    (1.0, 1.0),
+                    (2.0, -1.0),
+                    (4.0, 3.0),
+                    (6.0, 2.0),
+                    (9.0, 6.0),
+                    (12.0, 4.0),
+                ],
+                vec![2, 3],
+            )
+            .unwrap();
+            let expected =
+                gradient_complex_tensor_host(host.clone(), 2, 2.0).expect("cpu gradient");
+            let handle = gpu_helpers::upload_complex_tensor(provider, &host).expect("upload");
+            let result = gradient_builtin(Value::GpuTensor(handle), vec![Value::Num(2.0)])
+                .expect("gradient");
+            let Value::GpuTensor(out_handle) = result else {
+                panic!("expected complex gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out_handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(
+                crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
+            )
+            .expect("gather complex gradient");
+            assert_eq!(gathered.shape, expected.shape);
+            assert_eq!(gathered.data, expected.data);
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn gradient_gpu_complex_matches_cpu_and_stays_resident() {
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let host = ComplexTensor::new(
+            vec![
+                (1.0, 1.0),
+                (2.0, -1.0),
+                (4.0, 3.0),
+                (6.0, 2.0),
+                (9.0, 6.0),
+                (12.0, 4.0),
+            ],
+            vec![2, 3],
+        )
+        .unwrap();
+        let expected = gradient_complex_tensor_host(host.clone(), 2, 2.0).expect("cpu gradient");
+        let handle = gpu_helpers::upload_complex_tensor(provider, &host).expect("upload");
+        let result =
+            gradient_builtin(Value::GpuTensor(handle), vec![Value::Num(2.0)]).expect("gradient");
+        let Value::GpuTensor(out_handle) = result else {
+            panic!("expected complex gpu tensor");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&out_handle),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        let gathered = block_on(
+            crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
+        )
+        .expect("gather complex gradient");
+        assert_eq!(gathered.shape, expected.shape);
+        for (idx, (actual, expected)) in gathered.data.iter().zip(expected.data.iter()).enumerate()
+        {
+            assert!(
+                (actual.0 - expected.0).abs() <= 1.0e-5,
+                "real mismatch at {idx}: actual={} expected={}",
+                actual.0,
+                expected.0
+            );
+            assert!(
+                (actual.1 - expected.1).abs() <= 1.0e-5,
+                "imag mismatch at {idx}: actual={} expected={}",
+                actual.1,
+                expected.1
+            );
         }
     }
 }

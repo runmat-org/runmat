@@ -941,13 +941,20 @@ impl WgpuProvider {
         spacing: f64,
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(handle)?;
-
+        let complex_storage = entry.storage == GpuTensorStorage::ComplexInterleaved
+            || runmat_accelerate_api::handle_storage(handle)
+                == GpuTensorStorage::ComplexInterleaved;
         ensure!(
-            entry.storage == GpuTensorStorage::Real,
-            "gradient: complex GPU gradients are not implemented"
+            !complex_storage || entry.len % 2 == 0,
+            "gradient: complex-interleaved buffers must have even length"
         );
+        let logical_len = if complex_storage {
+            entry.len / 2
+        } else {
+            entry.len
+        };
 
-        let mut ext_shape = normalize_gradient_shape(&entry.shape, entry.len);
+        let mut ext_shape = normalize_gradient_shape(&entry.shape, logical_len);
         if ext_shape.is_empty() {
             ext_shape = vec![0, 0];
         }
@@ -956,7 +963,7 @@ impl WgpuProvider {
         }
 
         let len_dim = ext_shape[dim];
-        let mut out_shape = normalize_gradient_shape(&entry.shape, entry.len);
+        let mut out_shape = normalize_gradient_shape(&entry.shape, logical_len);
         if out_shape.is_empty() {
             out_shape = vec![0, 0];
         }
@@ -966,7 +973,16 @@ impl WgpuProvider {
 
         let out_buffer = self.create_storage_buffer(entry.len, "runmat-gradient-out");
         if entry.len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+            return Ok(self.register_existing_buffer_with_storage(
+                out_buffer,
+                out_shape,
+                0,
+                if complex_storage {
+                    GpuTensorStorage::ComplexInterleaved
+                } else {
+                    GpuTensorStorage::Real
+                },
+            ));
         }
 
         let stride_before = if dim == 0 {
@@ -989,19 +1005,26 @@ impl WgpuProvider {
             .and_then(|v| v.checked_mul(stride_after))
             .ok_or_else(|| anyhow!("gradient: tensor size exceeds GPU limits"))?;
         ensure!(
-            expected_len == entry.len,
+            expected_len == logical_len,
             "gradient: tensor shape mismatch (expected {} elements, got {})",
             expected_len,
-            entry.len
+            logical_len
         );
 
         let block = stride_before
             .checked_mul(len_dim.max(1))
             .ok_or_else(|| anyhow!("gradient: block size exceeds GPU limits"))?;
+        let lane_multiplier = if complex_storage { 2usize } else { 1usize };
+        let kernel_stride_before = stride_before
+            .checked_mul(lane_multiplier)
+            .ok_or_else(|| anyhow!("gradient: stride computation overflow"))?;
+        let kernel_block = block
+            .checked_mul(lane_multiplier)
+            .ok_or_else(|| anyhow!("gradient: block size exceeds GPU limits"))?;
         ensure!(
             len_dim <= u32::MAX as usize
-                && stride_before <= u32::MAX as usize
-                && block <= u32::MAX as usize
+                && kernel_stride_before <= u32::MAX as usize
+                && kernel_block <= u32::MAX as usize
                 && entry.len <= u32::MAX as usize,
             "gradient: tensor exceeds GPU kernel limits"
         );
@@ -1009,9 +1032,9 @@ impl WgpuProvider {
         let params_buffer = match self.precision {
             NumericPrecision::F64 => self.uniform_buffer(
                 &GradientParamsF64 {
-                    stride_before: stride_before as u32,
+                    stride_before: kernel_stride_before as u32,
                     segment_len: len_dim as u32,
-                    block: block as u32,
+                    block: kernel_block as u32,
                     total: entry.len as u32,
                     spacing,
                     _pad0: 0.0,
@@ -1023,9 +1046,9 @@ impl WgpuProvider {
             NumericPrecision::F32 => self.uniform_buffer(
                 &GradientParamsF32 {
                     meta0: crate::backend::wgpu::params::PackedU32([
-                        stride_before as u32,
+                        kernel_stride_before as u32,
                         len_dim as u32,
-                        block as u32,
+                        kernel_block as u32,
                         entry.len as u32,
                     ]),
                     meta1: crate::backend::wgpu::params::PackedF32([spacing as f32, 0.0, 0.0, 0.0]),
@@ -1067,7 +1090,16 @@ impl WgpuProvider {
             workgroups,
         );
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, entry.len))
+        Ok(self.register_existing_buffer_with_storage(
+            out_buffer,
+            out_shape,
+            entry.len,
+            if complex_storage {
+                GpuTensorStorage::ComplexInterleaved
+            } else {
+                GpuTensorStorage::Real
+            },
+        ))
     }
 
     pub(crate) fn cumsum_exec(
@@ -1746,6 +1778,8 @@ mod tests {
         AccelProvider, GpuTensorStorage, HostTensorView, ProviderEnvelopeMethod,
         ProviderEnvelopeRequest, ProviderHilbertRequest,
     };
+    use runmat_builtins::ComplexTensor;
+    use runmat_runtime::builtins::math::reduction::gradient_complex_tensor_host;
     use rustfft::FftPlanner;
     use std::sync::{Mutex, OnceLock};
 
@@ -1805,6 +1839,41 @@ mod tests {
                 dim,
             }))
             .expect("hilbert");
+            let host = pollster::block_on(provider.download(&output)).expect("download");
+            assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
+            assert_eq!(host.data.len() % 2, 0);
+            provider.free(&input).ok();
+            provider.free(&output).ok();
+            host.data
+                .chunks_exact(2)
+                .map(|pair| (pair[0], pair[1]))
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    fn run_complex_gradient(
+        values: &[(f64, f64)],
+        shape: &[usize],
+        dim: usize,
+        spacing: f64,
+    ) -> Vec<(f64, f64)> {
+        with_wgpu_provider(|provider| {
+            let mut interleaved = Vec::with_capacity(values.len() * 2);
+            for &(re, im) in values {
+                interleaved.push(re);
+                interleaved.push(im);
+            }
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &interleaved,
+                    shape,
+                })
+                .expect("upload");
+            runmat_accelerate_api::set_handle_storage(&input, GpuTensorStorage::ComplexInterleaved);
+            let output = provider
+                .gradient_dim(&input, dim, spacing)
+                .expect("gradient");
             let host = pollster::block_on(provider.download(&output)).expect("download");
             assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
             assert_eq!(host.data.len() % 2, 0);
@@ -2010,5 +2079,28 @@ mod tests {
         }
         let expected = host_hilbert(&values, &[1, 5], Some(3), 1);
         assert_complex_slices_close(&out, &expected, 1.0e-5);
+    }
+
+    #[test]
+    fn gradient_provider_complex_matches_host_and_stays_interleaved() {
+        let values = [
+            (1.0, 1.0),
+            (2.0, -1.0),
+            (4.0, 3.0),
+            (6.0, 2.0),
+            (9.0, 6.0),
+            (12.0, 4.0),
+        ];
+        let out = run_complex_gradient(&values, &[2, 3], 1, 2.0);
+        if out.is_empty() {
+            return;
+        }
+        let expected = gradient_complex_tensor_host(
+            ComplexTensor::new(values.to_vec(), vec![2, 3]).expect("complex tensor"),
+            2,
+            2.0,
+        )
+        .expect("host gradient");
+        assert_complex_slices_close(&out, &expected.data, 1.0e-5);
     }
 }
