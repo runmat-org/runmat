@@ -1374,6 +1374,28 @@ async fn resolve_path_source_input(
         )
     })?;
 
+        let source_path = std::path::PathBuf::from(path);
+        let candidate = if source_path.is_absolute() {
+            source_path.clone()
+        } else {
+            cwd.join(&source_path)
+        };
+
+        if let Ok(metadata) = runmat_filesystem::metadata_async(&candidate).await {
+            if metadata.is_file() {
+                return Ok(candidate);
+            }
+        }
+
+        if source_path.extension().is_none() {
+            let with_ext = candidate.with_extension("m");
+            if let Ok(metadata) = runmat_filesystem::metadata_async(&with_ext).await {
+                if metadata.is_file() {
+                    return Ok(with_ext);
+                }
+            }
+        }
+
         let resolved = resolve_project_source_input_from(&cwd, Path::new(path)).map_err(|err| {
             RunError::Runtime(
                 build_runtime_error(format!(
@@ -1446,6 +1468,8 @@ mod tests {
     use std::fs;
     #[cfg(not(target_arch = "wasm32"))]
     use std::path::{Path, PathBuf};
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::sync::Arc;
 
     #[cfg(not(target_arch = "wasm32"))]
     struct CwdGuard {
@@ -1523,6 +1547,24 @@ path = "src/main"
 
         assert!(source_name.ends_with("src/main.m"));
         assert_eq!(source_text.trim(), "x = 1;");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn source_input_path_infers_m_extension_from_memory_provider() {
+        let _guard = cwd_lock();
+        let provider = runmat_filesystem::MemoryFsProvider::new();
+        provider.write_project_path("/main.m", b"x = 1;").unwrap();
+
+        runmat_filesystem::with_provider_override(Arc::new(provider), || {
+            let (source_name, source_text) = futures::executor::block_on(source_input_text(
+                SourceInput::Path("main".to_string()),
+            ))
+            .expect("memory provider should resolve path without extension");
+
+            assert_eq!(source_name, "/main.m");
+            assert_eq!(source_text, "x = 1;");
+        });
     }
 
     #[test]
