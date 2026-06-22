@@ -3402,6 +3402,14 @@ impl CfdDomainTopology {
             active_dimension_count: prep.coordinate_active_dimension_count.max(1),
         }
     }
+
+    fn face_area_m2(self) -> f64 {
+        (self.hydraulic_diameter_m.max(1.0e-12)).powi(2)
+    }
+
+    fn control_volume_volume_m3(self) -> f64 {
+        self.face_area_m2() * self.dx_m.max(1.0e-12)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3956,10 +3964,18 @@ fn build_cfd_run_fields(
 
 fn cfd_assembly_diagnostic(
     topology: CfdDomainTopology,
+    domain: &runmat_analysis_core::CfdDomain,
+    time_step_s: f64,
     pressure_drop_pa: f64,
     mass_balance_residual: f64,
     residual_warn_threshold: f64,
 ) -> runmat_analysis_fea::diagnostics::FeaDiagnostic {
+    let face_area_m2 = topology.face_area_m2();
+    let control_volume_volume_m3 = topology.control_volume_volume_m3();
+    let nominal_mass_flow_rate_kg_per_s =
+        domain.reference_density_kg_per_m3 * domain.inlet_velocity_m_per_s * face_area_m2;
+    let courant_number =
+        domain.inlet_velocity_m_per_s.abs() * time_step_s.max(0.0) / topology.dx_m.max(1.0e-12);
     runmat_analysis_fea::diagnostics::FeaDiagnostic {
         code: "FEA_CFD_ASSEMBLY".to_string(),
         severity: if mass_balance_residual <= residual_warn_threshold {
@@ -3968,12 +3984,16 @@ fn cfd_assembly_diagnostic(
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis=finite_volume_velocity_pressure topology_basis={} control_volume_count={} hydraulic_diameter_m={} domain_length_m={} dx_m={} active_dimension_count={} pressure_drop_pa={} mass_balance_residual={}",
+            "basis=finite_volume_velocity_pressure topology_basis={} control_volume_count={} hydraulic_diameter_m={} domain_length_m={} dx_m={} face_area_m2={} control_volume_volume_m3={} nominal_mass_flow_rate_kg_per_s={} courant_number={} active_dimension_count={} pressure_drop_pa={} mass_balance_residual={}",
             topology.basis.as_str(),
             topology.control_volume_count,
             topology.hydraulic_diameter_m,
             topology.domain_length_m,
             topology.dx_m,
+            face_area_m2,
+            control_volume_volume_m3,
+            nominal_mass_flow_rate_kg_per_s,
+            courant_number,
             topology.active_dimension_count,
             pressure_drop_pa,
             mass_balance_residual,
@@ -4078,6 +4098,8 @@ fn solve_cfd_finite_volume_run(
             },
             cfd_assembly_diagnostic(
                 solution.topology,
+                domain,
+                options.time_step_s,
                 solution.pressure_drop_pa,
                 solution.mass_balance_residual,
                 options.residual_warn_threshold,
@@ -5625,6 +5647,8 @@ pub fn analysis_run_cht_with_options_op(
     });
     run.diagnostics.push(cfd_assembly_diagnostic(
         topology,
+        cfd_domain,
+        options.time_step_s,
         pressure_drop_from_nodal_pressure(&fluid_pressure),
         max_cfd_continuity_residual,
         options.residual_warn_threshold,
@@ -6190,6 +6214,8 @@ pub fn analysis_run_fsi_with_options_op(
     });
     run.diagnostics.push(cfd_assembly_diagnostic(
         topology,
+        cfd_domain,
+        options.time_step_s,
         pressure_drop_from_nodal_pressure(&fluid_pressure),
         max_cfd_continuity_residual,
         options.residual_warn_threshold,
