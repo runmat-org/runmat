@@ -21,7 +21,8 @@ use runmat_analysis_fea::{
     fea_acoustic_frequency_response_field_id, fea_cht_energy_residual_field_id,
     fea_cht_fluid_temperature_field_id, fea_electro_thermal_temperature_field_id,
     fea_electro_thermal_thermal_residual_field_id, fea_fsi_coupling_iteration_count_field_id,
-    fea_fsi_fluid_velocity_field_id, fea_fsi_interface_pressure_field_id,
+    fea_fsi_fluid_velocity_field_id, fea_fsi_interface_displacement_field_id,
+    fea_fsi_interface_pressure_field_id, fea_fsi_interface_traction_field_id,
     fea_modal_mode_shape_field_id, fea_nonlinear_contact_gap_field_id,
     fea_nonlinear_contact_pressure_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
     fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
@@ -5684,6 +5685,7 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
     assert!(envelope.data.run.diagnostics.iter().any(|diag| diag.code
         == "FEA_FSI_INTERFACE_CLOSURE"
         && diag.message.contains("interface_node_count=")
+        && diag.message.contains("interface_face_count=")
         && diag.message.contains("force_balance_ratio=")
         && diag
             .message
@@ -5720,6 +5722,32 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         .iter()
         .any(|diag| diag.code == "FEA_FSI_COUPLING"
             && diag.message.contains("cfd_profile_point_count=2")));
+    let interface_pressure = envelope
+        .data
+        .run
+        .field(&fea_fsi_interface_pressure_field_id(0))
+        .expect("fsi interface pressure field should be present");
+    let interface_traction = envelope
+        .data
+        .run
+        .field(&fea_fsi_interface_traction_field_id(0))
+        .expect("fsi interface traction field should be present");
+    let interface_displacement = envelope
+        .data
+        .run
+        .field(&fea_fsi_interface_displacement_field_id(0))
+        .expect("fsi interface displacement field should be present");
+    assert_eq!(interface_pressure.shape.len(), 1);
+    assert_eq!(
+        interface_traction.shape,
+        vec![interface_pressure.shape[0], 3]
+    );
+    assert_eq!(interface_displacement.shape.len(), 2);
+    assert_eq!(interface_displacement.shape[1], 3);
+    assert_eq!(
+        interface_displacement.shape[0],
+        interface_pressure.shape[0] + 1
+    );
     let results = analysis_results_op(
         &envelope.data,
         AnalysisResultsQuery::default(),

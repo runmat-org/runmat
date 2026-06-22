@@ -4,12 +4,13 @@ use runmat_analysis_core::{
 };
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::{
-    fea_modal_mode_shape_field_id, fea_nonlinear_load_factor_field_id,
-    fea_nonlinear_residual_norm_field_id, fea_transient_residual_norm_field_id, ComputeBackend,
-    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
-    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
-    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    fea_fsi_interface_displacement_field_id, fea_fsi_interface_pressure_field_id,
+    fea_fsi_interface_traction_field_id, fea_modal_mode_shape_field_id,
+    fea_nonlinear_load_factor_field_id, fea_nonlinear_residual_norm_field_id,
+    fea_transient_residual_norm_field_id, ComputeBackend, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
@@ -1346,6 +1347,32 @@ fn analysis_run_fsi_contract_is_v1_and_typed() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_FSI_COUPLING"));
+    let interface_pressure = envelope
+        .data
+        .run
+        .field(&fea_fsi_interface_pressure_field_id(0))
+        .expect("fsi interface pressure field should be present");
+    let interface_traction = envelope
+        .data
+        .run
+        .field(&fea_fsi_interface_traction_field_id(0))
+        .expect("fsi interface traction field should be present");
+    let interface_displacement = envelope
+        .data
+        .run
+        .field(&fea_fsi_interface_displacement_field_id(0))
+        .expect("fsi interface displacement field should be present");
+    assert_eq!(interface_pressure.shape.len(), 1);
+    assert_eq!(
+        interface_traction.shape,
+        vec![interface_pressure.shape[0], 3]
+    );
+    assert_eq!(interface_displacement.shape.len(), 2);
+    assert_eq!(interface_displacement.shape[1], 3);
+    assert_eq!(
+        interface_displacement.shape[0],
+        interface_pressure.shape[0] + 1
+    );
 
     let mut invalid_model = model.clone();
     invalid_model.steps = vec![runmat_analysis_core::AnalysisStep {

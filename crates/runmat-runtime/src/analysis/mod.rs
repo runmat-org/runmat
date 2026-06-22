@@ -4339,6 +4339,9 @@ fn build_fsi_run_fields(
         );
         let displacement = interface_step.structural_displacement;
         closure.interface_node_count = closure.interface_node_count.max(fluid_pressure.len());
+        closure.interface_face_count = closure
+            .interface_face_count
+            .max(interface_step.interface_pressure.len());
         closure.max_coupling_iteration_count = closure
             .max_coupling_iteration_count
             .max(interface_step.iteration_count);
@@ -4415,16 +4418,16 @@ fn build_fsi_run_fields(
 
         fields.push(AnalysisField::host_f64(
             fea_fsi_interface_pressure_field_id(step_index),
-            vec![node_count],
+            vec![interface_step.interface_pressure.len().max(1)],
             interface_step.interface_pressure.clone(),
         ));
-        let mut traction = Vec::with_capacity(node_count * 3);
+        let mut traction = Vec::with_capacity(interface_step.interface_pressure.len() * 3);
         for pressure in &interface_step.interface_pressure {
             traction.extend_from_slice(&[-*pressure, 0.0, 0.0]);
         }
         fields.push(AnalysisField::host_f64(
             fea_fsi_interface_traction_field_id(step_index),
-            vec![node_count, 3],
+            vec![interface_step.interface_pressure.len().max(1), 3],
             traction,
         ));
 
@@ -4538,9 +4541,10 @@ fn solve_fsi_partitioned_interface(
             (actual - expected).abs() / expected.abs().max(1.0e-18)
         })
         .fold(0.0_f64, f64::max);
+    let interface_face_pressure = cell_centered_scalar_from_nodal(&interface_pressure);
 
     FsiPartitionedInterfaceStep {
-        interface_pressure,
+        interface_pressure: interface_face_pressure,
         structural_displacement,
         interface_displacement,
         iteration_count,
@@ -4553,6 +4557,7 @@ fn solve_fsi_partitioned_interface(
 #[derive(Debug, Clone, Copy, Default)]
 struct FsiInterfaceClosure {
     interface_node_count: usize,
+    interface_face_count: usize,
     max_interface_residual: f64,
     force_balance_ratio: f64,
     max_displacement_transfer_residual_m: f64,
@@ -4576,6 +4581,7 @@ struct FsiKnownAnswerMetrics {
 
 fn fsi_known_answer_metrics(closure: &FsiInterfaceClosure) -> FsiKnownAnswerMetrics {
     let known_answer_coverage_ratio = if closure.interface_node_count > 0
+        && closure.interface_face_count > 0
         && closure.mean_interface_pressure_pa.is_finite()
         && closure.mean_interface_pressure_pa > 0.0
         && closure.max_traction_magnitude_pa.is_finite()
@@ -6054,11 +6060,12 @@ pub fn analysis_run_fsi_with_options_op(
         code: "FEA_FSI_INTERFACE_RESIDUAL".to_string(),
         severity: residual_severity,
         message: format!(
-            "max_interface_residual={} structural_compliance_per_pa={} residual_warn_threshold={} interface_count={}",
+            "max_interface_residual={} structural_compliance_per_pa={} residual_warn_threshold={} interface_node_count={} interface_face_count={}",
             max_interface_residual,
             structural_compliance_per_pa,
             options.residual_warn_threshold,
-            model.interfaces.len(),
+            fsi_interface_closure.interface_node_count,
+            fsi_interface_closure.interface_face_count,
         ),
     });
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -6075,8 +6082,9 @@ pub fn analysis_run_fsi_with_options_op(
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "interface_node_count={} max_interface_residual={} force_balance_ratio={} max_displacement_transfer_residual_m={} max_interface_displacement_m={} mean_interface_pressure_pa={} max_traction_magnitude_pa={} max_coupling_iteration_count={} pressure_feedback_residual_ratio={} pressure_displacement_law_residual_ratio={} interface_stiffness_pa_per_m={}",
+            "interface_node_count={} interface_face_count={} max_interface_residual={} force_balance_ratio={} max_displacement_transfer_residual_m={} max_interface_displacement_m={} mean_interface_pressure_pa={} max_traction_magnitude_pa={} max_coupling_iteration_count={} pressure_feedback_residual_ratio={} pressure_displacement_law_residual_ratio={} interface_stiffness_pa_per_m={}",
             fsi_interface_closure.interface_node_count,
+            fsi_interface_closure.interface_face_count,
             fsi_interface_closure.max_interface_residual,
             fsi_interface_closure.force_balance_ratio,
             fsi_interface_closure.max_displacement_transfer_residual_m,
