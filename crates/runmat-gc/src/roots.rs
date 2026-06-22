@@ -6,6 +6,7 @@
 
 use crate::Value;
 use crate::{GcError, GcHandle, Result};
+use runmat_gc_api::{Trace, Tracer};
 use runmat_time::Instant;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -16,65 +17,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// scanning should discover handles reachable from ordinary Rust-owned values;
 /// the collector is responsible for tracing each discovered GC object.
 pub(crate) fn collect_value_roots(value: &Value, roots: &mut Vec<GcHandle<Value>>) {
-    match value {
-        Value::Cell(cells) => {
-            for cell_value in &cells.data {
-                collect_value_roots(cell_value, roots);
-            }
-        }
-        Value::Struct(struct_value) => {
-            for field_value in struct_value.fields.values() {
-                collect_value_roots(field_value, roots);
-            }
-        }
-        Value::HandleObject(handle) => {
-            if !handle.target.is_null() {
-                roots.push(handle.target.clone());
-            }
-        }
-        Value::Listener(listener) => {
-            if !listener.target.is_null() {
-                roots.push(listener.target.clone());
-            }
-            if !listener.callback.is_null() {
-                roots.push(listener.callback.clone());
-            }
-        }
-        Value::Closure(closure) => {
-            for capture in &closure.captures {
-                collect_value_roots(capture, roots);
-            }
-        }
-        Value::Object(object) => {
-            for property in object.properties.values() {
-                collect_value_roots(property, roots);
-            }
-        }
-        Value::OutputList(values) => {
-            for value in values {
-                collect_value_roots(value, roots);
-            }
-        }
-        Value::Int(_)
-        | Value::Num(_)
-        | Value::Complex(_, _)
-        | Value::Bool(_)
-        | Value::LogicalArray(_)
-        | Value::String(_)
-        | Value::StringArray(_)
-        | Value::CharArray(_)
-        | Value::Tensor(_)
-        | Value::SparseTensor(_)
-        | Value::ComplexTensor(_)
-        | Value::Symbolic(_)
-        | Value::GpuTensor(_)
-        | Value::FunctionHandle(_)
-        | Value::ExternalFunctionHandle(_)
-        | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
-        | Value::ClassRef(_)
-        | Value::MException(_) => {}
+    struct RootCollector<'a> {
+        roots: &'a mut Vec<GcHandle<Value>>,
     }
+
+    impl Tracer<Value> for RootCollector<'_> {
+        fn mark(&mut self, handle: GcHandle<Value>) {
+            self.roots.push(handle);
+        }
+    }
+
+    value.trace(&mut RootCollector { roots });
 }
 
 /// Unique identifier for a GC root

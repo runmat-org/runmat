@@ -4,6 +4,9 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 
+mod trace;
+pub use trace::{Trace, Tracer};
+
 /// Opaque handle token for a RunMat GC allocation.
 ///
 /// `GcHandle` is intentionally not `Send` or `Sync`; a handle does not prove that

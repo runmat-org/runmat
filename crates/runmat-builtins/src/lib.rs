@@ -1,6 +1,6 @@
 pub use inventory;
 pub mod symbolic;
-use runmat_gc_api::GcHandle;
+use runmat_gc_api::{GcHandle, Trace, Tracer};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -2117,6 +2117,94 @@ pub struct Listener {
 impl Listener {
     pub fn class_name(&self) -> String {
         String::new()
+    }
+}
+
+impl Trace<Value> for CellArray {
+    fn trace(&self, tracer: &mut dyn Tracer<Value>) {
+        for value in &self.data {
+            value.trace(tracer);
+        }
+    }
+}
+
+impl Trace<Value> for StructValue {
+    fn trace(&self, tracer: &mut dyn Tracer<Value>) {
+        for value in self.fields.values() {
+            value.trace(tracer);
+        }
+    }
+}
+
+impl Trace<Value> for Closure {
+    fn trace(&self, tracer: &mut dyn Tracer<Value>) {
+        for value in &self.captures {
+            value.trace(tracer);
+        }
+    }
+}
+
+impl Trace<Value> for ObjectInstance {
+    fn trace(&self, tracer: &mut dyn Tracer<Value>) {
+        for value in self.properties.values() {
+            value.trace(tracer);
+        }
+    }
+}
+
+impl Trace<Value> for HandleRef {
+    fn trace(&self, tracer: &mut dyn Tracer<Value>) {
+        if !self.target.is_null() {
+            tracer.mark(self.target.clone());
+        }
+    }
+}
+
+impl Trace<Value> for Listener {
+    fn trace(&self, tracer: &mut dyn Tracer<Value>) {
+        if !self.target.is_null() {
+            tracer.mark(self.target.clone());
+        }
+        if !self.callback.is_null() {
+            tracer.mark(self.callback.clone());
+        }
+    }
+}
+
+impl Trace<Value> for Value {
+    fn trace(&self, tracer: &mut dyn Tracer<Value>) {
+        match self {
+            Value::Cell(cells) => cells.trace(tracer),
+            Value::Struct(struct_value) => struct_value.trace(tracer),
+            Value::HandleObject(handle) => handle.trace(tracer),
+            Value::Listener(listener) => listener.trace(tracer),
+            Value::Closure(closure) => closure.trace(tracer),
+            Value::Object(object) => object.trace(tracer),
+            Value::OutputList(values) => {
+                for value in values {
+                    value.trace(tracer);
+                }
+            }
+            Value::Int(_)
+            | Value::Num(_)
+            | Value::Complex(_, _)
+            | Value::Bool(_)
+            | Value::LogicalArray(_)
+            | Value::String(_)
+            | Value::StringArray(_)
+            | Value::CharArray(_)
+            | Value::Tensor(_)
+            | Value::SparseTensor(_)
+            | Value::ComplexTensor(_)
+            | Value::Symbolic(_)
+            | Value::GpuTensor(_)
+            | Value::FunctionHandle(_)
+            | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
+            | Value::BoundFunctionHandle { .. }
+            | Value::ClassRef(_)
+            | Value::MException(_) => {}
+        }
     }
 }
 
