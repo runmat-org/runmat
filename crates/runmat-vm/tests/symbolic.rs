@@ -25,3 +25,19 @@ fn symbolic_vpa_source_workflow() {
         })
     }));
 }
+
+#[test]
+fn symbolic_int_source_workflow() {
+    let vars = execute_source("syms x; F = int(x^2); A = int(sin(x), 0, pi); E = int(exp(x), x);")
+        .unwrap();
+
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Symbolic(expr) if expr.to_string() == "x^3/3")));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Symbolic(expr) if expr.to_string() == "2")));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Symbolic(expr) if expr.to_string() == "exp(x)")));
+}
