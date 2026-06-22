@@ -9140,9 +9140,17 @@ fn for_range_loop_uses_semantic_vm_without_rerunning_prefix() {
 }
 
 #[test]
-fn clear_before_for_range_loop_preserves_hidden_loop_slots() {
+fn clear_before_for_range_loop_does_not_panic_on_hidden_loop_slots() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "clear; n = 3; s = 0; for i = 1:n; s = s + i; end; y = s;";
+    let prepared = session.compile_input(source).expect("compile for loop");
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::LoadVar(index) if !prepared.bytecode.var_names.contains_key(index)
+        )),
+        "range-loop bytecode should read unnamed compiler-private slots"
+    );
 
     execute_text_request(&mut session, source).expect("exec succeeds");
     let outcome = execute_text_request(&mut session, "y").expect("read y");
@@ -9154,7 +9162,7 @@ fn clear_before_for_range_loop_preserves_hidden_loop_slots() {
 }
 
 #[test]
-fn clear_before_indexed_for_loop_preserves_hidden_loop_slots() {
+fn clear_before_indexed_for_loop_does_not_panic_on_hidden_loop_slots() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "\
         clear; \
@@ -9168,6 +9176,14 @@ fn clear_before_indexed_for_loop_preserves_hidden_loop_slots() {
             u(i, 1) = sin(pi * x(i) / L); \
         end; \
         y = u(2, 1);";
+    let prepared = session.compile_input(source).expect("compile indexed loop");
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::LoadVar(index) if !prepared.bytecode.var_names.contains_key(index)
+        )),
+        "indexed range-loop bytecode should read unnamed compiler-private slots"
+    );
 
     execute_text_request(&mut session, source).expect("exec succeeds");
     let outcome = execute_text_request(&mut session, "y").expect("read y");
