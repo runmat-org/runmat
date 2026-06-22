@@ -6152,6 +6152,9 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         && diag.message.contains("two_way_interface_residual_ratio=")
         && diag
             .message
+            .contains("structural_traction_update_residual_ratio=")
+        && diag
+            .message
             .contains("pressure_displacement_law_residual_ratio=")
         && diag.message.contains("interface_stiffness_pa_per_m=")));
     assert!(envelope
@@ -6173,6 +6176,9 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
                 .message
                 .contains("partitioned_pressure_feedback_residual_ratio=")
             && diag.message.contains("two_way_interface_residual_ratio=")
+            && diag
+                .message
+                .contains("structural_traction_update_residual_ratio=")
             && diag.message.contains("known_answer_coverage_ratio=")));
     assert!(envelope
         .data

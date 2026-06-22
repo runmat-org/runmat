@@ -1051,6 +1051,7 @@ REQUIRED_FIXTURES = {
         "fsi_max_coupling_iteration_count",
         "fsi_pressure_feedback_residual_ratio",
         "fsi_two_way_interface_residual_ratio",
+        "fsi_structural_traction_update_residual_ratio",
         "fsi_pressure_displacement_law_residual_ratio",
         "fsi_interface_stiffness_pa_per_m",
         "fsi_pressure_loaded_wall_displacement_law_residual_ratio",
@@ -1058,6 +1059,7 @@ REQUIRED_FIXTURES = {
         "fsi_known_answer_displacement_transfer_residual_m",
         "fsi_partitioned_pressure_feedback_residual_ratio",
         "fsi_known_answer_two_way_interface_residual_ratio",
+        "fsi_known_answer_structural_traction_update_residual_ratio",
         "fsi_known_answer_coverage_ratio",
     },
     "fsi_coupled_cpu": {
@@ -1080,6 +1082,7 @@ REQUIRED_FIXTURES = {
         "fsi_max_coupling_iteration_count",
         "fsi_pressure_feedback_residual_ratio",
         "fsi_two_way_interface_residual_ratio",
+        "fsi_structural_traction_update_residual_ratio",
         "fsi_pressure_displacement_law_residual_ratio",
         "fsi_interface_stiffness_pa_per_m",
         "fsi_pressure_loaded_wall_displacement_law_residual_ratio",
@@ -1087,6 +1090,7 @@ REQUIRED_FIXTURES = {
         "fsi_known_answer_displacement_transfer_residual_m",
         "fsi_partitioned_pressure_feedback_residual_ratio",
         "fsi_known_answer_two_way_interface_residual_ratio",
+        "fsi_known_answer_structural_traction_update_residual_ratio",
         "fsi_known_answer_coverage_ratio",
     },
     "fsi_coupled_pipe_plate_cpu": {
@@ -1110,6 +1114,7 @@ REQUIRED_FIXTURES = {
         "fsi_max_coupling_iteration_count",
         "fsi_pressure_feedback_residual_ratio",
         "fsi_two_way_interface_residual_ratio",
+        "fsi_structural_traction_update_residual_ratio",
         "fsi_pressure_displacement_law_residual_ratio",
         "fsi_interface_stiffness_pa_per_m",
         "fsi_pressure_loaded_wall_displacement_law_residual_ratio",
@@ -1117,6 +1122,7 @@ REQUIRED_FIXTURES = {
         "fsi_known_answer_displacement_transfer_residual_m",
         "fsi_partitioned_pressure_feedback_residual_ratio",
         "fsi_known_answer_two_way_interface_residual_ratio",
+        "fsi_known_answer_structural_traction_update_residual_ratio",
         "fsi_known_answer_coverage_ratio",
     },
     "fsi_coupled_gpu_fallback": {
@@ -1139,6 +1145,7 @@ REQUIRED_FIXTURES = {
         "fsi_max_coupling_iteration_count",
         "fsi_pressure_feedback_residual_ratio",
         "fsi_two_way_interface_residual_ratio",
+        "fsi_structural_traction_update_residual_ratio",
         "fsi_pressure_displacement_law_residual_ratio",
         "fsi_interface_stiffness_pa_per_m",
         "fsi_pressure_loaded_wall_displacement_law_residual_ratio",
@@ -1146,6 +1153,7 @@ REQUIRED_FIXTURES = {
         "fsi_known_answer_displacement_transfer_residual_m",
         "fsi_partitioned_pressure_feedback_residual_ratio",
         "fsi_known_answer_two_way_interface_residual_ratio",
+        "fsi_known_answer_structural_traction_update_residual_ratio",
         "fsi_known_answer_coverage_ratio",
     },
 }
