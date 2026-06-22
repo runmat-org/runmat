@@ -1,11 +1,10 @@
 //! Damping ratio and natural-frequency analysis for control models.
 
-use nalgebra::DMatrix;
 use num_complex::Complex64;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectInstance, Tensor, Value,
+    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -14,15 +13,13 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::control::tf_model::{
-    control_error, output_complex_column, polynomial_roots, scalar_f64, validate_sample_time,
-    TfModel, EPS, TF_CLASS,
+    control_error, output_complex_column, polynomial_roots, ss_poles_from_object, TfModel, EPS,
+    SS_CLASS, TF_CLASS,
 };
 use crate::builtins::control::type_resolvers::damp_type;
 use crate::{dispatcher, BuiltinResult};
 
 const BUILTIN_NAME: &str = "damp";
-const SS_CLASS: &str = "ss";
-
 const DAMP_PARAM_WN: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "wn",
     ty: BuiltinParamType::NumericArray,
@@ -185,7 +182,7 @@ impl DampingEval {
                 Ok(Self::from_poles(poles, model.sample_time))
             }
             Value::Object(object) if object.is_class(SS_CLASS) => {
-                let (poles, sample_time) = ss_poles(&object)?;
+                let (poles, sample_time) = ss_poles_from_object(&object, BUILTIN_NAME)?;
                 Ok(Self::from_poles(poles, sample_time))
             }
             Value::Object(object) => Err(damp_error(
@@ -246,81 +243,6 @@ fn compare_modes(lhs: &DampingMode, rhs: &DampingMode) -> std::cmp::Ordering {
         .then_with(|| lhs.zeta.total_cmp(&rhs.zeta))
         .then_with(|| lhs.pole.re.total_cmp(&rhs.pole.re))
         .then_with(|| lhs.pole.im.total_cmp(&rhs.pole.im))
-}
-
-fn ss_poles(object: &ObjectInstance) -> BuiltinResult<(Vec<Complex64>, f64)> {
-    let a = matrix_property(object, "A")?;
-    let sample_time = scalar_property(object, "Ts")?;
-    validate_sample_time(sample_time, BUILTIN_NAME)?;
-    let eigenvalues = a.eigenvalues().ok_or_else(|| {
-        damp_error(
-            "RunMat:damp:Internal",
-            "damp: failed to compute state matrix eigenvalues",
-        )
-    })?;
-    Ok((eigenvalues.iter().copied().collect(), sample_time))
-}
-
-fn matrix_property(
-    object: &ObjectInstance,
-    name: &'static str,
-) -> BuiltinResult<DMatrix<Complex64>> {
-    let value = object.properties.get(name).ok_or_else(|| {
-        damp_error(
-            "RunMat:damp:InvalidModel",
-            format!("damp: ss object is missing {name}"),
-        )
-    })?;
-    let tensor = match value {
-        Value::Tensor(tensor) => tensor.clone(),
-        Value::Num(n) => Tensor::new(vec![*n], vec![1, 1]).map_err(|err| {
-            damp_error(
-                "RunMat:damp:Internal",
-                format!("damp: failed to build scalar matrix: {err}"),
-            )
-        })?,
-        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|err| {
-            damp_error(
-                "RunMat:damp:Internal",
-                format!("damp: failed to build scalar matrix: {err}"),
-            )
-        })?,
-        other => {
-            return Err(damp_error(
-                "RunMat:damp:UnsupportedModel",
-                format!("damp: ss {name} must be a finite real matrix, got {other:?}"),
-            ));
-        }
-    };
-    if tensor.shape.len() > 2 || tensor.rows != tensor.cols {
-        return Err(damp_error(
-            "RunMat:damp:InvalidModel",
-            format!("damp: ss {name} must be square, got {:?}", tensor.shape),
-        ));
-    }
-    if tensor.data.iter().any(|value| !value.is_finite()) {
-        return Err(damp_error(
-            "RunMat:damp:UnsupportedModel",
-            format!("damp: ss {name} must contain only finite real values"),
-        ));
-    }
-    let mut matrix = DMatrix::<Complex64>::zeros(tensor.rows, tensor.cols);
-    for col in 0..tensor.cols {
-        for row in 0..tensor.rows {
-            matrix[(row, col)] = Complex64::new(tensor.data[row + col * tensor.rows], 0.0);
-        }
-    }
-    Ok(matrix)
-}
-
-fn scalar_property(object: &ObjectInstance, name: &'static str) -> BuiltinResult<f64> {
-    let value = object.properties.get(name).ok_or_else(|| {
-        damp_error(
-            "RunMat:damp:InvalidModel",
-            format!("damp: ss object is missing {name}"),
-        )
-    })?;
-    scalar_f64(value, name, BUILTIN_NAME)
 }
 
 fn real_column(data: Vec<f64>) -> BuiltinResult<Value> {
