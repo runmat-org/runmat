@@ -4272,6 +4272,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "fsi_structural_solve_residual_ratio",
+            "fixture_id": "fsi_coupled_cpu",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_structural_coupling_edge_count",
+            "fixture_id": "fsi_coupled_cpu",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
             "name": "fsi_interface_stiffness_pa_per_m",
             "fixture_id": "fsi_coupled_cpu",
             "observed": 200.0e9,
@@ -4315,6 +4329,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
         },
         {
             "name": "fsi_known_answer_structural_traction_update_residual_ratio",
+            "fixture_id": "fsi_coupled_cpu",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_known_answer_structural_solve_residual_ratio",
             "fixture_id": "fsi_coupled_cpu",
             "observed": 0.0,
             "reference": 0.0,
@@ -4475,6 +4496,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "fsi_structural_solve_residual_ratio",
+            "fixture_id": "fsi_coupled_gpu_fallback",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_structural_coupling_edge_count",
+            "fixture_id": "fsi_coupled_gpu_fallback",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
             "name": "fsi_interface_stiffness_pa_per_m",
             "fixture_id": "fsi_coupled_gpu_fallback",
             "observed": 200.0e9,
@@ -4518,6 +4553,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
         },
         {
             "name": "fsi_known_answer_structural_traction_update_residual_ratio",
+            "fixture_id": "fsi_coupled_gpu_fallback",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_known_answer_structural_solve_residual_ratio",
             "fixture_id": "fsi_coupled_gpu_fallback",
             "observed": 0.0,
             "reference": 0.0,
@@ -4678,6 +4720,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "fsi_structural_solve_residual_ratio",
+            "fixture_id": "fsi_coupled_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_structural_coupling_edge_count",
+            "fixture_id": "fsi_coupled_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
             "name": "fsi_interface_stiffness_pa_per_m",
             "fixture_id": "fsi_coupled_gpu_provider",
             "observed": 200.0e9,
@@ -4721,6 +4777,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
         },
         {
             "name": "fsi_known_answer_structural_traction_update_residual_ratio",
+            "fixture_id": "fsi_coupled_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "fsi_known_answer_structural_solve_residual_ratio",
             "fixture_id": "fsi_coupled_gpu_provider",
             "observed": 0.0,
             "reference": 0.0,

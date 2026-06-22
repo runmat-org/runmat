@@ -4662,6 +4662,12 @@ fn build_fsi_run_fields(
         closure.max_pressure_displacement_law_residual_ratio = closure
             .max_pressure_displacement_law_residual_ratio
             .max(interface_step.pressure_displacement_law_residual_ratio);
+        closure.max_structural_solve_residual_ratio = closure
+            .max_structural_solve_residual_ratio
+            .max(interface_step.structural_solve_residual_ratio);
+        closure.structural_coupling_edge_count = closure
+            .structural_coupling_edge_count
+            .max(interface_step.structural_coupling_edge_count);
         closure.interface_stiffness_pa_per_m = closure
             .interface_stiffness_pa_per_m
             .max(interface_step.interface_stiffness_pa_per_m);
@@ -4774,7 +4780,17 @@ struct FsiPartitionedInterfaceStep {
     two_way_interface_residual_ratio: f64,
     structural_traction_update_residual_ratio: f64,
     pressure_displacement_law_residual_ratio: f64,
+    structural_solve_residual_ratio: f64,
+    structural_coupling_edge_count: usize,
     interface_stiffness_pa_per_m: f64,
+}
+
+#[derive(Debug, Clone)]
+struct FsiStructuralInterfaceResponse {
+    displacement_x: Vec<f64>,
+    reaction_pressure: Vec<f64>,
+    residual_ratio: f64,
+    coupling_edge_count: usize,
 }
 
 fn solve_fsi_partitioned_interface(
@@ -4794,7 +4810,8 @@ fn solve_fsi_partitioned_interface(
     let pressure_relaxation = 0.65_f64;
     let displacement_relaxation = 0.65_f64;
     let traction_relaxation = 0.65_f64;
-    let feedback_stiffness_pa_per_m = 0.25 / compliance;
+    let interface_stiffness_pa_per_m = 1.0 / compliance;
+    let feedback_stiffness_pa_per_m = 0.25 * interface_stiffness_pa_per_m;
     let mut interface_pressure = vec![0.0; fluid_pressure.len()];
     let mut structural_traction = vec![0.0; fluid_pressure.len()];
     let mut structural_displacement = vec![0.0; fluid_pressure.len() * 3];
@@ -4804,6 +4821,8 @@ fn solve_fsi_partitioned_interface(
     let mut displacement_transfer_residual_ratio = 0.0_f64;
     let mut structural_traction_update_residual_ratio =
         if fluid_pressure.is_empty() { 0.0 } else { 1.0 };
+    let mut structural_solve_residual_ratio = if fluid_pressure.is_empty() { 0.0 } else { 1.0 };
+    let mut structural_coupling_edge_count = 0_usize;
 
     for iteration in 1..=max_linear_iters {
         let target_pressure: Vec<f64> = fluid_pressure
@@ -4817,15 +4836,19 @@ fn solve_fsi_partitioned_interface(
         for (interface, target) in interface_pressure.iter_mut().zip(target_pressure.iter()) {
             *interface += pressure_relaxation * (*target - *interface);
         }
-        for (node, pressure) in interface_pressure.iter().enumerate() {
-            structural_displacement[node * 3] = *pressure * compliance;
+        let structural_response = solve_fsi_structural_interface_response(
+            &interface_pressure,
+            interface_stiffness_pa_per_m,
+        );
+        structural_solve_residual_ratio = structural_response.residual_ratio;
+        structural_coupling_edge_count =
+            structural_coupling_edge_count.max(structural_response.coupling_edge_count);
+        for (node, displacement_x) in structural_response.displacement_x.iter().enumerate() {
+            structural_displacement[node * 3] = *displacement_x;
             structural_displacement[node * 3 + 1] = 0.0;
             structural_displacement[node * 3 + 2] = 0.0;
         }
-        let target_structural_traction = structural_displacement
-            .chunks_exact(3)
-            .map(|components| components[0] / compliance)
-            .collect::<Vec<_>>();
+        let target_structural_traction = structural_response.reaction_pressure;
         for (traction, target) in structural_traction
             .iter_mut()
             .zip(target_structural_traction.iter())
@@ -4866,21 +4889,23 @@ fn solve_fsi_partitioned_interface(
         if pressure_feedback_residual_ratio <= tolerance
             && displacement_transfer_residual_ratio <= tolerance
             && structural_traction_update_residual_ratio <= tolerance
+            && structural_solve_residual_ratio <= tolerance
         {
             break;
         }
     }
-    let pressure_displacement_law_residual_ratio = interface_pressure
+    let structural_response =
+        solve_fsi_structural_interface_response(&interface_pressure, interface_stiffness_pa_per_m);
+    structural_solve_residual_ratio = structural_solve_residual_ratio
+        .max(structural_response.residual_ratio)
+        .min(1.0);
+    structural_coupling_edge_count =
+        structural_coupling_edge_count.max(structural_response.coupling_edge_count);
+    let pressure_displacement_law_residual_ratio = structural_response
+        .reaction_pressure
         .iter()
-        .enumerate()
-        .map(|(node, pressure)| {
-            let expected = *pressure * compliance;
-            let actual = structural_displacement
-                .get(node * 3)
-                .copied()
-                .unwrap_or(0.0);
-            (actual - expected).abs() / expected.abs().max(1.0e-18)
-        })
+        .zip(interface_pressure.iter())
+        .map(|(reaction, pressure)| (reaction - pressure).abs() / pressure.abs().max(1.0))
         .fold(0.0_f64, f64::max);
     let interface_face_pressure = cell_centered_scalar_from_nodal(&interface_pressure);
 
@@ -4892,11 +4917,118 @@ fn solve_fsi_partitioned_interface(
         pressure_feedback_residual_ratio,
         two_way_interface_residual_ratio: pressure_feedback_residual_ratio
             .max(displacement_transfer_residual_ratio)
-            .max(structural_traction_update_residual_ratio),
+            .max(structural_traction_update_residual_ratio)
+            .max(structural_solve_residual_ratio),
         structural_traction_update_residual_ratio,
         pressure_displacement_law_residual_ratio,
-        interface_stiffness_pa_per_m: 1.0 / compliance,
+        structural_solve_residual_ratio,
+        structural_coupling_edge_count,
+        interface_stiffness_pa_per_m,
     }
+}
+
+fn solve_fsi_structural_interface_response(
+    pressure_load: &[f64],
+    interface_stiffness_pa_per_m: f64,
+) -> FsiStructuralInterfaceResponse {
+    let node_count = pressure_load.len();
+    if node_count == 0 {
+        return FsiStructuralInterfaceResponse {
+            displacement_x: Vec::new(),
+            reaction_pressure: Vec::new(),
+            residual_ratio: 0.0,
+            coupling_edge_count: 0,
+        };
+    }
+
+    let diagonal_stiffness = interface_stiffness_pa_per_m.max(1.0e-9);
+    let coupling_stiffness = 0.20 * diagonal_stiffness;
+    let coupling_edge_count = node_count.saturating_sub(1);
+    let mut lower = vec![0.0; node_count.saturating_sub(1)];
+    let mut diagonal = vec![diagonal_stiffness; node_count];
+    let mut upper = vec![0.0; node_count.saturating_sub(1)];
+    for edge in 0..coupling_edge_count {
+        lower[edge] = -coupling_stiffness;
+        upper[edge] = -coupling_stiffness;
+        diagonal[edge] += coupling_stiffness;
+        diagonal[edge + 1] += coupling_stiffness;
+    }
+
+    let displacement_x = solve_tridiagonal_system(&lower, &diagonal, &upper, pressure_load);
+    let reaction_pressure = apply_tridiagonal_operator(&lower, &diagonal, &upper, &displacement_x);
+    let pressure_scale = pressure_load
+        .iter()
+        .copied()
+        .map(f64::abs)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let residual_ratio = reaction_pressure
+        .iter()
+        .zip(pressure_load.iter())
+        .map(|(reaction, pressure)| (reaction - pressure).abs())
+        .fold(0.0_f64, f64::max)
+        / pressure_scale;
+
+    FsiStructuralInterfaceResponse {
+        displacement_x,
+        reaction_pressure,
+        residual_ratio,
+        coupling_edge_count,
+    }
+}
+
+fn solve_tridiagonal_system(
+    lower: &[f64],
+    diagonal: &[f64],
+    upper: &[f64],
+    rhs: &[f64],
+) -> Vec<f64> {
+    let n = diagonal.len().min(rhs.len());
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut c_prime = vec![0.0; n.saturating_sub(1)];
+    let mut d_prime = vec![0.0; n];
+    let first_pivot = diagonal[0].abs().max(1.0e-18).copysign(diagonal[0]);
+    if n > 1 {
+        c_prime[0] = upper[0] / first_pivot;
+    }
+    d_prime[0] = rhs[0] / first_pivot;
+    for row in 1..n {
+        let pivot = diagonal[row] - lower[row - 1] * c_prime[row - 1];
+        let pivot = pivot.abs().max(1.0e-18).copysign(pivot);
+        if row + 1 < n {
+            c_prime[row] = upper[row] / pivot;
+        }
+        d_prime[row] = (rhs[row] - lower[row - 1] * d_prime[row - 1]) / pivot;
+    }
+
+    let mut solution = vec![0.0; n];
+    solution[n - 1] = d_prime[n - 1];
+    for row in (0..n - 1).rev() {
+        solution[row] = d_prime[row] - c_prime[row] * solution[row + 1];
+    }
+    solution
+}
+
+fn apply_tridiagonal_operator(
+    lower: &[f64],
+    diagonal: &[f64],
+    upper: &[f64],
+    x: &[f64],
+) -> Vec<f64> {
+    let n = diagonal.len().min(x.len());
+    let mut result = vec![0.0; n];
+    for row in 0..n {
+        result[row] += diagonal[row] * x[row];
+        if row > 0 {
+            result[row] += lower[row - 1] * x[row - 1];
+        }
+        if row + 1 < n {
+            result[row] += upper[row] * x[row + 1];
+        }
+    }
+    result
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -4914,6 +5046,8 @@ struct FsiInterfaceClosure {
     max_two_way_interface_residual_ratio: f64,
     max_structural_traction_update_residual_ratio: f64,
     max_pressure_displacement_law_residual_ratio: f64,
+    max_structural_solve_residual_ratio: f64,
+    structural_coupling_edge_count: usize,
     interface_stiffness_pa_per_m: f64,
 }
 
@@ -4925,6 +5059,7 @@ struct FsiKnownAnswerMetrics {
     partitioned_pressure_feedback_residual_ratio: f64,
     two_way_interface_residual_ratio: f64,
     structural_traction_update_residual_ratio: f64,
+    structural_solve_residual_ratio: f64,
     known_answer_coverage_ratio: f64,
 }
 
@@ -4948,6 +5083,8 @@ fn fsi_known_answer_metrics(closure: &FsiInterfaceClosure) -> FsiKnownAnswerMetr
         && closure
             .max_structural_traction_update_residual_ratio
             .is_finite()
+        && closure.max_structural_solve_residual_ratio.is_finite()
+        && closure.structural_coupling_edge_count > 0
     {
         1.0
     } else {
@@ -4963,6 +5100,7 @@ fn fsi_known_answer_metrics(closure: &FsiInterfaceClosure) -> FsiKnownAnswerMetr
         two_way_interface_residual_ratio: closure.max_two_way_interface_residual_ratio,
         structural_traction_update_residual_ratio: closure
             .max_structural_traction_update_residual_ratio,
+        structural_solve_residual_ratio: closure.max_structural_solve_residual_ratio,
         known_answer_coverage_ratio,
     }
 }
@@ -4977,6 +5115,7 @@ fn fsi_known_answer_diagnostic(
         && metrics.partitioned_pressure_feedback_residual_ratio <= tolerance
         && metrics.two_way_interface_residual_ratio <= tolerance
         && metrics.structural_traction_update_residual_ratio <= tolerance
+        && metrics.structural_solve_residual_ratio <= tolerance
         && metrics.known_answer_coverage_ratio >= 1.0
     {
         runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
@@ -4988,13 +5127,14 @@ fn fsi_known_answer_diagnostic(
         code: "FEA_FSI_KNOWN_ANSWER".to_string(),
         severity,
         message: format!(
-            "basis=pressure_loaded_wall_partitioned pressure_loaded_wall_displacement_law_residual_ratio={} interface_traction_balance_residual_ratio={} interface_displacement_transfer_residual_m={} partitioned_pressure_feedback_residual_ratio={} two_way_interface_residual_ratio={} structural_traction_update_residual_ratio={} known_answer_coverage_ratio={}",
+            "basis=pressure_loaded_wall_partitioned pressure_loaded_wall_displacement_law_residual_ratio={} interface_traction_balance_residual_ratio={} interface_displacement_transfer_residual_m={} partitioned_pressure_feedback_residual_ratio={} two_way_interface_residual_ratio={} structural_traction_update_residual_ratio={} structural_solve_residual_ratio={} known_answer_coverage_ratio={}",
             metrics.pressure_loaded_wall_displacement_law_residual_ratio,
             metrics.interface_traction_balance_residual_ratio,
             metrics.interface_displacement_transfer_residual_m,
             metrics.partitioned_pressure_feedback_residual_ratio,
             metrics.two_way_interface_residual_ratio,
             metrics.structural_traction_update_residual_ratio,
+            metrics.structural_solve_residual_ratio,
             metrics.known_answer_coverage_ratio,
         ),
     }
@@ -6503,6 +6643,8 @@ pub fn analysis_run_fsi_with_options_op(
                 <= options.tolerance
             && fsi_interface_closure.max_pressure_displacement_law_residual_ratio
                 <= options.tolerance
+            && fsi_interface_closure.max_structural_solve_residual_ratio <= options.tolerance
+            && fsi_interface_closure.structural_coupling_edge_count > 0
             && fsi_interface_closure.max_interface_residual <= options.residual_warn_threshold
         {
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
@@ -6510,7 +6652,7 @@ pub fn analysis_run_fsi_with_options_op(
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "interface_node_count={} interface_face_count={} max_interface_residual={} force_balance_ratio={} max_displacement_transfer_residual_m={} max_interface_displacement_m={} mean_interface_pressure_pa={} max_traction_magnitude_pa={} max_coupling_iteration_count={} pressure_feedback_residual_ratio={} two_way_interface_residual_ratio={} structural_traction_update_residual_ratio={} pressure_displacement_law_residual_ratio={} interface_stiffness_pa_per_m={}",
+            "interface_node_count={} interface_face_count={} max_interface_residual={} force_balance_ratio={} max_displacement_transfer_residual_m={} max_interface_displacement_m={} mean_interface_pressure_pa={} max_traction_magnitude_pa={} max_coupling_iteration_count={} pressure_feedback_residual_ratio={} two_way_interface_residual_ratio={} structural_traction_update_residual_ratio={} pressure_displacement_law_residual_ratio={} structural_solve_residual_ratio={} structural_coupling_edge_count={} interface_stiffness_pa_per_m={}",
             fsi_interface_closure.interface_node_count,
             fsi_interface_closure.interface_face_count,
             fsi_interface_closure.max_interface_residual,
@@ -6524,6 +6666,8 @@ pub fn analysis_run_fsi_with_options_op(
             fsi_interface_closure.max_two_way_interface_residual_ratio,
             fsi_interface_closure.max_structural_traction_update_residual_ratio,
             fsi_interface_closure.max_pressure_displacement_law_residual_ratio,
+            fsi_interface_closure.max_structural_solve_residual_ratio,
+            fsi_interface_closure.structural_coupling_edge_count,
             fsi_interface_closure.interface_stiffness_pa_per_m,
         ),
     });
