@@ -67,6 +67,22 @@ fn default_reference_element_coordinates_m() -> [[f64; 3]; 3] {
     [[0.0; 3]; 3]
 }
 
+fn default_element_topology_sample_edge_nodes() -> [[u32; 2]; 8] {
+    [[0; 2]; 8]
+}
+
+fn default_element_topology_sample_element_edges() -> [[u32; 3]; 4] {
+    [[0; 3]; 4]
+}
+
+fn default_element_topology_sample_element_orientations() -> [[i8; 3]; 4] {
+    [[0; 3]; 4]
+}
+
+fn default_element_topology_sample_element_areas_m2() -> [f64; 4] {
+    [0.0; 4]
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PreparedMeshDescriptor {
     pub prepared_mesh_id: String,
@@ -107,6 +123,18 @@ pub struct PreparedMeshDescriptor {
     pub control_volume_boundary_face_count: u64,
     #[serde(default = "default_zero_f64")]
     pub control_volume_connectivity_coverage_ratio: f64,
+    #[serde(default = "default_zero_u64")]
+    pub element_topology_sample_element_count: u64,
+    #[serde(default = "default_zero_u64")]
+    pub element_topology_sample_edge_count: u64,
+    #[serde(default = "default_element_topology_sample_edge_nodes")]
+    pub element_topology_sample_edge_nodes: [[u32; 2]; 8],
+    #[serde(default = "default_element_topology_sample_element_edges")]
+    pub element_topology_sample_element_edges: [[u32; 3]; 4],
+    #[serde(default = "default_element_topology_sample_element_orientations")]
+    pub element_topology_sample_element_orientations: [[i8; 3]; 4],
+    #[serde(default = "default_element_topology_sample_element_areas_m2")]
+    pub element_topology_sample_element_areas_m2: [f64; 4],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -246,6 +274,20 @@ pub fn prepare_geometry_for_analysis(
             control_volume_internal_face_count: element_geometry.control_volume_internal_face_count,
             control_volume_boundary_face_count: element_geometry.control_volume_boundary_face_count,
             control_volume_connectivity_coverage_ratio: element_geometry.coverage_ratio,
+            element_topology_sample_element_count: element_geometry
+                .element_topology_sample
+                .element_count,
+            element_topology_sample_edge_count: element_geometry.element_topology_sample.edge_count,
+            element_topology_sample_edge_nodes: element_geometry.element_topology_sample.edge_nodes,
+            element_topology_sample_element_edges: element_geometry
+                .element_topology_sample
+                .element_edges,
+            element_topology_sample_element_orientations: element_geometry
+                .element_topology_sample
+                .element_orientations,
+            element_topology_sample_element_areas_m2: element_geometry
+                .element_topology_sample
+                .element_areas_m2,
         });
     }
 
@@ -374,6 +416,17 @@ struct ElementGeometryMetrics {
     control_volume_face_count: u64,
     control_volume_internal_face_count: u64,
     control_volume_boundary_face_count: u64,
+    element_topology_sample: ElementTopologySample,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ElementTopologySample {
+    element_count: u64,
+    edge_count: u64,
+    edge_nodes: [[u32; 2]; 8],
+    element_edges: [[u32; 3]; 4],
+    element_orientations: [[i8; 3]; 4],
+    element_areas_m2: [f64; 4],
 }
 
 fn mesh_element_geometry_metrics(
@@ -398,6 +451,8 @@ fn mesh_element_geometry_metrics(
     let mut area_sum = 0.0_f64;
     let mut valid_triangle_count = 0_u64;
     let mut edge_incidence = BTreeMap::<(u32, u32), u64>::new();
+    let mut edge_indices = BTreeMap::<(u32, u32), u32>::new();
+    let mut element_topology_sample = ElementTopologySample::default();
     let mut reference_coordinates_m = [[0.0_f64; 3]; 3];
     let mut reference_area_m2 = 0.0_f64;
     for triangle in &surface.triangles {
@@ -422,6 +477,31 @@ fn mesh_element_geometry_metrics(
             let edge = (left.min(right), left.max(right));
             unique_edges.insert(edge);
             *edge_incidence.entry(edge).or_insert(0) += 1;
+            if !edge_indices.contains_key(&edge) && edge_indices.len() < 8 {
+                let edge_index = edge_indices.len() as u32;
+                edge_indices.insert(edge, edge_index);
+                element_topology_sample.edge_nodes[edge_index as usize] = [edge.0, edge.1];
+                element_topology_sample.edge_count = edge_indices.len() as u64;
+            }
+        }
+        if (element_topology_sample.element_count as usize) < 4 {
+            let element_index = element_topology_sample.element_count as usize;
+            for (local_index, (left, right)) in [
+                (indices[0], indices[1]),
+                (indices[1], indices[2]),
+                (indices[2], indices[0]),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let edge = (left.min(right), left.max(right));
+                element_topology_sample.element_edges[element_index][local_index] =
+                    *edge_indices.get(&edge).unwrap_or(&0);
+                element_topology_sample.element_orientations[element_index][local_index] =
+                    if left <= right { 1 } else { -1 };
+            }
+            element_topology_sample.element_areas_m2[element_index] = triangle_area;
+            element_topology_sample.element_count += 1;
         }
         for (left, right) in [
             (vertices[0], vertices[1]),
@@ -463,6 +543,7 @@ fn mesh_element_geometry_metrics(
         control_volume_face_count: unique_edges.len() as u64,
         control_volume_internal_face_count,
         control_volume_boundary_face_count,
+        element_topology_sample,
     }
 }
 
@@ -664,6 +745,18 @@ mod tests {
         assert_eq!(descriptor.control_volume_internal_face_count, 1);
         assert_eq!(descriptor.control_volume_boundary_face_count, 4);
         assert_eq!(descriptor.control_volume_connectivity_coverage_ratio, 1.0);
+        assert_eq!(descriptor.element_topology_sample_element_count, 2);
+        assert_eq!(descriptor.element_topology_sample_edge_count, 5);
+        assert_eq!(descriptor.element_topology_sample_edge_nodes[0], [0, 1]);
+        assert_eq!(
+            descriptor.element_topology_sample_element_edges[0],
+            [0, 1, 2]
+        );
+        assert_eq!(
+            descriptor.element_topology_sample_element_orientations[0],
+            [1, 1, -1]
+        );
+        assert!((descriptor.element_topology_sample_element_areas_m2[0] - 0.5).abs() < 1.0e-12);
     }
 
     #[test]

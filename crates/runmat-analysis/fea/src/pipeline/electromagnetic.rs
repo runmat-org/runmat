@@ -2225,7 +2225,27 @@ impl MaxwellEdgeTopology {
             return None;
         }
         let coordinates = prep_coordinates.reference_element_coordinates_m;
-        let edge_nodes = [(0_usize, 1_usize), (1, 2), (2, 0)];
+        let sample_edge_count = prep_coordinates.element_topology_sample_edge_count.min(8);
+        let sample_element_count = prep_coordinates
+            .element_topology_sample_element_count
+            .min(4);
+        let sample_usable = sample_edge_count >= 3
+            && sample_element_count >= 1
+            && prep_coordinates
+                .element_topology_sample_edge_nodes
+                .iter()
+                .take(sample_edge_count)
+                .all(|nodes| nodes[0] < 3 && nodes[1] < 3 && nodes[0] != nodes[1]);
+        let edge_nodes = if sample_usable {
+            prep_coordinates
+                .element_topology_sample_edge_nodes
+                .iter()
+                .take(sample_edge_count)
+                .map(|nodes| (nodes[0] as usize, nodes[1] as usize))
+                .collect::<Vec<_>>()
+        } else {
+            vec![(0_usize, 1_usize), (1, 2), (0, 2)]
+        };
         let edges = edge_nodes
             .iter()
             .filter_map(|(from_node, to_node)| {
@@ -2243,14 +2263,51 @@ impl MaxwellEdgeTopology {
         if edges.len() != 3 {
             return None;
         }
+        let elements = if sample_usable {
+            prep_coordinates
+                .element_topology_sample_element_edges
+                .iter()
+                .zip(
+                    prep_coordinates
+                        .element_topology_sample_element_orientations
+                        .iter(),
+                )
+                .zip(
+                    prep_coordinates
+                        .element_topology_sample_element_areas_m2
+                        .iter(),
+                )
+                .take(sample_element_count)
+                .filter_map(|((edge_indices, orientations), area)| {
+                    let edge_indices = edge_indices
+                        .iter()
+                        .map(|index| *index as usize)
+                        .filter(|index| *index < edges.len())
+                        .collect::<Vec<_>>();
+                    if edge_indices.len() < 3 {
+                        return None;
+                    }
+                    Some(MaxwellElementIncidence {
+                        edge_indices,
+                        orientations: orientations.iter().map(|value| *value as f64).collect(),
+                        area_m2: finite_positive_or(
+                            *area,
+                            prep_coordinates.reference_element_area_m2,
+                        ),
+                    })
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![MaxwellElementIncidence {
+                edge_indices: vec![0, 1, 2],
+                orientations: vec![1.0, 1.0, -1.0],
+                area_m2: prep_coordinates.reference_element_area_m2,
+            }]
+        };
         Some(Self {
             basis: MaxwellEdgeTopologyBasis::PrepReferenceVectorElement,
             edges,
-            elements: vec![MaxwellElementIncidence {
-                edge_indices: vec![0, 1, 2],
-                orientations: vec![1.0, 1.0, 1.0],
-                area_m2: prep_coordinates.reference_element_area_m2,
-            }],
+            elements,
             gauge_anchor_nodes: gauge_anchor_nodes(constrained),
             prep_recovery_edge_count: summary.prep_recovery_edges.len(),
             vector_basis_dimension_count: 3,
@@ -3443,6 +3500,26 @@ mod tests {
                     [0.0, 0.2, 0.0],
                 ],
                 reference_element_area_m2: 0.04,
+                element_topology_sample_element_count: 1,
+                element_topology_sample_edge_count: 3,
+                element_topology_sample_edge_nodes: [
+                    [0, 1],
+                    [1, 2],
+                    [0, 2],
+                    [0, 0],
+                    [0, 0],
+                    [0, 0],
+                    [0, 0],
+                    [0, 0],
+                ],
+                element_topology_sample_element_edges: [[0, 1, 2], [0, 0, 0], [0, 0, 0], [0, 0, 0]],
+                element_topology_sample_element_orientations: [
+                    [1, 1, -1],
+                    [0, 0, 0],
+                    [0, 0, 0],
+                    [0, 0, 0],
+                ],
+                element_topology_sample_element_areas_m2: [0.04, 0.0, 0.0, 0.0],
                 calibration_profile_override: None,
             }),
             None,

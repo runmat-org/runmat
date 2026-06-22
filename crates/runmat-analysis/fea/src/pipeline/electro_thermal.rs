@@ -999,6 +999,26 @@ mod tests {
                     [0.0, 0.5, 0.0],
                 ],
                 reference_element_area_m2: 0.25,
+                element_topology_sample_element_count: 1,
+                element_topology_sample_edge_count: 3,
+                element_topology_sample_edge_nodes: [
+                    [0, 1],
+                    [1, 2],
+                    [0, 2],
+                    [0, 0],
+                    [0, 0],
+                    [0, 0],
+                    [0, 0],
+                    [0, 0],
+                ],
+                element_topology_sample_element_edges: [[0, 1, 2], [0, 0, 0], [0, 0, 0], [0, 0, 0]],
+                element_topology_sample_element_orientations: [
+                    [1, 1, -1],
+                    [0, 0, 0],
+                    [0, 0, 0],
+                    [0, 0, 0],
+                ],
+                element_topology_sample_element_areas_m2: [0.25, 0.0, 0.0, 0.0],
             }),
             ..summary()
         }

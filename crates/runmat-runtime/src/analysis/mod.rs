@@ -3363,6 +3363,9 @@ struct CfdDomainTopology {
     element_geometry_node_count: usize,
     element_geometry_edge_count: usize,
     element_geometry_coverage_ratio: f64,
+    element_topology_sample_element_count: usize,
+    element_topology_sample_edge_count: usize,
+    element_topology_sample_element_edges: [[u32; 3]; 4],
 }
 
 impl CfdDomainTopology {
@@ -3394,6 +3397,9 @@ impl CfdDomainTopology {
             element_geometry_node_count: 0,
             element_geometry_edge_count: 0,
             element_geometry_coverage_ratio: 0.0,
+            element_topology_sample_element_count: 0,
+            element_topology_sample_edge_count: 0,
+            element_topology_sample_element_edges: [[0; 3]; 4],
         }
     }
 
@@ -3472,6 +3478,9 @@ impl CfdDomainTopology {
             element_geometry_node_count: prep.element_geometry_node_count,
             element_geometry_edge_count: prep.element_geometry_edge_count,
             element_geometry_coverage_ratio: prep.element_geometry_coverage_ratio.clamp(0.0, 1.0),
+            element_topology_sample_element_count: prep.element_topology_sample_element_count,
+            element_topology_sample_edge_count: prep.element_topology_sample_edge_count,
+            element_topology_sample_element_edges: prep.element_topology_sample_element_edges,
         }
     }
 
@@ -4162,7 +4171,7 @@ fn cfd_assembly_diagnostic(
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis=finite_volume_velocity_pressure topology_basis={} topology_geometry_source={} control_volume_count={} control_volume_face_count={} control_volume_internal_face_count={} control_volume_boundary_face_count={} control_volume_connectivity_coverage_ratio={} hydraulic_diameter_m={} domain_length_m={} dx_m={} face_area_m2={} control_volume_volume_m3={} nominal_mass_flow_rate_kg_per_s={} courant_number={} active_dimension_count={} element_geometry_node_count={} element_geometry_edge_count={} element_geometry_coverage_ratio={} pressure_drop_pa={} mass_balance_residual={}",
+            "basis=finite_volume_velocity_pressure topology_basis={} topology_geometry_source={} control_volume_count={} control_volume_face_count={} control_volume_internal_face_count={} control_volume_boundary_face_count={} control_volume_connectivity_coverage_ratio={} hydraulic_diameter_m={} domain_length_m={} dx_m={} face_area_m2={} control_volume_volume_m3={} nominal_mass_flow_rate_kg_per_s={} courant_number={} active_dimension_count={} element_geometry_node_count={} element_geometry_edge_count={} element_geometry_coverage_ratio={} element_topology_sample_element_count={} element_topology_sample_edge_count={} pressure_drop_pa={} mass_balance_residual={}",
             topology.basis.as_str(),
             topology.geometry_source.as_str(),
             topology.control_volume_count,
@@ -4181,6 +4190,8 @@ fn cfd_assembly_diagnostic(
             topology.element_geometry_node_count,
             topology.element_geometry_edge_count,
             topology.element_geometry_coverage_ratio,
+            topology.element_topology_sample_element_count,
+            topology.element_topology_sample_edge_count,
             pressure_drop_pa,
             mass_balance_residual,
         ),
@@ -4284,6 +4295,69 @@ fn coupled_interface_graph_edge_target(
     } else {
         line_edge_count
     }
+}
+
+fn coupled_interface_graph_edges_for_topology(
+    topology: CfdDomainTopology,
+    interface_face_count: usize,
+) -> Vec<(usize, usize)> {
+    use std::collections::BTreeSet;
+
+    let target = coupled_interface_graph_edge_target(topology, interface_face_count);
+    if target == 0 {
+        return Vec::new();
+    }
+
+    let mut seen = BTreeSet::<(usize, usize)>::new();
+    let mut edges = Vec::with_capacity(target);
+    let sample_edge_count = topology
+        .element_topology_sample_edge_count
+        .min(interface_face_count);
+    for element_edges in topology
+        .element_topology_sample_element_edges
+        .iter()
+        .take(topology.element_topology_sample_element_count.min(4))
+    {
+        let local_edges = element_edges
+            .iter()
+            .map(|edge| *edge as usize)
+            .filter(|edge| *edge < sample_edge_count)
+            .collect::<Vec<_>>();
+        if local_edges.len() < 2 {
+            continue;
+        }
+        let pair_count = if local_edges.len() == 2 {
+            1
+        } else {
+            local_edges.len()
+        };
+        for offset in 0..pair_count {
+            let next = if offset + 1 < local_edges.len() {
+                offset + 1
+            } else {
+                0
+            };
+            let left = local_edges[offset].min(local_edges[next]);
+            let right = local_edges[offset].max(local_edges[next]);
+            if left != right && seen.insert((left, right)) {
+                edges.push((left, right));
+                if edges.len() == target {
+                    return edges;
+                }
+            }
+        }
+    }
+
+    for (left, right) in coupled_interface_graph_edges(interface_face_count, target) {
+        let edge = (left.min(right), left.max(right));
+        if seen.insert(edge) {
+            edges.push(edge);
+            if edges.len() == target {
+                break;
+            }
+        }
+    }
+    edges
 }
 
 fn solve_cfd_finite_volume_run(
@@ -4663,10 +4737,8 @@ fn solve_cht_conjugate_interface(
     let axial_conductance = (0.05 * conductance).max(1.0e-12);
     let anchor_conductance = conductance;
     let base_interface_temperature = resample_scalar_profile(base_temperature, interface_count);
-    let thermal_network_edges = coupled_interface_graph_edges(
-        interface_count,
-        coupled_interface_graph_edge_target(topology, interface_count),
-    );
+    let thermal_network_edges =
+        coupled_interface_graph_edges_for_topology(topology, interface_count);
     let mut operator = vec![vec![0.0; interface_count]; interface_count];
     for (row, diagonal) in operator.iter_mut().enumerate() {
         diagonal[row] = anchor_conductance;
@@ -5133,8 +5205,8 @@ fn solve_fsi_partitioned_interface(
     let traction_relaxation = 0.65_f64;
     let interface_stiffness_pa_per_m = 1.0 / compliance;
     let feedback_stiffness_pa_per_m = 0.25 * interface_stiffness_pa_per_m;
-    let structural_edge_target =
-        coupled_interface_graph_edge_target(topology, interface_face_count);
+    let structural_coupling_edges =
+        coupled_interface_graph_edges_for_topology(topology, interface_face_count);
     let mut interface_pressure = vec![0.0; face_pressure.len()];
     let mut structural_traction = vec![0.0; face_pressure.len()];
     let mut structural_face_displacement = vec![0.0; face_pressure.len() * 3];
@@ -5165,7 +5237,7 @@ fn solve_fsi_partitioned_interface(
         let structural_response = solve_fsi_structural_interface_response(
             &interface_pressure,
             interface_stiffness_pa_per_m,
-            structural_edge_target,
+            &structural_coupling_edges,
         );
         structural_solve_residual_ratio = structural_response.residual_ratio;
         structural_coupling_edge_count =
@@ -5224,7 +5296,7 @@ fn solve_fsi_partitioned_interface(
     let structural_response = solve_fsi_structural_interface_response(
         &interface_pressure,
         interface_stiffness_pa_per_m,
-        structural_edge_target,
+        &structural_coupling_edges,
     );
     structural_solve_residual_ratio = structural_solve_residual_ratio
         .max(structural_response.residual_ratio)
@@ -5287,7 +5359,7 @@ fn solve_fsi_partitioned_interface(
 fn solve_fsi_structural_interface_response(
     pressure_load: &[f64],
     interface_stiffness_pa_per_m: f64,
-    coupling_edge_target: usize,
+    coupling_edges: &[(usize, usize)],
 ) -> FsiStructuralInterfaceResponse {
     let face_count = pressure_load.len();
     if face_count == 0 {
@@ -5301,12 +5373,11 @@ fn solve_fsi_structural_interface_response(
 
     let diagonal_stiffness = interface_stiffness_pa_per_m.max(1.0e-9);
     let coupling_stiffness = 0.20 * diagonal_stiffness;
-    let coupling_edges = coupled_interface_graph_edges(face_count, coupling_edge_target);
     let mut operator = vec![vec![0.0; face_count]; face_count];
     for (row, diagonal) in operator.iter_mut().enumerate() {
         diagonal[row] = diagonal_stiffness;
     }
-    for (left, right) in &coupling_edges {
+    for (left, right) in coupling_edges {
         operator[*left][*left] += coupling_stiffness;
         operator[*right][*right] += coupling_stiffness;
         operator[*left][*right] -= coupling_stiffness;
@@ -12570,6 +12641,13 @@ fn to_fea_prep_context(
         element_geometry_coverage_ratio: prep.element_geometry_coverage_ratio,
         reference_element_coordinates_m: prep.reference_element_coordinates_m,
         reference_element_area_m2: prep.reference_element_area_m2,
+        element_topology_sample_element_count: prep.element_topology_sample_element_count,
+        element_topology_sample_edge_count: prep.element_topology_sample_edge_count,
+        element_topology_sample_edge_nodes: prep.element_topology_sample_edge_nodes,
+        element_topology_sample_element_edges: prep.element_topology_sample_element_edges,
+        element_topology_sample_element_orientations: prep
+            .element_topology_sample_element_orientations,
+        element_topology_sample_element_areas_m2: prep.element_topology_sample_element_areas_m2,
         calibration_profile_override: calibration_profile.and_then(map_calibration_profile),
     })
 }
@@ -14109,6 +14187,30 @@ fn resolve_run_prep_context(
             (area.is_finite() && area > 0.0).then_some((mesh.reference_element_coordinates_m, area))
         })
         .unwrap_or(([[0.0; 3]; 3], 0.0));
+    let (
+        element_topology_sample_element_count,
+        element_topology_sample_edge_count,
+        element_topology_sample_edge_nodes,
+        element_topology_sample_element_edges,
+        element_topology_sample_element_orientations,
+        element_topology_sample_element_areas_m2,
+    ) = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .find_map(|mesh| {
+            (mesh.element_topology_sample_element_count > 0
+                && mesh.element_topology_sample_edge_count > 0)
+                .then_some((
+                    mesh.element_topology_sample_element_count as usize,
+                    mesh.element_topology_sample_edge_count as usize,
+                    mesh.element_topology_sample_edge_nodes,
+                    mesh.element_topology_sample_element_edges,
+                    mesh.element_topology_sample_element_orientations,
+                    mesh.element_topology_sample_element_areas_m2,
+                ))
+        })
+        .unwrap_or((0, 0, [[0; 2]; 8], [[0; 3]; 4], [[0; 3]; 4], [0.0; 4]));
     let control_volume_cell_count = artifact
         .prep
         .prepared_meshes
@@ -14225,6 +14327,12 @@ fn resolve_run_prep_context(
         control_volume_internal_face_count,
         control_volume_boundary_face_count,
         control_volume_connectivity_coverage_ratio,
+        element_topology_sample_element_count,
+        element_topology_sample_edge_count,
+        element_topology_sample_edge_nodes,
+        element_topology_sample_element_edges,
+        element_topology_sample_element_orientations,
+        element_topology_sample_element_areas_m2,
     }))
 }
 

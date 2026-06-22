@@ -158,6 +158,12 @@ pub struct PrepCoordinateSummary {
     pub element_geometry_coverage_ratio: f64,
     pub reference_element_coordinates_m: [[f64; 3]; 3],
     pub reference_element_area_m2: f64,
+    pub element_topology_sample_element_count: usize,
+    pub element_topology_sample_edge_count: usize,
+    pub element_topology_sample_edge_nodes: [[u32; 2]; 8],
+    pub element_topology_sample_element_edges: [[u32; 3]; 4],
+    pub element_topology_sample_element_orientations: [[i8; 3]; 4],
+    pub element_topology_sample_element_areas_m2: [f64; 4],
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -469,6 +475,13 @@ pub fn assemble_linear_system(
             element_geometry_coverage_ratio: prep.element_geometry_coverage_ratio,
             reference_element_coordinates_m: prep.reference_element_coordinates_m,
             reference_element_area_m2: prep.reference_element_area_m2,
+            element_topology_sample_element_count: prep.element_topology_sample_element_count,
+            element_topology_sample_edge_count: prep.element_topology_sample_edge_count,
+            element_topology_sample_edge_nodes: prep.element_topology_sample_edge_nodes,
+            element_topology_sample_element_edges: prep.element_topology_sample_element_edges,
+            element_topology_sample_element_orientations: prep
+                .element_topology_sample_element_orientations,
+            element_topology_sample_element_areas_m2: prep.element_topology_sample_element_areas_m2,
         });
 
         prep_assembly = Some(PrepAssemblySummary {

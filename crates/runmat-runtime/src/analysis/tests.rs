@@ -119,6 +119,26 @@ fn sample_analysis_run_prep_context() -> AnalysisRunPrepContext {
         control_volume_internal_face_count: 11,
         control_volume_boundary_face_count: 8,
         control_volume_connectivity_coverage_ratio: 1.0,
+        element_topology_sample_element_count: 2,
+        element_topology_sample_edge_count: 5,
+        element_topology_sample_edge_nodes: [
+            [0, 1],
+            [1, 2],
+            [0, 2],
+            [2, 3],
+            [0, 3],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+        ],
+        element_topology_sample_element_edges: [[0, 1, 2], [2, 3, 4], [0, 0, 0], [0, 0, 0]],
+        element_topology_sample_element_orientations: [
+            [1, 1, -1],
+            [1, 1, -1],
+            [0, 0, 0],
+            [0, 0, 0],
+        ],
+        element_topology_sample_element_areas_m2: [0.04, 0.04, 0.0, 0.0],
     }
 }
 
@@ -5954,6 +5974,12 @@ fn analysis_run_cfd_uses_prep_control_volume_topology() {
             && diag.message.contains("element_geometry_node_count=4")
             && diag.message.contains("element_geometry_edge_count=5")
             && diag.message.contains("element_geometry_coverage_ratio=1")
+            && diag
+                .message
+                .contains("element_topology_sample_element_count=2")
+            && diag
+                .message
+                .contains("element_topology_sample_edge_count=5")
     }));
 }
 
@@ -6384,6 +6410,22 @@ fn cht_prepared_topology_uses_boundary_faces_for_interface_fields() {
     assert_eq!(closure.thermal_network_edge_count, 11);
     assert_eq!(heat_flux.shape, vec![8]);
     assert_eq!(temperature_jump.shape, vec![8]);
+}
+
+#[test]
+fn prepared_coupled_interface_graph_uses_element_topology_sample() {
+    let model = sample_cht_model();
+    let topology = CfdDomainTopology::from_model(&model, Some(sample_analysis_run_prep_context()));
+    let edges =
+        coupled_interface_graph_edges_for_topology(topology, fluid_interface_face_count(topology));
+
+    assert!(edges.contains(&(0, 1)));
+    assert!(edges.contains(&(1, 2)));
+    assert!(edges.contains(&(0, 2)));
+    assert!(edges.contains(&(2, 3)));
+    assert!(edges.contains(&(3, 4)));
+    assert!(edges.contains(&(2, 4)));
+    assert_eq!(edges.len(), topology.control_volume_internal_face_count);
 }
 
 #[test]

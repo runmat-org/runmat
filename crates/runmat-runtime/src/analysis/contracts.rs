@@ -33,6 +33,22 @@ fn default_reference_element_coordinates_m() -> [[f64; 3]; 3] {
     [[0.0; 3]; 3]
 }
 
+fn default_element_topology_sample_edge_nodes() -> [[u32; 2]; 8] {
+    [[0; 2]; 8]
+}
+
+fn default_element_topology_sample_element_edges() -> [[u32; 3]; 4] {
+    [[0; 3]; 4]
+}
+
+fn default_element_topology_sample_element_orientations() -> [[i8; 3]; 4] {
+    [[0; 3]; 4]
+}
+
+fn default_element_topology_sample_element_areas_m2() -> [f64; 4] {
+    [0.0; 4]
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalysisValidateResult {
     pub valid: bool,
@@ -113,6 +129,18 @@ pub struct AnalysisRunPrepContext {
     pub control_volume_boundary_face_count: usize,
     #[serde(default = "default_zero_f64")]
     pub control_volume_connectivity_coverage_ratio: f64,
+    #[serde(default = "default_zero_usize")]
+    pub element_topology_sample_element_count: usize,
+    #[serde(default = "default_zero_usize")]
+    pub element_topology_sample_edge_count: usize,
+    #[serde(default = "default_element_topology_sample_edge_nodes")]
+    pub element_topology_sample_edge_nodes: [[u32; 2]; 8],
+    #[serde(default = "default_element_topology_sample_element_edges")]
+    pub element_topology_sample_element_edges: [[u32; 3]; 4],
+    #[serde(default = "default_element_topology_sample_element_orientations")]
+    pub element_topology_sample_element_orientations: [[i8; 3]; 4],
+    #[serde(default = "default_element_topology_sample_element_areas_m2")]
+    pub element_topology_sample_element_areas_m2: [f64; 4],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
