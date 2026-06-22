@@ -4,7 +4,7 @@ use parking_lot::{Mutex, RwLock};
 use runmat_builtins::Value;
 use runmat_time::Instant;
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -121,8 +121,30 @@ pub struct GarbageCollector {
     /// Collection state
     collection_in_progress: AtomicBool,
 
+    /// Active guarded value borrows. Collection is skipped while this is nonzero.
+    active_value_borrows: AtomicUsize,
+
+    /// Active mutable guarded value borrow. Mutable access is exclusive.
+    active_value_mut_borrow: AtomicBool,
+
     /// Statistics
     stats: Arc<GcStats>,
+}
+
+struct GcValueBorrowGuard<'gc> {
+    gc: &'gc GarbageCollector,
+    mutable: bool,
+}
+
+impl Drop for GcValueBorrowGuard<'_> {
+    fn drop(&mut self) {
+        self.gc.active_value_borrows.fetch_sub(1, Ordering::AcqRel);
+        if self.mutable {
+            self.gc
+                .active_value_mut_borrow
+                .store(false, Ordering::Release);
+        }
+    }
 }
 
 impl GarbageCollector {
@@ -140,6 +162,8 @@ impl GarbageCollector {
             collector: Mutex::new(collector),
             root_ptrs: Arc::new(Mutex::new(HashSet::new())),
             collection_in_progress: AtomicBool::new(false),
+            active_value_borrows: AtomicUsize::new(0),
+            active_value_mut_borrow: AtomicBool::new(false),
             stats: Arc::new(GcStats::new()),
         })
     }
@@ -213,12 +237,50 @@ impl GarbageCollector {
         Ok(())
     }
 
+    fn begin_value_borrow(&self, mutable: bool) -> Result<GcValueBorrowGuard<'_>> {
+        if self.collection_in_progress.load(Ordering::Acquire) {
+            return Err(GcError::CollectionFailed(
+                "cannot borrow GC value during collection".to_string(),
+            ));
+        }
+
+        if mutable {
+            self.active_value_mut_borrow
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .map_err(|_| {
+                    GcError::SyncError("mutable GC value borrow already active".to_string())
+                })?;
+            if self.active_value_borrows.load(Ordering::Acquire) != 0 {
+                self.active_value_mut_borrow.store(false, Ordering::Release);
+                return Err(GcError::SyncError(
+                    "cannot mutably borrow GC value while another borrow is active".to_string(),
+                ));
+            }
+        } else if self.active_value_mut_borrow.load(Ordering::Acquire) {
+            return Err(GcError::SyncError(
+                "cannot immutably borrow GC value during mutable borrow".to_string(),
+            ));
+        }
+
+        self.active_value_borrows.fetch_add(1, Ordering::AcqRel);
+        if self.collection_in_progress.load(Ordering::Acquire) {
+            self.active_value_borrows.fetch_sub(1, Ordering::AcqRel);
+            if mutable {
+                self.active_value_mut_borrow.store(false, Ordering::Release);
+            }
+            return Err(GcError::CollectionFailed(
+                "collection started before GC value borrow could be established".to_string(),
+            ));
+        }
+
+        Ok(GcValueBorrowGuard { gc: self, mutable })
+    }
+
     /// Access a GC-managed value after validating that the pointer belongs to the GC heap.
     ///
-    /// This is an audited raw-pointer bridge for legacy `GcHandle<Value>` call sites. It is not the
-    /// final pinned-borrow API: callers must not allocate or trigger collection while using the
-    /// borrowed value.
+    /// Collection is blocked for the duration of the callback.
     pub fn with_value<R>(&self, ptr: &GcHandle<Value>, f: impl FnOnce(&Value) -> R) -> Result<R> {
+        let _borrow = self.begin_value_borrow(false)?;
         let raw = Self::non_null_value_ptr(ptr)?;
         self.validate_value_ptr(raw)?;
         Ok(f(unsafe { &*raw }))
@@ -226,13 +288,13 @@ impl GarbageCollector {
 
     /// Mutably access a GC-managed value after validating that the pointer belongs to the GC heap.
     ///
-    /// This is an audited raw-pointer bridge for legacy `GcHandle<Value>` call sites. It does not yet
-    /// enforce alias exclusivity beyond the existing same-thread runtime discipline.
+    /// Collection is blocked for the duration of the callback and mutable access is exclusive.
     pub fn with_value_mut<R>(
         &self,
         ptr: &GcHandle<Value>,
         f: impl FnOnce(&mut Value) -> R,
     ) -> Result<R> {
+        let _borrow = self.begin_value_borrow(true)?;
         let raw = Self::non_null_value_ptr(ptr)? as *mut Value;
         self.validate_value_ptr(raw)?;
         Ok(f(unsafe { &mut *raw }))
@@ -246,6 +308,9 @@ impl GarbageCollector {
     /// Check if collection should be triggered
     fn should_collect(&self) -> bool {
         if self.collection_in_progress.load(Ordering::Acquire) {
+            return false;
+        }
+        if self.active_value_borrows.load(Ordering::Acquire) != 0 {
             return false;
         }
 
@@ -262,6 +327,10 @@ impl GarbageCollector {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
             .is_err()
         {
+            return Ok(0);
+        }
+        if self.active_value_borrows.load(Ordering::Acquire) != 0 {
+            self.collection_in_progress.store(false, Ordering::Release);
             return Ok(0);
         }
 
@@ -319,6 +388,10 @@ impl GarbageCollector {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
             .is_err()
         {
+            return Ok(0);
+        }
+        if self.active_value_borrows.load(Ordering::Acquire) != 0 {
+            self.collection_in_progress.store(false, Ordering::Release);
             return Ok(0);
         }
 
@@ -548,6 +621,8 @@ pub fn gc_reset_for_test() -> Result<()> {
 
     // Ensure collection is not in progress
     GC.collection_in_progress.store(false, Ordering::Relaxed);
+    GC.active_value_borrows.store(0, Ordering::Relaxed);
+    GC.active_value_mut_borrow.store(false, Ordering::Relaxed);
 
     // Configure with default settings
     gc_configure(GcConfig::default())?;
@@ -681,6 +756,36 @@ mod tests {
             unsafe {
                 drop(Box::from_raw(raw));
             }
+        });
+    }
+
+    #[test]
+    fn guarded_access_blocks_nested_collection() {
+        gc_test_context(|| {
+            let ptr = gc_allocate(Value::Num(1.0)).expect("allocation failed");
+
+            let collected = gc_with_value(&ptr, |_| {
+                gc_collect_minor().expect("nested collection should be skipped")
+            })
+            .expect("guarded access should succeed");
+
+            assert_eq!(collected, 0);
+            assert_eq!(
+                gc_clone_value(&ptr).expect("value should remain live"),
+                Value::Num(1.0)
+            );
+        });
+    }
+
+    #[test]
+    fn guarded_mut_access_is_exclusive() {
+        gc_test_context(|| {
+            let ptr = gc_allocate(Value::Num(1.0)).expect("allocation failed");
+
+            let nested = gc_with_value_mut(&ptr, |_| gc_with_value_mut(&ptr, |_| ()))
+                .expect("outer mutable borrow should succeed");
+
+            assert!(matches!(nested, Err(GcError::SyncError(_))));
         });
     }
 }
