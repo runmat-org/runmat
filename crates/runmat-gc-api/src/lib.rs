@@ -66,43 +66,87 @@ impl<T> DerefMut for GcPtr<T> {
     }
 }
 
-impl<T: PartialEq> PartialEq for GcPtr<T> {
+impl<T> PartialEq for GcPtr<T> {
     fn eq(&self, other: &Self) -> bool {
-        if self.is_null() && other.is_null() {
-            true
-        } else if self.is_null() || other.is_null() {
-            false
-        } else {
-            **self == **other
-        }
+        self.ptr == other.ptr
     }
 }
-impl<T: Eq> Eq for GcPtr<T> {}
-impl<T: Hash> Hash for GcPtr<T> {
+impl<T> Eq for GcPtr<T> {}
+impl<T> Hash for GcPtr<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        if !self.is_null() {
-            (**self).hash(state)
-        }
+        self.ptr.hash(state)
     }
 }
-impl<T: fmt::Debug> fmt::Debug for GcPtr<T> {
+impl<T> fmt::Debug for GcPtr<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_null() {
             write!(f, "GcPtr(null)")
         } else {
-            write!(f, "GcPtr({:?})", **self)
+            write!(f, "GcPtr({:p})", self.ptr)
         }
     }
 }
-impl<T: fmt::Display> fmt::Display for GcPtr<T> {
+impl<T> fmt::Display for GcPtr<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_null() {
             write!(f, "null")
         } else {
-            write!(f, "{}", **self)
+            write!(f, "{:p}", self.ptr)
         }
     }
 }
 
 unsafe impl<T: Send> Send for GcPtr<T> {}
 unsafe impl<T: Sync> Sync for GcPtr<T> {}
+
+#[cfg(test)]
+mod tests {
+    use super::GcPtr;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    #[test]
+    fn equality_is_pointer_identity_not_pointee_value() {
+        let raw_a = Box::into_raw(Box::new(7_u64));
+        let raw_b = Box::into_raw(Box::new(7_u64));
+        let ptr_a = unsafe { GcPtr::from_raw(raw_a) };
+        let ptr_b = unsafe { GcPtr::from_raw(raw_b) };
+
+        assert_eq!(ptr_a, ptr_a);
+        assert_ne!(ptr_a, ptr_b);
+
+        unsafe {
+            drop(Box::from_raw(raw_a));
+            drop(Box::from_raw(raw_b));
+        }
+    }
+
+    #[test]
+    fn hash_is_pointer_identity() {
+        let raw_a = Box::into_raw(Box::new(7_u64));
+        let raw_b = Box::into_raw(Box::new(7_u64));
+        let ptr_a = unsafe { GcPtr::from_raw(raw_a) };
+        let ptr_b = unsafe { GcPtr::from_raw(raw_b) };
+
+        let mut ptr_hash = DefaultHasher::new();
+        ptr_a.hash(&mut ptr_hash);
+        let mut raw_hash = DefaultHasher::new();
+        raw_a.hash(&mut raw_hash);
+
+        assert_eq!(ptr_hash.finish(), raw_hash.finish());
+        assert_ne!(ptr_a, ptr_b);
+
+        unsafe {
+            drop(Box::from_raw(raw_a));
+            drop(Box::from_raw(raw_b));
+        }
+    }
+
+    #[test]
+    fn debug_and_display_do_not_dereference_pointee() {
+        let ptr = GcPtr::<u64>::null();
+
+        assert_eq!(format!("{ptr:?}"), "GcPtr(null)");
+        assert_eq!(ptr.to_string(), "null");
+    }
+}
