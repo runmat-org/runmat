@@ -5721,7 +5721,10 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_FSI_COUPLING"
-            && diag.message.contains("cfd_profile_point_count=2")));
+            && diag.message.contains("cfd_profile_point_count=2")
+            && diag.message.contains("authored_interface_count=")
+            && diag.message.contains("interface_node_count=")
+            && diag.message.contains("interface_face_count=")));
     let interface_pressure = envelope
         .data
         .run
