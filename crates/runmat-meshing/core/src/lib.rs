@@ -97,6 +97,16 @@ pub struct PreparedMeshDescriptor {
     pub reference_element_coordinates_m: [[f64; 3]; 3],
     #[serde(default = "default_zero_f64")]
     pub reference_element_area_m2: f64,
+    #[serde(default = "default_zero_u64")]
+    pub control_volume_cell_count: u64,
+    #[serde(default = "default_zero_u64")]
+    pub control_volume_face_count: u64,
+    #[serde(default = "default_zero_u64")]
+    pub control_volume_internal_face_count: u64,
+    #[serde(default = "default_zero_u64")]
+    pub control_volume_boundary_face_count: u64,
+    #[serde(default = "default_zero_f64")]
+    pub control_volume_connectivity_coverage_ratio: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -231,6 +241,11 @@ pub fn prepare_geometry_for_analysis(
             element_geometry_coverage_ratio: element_geometry.coverage_ratio,
             reference_element_coordinates_m: element_geometry.reference_coordinates_m,
             reference_element_area_m2: element_geometry.reference_area_m2,
+            control_volume_cell_count: element_geometry.control_volume_cell_count,
+            control_volume_face_count: element_geometry.control_volume_face_count,
+            control_volume_internal_face_count: element_geometry.control_volume_internal_face_count,
+            control_volume_boundary_face_count: element_geometry.control_volume_boundary_face_count,
+            control_volume_connectivity_coverage_ratio: element_geometry.coverage_ratio,
         });
     }
 
@@ -355,6 +370,10 @@ struct ElementGeometryMetrics {
     coverage_ratio: f64,
     reference_coordinates_m: [[f64; 3]; 3],
     reference_area_m2: f64,
+    control_volume_cell_count: u64,
+    control_volume_face_count: u64,
+    control_volume_internal_face_count: u64,
+    control_volume_boundary_face_count: u64,
 }
 
 fn mesh_element_geometry_metrics(
@@ -378,6 +397,7 @@ fn mesh_element_geometry_metrics(
     let mut edge_length_count = 0_u64;
     let mut area_sum = 0.0_f64;
     let mut valid_triangle_count = 0_u64;
+    let mut edge_incidence = BTreeMap::<(u32, u32), u64>::new();
     let mut reference_coordinates_m = [[0.0_f64; 3]; 3];
     let mut reference_area_m2 = 0.0_f64;
     for triangle in &surface.triangles {
@@ -399,7 +419,9 @@ fn mesh_element_geometry_metrics(
             (indices[1], indices[2]),
             (indices[2], indices[0]),
         ] {
-            unique_edges.insert((left.min(right), left.max(right)));
+            let edge = (left.min(right), left.max(right));
+            unique_edges.insert(edge);
+            *edge_incidence.entry(edge).or_insert(0) += 1;
         }
         for (left, right) in [
             (vertices[0], vertices[1]),
@@ -411,6 +433,11 @@ fn mesh_element_geometry_metrics(
         }
         area_sum += triangle_area;
     }
+
+    let control_volume_internal_face_count =
+        edge_incidence.values().filter(|count| **count > 1).count() as u64;
+    let control_volume_boundary_face_count =
+        edge_incidence.values().filter(|count| **count == 1).count() as u64;
 
     ElementGeometryMetrics {
         node_count: referenced_nodes.len() as u64,
@@ -432,6 +459,10 @@ fn mesh_element_geometry_metrics(
         },
         reference_coordinates_m,
         reference_area_m2,
+        control_volume_cell_count: valid_triangle_count,
+        control_volume_face_count: unique_edges.len() as u64,
+        control_volume_internal_face_count,
+        control_volume_boundary_face_count,
     }
 }
 
@@ -628,6 +659,11 @@ mod tests {
             [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]]
         );
         assert!((descriptor.reference_element_area_m2 - 0.5).abs() < 1.0e-12);
+        assert_eq!(descriptor.control_volume_cell_count, 2);
+        assert_eq!(descriptor.control_volume_face_count, 5);
+        assert_eq!(descriptor.control_volume_internal_face_count, 1);
+        assert_eq!(descriptor.control_volume_boundary_face_count, 4);
+        assert_eq!(descriptor.control_volume_connectivity_coverage_ratio, 1.0);
     }
 
     #[test]

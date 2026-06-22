@@ -114,6 +114,11 @@ fn sample_analysis_run_prep_context() -> AnalysisRunPrepContext {
         element_geometry_coverage_ratio: 1.0,
         reference_element_coordinates_m: [[0.0, 0.0, 0.0], [0.4, 0.0, 0.0], [0.0, 0.2, 0.0]],
         reference_element_area_m2: 0.04,
+        control_volume_cell_count: 15,
+        control_volume_face_count: 19,
+        control_volume_internal_face_count: 11,
+        control_volume_boundary_face_count: 8,
+        control_volume_connectivity_coverage_ratio: 1.0,
     }
 }
 
@@ -5922,6 +5927,16 @@ fn analysis_run_cfd_uses_prep_control_volume_topology() {
                 .message
                 .contains("topology_geometry_source=prep_element_geometry")
             && diag.message.contains("control_volume_count=15")
+            && diag.message.contains("control_volume_face_count=19")
+            && diag
+                .message
+                .contains("control_volume_internal_face_count=11")
+            && diag
+                .message
+                .contains("control_volume_boundary_face_count=8")
+            && diag
+                .message
+                .contains("control_volume_connectivity_coverage_ratio=1")
             && diag.message.contains("domain_length_m=2.4")
             && diag.message.contains("face_area_m2=0.04")
             && diag.message.contains("face_area_m2=")

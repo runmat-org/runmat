@@ -3351,6 +3351,10 @@ struct CfdDomainTopology {
     geometry_source: CfdDomainGeometrySource,
     node_count: usize,
     control_volume_count: usize,
+    control_volume_face_count: usize,
+    control_volume_internal_face_count: usize,
+    control_volume_boundary_face_count: usize,
+    control_volume_connectivity_coverage_ratio: f64,
     domain_length_m: f64,
     hydraulic_diameter_m: f64,
     face_area_m2: f64,
@@ -3378,6 +3382,10 @@ impl CfdDomainTopology {
             geometry_source: CfdDomainGeometrySource::ImplicitChannel,
             node_count,
             control_volume_count,
+            control_volume_face_count: control_volume_count.saturating_add(1),
+            control_volume_internal_face_count: control_volume_count.saturating_sub(1),
+            control_volume_boundary_face_count: 2,
+            control_volume_connectivity_coverage_ratio: 0.0,
             domain_length_m: 1.0,
             hydraulic_diameter_m: 1.0,
             face_area_m2: 1.0,
@@ -3390,8 +3398,19 @@ impl CfdDomainTopology {
     }
 
     fn from_prep(node_count: usize, prep: AnalysisRunPrepContext) -> Self {
-        let node_count = node_count.max(2);
-        let control_volume_count = node_count.saturating_sub(1).max(1);
+        let has_control_volume_connectivity = prep.control_volume_cell_count > 0
+            && prep.control_volume_face_count > 0
+            && prep.control_volume_connectivity_coverage_ratio > 0.0;
+        let control_volume_count = if has_control_volume_connectivity {
+            prep.control_volume_cell_count.max(1)
+        } else {
+            node_count.max(2).saturating_sub(1).max(1)
+        };
+        let node_count = if has_control_volume_connectivity {
+            control_volume_count.saturating_add(1).max(2)
+        } else {
+            node_count.max(2)
+        };
         let fallback_length = finite_positive_or(prep.coordinate_characteristic_length_m, 1.0)
             * control_volume_count as f64;
         let domain_length_m = finite_positive_or(prep.coordinate_span_x_m, fallback_length);
@@ -3427,6 +3446,24 @@ impl CfdDomainTopology {
             },
             node_count,
             control_volume_count,
+            control_volume_face_count: if has_control_volume_connectivity {
+                prep.control_volume_face_count
+            } else {
+                control_volume_count.saturating_add(1)
+            },
+            control_volume_internal_face_count: if has_control_volume_connectivity {
+                prep.control_volume_internal_face_count
+            } else {
+                control_volume_count.saturating_sub(1)
+            },
+            control_volume_boundary_face_count: if has_control_volume_connectivity {
+                prep.control_volume_boundary_face_count
+            } else {
+                2
+            },
+            control_volume_connectivity_coverage_ratio: prep
+                .control_volume_connectivity_coverage_ratio
+                .clamp(0.0, 1.0),
             domain_length_m,
             hydraulic_diameter_m,
             face_area_m2,
@@ -4125,10 +4162,14 @@ fn cfd_assembly_diagnostic(
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis=finite_volume_velocity_pressure topology_basis={} topology_geometry_source={} control_volume_count={} hydraulic_diameter_m={} domain_length_m={} dx_m={} face_area_m2={} control_volume_volume_m3={} nominal_mass_flow_rate_kg_per_s={} courant_number={} active_dimension_count={} element_geometry_node_count={} element_geometry_edge_count={} element_geometry_coverage_ratio={} pressure_drop_pa={} mass_balance_residual={}",
+            "basis=finite_volume_velocity_pressure topology_basis={} topology_geometry_source={} control_volume_count={} control_volume_face_count={} control_volume_internal_face_count={} control_volume_boundary_face_count={} control_volume_connectivity_coverage_ratio={} hydraulic_diameter_m={} domain_length_m={} dx_m={} face_area_m2={} control_volume_volume_m3={} nominal_mass_flow_rate_kg_per_s={} courant_number={} active_dimension_count={} element_geometry_node_count={} element_geometry_edge_count={} element_geometry_coverage_ratio={} pressure_drop_pa={} mass_balance_residual={}",
             topology.basis.as_str(),
             topology.geometry_source.as_str(),
             topology.control_volume_count,
+            topology.control_volume_face_count,
+            topology.control_volume_internal_face_count,
+            topology.control_volume_boundary_face_count,
+            topology.control_volume_connectivity_coverage_ratio,
             topology.hydraulic_diameter_m,
             topology.domain_length_m,
             topology.dx_m,
@@ -5718,7 +5759,7 @@ pub fn analysis_run_cfd_with_options_op(
         code: "FEA_CFD_FLOW".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
         message: format!(
-            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={} topology_basis={} domain_length_m={} hydraulic_diameter_m={}",
+            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={} topology_basis={} control_volume_count={} control_volume_face_count={} control_volume_internal_face_count={} control_volume_boundary_face_count={} control_volume_connectivity_coverage_ratio={} domain_length_m={} hydraulic_diameter_m={}",
             cfd_domain.reference_density_kg_per_m3,
             cfd_domain.dynamic_viscosity_pa_s,
             flow_inlet_velocity,
@@ -5727,6 +5768,11 @@ pub fn analysis_run_cfd_with_options_op(
             solve_family,
             cfd_domain.time_profile.len(),
             flow_topology.basis.as_str(),
+            flow_topology.control_volume_count,
+            flow_topology.control_volume_face_count,
+            flow_topology.control_volume_internal_face_count,
+            flow_topology.control_volume_boundary_face_count,
+            flow_topology.control_volume_connectivity_coverage_ratio,
             flow_topology.domain_length_m,
             flow_topology.hydraulic_diameter_m,
         ),
@@ -6240,7 +6286,7 @@ pub fn analysis_run_cht_with_options_op(
         code: "FEA_CFD_FLOW".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
         message: format!(
-            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={} topology_basis={} domain_length_m={} hydraulic_diameter_m={}",
+            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={} topology_basis={} control_volume_count={} control_volume_face_count={} control_volume_internal_face_count={} control_volume_boundary_face_count={} control_volume_connectivity_coverage_ratio={} domain_length_m={} hydraulic_diameter_m={}",
             cfd_domain.reference_density_kg_per_m3,
             cfd_domain.dynamic_viscosity_pa_s,
             cfd_domain.inlet_velocity_m_per_s,
@@ -6252,6 +6298,11 @@ pub fn analysis_run_cht_with_options_op(
             },
             cfd_domain.time_profile.len(),
             topology.basis.as_str(),
+            topology.control_volume_count,
+            topology.control_volume_face_count,
+            topology.control_volume_internal_face_count,
+            topology.control_volume_boundary_face_count,
+            topology.control_volume_connectivity_coverage_ratio,
             topology.domain_length_m,
             topology.hydraulic_diameter_m,
         ),
@@ -6822,7 +6873,7 @@ pub fn analysis_run_fsi_with_options_op(
         code: "FEA_CFD_FLOW".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
         message: format!(
-            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={} topology_basis={} domain_length_m={} hydraulic_diameter_m={}",
+            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={} topology_basis={} control_volume_count={} control_volume_face_count={} control_volume_internal_face_count={} control_volume_boundary_face_count={} control_volume_connectivity_coverage_ratio={} domain_length_m={} hydraulic_diameter_m={}",
             cfd_domain.reference_density_kg_per_m3,
             cfd_domain.dynamic_viscosity_pa_s,
             cfd_domain.inlet_velocity_m_per_s,
@@ -6834,6 +6885,11 @@ pub fn analysis_run_fsi_with_options_op(
             },
             cfd_domain.time_profile.len(),
             topology.basis.as_str(),
+            topology.control_volume_count,
+            topology.control_volume_face_count,
+            topology.control_volume_internal_face_count,
+            topology.control_volume_boundary_face_count,
+            topology.control_volume_connectivity_coverage_ratio,
             topology.domain_length_m,
             topology.hydraulic_diameter_m,
         ),
@@ -13928,6 +13984,50 @@ fn resolve_run_prep_context(
             (area.is_finite() && area > 0.0).then_some((mesh.reference_element_coordinates_m, area))
         })
         .unwrap_or(([[0.0; 3]; 3], 0.0));
+    let control_volume_cell_count = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| mesh.control_volume_cell_count as usize)
+        .sum::<usize>();
+    let control_volume_face_count = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| mesh.control_volume_face_count as usize)
+        .sum::<usize>();
+    let control_volume_internal_face_count = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| mesh.control_volume_internal_face_count as usize)
+        .sum::<usize>();
+    let control_volume_boundary_face_count = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| mesh.control_volume_boundary_face_count as usize)
+        .sum::<usize>();
+    let (control_volume_coverage_sum, control_volume_coverage_weight) = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| {
+            (
+                mesh.control_volume_connectivity_coverage_ratio
+                    .clamp(0.0, 1.0),
+                mesh.element_count.max(1) as f64,
+            )
+        })
+        .fold(
+            (0.0_f64, 0.0_f64),
+            |(sum, weight_sum), (coverage, weight)| (sum + coverage * weight, weight_sum + weight),
+        );
+    let control_volume_connectivity_coverage_ratio = if control_volume_coverage_weight > 0.0 {
+        control_volume_coverage_sum / control_volume_coverage_weight
+    } else {
+        0.0
+    };
 
     Ok(Some(AnalysisRunPrepContext {
         prepared_mesh_count,
@@ -13995,6 +14095,11 @@ fn resolve_run_prep_context(
         element_geometry_coverage_ratio,
         reference_element_coordinates_m,
         reference_element_area_m2,
+        control_volume_cell_count,
+        control_volume_face_count,
+        control_volume_internal_face_count,
+        control_volume_boundary_face_count,
+        control_volume_connectivity_coverage_ratio,
     }))
 }
 

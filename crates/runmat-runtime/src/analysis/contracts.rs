@@ -103,6 +103,16 @@ pub struct AnalysisRunPrepContext {
     pub reference_element_coordinates_m: [[f64; 3]; 3],
     #[serde(default = "default_zero_f64")]
     pub reference_element_area_m2: f64,
+    #[serde(default = "default_zero_usize")]
+    pub control_volume_cell_count: usize,
+    #[serde(default = "default_zero_usize")]
+    pub control_volume_face_count: usize,
+    #[serde(default = "default_zero_usize")]
+    pub control_volume_internal_face_count: usize,
+    #[serde(default = "default_zero_usize")]
+    pub control_volume_boundary_face_count: usize,
+    #[serde(default = "default_zero_f64")]
+    pub control_volume_connectivity_coverage_ratio: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
