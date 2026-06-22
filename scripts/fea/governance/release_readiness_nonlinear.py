@@ -63,6 +63,8 @@ KEY_PERFORMANCE_FIXTURES = {
     "cantilever_gpu_fallback",
     "cantilever_load_sweep_gpu_provider",
     "cantilever_large_load_sweep_gpu_provider",
+    "structural_axial_bar_reference_gpu_provider",
+    "structural_beam_bending_reference_gpu_provider",
     "multi_material_assembly_gpu_provider",
     "modal_large_gpu_provider",
     "modal_large_gpu_provider_stress16",

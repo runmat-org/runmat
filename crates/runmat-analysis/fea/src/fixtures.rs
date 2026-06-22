@@ -10,6 +10,8 @@ pub enum FixtureId {
     CantileverLinearStatic,
     CantileverLoadSweep,
     CantileverLargeLoadSweep,
+    StructuralAxialBarReference,
+    StructuralBeamBendingReference,
     ModalLarge,
     TransientLong,
     TransientShock,
@@ -38,6 +40,8 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::CantileverLinearStatic => cantilever_linear_static(),
         FixtureId::CantileverLoadSweep => cantilever_load_sweep(),
         FixtureId::CantileverLargeLoadSweep => cantilever_large_load_sweep(),
+        FixtureId::StructuralAxialBarReference => structural_axial_bar_reference(),
+        FixtureId::StructuralBeamBendingReference => structural_beam_bending_reference(),
         FixtureId::ModalLarge => modal_large_fixture(),
         FixtureId::TransientLong => transient_long_fixture(),
         FixtureId::TransientShock => transient_shock_fixture(),
@@ -162,6 +166,57 @@ fn cantilever_large_load_sweep() -> AnalysisModel {
             }
         })
         .collect();
+    model
+}
+
+fn structural_axial_bar_reference() -> AnalysisModel {
+    let mut model = cantilever_linear_static();
+    model.model_id = AnalysisModelId("structural_axial_bar_reference".to_string());
+    model.geometry_id = "geo:structural_axial_bar".to_string();
+    model.loads = (0..12)
+        .map(|i| LoadCase {
+            load_id: format!("axial_bar_tension_{i}"),
+            region_id: format!("bar_station_{i}"),
+            kind: LoadKind::Force {
+                fx: 2_000.0,
+                fy: 0.0,
+                fz: 0.0,
+            },
+        })
+        .collect();
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "bar_span".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    model
+}
+
+fn structural_beam_bending_reference() -> AnalysisModel {
+    let mut model = cantilever_linear_static();
+    model.model_id = AnalysisModelId("structural_beam_bending_reference".to_string());
+    model.geometry_id = "geo:structural_beam_bending".to_string();
+    model.loads = (0..12)
+        .map(|i| {
+            let span_fraction = (i + 1) as f64 / 12.0;
+            LoadCase {
+                load_id: format!("beam_bending_station_{i}"),
+                region_id: format!("beam_station_{i}"),
+                kind: LoadKind::Force {
+                    fx: 0.0,
+                    fy: -500.0 * span_fraction,
+                    fz: 0.0,
+                },
+            }
+        })
+        .collect();
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "beam_span".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
     model
 }
 

@@ -1238,6 +1238,46 @@ fn large_load_sweep_fixture_scales_dof_count() {
 }
 
 #[test]
+fn structural_bar_and_beam_reference_fixtures_emit_known_answer_checks() {
+    let axial = crate::run_linear_static(
+        &fixture_model(FixtureId::StructuralAxialBarReference),
+        ComputeBackend::Cpu,
+    )
+    .expect("axial bar reference should solve");
+    let bending = crate::run_linear_static(
+        &fixture_model(FixtureId::StructuralBeamBendingReference),
+        ComputeBackend::Cpu,
+    )
+    .expect("beam bending reference should solve");
+
+    assert!(axial.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER"
+            && diag.message.contains("known_answer_coverage_ratio=1")
+    }));
+    assert!(bending.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER"
+            && diag.message.contains("known_answer_coverage_ratio=1")
+    }));
+
+    let axial_displacement = field(&axial, FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .as_host_f64()
+        .expect("axial displacement should be host-backed");
+    let bending_displacement = field(&bending, FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .as_host_f64()
+        .expect("bending displacement should be host-backed");
+    let axial_x = component_peak(axial_displacement, 0);
+    let axial_y = component_peak(axial_displacement, 1);
+    let bending_x = component_peak(bending_displacement, 0);
+    let bending_y = component_peak(bending_displacement, 1);
+
+    assert!(axial_x > axial_y, "axial reference should be x dominated");
+    assert!(
+        bending_y > bending_x,
+        "bending reference should be transverse-load dominated"
+    );
+}
+
+#[test]
 fn multi_material_fixture_has_distinct_response_profile() {
     let baseline = crate::run_linear_static(
         &fixture_model(FixtureId::CantileverLinearStatic),
@@ -1278,4 +1318,11 @@ fn multi_material_fixture_has_distinct_response_profile() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_INFERRED"));
+}
+
+fn component_peak(values: &[f64], component: usize) -> f64 {
+    values
+        .chunks_exact(3)
+        .map(|components| components.get(component).copied().unwrap_or(0.0).abs())
+        .fold(0.0_f64, f64::max)
 }
