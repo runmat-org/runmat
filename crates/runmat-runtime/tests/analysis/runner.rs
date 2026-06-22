@@ -9093,8 +9093,8 @@ pub(super) fn run_fixture(
                                 "FEA_EM_STATIC",
                                 "flux_divergence_ratio",
                             ),
-                            Some(0.12),
-                            Some(2.5),
+                            Some(0.0),
+                            Some(0.35),
                         );
                         push_threshold_assertion(
                             spec.id,

@@ -527,6 +527,21 @@ pub fn run_electromagnetic_with_options(
 
     let base_rhs_real = rhs_real;
     let base_rhs_imag = rhs_imag;
+    let maxwell_topology =
+        MaxwellEdgeTopology::from_assembly_or_line(&summary, node_count, h, &constrained);
+    let edge_operator = maxwell_topology.assemble_curl_curl_operator(
+        &summary.operator,
+        &node_mu_r,
+        &node_eps_r,
+        &boundary_penalty_diag,
+        mu0,
+        epsilon0,
+        omega,
+    );
+    let edge_coupling_terms =
+        maxwell_topology.edge_average_terms(&conductivity_coupling_terms, 1.0e-9);
+    let edge_rhs_real = maxwell_topology.edge_source_terms(&base_rhs_real);
+    let edge_rhs_imag = maxwell_topology.edge_source_terms(&base_rhs_imag);
     let backend_kind = if backend == ComputeBackend::Gpu {
         LinearAlgebraBackendKind::RuntimeTensor
     } else {
@@ -537,20 +552,20 @@ pub fn run_electromagnetic_with_options(
     let prepared_build_ms = prepared_start.elapsed().as_secs_f64() * 1_000.0;
     let solve_start = Instant::now();
     let harmonic_solve = solve_harmonic_block_system(
-        &summary.operator,
-        &conductivity_coupling_terms,
-        &base_rhs_real,
-        &base_rhs_imag,
+        &edge_operator,
+        &edge_coupling_terms,
+        &edge_rhs_real,
+        &edge_rhs_imag,
         harmonic_max_iters,
         harmonic_tol,
     );
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1_000.0;
-    let vector_potential_real = harmonic_solve.real_solution.clone();
-    let vector_potential_imag = harmonic_solve.imag_solution.clone();
-    let maxwell_topology =
-        MaxwellEdgeTopology::from_assembly_or_line(&summary, node_count, h, &constrained);
-    let edge_vector_potential_real = maxwell_topology.edge_line_integrals(&vector_potential_real);
-    let edge_vector_potential_imag = maxwell_topology.edge_line_integrals(&vector_potential_imag);
+    let edge_vector_potential_real = harmonic_solve.real_solution.clone();
+    let edge_vector_potential_imag = harmonic_solve.imag_solution.clone();
+    let vector_potential_real =
+        maxwell_topology.node_potential_from_edge_line_integrals(&edge_vector_potential_real);
+    let vector_potential_imag =
+        maxwell_topology.node_potential_from_edge_line_integrals(&edge_vector_potential_imag);
     let gauge_anchor_residual_ratio = maxwell_topology
         .gauge_anchor_residual_ratio(&vector_potential_real, &vector_potential_imag);
     let gauge_penalty_ratio = boundary_penalty_diag.iter().sum::<f64>()
@@ -568,11 +583,12 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "iterations={} residual_norm={} tolerance={} backend={} block_coupled=true",
+            "formulation=edge_curl_curl_harmonic iterations={} residual_norm={} tolerance={} backend={} block_coupled=true edge_dof_count={}",
             harmonic_solve.iterations,
             harmonic_solve.residual_norm,
             harmonic_tol,
-            backend_kind.as_str()
+            backend_kind.as_str(),
+            edge_operator.dof_count,
         ),
     }];
     diagnostics.push(electromagnetic_formulation_diagnostic(
@@ -639,15 +655,17 @@ pub fn run_electromagnetic_with_options(
         .map(|(real, imag)| (real * real + imag * imag).sqrt())
         .collect::<Vec<_>>();
     let (flux_density_real, flux_density_imag, flux_density) = maxwell_topology
-        .curl_from_nodal_vector_potential(&vector_potential_real, &vector_potential_imag);
-    let flux_magnitude_estimate = maxwell_topology.curl_from_nodal_magnitude(&vector_potential);
+        .curl_from_edge_vector_potential(&edge_vector_potential_real, &edge_vector_potential_imag);
+    let flux_magnitude_estimate = maxwell_topology
+        .curl_from_edge_magnitude(&edge_vector_potential_real, &edge_vector_potential_imag);
     let flux_phasor_coherence_ratio =
         flux_phasor_coherence_ratio(&flux_density, &flux_magnitude_estimate);
 
-    let real_applied = apply_k(&summary.operator, &vector_potential_real);
-    let imag_applied = apply_k(&summary.operator, &vector_potential_imag);
-    let mut residual_real_values = vec![0.0_f64; node_count];
-    let mut residual_imag_values = vec![0.0_f64; node_count];
+    let real_applied = apply_k(&edge_operator, &edge_vector_potential_real);
+    let imag_applied = apply_k(&edge_operator, &edge_vector_potential_imag);
+    let element_count = maxwell_topology.element_count();
+    let mut residual_real_values = vec![0.0_f64; element_count];
+    let mut residual_imag_values = vec![0.0_f64; element_count];
     let mut coupled_residual_sq_sum = 0.0_f64;
     let mut real_residual_sq_sum = 0.0_f64;
     let mut imag_residual_sq_sum = 0.0_f64;
@@ -655,14 +673,14 @@ pub fn run_electromagnetic_with_options(
     let mut real_equation_scale_sq_sum = 0.0_f64;
     let mut imag_equation_scale_sq_sum = 0.0_f64;
     let mut rhs_sq_sum = 0.0_f64;
-    for i in 0..node_count {
-        if constrained[i] {
+    for i in 0..element_count {
+        if edge_operator.constrained[i] {
             continue;
         }
-        let conductivity_imag = conductivity_coupling_terms[i] * vector_potential_imag[i];
-        let conductivity_real = conductivity_coupling_terms[i] * vector_potential_real[i];
-        let residual_real = real_applied[i] - conductivity_imag - base_rhs_real[i];
-        let residual_imag = imag_applied[i] + conductivity_real - base_rhs_imag[i];
+        let conductivity_imag = edge_coupling_terms[i] * edge_vector_potential_imag[i];
+        let conductivity_real = edge_coupling_terms[i] * edge_vector_potential_real[i];
+        let residual_real = real_applied[i] - conductivity_imag - edge_rhs_real[i];
+        let residual_imag = imag_applied[i] + conductivity_real - edge_rhs_imag[i];
         residual_real_values[i] = residual_real;
         residual_imag_values[i] = residual_imag;
         real_residual_sq_sum += residual_real * residual_real;
@@ -670,17 +688,17 @@ pub fn run_electromagnetic_with_options(
         coupled_residual_sq_sum += residual_real * residual_real + residual_imag * residual_imag;
         real_equation_scale_sq_sum += real_applied[i] * real_applied[i]
             + conductivity_imag * conductivity_imag
-            + base_rhs_real[i] * base_rhs_real[i];
+            + edge_rhs_real[i] * edge_rhs_real[i];
         imag_equation_scale_sq_sum += imag_applied[i] * imag_applied[i]
             + conductivity_real * conductivity_real
-            + base_rhs_imag[i] * base_rhs_imag[i];
+            + edge_rhs_imag[i] * edge_rhs_imag[i];
         equation_scale_sq_sum += real_applied[i] * real_applied[i]
             + conductivity_imag * conductivity_imag
-            + base_rhs_real[i] * base_rhs_real[i]
+            + edge_rhs_real[i] * edge_rhs_real[i]
             + imag_applied[i] * imag_applied[i]
             + conductivity_real * conductivity_real
-            + base_rhs_imag[i] * base_rhs_imag[i];
-        rhs_sq_sum += base_rhs_real[i] * base_rhs_real[i];
+            + edge_rhs_imag[i] * edge_rhs_imag[i];
+        rhs_sq_sum += edge_rhs_real[i] * edge_rhs_real[i];
     }
     let max_residual_norm =
         coupled_residual_sq_sum.sqrt() / equation_scale_sq_sum.sqrt().max(1.0e-9);
@@ -688,7 +706,7 @@ pub fn run_electromagnetic_with_options(
         real_residual_sq_sum.sqrt() / real_equation_scale_sq_sum.sqrt().max(1.0e-9);
     let imag_residual_norm =
         imag_residual_sq_sum.sqrt() / imag_equation_scale_sq_sum.sqrt().max(1.0e-9);
-    let rhs_imag_norm = base_rhs_imag
+    let rhs_imag_norm = edge_rhs_imag
         .iter()
         .map(|value| value * value)
         .sum::<f64>()
@@ -705,15 +723,15 @@ pub fn run_electromagnetic_with_options(
             (harmonic_residual_tolerance / (max_residual_norm + harmonic_residual_tolerance))
                 .clamp(0.0, 1.0)
         };
-    let edge_residual = maxwell_topology.edge_curl_curl_residual_metrics(
-        &vector_potential_real,
-        &vector_potential_imag,
-        &base_rhs_real,
-        &base_rhs_imag,
-        &conductivity_coupling_terms,
+    let edge_residual = MaxwellEdgeResidualMetrics::from_edge_operator(
+        &edge_operator,
+        &edge_vector_potential_real,
+        &edge_vector_potential_imag,
+        &edge_rhs_real,
+        &edge_rhs_imag,
+        &edge_coupling_terms,
     );
     let field_energy_integral = flux_density.iter().map(|v| v * v).sum::<f64>();
-    let element_count = maxwell_topology.element_count();
     let max_flux_density = flux_density
         .iter()
         .copied()
@@ -1180,7 +1198,7 @@ pub fn run_electromagnetic_with_options(
         } else {
             0.0
         },
-        solver_method: "electromagnetic_harmonic_block_bicgstab".to_string(),
+        solver_method: "electromagnetic_edge_curl_curl_harmonic_block_bicgstab".to_string(),
         preconditioner: "block_jacobi".to_string(),
         solver_host_sync_count: if backend == ComputeBackend::Gpu { 0 } else { 1 },
         diagnostics,
@@ -2279,6 +2297,7 @@ impl MaxwellEdgeTopology {
             .sum::<f64>()
     }
 
+    #[cfg(test)]
     fn edge_line_integrals(&self, nodal_values: &[f64]) -> Vec<f64> {
         self.edges
             .iter()
@@ -2290,6 +2309,110 @@ impl MaxwellEdgeTopology {
             .collect()
     }
 
+    fn assemble_curl_curl_operator(
+        &self,
+        nodal_operator: &OperatorSystem,
+        node_mu_r: &[f64],
+        node_eps_r: &[f64],
+        boundary_penalty_diag: &[f64],
+        mu0: f64,
+        epsilon0: f64,
+        omega: f64,
+    ) -> OperatorSystem {
+        let edge_count = self.edge_count();
+        let mut stiffness_diag = vec![0.0_f64; edge_count];
+        let mut stiffness_upper = vec![0.0_f64; edge_count.saturating_sub(1)];
+        let mut mass_diag = vec![1.0_f64; edge_count];
+        let mut damping_diag = vec![0.0_f64; edge_count];
+        let constrained = self
+            .edges
+            .iter()
+            .map(|edge| edge.constrained)
+            .collect::<Vec<_>>();
+
+        for (index, edge) in self.edges.iter().enumerate() {
+            let mu = mu0 * edge.average(node_mu_r).max(1.0e-9);
+            let epsilon = epsilon0 * edge.average(node_eps_r).max(1.0e-9);
+            let reluctivity = 1.0 / mu;
+            let curl_curl = reluctivity / edge.length.max(1.0e-12);
+            let displacement = omega * omega * epsilon * edge.length.max(1.0e-12);
+            let nodal_stiffness = edge.average(&nodal_operator.stiffness_diag).abs();
+            let boundary_penalty = edge.average(boundary_penalty_diag).abs();
+            stiffness_diag[index] =
+                curl_curl + displacement + boundary_penalty + 0.01 * nodal_stiffness.max(1.0e-9);
+            mass_diag[index] = edge.length.max(1.0e-12);
+            damping_diag[index] = boundary_penalty;
+        }
+
+        for index in 0..stiffness_upper.len() {
+            let left = &self.edges[index];
+            let right = &self.edges[index + 1];
+            let shared_node = left.from_node == right.from_node
+                || left.from_node == right.to_node
+                || left.to_node == right.from_node
+                || left.to_node == right.to_node;
+            let coupling_scale = if shared_node { 0.20 } else { 0.05 };
+            stiffness_upper[index] = coupling_scale
+                * harmonic_mean(stiffness_diag[index], stiffness_diag[index + 1]).max(1.0e-12);
+        }
+        for (index, coupling) in stiffness_upper.iter().copied().enumerate() {
+            stiffness_diag[index] += coupling.abs();
+            stiffness_diag[index + 1] += coupling.abs();
+        }
+
+        OperatorSystem {
+            dof_count: edge_count,
+            constrained,
+            stiffness_diag,
+            stiffness_upper,
+            mass_diag,
+            damping_diag,
+            rhs: vec![0.0; edge_count],
+        }
+    }
+
+    fn edge_average_terms(&self, nodal_terms: &[f64], floor: f64) -> Vec<f64> {
+        self.edges
+            .iter()
+            .map(|edge| edge.average(nodal_terms).max(floor))
+            .collect()
+    }
+
+    fn edge_source_terms(&self, nodal_source: &[f64]) -> Vec<f64> {
+        self.edges
+            .iter()
+            .map(|edge| edge.average(nodal_source) * edge.length.max(1.0e-12))
+            .collect()
+    }
+
+    fn node_potential_from_edge_line_integrals(&self, line_integrals: &[f64]) -> Vec<f64> {
+        let node_count = self
+            .edges
+            .iter()
+            .map(|edge| edge.from_node.max(edge.to_node))
+            .max()
+            .map(|max_node| max_node + 1)
+            .unwrap_or(0);
+        let mut nodal = vec![0.0_f64; node_count];
+        let mut counts = vec![0usize; node_count];
+        for (edge, line_integral) in self.edges.iter().zip(line_integrals.iter().copied()) {
+            let tangential = edge.tangential_component(line_integral);
+            for node in [edge.from_node, edge.to_node] {
+                if let Some(value) = nodal.get_mut(node) {
+                    *value += tangential;
+                    counts[node] += 1;
+                }
+            }
+        }
+        for (value, count) in nodal.iter_mut().zip(counts.iter().copied()) {
+            if count > 0 {
+                *value /= count as f64;
+            }
+        }
+        nodal
+    }
+
+    #[cfg(test)]
     fn curl_from_nodal_vector_potential(
         &self,
         real: &[f64],
@@ -2308,11 +2431,76 @@ impl MaxwellEdgeTopology {
         (flux_density_real, flux_density_imag, flux_density_magnitude)
     }
 
-    fn curl_from_nodal_magnitude(&self, magnitude: &[f64]) -> Vec<f64> {
+    fn curl_from_edge_vector_potential(
+        &self,
+        edge_real: &[f64],
+        edge_imag: &[f64],
+    ) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let tangential_real = self.edge_tangential_components(edge_real);
+        let tangential_imag = self.edge_tangential_components(edge_imag);
+        let flux_density_real = self.edge_tangential_curl(&tangential_real);
+        let flux_density_imag = self.edge_tangential_curl(&tangential_imag);
+        let flux_density_magnitude = flux_density_real
+            .iter()
+            .zip(flux_density_imag.iter())
+            .map(|(real, imag)| (real * real + imag * imag).sqrt())
+            .collect::<Vec<_>>();
+        (flux_density_real, flux_density_imag, flux_density_magnitude)
+    }
+
+    fn curl_from_edge_magnitude(&self, edge_real: &[f64], edge_imag: &[f64]) -> Vec<f64> {
+        let magnitude = self
+            .edge_tangential_components(edge_real)
+            .into_iter()
+            .zip(self.edge_tangential_components(edge_imag))
+            .map(|(real, imag)| (real * real + imag * imag).sqrt())
+            .collect::<Vec<_>>();
+        self.edge_tangential_curl(&magnitude)
+            .into_iter()
+            .map(f64::abs)
+            .collect()
+    }
+
+    fn edge_tangential_components(&self, line_integrals: &[f64]) -> Vec<f64> {
         self.edges
             .iter()
-            .map(|edge| edge.oriented_difference(magnitude).abs())
+            .zip(line_integrals.iter().copied())
+            .map(|(edge, value)| edge.tangential_component(value))
             .collect()
+    }
+
+    fn edge_tangential_curl(&self, tangential: &[f64]) -> Vec<f64> {
+        let edge_count = self.edge_count();
+        if edge_count == 0 {
+            return Vec::new();
+        }
+        if edge_count == 1 {
+            let length = self.edges[0].length.max(1.0e-12);
+            return vec![tangential.first().copied().unwrap_or(0.0) / length];
+        }
+
+        let mut curl = vec![0.0_f64; edge_count];
+        for index in 0..edge_count {
+            let current = tangential.get(index).copied().unwrap_or(0.0);
+            let value = if index == 0 {
+                let next = tangential.get(1).copied().unwrap_or(current);
+                let distance = 0.5 * (self.edges[0].length + self.edges[1].length);
+                (next - current) / distance.max(1.0e-12)
+            } else if index + 1 == edge_count {
+                let previous = tangential.get(index - 1).copied().unwrap_or(current);
+                let distance = 0.5 * (self.edges[index - 1].length + self.edges[index].length);
+                (current - previous) / distance.max(1.0e-12)
+            } else {
+                let previous = tangential.get(index - 1).copied().unwrap_or(current);
+                let next = tangential.get(index + 1).copied().unwrap_or(current);
+                let distance = 0.5 * self.edges[index - 1].length
+                    + self.edges[index].length
+                    + 0.5 * self.edges[index + 1].length;
+                (next - previous) / distance.max(1.0e-12)
+            };
+            curl[index] = value;
+        }
+        curl
     }
 
     fn gauge_anchor_residual_ratio(&self, real: &[f64], imag: &[f64]) -> f64 {
@@ -2334,6 +2522,7 @@ impl MaxwellEdgeTopology {
         }
     }
 
+    #[cfg(test)]
     fn edge_curl_curl_residual_metrics(
         &self,
         real: &[f64],
@@ -2397,6 +2586,67 @@ struct MaxwellEdgeResidualMetrics {
     equation_scale: f64,
 }
 
+impl MaxwellEdgeResidualMetrics {
+    fn from_edge_operator(
+        operator: &OperatorSystem,
+        real: &[f64],
+        imag: &[f64],
+        rhs_real: &[f64],
+        rhs_imag: &[f64],
+        coupling_terms: &[f64],
+    ) -> Self {
+        let real_applied = apply_k(operator, real);
+        let imag_applied = apply_k(operator, imag);
+        let mut active_edge_count = 0usize;
+        let mut real_residual_sq_sum = 0.0_f64;
+        let mut imag_residual_sq_sum = 0.0_f64;
+        let mut equation_scale_sq_sum = 0.0_f64;
+        let mut real_equation_scale_sq_sum = 0.0_f64;
+        let mut imag_equation_scale_sq_sum = 0.0_f64;
+
+        for index in 0..operator.dof_count {
+            if operator.constrained.get(index).copied().unwrap_or(false) {
+                continue;
+            }
+            active_edge_count = active_edge_count.saturating_add(1);
+            let coupling = coupling_terms.get(index).copied().unwrap_or(0.0);
+            let real_value = real.get(index).copied().unwrap_or(0.0);
+            let imag_value = imag.get(index).copied().unwrap_or(0.0);
+            let real_operator = real_applied.get(index).copied().unwrap_or(0.0);
+            let imag_operator = imag_applied.get(index).copied().unwrap_or(0.0);
+            let real_source = rhs_real.get(index).copied().unwrap_or(0.0);
+            let imag_source = rhs_imag.get(index).copied().unwrap_or(0.0);
+            let real_mass = coupling * real_value;
+            let imag_mass = coupling * imag_value;
+            let real_residual = real_operator - imag_mass - real_source;
+            let imag_residual = imag_operator + real_mass - imag_source;
+            real_residual_sq_sum += real_residual * real_residual;
+            imag_residual_sq_sum += imag_residual * imag_residual;
+            real_equation_scale_sq_sum +=
+                real_operator * real_operator + imag_mass * imag_mass + real_source * real_source;
+            imag_equation_scale_sq_sum +=
+                imag_operator * imag_operator + real_mass * real_mass + imag_source * imag_source;
+            equation_scale_sq_sum += real_operator * real_operator
+                + imag_operator * imag_operator
+                + real_mass * real_mass
+                + imag_mass * imag_mass
+                + real_source * real_source
+                + imag_source * imag_source;
+        }
+
+        let real_scale = real_equation_scale_sq_sum.sqrt().max(1.0e-9);
+        let imag_scale = imag_equation_scale_sq_sum.sqrt().max(1.0e-9);
+        let coupled_scale = equation_scale_sq_sum.sqrt().max(1.0e-9);
+        Self {
+            active_edge_count,
+            real_norm: real_residual_sq_sum.sqrt() / real_scale,
+            imag_norm: imag_residual_sq_sum.sqrt() / imag_scale,
+            coupled_norm: (real_residual_sq_sum + imag_residual_sq_sum).sqrt() / coupled_scale,
+            equation_scale: coupled_scale,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MaxwellEdgeTopologyBasis {
     PrepEdgeCurlConforming,
@@ -2442,6 +2692,7 @@ impl MaxwellEdge {
         self.orientation / self.length.max(1.0e-12)
     }
 
+    #[cfg(test)]
     fn oriented_difference(&self, values: &[f64]) -> f64 {
         let from = values.get(self.from_node).copied().unwrap_or(0.0);
         let to = values.get(self.to_node).copied().unwrap_or(0.0);
@@ -2645,6 +2896,7 @@ fn em_homogeneous_known_answer_diagnostic(
 #[cfg(test)]
 mod tests {
     use crate::assembly::PrepRecoveryEdgeSummary;
+    use crate::operator::OperatorSystem;
 
     use runmat_analysis_core::{ConductivityFrequencyPoint, MaterialElectricalModel};
 
@@ -2886,6 +3138,36 @@ mod tests {
         assert_eq!(topology.constrained_edge_count(), 2);
         assert!((curl_real[0] - 1.0).abs() < 1.0e-12);
         assert!((curl_real[1] - 1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn maxwell_edge_topology_assembles_edge_curl_curl_operator() {
+        let topology = MaxwellEdgeTopology::line_graph(5, 0.25, &[true, false, false, false, true]);
+        let nodal_operator = OperatorSystem {
+            dof_count: 5,
+            constrained: vec![true, false, false, false, true],
+            stiffness_diag: vec![10.0, 20.0, 30.0, 20.0, 10.0],
+            stiffness_upper: vec![1.0, 1.0, 1.0, 1.0],
+            mass_diag: vec![1.0; 5],
+            damping_diag: vec![0.0; 5],
+            rhs: vec![0.0; 5],
+        };
+        let operator = topology.assemble_curl_curl_operator(
+            &nodal_operator,
+            &[1.0; 5],
+            &[2.0; 5],
+            &[0.0, 3.0, 0.0, 3.0, 0.0],
+            4.0e-7 * std::f64::consts::PI,
+            8.854_187_812_8e-12,
+            2.0 * std::f64::consts::PI * 60.0,
+        );
+
+        assert_eq!(operator.dof_count, topology.edge_count());
+        assert_eq!(operator.constrained, vec![true, false, false, true]);
+        assert_eq!(operator.stiffness_upper.len(), topology.edge_count() - 1);
+        assert!(operator.stiffness_diag.iter().all(|value| *value > 0.0));
+        assert!(operator.stiffness_upper.iter().all(|value| *value > 0.0));
+        assert_eq!(operator.mass_diag.len(), topology.edge_count());
     }
 
     #[test]

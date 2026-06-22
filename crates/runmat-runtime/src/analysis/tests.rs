@@ -4412,6 +4412,10 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
     assert_eq!(envelope.operation, "fea.run_electromagnetic");
     assert_eq!(envelope.op_version, "fea.run_electromagnetic/v1");
     assert_ne!(envelope.data.run_status, RunStatus::Rejected);
+    assert_eq!(
+        envelope.data.run.solver_method,
+        "electromagnetic_edge_curl_curl_harmonic_block_bicgstab"
+    );
     assert!(envelope.data.electromagnetic_results.is_some());
     assert!(envelope
         .data
@@ -4419,6 +4423,11 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_EM_STATIC"));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_EM_HARMONIC_COUPLING"
+            && diag.message.contains("formulation=edge_curl_curl_harmonic")
+            && diag.message.contains("edge_dof_count=")
+    }));
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_EM_FORMULATION"
             && diag
