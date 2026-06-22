@@ -8,7 +8,8 @@ use runmat_analysis_fea::{
     fea_fsi_interface_traction_field_id, fea_modal_mode_shape_field_id,
     fea_nonlinear_load_factor_field_id, fea_nonlinear_residual_norm_field_id,
     fea_transient_residual_norm_field_id, ComputeBackend, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_VELOCITY,
+    FEA_FIELD_CFD_VORTICITY, FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
     FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
     FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
@@ -21,9 +22,9 @@ use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_plan_study_op, analysis_plan_study_sweep_op,
     analysis_results_by_run_id_op, analysis_results_compare_op, analysis_results_op,
-    analysis_run_acoustic_op, analysis_run_electromagnetic_op, analysis_run_fsi_op,
-    analysis_run_linear_static_op, analysis_run_linear_static_with_options, analysis_run_modal_op,
-    analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
+    analysis_run_acoustic_op, analysis_run_cfd_op, analysis_run_electromagnetic_op,
+    analysis_run_fsi_op, analysis_run_linear_static_op, analysis_run_linear_static_with_options,
+    analysis_run_modal_op, analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
     analysis_run_nonlinear_with_options_op, analysis_run_study_op, analysis_run_study_sweep_op,
     analysis_run_transient_op, analysis_run_transient_with_options_op, analysis_trends_op,
     analysis_validate, analysis_validate_study_op, analysis_validate_study_sweep_op,
@@ -1224,6 +1225,83 @@ fn analysis_run_acoustic_contract_is_v1_and_typed() {
     assert_eq!(invalid.operation, "fea.run_acoustic");
     assert_eq!(invalid.op_version, "fea.run_acoustic/v1");
     assert_eq!(invalid.error_code, "RM.FEA.RUN_ACOUSTIC.INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_cfd_contract_shapes_cell_and_boundary_fields() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.steps = vec![runmat_analysis_core::AnalysisStep {
+        step_id: "cfd_steady".to_string(),
+        kind: runmat_analysis_core::AnalysisStepKind::Cfd,
+    }];
+    model.cfd = Some(runmat_analysis_core::CfdDomain {
+        enabled: true,
+        solve_family: runmat_analysis_core::CfdSolveFamily::SteadyState,
+        reference_density_kg_per_m3: 1.225,
+        dynamic_viscosity_pa_s: 1.81e-5,
+        inlet_velocity_m_per_s: 4.25,
+        turbulence_intensity: 0.06,
+        time_profile: Vec::new(),
+    });
+    model.boundary_conditions = vec![
+        BoundaryCondition {
+            bc_id: "bc_cfd_inlet".to_string(),
+            region_id: "fluid_inlet".to_string(),
+            kind: BoundaryConditionKind::CfdInletVelocity {
+                velocity_m_per_s: 4.25,
+            },
+        },
+        BoundaryCondition {
+            bc_id: "bc_cfd_outlet".to_string(),
+            region_id: "fluid_outlet".to_string(),
+            kind: BoundaryConditionKind::CfdOutletPressure { pressure_pa: 0.0 },
+        },
+        BoundaryCondition {
+            bc_id: "bc_cfd_wall".to_string(),
+            region_id: "fluid_wall".to_string(),
+            kind: BoundaryConditionKind::CfdSlipWall,
+        },
+    ];
+
+    let envelope = analysis_run_cfd_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-cfd-1".to_string()), None),
+    )
+    .expect("cfd run should return envelope");
+    assert_eq!(envelope.operation, "fea.run_cfd");
+    assert_eq!(envelope.op_version, "fea.run_cfd/v1");
+    assert_eq!(
+        envelope.data.run.solver_method,
+        "cfd_velocity_pressure_finite_volume"
+    );
+
+    let velocity = envelope
+        .data
+        .run
+        .field(FEA_FIELD_CFD_VELOCITY)
+        .expect("cfd velocity field should be present");
+    let pressure = envelope
+        .data
+        .run
+        .field(FEA_FIELD_CFD_PRESSURE)
+        .expect("cfd pressure field should be present");
+    let vorticity = envelope
+        .data
+        .run
+        .field(FEA_FIELD_CFD_VORTICITY)
+        .expect("cfd vorticity field should be present");
+    let wall_shear = envelope
+        .data
+        .run
+        .field(FEA_FIELD_CFD_WALL_SHEAR_STRESS)
+        .expect("cfd wall shear field should be present");
+    assert_eq!(velocity.shape.len(), 2);
+    assert_eq!(velocity.shape[1], 3);
+    assert_eq!(pressure.shape, vec![velocity.shape[0]]);
+    assert_eq!(vorticity.shape, velocity.shape);
+    assert_eq!(wall_shear.shape, vec![1, 3]);
+    assert_ne!(wall_shear.shape[0], velocity.shape[0]);
 }
 
 #[test]
