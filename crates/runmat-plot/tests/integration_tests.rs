@@ -224,11 +224,13 @@ fn test_error_handling() {
     assert!(LinePlot::new(x.clone(), y.clone()).is_err());
     assert!(ScatterPlot::new(x, y).is_err());
 
-    // Test empty data
+    // Empty line data is a valid MATLAB-compatible empty graphics object.
     let empty_x: Vec<f64> = vec![];
     let empty_y: Vec<f64> = vec![];
 
-    assert!(LinePlot::new(empty_x.clone(), empty_y.clone()).is_err());
+    assert!(LinePlot::new(empty_x.clone(), empty_y.clone())
+        .unwrap()
+        .is_empty());
     assert!(ScatterPlot::new(empty_x, empty_y).is_err());
 
     // Test invalid surface data

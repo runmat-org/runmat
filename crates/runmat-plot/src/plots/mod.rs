@@ -28,7 +28,7 @@ pub use contour::ContourPlot;
 pub use contour_fill::ContourFillPlot;
 pub use errorbar::ErrorBar;
 pub use figure::{
-    AxesMetadata, Figure, LegendEntry, LegendStyle, PlotElement, PlotType, TextStyle,
+    AxesKind, AxesMetadata, Figure, LegendEntry, LegendStyle, PlotElement, PlotType, TextStyle,
 };
 pub use line::{LineGpuStyle, LineMarkerAppearance, LinePlot, LineStyle};
 pub use line3::Line3Plot;
