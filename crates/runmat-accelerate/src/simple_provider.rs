@@ -356,6 +356,24 @@ impl InProcessProvider {
         handle
     }
 
+    fn complex_constructor_shape(
+        &self,
+        real: &GpuTensorHandle,
+        real_len: usize,
+        imag: &GpuTensorHandle,
+        imag_len: usize,
+    ) -> Result<Vec<usize>> {
+        if real.shape == imag.shape {
+            Ok(real.shape.clone())
+        } else if real_len == 1 {
+            Ok(imag.shape.clone())
+        } else if imag_len == 1 {
+            Ok(real.shape.clone())
+        } else {
+            Err(anyhow!("complex_from_real_imag: shape mismatch"))
+        }
+    }
+
     fn load_polynomial(&self, handle: &GpuTensorHandle) -> Result<(Vec<f64>, PolyOrientation)> {
         let data = {
             let guard = registry().lock().unwrap();
@@ -2282,6 +2300,104 @@ impl AccelProvider for InProcessProvider {
                 device_id: 0,
                 buffer_id: id,
             })
+        })
+    }
+
+    fn complex_from_real<'a>(
+        &'a self,
+        real: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(real) != GpuTensorStorage::ComplexInterleaved,
+                "complex_from_real requires a real-valued input"
+            );
+            let data = {
+                let guard = registry().lock().unwrap();
+                guard
+                    .get(&real.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", real.buffer_id))?
+                    .clone()
+            };
+            let logical_len = real
+                .shape
+                .iter()
+                .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+                .ok_or_else(|| anyhow!("complex_from_real: input shape overflow"))?;
+            ensure!(
+                logical_len == data.len(),
+                "complex_from_real: input data length does not match shape"
+            );
+            let out_capacity = data
+                .len()
+                .checked_mul(2)
+                .ok_or_else(|| anyhow!("complex_from_real: output length overflow"))?;
+            let mut out = Vec::with_capacity(out_capacity);
+            for re in data {
+                out.push(re);
+                out.push(0.0);
+            }
+            Ok(self.allocate_tensor_with_storage(
+                out,
+                real.shape.clone(),
+                GpuTensorStorage::ComplexInterleaved,
+            ))
+        })
+    }
+
+    fn complex_from_real_imag<'a>(
+        &'a self,
+        real: &'a GpuTensorHandle,
+        imag: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(real) != GpuTensorStorage::ComplexInterleaved
+                    && runmat_accelerate_api::handle_storage(imag)
+                        != GpuTensorStorage::ComplexInterleaved,
+                "complex_from_real_imag requires real-valued inputs"
+            );
+            let (real_data, imag_data) = {
+                let guard = registry().lock().unwrap();
+                let real_data = guard
+                    .get(&real.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", real.buffer_id))?
+                    .clone();
+                let imag_data = guard
+                    .get(&imag.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", imag.buffer_id))?
+                    .clone();
+                (real_data, imag_data)
+            };
+            let out_shape =
+                self.complex_constructor_shape(real, real_data.len(), imag, imag_data.len())?;
+            let logical_len = out_shape
+                .iter()
+                .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+                .ok_or_else(|| anyhow!("complex_from_real_imag: output shape overflow"))?;
+            let real_scalar = real_data.len() == 1;
+            let imag_scalar = imag_data.len() == 1;
+            ensure!(
+                real_scalar || real_data.len() == logical_len,
+                "complex_from_real_imag: real input data length does not match output shape"
+            );
+            ensure!(
+                imag_scalar || imag_data.len() == logical_len,
+                "complex_from_real_imag: imaginary input data length does not match output shape"
+            );
+            let out_capacity = logical_len
+                .checked_mul(2)
+                .ok_or_else(|| anyhow!("complex_from_real_imag: output length overflow"))?;
+            let mut out = Vec::with_capacity(out_capacity);
+            for i in 0..logical_len {
+                out.push(real_data[if real_scalar { 0 } else { i }]);
+                out.push(imag_data[if imag_scalar { 0 } else { i }]);
+            }
+            Ok(self.allocate_tensor_with_storage(
+                out,
+                out_shape,
+                GpuTensorStorage::ComplexInterleaved,
+            ))
         })
     }
 

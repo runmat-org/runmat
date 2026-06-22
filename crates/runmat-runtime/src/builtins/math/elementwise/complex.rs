@@ -13,6 +13,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -130,10 +131,10 @@ fn complex_error_with_detail(
 )]
 async fn complex_builtin(real: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     match rest.len() {
-        0 => unary_complex(real),
+        0 => unary_complex(real).await,
         1 => {
             let imag = rest.into_iter().next().expect("rest has one element");
-            binary_complex(real, imag)
+            binary_complex(real, imag).await
         }
         n => Err(complex_error_with_detail(
             &COMPLEX_ERROR_INVALID_ARGUMENT,
@@ -216,7 +217,15 @@ fn numeric_array_shape(ty: &Type) -> Option<&Option<Vec<Option<usize>>>> {
     }
 }
 
-fn unary_complex(value: Value) -> BuiltinResult<Value> {
+async fn unary_complex(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
+        Value::GpuTensor(handle) => unary_complex_gpu(handle).await,
+        other => unary_complex_host(other),
+    }
+}
+
+fn unary_complex_host(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         other => {
@@ -233,10 +242,109 @@ fn unary_complex(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn binary_complex(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+async fn binary_complex(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if matches!(lhs, Value::GpuTensor(_)) || matches!(rhs, Value::GpuTensor(_)) {
+        match try_binary_complex_gpu(&lhs, &rhs).await {
+            Ok(Some(value)) => return Ok(value),
+            Ok(None) => {
+                let real_value = gather_if_gpu_value(&lhs).await?;
+                let imag_value = gather_if_gpu_value(&rhs).await?;
+                let real_tensor = value_into_real_tensor(real_value)?;
+                let imag_tensor = value_into_real_tensor(imag_value)?;
+                return compose_complex(&real_tensor, &imag_tensor);
+            }
+            Err(err) => return Err(err),
+        }
+    }
     let real_tensor = value_into_real_tensor(lhs)?;
     let imag_tensor = value_into_real_tensor(rhs)?;
     compose_complex(&real_tensor, &imag_tensor)
+}
+
+async fn unary_complex_gpu(handle: runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_storage(&handle)
+        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+    {
+        return Ok(gpu_helpers::complex_gpu_value(handle));
+    }
+
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        if let Ok(out) = provider.complex_from_real(&handle).await {
+            return Ok(gpu_helpers::complex_gpu_value(out));
+        }
+    }
+
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
+    unary_complex_host(gathered)
+}
+
+async fn gather_if_gpu_value(value: &Value) -> BuiltinResult<Value> {
+    match value {
+        Value::GpuTensor(_) => gpu_helpers::gather_value_async(value).await,
+        other => Ok(other.clone()),
+    }
+}
+
+async fn try_binary_complex_gpu(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
+    let provider = match (lhs, rhs) {
+        (Value::GpuTensor(handle), _) | (_, Value::GpuTensor(handle)) => {
+            runmat_accelerate_api::provider_for_handle(handle)
+        }
+        _ => None,
+    };
+    let Some(provider) = provider else {
+        return Ok(None);
+    };
+
+    let real = value_to_real_gpu_handle(lhs, provider).await?;
+    let imag = value_to_real_gpu_handle(rhs, provider).await?;
+    match provider.complex_from_real_imag(&real, &imag).await {
+        Ok(out) => Ok(Some(gpu_helpers::complex_gpu_value(out))),
+        Err(_) => Ok(None),
+    }
+}
+
+async fn value_to_real_gpu_handle(
+    value: &Value,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+) -> BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
+    match value {
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_storage(handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                return Err(complex_error_with_detail(
+                    &COMPLEX_ERROR_INVALID_INPUT,
+                    "inputs must be real",
+                ));
+            }
+            Ok(handle.clone())
+        }
+        other => {
+            let tensor = value_into_real_tensor(other.clone())?;
+            upload_real_tensor(provider, &tensor)
+        }
+    }
+}
+
+fn upload_real_tensor(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    tensor: &Tensor,
+) -> BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
+    let view = runmat_accelerate_api::HostTensorView {
+        data: &tensor.data,
+        shape: &tensor.shape,
+    };
+    let handle = provider
+        .upload(&view)
+        .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
+    runmat_accelerate_api::set_handle_logical(&handle, false);
+    runmat_accelerate_api::set_handle_storage(
+        &handle,
+        runmat_accelerate_api::GpuTensorStorage::Real,
+    );
+    runmat_accelerate_api::set_handle_precision(&handle, provider.precision());
+    Ok(handle)
 }
 
 fn compose_complex(real: &Tensor, imag: &Tensor) -> BuiltinResult<Value> {
@@ -299,6 +407,8 @@ fn value_into_real_tensor(value: Value) -> BuiltinResult<Tensor> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::gpu_helpers;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Type, Value};
 
@@ -653,6 +763,228 @@ pub(crate) mod tests {
             }
             other => panic!("expected empty ComplexTensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn complex_unary_gpu_stays_resident() {
+        test_support::with_test_provider(|provider| {
+            let real = Tensor::new(vec![1.0, -2.0, 3.5], vec![3, 1]).unwrap();
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &real.data,
+                    shape: &real.shape,
+                })
+                .expect("upload");
+            let result = complex_call(Value::GpuTensor(handle), Vec::new()).expect("complex");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected resident complex gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(out))).expect("gather");
+            let Value::ComplexTensor(ct) = gathered else {
+                panic!("expected gathered complex tensor");
+            };
+            assert_eq!(ct.shape, vec![3, 1]);
+            assert_eq!(ct.data, vec![(1.0, 0.0), (-2.0, 0.0), (3.5, 0.0)]);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn complex_binary_gpu_stays_resident_with_scalar_expansion() {
+        test_support::with_test_provider(|provider| {
+            let real = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
+            let real_handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &real.data,
+                    shape: &real.shape,
+                })
+                .expect("upload real");
+            let result = complex_call(Value::GpuTensor(real_handle), vec![Value::Num(-4.0)])
+                .expect("complex");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected resident complex gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(out))).expect("gather");
+            let Value::ComplexTensor(ct) = gathered else {
+                panic!("expected gathered complex tensor");
+            };
+            assert_eq!(ct.shape, vec![1, 3]);
+            assert_eq!(ct.data, vec![(1.0, -4.0), (2.0, -4.0), (3.0, -4.0)]);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn complex_empty_gpu_inputs_stay_resident() {
+        test_support::with_test_provider(|provider| {
+            let real = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
+            let imag = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
+            let real_handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &real.data,
+                    shape: &real.shape,
+                })
+                .expect("upload real");
+            let imag_handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &imag.data,
+                    shape: &imag.shape,
+                })
+                .expect("upload imag");
+            let result = complex_call(
+                Value::GpuTensor(real_handle),
+                vec![Value::GpuTensor(imag_handle)],
+            )
+            .expect("complex");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected resident complex gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(out))).expect("gather");
+            let Value::ComplexTensor(ct) = gathered else {
+                panic!("expected gathered complex tensor");
+            };
+            assert_eq!(ct.shape, vec![0, 3]);
+            assert!(ct.data.is_empty());
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn complex_gpu_shape_mismatch_fallback_reports_size_error() {
+        test_support::with_test_provider(|provider| {
+            let real = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
+            let imag = Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap();
+            let real_handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &real.data,
+                    shape: &real.shape,
+                })
+                .expect("upload real");
+            let imag_handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &imag.data,
+                    shape: &imag.shape,
+                })
+                .expect("upload imag");
+            let err = complex_call(
+                Value::GpuTensor(real_handle),
+                vec![Value::GpuTensor(imag_handle)],
+            )
+            .unwrap_err();
+            let message = err.message();
+            assert!(
+                message.contains("same size") || message.contains("scalar"),
+                "unexpected error: {message}"
+            );
+            assert!(
+                !message.contains("GpuTensor"),
+                "fallback leaked gpuArray host-conversion error: {message}"
+            );
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn complex_binary_rejects_complex_gpu_input() {
+        test_support::with_test_provider(|provider| {
+            let complex = ComplexTensor::new(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+            let err = complex_call(Value::GpuTensor(handle), vec![Value::Num(0.0)]).unwrap_err();
+            assert!(
+                err.message().contains("must be real"),
+                "unexpected error: {}",
+                err.message()
+            );
+        });
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn complex_wgpu_binary_matches_cpu_and_stays_resident() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = runmat_accelerate_api::provider().unwrap();
+        let real = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let imag = Tensor::new(vec![-1.0, 0.5, 4.0], vec![3, 1]).unwrap();
+        let expected = complex_call(
+            Value::Tensor(real.clone()),
+            vec![Value::Tensor(imag.clone())],
+        )
+        .expect("cpu complex");
+        let real_handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &real.data,
+                shape: &real.shape,
+            })
+            .expect("upload real");
+        let imag_handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &imag.data,
+                shape: &imag.shape,
+            })
+            .expect("upload imag");
+        let result = complex_call(
+            Value::GpuTensor(real_handle),
+            vec![Value::GpuTensor(imag_handle)],
+        )
+        .expect("gpu complex");
+        let Value::GpuTensor(out) = result else {
+            panic!("expected resident complex gpuArray");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&out),
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        );
+        let gathered =
+            block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(out))).expect("gather");
+        assert_eq!(gathered, expected);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn complex_wgpu_scalar_real_gpu_imag_matches_cpu() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = runmat_accelerate_api::provider().unwrap();
+        let imag = Tensor::new(vec![-1.0, 0.5, 4.0], vec![3, 1]).unwrap();
+        let expected =
+            complex_call(Value::Num(2.0), vec![Value::Tensor(imag.clone())]).expect("cpu complex");
+        let imag_handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &imag.data,
+                shape: &imag.shape,
+            })
+            .expect("upload imag");
+        let result = complex_call(Value::Num(2.0), vec![Value::GpuTensor(imag_handle)])
+            .expect("gpu complex");
+        let Value::GpuTensor(out) = result else {
+            panic!("expected resident complex gpuArray");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&out),
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        );
+        let gathered =
+            block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(out))).expect("gather");
+        assert_eq!(gathered, expected);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

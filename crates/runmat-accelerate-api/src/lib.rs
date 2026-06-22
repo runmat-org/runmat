@@ -1553,6 +1553,27 @@ pub trait AccelProvider: Send + Sync {
         unsupported_future("elem_pow not supported by provider")
     }
 
+    /// Construct complex-interleaved GPU storage from a real-valued tensor,
+    /// using zero for the imaginary lane.
+    fn complex_from_real<'a>(
+        &'a self,
+        _real: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("complex_from_real not supported by provider")
+    }
+
+    /// Construct complex-interleaved GPU storage from real and imaginary tensors.
+    ///
+    /// Implementations should support equal shapes and scalar expansion for either
+    /// operand, matching MATLAB's `complex(real, imag)` size rules.
+    fn complex_from_real_imag<'a>(
+        &'a self,
+        _real: &'a GpuTensorHandle,
+        _imag: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("complex_from_real_imag not supported by provider")
+    }
+
     fn elem_hypot<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
