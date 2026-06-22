@@ -14,6 +14,8 @@ use crate::{
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
 const TENSOR_COMPONENT_COUNT: usize = 6;
+type LocalTriangleCoordinates = [[f64; 2]; 3];
+type LocalFrame = [[f64; 3]; 3];
 
 pub fn recover_result_fields(
     summary: &AssemblySummary,
@@ -35,9 +37,9 @@ pub fn recover_result_fields(
     let node_count = dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1);
     displacement_values.resize(node_count * VECTOR_COMPONENT_COUNT, 0.0);
 
-    let recovery_edges = structural_recovery_edges(summary);
-    let element_count = recovery_edges.len().max(1);
-    let strain_values = recover_strain(&displacement_values, &recovery_edges);
+    let strain_recovery = recover_structural_strain(summary, &displacement_values);
+    let element_count = strain_recovery.element_count;
+    let strain_values = strain_recovery.values;
     let stress_values = recover_stress(&strain_values, summary.structural_material);
     let von_mises_values = recover_von_mises(&stress_values);
     let internal_force = apply_k_unconstrained(&summary.operator, &solve_result.solution);
@@ -111,6 +113,7 @@ pub fn structural_field_recovery_metrics(
     displacement: &[f64],
 ) -> StructuralFieldRecoveryMetrics {
     let recovery_edges = structural_recovery_edges(summary);
+    let strain_recovery = recover_structural_strain(summary, displacement);
     let active_stiffness_edge_count = recovery_edges.len();
     let prep_recovery_edge_count = recovery_edges
         .iter()
@@ -128,15 +131,16 @@ pub fn structural_field_recovery_metrics(
             .map(|(right, left)| (right - left).abs())
             .unwrap_or(0.0);
         max_edge_displacement_jump = max_edge_displacement_jump.max(jump);
-        let strain_tensor = edge_strain_tensor(displacement, edge);
+        stiffness_ratio_sum += edge.stiffness_ratio;
+        edge_length_sum += edge.edge_length_m;
+    }
+    for strain_tensor in strain_recovery.values.chunks_exact(TENSOR_COMPONENT_COUNT) {
         let strain_norm = strain_tensor
             .iter()
             .map(|value| value * value)
             .sum::<f64>()
             .sqrt();
         max_edge_strain_norm = max_edge_strain_norm.max(strain_norm);
-        stiffness_ratio_sum += edge.stiffness_ratio;
-        edge_length_sum += edge.edge_length_m;
     }
     let recovery_edge_count = recovery_edges.len();
     let mean_edge_stiffness_ratio = if recovery_edge_count == 0 {
@@ -168,7 +172,7 @@ pub fn structural_field_recovery_metrics(
         active_stiffness_edge_count,
         prep_recovery_edge_count,
         constrained_edge_count,
-        recovery_element_count: active_stiffness_edge_count.max(1),
+        recovery_element_count: strain_recovery.element_count,
         max_edge_displacement_jump,
         max_edge_strain_norm,
         mean_edge_stiffness_ratio,
@@ -177,11 +181,14 @@ pub fn structural_field_recovery_metrics(
         element_geometry_node_count,
         element_geometry_edge_count,
         element_geometry_coverage_ratio,
-        basis: recovery_edges
-            .first()
-            .map(|edge| edge.basis.as_str())
-            .unwrap_or(StructuralRecoveryBasis::OperatorConnectivity.as_str()),
+        basis: strain_recovery.basis,
     }
+}
+
+struct StructuralStrainRecovery {
+    values: Vec<f64>,
+    element_count: usize,
+    basis: &'static str,
 }
 
 fn empty_structural_fields() -> Vec<AnalysisField> {
@@ -214,6 +221,7 @@ struct StructuralRecoveryEdge {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StructuralRecoveryBasis {
+    PrepConstantStrainBMatrix,
     PrepElementConnectivity,
     OperatorConnectivity,
 }
@@ -221,10 +229,17 @@ enum StructuralRecoveryBasis {
 impl StructuralRecoveryBasis {
     const fn as_str(self) -> &'static str {
         match self {
+            Self::PrepConstantStrainBMatrix => "prep_constant_strain_b_matrix",
             Self::PrepElementConnectivity => "prep_element_connectivity",
             Self::OperatorConnectivity => "operator_connectivity",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StructuralBMatrixElement {
+    nodes: [usize; 3],
+    coordinates_m: [[f64; 3]; 3],
 }
 
 fn structural_recovery_edges(summary: &AssemblySummary) -> Vec<StructuralRecoveryEdge> {
@@ -406,7 +421,223 @@ fn constrained_recovery_edge_count(summary: &AssemblySummary) -> usize {
         .count()
 }
 
-fn recover_strain(displacement: &[f64], recovery_edges: &[StructuralRecoveryEdge]) -> Vec<f64> {
+fn recover_structural_strain(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+) -> StructuralStrainRecovery {
+    let b_matrix_elements = prep_b_matrix_recovery_elements(summary, displacement);
+    if !b_matrix_elements.is_empty() {
+        return StructuralStrainRecovery {
+            values: recover_b_matrix_strain(displacement, &b_matrix_elements),
+            element_count: b_matrix_elements.len().max(1),
+            basis: StructuralRecoveryBasis::PrepConstantStrainBMatrix.as_str(),
+        };
+    }
+
+    let recovery_edges = structural_recovery_edges(summary);
+    StructuralStrainRecovery {
+        values: recover_edge_strain(displacement, &recovery_edges),
+        element_count: recovery_edges.len().max(1),
+        basis: recovery_edges
+            .first()
+            .map(|edge| edge.basis.as_str())
+            .unwrap_or(StructuralRecoveryBasis::OperatorConnectivity.as_str()),
+    }
+}
+
+fn prep_b_matrix_recovery_elements(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+) -> Vec<StructuralBMatrixElement> {
+    let Some(prep_coordinates) = summary.prep_coordinates.as_ref() else {
+        return Vec::new();
+    };
+    if prep_coordinates.element_geometry_coverage_ratio <= 0.0
+        || prep_coordinates.element_geometry_node_count < 3
+        || prep_coordinates.reference_element_area_m2 <= 0.0
+        || !prep_coordinates.reference_element_area_m2.is_finite()
+        || !reference_coordinates_are_valid(prep_coordinates.reference_element_coordinates_m)
+    {
+        return Vec::new();
+    }
+
+    let node_count = displacement.len().div_ceil(VECTOR_COMPONENT_COUNT);
+    let mut nodes = summary
+        .prep_recovery_edges
+        .iter()
+        .flat_map(|edge| {
+            [
+                edge.from_dof / VECTOR_COMPONENT_COUNT,
+                edge.to_dof / VECTOR_COMPONENT_COUNT,
+            ]
+        })
+        .filter(|node| *node < node_count && node_has_unconstrained_dof(summary, *node))
+        .collect::<Vec<_>>();
+    nodes.sort_unstable();
+    nodes.dedup();
+    if nodes.len() < 3 {
+        nodes = (0..node_count)
+            .filter(|node| node_has_unconstrained_dof(summary, *node))
+            .take(3)
+            .collect();
+    }
+
+    nodes
+        .chunks_exact(3)
+        .map(|chunk| StructuralBMatrixElement {
+            nodes: [chunk[0], chunk[1], chunk[2]],
+            coordinates_m: prep_coordinates.reference_element_coordinates_m,
+        })
+        .collect()
+}
+
+fn reference_coordinates_are_valid(coordinates: [[f64; 3]; 3]) -> bool {
+    coordinates.iter().flatten().all(|value| value.is_finite())
+        && triangle_area_3d_m2(coordinates) > 0.0
+}
+
+fn node_has_unconstrained_dof(summary: &AssemblySummary, node: usize) -> bool {
+    let base = node * VECTOR_COMPONENT_COUNT;
+    (0..VECTOR_COMPONENT_COUNT).any(|component| {
+        !summary
+            .operator
+            .constrained
+            .get(base + component)
+            .copied()
+            .unwrap_or(false)
+    })
+}
+
+fn recover_b_matrix_strain(
+    displacement: &[f64],
+    elements: &[StructuralBMatrixElement],
+) -> Vec<f64> {
+    let mut strain = vec![0.0; elements.len().max(1) * TENSOR_COMPONENT_COUNT];
+    for (element_index, element) in elements.iter().enumerate() {
+        let edge_strain = b_matrix_strain_tensor(displacement, element);
+        let base = element_index * TENSOR_COMPONENT_COUNT;
+        strain[base..base + TENSOR_COMPONENT_COUNT].copy_from_slice(&edge_strain);
+    }
+    strain
+}
+
+fn b_matrix_strain_tensor(displacement: &[f64], element: &StructuralBMatrixElement) -> [f64; 6] {
+    let Some((local_coordinates, local_basis)) = local_triangle_coordinates(element.coordinates_m)
+    else {
+        return [0.0; TENSOR_COMPONENT_COUNT];
+    };
+    let denominator = triangle_signed_area2(local_coordinates);
+    if !denominator.is_finite() || denominator.abs() <= f64::EPSILON {
+        return [0.0; TENSOR_COMPONENT_COUNT];
+    }
+
+    let mut local_displacement = [[0.0_f64; 3]; 3];
+    for (i, node) in element.nodes.iter().copied().enumerate() {
+        let displacement_vector = nodal_displacement(displacement, node);
+        local_displacement[i] = [
+            dot3(displacement_vector, local_basis[0]),
+            dot3(displacement_vector, local_basis[1]),
+            dot3(displacement_vector, local_basis[2]),
+        ];
+    }
+
+    let b = [
+        local_coordinates[1][1] - local_coordinates[2][1],
+        local_coordinates[2][1] - local_coordinates[0][1],
+        local_coordinates[0][1] - local_coordinates[1][1],
+    ];
+    let c = [
+        local_coordinates[2][0] - local_coordinates[1][0],
+        local_coordinates[0][0] - local_coordinates[2][0],
+        local_coordinates[1][0] - local_coordinates[0][0],
+    ];
+
+    let mut du_dx = 0.0_f64;
+    let mut du_dy = 0.0_f64;
+    let mut dv_dx = 0.0_f64;
+    let mut dv_dy = 0.0_f64;
+    let mut dw_dx = 0.0_f64;
+    let mut dw_dy = 0.0_f64;
+    for i in 0..3 {
+        du_dx += b[i] * local_displacement[i][0];
+        du_dy += c[i] * local_displacement[i][0];
+        dv_dx += b[i] * local_displacement[i][1];
+        dv_dy += c[i] * local_displacement[i][1];
+        dw_dx += b[i] * local_displacement[i][2];
+        dw_dy += c[i] * local_displacement[i][2];
+    }
+
+    [
+        du_dx / denominator,
+        dv_dy / denominator,
+        0.0,
+        (du_dy + dv_dx) / denominator,
+        dw_dy / denominator,
+        dw_dx / denominator,
+    ]
+}
+
+fn local_triangle_coordinates(
+    coordinates: [[f64; 3]; 3],
+) -> Option<(LocalTriangleCoordinates, LocalFrame)> {
+    let origin = coordinates[0];
+    let edge01 = sub3(coordinates[1], origin);
+    let edge02 = sub3(coordinates[2], origin);
+    let e1 = normalize3(edge01)?;
+    let normal = normalize3(cross3(edge01, edge02))?;
+    let e2 = normalize3(cross3(normal, e1))?;
+    let local = coordinates.map(|point| {
+        let relative = sub3(point, origin);
+        [dot3(relative, e1), dot3(relative, e2)]
+    });
+    Some((local, [e1, e2, normal]))
+}
+
+fn triangle_signed_area2(coordinates: [[f64; 2]; 3]) -> f64 {
+    coordinates[0][0] * (coordinates[1][1] - coordinates[2][1])
+        + coordinates[1][0] * (coordinates[2][1] - coordinates[0][1])
+        + coordinates[2][0] * (coordinates[0][1] - coordinates[1][1])
+}
+
+fn triangle_area_3d_m2(coordinates: [[f64; 3]; 3]) -> f64 {
+    let edge01 = sub3(coordinates[1], coordinates[0]);
+    let edge02 = sub3(coordinates[2], coordinates[0]);
+    0.5 * norm3(cross3(edge01, edge02))
+}
+
+fn sub3(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+fn dot3(left: [f64; 3], right: [f64; 3]) -> f64 {
+    left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}
+
+fn cross3(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
+}
+
+fn norm3(value: [f64; 3]) -> f64 {
+    dot3(value, value).sqrt()
+}
+
+fn normalize3(value: [f64; 3]) -> Option<[f64; 3]> {
+    let norm = norm3(value);
+    (norm.is_finite() && norm > f64::EPSILON).then_some([
+        value[0] / norm,
+        value[1] / norm,
+        value[2] / norm,
+    ])
+}
+
+fn recover_edge_strain(
+    displacement: &[f64],
+    recovery_edges: &[StructuralRecoveryEdge],
+) -> Vec<f64> {
     let element_count = recovery_edges.len().max(1);
     let mut strain = vec![0.0; element_count * TENSOR_COMPONENT_COUNT];
     for (element_index, edge) in recovery_edges.iter().enumerate() {

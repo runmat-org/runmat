@@ -156,6 +156,8 @@ pub struct PrepCoordinateSummary {
     pub mean_element_edge_length_m: f64,
     pub mean_element_area_m2: f64,
     pub element_geometry_coverage_ratio: f64,
+    pub reference_element_coordinates_m: [[f64; 3]; 3],
+    pub reference_element_area_m2: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -465,6 +467,8 @@ pub fn assemble_linear_system(
             mean_element_edge_length_m: prep.mean_element_edge_length_m,
             mean_element_area_m2: prep.mean_element_area_m2,
             element_geometry_coverage_ratio: prep.element_geometry_coverage_ratio,
+            reference_element_coordinates_m: prep.reference_element_coordinates_m,
+            reference_element_area_m2: prep.reference_element_area_m2,
         });
 
         prep_assembly = Some(PrepAssemblySummary {

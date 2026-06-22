@@ -12387,6 +12387,8 @@ fn to_fea_prep_context(
         mean_element_edge_length_m: prep.mean_element_edge_length_m,
         mean_element_area_m2: prep.mean_element_area_m2,
         element_geometry_coverage_ratio: prep.element_geometry_coverage_ratio,
+        reference_element_coordinates_m: prep.reference_element_coordinates_m,
+        reference_element_area_m2: prep.reference_element_area_m2,
         calibration_profile_override: calibration_profile.and_then(map_calibration_profile),
     })
 }
@@ -13917,6 +13919,15 @@ fn resolve_run_prep_context(
     } else {
         0.0
     };
+    let (reference_element_coordinates_m, reference_element_area_m2) = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .find_map(|mesh| {
+            let area = mesh.reference_element_area_m2;
+            (area.is_finite() && area > 0.0).then_some((mesh.reference_element_coordinates_m, area))
+        })
+        .unwrap_or(([[0.0; 3]; 3], 0.0));
 
     Ok(Some(AnalysisRunPrepContext {
         prepared_mesh_count,
@@ -13982,6 +13993,8 @@ fn resolve_run_prep_context(
         mean_element_edge_length_m,
         mean_element_area_m2,
         element_geometry_coverage_ratio,
+        reference_element_coordinates_m,
+        reference_element_area_m2,
     }))
 }
 

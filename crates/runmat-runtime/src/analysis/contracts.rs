@@ -29,6 +29,10 @@ fn default_zero_f64() -> f64 {
     0.0
 }
 
+fn default_reference_element_coordinates_m() -> [[f64; 3]; 3] {
+    [[0.0; 3]; 3]
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalysisValidateResult {
     pub valid: bool,
@@ -95,6 +99,10 @@ pub struct AnalysisRunPrepContext {
     pub mean_element_area_m2: f64,
     #[serde(default = "default_zero_f64")]
     pub element_geometry_coverage_ratio: f64,
+    #[serde(default = "default_reference_element_coordinates_m")]
+    pub reference_element_coordinates_m: [[f64; 3]; 3],
+    #[serde(default = "default_zero_f64")]
+    pub reference_element_area_m2: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

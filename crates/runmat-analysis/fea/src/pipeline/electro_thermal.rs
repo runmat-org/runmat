@@ -993,6 +993,12 @@ mod tests {
                 mean_element_edge_length_m: 0.5,
                 mean_element_area_m2: 0.25,
                 element_geometry_coverage_ratio: 1.0,
+                reference_element_coordinates_m: [
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 0.5, 0.0],
+                ],
+                reference_element_area_m2: 0.25,
             }),
             ..summary()
         }

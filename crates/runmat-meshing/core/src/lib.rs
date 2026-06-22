@@ -63,6 +63,10 @@ fn default_zero_f64() -> f64 {
     0.0
 }
 
+fn default_reference_element_coordinates_m() -> [[f64; 3]; 3] {
+    [[0.0; 3]; 3]
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PreparedMeshDescriptor {
     pub prepared_mesh_id: String,
@@ -89,6 +93,10 @@ pub struct PreparedMeshDescriptor {
     pub mean_element_area_m2: f64,
     #[serde(default = "default_zero_f64")]
     pub element_geometry_coverage_ratio: f64,
+    #[serde(default = "default_reference_element_coordinates_m")]
+    pub reference_element_coordinates_m: [[f64; 3]; 3],
+    #[serde(default = "default_zero_f64")]
+    pub reference_element_area_m2: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +229,8 @@ pub fn prepare_geometry_for_analysis(
             mean_element_edge_length_m: element_geometry.mean_edge_length_m,
             mean_element_area_m2: element_geometry.mean_area_m2,
             element_geometry_coverage_ratio: element_geometry.coverage_ratio,
+            reference_element_coordinates_m: element_geometry.reference_coordinates_m,
+            reference_element_area_m2: element_geometry.reference_area_m2,
         });
     }
 
@@ -343,6 +353,8 @@ struct ElementGeometryMetrics {
     mean_edge_length_m: f64,
     mean_area_m2: f64,
     coverage_ratio: f64,
+    reference_coordinates_m: [[f64; 3]; 3],
+    reference_area_m2: f64,
 }
 
 fn mesh_element_geometry_metrics(
@@ -366,12 +378,19 @@ fn mesh_element_geometry_metrics(
     let mut edge_length_count = 0_u64;
     let mut area_sum = 0.0_f64;
     let mut valid_triangle_count = 0_u64;
+    let mut reference_coordinates_m = [[0.0_f64; 3]; 3];
+    let mut reference_area_m2 = 0.0_f64;
     for triangle in &surface.triangles {
         let indices = [triangle[0], triangle[1], triangle[2]];
         let Some(vertices) = triangle_vertices(&surface.vertices, indices) else {
             continue;
         };
         valid_triangle_count += 1;
+        let triangle_area = triangle_area_m2(vertices);
+        if reference_area_m2 == 0.0 && triangle_area.is_finite() && triangle_area > 0.0 {
+            reference_coordinates_m = vertices;
+            reference_area_m2 = triangle_area;
+        }
         for index in indices {
             referenced_nodes.insert(index);
         }
@@ -390,7 +409,7 @@ fn mesh_element_geometry_metrics(
             edge_length_sum += distance_m(left, right);
             edge_length_count += 1;
         }
-        area_sum += triangle_area_m2(vertices);
+        area_sum += triangle_area;
     }
 
     ElementGeometryMetrics {
@@ -411,6 +430,8 @@ fn mesh_element_geometry_metrics(
         } else {
             (valid_triangle_count as f64 / descriptor.element_count as f64).clamp(0.0, 1.0)
         },
+        reference_coordinates_m,
+        reference_area_m2,
     }
 }
 
@@ -602,6 +623,11 @@ mod tests {
         assert!(descriptor.mean_element_edge_length_m > 1.0);
         assert!((descriptor.mean_element_area_m2 - 0.5).abs() < 1.0e-12);
         assert_eq!(descriptor.element_geometry_coverage_ratio, 1.0);
+        assert_eq!(
+            descriptor.reference_element_coordinates_m,
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]]
+        );
+        assert!((descriptor.reference_element_area_m2 - 0.5).abs() < 1.0e-12);
     }
 
     #[test]

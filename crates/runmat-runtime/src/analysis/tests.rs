@@ -112,6 +112,8 @@ fn sample_analysis_run_prep_context() -> AnalysisRunPrepContext {
         mean_element_edge_length_m: 0.2,
         mean_element_area_m2: 0.04,
         element_geometry_coverage_ratio: 1.0,
+        reference_element_coordinates_m: [[0.0, 0.0, 0.0], [0.4, 0.0, 0.0], [0.0, 0.2, 0.0]],
+        reference_element_area_m2: 0.04,
     }
 }
 

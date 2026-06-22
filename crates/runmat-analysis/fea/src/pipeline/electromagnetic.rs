@@ -529,15 +529,15 @@ pub fn run_electromagnetic_with_options(
     let base_rhs_imag = rhs_imag;
     let maxwell_topology =
         MaxwellEdgeTopology::from_assembly_or_line(&summary, node_count, h, &constrained);
-    let edge_operator = maxwell_topology.assemble_curl_curl_operator(
-        &summary.operator,
-        &node_mu_r,
-        &node_eps_r,
-        &boundary_penalty_diag,
+    let edge_operator = maxwell_topology.assemble_curl_curl_operator(CurlCurlAssemblyInputs {
+        nodal_operator: &summary.operator,
+        node_mu_r: &node_mu_r,
+        node_eps_r: &node_eps_r,
+        boundary_penalty_diag: &boundary_penalty_diag,
         mu0,
         epsilon0,
         omega,
-    );
+    });
     let edge_coupling_terms =
         maxwell_topology.edge_average_terms(&conductivity_coupling_terms, 1.0e-9);
     let edge_rhs_real = maxwell_topology.edge_source_terms(&base_rhs_real);
@@ -2171,6 +2171,16 @@ struct MaxwellEdgeTopology {
     prep_recovery_edge_count: usize,
 }
 
+struct CurlCurlAssemblyInputs<'a> {
+    nodal_operator: &'a OperatorSystem,
+    node_mu_r: &'a [f64],
+    node_eps_r: &'a [f64],
+    boundary_penalty_diag: &'a [f64],
+    mu0: f64,
+    epsilon0: f64,
+    omega: f64,
+}
+
 impl MaxwellEdgeTopology {
     fn from_assembly_or_line(
         summary: &AssemblySummary,
@@ -2309,16 +2319,7 @@ impl MaxwellEdgeTopology {
             .collect()
     }
 
-    fn assemble_curl_curl_operator(
-        &self,
-        nodal_operator: &OperatorSystem,
-        node_mu_r: &[f64],
-        node_eps_r: &[f64],
-        boundary_penalty_diag: &[f64],
-        mu0: f64,
-        epsilon0: f64,
-        omega: f64,
-    ) -> OperatorSystem {
+    fn assemble_curl_curl_operator(&self, inputs: CurlCurlAssemblyInputs<'_>) -> OperatorSystem {
         let edge_count = self.edge_count();
         let mut stiffness_diag = vec![0.0_f64; edge_count];
         let mut stiffness_upper = vec![0.0_f64; edge_count.saturating_sub(1)];
@@ -2331,13 +2332,13 @@ impl MaxwellEdgeTopology {
             .collect::<Vec<_>>();
 
         for (index, edge) in self.edges.iter().enumerate() {
-            let mu = mu0 * edge.average(node_mu_r).max(1.0e-9);
-            let epsilon = epsilon0 * edge.average(node_eps_r).max(1.0e-9);
+            let mu = inputs.mu0 * edge.average(inputs.node_mu_r).max(1.0e-9);
+            let epsilon = inputs.epsilon0 * edge.average(inputs.node_eps_r).max(1.0e-9);
             let reluctivity = 1.0 / mu;
             let curl_curl = reluctivity / edge.length.max(1.0e-12);
-            let displacement = omega * omega * epsilon * edge.length.max(1.0e-12);
-            let nodal_stiffness = edge.average(&nodal_operator.stiffness_diag).abs();
-            let boundary_penalty = edge.average(boundary_penalty_diag).abs();
+            let displacement = inputs.omega * inputs.omega * epsilon * edge.length.max(1.0e-12);
+            let nodal_stiffness = edge.average(&inputs.nodal_operator.stiffness_diag).abs();
+            let boundary_penalty = edge.average(inputs.boundary_penalty_diag).abs();
             stiffness_diag[index] =
                 curl_curl + displacement + boundary_penalty + 0.01 * nodal_stiffness.max(1.0e-9);
             mass_diag[index] = edge.length.max(1.0e-12);
@@ -2480,7 +2481,7 @@ impl MaxwellEdgeTopology {
         }
 
         let mut curl = vec![0.0_f64; edge_count];
-        for index in 0..edge_count {
+        for (index, curl_value) in curl.iter_mut().enumerate().take(edge_count) {
             let current = tangential.get(index).copied().unwrap_or(0.0);
             let value = if index == 0 {
                 let next = tangential.get(1).copied().unwrap_or(current);
@@ -2498,7 +2499,7 @@ impl MaxwellEdgeTopology {
                     + 0.5 * self.edges[index + 1].length;
                 (next - previous) / distance.max(1.0e-12)
             };
-            curl[index] = value;
+            *curl_value = value;
         }
         curl
     }
@@ -3152,15 +3153,15 @@ mod tests {
             damping_diag: vec![0.0; 5],
             rhs: vec![0.0; 5],
         };
-        let operator = topology.assemble_curl_curl_operator(
-            &nodal_operator,
-            &[1.0; 5],
-            &[2.0; 5],
-            &[0.0, 3.0, 0.0, 3.0, 0.0],
-            4.0e-7 * std::f64::consts::PI,
-            8.854_187_812_8e-12,
-            2.0 * std::f64::consts::PI * 60.0,
-        );
+        let operator = topology.assemble_curl_curl_operator(super::CurlCurlAssemblyInputs {
+            nodal_operator: &nodal_operator,
+            node_mu_r: &[1.0; 5],
+            node_eps_r: &[2.0; 5],
+            boundary_penalty_diag: &[0.0, 3.0, 0.0, 3.0, 0.0],
+            mu0: 4.0e-7 * std::f64::consts::PI,
+            epsilon0: 8.854_187_812_8e-12,
+            omega: 2.0 * std::f64::consts::PI * 60.0,
+        });
 
         assert_eq!(operator.dof_count, topology.edge_count());
         assert_eq!(operator.constrained, vec![true, false, false, true]);

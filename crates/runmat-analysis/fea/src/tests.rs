@@ -242,6 +242,12 @@ fn prepared_structural_recovery_uses_prep_connectivity_edges() {
                 mean_element_edge_length_m: 0.2,
                 mean_element_area_m2: 0.04,
                 element_geometry_coverage_ratio: 1.0,
+                reference_element_coordinates_m: [
+                    [0.0, 0.0, 0.0],
+                    [0.4, 0.0, 0.0],
+                    [0.0, 0.2, 0.0],
+                ],
+                reference_element_area_m2: 0.04,
                 calibration_profile_override: None,
             }),
             ..LinearStaticSolveOptions::default()
@@ -256,10 +262,11 @@ fn prepared_structural_recovery_uses_prep_connectivity_edges() {
             && diag.message.contains("mean_element_edge_length_m=0.2")
             && diag.message.contains("mean_element_area_m2=0.04")
             && diag.message.contains("element_geometry_coverage_ratio=1")
+            && diag.message.contains("reference_element_area_m2=0.04")
     }));
     assert!(result.diagnostics.iter().any(|diag| {
         diag.code == "FEA_STRUCTURAL_FIELD_RECOVERY"
-            && diag.message.contains("basis=prep_element_connectivity")
+            && diag.message.contains("basis=prep_constant_strain_b_matrix")
             && diag.message.contains("prep_recovery_edge_count=")
             && diag.message.contains("mean_edge_length_m=")
             && diag.message.contains("max_edge_strain_norm=")
@@ -606,6 +613,12 @@ fn prepared_thermal_recovery_uses_prep_edge_graph() {
                 mean_element_edge_length_m: 0.2,
                 mean_element_area_m2: 0.04,
                 element_geometry_coverage_ratio: 1.0,
+                reference_element_coordinates_m: [
+                    [0.0, 0.0, 0.0],
+                    [0.4, 0.0, 0.0],
+                    [0.0, 0.2, 0.0],
+                ],
+                reference_element_area_m2: 0.04,
                 calibration_profile_override: None,
             }),
             thermo_mechanical_context: Some(FeaThermoMechanicalContext {
@@ -1035,13 +1048,15 @@ fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
 
 #[test]
 fn nonlinear_contact_reference_enforces_pressure_gap_complementarity() {
-    let mut options = NonlinearSolveOptions::default();
-    options.contact_context = Some(FeaContactInterfaceContext {
-        enabled: true,
-        penalty_stiffness_scale: 2.0,
-        max_penetration_ratio: 0.01,
-        friction_coefficient: 0.0,
-    });
+    let options = NonlinearSolveOptions {
+        contact_context: Some(FeaContactInterfaceContext {
+            enabled: true,
+            penalty_stiffness_scale: 2.0,
+            max_penetration_ratio: 0.01,
+            friction_coefficient: 0.0,
+        }),
+        ..NonlinearSolveOptions::default()
+    };
     let model = fixture_model(FixtureId::NonlinearContactFrictionlessReference);
     let result = crate::run_nonlinear_with_options(&model, ComputeBackend::Cpu, options)
         .expect("frictionless contact reference solve should succeed");
@@ -1132,6 +1147,12 @@ fn nonlinear_prepared_state_recovery_uses_prep_connectivity_edges() {
                 mean_element_edge_length_m: 0.25,
                 mean_element_area_m2: 0.0625,
                 element_geometry_coverage_ratio: 1.0,
+                reference_element_coordinates_m: [
+                    [0.0, 0.0, 0.0],
+                    [0.5, 0.0, 0.0],
+                    [0.0, 0.25, 0.0],
+                ],
+                reference_element_area_m2: 0.0625,
                 calibration_profile_override: None,
             }),
             ..NonlinearSolveOptions::default()
