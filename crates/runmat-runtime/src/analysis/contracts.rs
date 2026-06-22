@@ -1075,6 +1075,9 @@ fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
                 .unwrap_or(6),
         );
     }
+    if normalized.contains("orthogonality") {
+        return None;
+    }
     match shape {
         [_, count] if (1..=6).contains(count) => Some(*count),
         _ => None,

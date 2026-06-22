@@ -6632,6 +6632,7 @@ fn analysis_run_modal_returns_native_modal_result() {
         orthogonality_descriptor.shape,
         vec![modal.eigenvalues_hz.len(), modal.eigenvalues_hz.len()]
     );
+    assert_eq!(orthogonality_descriptor.component_count, None);
     assert!(envelope
         .data
         .quality_reasons
