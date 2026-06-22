@@ -157,14 +157,17 @@ pub fn structural_field_recovery_metrics(
         strain_component_coverage_ratio(displacement, &recovery_edges);
     let element_geometry_node_count = summary
         .prep_coordinates
+        .as_ref()
         .map(|coordinates| coordinates.element_geometry_node_count)
         .unwrap_or(0);
     let element_geometry_edge_count = summary
         .prep_coordinates
+        .as_ref()
         .map(|coordinates| coordinates.element_geometry_edge_count)
         .unwrap_or(0);
     let element_geometry_coverage_ratio = summary
         .prep_coordinates
+        .as_ref()
         .map(|coordinates| coordinates.element_geometry_coverage_ratio)
         .unwrap_or(0.0);
 

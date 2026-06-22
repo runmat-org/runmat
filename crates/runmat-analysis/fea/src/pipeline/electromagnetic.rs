@@ -87,7 +87,7 @@ pub fn run_electromagnetic_with_options(
         Some(1),
         Some(5),
     );
-    let mut summary = assemble_linear_system(model, options.prep_context, None, None);
+    let mut summary = assemble_linear_system(model, options.prep_context.clone(), None, None);
     emit_phase(
         "fea.run_electromagnetic",
         FeaProgressPhase::ModelAssembly,
@@ -615,7 +615,7 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis={} edge_dof_count={} element_count={} incidence_element_count={} incidence_orientation_count={} incidence_pair_count={} representable_incidence_pair_count={} incidence_operator_pair_coverage_ratio={} oriented_edge_count={} constrained_edge_count={} gauge_anchor_count={} prep_recovery_edge_count={} vector_basis_dimension_count={} reference_element_area_m2={} curl_curl_energy_scale={}",
+            "basis={} edge_dof_count={} element_count={} incidence_element_count={} incidence_orientation_count={} incidence_pair_count={} representable_incidence_pair_count={} incidence_operator_pair_coverage_ratio={} oriented_edge_count={} constrained_edge_count={} gauge_anchor_count={} prep_recovery_edge_count={} full_topology_edge_count={} full_topology_element_count={} vector_basis_dimension_count={} reference_element_area_m2={} curl_curl_energy_scale={}",
             maxwell_topology.basis.as_str(),
             maxwell_topology.edge_count(),
             maxwell_topology.element_count(),
@@ -628,6 +628,8 @@ pub fn run_electromagnetic_with_options(
             maxwell_topology.constrained_edge_count(),
             maxwell_topology.gauge_anchor_count(),
             maxwell_topology.prep_recovery_edge_count,
+            maxwell_topology.full_topology_edge_count,
+            maxwell_topology.full_topology_element_count,
             maxwell_topology.vector_basis_dimension_count,
             maxwell_topology.reference_element_area_m2,
             maxwell_topology.curl_curl_energy_scale(),
@@ -2132,6 +2134,8 @@ struct MaxwellEdgeTopology {
     elements: Vec<MaxwellElementIncidence>,
     gauge_anchor_nodes: Vec<usize>,
     prep_recovery_edge_count: usize,
+    full_topology_edge_count: usize,
+    full_topology_element_count: usize,
     vector_basis_dimension_count: usize,
     reference_element_area_m2: f64,
 }
@@ -2179,19 +2183,40 @@ impl MaxwellEdgeTopology {
         {
             return None;
         }
-        let coordinates = prep_coordinates.element_topology_sample_node_coordinates_m;
+        let full_usable = prep_coordinates.element_topology_edge_nodes.len() >= 3
+            && !prep_coordinates.element_topology_element_edges.is_empty()
+            && !prep_coordinates
+                .element_topology_node_coordinates_m
+                .is_empty()
+            && prep_coordinates
+                .element_topology_edge_nodes
+                .iter()
+                .all(|nodes| {
+                    nodes[0] != nodes[1]
+                        && (nodes[0] as usize)
+                            < prep_coordinates.element_topology_node_coordinates_m.len()
+                        && (nodes[1] as usize)
+                            < prep_coordinates.element_topology_node_coordinates_m.len()
+                });
         let sample_edge_count = prep_coordinates.element_topology_sample_edge_count.min(8);
         let sample_element_count = prep_coordinates
             .element_topology_sample_element_count
             .min(4);
-        let sample_usable = sample_edge_count >= 3
+        let sample_usable = !full_usable
+            && sample_edge_count >= 3
             && sample_element_count >= 1
             && prep_coordinates
                 .element_topology_sample_edge_nodes
                 .iter()
                 .take(sample_edge_count)
                 .all(|nodes| nodes[0] < 8 && nodes[1] < 8 && nodes[0] != nodes[1]);
-        let edge_nodes = if sample_usable {
+        let edge_nodes = if full_usable {
+            prep_coordinates
+                .element_topology_edge_nodes
+                .iter()
+                .map(|nodes| (nodes[0] as usize, nodes[1] as usize))
+                .collect::<Vec<_>>()
+        } else if sample_usable {
             prep_coordinates
                 .element_topology_sample_edge_nodes
                 .iter()
@@ -2202,8 +2227,10 @@ impl MaxwellEdgeTopology {
             vec![(0_usize, 1_usize), (1, 2), (0, 2)]
         };
         let coordinate_for_node = |node: usize| {
-            if sample_usable {
-                coordinates[node]
+            if full_usable {
+                prep_coordinates.element_topology_node_coordinates_m[node]
+            } else if sample_usable {
+                prep_coordinates.element_topology_sample_node_coordinates_m[node]
             } else {
                 prep_coordinates.reference_element_coordinates_m[node]
             }
@@ -2262,7 +2289,36 @@ impl MaxwellEdgeTopology {
             });
         }
         let vector_basis_dimension_count = edges.len();
-        let elements = if sample_usable {
+        let elements = if full_usable {
+            prep_coordinates
+                .element_topology_element_edges
+                .iter()
+                .zip(
+                    prep_coordinates
+                        .element_topology_element_orientations
+                        .iter(),
+                )
+                .zip(prep_coordinates.element_topology_element_areas_m2.iter())
+                .filter_map(|((edge_indices, orientations), area)| {
+                    let edge_indices = edge_indices
+                        .iter()
+                        .map(|index| *index as usize)
+                        .filter(|index| *index < edges.len())
+                        .collect::<Vec<_>>();
+                    if edge_indices.len() < 3 {
+                        return None;
+                    }
+                    Some(MaxwellElementIncidence {
+                        edge_indices,
+                        orientations: orientations.iter().map(|value| *value as f64).collect(),
+                        area_m2: finite_positive_or(
+                            *area,
+                            prep_coordinates.reference_element_area_m2,
+                        ),
+                    })
+                })
+                .collect::<Vec<_>>()
+        } else if sample_usable {
             prep_coordinates
                 .element_topology_sample_element_edges
                 .iter()
@@ -2309,6 +2365,12 @@ impl MaxwellEdgeTopology {
             elements,
             gauge_anchor_nodes: gauge_anchor_nodes(constrained),
             prep_recovery_edge_count: summary.prep_recovery_edges.len(),
+            full_topology_edge_count: if full_usable { edge_nodes.len() } else { 0 },
+            full_topology_element_count: if full_usable {
+                prep_coordinates.element_topology_element_edges.len()
+            } else {
+                0
+            },
             vector_basis_dimension_count,
             reference_element_area_m2: prep_coordinates.reference_element_area_m2,
         })
@@ -2387,6 +2449,8 @@ impl MaxwellEdgeTopology {
         Some(Self {
             basis: MaxwellEdgeTopologyBasis::PrepEdgeCurlConforming,
             prep_recovery_edge_count: edges.len(),
+            full_topology_edge_count: 0,
+            full_topology_element_count: 0,
             edges,
             elements,
             gauge_anchor_nodes: gauge_anchor_nodes(constrained),
@@ -2421,6 +2485,8 @@ impl MaxwellEdgeTopology {
             elements: Vec::new(),
             gauge_anchor_nodes: gauge_anchor_nodes(constrained),
             prep_recovery_edge_count: 0,
+            full_topology_edge_count: 0,
+            full_topology_element_count: 0,
             vector_basis_dimension_count: 1,
             reference_element_area_m2: 0.0,
         }
@@ -3533,6 +3599,16 @@ mod tests {
                     [0, 0, 0],
                 ],
                 element_topology_sample_element_areas_m2: [0.04, 0.04, 0.0, 0.0],
+                element_topology_node_coordinates_m: vec![
+                    [0.0, 0.0, 0.0],
+                    [0.4, 0.0, 0.0],
+                    [0.0, 0.2, 0.0],
+                    [0.4, 0.2, 0.0],
+                ],
+                element_topology_edge_nodes: vec![[0, 1], [1, 2], [0, 2], [2, 3], [0, 3]],
+                element_topology_element_edges: vec![[0, 1, 2], [2, 3, 4]],
+                element_topology_element_orientations: vec![[1, 1, -1], [1, 1, -1]],
+                element_topology_element_areas_m2: vec![0.04, 0.04],
                 calibration_profile_override: None,
             }),
             None,

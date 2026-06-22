@@ -149,6 +149,16 @@ fn sample_analysis_run_prep_context() -> AnalysisRunPrepContext {
             [0, 0, 0],
         ],
         element_topology_sample_element_areas_m2: [0.04, 0.04, 0.0, 0.0],
+        element_topology_node_coordinates_m: vec![
+            [0.0, 0.0, 0.0],
+            [0.4, 0.0, 0.0],
+            [0.0, 0.2, 0.0],
+            [0.4, 0.2, 0.0],
+        ],
+        element_topology_edge_nodes: vec![[0, 1], [1, 2], [0, 2], [2, 3], [0, 3]],
+        element_topology_element_edges: vec![[0, 1, 2], [2, 3, 4]],
+        element_topology_element_orientations: vec![[1, 1, -1], [1, 1, -1]],
+        element_topology_element_areas_m2: vec![0.04, 0.04],
     }
 }
 
@@ -6084,7 +6094,7 @@ fn analysis_run_cfd_uses_prep_control_volume_topology() {
             prep_artifact_id: None,
             prep_calibration_profile: None,
         },
-        Some(sample_analysis_run_prep_context()),
+        Some(&sample_analysis_run_prep_context()),
     );
 
     let velocity = run
@@ -6537,7 +6547,7 @@ fn cht_prepared_topology_uses_boundary_faces_for_interface_fields() {
     let model = sample_cht_model();
     let cfd_domain = model.cfd.as_ref().expect("cfd domain should exist");
     let prep_context = sample_analysis_run_prep_context();
-    let topology = CfdDomainTopology::from_model(&model, Some(prep_context));
+    let topology = CfdDomainTopology::from_model(&model, Some(&prep_context));
     let thermo_context = to_fea_thermo_mechanical_context(model_thermo_coupling_options(&model));
     let thermal_run = run_thermal_with_options(
         &model,
@@ -6546,7 +6556,7 @@ fn cht_prepared_topology_uses_boundary_faces_for_interface_fields() {
             step_count: 4,
             time_step_s: 1.0e-3,
             residual_target: 1.0e-4,
-            prep_context: to_fea_prep_context(Some(prep_context), None),
+            prep_context: to_fea_prep_context(Some(&prep_context), None),
             thermo_mechanical_context: thermo_context,
         },
     )
@@ -6586,7 +6596,8 @@ fn cht_prepared_topology_uses_boundary_faces_for_interface_fields() {
 #[test]
 fn prepared_coupled_interface_graph_uses_element_topology_sample() {
     let model = sample_cht_model();
-    let topology = CfdDomainTopology::from_model(&model, Some(sample_analysis_run_prep_context()));
+    let prep_context = sample_analysis_run_prep_context();
+    let topology = CfdDomainTopology::from_model(&model, Some(&prep_context));
     let edges =
         coupled_interface_graph_edges_for_topology(topology, fluid_interface_face_count(topology));
 
@@ -6605,7 +6616,7 @@ fn fsi_prepared_topology_uses_boundary_faces_for_interface_fields() {
     let model = sample_fsi_model();
     let cfd_domain = model.cfd.as_ref().expect("cfd domain should exist");
     let prep_context = sample_analysis_run_prep_context();
-    let topology = CfdDomainTopology::from_model(&model, Some(prep_context));
+    let topology = CfdDomainTopology::from_model(&model, Some(&prep_context));
     let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(cfd_domain, topology, 0);
     let (residual_momentum, residual_continuity) =
         cfd_residual_norms(&fluid_velocity, &fluid_pressure, cfd_domain, topology, 4);

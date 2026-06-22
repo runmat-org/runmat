@@ -146,7 +146,7 @@ pub struct PrepAcceptanceSummary {
     pub acceptance_fingerprint: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PrepCoordinateSummary {
     pub span_m: [f64; 3],
     pub active_dimension_count: usize,
@@ -165,6 +165,11 @@ pub struct PrepCoordinateSummary {
     pub element_topology_sample_element_edges: [[u32; 3]; 4],
     pub element_topology_sample_element_orientations: [[i8; 3]; 4],
     pub element_topology_sample_element_areas_m2: [f64; 4],
+    pub element_topology_node_coordinates_m: Vec<[f64; 3]>,
+    pub element_topology_edge_nodes: Vec<[u32; 2]>,
+    pub element_topology_element_edges: Vec<[u32; 3]>,
+    pub element_topology_element_orientations: Vec<[i8; 3]>,
+    pub element_topology_element_areas_m2: Vec<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -212,7 +217,8 @@ pub fn assemble_linear_system(
     electro_thermal_context: Option<FeaElectroThermalContext>,
 ) -> AssemblySummary {
     let base_dof_count = (model.loads.len() * 3).max(3);
-    let dof_count = if let Some(prep) = prep_context {
+    let prep_context_ref = prep_context.as_ref();
+    let dof_count = if let Some(prep) = prep_context_ref {
         let prep_dof = ((prep.prepared_node_count as f64) * prep.topology_dof_multiplier)
             .round()
             .max(base_dof_count as f64) as usize;
@@ -274,7 +280,7 @@ pub fn assemble_linear_system(
     }
 
     let mut rhs = vec![0.0; dof_count];
-    let load_base_index = |i: usize, prep: Option<FeaPrepContext>| -> usize {
+    let load_base_index = |i: usize, prep: Option<&FeaPrepContext>| -> usize {
         if let Some(prep) = prep {
             let stride = (1 + prep.mapped_load_count.max(1)).min(dof_count.max(1));
             let offset = (prep.layout_seed as usize) % dof_count.max(1);
@@ -284,7 +290,7 @@ pub fn assemble_linear_system(
         }
     };
     for (i, load) in model.loads.iter().enumerate() {
-        let base = load_base_index(i, prep_context);
+        let base = load_base_index(i, prep_context_ref);
         match &load.kind {
             runmat_analysis_core::LoadKind::Force { fx, fy, fz } => {
                 rhs[base] += *fx;
@@ -328,7 +334,7 @@ pub fn assemble_linear_system(
 
     let constrained_dof_count = model.boundary_conditions.len().min(dof_count);
     let mut constrained = vec![false; dof_count];
-    let constraint_offset = prep_context
+    let constraint_offset = prep_context_ref
         .map(|prep| (prep.layout_seed as usize) % dof_count.max(1))
         .unwrap_or(0);
     for idx in 0..constrained_dof_count {
@@ -359,7 +365,7 @@ pub fn assemble_linear_system(
     let mut region_block_sizes = Vec::new();
     let mut region_boundary_positions = Vec::new();
     let mut region_coupling_weight = 1.0;
-    if let Some(prep) = prep_context {
+    if let Some(prep) = prep_context_ref {
         let mesh_scale = 1.0 + (prep.prepared_mesh_count.min(32) as f64) * 0.01;
         let density = if prep.prepared_node_count == 0 {
             1.0
@@ -485,6 +491,13 @@ pub fn assemble_linear_system(
             element_topology_sample_element_orientations: prep
                 .element_topology_sample_element_orientations,
             element_topology_sample_element_areas_m2: prep.element_topology_sample_element_areas_m2,
+            element_topology_node_coordinates_m: prep.element_topology_node_coordinates_m.clone(),
+            element_topology_edge_nodes: prep.element_topology_edge_nodes.clone(),
+            element_topology_element_edges: prep.element_topology_element_edges.clone(),
+            element_topology_element_orientations: prep
+                .element_topology_element_orientations
+                .clone(),
+            element_topology_element_areas_m2: prep.element_topology_element_areas_m2.clone(),
         });
 
         prep_assembly = Some(PrepAssemblySummary {
@@ -505,7 +518,7 @@ pub fn assemble_linear_system(
         });
     }
 
-    let bandwidth_stride = prep_context
+    let bandwidth_stride = prep_context_ref
         .map(|prep| prep.topology_bandwidth_estimate.max(1) as usize)
         .unwrap_or(1);
     for i in 0..stiffness_upper.len() {
@@ -532,7 +545,7 @@ pub fn assemble_linear_system(
         };
     }
 
-    if let Some(prep) = prep_context {
+    if let Some(prep) = prep_context_ref {
         if let Some(element_summary) = prep_element_assembly.as_ref() {
             let (connectivity_summary, graph_summary, recovery_edges) =
                 apply_prep_element_connectivity_scatter(
@@ -792,7 +805,7 @@ pub fn assemble_linear_system(
                     temporal_variation,
                 ),
                 prep_recovery_edges: prep_recovery_edges.clone(),
-                prep_coordinates,
+                prep_coordinates: prep_coordinates.clone(),
             });
         }
     }
@@ -853,7 +866,7 @@ fn electro_thermal_fingerprint(
 }
 
 fn topology_fingerprint(
-    prep: FeaPrepContext,
+    prep: &FeaPrepContext,
     stiffness_scale: f64,
     mass_scale: f64,
     damping_scale: f64,
@@ -885,7 +898,7 @@ fn topology_fingerprint(
 }
 
 fn apply_prep_native_element_assembly(
-    prep: FeaPrepContext,
+    prep: &FeaPrepContext,
     dof_count: usize,
     constrained: &[bool],
     stiffness_diag: &mut [f64],
@@ -983,7 +996,7 @@ fn apply_prep_native_element_assembly(
 }
 
 fn apply_prep_element_connectivity_scatter(
-    prep: FeaPrepContext,
+    prep: &FeaPrepContext,
     constrained: &[bool],
     stiffness_upper: &mut [f64],
     mass_diag: &mut [f64],
@@ -1182,7 +1195,7 @@ fn apply_prep_element_connectivity_scatter(
     (connectivity_summary, graph_summary, recovery_edges)
 }
 
-fn prep_recovery_edge_length_m(prep: FeaPrepContext, hop: usize) -> f64 {
+fn prep_recovery_edge_length_m(prep: &FeaPrepContext, hop: usize) -> f64 {
     let measured_edge_length = if prep.element_geometry_coverage_ratio > 0.0 {
         prep.mean_element_edge_length_m
     } else {
@@ -1202,7 +1215,7 @@ fn prep_recovery_edge_length_m(prep: FeaPrepContext, hop: usize) -> f64 {
 }
 
 fn apply_prep_calibration(
-    prep: FeaPrepContext,
+    prep: &FeaPrepContext,
     avg_youngs_modulus: f64,
     graph_summary: Option<&PrepGraphAssemblySummary>,
     stiffness_diag: &mut [f64],
@@ -1277,7 +1290,7 @@ fn apply_prep_calibration(
 }
 
 fn evaluate_prep_acceptance(
-    prep: FeaPrepContext,
+    prep: &FeaPrepContext,
     calibration: &PrepCalibrationSummary,
     graph_summary: Option<&PrepGraphAssemblySummary>,
     stiffness_diag: &[f64],
@@ -1341,7 +1354,7 @@ enum CalibrationProfile {
 }
 
 fn select_calibration_profile(
-    prep: FeaPrepContext,
+    prep: &FeaPrepContext,
     avg_youngs_modulus: f64,
     graph_summary: Option<&PrepGraphAssemblySummary>,
 ) -> CalibrationProfile {
@@ -1366,7 +1379,7 @@ fn select_calibration_profile(
 }
 
 fn build_prep_graph_edges(
-    prep: FeaPrepContext,
+    prep: &FeaPrepContext,
     node_count: usize,
     element_summary: &PrepElementAssemblySummary,
 ) -> Vec<(usize, usize, usize)> {
@@ -1492,7 +1505,7 @@ fn graph_bandwidth(edges: &[(usize, usize, usize)], permutation: Option<&[usize]
     max_bw
 }
 
-fn graph_ordering_fingerprint(prep: FeaPrepContext, permutation: &[usize]) -> u64 {
+fn graph_ordering_fingerprint(prep: &FeaPrepContext, permutation: &[usize]) -> u64 {
     let mut hash = 1469598103934665603_u64;
     hash ^= prep.layout_seed;
     hash = hash.wrapping_mul(1099511628211_u64);
@@ -1553,7 +1566,7 @@ fn block_bias(layout_seed: u64, block_index: usize) -> f64 {
 }
 
 fn region_topology_fingerprint(
-    prep: FeaPrepContext,
+    prep: &FeaPrepContext,
     block_sizes: &[usize],
     inter_block_edge_count: usize,
     coupling_nonzero_ratio: f64,
@@ -1591,7 +1604,7 @@ struct ElementAssemblyFingerprintInputs {
 }
 
 fn element_assembly_fingerprint(
-    prep: FeaPrepContext,
+    prep: &FeaPrepContext,
     inputs: ElementAssemblyFingerprintInputs,
 ) -> u64 {
     let mut hash = 1469598103934665603_u64;
@@ -1629,7 +1642,7 @@ struct ElementConnectivityFingerprintInputs<'a> {
 }
 
 fn element_connectivity_fingerprint(
-    prep: FeaPrepContext,
+    prep: &FeaPrepContext,
     inputs: ElementConnectivityFingerprintInputs<'_>,
 ) -> u64 {
     let mut hash = 1469598103934665603_u64;
@@ -1656,7 +1669,7 @@ fn element_connectivity_fingerprint(
 }
 
 fn graph_fingerprint(
-    prep: FeaPrepContext,
+    prep: &FeaPrepContext,
     edge_count: usize,
     connected_component_count: usize,
     degree_mean: f64,
@@ -1681,7 +1694,7 @@ fn graph_fingerprint(
 }
 
 fn calibration_fingerprint(
-    prep: FeaPrepContext,
+    prep: &FeaPrepContext,
     profile: &str,
     stiffness_scale: f64,
     mass_scale: f64,
@@ -1710,7 +1723,7 @@ fn calibration_fingerprint(
 }
 
 fn acceptance_fingerprint(
-    prep: FeaPrepContext,
+    prep: &FeaPrepContext,
     profile: &str,
     accepted: bool,
     score: f64,

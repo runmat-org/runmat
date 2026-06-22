@@ -1845,7 +1845,7 @@ pub fn analysis_run_modal_with_options_op(
     let prep_context = resolve_run_prep_context(
         model,
         options.prep_artifact_id.as_deref(),
-        options.prep_context,
+        options.prep_context.clone(),
         ANALYSIS_RUN_MODAL_OPERATION,
         ANALYSIS_RUN_MODAL_OP_VERSION,
         &context,
@@ -1856,7 +1856,10 @@ pub fn analysis_run_modal_with_options_op(
         backend,
         ModalSolveOptions {
             mode_count: options.mode_count,
-            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+            prep_context: to_fea_prep_context(
+                prep_context.as_ref(),
+                options.prep_calibration_profile,
+            ),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
@@ -2244,7 +2247,7 @@ pub fn analysis_run_acoustic_with_options_op(
     let prep_context = resolve_run_prep_context(
         model,
         options.prep_artifact_id.as_deref(),
-        options.prep_context,
+        options.prep_context.clone(),
         ANALYSIS_RUN_ACOUSTIC_OPERATION,
         ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
         &context,
@@ -2396,7 +2399,7 @@ fn solve_acoustic_harmonic(
     prep_context: Option<AnalysisRunPrepContext>,
     residual_warn_threshold: f64,
 ) -> FeaRunResult {
-    let node_count = acoustic_node_count(model, prep_context);
+    let node_count = acoustic_node_count(model, prep_context.as_ref());
     let material_summary = acoustic_material_summary(model, mode_count);
     let boundary_summary = acoustic_boundary_summary(
         model,
@@ -2408,7 +2411,7 @@ fn solve_acoustic_harmonic(
     let damping_ratio = material_summary.damping_ratio;
     let source_real = acoustic_source_vector(model, node_count);
     let source_imag = vec![0.0; node_count];
-    let domain = acoustic_domain_topology(node_count, prep_context);
+    let domain = acoustic_domain_topology(node_count, prep_context.as_ref());
     let system = acoustic_helmholtz_operator(
         domain,
         node_count,
@@ -2753,7 +2756,7 @@ fn acoustic_sweep_frequencies_hz(drive_frequency_hz: f64) -> Vec<f64> {
 
 fn acoustic_node_count(
     model: &AnalysisModel,
-    prep_context: Option<AnalysisRunPrepContext>,
+    prep_context: Option<&AnalysisRunPrepContext>,
 ) -> usize {
     prep_context
         .map(|prep| prep.prepared_node_count.max(3))
@@ -2970,7 +2973,7 @@ struct AcousticDomainSystem {
 
 fn acoustic_domain_topology(
     node_count: usize,
-    prep_context: Option<AnalysisRunPrepContext>,
+    prep_context: Option<&AnalysisRunPrepContext>,
 ) -> AcousticDomainTopology {
     let n = node_count.max(1);
     let volume_hint = prep_context
@@ -3344,7 +3347,7 @@ fn cfd_profile_scale(domain: &runmat_analysis_core::CfdDomain, step_index: usize
 
 fn cfd_node_count_from_model(
     model: &AnalysisModel,
-    prep_context: Option<AnalysisRunPrepContext>,
+    prep_context: Option<&AnalysisRunPrepContext>,
 ) -> usize {
     prep_context
         .map(|prep| prep.prepared_node_count.max(3))
@@ -3376,7 +3379,7 @@ struct CfdDomainTopology {
 }
 
 impl CfdDomainTopology {
-    fn from_model(model: &AnalysisModel, prep_context: Option<AnalysisRunPrepContext>) -> Self {
+    fn from_model(model: &AnalysisModel, prep_context: Option<&AnalysisRunPrepContext>) -> Self {
         let node_count = cfd_node_count_from_model(model, prep_context);
         match prep_context {
             Some(prep) => Self::from_prep(node_count, prep),
@@ -3410,7 +3413,7 @@ impl CfdDomainTopology {
         }
     }
 
-    fn from_prep(node_count: usize, prep: AnalysisRunPrepContext) -> Self {
+    fn from_prep(node_count: usize, prep: &AnalysisRunPrepContext) -> Self {
         let has_control_volume_connectivity = prep.control_volume_cell_count > 0
             && prep.control_volume_face_count > 0
             && prep.control_volume_connectivity_coverage_ratio > 0.0;
@@ -4398,7 +4401,7 @@ fn solve_cfd_finite_volume_run(
     domain: &runmat_analysis_core::CfdDomain,
     backend: ComputeBackend,
     options: &AnalysisCfdRunOptions,
-    prep_context: Option<AnalysisRunPrepContext>,
+    prep_context: Option<&AnalysisRunPrepContext>,
 ) -> FeaRunResult {
     let topology = CfdDomainTopology::from_model(model, prep_context);
     let node_count = topology.node_count;
@@ -6008,14 +6011,15 @@ pub fn analysis_run_cfd_with_options_op(
     let prep_context = resolve_run_prep_context(
         model,
         options.prep_artifact_id.as_deref(),
-        options.prep_context,
+        options.prep_context.clone(),
         ANALYSIS_RUN_CFD_OPERATION,
         ANALYSIS_RUN_CFD_OP_VERSION,
         &context,
     )?;
 
     let solve_start = Instant::now();
-    let mut run = solve_cfd_finite_volume_run(model, cfd_domain, backend, &options, prep_context);
+    let mut run =
+        solve_cfd_finite_volume_run(model, cfd_domain, backend, &options, prep_context.as_ref());
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
     run.diagnostics
         .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -6034,7 +6038,7 @@ pub fn analysis_run_cfd_with_options_op(
         );
     }
 
-    let flow_topology = CfdDomainTopology::from_model(model, prep_context);
+    let flow_topology = CfdDomainTopology::from_model(model, prep_context.as_ref());
     let flow_boundary_summary = CfdBoundarySummary::from_model(model, cfd_domain, 2);
     let flow_inlet_velocity = flow_boundary_summary.nominal_inlet_velocity_m_per_s;
     let reynolds_number = cfd_reynolds_number_for_velocity(cfd_domain, flow_inlet_velocity);
@@ -6501,7 +6505,7 @@ pub fn analysis_run_cht_with_options_op(
     let prep_context = resolve_run_prep_context(
         model,
         options.prep_artifact_id.as_deref(),
-        options.prep_context,
+        options.prep_context.clone(),
         ANALYSIS_RUN_CHT_OPERATION,
         ANALYSIS_RUN_CHT_OP_VERSION,
         &context,
@@ -6515,7 +6519,10 @@ pub fn analysis_run_cht_with_options_op(
             step_count: options.step_count,
             time_step_s: options.time_step_s,
             residual_target: options.residual_warn_threshold,
-            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+            prep_context: to_fea_prep_context(
+                prep_context.as_ref(),
+                options.prep_calibration_profile,
+            ),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(Some(
                 thermo_options.clone(),
             )),
@@ -6533,7 +6540,7 @@ pub fn analysis_run_cht_with_options_op(
         )
     })?;
 
-    let topology = CfdDomainTopology::from_model(model, prep_context);
+    let topology = CfdDomainTopology::from_model(model, prep_context.as_ref());
     let node_count = topology.node_count;
     let field_step = match cfd_domain.solve_family {
         runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
@@ -7106,14 +7113,14 @@ pub fn analysis_run_fsi_with_options_op(
     let prep_context = resolve_run_prep_context(
         model,
         options.prep_artifact_id.as_deref(),
-        options.prep_context,
+        options.prep_context.clone(),
         ANALYSIS_RUN_FSI_OPERATION,
         ANALYSIS_RUN_FSI_OP_VERSION,
         &context,
     )?;
 
     let solve_start = Instant::now();
-    let topology = CfdDomainTopology::from_model(model, prep_context);
+    let topology = CfdDomainTopology::from_model(model, prep_context.as_ref());
     let node_count = topology.node_count;
     let field_step = match cfd_domain.solve_family {
         runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
@@ -7503,7 +7510,7 @@ pub fn analysis_run_thermal_with_options_op(
     let prep_context = resolve_run_prep_context(
         model,
         options.prep_artifact_id.as_deref(),
-        options.prep_context,
+        options.prep_context.clone(),
         ANALYSIS_RUN_THERMAL_OPERATION,
         ANALYSIS_RUN_THERMAL_OP_VERSION,
         &context,
@@ -7516,7 +7523,10 @@ pub fn analysis_run_thermal_with_options_op(
             step_count: options.step_count,
             time_step_s: options.time_step_s,
             residual_target: options.residual_warn_threshold,
-            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+            prep_context: to_fea_prep_context(
+                prep_context.as_ref(),
+                options.prep_calibration_profile,
+            ),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(Some(thermo_options)),
         },
     )
@@ -7847,7 +7857,7 @@ pub fn analysis_run_transient_with_options_op(
         let prep_context = resolve_run_prep_context(
             model,
             options.prep_artifact_id.as_deref(),
-            options.prep_context,
+            options.prep_context.clone(),
             ANALYSIS_RUN_TRANSIENT_OPERATION,
             ANALYSIS_RUN_TRANSIENT_OP_VERSION,
             &context,
@@ -7869,7 +7879,10 @@ pub fn analysis_run_transient_with_options_op(
             adapt_nonconverged_shrink: options.adapt_nonconverged_shrink,
             dt_bucket_rel_tolerance: options.dt_bucket_rel_tolerance,
             progress_operation: ANALYSIS_RUN_TRANSIENT_OPERATION.to_string(),
-            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+            prep_context: to_fea_prep_context(
+                prep_context.as_ref(),
+                options.prep_calibration_profile,
+            ),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         }
@@ -8472,7 +8485,7 @@ pub fn analysis_run_nonlinear_with_options_op(
         let prep_context = resolve_run_prep_context(
             model,
             options.prep_artifact_id.as_deref(),
-            options.prep_context,
+            options.prep_context.clone(),
             ANALYSIS_RUN_NONLINEAR_OPERATION,
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
             &context,
@@ -8487,7 +8500,10 @@ pub fn analysis_run_nonlinear_with_options_op(
             max_line_search_backtracks: options.max_line_search_backtracks,
             line_search_reduction: options.line_search_reduction,
             tangent_refresh_interval: options.tangent_refresh_interval,
-            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+            prep_context: to_fea_prep_context(
+                prep_context.as_ref(),
+                options.prep_calibration_profile,
+            ),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
             plasticity_context: to_fea_plasticity_constitutive_context(plasticity_options),
@@ -8953,7 +8969,7 @@ pub fn analysis_run_linear_static_with_options(
         let prep_context = resolve_run_prep_context(
             model,
             options.prep_artifact_id.as_deref(),
-            options.prep_context,
+            options.prep_context.clone(),
             ANALYSIS_RUN_OPERATION,
             ANALYSIS_RUN_OP_VERSION,
             &context,
@@ -8961,7 +8977,10 @@ pub fn analysis_run_linear_static_with_options(
         LinearStaticSolveOptions {
             preconditioner_kind: requested_preconditioner,
             algebra_backend_kind: requested_solver_backend,
-            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+            prep_context: to_fea_prep_context(
+                prep_context.as_ref(),
+                options.prep_calibration_profile,
+            ),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         }
@@ -9282,7 +9301,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
     let prep_context = resolve_run_prep_context(
         model,
         options.prep_artifact_id.as_deref(),
-        options.prep_context,
+        options.prep_context.clone(),
         ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
         ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
         &context,
@@ -9309,7 +9328,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
         )
     })?;
     let solve_options = ElectromagneticSolveOptions {
-        prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+        prep_context: to_fea_prep_context(prep_context.as_ref(), options.prep_calibration_profile),
         residual_target: options.residual_target,
         harmonic_tolerance: options.harmonic_tolerance,
         harmonic_max_iterations: options.harmonic_max_iterations,
@@ -12711,7 +12730,7 @@ fn fs_read_to_string(path: impl Into<PathBuf>) -> std::io::Result<String> {
 }
 
 fn to_fea_prep_context(
-    context: Option<AnalysisRunPrepContext>,
+    context: Option<&AnalysisRunPrepContext>,
     calibration_profile: Option<PrepCalibrationProfile>,
 ) -> Option<runmat_analysis_fea::FeaPrepContext> {
     context.map(|prep| runmat_analysis_fea::FeaPrepContext {
@@ -12759,6 +12778,11 @@ fn to_fea_prep_context(
         element_topology_sample_element_orientations: prep
             .element_topology_sample_element_orientations,
         element_topology_sample_element_areas_m2: prep.element_topology_sample_element_areas_m2,
+        element_topology_node_coordinates_m: prep.element_topology_node_coordinates_m.clone(),
+        element_topology_edge_nodes: prep.element_topology_edge_nodes.clone(),
+        element_topology_element_edges: prep.element_topology_element_edges.clone(),
+        element_topology_element_orientations: prep.element_topology_element_orientations.clone(),
+        element_topology_element_areas_m2: prep.element_topology_element_areas_m2.clone(),
         calibration_profile_override: calibration_profile.and_then(map_calibration_profile),
     })
 }
@@ -14332,6 +14356,41 @@ fn resolve_run_prep_context(
             [[0; 3]; 4],
             [0.0; 4],
         ));
+    let mut element_topology_node_coordinates_m = Vec::<[f64; 3]>::new();
+    let mut element_topology_edge_nodes = Vec::<[u32; 2]>::new();
+    let mut element_topology_element_edges = Vec::<[u32; 3]>::new();
+    let mut element_topology_element_orientations = Vec::<[i8; 3]>::new();
+    let mut element_topology_element_areas_m2 = Vec::<f64>::new();
+    let mut node_offset = 0_u32;
+    let mut edge_offset = 0_u32;
+    for mesh in &artifact.prep.prepared_meshes {
+        let node_count = mesh.element_topology_node_coordinates_m.len();
+        element_topology_node_coordinates_m
+            .extend(mesh.element_topology_node_coordinates_m.iter().copied());
+        for edge in &mesh.element_topology_edge_nodes {
+            if let (Some(left), Some(right)) = (
+                edge[0].checked_add(node_offset),
+                edge[1].checked_add(node_offset),
+            ) {
+                element_topology_edge_nodes.push([left, right]);
+            }
+        }
+        for element_edges in &mesh.element_topology_element_edges {
+            if let (Some(a), Some(b), Some(c)) = (
+                element_edges[0].checked_add(edge_offset),
+                element_edges[1].checked_add(edge_offset),
+                element_edges[2].checked_add(edge_offset),
+            ) {
+                element_topology_element_edges.push([a, b, c]);
+            }
+        }
+        element_topology_element_orientations
+            .extend(mesh.element_topology_element_orientations.iter().copied());
+        element_topology_element_areas_m2
+            .extend(mesh.element_topology_element_areas_m2.iter().copied());
+        node_offset = node_offset.saturating_add(node_count as u32);
+        edge_offset = edge_offset.saturating_add(mesh.element_topology_edge_nodes.len() as u32);
+    }
     let control_volume_cell_count = artifact
         .prep
         .prepared_meshes
@@ -14455,6 +14514,11 @@ fn resolve_run_prep_context(
         element_topology_sample_element_edges,
         element_topology_sample_element_orientations,
         element_topology_sample_element_areas_m2,
+        element_topology_node_coordinates_m,
+        element_topology_edge_nodes,
+        element_topology_element_edges,
+        element_topology_element_orientations,
+        element_topology_element_areas_m2,
     }))
 }
 

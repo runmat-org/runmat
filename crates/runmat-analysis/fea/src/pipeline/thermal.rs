@@ -25,7 +25,13 @@ fn thermal_solution_node_count(summary: &AssemblySummary) -> usize {
     let assembly_node_count = (summary.dof_count / VECTOR_COMPONENT_COUNT).max(1);
     let prep_sample_node_count = summary
         .prep_coordinates
+        .as_ref()
         .map(|coordinates| {
+            if !coordinates.element_topology_edge_nodes.is_empty()
+                && !coordinates.element_topology_node_coordinates_m.is_empty()
+            {
+                return coordinates.element_topology_node_coordinates_m.len();
+            }
             if coordinates.element_topology_sample_element_count == 0
                 || coordinates.element_topology_sample_edge_count == 0
             {
@@ -98,7 +104,7 @@ pub fn run_thermal_with_options(
     );
     let summary = assemble_linear_system(
         model,
-        options.prep_context,
+        options.prep_context.clone(),
         Some(thermo_context.clone()),
         None,
     );
@@ -460,7 +466,7 @@ pub fn run_thermal_with_options(
         code: "FEA_THERMAL_FIELD_RECOVERY".to_string(),
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
-            "basis={} recovery_node_count={} recovery_dimensions={}x{}x{} recovery_spacing_x={} recovery_spacing_y={} recovery_spacing_z={} coordinate_active_dimension_count={} coordinate_characteristic_length_m={} prep_recovery_edge_count={} prep_triangle_element_count={} boundary_face_count={}",
+            "basis={} recovery_node_count={} recovery_dimensions={}x{}x{} recovery_spacing_x={} recovery_spacing_y={} recovery_spacing_z={} coordinate_active_dimension_count={} coordinate_characteristic_length_m={} prep_recovery_edge_count={} prep_triangle_element_count={} full_topology_element_count={} boundary_face_count={}",
             recovery_topology.basis.as_str(),
             recovery_topology.node_count,
             recovery_topology.dims[0],
@@ -473,6 +479,7 @@ pub fn run_thermal_with_options(
             recovery_topology.characteristic_length_m,
             recovery_topology.prep_recovery_edge_count,
             recovery_topology.prep_triangle_elements.len(),
+            recovery_topology.full_topology_element_count,
             BOUNDARY_HEAT_FLUX_COMPONENT_COUNT,
         ),
     });
@@ -589,6 +596,7 @@ struct ThermalRecoveryTopology {
     characteristic_length_m: f64,
     basis: ThermalRecoveryBasis,
     prep_recovery_edge_count: usize,
+    full_topology_element_count: usize,
     prep_edge_elements: Vec<ThermalRecoveryEdge>,
     prep_triangle_elements: Vec<ThermalRecoveryTriangle>,
 }
@@ -653,7 +661,7 @@ impl ThermalRecoveryTopology {
             .max(1);
         let dims = [x_dim, y_dim, z_dim];
         let inferred_active_dimension_count = dims.iter().filter(|dim| **dim > 1).count().max(1);
-        let coordinate_summary = summary.prep_coordinates;
+        let coordinate_summary = summary.prep_coordinates.as_ref();
         let active_dimension_count = coordinate_summary
             .map(|item| item.active_dimension_count.max(1))
             .unwrap_or(inferred_active_dimension_count);
@@ -665,6 +673,11 @@ impl ThermalRecoveryTopology {
             .unwrap_or_else(|| thermal_normalized_axis_spacing(dims));
         let prep_edge_elements = thermal_prep_edge_elements(summary, node_count.max(1));
         let prep_triangle_elements = thermal_prep_triangle_elements(summary, node_count.max(1));
+        let full_topology_element_count = summary
+            .prep_coordinates
+            .as_ref()
+            .map(|coordinates| coordinates.element_topology_element_edges.len())
+            .unwrap_or(0);
         let basis = if !prep_triangle_elements.is_empty() {
             ThermalRecoveryBasis::PrepElementTriangleTopology
         } else if !prep_edge_elements.is_empty() {
@@ -680,6 +693,7 @@ impl ThermalRecoveryTopology {
             characteristic_length_m,
             basis,
             prep_recovery_edge_count: prep_edge_elements.len(),
+            full_topology_element_count,
             prep_edge_elements,
             prep_triangle_elements,
         }
@@ -715,9 +729,15 @@ fn thermal_prep_triangle_elements(
     summary: &AssemblySummary,
     node_count: usize,
 ) -> Vec<ThermalRecoveryTriangle> {
-    let Some(coordinates) = summary.prep_coordinates else {
+    let Some(coordinates) = summary.prep_coordinates.as_ref() else {
         return Vec::new();
     };
+    if !coordinates.element_topology_edge_nodes.is_empty()
+        && !coordinates.element_topology_element_edges.is_empty()
+        && !coordinates.element_topology_node_coordinates_m.is_empty()
+    {
+        return thermal_full_topology_triangle_elements(coordinates, node_count);
+    }
     let sample_edge_count = coordinates.element_topology_sample_edge_count.min(8);
     let sample_element_count = coordinates.element_topology_sample_element_count.min(4);
     if sample_edge_count < 3 || sample_element_count == 0 {
@@ -765,12 +785,55 @@ fn thermal_prep_triangle_elements(
     triangles
 }
 
+fn thermal_full_topology_triangle_elements(
+    coordinates: &crate::assembly::PrepCoordinateSummary,
+    node_count: usize,
+) -> Vec<ThermalRecoveryTriangle> {
+    coordinates
+        .element_topology_element_edges
+        .iter()
+        .filter_map(|element_edges| {
+            let mut nodes = Vec::with_capacity(VECTOR_COMPONENT_COUNT);
+            for edge_index in element_edges {
+                let Some(edge_nodes) = coordinates
+                    .element_topology_edge_nodes
+                    .get(*edge_index as usize)
+                else {
+                    continue;
+                };
+                for node in edge_nodes {
+                    let node = *node as usize;
+                    if node < node_count
+                        && node < coordinates.element_topology_node_coordinates_m.len()
+                        && !nodes.contains(&node)
+                    {
+                        nodes.push(node);
+                    }
+                }
+            }
+            if nodes.len() != VECTOR_COMPONENT_COUNT {
+                return None;
+            }
+            let triangle = [
+                coordinates.element_topology_node_coordinates_m[nodes[0]],
+                coordinates.element_topology_node_coordinates_m[nodes[1]],
+                coordinates.element_topology_node_coordinates_m[nodes[2]],
+            ];
+            (thermal_triangle_area(&triangle) > 1.0e-18).then_some(ThermalRecoveryTriangle {
+                nodes: [nodes[0], nodes[1], nodes[2]],
+                coordinates_m: triangle,
+            })
+        })
+        .collect()
+}
+
 fn thermal_prep_edge_elements(
     summary: &AssemblySummary,
     node_count: usize,
 ) -> Vec<ThermalRecoveryEdge> {
     let active_dimension_count = summary
         .prep_coordinates
+        .as_ref()
         .map(|coordinates| coordinates.active_dimension_count.max(1))
         .unwrap_or(VECTOR_COMPONENT_COUNT)
         .min(VECTOR_COMPONENT_COUNT);

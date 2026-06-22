@@ -87,6 +87,26 @@ fn default_element_topology_sample_element_areas_m2() -> [f64; 4] {
     [0.0; 4]
 }
 
+fn default_element_topology_node_coordinates_m() -> Vec<[f64; 3]> {
+    Vec::new()
+}
+
+fn default_element_topology_edge_nodes() -> Vec<[u32; 2]> {
+    Vec::new()
+}
+
+fn default_element_topology_element_edges() -> Vec<[u32; 3]> {
+    Vec::new()
+}
+
+fn default_element_topology_element_orientations() -> Vec<[i8; 3]> {
+    Vec::new()
+}
+
+fn default_element_topology_element_areas_m2() -> Vec<f64> {
+    Vec::new()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PreparedMeshDescriptor {
     pub prepared_mesh_id: String,
@@ -141,6 +161,16 @@ pub struct PreparedMeshDescriptor {
     pub element_topology_sample_element_orientations: [[i8; 3]; 4],
     #[serde(default = "default_element_topology_sample_element_areas_m2")]
     pub element_topology_sample_element_areas_m2: [f64; 4],
+    #[serde(default = "default_element_topology_node_coordinates_m")]
+    pub element_topology_node_coordinates_m: Vec<[f64; 3]>,
+    #[serde(default = "default_element_topology_edge_nodes")]
+    pub element_topology_edge_nodes: Vec<[u32; 2]>,
+    #[serde(default = "default_element_topology_element_edges")]
+    pub element_topology_element_edges: Vec<[u32; 3]>,
+    #[serde(default = "default_element_topology_element_orientations")]
+    pub element_topology_element_orientations: Vec<[i8; 3]>,
+    #[serde(default = "default_element_topology_element_areas_m2")]
+    pub element_topology_element_areas_m2: Vec<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -297,6 +327,13 @@ pub fn prepare_geometry_for_analysis(
             element_topology_sample_element_areas_m2: element_geometry
                 .element_topology_sample
                 .element_areas_m2,
+            element_topology_node_coordinates_m: element_geometry
+                .element_topology_node_coordinates_m,
+            element_topology_edge_nodes: element_geometry.element_topology_edge_nodes,
+            element_topology_element_edges: element_geometry.element_topology_element_edges,
+            element_topology_element_orientations: element_geometry
+                .element_topology_element_orientations,
+            element_topology_element_areas_m2: element_geometry.element_topology_element_areas_m2,
         });
     }
 
@@ -412,7 +449,7 @@ pub fn prepare_geometry_for_analysis(
     })
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 struct ElementGeometryMetrics {
     node_count: u64,
     edge_count: u64,
@@ -426,6 +463,11 @@ struct ElementGeometryMetrics {
     control_volume_internal_face_count: u64,
     control_volume_boundary_face_count: u64,
     element_topology_sample: ElementTopologySample,
+    element_topology_node_coordinates_m: Vec<[f64; 3]>,
+    element_topology_edge_nodes: Vec<[u32; 2]>,
+    element_topology_element_edges: Vec<[u32; 3]>,
+    element_topology_element_orientations: Vec<[i8; 3]>,
+    element_topology_element_areas_m2: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -463,6 +505,11 @@ fn mesh_element_geometry_metrics(
     let mut edge_incidence = BTreeMap::<(u32, u32), u64>::new();
     let mut edge_indices = BTreeMap::<(u32, u32), u32>::new();
     let mut element_topology_sample = ElementTopologySample::default();
+    let element_topology_node_coordinates_m = surface.vertices.clone();
+    let mut element_topology_edge_nodes = Vec::<[u32; 2]>::new();
+    let mut element_topology_element_edges = Vec::<[u32; 3]>::new();
+    let mut element_topology_element_orientations = Vec::<[i8; 3]>::new();
+    let mut element_topology_element_areas_m2 = Vec::<f64>::new();
     let mut reference_coordinates_m = [[0.0_f64; 3]; 3];
     let mut reference_area_m2 = 0.0_f64;
     for triangle in &surface.triangles {
@@ -492,13 +539,34 @@ fn mesh_element_geometry_metrics(
             let edge = (left.min(right), left.max(right));
             unique_edges.insert(edge);
             *edge_incidence.entry(edge).or_insert(0) += 1;
-            if !edge_indices.contains_key(&edge) && edge_indices.len() < 8 {
+            if !edge_indices.contains_key(&edge) {
                 let edge_index = edge_indices.len() as u32;
                 edge_indices.insert(edge, edge_index);
-                element_topology_sample.edge_nodes[edge_index as usize] = [edge.0, edge.1];
-                element_topology_sample.edge_count = edge_indices.len() as u64;
+                element_topology_edge_nodes.push([edge.0, edge.1]);
+                if (edge_index as usize) < element_topology_sample.edge_nodes.len() {
+                    element_topology_sample.edge_nodes[edge_index as usize] = [edge.0, edge.1];
+                    element_topology_sample.edge_count = (edge_index as u64 + 1)
+                        .min(element_topology_sample.edge_nodes.len() as u64);
+                }
             }
         }
+        let mut full_element_edges = [0_u32; 3];
+        let mut full_element_orientations = [0_i8; 3];
+        for (local_index, (left, right)) in [
+            (indices[0], indices[1]),
+            (indices[1], indices[2]),
+            (indices[2], indices[0]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let edge = (left.min(right), left.max(right));
+            full_element_edges[local_index] = *edge_indices.get(&edge).unwrap_or(&0);
+            full_element_orientations[local_index] = if left <= right { 1 } else { -1 };
+        }
+        element_topology_element_edges.push(full_element_edges);
+        element_topology_element_orientations.push(full_element_orientations);
+        element_topology_element_areas_m2.push(triangle_area);
         if (element_topology_sample.element_count as usize) < 4 {
             let element_index = element_topology_sample.element_count as usize;
             for (local_index, (left, right)) in [
@@ -559,6 +627,11 @@ fn mesh_element_geometry_metrics(
         control_volume_internal_face_count,
         control_volume_boundary_face_count,
         element_topology_sample,
+        element_topology_node_coordinates_m,
+        element_topology_edge_nodes,
+        element_topology_element_edges,
+        element_topology_element_orientations,
+        element_topology_element_areas_m2,
     }
 }
 

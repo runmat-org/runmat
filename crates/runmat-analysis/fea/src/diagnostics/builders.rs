@@ -6,7 +6,7 @@ use crate::{
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct CommonRunDiagnosticInputs<'a> {
     pub(crate) model: &'a AnalysisModel,
     pub(crate) summary: &'a assembly::AssemblySummary,
@@ -24,12 +24,12 @@ pub(crate) fn extend_common_run_diagnostics(
     diagnostics.extend(material_assignment_diagnostics(
         &inputs.model.material_assignments,
     ));
-    if let Some(prep) = inputs.prep_context {
+    if let Some(prep) = inputs.prep_context.as_ref() {
         diagnostics.push(prep_diagnostic(prep));
     }
     if let Some(prep_summary) = inputs.summary.prep_assembly.as_ref() {
         diagnostics.push(prep_assembly_diagnostic(prep_summary));
-        if let Some(prep) = inputs.prep_context {
+        if let Some(prep) = inputs.prep_context.as_ref() {
             diagnostics.push(prep_topology_diagnostic(prep, inputs.summary.dof_count));
         }
     }
@@ -108,7 +108,7 @@ pub(crate) fn material_assignment_diagnostics(
     out
 }
 
-pub(crate) fn prep_diagnostic(prep: FeaPrepContext) -> FeaDiagnostic {
+pub(crate) fn prep_diagnostic(prep: &FeaPrepContext) -> FeaDiagnostic {
     FeaDiagnostic {
         code: "FEA_PREP_CONTEXT".to_string(),
         severity: if prep.inverted_element_count == 0 {
@@ -180,7 +180,7 @@ pub(crate) fn prep_assembly_diagnostic(summary: &assembly::PrepAssemblySummary) 
     }
 }
 
-pub(crate) fn prep_topology_diagnostic(prep: FeaPrepContext, dof_count: usize) -> FeaDiagnostic {
+pub(crate) fn prep_topology_diagnostic(prep: &FeaPrepContext, dof_count: usize) -> FeaDiagnostic {
     FeaDiagnostic {
         code: "FEA_PREP_TOPOLOGY".to_string(),
         severity: FeaDiagnosticSeverity::Info,

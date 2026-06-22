@@ -58,7 +58,7 @@ pub fn run_modal_with_options(
     );
     let summary = assemble_linear_system(
         model,
-        options.prep_context,
+        options.prep_context.clone(),
         options.thermo_mechanical_context,
         options.electro_thermal_context,
     );
@@ -105,7 +105,7 @@ pub fn run_modal_with_options(
         CommonRunDiagnosticInputs {
             model,
             summary: &summary,
-            prep_context: options.prep_context,
+            prep_context: options.prep_context.clone(),
             iteration_metric: mode_shapes_iteration_count_estimate(&modal.residual_norms),
             residual_metric: modal.residual_norms.iter().copied().fold(0.0_f64, f64::max),
             requested_preconditioner: "auto",

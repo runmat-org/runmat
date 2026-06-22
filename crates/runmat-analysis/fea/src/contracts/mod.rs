@@ -324,7 +324,27 @@ fn default_element_topology_sample_element_areas_m2() -> [f64; 4] {
     [0.0; 4]
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+fn default_element_topology_node_coordinates_m() -> Vec<[f64; 3]> {
+    Vec::new()
+}
+
+fn default_element_topology_edge_nodes() -> Vec<[u32; 2]> {
+    Vec::new()
+}
+
+fn default_element_topology_element_edges() -> Vec<[u32; 3]> {
+    Vec::new()
+}
+
+fn default_element_topology_element_orientations() -> Vec<[i8; 3]> {
+    Vec::new()
+}
+
+fn default_element_topology_element_areas_m2() -> Vec<f64> {
+    Vec::new()
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaPrepContext {
     pub prepared_mesh_count: usize,
     pub prepared_node_count: usize,
@@ -388,6 +408,16 @@ pub struct FeaPrepContext {
     pub element_topology_sample_element_orientations: [[i8; 3]; 4],
     #[serde(default = "default_element_topology_sample_element_areas_m2")]
     pub element_topology_sample_element_areas_m2: [f64; 4],
+    #[serde(default = "default_element_topology_node_coordinates_m")]
+    pub element_topology_node_coordinates_m: Vec<[f64; 3]>,
+    #[serde(default = "default_element_topology_edge_nodes")]
+    pub element_topology_edge_nodes: Vec<[u32; 2]>,
+    #[serde(default = "default_element_topology_element_edges")]
+    pub element_topology_element_edges: Vec<[u32; 3]>,
+    #[serde(default = "default_element_topology_element_orientations")]
+    pub element_topology_element_orientations: Vec<[i8; 3]>,
+    #[serde(default = "default_element_topology_element_areas_m2")]
+    pub element_topology_element_areas_m2: Vec<f64>,
     pub calibration_profile_override: Option<FeaPrepCalibrationProfile>,
 }
 

@@ -472,6 +472,7 @@ fn build_conductance_domain_graph(
     };
     let active_dimension_count = summary
         .prep_coordinates
+        .as_ref()
         .map(|coordinates| coordinates.active_dimension_count.max(1))
         .unwrap_or(1);
 
@@ -498,18 +499,29 @@ fn prep_element_topology_conductance_edges(
     if node_count < 2 {
         return Vec::new();
     }
-    let Some(coordinates) = summary.prep_coordinates else {
+    let Some(coordinates) = summary.prep_coordinates.as_ref() else {
         return Vec::new();
     };
+    let full_edge_count = coordinates.element_topology_edge_nodes.len();
     let sample_edge_count = coordinates.element_topology_sample_edge_count.min(8);
-    if sample_edge_count == 0 {
+    if full_edge_count == 0 && sample_edge_count == 0 {
         return Vec::new();
     }
     let fallback_length = finite_positive_or(coordinates.mean_element_edge_length_m, 1.0);
-    let mut edges = coordinates
+    let full_edges = coordinates.element_topology_edge_nodes.to_vec();
+    let sample_edges = coordinates
         .element_topology_sample_edge_nodes
         .iter()
         .take(sample_edge_count)
+        .copied()
+        .collect::<Vec<_>>();
+    let topology_edges = if full_edges.is_empty() {
+        sample_edges.as_slice()
+    } else {
+        full_edges.as_slice()
+    };
+    let mut edges = topology_edges
+        .iter()
         .filter_map(|nodes| {
             let from = nodes[0] as usize;
             let to = nodes[1] as usize;
@@ -565,18 +577,23 @@ fn expand_prep_topology_edges_to_node_span(
 }
 
 fn prep_coordinate_edge_geometry(
-    coordinates: crate::assembly::PrepCoordinateSummary,
+    coordinates: &crate::assembly::PrepCoordinateSummary,
     from: usize,
     to: usize,
     fallback_length: f64,
 ) -> (f64, [f64; VECTOR_COMPONENT_COUNT]) {
-    if from >= coordinates.element_topology_sample_node_coordinates_m.len()
-        || to >= coordinates.element_topology_sample_node_coordinates_m.len()
-    {
+    let coordinate_source = if coordinates.element_topology_node_coordinates_m.is_empty() {
+        coordinates
+            .element_topology_sample_node_coordinates_m
+            .as_slice()
+    } else {
+        coordinates.element_topology_node_coordinates_m.as_slice()
+    };
+    if from >= coordinate_source.len() || to >= coordinate_source.len() {
         return (fallback_length, [1.0, 0.0, 0.0]);
     }
-    let from_coord = coordinates.element_topology_sample_node_coordinates_m[from];
-    let to_coord = coordinates.element_topology_sample_node_coordinates_m[to];
+    let from_coord = coordinate_source[from];
+    let to_coord = coordinate_source[to];
     let delta = [
         to_coord[0] - from_coord[0],
         to_coord[1] - from_coord[1],
@@ -1183,6 +1200,16 @@ mod tests {
                     [0, 0, 0],
                 ],
                 element_topology_sample_element_areas_m2: [0.25, 0.25, 0.0, 0.0],
+                element_topology_node_coordinates_m: vec![
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 0.5, 0.0],
+                    [1.0, 0.5, 0.0],
+                ],
+                element_topology_edge_nodes: vec![[0, 1], [1, 2], [0, 2], [2, 3], [0, 3]],
+                element_topology_element_edges: vec![[0, 1, 2], [2, 3, 4]],
+                element_topology_element_orientations: vec![[1, 1, -1], [1, 1, -1]],
+                element_topology_element_areas_m2: vec![0.25, 0.25],
             }),
             ..summary()
         }
@@ -1198,6 +1225,11 @@ mod tests {
             coordinates.element_topology_sample_element_edges = [[0; 3]; 4];
             coordinates.element_topology_sample_element_orientations = [[0; 3]; 4];
             coordinates.element_topology_sample_element_areas_m2 = [0.0; 4];
+            coordinates.element_topology_node_coordinates_m.clear();
+            coordinates.element_topology_edge_nodes.clear();
+            coordinates.element_topology_element_edges.clear();
+            coordinates.element_topology_element_orientations.clear();
+            coordinates.element_topology_element_areas_m2.clear();
             summary.prep_coordinates = Some(coordinates);
         }
         summary

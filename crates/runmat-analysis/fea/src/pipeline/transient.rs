@@ -53,7 +53,7 @@ pub fn run_transient_with_options(
         Some(5),
     );
     check_cancelled("fea.run_transient")?;
-    let prep_context = options.prep_context;
+    let prep_context = options.prep_context.clone();
     let thermo_context = options.thermo_mechanical_context.clone();
     let electro_context = options.electro_thermal_context.clone();
 
@@ -65,7 +65,8 @@ pub fn run_transient_with_options(
         Some(1),
         Some(5),
     );
-    let summary = assemble_linear_system(model, prep_context, thermo_context, electro_context);
+    let summary =
+        assemble_linear_system(model, prep_context.clone(), thermo_context, electro_context);
     emit_phase(
         "fea.run_transient",
         FeaProgressPhase::ModelAssembly,

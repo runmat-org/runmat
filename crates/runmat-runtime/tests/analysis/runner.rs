@@ -3430,6 +3430,20 @@ fn push_thermal_standalone_threshold_assertions(
         fixture_id,
         assertions,
         failures,
+        "thermal_standalone_full_topology_element_count",
+        "FEA_THERMAL_FIELD_RECOVERY",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_FIELD_RECOVERY",
+            "full_topology_element_count",
+        ),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
         "thermal_standalone_prep_active_dimension_count",
         "FEA_THERMAL_FIELD_RECOVERY",
         diagnostic_metric(
@@ -3614,6 +3628,34 @@ fn push_em_reference_topology_threshold_assertions(
             run,
             "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
             "prep_recovery_edge_count",
+        ),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "electromagnetic_full_topology_edge_count",
+        "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+        diagnostic_metric(
+            run,
+            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+            "full_topology_edge_count",
+        ),
+        Some(3.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "electromagnetic_full_topology_element_count",
+        "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+        diagnostic_metric(
+            run,
+            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+            "full_topology_element_count",
         ),
         Some(1.0),
         None,
