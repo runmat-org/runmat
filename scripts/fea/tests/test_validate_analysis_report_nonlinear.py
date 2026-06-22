@@ -1479,11 +1479,41 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
         finally:
             sys.argv = previous_argv
 
+    def _run_main_with_env_report(self, env_var: str, report_path: Path) -> int:
+        import sys
+
+        previous_argv = sys.argv[:]
+        previous_env = os.environ.get(env_var)
+        sys.argv = ["validate_analysis_report_nonlinear.py"]
+        os.environ[env_var] = str(report_path)
+        try:
+            return main()
+        finally:
+            sys.argv = previous_argv
+            if previous_env is None:
+                os.environ.pop(env_var, None)
+            else:
+                os.environ[env_var] = previous_env
+
     def test_passes_with_cfd_cht_fsi_required_assertions_present(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "analysis_benchmark_report.json"
             path.write_text(json.dumps({"records": self._base_records()}))
             rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 0)
+
+    def test_passes_with_analysis_artifact_env_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": self._base_records()}))
+            rc = self._run_main_with_env_report("RUNMAT_ANALYSIS_ARTIFACT_PATH", path)
+            self.assertEqual(rc, 0)
+
+    def test_passes_with_fea_artifact_env_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fea_benchmark_report.json"
+            path.write_text(json.dumps({"records": self._base_records()}))
+            rc = self._run_main_with_env_report("RUNMAT_FEA_ARTIFACT_PATH", path)
             self.assertEqual(rc, 0)
 
     def test_fails_when_fsi_required_assertion_missing(self):

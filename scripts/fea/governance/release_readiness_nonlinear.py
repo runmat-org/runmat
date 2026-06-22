@@ -9413,11 +9413,24 @@ def evaluate_release_readiness(
             "electromagnetic_sweep_known_peak_frequency_error_ratio",
             "electromagnetic_sweep_known_quality_factor",
             "electromagnetic_sweep_known_answer_coverage_ratio",
+            "electromagnetic_edge_dof_count",
+            "electromagnetic_element_count",
+            "electromagnetic_oriented_edge_count",
+            "electromagnetic_prep_recovery_edge_count",
+            "electromagnetic_full_topology_edge_count",
+            "electromagnetic_full_topology_element_count",
+            "electromagnetic_incidence_element_count",
+            "electromagnetic_incidence_orientation_count",
+            "electromagnetic_incidence_pair_count",
+            "electromagnetic_incidence_operator_pair_coverage_ratio",
         )
         for field in additional_required_em_fields:
             if not any(
-                isinstance(rec.get(field), (int, float))
-                and math.isfinite(float(rec[field]))
+                (
+                    isinstance(rec.get(field), (int, float))
+                    and math.isfinite(float(rec[field]))
+                )
+                or threshold_assertion_observed(rec, field) is not None
                 for rec in em_records
             ):
                 missing_metric_fields.append(field)

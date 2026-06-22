@@ -1275,7 +1275,7 @@ REQUIRED_FIXTURES = {
     },
 }
 
-EM_TOPOLOGY_ASSERTIONS = {
+EM_TOPOLOGY_REQUIRED_FIELDS = {
     "electromagnetic_edge_dof_count",
     "electromagnetic_element_count",
     "electromagnetic_oriented_edge_count",
@@ -1290,7 +1290,7 @@ EM_TOPOLOGY_ASSERTIONS = {
 
 for _fixture_id, _required_assertions in REQUIRED_FIXTURES.items():
     if _fixture_id.startswith("electromagnetic_reference_"):
-        _required_assertions.update(EM_TOPOLOGY_ASSERTIONS)
+        _required_assertions.update(EM_TOPOLOGY_REQUIRED_FIELDS)
 
 REQUIRED_ERROR_FIXTURES = {
     "acoustic_harmonic_missing_source": {
@@ -1755,10 +1755,16 @@ def is_true(value: str) -> bool:
 
 
 def main() -> int:
-    path = (
-        Path(sys.argv[1])
+    path = Path(
+        sys.argv[1]
         if len(sys.argv) > 1
-        else Path("target/runmat-analysis-artifacts/analysis_benchmark_report.json")
+        else os.getenv(
+            "RUNMAT_ANALYSIS_ARTIFACT_PATH",
+            os.getenv(
+                "RUNMAT_FEA_ARTIFACT_PATH",
+                "target/runmat-analysis-artifacts/analysis_benchmark_report.json",
+            ),
+        )
     )
     if not path.exists():
         print(f"report missing: {path}", file=sys.stderr)

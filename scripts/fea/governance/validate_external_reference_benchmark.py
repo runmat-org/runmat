@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 import json
 import os
+import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.fea.governance.validate_analysis_report_nonlinear import (
+    REQUIRED_FIXTURES as REPORT_REQUIRED_FIXTURES,
+)
 
 
 TRANSIENT_ENERGY_BALANCE_REQUIRED_FIELDS = {
@@ -1382,6 +1391,11 @@ REQUIRED_METRICS_BY_FIXTURE["cht_coupled_channel_slab_cpu"] = (
 REQUIRED_METRICS_BY_FIXTURE["fsi_coupled_pipe_plate_cpu"] = (
     REQUIRED_METRICS_BY_FIXTURE["fsi_coupled_cpu"] | {"fsi_authored_interface_count"}
 )
+
+for fixture_id, required_assertions in REPORT_REQUIRED_FIXTURES.items():
+    REQUIRED_METRICS_BY_FIXTURE[fixture_id] = (
+        REQUIRED_METRICS_BY_FIXTURE.get(fixture_id, set()) | required_assertions
+    )
 
 
 def is_true(value: str) -> bool:

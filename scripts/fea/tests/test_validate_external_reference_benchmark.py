@@ -25,6 +25,7 @@ from scripts.fea.governance.validate_analysis_report_nonlinear import (
     EM_SOURCE_LOCALIZATION_REQUIRED_FIELDS,
     EM_SWEEP_KNOWN_ANSWER_REQUIRED_FIELDS,
     EM_SWEEP_RESONANCE_REQUIRED_FIELDS,
+    EM_TOPOLOGY_REQUIRED_FIELDS,
     REQUIRED_FIXTURES,
 )
 from scripts.fea.governance.validate_external_reference_benchmark import main
@@ -6647,6 +6648,7 @@ class ValidateExternalReferenceBenchmarkTests(unittest.TestCase):
             EM_RESIDUAL_REQUIRED_FIELDS,
             EM_BALANCE_REQUIRED_FIELDS,
             EM_FORMULATION_REQUIRED_FIELDS,
+            EM_TOPOLOGY_REQUIRED_FIELDS,
         )
 
         required_external_em_metrics = {
