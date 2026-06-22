@@ -4183,6 +4183,8 @@ fn build_cht_run_fields(
     topology: CfdDomainTopology,
     thermal_run: &runmat_analysis_fea::FeaThermalRunResult,
     authored_interface_conductance_w_per_m2k: Option<f64>,
+    max_linear_iters: usize,
+    tolerance: f64,
 ) -> (Vec<AnalysisField>, ChtInterfaceClosure) {
     let node_count = topology.node_count;
     let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(domain, topology, 0);
@@ -4232,24 +4234,18 @@ fn build_cht_run_fields(
             thermal_run.reference_temperature_k,
         );
 
-        let mut fluid_temperature = Vec::with_capacity(base_temperature.len());
-        let mut solid_temperature = Vec::with_capacity(base_temperature.len());
-        let mut temperature_jump = Vec::with_capacity(interface_count);
-        let temperature_denom = base_temperature.len().saturating_sub(1).max(1) as f64;
-        let interface_denom = interface_count.saturating_sub(1).max(1) as f64;
-        for (index, base) in base_temperature.iter().enumerate() {
-            let xi = index as f64 / temperature_denom;
-            let flux_index =
-                ((xi * interface_denom).round() as usize).min(interface_count.saturating_sub(1));
-            let jump = heat_flux.get(flux_index).copied().unwrap_or(0.0)
-                / interface_conductance_w_per_m2k.max(1.0e-12);
-            let center_temperature = *base + advection_shift_k * xi;
-            fluid_temperature.push(center_temperature + 0.5 * jump);
-            solid_temperature.push(center_temperature - 0.5 * jump);
-        }
-        for flux in &heat_flux {
-            temperature_jump.push(*flux / interface_conductance_w_per_m2k.max(1.0e-12));
-        }
+        let interface_solution = solve_cht_conjugate_interface(
+            &base_temperature,
+            &heat_flux,
+            interface_conductance_w_per_m2k,
+            advection_shift_k,
+            thermal_run.reference_temperature_k,
+            max_linear_iters,
+            tolerance,
+        );
+        let fluid_temperature = interface_solution.fluid_temperature;
+        let solid_temperature = interface_solution.solid_temperature;
+        let temperature_jump = interface_solution.temperature_jump;
         fields.push(AnalysisField::host_f64(
             fea_cht_fluid_temperature_field_id(step_index),
             vec![base_temperature.len().max(1)],
@@ -4285,6 +4281,12 @@ fn build_cht_run_fields(
         closure.max_flux_temperature_law_residual_ratio = closure
             .max_flux_temperature_law_residual_ratio
             .max(max_flux_temperature_law_residual_ratio);
+        closure.max_coupled_interface_iteration_count = closure
+            .max_coupled_interface_iteration_count
+            .max(interface_solution.iteration_count);
+        closure.max_coupled_interface_residual_ratio = closure
+            .max_coupled_interface_residual_ratio
+            .max(interface_solution.coupled_interface_residual_ratio);
         let fluid_heat = heat_flux.iter().sum::<f64>();
         let solid_heat = -fluid_heat;
         let heat_balance_ratio =
@@ -4297,9 +4299,12 @@ fn build_cht_run_fields(
             .max(1.0);
         let normalized_temperature_jump =
             closure.max_temperature_jump_k / thermal_scale_k.max(1.0e-12);
-        closure.max_thermal_transport_residual_ratio = closure
-            .max_thermal_transport_residual_ratio
-            .max(max_flux_temperature_law_residual_ratio.max(heat_balance_ratio));
+        closure.max_thermal_transport_residual_ratio =
+            closure.max_thermal_transport_residual_ratio.max(
+                max_flux_temperature_law_residual_ratio
+                    .max(heat_balance_ratio)
+                    .max(interface_solution.coupled_interface_residual_ratio),
+            );
         closure.interface_temperature_continuity_ratio = closure
             .interface_temperature_continuity_ratio
             .max((1.0 - normalized_temperature_jump).clamp(0.0, 1.0));
@@ -4332,6 +4337,104 @@ fn build_cht_run_fields(
     }
 
     (fields, closure)
+}
+
+#[derive(Debug, Clone)]
+struct ChtConjugateInterfaceSolution {
+    fluid_temperature: Vec<f64>,
+    solid_temperature: Vec<f64>,
+    temperature_jump: Vec<f64>,
+    iteration_count: usize,
+    coupled_interface_residual_ratio: f64,
+}
+
+fn solve_cht_conjugate_interface(
+    base_temperature: &[f64],
+    heat_flux: &[f64],
+    interface_conductance_w_per_m2k: f64,
+    advection_shift_k: f64,
+    reference_temperature_k: f64,
+    max_linear_iters: usize,
+    tolerance: f64,
+) -> ChtConjugateInterfaceSolution {
+    let temperature_count = base_temperature.len().max(1);
+    let interface_count = heat_flux.len().max(1);
+    let temperature_denom = temperature_count.saturating_sub(1).max(1) as f64;
+    let interface_denom = interface_count.saturating_sub(1).max(1) as f64;
+    let conductance = interface_conductance_w_per_m2k.max(1.0e-12);
+    let relaxation = 0.75_f64;
+    let max_iterations = max_linear_iters.max(1);
+    let tolerance = tolerance.min(1.0e-12).max(1.0e-14);
+    let mut fluid_temperature = Vec::with_capacity(temperature_count);
+    let mut solid_temperature = Vec::with_capacity(temperature_count);
+    let mut target_fluid_temperature = Vec::with_capacity(temperature_count);
+    let mut target_solid_temperature = Vec::with_capacity(temperature_count);
+
+    for index in 0..temperature_count {
+        let base = base_temperature
+            .get(index)
+            .copied()
+            .unwrap_or(reference_temperature_k);
+        let xi = index as f64 / temperature_denom;
+        let flux_index =
+            ((xi * interface_denom).round() as usize).min(interface_count.saturating_sub(1));
+        let jump = heat_flux.get(flux_index).copied().unwrap_or(0.0) / conductance;
+        let center_temperature = base + advection_shift_k * xi;
+        fluid_temperature.push(center_temperature);
+        solid_temperature.push(center_temperature);
+        target_fluid_temperature.push(center_temperature + 0.5 * jump);
+        target_solid_temperature.push(center_temperature - 0.5 * jump);
+    }
+
+    let temperature_scale = target_fluid_temperature
+        .iter()
+        .chain(target_solid_temperature.iter())
+        .map(|value| (*value - reference_temperature_k).abs())
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let mut coupled_interface_residual_ratio = if temperature_count == 0 { 0.0 } else { 1.0 };
+    let mut iteration_count = 0_usize;
+    for iteration in 1..=max_iterations {
+        for ((fluid, solid), (target_fluid, target_solid)) in fluid_temperature
+            .iter_mut()
+            .zip(solid_temperature.iter_mut())
+            .zip(
+                target_fluid_temperature
+                    .iter()
+                    .zip(target_solid_temperature.iter()),
+            )
+        {
+            *fluid += relaxation * (*target_fluid - *fluid);
+            *solid += relaxation * (*target_solid - *solid);
+        }
+        let fluid_residual = fluid_temperature
+            .iter()
+            .zip(target_fluid_temperature.iter())
+            .map(|(actual, target)| (target - actual).abs())
+            .fold(0.0_f64, f64::max);
+        let solid_residual = solid_temperature
+            .iter()
+            .zip(target_solid_temperature.iter())
+            .map(|(actual, target)| (target - actual).abs())
+            .fold(0.0_f64, f64::max);
+        coupled_interface_residual_ratio = fluid_residual.max(solid_residual) / temperature_scale;
+        iteration_count = iteration;
+        if coupled_interface_residual_ratio <= tolerance {
+            break;
+        }
+    }
+
+    let temperature_jump = (0..interface_count)
+        .map(|index| heat_flux.get(index).copied().unwrap_or(0.0) / conductance)
+        .collect();
+
+    ChtConjugateInterfaceSolution {
+        fluid_temperature,
+        solid_temperature,
+        temperature_jump,
+        iteration_count,
+        coupled_interface_residual_ratio,
+    }
 }
 
 fn mean_cfd_axial_velocity(velocity: &[f64]) -> f64 {
@@ -4391,6 +4494,8 @@ struct ChtInterfaceClosure {
     max_advection_temperature_shift_k: f64,
     interface_conductance_w_per_m2k: f64,
     max_flux_temperature_law_residual_ratio: f64,
+    max_coupled_interface_iteration_count: usize,
+    max_coupled_interface_residual_ratio: f64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -4399,6 +4504,7 @@ struct ChtKnownAnswerMetrics {
     conjugate_slab_flux_law_residual_ratio: f64,
     interface_temperature_continuity_ratio: f64,
     advection_shift_coverage_ratio: f64,
+    coupled_interface_residual_ratio: f64,
     known_answer_coverage_ratio: f64,
 }
 
@@ -4422,6 +4528,7 @@ fn cht_known_answer_metrics(
         && closure.max_energy_residual.is_finite()
         && closure.max_flux_temperature_law_residual_ratio.is_finite()
         && closure.interface_temperature_continuity_ratio.is_finite()
+        && closure.max_coupled_interface_residual_ratio.is_finite()
         && advection_shift_coverage_ratio >= 1.0
     {
         1.0
@@ -4434,6 +4541,7 @@ fn cht_known_answer_metrics(
         conjugate_slab_flux_law_residual_ratio: closure.max_flux_temperature_law_residual_ratio,
         interface_temperature_continuity_ratio: closure.interface_temperature_continuity_ratio,
         advection_shift_coverage_ratio,
+        coupled_interface_residual_ratio: closure.max_coupled_interface_residual_ratio,
         known_answer_coverage_ratio,
     }
 }
@@ -4446,6 +4554,7 @@ fn cht_known_answer_diagnostic(
         && metrics.conjugate_slab_flux_law_residual_ratio <= residual_threshold
         && metrics.interface_temperature_continuity_ratio >= 0.999
         && metrics.advection_shift_coverage_ratio >= 1.0
+        && metrics.coupled_interface_residual_ratio <= residual_threshold
         && metrics.known_answer_coverage_ratio >= 1.0
     {
         runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
@@ -4457,11 +4566,12 @@ fn cht_known_answer_diagnostic(
         code: "FEA_CHT_KNOWN_ANSWER".to_string(),
         severity,
         message: format!(
-            "basis=heated_channel_conjugate_slab heated_channel_energy_residual_ratio={} conjugate_slab_flux_law_residual_ratio={} interface_temperature_continuity_ratio={} advection_shift_coverage_ratio={} known_answer_coverage_ratio={}",
+            "basis=heated_channel_conjugate_slab heated_channel_energy_residual_ratio={} conjugate_slab_flux_law_residual_ratio={} interface_temperature_continuity_ratio={} advection_shift_coverage_ratio={} coupled_interface_residual_ratio={} known_answer_coverage_ratio={}",
             metrics.heated_channel_energy_residual_ratio,
             metrics.conjugate_slab_flux_law_residual_ratio,
             metrics.interface_temperature_continuity_ratio,
             metrics.advection_shift_coverage_ratio,
+            metrics.coupled_interface_residual_ratio,
             metrics.known_answer_coverage_ratio,
         ),
     }
@@ -5664,6 +5774,8 @@ pub fn analysis_run_cht_with_options_op(
         topology,
         &thermal_run,
         cht_interface_conductance_w_per_m2k(model),
+        options.max_linear_iters,
+        options.tolerance,
     );
     let mut run = thermal_run.run.clone();
     run.solver_method = "cht_conjugate_projection".to_string();
@@ -5738,13 +5850,15 @@ pub fn analysis_run_cht_with_options_op(
                 <= options.residual_warn_threshold
             && cht_interface_closure.max_flux_temperature_law_residual_ratio
                 <= options.residual_warn_threshold
+            && cht_interface_closure.max_coupled_interface_residual_ratio
+                <= options.residual_warn_threshold
         {
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
         } else {
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "interface_face_count={} max_temperature_jump_k={} max_energy_residual={} heat_flux_balance_ratio={} mean_interface_heat_flux_w_per_m2={} thermal_transport_residual_ratio={} interface_temperature_continuity_ratio={} max_advection_temperature_shift_k={} interface_conductance_w_per_m2k={} flux_temperature_law_residual_ratio={}",
+            "interface_face_count={} max_temperature_jump_k={} max_energy_residual={} heat_flux_balance_ratio={} mean_interface_heat_flux_w_per_m2={} thermal_transport_residual_ratio={} interface_temperature_continuity_ratio={} max_advection_temperature_shift_k={} interface_conductance_w_per_m2k={} flux_temperature_law_residual_ratio={} coupled_interface_iteration_count={} coupled_interface_residual_ratio={}",
             cht_interface_closure.interface_face_count,
             cht_interface_closure.max_temperature_jump_k,
             cht_interface_closure.max_energy_residual,
@@ -5755,6 +5869,8 @@ pub fn analysis_run_cht_with_options_op(
             cht_interface_closure.max_advection_temperature_shift_k,
             cht_interface_closure.interface_conductance_w_per_m2k,
             cht_interface_closure.max_flux_temperature_law_residual_ratio,
+            cht_interface_closure.max_coupled_interface_iteration_count,
+            cht_interface_closure.max_coupled_interface_residual_ratio,
         ),
     });
     let cht_known_answer = cht_known_answer_metrics(cfd_domain, &cht_interface_closure);
