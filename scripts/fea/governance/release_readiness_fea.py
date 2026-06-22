@@ -15662,7 +15662,7 @@ def evaluate_release_readiness(
 
 
 def markdown_summary(result: dict) -> str:
-    lines = ["## Nonlinear Release Readiness", ""]
+    lines = ["## FEA Release Readiness", ""]
     lines.append(f"Verdict: **{result['verdict']}**")
     lines.append(f"Governance profile: **{result.get('governance_profile', 'unknown')}**")
     lines.append(f"Protected branch enforcement: **{result['protected_branch']}**")
@@ -16738,7 +16738,7 @@ def main() -> int:
     output_path = Path(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_OUTPUT",
-            "target/runmat-analysis-artifacts/nonlinear_release_readiness.json",
+            "target/runmat-analysis-artifacts/fea_release_readiness.json",
         )
     )
 

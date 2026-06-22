@@ -8,7 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.fea.governance.validate_analysis_report_nonlinear import (
+from scripts.fea.governance.validate_fea_conformance_report import (
     REQUIRED_FIXTURES as REPORT_REQUIRED_FIXTURES,
 )
 

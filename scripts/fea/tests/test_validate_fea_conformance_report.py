@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.fea.governance.validate_analysis_report_nonlinear import (
+from scripts.fea.governance.validate_fea_conformance_report import (
     EM_FORMULATION_REQUIRED_FIELDS,
     REQUIRED_ERROR_FIXTURES,
     REQUIRED_FIXTURES,
@@ -129,7 +129,7 @@ def _error_record(fixture_id: str, run_error_code: str) -> dict:
     }
 
 
-class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
+class ValidateFeaConformanceReportTests(unittest.TestCase):
     def _base_records(self) -> list[dict]:
         records = [
             _record(
@@ -1473,7 +1473,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
         import sys
 
         previous_argv = sys.argv[:]
-        sys.argv = ["validate_analysis_report_nonlinear.py", str(report_path)]
+        sys.argv = ["validate_fea_conformance_report.py", str(report_path)]
         try:
             return main()
         finally:
@@ -1484,7 +1484,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
 
         previous_argv = sys.argv[:]
         previous_env = os.environ.get(env_var)
-        sys.argv = ["validate_analysis_report_nonlinear.py"]
+        sys.argv = ["validate_fea_conformance_report.py"]
         os.environ[env_var] = str(report_path)
         try:
             return main()

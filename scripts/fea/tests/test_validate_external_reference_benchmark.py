@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.fea.governance.validate_analysis_report_nonlinear import (
+from scripts.fea.governance.validate_fea_conformance_report import (
     EM_APPLIED_CURRENT_REQUIRED_FIELDS,
     EM_BALANCE_REQUIRED_FIELDS,
     EM_BOUNDARY_CONDITION_LOCALIZATION_REQUIRED_FIELDS,

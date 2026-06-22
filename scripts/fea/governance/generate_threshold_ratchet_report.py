@@ -53,7 +53,7 @@ def main() -> int:
     in_path = Path(
         os.getenv(
             "RUNMAT_THRESHOLD_RATCHET_INPUT",
-            "target/runmat-analysis-artifacts/nonlinear_release_readiness.json",
+            "target/runmat-analysis-artifacts/fea_release_readiness.json",
         )
     )
     out_json = Path(

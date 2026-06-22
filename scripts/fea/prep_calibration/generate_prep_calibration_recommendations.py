@@ -11,7 +11,7 @@ from scripts.fea.prep_calibration.evaluate_prep_calibration_drift import (
     build_recommendation_artifact,
     load_evidence,
 )
-from scripts.fea.governance.release_readiness_nonlinear import (
+from scripts.fea.governance.release_readiness_fea import (
     load_json,
     rolling_reports,
 )

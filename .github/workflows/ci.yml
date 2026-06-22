@@ -308,8 +308,8 @@ jobs:
         if: success()
         run: echo "RUNMAT_RELEASE_READINESS_ARTIFACT_REPLAY_OK=true" >> "$GITHUB_ENV"
 
-      - name: Validate nonlinear benchmark report keys
-        run: python3 scripts/fea/governance/validate_analysis_report_nonlinear.py
+      - name: Validate FEA conformance report keys
+        run: python3 scripts/fea/governance/validate_fea_conformance_report.py
 
       - name: Enforce thermo summary presence on thermo-gated branches
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/')
@@ -319,7 +319,7 @@ jobs:
           RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY: "true"
           RUNMAT_VALIDATE_REQUIRE_PLASTIC_SUMMARY: "true"
           RUNMAT_VALIDATE_REQUIRE_CONTACT_SUMMARY: "true"
-        run: python3 scripts/fea/governance/validate_analysis_report_nonlinear.py
+        run: python3 scripts/fea/governance/validate_fea_conformance_report.py
 
       - name: Enforce non-default thermo signing key on release branches
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/')
@@ -424,11 +424,11 @@ jobs:
           python3 scripts/fea/reporting/analyze_nonlinear_trends.py | tee nonlinear-trends.md
           cat nonlinear-trends.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Summarize nonlinear report
+      - name: Summarize FEA conformance report
         if: always()
         run: |
-          python3 scripts/fea/reporting/summarize_analysis_report.py | tee nonlinear-summary.md
-          cat nonlinear-summary.md >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/fea/reporting/summarize_analysis_report.py | tee fea-conformance-summary.md
+          cat fea-conformance-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summarize prep artifact SLO
         if: always()
@@ -470,7 +470,7 @@ jobs:
           RUNMAT_VALIDATE_EXTERNAL_REFERENCE_REQUIRE_PASS: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/') }}
         run: python3 scripts/fea/governance/validate_external_reference_benchmark.py
 
-      - name: Evaluate nonlinear release readiness
+      - name: Evaluate FEA release readiness
         if: always()
         env:
           RUNMAT_RELEASE_READINESS_MAX_SLOWDOWN_RATIO: "1.25"
@@ -487,8 +487,8 @@ jobs:
           RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT: target/runmat-analysis-artifacts/prep_calibration_recommendations.json
           RUNMAT_THERMO_FIELD_SIGNING_KEY: ${{ secrets.RUNMAT_THERMO_FIELD_SIGNING_KEY }}
         run: |
-          python3 scripts/fea/governance/release_readiness_nonlinear.py | tee nonlinear-release-readiness.md
-          cat nonlinear-release-readiness.md >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/fea/governance/release_readiness_fea.py | tee fea-release-readiness.md
+          cat fea-release-readiness.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate threshold ratchet report
         if: always()
@@ -510,7 +510,7 @@ jobs:
           import json
           from pathlib import Path
           rec_path = Path("target/runmat-analysis-artifacts/prep_calibration_recommendations.json")
-          ready_path = Path("target/runmat-analysis-artifacts/nonlinear_release_readiness.json")
+          ready_path = Path("target/runmat-analysis-artifacts/fea_release_readiness.json")
           ratchet_path = Path("target/runmat-analysis-artifacts/threshold_ratchet_report.json")
           promotion_calib_path = Path("target/runmat-analysis-artifacts/promotion_threshold_calibration.json")
           external_ref_path = Path("target/runmat-analysis-artifacts/external_reference_benchmark.json")
@@ -857,7 +857,7 @@ jobs:
           name: fea-conformance-${{ github.run_id }}
           path: |
             target/runmat-analysis-artifacts/analysis_benchmark_report.json
-            target/runmat-analysis-artifacts/nonlinear_release_readiness.json
+            target/runmat-analysis-artifacts/fea_release_readiness.json
             target/runmat-analysis-artifacts/threshold_ratchet_report.json
             target/runmat-analysis-artifacts/threshold_ratchet_report.md
             target/runmat-analysis-artifacts/promotion_threshold_calibration.json
@@ -867,8 +867,8 @@ jobs:
             target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
             target/runmat-analysis-artifacts/rolling/*.json
             target/runmat-prep-artifacts/prep/*.json
-            nonlinear-summary.md
-            nonlinear-release-readiness.md
+            fea-conformance-summary.md
+            fea-release-readiness.md
             nonlinear-trends.md
             thermo-field-trust-report.md
             prep-artifact-slo.md

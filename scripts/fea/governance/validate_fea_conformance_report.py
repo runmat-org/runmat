@@ -2188,7 +2188,7 @@ def main() -> int:
             print(error, file=sys.stderr)
         return 1
 
-    print("nonlinear analysis report schema checks passed")
+    print("FEA conformance report schema checks passed")
     return 0
 
 
