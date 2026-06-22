@@ -1,4 +1,5 @@
 pub mod dofs;
+pub mod elements;
 
 use runmat_analysis_core::AnalysisModel;
 use serde::{Deserialize, Serialize};
