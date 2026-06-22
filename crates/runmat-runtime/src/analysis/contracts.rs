@@ -1009,12 +1009,34 @@ pub enum AnalysisFieldStorage {
     DeviceRef,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisFieldLocation {
+    Node,
+    Element,
+    Edge,
+    BoundaryFace,
+    InterfaceFace,
+    Mode,
+    Global,
+    #[default]
+    Unknown,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnalysisFieldDescriptor {
     pub field_id: String,
+    #[serde(default)]
+    pub family: String,
+    #[serde(default)]
+    pub quantity: String,
     pub class_name: String,
     pub kind: AnalysisFieldKind,
     pub dtype: String,
+    #[serde(default)]
+    pub unit: Option<String>,
+    #[serde(default)]
+    pub location: AnalysisFieldLocation,
     pub shape: Vec<usize>,
     pub element_count: usize,
     pub component_count: Option<usize>,
@@ -1045,9 +1067,13 @@ impl AnalysisFieldDescriptor {
         let element_count = field.element_count();
         Self {
             field_id: field.field_id.clone(),
+            family: infer_field_family(&field.field_id).to_string(),
+            quantity: infer_field_quantity(&field.field_id).to_string(),
             class_name,
             kind,
             dtype: "double".to_string(),
+            unit: infer_field_unit(&field.field_id).map(str::to_string),
+            location: infer_field_location(&field.field_id),
             shape: field.shape.clone(),
             element_count,
             component_count: infer_component_count(&field.field_id, &field.shape),
@@ -1058,6 +1084,196 @@ impl AnalysisFieldDescriptor {
                 .map(|bytes| bytes as u64),
         }
     }
+}
+
+fn infer_field_family(field_id: &str) -> &str {
+    field_id
+        .split_once('.')
+        .map_or("unknown", |(family, _)| family)
+}
+
+fn infer_field_quantity(field_id: &str) -> &str {
+    let Some((_, rest)) = field_id.split_once('.') else {
+        return field_id;
+    };
+    let Some((quantity, suffix)) = rest.rsplit_once('.') else {
+        return rest;
+    };
+    if suffix.chars().all(|ch| ch.is_ascii_digit()) {
+        quantity
+    } else {
+        rest
+    }
+}
+
+fn infer_field_unit(field_id: &str) -> Option<&'static str> {
+    let normalized = field_id.to_ascii_lowercase();
+    if normalized.contains("frequency_hz") || normalized.contains("frequency_response") {
+        return Some("Hz");
+    }
+    if normalized.contains("eigenvalue") {
+        return Some("rad^2/s^2");
+    }
+    if normalized.contains("sound_pressure_level_db") {
+        return Some("dB");
+    }
+    if normalized.contains("temperature_gradient") {
+        return Some("K/m");
+    }
+    if normalized.contains("temperature") || normalized.contains("temperature_jump") {
+        return Some("K");
+    }
+    if normalized.contains("electric_potential") {
+        return Some("V");
+    }
+    if normalized.contains("electric_field") {
+        return Some("V/m");
+    }
+    if normalized.contains("electric_flux_density") {
+        return Some("C/m^2");
+    }
+    if normalized.contains("current_density") {
+        return Some("A/m^2");
+    }
+    if normalized.contains("vector_potential") {
+        return Some("Wb/m");
+    }
+    if normalized.contains("magnetic_flux_density") {
+        return Some("T");
+    }
+    if normalized.contains("magnetic_field") {
+        return Some("A/m");
+    }
+    if normalized.contains("poynting_vector")
+        || normalized.contains("boundary_heat_flux")
+        || normalized.contains("interface_heat_flux")
+        || normalized.ends_with(".heat_flux")
+        || normalized.contains(".heat_flux.")
+    {
+        return Some("W/m^2");
+    }
+    if normalized.contains("power_loss_density")
+        || normalized.contains("joule_heat")
+        || normalized.contains("heat_source")
+    {
+        return Some("W/m^3");
+    }
+    if normalized.contains("energy_density") {
+        return Some("J/m^3");
+    }
+    if normalized.contains("kinetic_energy")
+        || normalized.contains("strain_energy")
+        || normalized.contains("total_strain_energy")
+    {
+        return Some("J");
+    }
+    if normalized.contains("modal_mass") {
+        return Some("kg");
+    }
+    if normalized.contains("modal_stiffness") {
+        return Some("N/m");
+    }
+    if normalized.contains("wall_shear_stress")
+        || normalized.contains("contact_pressure")
+        || normalized.contains("interface_pressure")
+        || normalized.contains("fluid_pressure")
+        || normalized.contains(".pressure")
+        || normalized.contains("stress")
+        || normalized.contains("traction")
+        || normalized.contains("von_mises")
+    {
+        return Some("Pa");
+    }
+    if normalized.contains("reaction_force") {
+        return Some("N");
+    }
+    if normalized.contains("contact_gap")
+        || normalized.contains("displacement")
+        || normalized.contains("mode_shape")
+    {
+        return Some("m");
+    }
+    if normalized.contains("velocity") {
+        return Some("m/s");
+    }
+    if normalized.contains("acceleration") {
+        return Some("m/s^2");
+    }
+    if normalized.contains("strain")
+        || normalized.contains("residual")
+        || normalized.contains("equation_scale")
+        || normalized.contains("load_factor")
+        || normalized.contains("coupling_iteration_count")
+        || normalized.contains("reynolds_number")
+        || normalized.contains("phase")
+        || normalized.contains("orthogonality")
+        || normalized.contains("participation_factor")
+        || normalized.contains("relative_frequency_separation")
+    {
+        return Some("1");
+    }
+    None
+}
+
+fn infer_field_location(field_id: &str) -> AnalysisFieldLocation {
+    let normalized = field_id.to_ascii_lowercase();
+    if normalized.contains("vector_potential") {
+        return AnalysisFieldLocation::Edge;
+    }
+    if normalized.contains("wall_shear_stress") || normalized.contains("boundary_heat_flux") {
+        return AnalysisFieldLocation::BoundaryFace;
+    }
+    if normalized.contains("interface_")
+        || normalized.contains("contact_pressure")
+        || normalized.contains("contact_gap")
+    {
+        return AnalysisFieldLocation::InterfaceFace;
+    }
+    if normalized.starts_with("modal.")
+        && !normalized.starts_with("modal.mode_shape.")
+        && !normalized.contains("orthogonality")
+    {
+        return AnalysisFieldLocation::Mode;
+    }
+    if normalized.contains("residual")
+        || normalized.contains("equation_scale")
+        || normalized.contains("energy")
+        || normalized.contains("load_factor")
+        || normalized.contains("coupling_iteration_count")
+        || normalized.contains("orthogonality")
+    {
+        return AnalysisFieldLocation::Global;
+    }
+    if normalized.starts_with("acoustic.") {
+        return AnalysisFieldLocation::Node;
+    }
+    if normalized.contains("temperature_gradient")
+        || normalized.contains("heat_flux")
+        || normalized.contains("heat_source")
+        || normalized.contains("joule_heat")
+        || normalized.contains("magnetic_flux_density")
+        || normalized.contains("magnetic_field")
+        || normalized.contains("electric_field")
+        || normalized.contains("electric_flux_density")
+        || normalized.contains("current_density")
+        || normalized.contains("poynting_vector")
+        || normalized.contains("vorticity")
+        || normalized.contains("pressure")
+        || normalized.contains("stress")
+        || normalized.contains("strain")
+        || normalized.contains("von_mises")
+    {
+        return AnalysisFieldLocation::Element;
+    }
+    if normalized.contains("displacement")
+        || normalized.contains("mode_shape")
+        || normalized.contains("temperature")
+        || normalized.starts_with("acoustic.")
+        || normalized.contains("electric_potential")
+    {
+        return AnalysisFieldLocation::Node;
+    }
+    AnalysisFieldLocation::Element
 }
 
 fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {

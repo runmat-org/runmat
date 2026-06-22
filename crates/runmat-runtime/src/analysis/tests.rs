@@ -11,11 +11,11 @@ use runmat_accelerate_api::{
     HostTensorView,
 };
 use runmat_analysis_core::{
-    AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
-    BoundaryCondition, BoundaryConditionKind, CfdSolveFamily, ConductivityFrequencyPoint,
-    ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment,
-    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
-    ReferenceFrame,
+    AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep,
+    AnalysisStepKind, BoundaryCondition, BoundaryConditionKind, CfdSolveFamily,
+    ConductivityFrequencyPoint, ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind,
+    MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
+    MaterialThermalModel, ReferenceFrame,
 };
 use runmat_analysis_fea::{
     fea_acoustic_frequency_response_field_id, fea_cht_energy_residual_field_id,
@@ -2226,6 +2226,129 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
 }
 
 #[test]
+fn analysis_field_descriptors_include_physics_units_and_locations() {
+    let cases = vec![
+        (
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string(),
+            "structural",
+            "displacement",
+            Some("m"),
+            AnalysisFieldLocation::Node,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_STRESS.to_string(),
+            "structural",
+            "stress",
+            Some("Pa"),
+            AnalysisFieldLocation::Element,
+        ),
+        (
+            FEA_FIELD_MODAL_FREQUENCY_HZ.to_string(),
+            "modal",
+            "frequency_hz",
+            Some("Hz"),
+            AnalysisFieldLocation::Mode,
+        ),
+        (
+            fea_modal_mode_shape_field_id(1),
+            "modal",
+            "mode_shape",
+            Some("m"),
+            AnalysisFieldLocation::Node,
+        ),
+        (
+            FEA_FIELD_ACOUSTIC_PRESSURE_REAL.to_string(),
+            "acoustic",
+            "pressure_real",
+            Some("Pa"),
+            AnalysisFieldLocation::Node,
+        ),
+        (
+            FEA_FIELD_CFD_WALL_SHEAR_STRESS.to_string(),
+            "cfd",
+            "wall_shear_stress",
+            Some("Pa"),
+            AnalysisFieldLocation::BoundaryFace,
+        ),
+        (
+            fea_thermal_temperature_gradient_field_id(0),
+            "thermal",
+            "temperature_gradient",
+            Some("K/m"),
+            AnalysisFieldLocation::Element,
+        ),
+        (
+            fea_thermal_boundary_heat_flux_field_id(0),
+            "thermal",
+            "boundary_heat_flux",
+            Some("W/m^2"),
+            AnalysisFieldLocation::BoundaryFace,
+        ),
+        (
+            FEA_FIELD_EM_VECTOR_POTENTIAL_REAL.to_string(),
+            "em",
+            "vector_potential_real",
+            Some("Wb/m"),
+            AnalysisFieldLocation::Edge,
+        ),
+        (
+            FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL.to_string(),
+            "em",
+            "electric_flux_density_real",
+            Some("C/m^2"),
+            AnalysisFieldLocation::Element,
+        ),
+        (
+            FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT.to_string(),
+            "electro_thermal",
+            "joule_heat",
+            Some("W/m^3"),
+            AnalysisFieldLocation::Element,
+        ),
+        (
+            fea_nonlinear_contact_pressure_field_id(0),
+            "nonlinear",
+            "contact_pressure",
+            Some("Pa"),
+            AnalysisFieldLocation::InterfaceFace,
+        ),
+        (
+            fea_cht_interface_heat_flux_field_id(0),
+            "cht",
+            "interface_heat_flux",
+            Some("W/m^2"),
+            AnalysisFieldLocation::InterfaceFace,
+        ),
+        (
+            fea_fsi_interface_traction_field_id(0),
+            "fsi",
+            "interface_traction",
+            Some("Pa"),
+            AnalysisFieldLocation::InterfaceFace,
+        ),
+        (
+            fea_thermo_mechanical_thermal_strain_field_id(0),
+            "thermo_mechanical",
+            "thermal_strain",
+            Some("1"),
+            AnalysisFieldLocation::Element,
+        ),
+    ];
+
+    for (field_id, family, quantity, unit, location) in cases {
+        let descriptor = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+            &field_id,
+            vec![1],
+            vec![0.0],
+        ));
+        assert_eq!(descriptor.family, family, "{field_id} family");
+        assert_eq!(descriptor.quantity, quantity, "{field_id} quantity");
+        assert_eq!(descriptor.unit.as_deref(), unit, "{field_id} unit");
+        assert_eq!(descriptor.location, location, "{field_id} location");
+    }
+}
+
+#[test]
 fn analysis_results_describes_structural_l2_fields() {
     let _guard = analysis_test_guard();
     let model = sample_model();
@@ -2364,7 +2487,19 @@ fn analysis_results_by_run_id_roundtrip_works() {
 
     assert_eq!(fetched.operation, "fea.results");
     assert_eq!(fetched.op_version, "fea.results/v1");
-    assert_eq!(fetched.data.summary.field_count, 2);
+    assert_eq!(fetched.data.summary.field_count, 8);
+    assert_eq!(fetched.data.field_descriptors.len(), 8);
+    let displacement_descriptor = fetched
+        .data
+        .field_descriptors
+        .iter()
+        .find(|descriptor| descriptor.field_id == FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .expect("structural displacement descriptor should replay");
+    assert_eq!(displacement_descriptor.unit.as_deref(), Some("m"));
+    assert_eq!(
+        displacement_descriptor.location,
+        AnalysisFieldLocation::Node
+    );
     assert_eq!(fetched.data.summary.mode_count, 0);
     assert!(fetched.data.summary.available_mode_indices.is_empty());
     assert_eq!(fetched.data.summary.min_frequency_hz, None);

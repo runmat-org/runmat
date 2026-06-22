@@ -151,7 +151,7 @@ pub use contracts::{
     AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
     AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext, AnalysisCreateModelProfile,
     AnalysisElectromagneticRunOptions, AnalysisFieldDescriptor, AnalysisFieldKind,
-    AnalysisFieldStorage, AnalysisFsiRunOptions, AnalysisModalRunOptions,
+    AnalysisFieldLocation, AnalysisFieldStorage, AnalysisFsiRunOptions, AnalysisModalRunOptions,
     AnalysisNonlinearRunOptions, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
     AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunKind,
     AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult, AnalysisStudyIssue,
