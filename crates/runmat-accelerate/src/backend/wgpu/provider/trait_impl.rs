@@ -455,9 +455,7 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sinc, a) },
-        )
+        Box::pin(async move { self.unary_sinc_exec(a) })
     }
 
     fn unary_gamma<'a>(

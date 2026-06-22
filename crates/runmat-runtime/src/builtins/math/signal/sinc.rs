@@ -118,7 +118,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers may execute real normalized sinc on-device via unary_sinc; complex-interleaved handles and unsupported hooks gather and apply the MATLAB-compatible host implementation.",
+    notes: "Providers may execute normalized sinc on-device via unary_sinc for real and complex-interleaved gpuArrays; unsupported hooks gather and apply the MATLAB-compatible host implementation.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::sinc")]
@@ -218,9 +218,6 @@ async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
 
 async fn sinc_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
-            return sinc_gpu_host_fallback(provider, &handle).await;
-        }
         match provider.unary_sinc(&handle).await {
             Ok(out) => return Ok(gpu_helpers::resident_gpu_value(out)),
             Err(err) if provider_error_is_unsupported(&err) => {
@@ -468,7 +465,7 @@ mod tests {
             &'a self,
             _: &'a GpuTensorHandle,
         ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-            Box::pin(async move { Err(anyhow::anyhow!("unary_sinc should not be called")) })
+            Box::pin(async move { Err(anyhow::anyhow!("unary_sinc not supported by provider")) })
         }
     }
 
@@ -693,7 +690,7 @@ mod tests {
     }
 
     #[test]
-    fn sinc_gpu_complex_interleaved_bypasses_real_unary_provider_hook() {
+    fn sinc_gpu_complex_interleaved_falls_back_when_hook_unsupported() {
         let _guard = test_support::accel_test_lock();
         let provider: &'static dyn AccelProvider = Box::leak(Box::new(ComplexSincProvider));
         let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
@@ -757,6 +754,32 @@ mod tests {
     }
 
     #[test]
+    fn sinc_gpu_complex_input_stays_resident_when_provider_supports_sinc() {
+        test_support::with_test_provider(|provider| {
+            let complex = ComplexTensor::new(vec![(0.0, 0.0), (0.5, 0.25)], vec![2, 1]).unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+            let result = call(Value::GpuTensor(handle)).expect("sinc gpu complex");
+            let Value::GpuTensor(out_handle) = result else {
+                panic!("expected resident gpu output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out_handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
+                out_handle,
+            )))
+            .expect("gather");
+            let Value::ComplexTensor(out) = gathered else {
+                panic!("expected complex tensor");
+            };
+            assert_eq!(out.shape, complex.shape);
+            assert_complex_close(out.data[0], (1.0, 0.0));
+            assert_complex_close(out.data[1], sinc_complex_value(0.5, 0.25));
+        });
+    }
+
+    #[test]
     #[cfg(feature = "wgpu")]
     fn sinc_wgpu_matches_cpu_elementwise() {
         if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -789,6 +812,52 @@ mod tests {
         };
         for (got, want) in gathered.data.iter().zip(expected.data.iter()) {
             assert!((got - want).abs() < tol, "|{got} - {want}| >= {tol}");
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn sinc_wgpu_complex_matches_cpu() {
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let complex =
+            ComplexTensor::new(vec![(0.0, 0.0), (0.5, 0.25), (1.0, -0.5)], vec![3, 1]).unwrap();
+        let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+        let gpu = block_on(sinc_gpu(handle)).expect("gpu sinc");
+        let Value::GpuTensor(out_handle) = gpu else {
+            panic!("expected resident gpu output");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&out_handle),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
+            out_handle,
+        )))
+        .expect("gather");
+        let Value::ComplexTensor(actual) = gathered else {
+            panic!("expected complex tensor");
+        };
+        let expected = match sinc_complex_tensor(complex).expect("cpu sinc") {
+            Value::ComplexTensor(tensor) => tensor,
+            other => panic!("expected complex tensor, got {other:?}"),
+        };
+        assert_eq!(actual.shape, expected.shape);
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
+        for (got, want) in actual.data.iter().zip(expected.data.iter()) {
+            assert!(
+                (got.0 - want.0).abs() < tol && (got.1 - want.1).abs() < tol,
+                "got {got:?}, expected {want:?}, tol {tol}"
+            );
         }
     }
 }

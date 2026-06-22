@@ -106,6 +106,22 @@ fn sinc_scalar_host(value: f64) -> f64 {
     scaled.sin() / scaled
 }
 
+fn sinc_complex_host(re: f64, im: f64) -> (f64, f64) {
+    if im == 0.0 {
+        return (sinc_scalar_host(re), 0.0);
+    }
+
+    let scaled_re = std::f64::consts::PI * re;
+    let scaled_im = std::f64::consts::PI * im;
+    let num_re = scaled_re.sin() * scaled_im.cosh();
+    let num_im = scaled_re.cos() * scaled_im.sinh();
+    let denom_norm = scaled_re.mul_add(scaled_re, scaled_im * scaled_im);
+    (
+        (num_re * scaled_re + num_im * scaled_im) / denom_norm,
+        (num_im * scaled_re - num_re * scaled_im) / denom_norm,
+    )
+}
+
 fn heaviside_scalar_host(value: f64) -> f64 {
     if value > 0.0 {
         1.0
@@ -3108,16 +3124,29 @@ impl AccelProvider for InProcessProvider {
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out: Vec<f64> = abuf.iter().copied().map(sinc_scalar_host).collect();
+            let out: Vec<f64> = if runmat_accelerate_api::handle_storage(a)
+                == GpuTensorStorage::ComplexInterleaved
+            {
+                ensure!(
+                    abuf.len() % 2 == 0,
+                    "unary_sinc: complex-interleaved buffer has odd length"
+                );
+                let mut out = Vec::with_capacity(abuf.len());
+                for pair in abuf.chunks_exact(2) {
+                    let (re, im) = sinc_complex_host(pair[0], pair[1]);
+                    out.push(re);
+                    out.push(im);
+                }
+                out
+            } else {
+                abuf.iter().copied().map(sinc_scalar_host).collect()
+            };
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: 0,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor_with_storage(
+                out,
+                a.shape.clone(),
+                runmat_accelerate_api::handle_storage(a),
+            ))
         })
     }
     fn unary_gamma<'a>(
