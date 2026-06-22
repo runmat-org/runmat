@@ -1250,6 +1250,31 @@ fn repmat_numeric(data: &[f64], shape: &[usize], reps: &[usize]) -> Result<(Vec<
     Ok((out, new_shape))
 }
 
+fn repmat_complex_interleaved(
+    data: &[f64],
+    shape: &[usize],
+    reps: &[usize],
+) -> Result<(Vec<f64>, Vec<usize>)> {
+    ensure!(
+        data.len().is_multiple_of(2),
+        "repmat: complex-interleaved buffer has odd length"
+    );
+
+    let mut storage_shape = Vec::with_capacity(shape.len() + 1);
+    storage_shape.push(2);
+    storage_shape.extend_from_slice(shape);
+
+    let mut storage_reps = Vec::with_capacity(reps.len() + 1);
+    storage_reps.push(1);
+    storage_reps.extend_from_slice(reps);
+
+    let (tiled, mut storage_output_shape) = repmat_numeric(data, &storage_shape, &storage_reps)?;
+    if !storage_output_shape.is_empty() {
+        storage_output_shape.remove(0);
+    }
+    Ok((tiled, storage_output_shape))
+}
+
 fn coerce_sub2ind_value(value: f64, dim_number: usize, dim_size: usize) -> Result<usize> {
     if !value.is_finite() {
         return Err(anyhow!(
@@ -4667,8 +4692,14 @@ impl AccelProvider for InProcessProvider {
                 .ok_or_else(|| anyhow!("repmat: unknown tensor handle {}", handle.buffer_id))?
                 .clone()
         };
-        let (tiled, shape) = repmat_numeric(&data, &handle.shape, reps)?;
-        Ok(self.allocate_tensor(tiled, shape))
+        let storage = runmat_accelerate_api::handle_storage(handle);
+        let (tiled, shape) = match storage {
+            GpuTensorStorage::Real => repmat_numeric(&data, &handle.shape, reps)?,
+            GpuTensorStorage::ComplexInterleaved => {
+                repmat_complex_interleaved(&data, &handle.shape, reps)?
+            }
+        };
+        Ok(self.allocate_tensor_with_storage(tiled, shape, storage))
     }
 
     fn dot<'a>(

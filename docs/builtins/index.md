@@ -75,7 +75,7 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 
 | Status | Path | Names | GPU | Fusion | Backend | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| done | `comms/modulation` | `qammod`, `pskmod` | host | - | - | Integer and bit-symbol modulation to complex baseband constellations; gpuArray inputs are gathered while complex GPU outputs are not represented. |
+| done | `comms/modulation` | `qammod`, `pskmod` | yes | - | - | Integer-symbol gpuArray inputs produce complex-interleaved GPU constellations through provider hooks; bit-symbol paths validate on host and re-upload when GPU residency is requested. |
 
 ## Polynomials and Fitting
 
