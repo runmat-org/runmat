@@ -1118,6 +1118,49 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 },
             ],
         });
+        if spec_id == "fsi_coupled_pipe_plate_cpu" {
+            model.cfd = Some(runmat_analysis_core::CfdDomain {
+                enabled: true,
+                solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
+                reference_density_kg_per_m3: 1.225,
+                dynamic_viscosity_pa_s: 1.81e-5,
+                inlet_velocity_m_per_s: 4.2,
+                turbulence_intensity: 0.055,
+                time_profile: vec![
+                    runmat_analysis_core::CfdTimeProfilePoint {
+                        normalized_time: 0.0,
+                        inlet_scale: 0.5,
+                    },
+                    runmat_analysis_core::CfdTimeProfilePoint {
+                        normalized_time: 0.5,
+                        inlet_scale: 0.85,
+                    },
+                    runmat_analysis_core::CfdTimeProfilePoint {
+                        normalized_time: 1.0,
+                        inlet_scale: 1.0,
+                    },
+                ],
+            });
+            model.loads.push(runmat_analysis_core::LoadCase {
+                load_id: format!("pipe_plate_pressure_preload_{spec_id}"),
+                region_id: "pipe_wall".to_string(),
+                kind: runmat_analysis_core::LoadKind::Pressure {
+                    magnitude_pa: 2.5e4,
+                },
+            });
+            model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
+                interface_id: format!("fsi_pipe_plate_interface_{spec_id}"),
+                primary_region_id: "fluid_pipe".to_string(),
+                secondary_region_id: "plate_wall".to_string(),
+                kind: runmat_analysis_core::AnalysisInterfaceKind::FluidStructure(
+                    runmat_analysis_core::FluidStructureInterfaceModel {
+                        normal_stiffness_pa_per_m: 8.0e8,
+                        damping_ratio: 0.04,
+                        relaxation_factor: 0.5,
+                    },
+                ),
+            }];
+        }
         if spec_id == "fsi_coupled_invalid_cfd_domain" {
             if let Some(cfd_domain) = model.cfd.as_mut() {
                 cfd_domain.dynamic_viscosity_pa_s = 0.0;
@@ -4922,6 +4965,11 @@ pub(super) fn run_fixture(
             );
         }
         if spec.id.starts_with("fsi_coupled_") {
+            let expected_fsi_profile_point_count = if spec.id == "fsi_coupled_pipe_plate_cpu" {
+                3.0
+            } else {
+                2.0
+            };
             push_threshold_assertion(
                 spec.id,
                 &mut threshold_assertions,
@@ -5189,8 +5237,8 @@ pub(super) fn run_fixture(
                 "fsi_profile_point_count",
                 "FEA_CFD_FLOW",
                 diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "profile_point_count"),
-                Some(2.0),
-                Some(2.0),
+                Some(expected_fsi_profile_point_count),
+                Some(expected_fsi_profile_point_count),
             );
             push_threshold_assertion(
                 spec.id,
@@ -5237,9 +5285,25 @@ pub(super) fn run_fixture(
                     "FEA_FSI_COUPLING",
                     "cfd_profile_point_count",
                 ),
-                Some(2.0),
-                Some(2.0),
+                Some(expected_fsi_profile_point_count),
+                Some(expected_fsi_profile_point_count),
             );
+            if spec.id == "fsi_coupled_pipe_plate_cpu" {
+                push_threshold_assertion(
+                    spec.id,
+                    &mut threshold_assertions,
+                    &mut failures,
+                    "fsi_authored_interface_count",
+                    "FEA_FSI_COUPLING",
+                    diagnostic_metric(
+                        &cpu_envelope.data,
+                        "FEA_FSI_COUPLING",
+                        "authored_interface_count",
+                    ),
+                    Some(1.0),
+                    Some(1.0),
+                );
+            }
         }
         if spec.id == "thermal_standalone_ramp_cpu" {
             push_thermal_standalone_threshold_assertions(

@@ -21,7 +21,9 @@ pub use problem::domains::{
     ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalDomain,
     ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
 };
-pub use problem::interfaces::{AnalysisInterface, AnalysisInterfaceKind, ContactInterfaceModel};
+pub use problem::interfaces::{
+    AnalysisInterface, AnalysisInterfaceKind, ContactInterfaceModel, FluidStructureInterfaceModel,
+};
 pub use problem::loads::{LoadCase, LoadKind};
 pub use problem::material_assignment::{EvidenceConfidence, MaterialAssignment};
 pub use problem::materials::{

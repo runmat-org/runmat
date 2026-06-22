@@ -4775,6 +4775,10 @@ fn fsi_known_answer_diagnostic(
 }
 
 fn fsi_structural_compliance_per_pa(model: &AnalysisModel) -> f64 {
+    if let Some(stiffness) = fsi_interface_normal_stiffness_pa_per_m(model) {
+        return 1.0 / stiffness.max(1.0e-18);
+    }
+
     let mean_modulus = model
         .materials
         .iter()
@@ -4791,6 +4795,21 @@ fn fsi_structural_compliance_per_pa(model: &AnalysisModel) -> f64 {
         200.0e9
     };
     1.0 / youngs_modulus.max(1.0e6)
+}
+
+fn fsi_interface_normal_stiffness_pa_per_m(model: &AnalysisModel) -> Option<f64> {
+    model
+        .interfaces
+        .iter()
+        .find_map(|interface| match &interface.kind {
+            AnalysisInterfaceKind::FluidStructure(fluid_structure)
+                if fluid_structure.normal_stiffness_pa_per_m.is_finite()
+                    && fluid_structure.normal_stiffness_pa_per_m > 0.0 =>
+            {
+                Some(fluid_structure.normal_stiffness_pa_per_m)
+            }
+            AnalysisInterfaceKind::FluidStructure(_) | AnalysisInterfaceKind::Contact(_) => None,
+        })
 }
 
 pub fn analysis_run_transient_op(
@@ -11833,13 +11852,14 @@ fn model_contact_interface_options(model: &AnalysisModel) -> Option<ContactInter
     model
         .interfaces
         .iter()
-        .map(|interface| match &interface.kind {
-            AnalysisInterfaceKind::Contact(contact) => ContactInterfaceOptions {
+        .filter_map(|interface| match &interface.kind {
+            AnalysisInterfaceKind::Contact(contact) => Some(ContactInterfaceOptions {
                 enabled: true,
                 penalty_stiffness_scale: contact.penalty_stiffness_scale,
                 max_penetration_ratio: contact.max_penetration_ratio,
                 friction_coefficient: contact.friction_coefficient,
-            },
+            }),
+            AnalysisInterfaceKind::FluidStructure(_) => None,
         })
         .next()
 }
@@ -12285,24 +12305,97 @@ fn validate_coupled_flow_interfaces(
     model: &AnalysisModel,
     family: &str,
 ) -> Result<(), (String, BTreeMap<String, String>)> {
-    if let Some(interface) = model.interfaces.first() {
-        return Err((
-            format!(
-                "{family} coupling does not accept structural contact interfaces as fluid/thermal interface mappings"
-            ),
-            BTreeMap::from([
-                ("interface_id".to_string(), interface.interface_id.clone()),
-                (
-                    "primary_region_id".to_string(),
-                    interface.primary_region_id.clone(),
-                ),
-                (
-                    "secondary_region_id".to_string(),
-                    interface.secondary_region_id.clone(),
-                ),
-                ("interface_kind".to_string(), "contact".to_string()),
-            ]),
-        ));
+    for interface in &model.interfaces {
+        match &interface.kind {
+            AnalysisInterfaceKind::Contact(_) => {
+                return Err((
+                    format!(
+                        "{family} coupling does not accept structural contact interfaces as fluid/thermal interface mappings"
+                    ),
+                    BTreeMap::from([
+                        ("interface_id".to_string(), interface.interface_id.clone()),
+                        (
+                            "primary_region_id".to_string(),
+                            interface.primary_region_id.clone(),
+                        ),
+                        (
+                            "secondary_region_id".to_string(),
+                            interface.secondary_region_id.clone(),
+                        ),
+                        ("interface_kind".to_string(), "contact".to_string()),
+                    ]),
+                ));
+            }
+            AnalysisInterfaceKind::FluidStructure(fluid_structure) => {
+                if family != "FSI" {
+                    return Err((
+                        format!(
+                            "{family} coupling does not accept fluid-structure interfaces as fluid/thermal interface mappings"
+                        ),
+                        BTreeMap::from([
+                            ("interface_id".to_string(), interface.interface_id.clone()),
+                            (
+                                "primary_region_id".to_string(),
+                                interface.primary_region_id.clone(),
+                            ),
+                            (
+                                "secondary_region_id".to_string(),
+                                interface.secondary_region_id.clone(),
+                            ),
+                            ("interface_kind".to_string(), "fluid_structure".to_string()),
+                        ]),
+                    ));
+                }
+                if !fluid_structure.normal_stiffness_pa_per_m.is_finite()
+                    || fluid_structure.normal_stiffness_pa_per_m <= 0.0
+                {
+                    return Err((
+                        format!(
+                            "{family} fluid-structure interface requires finite positive normal_stiffness_pa_per_m"
+                        ),
+                        BTreeMap::from([
+                            ("interface_id".to_string(), interface.interface_id.clone()),
+                            (
+                                "normal_stiffness_pa_per_m".to_string(),
+                                fluid_structure.normal_stiffness_pa_per_m.to_string(),
+                            ),
+                        ]),
+                    ));
+                }
+                if !fluid_structure.damping_ratio.is_finite() || fluid_structure.damping_ratio < 0.0
+                {
+                    return Err((
+                        format!(
+                            "{family} fluid-structure interface requires finite non-negative damping_ratio"
+                        ),
+                        BTreeMap::from([
+                            ("interface_id".to_string(), interface.interface_id.clone()),
+                            (
+                                "damping_ratio".to_string(),
+                                fluid_structure.damping_ratio.to_string(),
+                            ),
+                        ]),
+                    ));
+                }
+                if !fluid_structure.relaxation_factor.is_finite()
+                    || fluid_structure.relaxation_factor <= 0.0
+                    || fluid_structure.relaxation_factor > 1.0
+                {
+                    return Err((
+                        format!(
+                            "{family} fluid-structure interface requires relaxation_factor in (0, 1]"
+                        ),
+                        BTreeMap::from([
+                            ("interface_id".to_string(), interface.interface_id.clone()),
+                            (
+                                "relaxation_factor".to_string(),
+                                fluid_structure.relaxation_factor.to_string(),
+                            ),
+                        ]),
+                    ));
+                }
+            }
+        }
     }
     Ok(())
 }

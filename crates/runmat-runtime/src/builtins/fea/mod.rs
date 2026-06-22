@@ -1401,6 +1401,22 @@ fn create_interface_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             )?,
             "contact interface",
         )?),
+        "fluid_structure" | "fluidstructure" | "fsi" => {
+            AnalysisInterfaceKind::FluidStructure(json_deserialize(
+                INTERFACE_NAME,
+                json_with_overrides(
+                    INTERFACE_NAME,
+                    serde_json::json!({
+                        "normal_stiffness_pa_per_m": 1.0e9,
+                        "damping_ratio": 0.0,
+                        "relaxation_factor": 0.5
+                    }),
+                    fields,
+                    "fluid-structure interface",
+                )?,
+                "fluid-structure interface",
+            )?)
+        }
         other => {
             return Err(builtin_error(
                 INTERFACE_NAME,

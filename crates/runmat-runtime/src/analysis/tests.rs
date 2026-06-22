@@ -4143,6 +4143,58 @@ fn analysis_run_fsi_rejects_contact_interface_mapping() {
 }
 
 #[test]
+fn analysis_run_fsi_uses_authored_fluid_structure_interface() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_fsi_model();
+    model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
+        interface_id: "fsi_pipe_plate_interface".to_string(),
+        primary_region_id: "fluid_pipe".to_string(),
+        secondary_region_id: "plate_wall".to_string(),
+        kind: runmat_analysis_core::AnalysisInterfaceKind::FluidStructure(
+            runmat_analysis_core::FluidStructureInterfaceModel {
+                normal_stiffness_pa_per_m: 8.0e8,
+                damping_ratio: 0.04,
+                relaxation_factor: 0.5,
+            },
+        ),
+    }];
+
+    let envelope = analysis_run_fsi_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisFsiRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            time_step_s: 1.0e-3,
+            step_count: 4,
+            max_linear_iters: 64,
+            tolerance: 1.0e-8,
+            residual_warn_threshold: 1.0e-4,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("fsi run should accept authored fluid-structure interface");
+
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_FSI_INTERFACE_CLOSURE"
+            && diag
+                .message
+                .contains("interface_stiffness_pa_per_m=800000000")
+    }));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_FSI_COUPLING"
+            && diag.message.contains("authored_interface_count=1")));
+}
+
+#[test]
 fn analysis_run_electromagnetic_rejects_models_without_em_step() {
     let model = sample_model();
     let err = analysis_run_electromagnetic_op(
