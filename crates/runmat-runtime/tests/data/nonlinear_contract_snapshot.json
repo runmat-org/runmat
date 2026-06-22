@@ -113,7 +113,6 @@
     "electromagnetic_material_heterogeneity_index": null,
     "electromagnetic_assignment_coverage_ratio": null,
     "electromagnetic_assigned_coefficient_coverage_ratio": null,
-    "electromagnetic_fallback_coefficient_ratio": null,
     "electromagnetic_region_coefficient_contrast_index": null,
     "electromagnetic_condition_number_estimate": null,
     "electromagnetic_source_realization_ratio": null,

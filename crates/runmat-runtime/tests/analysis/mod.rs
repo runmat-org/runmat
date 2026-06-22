@@ -218,7 +218,6 @@ struct FixtureRunRecord {
     electromagnetic_material_heterogeneity_index: Option<f64>,
     electromagnetic_assignment_coverage_ratio: Option<f64>,
     electromagnetic_assigned_coefficient_coverage_ratio: Option<f64>,
-    electromagnetic_fallback_coefficient_ratio: Option<f64>,
     electromagnetic_region_coefficient_contrast_index: Option<f64>,
     electromagnetic_condition_number_estimate: Option<f64>,
     electromagnetic_source_realization_ratio: Option<f64>,

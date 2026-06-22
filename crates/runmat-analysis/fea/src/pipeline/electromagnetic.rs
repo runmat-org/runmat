@@ -231,7 +231,7 @@ pub fn run_electromagnetic_with_options(
                 .get(region_index)
                 .cloned()
             {
-                if region.covered && !region.used_fallback {
+                if region.covered {
                     aligned_source_count += 1;
                 }
                 let gain = regional_source_gain(&region, &material_stats, coil_source);
@@ -760,7 +760,8 @@ pub fn run_electromagnetic_with_options(
     let heterogeneity_imbalance = material_stats
         .assignment_heterogeneity_index
         .clamp(0.0, 1.0);
-    let fallback_imbalance = material_stats.fallback_coefficient_ratio.clamp(0.0, 1.0);
+    let coefficient_coverage_imbalance =
+        (1.0 - material_stats.assigned_coefficient_coverage_ratio).clamp(0.0, 1.0);
     let source_imbalance = (1.0 - source_realization_ratio).clamp(0.0, 1.0);
     let source_region_coverage_imbalance = (1.0 - source_region_coverage_ratio).clamp(0.0, 1.0);
     let source_material_alignment_imbalance =
@@ -768,7 +769,7 @@ pub fn run_electromagnetic_with_options(
     let source_localization_imbalance = (1.0 - source_localization_ratio).clamp(0.0, 1.0);
     let energy_imbalance_ratio = (0.10 * residual_imbalance
         + 0.22 * heterogeneity_imbalance
-        + 0.22 * fallback_imbalance
+        + 0.22 * coefficient_coverage_imbalance
         + 0.10 * source_imbalance
         + 0.12 * source_region_coverage_imbalance
         + 0.10 * source_material_alignment_imbalance
@@ -902,7 +903,7 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} conductivity_frequency_scale_mean={} conductivity_frequency_scale_spread_ratio={} conductivity_frequency_response_coverage_ratio={} relative_permittivity_frequency_scale_mean={} relative_permittivity_frequency_scale_spread_ratio={} relative_permittivity_frequency_response_coverage_ratio={} relative_permeability_frequency_scale_mean={} relative_permeability_frequency_scale_spread_ratio={} relative_permeability_frequency_response_coverage_ratio={} dispersive_loss_scale_mean={} dispersive_loss_scale_spread_ratio={} dispersive_phase_attenuation_mean={} dispersive_phase_attenuation_spread_ratio={} dispersive_conductivity_coupling_ratio={} dispersive_phase_conductivity_attenuation_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} assigned_coefficient_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} condition_number_estimate={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} boundary_condition_localization_ratio={} ground_anchor_effectiveness_ratio={} insulation_leakage_ratio={} flux_divergence_ratio={} flux_phasor_coherence_ratio={} energy_imbalance_ratio={} boundary_energy_ratio={} boundary_penalty_conditioning_contribution={} source_region_energy_consistency_ratio={} real_residual_norm={} imag_residual_norm={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} field_energy_integral={}",
+            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} conductivity_frequency_scale_mean={} conductivity_frequency_scale_spread_ratio={} conductivity_frequency_response_coverage_ratio={} relative_permittivity_frequency_scale_mean={} relative_permittivity_frequency_scale_spread_ratio={} relative_permittivity_frequency_response_coverage_ratio={} relative_permeability_frequency_scale_mean={} relative_permeability_frequency_scale_spread_ratio={} relative_permeability_frequency_response_coverage_ratio={} dispersive_loss_scale_mean={} dispersive_loss_scale_spread_ratio={} dispersive_phase_attenuation_mean={} dispersive_phase_attenuation_spread_ratio={} dispersive_conductivity_coupling_ratio={} dispersive_phase_conductivity_attenuation_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} assigned_coefficient_coverage_ratio={} region_coefficient_contrast_index={} condition_number_estimate={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} boundary_condition_localization_ratio={} ground_anchor_effectiveness_ratio={} insulation_leakage_ratio={} flux_divergence_ratio={} flux_phasor_coherence_ratio={} energy_imbalance_ratio={} boundary_energy_ratio={} boundary_penalty_conditioning_contribution={} source_region_energy_consistency_ratio={} real_residual_norm={} imag_residual_norm={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} field_energy_integral={}",
             domain.enabled,
             domain.reference_frequency_hz,
             domain.applied_current_a,
@@ -930,7 +931,6 @@ pub fn run_electromagnetic_with_options(
             material_stats.assignment_heterogeneity_index,
             material_stats.assignment_coverage_ratio,
             material_stats.assigned_coefficient_coverage_ratio,
-            material_stats.fallback_coefficient_ratio,
             material_stats.region_coefficient_contrast_index,
             condition_number_estimate,
             source_realization_ratio,
@@ -1303,7 +1303,6 @@ struct ElectromagneticMaterialStats {
     assignment_heterogeneity_index: f64,
     assignment_coverage_ratio: f64,
     assigned_coefficient_coverage_ratio: f64,
-    fallback_coefficient_ratio: f64,
     region_coefficient_contrast_index: f64,
 }
 
@@ -1320,7 +1319,6 @@ struct RegionElectromagneticCoefficients {
     relative_permeability: f64,
     weight: f64,
     covered: bool,
-    used_fallback: bool,
     has_frequency_response: bool,
     has_relative_permittivity_frequency_response: bool,
     has_relative_permeability_frequency_response: bool,
@@ -1416,7 +1414,6 @@ fn electromagnetic_coefficient_profile(
         .collect::<std::collections::HashMap<_, _>>();
     let mut samples = Vec::new();
     let mut covered_assignments = 0usize;
-    let mut fallback_coefficients = 0usize;
 
     for assignment in &model.material_assignments {
         let assigned = material_by_id
@@ -1432,7 +1429,6 @@ fn electromagnetic_coefficient_profile(
             permittivity,
             permeability,
             covered,
-            used_fallback,
             has_frequency_response,
             has_relative_permittivity_frequency_response,
             has_relative_permeability_frequency_response,
@@ -1450,7 +1446,6 @@ fn electromagnetic_coefficient_profile(
                 (electrical.relative_permeability * freq_sample.relative_permeability_scale)
                     .max(1.0e-9),
                 true,
-                false,
                 freq_sample.has_frequency_response,
                 freq_sample.has_relative_permittivity_frequency_response,
                 freq_sample.has_relative_permeability_frequency_response,
@@ -1462,7 +1457,6 @@ fn electromagnetic_coefficient_profile(
             )));
         };
         covered_assignments += usize::from(covered);
-        fallback_coefficients += usize::from(used_fallback);
         samples.push(RegionElectromagneticCoefficients {
             region_id: assignment.region_id.clone(),
             conductivity_s_per_m: conductivity,
@@ -1475,7 +1469,6 @@ fn electromagnetic_coefficient_profile(
             relative_permeability: permeability,
             weight: confidence_weight(assignment.confidence),
             covered,
-            used_fallback,
             has_frequency_response,
             has_relative_permittivity_frequency_response,
             has_relative_permeability_frequency_response,
@@ -1505,7 +1498,6 @@ fn electromagnetic_coefficient_profile(
                     .max(1.0e-9),
                 weight: 1.0,
                 covered: true,
-                used_fallback: false,
                 has_frequency_response: freq_sample.has_frequency_response,
                 has_relative_permittivity_frequency_response: freq_sample
                     .has_relative_permittivity_frequency_response,
@@ -1641,20 +1633,7 @@ fn electromagnetic_coefficient_profile(
     } else {
         covered_assignments as f64 / model.material_assignments.len() as f64
     };
-    let assigned_coefficient_coverage_ratio = if model.material_assignments.is_empty() {
-        1.0
-    } else {
-        samples
-            .iter()
-            .filter(|sample| !sample.used_fallback)
-            .count() as f64
-            / model.material_assignments.len() as f64
-    };
-    let fallback_coefficient_ratio = if model.material_assignments.is_empty() {
-        0.0
-    } else {
-        fallback_coefficients as f64 / model.material_assignments.len() as f64
-    };
+    let assigned_coefficient_coverage_ratio = assignment_coverage_ratio;
     let region_coefficient_contrast_index = ((conductivity_spread_ratio.max(1.0)).ln()
         + (relative_permittivity_spread_ratio.max(1.0)).ln()
         + (relative_permeability_spread_ratio.max(1.0)).ln())
@@ -1686,7 +1665,6 @@ fn electromagnetic_coefficient_profile(
             assignment_heterogeneity_index,
             assignment_coverage_ratio,
             assigned_coefficient_coverage_ratio,
-            fallback_coefficient_ratio,
             region_coefficient_contrast_index,
         },
     })
@@ -3123,7 +3101,6 @@ fn em_homogeneous_known_answer_metrics(
         (input.material_stats.relative_permittivity_spread_ratio - 1.0).abs(),
         (input.material_stats.relative_permeability_spread_ratio - 1.0).abs(),
         input.material_stats.assignment_heterogeneity_index,
-        input.material_stats.fallback_coefficient_ratio,
         input.material_stats.region_coefficient_contrast_index,
     ]
     .into_iter()

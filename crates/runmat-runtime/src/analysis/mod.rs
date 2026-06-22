@@ -51,11 +51,10 @@ use policy::{
     EM_BOUNDARY_ANCHOR_MIN_BALANCED, EM_BOUNDARY_ENERGY_MIN_BALANCED,
     EM_BOUNDARY_LOCALIZATION_MIN_BALANCED, EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED,
     EM_CONDITIONING_MAX_BALANCED, EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED,
-    EM_ENERGY_IMBALANCE_MAX_BALANCED, EM_FALLBACK_COEFFICIENT_MAX_BALANCED,
-    EM_FLUX_DIVERGENCE_MAX_BALANCED, EM_GROUND_EFFECTIVENESS_MIN_BALANCED,
-    EM_HETEROGENEITY_THRESHOLD_BALANCED, EM_IMAG_RESIDUAL_MAX_BALANCED,
-    EM_INSULATION_LEAKAGE_MAX_BALANCED, EM_REAL_RESIDUAL_MAX_BALANCED,
-    EM_REGION_CONTRAST_MAX_BALANCED, EM_RESONANCE_Q_MIN_BALANCED,
+    EM_ENERGY_IMBALANCE_MAX_BALANCED, EM_FLUX_DIVERGENCE_MAX_BALANCED,
+    EM_GROUND_EFFECTIVENESS_MIN_BALANCED, EM_HETEROGENEITY_THRESHOLD_BALANCED,
+    EM_IMAG_RESIDUAL_MAX_BALANCED, EM_INSULATION_LEAKAGE_MAX_BALANCED,
+    EM_REAL_RESIDUAL_MAX_BALANCED, EM_REGION_CONTRAST_MAX_BALANCED, EM_RESONANCE_Q_MIN_BALANCED,
     EM_SOURCE_INTERFERENCE_MAX_BALANCED, EM_SOURCE_MATERIAL_ALIGNMENT_MIN_BALANCED,
     EM_SOURCE_OVERLAP_MAX_BALANCED, EM_SOURCE_REALIZATION_MIN_BALANCED,
     EM_SOURCE_REGION_COVERAGE_MIN_BALANCED, EM_SOURCE_REGION_ENERGY_CONSISTENCY_MIN_BALANCED,
@@ -9317,11 +9316,6 @@ pub fn analysis_run_electromagnetic_with_options_op(
         "FEA_EM_STATIC",
         "assigned_coefficient_coverage_ratio",
     );
-    let em_fallback_coefficient_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_EM_STATIC",
-        "fallback_coefficient_ratio",
-    );
     let em_region_contrast_index = diagnostic_metric(
         &run.diagnostics,
         "FEA_EM_STATIC",
@@ -9410,7 +9404,6 @@ pub fn analysis_run_electromagnetic_with_options_op(
         em_spread_threshold,
         em_heterogeneity_threshold,
         em_coverage_min_threshold,
-        em_fallback_max_threshold,
         em_contrast_max_threshold,
         em_conditioning_max_threshold,
         em_source_realization_min_threshold,
@@ -9443,9 +9436,6 @@ pub fn analysis_run_electromagnetic_with_options_op(
         .unwrap_or(false);
     let em_assigned_coefficient_breach = em_assigned_coefficient_coverage_ratio
         .map(|value| value < em_coverage_min_threshold)
-        .unwrap_or(false);
-    let em_fallback_breach = em_fallback_coefficient_ratio
-        .map(|value| value > em_fallback_max_threshold)
         .unwrap_or(false);
     let em_contrast_breach = em_region_contrast_index
         .map(|value| value > em_contrast_max_threshold)
@@ -9514,7 +9504,6 @@ pub fn analysis_run_electromagnetic_with_options_op(
         || em_heterogeneity_breach
         || em_coverage_breach
         || em_assigned_coefficient_breach
-        || em_fallback_breach
         || em_contrast_breach
         || em_conditioning_breach
         || em_source_realization_breach
@@ -9588,16 +9577,6 @@ pub fn analysis_run_electromagnetic_with_options_op(
                 "electromagnetic assigned coefficient coverage ratio {} is below threshold {}",
                 em_assigned_coefficient_coverage_ratio.unwrap_or(0.0),
                 em_coverage_min_threshold
-            ),
-        });
-    }
-    if em_fallback_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectromagneticFallbackCoefficientHigh,
-            detail: format!(
-                "electromagnetic fallback coefficient ratio {} exceeds threshold {}",
-                em_fallback_coefficient_ratio.unwrap_or(0.0),
-                em_fallback_max_threshold
             ),
         });
     }
@@ -10756,11 +10735,6 @@ pub fn analysis_results_op(
         "FEA_EM_STATIC",
         "assigned_coefficient_coverage_ratio",
     );
-    let electromagnetic_fallback_coefficient_ratio = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_EM_STATIC",
-        "fallback_coefficient_ratio",
-    );
     let electromagnetic_region_coefficient_contrast_index = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_EM_STATIC",
@@ -10970,7 +10944,6 @@ pub fn analysis_results_op(
         electromagnetic_material_heterogeneity_index,
         electromagnetic_assignment_coverage_ratio,
         electromagnetic_assigned_coefficient_coverage_ratio,
-        electromagnetic_fallback_coefficient_ratio,
         electromagnetic_region_coefficient_contrast_index,
         electromagnetic_condition_number_estimate,
         electromagnetic_source_realization_ratio,
@@ -11936,21 +11909,6 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let electromagnetic_fallback_breach_rate = if kind == AnalysisRunKind::Electromagnetic {
-            let values = entries
-                .iter()
-                .filter_map(|run| {
-                    diagnostic_metric(
-                        &run.run.diagnostics,
-                        "FEA_EM_STATIC",
-                        "fallback_coefficient_ratio",
-                    )
-                })
-                .collect::<Vec<_>>();
-            breach_rate_greater_than(&values, EM_FALLBACK_COEFFICIENT_MAX_BALANCED)
-        } else {
-            None
-        };
         let electromagnetic_contrast_breach_rate = if kind == AnalysisRunKind::Electromagnetic {
             let values = entries
                 .iter()
@@ -12287,7 +12245,6 @@ pub fn analysis_trends_op(
             electromagnetic_spread_breach_rate,
             electromagnetic_heterogeneity_breach_rate,
             electromagnetic_coverage_breach_rate,
-            electromagnetic_fallback_breach_rate,
             electromagnetic_contrast_breach_rate,
             electromagnetic_conditioning_breach_rate,
             electromagnetic_source_realization_breach_rate,

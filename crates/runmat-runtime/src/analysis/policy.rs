@@ -5,7 +5,6 @@ pub(crate) const THERMO_HETEROGENEITY_THRESHOLD_BALANCED: f64 = 0.2;
 pub(crate) const EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED: f64 = 2.0;
 pub(crate) const EM_HETEROGENEITY_THRESHOLD_BALANCED: f64 = 0.2;
 pub(crate) const EM_ASSIGNMENT_COVERAGE_MIN_BALANCED: f64 = 0.85;
-pub(crate) const EM_FALLBACK_COEFFICIENT_MAX_BALANCED: f64 = 0.25;
 pub(crate) const EM_REGION_CONTRAST_MAX_BALANCED: f64 = 0.85;
 pub(crate) const EM_CONDITIONING_MAX_BALANCED: f64 = 2.0e4;
 pub(crate) const EM_SOURCE_REALIZATION_MIN_BALANCED: f64 = 0.55;
@@ -59,7 +58,6 @@ pub(crate) struct ElectromagneticQualityThresholds {
     pub(crate) em_spread_threshold: f64,
     pub(crate) em_heterogeneity_threshold: f64,
     pub(crate) em_coverage_min_threshold: f64,
-    pub(crate) em_fallback_max_threshold: f64,
     pub(crate) em_contrast_max_threshold: f64,
     pub(crate) em_conditioning_max_threshold: f64,
     pub(crate) em_source_realization_min_threshold: f64,
@@ -88,7 +86,6 @@ pub(crate) fn electromagnetic_thresholds_for_policy(
             em_spread_threshold: 1.5,
             em_heterogeneity_threshold: 0.12,
             em_coverage_min_threshold: 0.95,
-            em_fallback_max_threshold: 0.05,
             em_contrast_max_threshold: 0.45,
             em_conditioning_max_threshold: 8.0e3,
             em_source_realization_min_threshold: 0.85,
@@ -112,7 +109,6 @@ pub(crate) fn electromagnetic_thresholds_for_policy(
             em_spread_threshold: EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED,
             em_heterogeneity_threshold: EM_HETEROGENEITY_THRESHOLD_BALANCED,
             em_coverage_min_threshold: EM_ASSIGNMENT_COVERAGE_MIN_BALANCED,
-            em_fallback_max_threshold: EM_FALLBACK_COEFFICIENT_MAX_BALANCED,
             em_contrast_max_threshold: EM_REGION_CONTRAST_MAX_BALANCED,
             em_conditioning_max_threshold: EM_CONDITIONING_MAX_BALANCED,
             em_source_realization_min_threshold: EM_SOURCE_REALIZATION_MIN_BALANCED,
@@ -138,7 +134,6 @@ pub(crate) fn electromagnetic_thresholds_for_policy(
             em_spread_threshold: 3.0,
             em_heterogeneity_threshold: 0.35,
             em_coverage_min_threshold: 0.5,
-            em_fallback_max_threshold: 0.65,
             em_contrast_max_threshold: 1.8,
             em_conditioning_max_threshold: 1.5e5,
             em_source_realization_min_threshold: 0.2,

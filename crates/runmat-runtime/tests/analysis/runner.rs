@@ -3839,7 +3839,6 @@ pub(super) fn run_fixture(
     let mut electromagnetic_material_heterogeneity_index = None;
     let mut electromagnetic_assignment_coverage_ratio = None;
     let mut electromagnetic_assigned_coefficient_coverage_ratio = None;
-    let mut electromagnetic_fallback_coefficient_ratio = None;
     let mut electromagnetic_region_coefficient_contrast_index = None;
     let mut electromagnetic_condition_number_estimate = None;
     let mut electromagnetic_source_realization_ratio = None;
@@ -3962,7 +3961,6 @@ pub(super) fn run_fixture(
                     electromagnetic_material_heterogeneity_index,
                     electromagnetic_assignment_coverage_ratio,
                     electromagnetic_assigned_coefficient_coverage_ratio,
-                    electromagnetic_fallback_coefficient_ratio,
                     electromagnetic_region_coefficient_contrast_index,
                     electromagnetic_condition_number_estimate,
                     electromagnetic_source_realization_ratio,
@@ -9829,7 +9827,6 @@ pub(super) fn run_fixture(
                                 electromagnetic_material_heterogeneity_index,
                                 electromagnetic_assignment_coverage_ratio,
                                 electromagnetic_assigned_coefficient_coverage_ratio,
-                                electromagnetic_fallback_coefficient_ratio,
                                 electromagnetic_region_coefficient_contrast_index,
                                 electromagnetic_condition_number_estimate,
                                 electromagnetic_source_realization_ratio,
@@ -10005,10 +10002,6 @@ pub(super) fn run_fixture(
                         .data
                         .summary
                         .electromagnetic_assigned_coefficient_coverage_ratio;
-                    electromagnetic_fallback_coefficient_ratio = gpu_results
-                        .data
-                        .summary
-                        .electromagnetic_fallback_coefficient_ratio;
                     electromagnetic_region_coefficient_contrast_index = gpu_results
                         .data
                         .summary
@@ -10301,7 +10294,6 @@ pub(super) fn run_fixture(
                                     electromagnetic_material_heterogeneity_index,
                                     electromagnetic_assignment_coverage_ratio,
                                     electromagnetic_assigned_coefficient_coverage_ratio,
-                                    electromagnetic_fallback_coefficient_ratio,
                                     electromagnetic_region_coefficient_contrast_index,
                                     electromagnetic_condition_number_estimate,
                                     electromagnetic_source_realization_ratio,
@@ -10473,7 +10465,6 @@ pub(super) fn run_fixture(
         electromagnetic_material_heterogeneity_index,
         electromagnetic_assignment_coverage_ratio,
         electromagnetic_assigned_coefficient_coverage_ratio,
-        electromagnetic_fallback_coefficient_ratio,
         electromagnetic_region_coefficient_contrast_index,
         electromagnetic_condition_number_estimate,
         electromagnetic_source_realization_ratio,

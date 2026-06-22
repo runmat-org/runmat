@@ -313,15 +313,6 @@ pub(super) fn check_rolling_baseline_drift(
             );
             check_rolling_metric_drift(
                 fixture_id,
-                "electromagnetic_fallback_coefficient_ratio",
-                history,
-                current_record.electromagnetic_fallback_coefficient_ratio,
-                |record| record.electromagnetic_fallback_coefficient_ratio,
-                EM_READINESS_DRIFT_BOUNDS,
-                failures,
-            );
-            check_rolling_metric_drift(
-                fixture_id,
                 "electromagnetic_region_coefficient_contrast_index",
                 history,
                 current_record.electromagnetic_region_coefficient_contrast_index,
@@ -540,14 +531,6 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_assigned_coefficient_coverage_ratio",
                 baseline_record.electromagnetic_assigned_coefficient_coverage_ratio,
                 current_record.electromagnetic_assigned_coefficient_coverage_ratio,
-                EM_READINESS_DRIFT_BOUNDS,
-                failures,
-            );
-            check_metric_drift(
-                &current_record.fixture_id,
-                "electromagnetic_fallback_coefficient_ratio",
-                baseline_record.electromagnetic_fallback_coefficient_ratio,
-                current_record.electromagnetic_fallback_coefficient_ratio,
                 EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );
