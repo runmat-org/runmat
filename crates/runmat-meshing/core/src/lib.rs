@@ -71,6 +71,10 @@ fn default_element_topology_sample_edge_nodes() -> [[u32; 2]; 8] {
     [[0; 2]; 8]
 }
 
+fn default_element_topology_sample_node_coordinates_m() -> [[f64; 3]; 8] {
+    [[0.0; 3]; 8]
+}
+
 fn default_element_topology_sample_element_edges() -> [[u32; 3]; 4] {
     [[0; 3]; 4]
 }
@@ -129,6 +133,8 @@ pub struct PreparedMeshDescriptor {
     pub element_topology_sample_edge_count: u64,
     #[serde(default = "default_element_topology_sample_edge_nodes")]
     pub element_topology_sample_edge_nodes: [[u32; 2]; 8],
+    #[serde(default = "default_element_topology_sample_node_coordinates_m")]
+    pub element_topology_sample_node_coordinates_m: [[f64; 3]; 8],
     #[serde(default = "default_element_topology_sample_element_edges")]
     pub element_topology_sample_element_edges: [[u32; 3]; 4],
     #[serde(default = "default_element_topology_sample_element_orientations")]
@@ -279,6 +285,9 @@ pub fn prepare_geometry_for_analysis(
                 .element_count,
             element_topology_sample_edge_count: element_geometry.element_topology_sample.edge_count,
             element_topology_sample_edge_nodes: element_geometry.element_topology_sample.edge_nodes,
+            element_topology_sample_node_coordinates_m: element_geometry
+                .element_topology_sample
+                .node_coordinates_m,
             element_topology_sample_element_edges: element_geometry
                 .element_topology_sample
                 .element_edges,
@@ -424,6 +433,7 @@ struct ElementTopologySample {
     element_count: u64,
     edge_count: u64,
     edge_nodes: [[u32; 2]; 8],
+    node_coordinates_m: [[f64; 3]; 8],
     element_edges: [[u32; 3]; 4],
     element_orientations: [[i8; 3]; 4],
     element_areas_m2: [f64; 4],
@@ -468,6 +478,11 @@ fn mesh_element_geometry_metrics(
         }
         for index in indices {
             referenced_nodes.insert(index);
+        }
+        for (index, vertex) in indices.into_iter().zip(vertices) {
+            if (index as usize) < element_topology_sample.node_coordinates_m.len() {
+                element_topology_sample.node_coordinates_m[index as usize] = vertex;
+            }
         }
         for (left, right) in [
             (indices[0], indices[1]),
@@ -748,6 +763,10 @@ mod tests {
         assert_eq!(descriptor.element_topology_sample_element_count, 2);
         assert_eq!(descriptor.element_topology_sample_edge_count, 5);
         assert_eq!(descriptor.element_topology_sample_edge_nodes[0], [0, 1]);
+        assert_eq!(
+            descriptor.element_topology_sample_node_coordinates_m[0],
+            [0.0, 0.0, 0.0]
+        );
         assert_eq!(
             descriptor.element_topology_sample_element_edges[0],
             [0, 1, 2]

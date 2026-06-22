@@ -260,6 +260,16 @@ fn prepared_structural_recovery_uses_prep_connectivity_edges() {
                     [0, 0],
                     [0, 0],
                 ],
+                element_topology_sample_node_coordinates_m: [
+                    [0.0, 0.0, 0.0],
+                    [0.4, 0.0, 0.0],
+                    [0.0, 0.2, 0.0],
+                    [0.4, 0.2, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
                 element_topology_sample_element_edges: [[0, 1, 2], [2, 3, 4], [0, 0, 0], [0, 0, 0]],
                 element_topology_sample_element_orientations: [
                     [1, 1, -1],
@@ -651,6 +661,16 @@ fn prepared_thermal_recovery_uses_prep_element_topology() {
                     [0, 0],
                     [0, 0],
                 ],
+                element_topology_sample_node_coordinates_m: [
+                    [0.0, 0.0, 0.0],
+                    [0.4, 0.0, 0.0],
+                    [0.0, 0.2, 0.0],
+                    [0.4, 0.2, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
                 element_topology_sample_element_edges: [[0, 1, 2], [2, 3, 4], [0, 0, 0], [0, 0, 0]],
                 element_topology_sample_element_orientations: [
                     [1, 1, -1],
@@ -685,8 +705,8 @@ fn prepared_thermal_recovery_uses_prep_element_topology() {
         .message
         .contains("basis=prep_element_triangle_topology"));
     assert!(recovery.message.contains("prep_recovery_edge_count="));
-    assert!(recovery.message.contains("prep_triangle_element_count=1"));
-    assert_eq!(result.temperature_gradient_snapshots[1].shape[0], 1);
+    assert!(recovery.message.contains("prep_triangle_element_count=2"));
+    assert_eq!(result.temperature_gradient_snapshots[1].shape[0], 2);
     assert_eq!(result.temperature_gradient_snapshots[1].shape[1], 3);
     assert_eq!(
         result.heat_flux_snapshots[1].shape,
@@ -1208,6 +1228,16 @@ fn nonlinear_prepared_state_recovery_uses_prep_connectivity_edges() {
                     [0, 0],
                     [0, 0],
                     [0, 0],
+                ],
+                element_topology_sample_node_coordinates_m: [
+                    [0.0, 0.0, 0.0],
+                    [0.25, 0.0, 0.0],
+                    [0.0, 0.25, 0.0],
+                    [0.25, 0.25, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
                 ],
                 element_topology_sample_element_edges: [[0, 1, 2], [2, 3, 4], [0, 0, 0], [0, 0, 0]],
                 element_topology_sample_element_orientations: [

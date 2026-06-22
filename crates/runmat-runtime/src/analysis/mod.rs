@@ -12644,6 +12644,7 @@ fn to_fea_prep_context(
         element_topology_sample_element_count: prep.element_topology_sample_element_count,
         element_topology_sample_edge_count: prep.element_topology_sample_edge_count,
         element_topology_sample_edge_nodes: prep.element_topology_sample_edge_nodes,
+        element_topology_sample_node_coordinates_m: prep.element_topology_sample_node_coordinates_m,
         element_topology_sample_element_edges: prep.element_topology_sample_element_edges,
         element_topology_sample_element_orientations: prep
             .element_topology_sample_element_orientations,
@@ -14191,6 +14192,7 @@ fn resolve_run_prep_context(
         element_topology_sample_element_count,
         element_topology_sample_edge_count,
         element_topology_sample_edge_nodes,
+        element_topology_sample_node_coordinates_m,
         element_topology_sample_element_edges,
         element_topology_sample_element_orientations,
         element_topology_sample_element_areas_m2,
@@ -14205,12 +14207,21 @@ fn resolve_run_prep_context(
                     mesh.element_topology_sample_element_count as usize,
                     mesh.element_topology_sample_edge_count as usize,
                     mesh.element_topology_sample_edge_nodes,
+                    mesh.element_topology_sample_node_coordinates_m,
                     mesh.element_topology_sample_element_edges,
                     mesh.element_topology_sample_element_orientations,
                     mesh.element_topology_sample_element_areas_m2,
                 ))
         })
-        .unwrap_or((0, 0, [[0; 2]; 8], [[0; 3]; 4], [[0; 3]; 4], [0.0; 4]));
+        .unwrap_or((
+            0,
+            0,
+            [[0; 2]; 8],
+            [[0.0; 3]; 8],
+            [[0; 3]; 4],
+            [[0; 3]; 4],
+            [0.0; 4],
+        ));
     let control_volume_cell_count = artifact
         .prep
         .prepared_meshes
@@ -14330,6 +14341,7 @@ fn resolve_run_prep_context(
         element_topology_sample_element_count,
         element_topology_sample_edge_count,
         element_topology_sample_edge_nodes,
+        element_topology_sample_node_coordinates_m,
         element_topology_sample_element_edges,
         element_topology_sample_element_orientations,
         element_topology_sample_element_areas_m2,

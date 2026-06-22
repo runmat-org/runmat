@@ -2224,7 +2224,7 @@ impl MaxwellEdgeTopology {
         {
             return None;
         }
-        let coordinates = prep_coordinates.reference_element_coordinates_m;
+        let coordinates = prep_coordinates.element_topology_sample_node_coordinates_m;
         let sample_edge_count = prep_coordinates.element_topology_sample_edge_count.min(8);
         let sample_element_count = prep_coordinates
             .element_topology_sample_element_count
@@ -2235,7 +2235,7 @@ impl MaxwellEdgeTopology {
                 .element_topology_sample_edge_nodes
                 .iter()
                 .take(sample_edge_count)
-                .all(|nodes| nodes[0] < 3 && nodes[1] < 3 && nodes[0] != nodes[1]);
+                .all(|nodes| nodes[0] < 8 && nodes[1] < 8 && nodes[0] != nodes[1]);
         let edge_nodes = if sample_usable {
             prep_coordinates
                 .element_topology_sample_edge_nodes
@@ -2246,10 +2246,20 @@ impl MaxwellEdgeTopology {
         } else {
             vec![(0_usize, 1_usize), (1, 2), (0, 2)]
         };
+        let coordinate_for_node = |node: usize| {
+            if sample_usable {
+                coordinates[node]
+            } else {
+                prep_coordinates.reference_element_coordinates_m[node]
+            }
+        };
         let edges = edge_nodes
             .iter()
             .filter_map(|(from_node, to_node)| {
-                let length = maxwell_distance3(coordinates[*from_node], coordinates[*to_node]);
+                let length = maxwell_distance3(
+                    coordinate_for_node(*from_node),
+                    coordinate_for_node(*to_node),
+                );
                 (length.is_finite() && length > 0.0).then_some(MaxwellEdge {
                     from_node: *from_node,
                     to_node: *to_node,
@@ -2260,9 +2270,10 @@ impl MaxwellEdgeTopology {
                 })
             })
             .collect::<Vec<_>>();
-        if edges.len() != 3 {
+        if edges.len() < 3 {
             return None;
         }
+        let vector_basis_dimension_count = edges.len();
         let elements = if sample_usable {
             prep_coordinates
                 .element_topology_sample_element_edges
@@ -2310,7 +2321,7 @@ impl MaxwellEdgeTopology {
             elements,
             gauge_anchor_nodes: gauge_anchor_nodes(constrained),
             prep_recovery_edge_count: summary.prep_recovery_edges.len(),
-            vector_basis_dimension_count: 3,
+            vector_basis_dimension_count,
             reference_element_area_m2: prep_coordinates.reference_element_area_m2,
         })
     }
@@ -3500,26 +3511,36 @@ mod tests {
                     [0.0, 0.2, 0.0],
                 ],
                 reference_element_area_m2: 0.04,
-                element_topology_sample_element_count: 1,
-                element_topology_sample_edge_count: 3,
+                element_topology_sample_element_count: 2,
+                element_topology_sample_edge_count: 5,
                 element_topology_sample_edge_nodes: [
                     [0, 1],
                     [1, 2],
                     [0, 2],
-                    [0, 0],
-                    [0, 0],
+                    [2, 3],
+                    [0, 3],
                     [0, 0],
                     [0, 0],
                     [0, 0],
                 ],
-                element_topology_sample_element_edges: [[0, 1, 2], [0, 0, 0], [0, 0, 0], [0, 0, 0]],
+                element_topology_sample_node_coordinates_m: [
+                    [0.0, 0.0, 0.0],
+                    [0.4, 0.0, 0.0],
+                    [0.0, 0.2, 0.0],
+                    [0.4, 0.2, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
+                element_topology_sample_element_edges: [[0, 1, 2], [2, 3, 4], [0, 0, 0], [0, 0, 0]],
                 element_topology_sample_element_orientations: [
+                    [1, 1, -1],
                     [1, 1, -1],
                     [0, 0, 0],
                     [0, 0, 0],
-                    [0, 0, 0],
                 ],
-                element_topology_sample_element_areas_m2: [0.04, 0.0, 0.0, 0.0],
+                element_topology_sample_element_areas_m2: [0.04, 0.04, 0.0, 0.0],
                 calibration_profile_override: None,
             }),
             None,
@@ -3536,14 +3557,14 @@ mod tests {
             topology.basis,
             MaxwellEdgeTopologyBasis::PrepReferenceVectorElement
         );
-        assert_eq!(topology.edge_count(), 3);
-        assert_eq!(topology.oriented_edge_count(), 3);
-        assert_eq!(topology.vector_basis_dimension_count, 3);
-        assert_eq!(topology.incidence_element_count(), 1);
-        assert_eq!(topology.incidence_orientation_count(), 3);
-        assert_eq!(topology.incidence_pair_count(), 3);
-        assert_eq!(topology.representable_incidence_pair_count(), 2);
-        assert!((topology.incidence_operator_pair_coverage_ratio() - (2.0 / 3.0)).abs() < 1.0e-12);
+        assert_eq!(topology.edge_count(), 5);
+        assert_eq!(topology.oriented_edge_count(), 5);
+        assert_eq!(topology.vector_basis_dimension_count, 5);
+        assert_eq!(topology.incidence_element_count(), 2);
+        assert_eq!(topology.incidence_orientation_count(), 6);
+        assert_eq!(topology.incidence_pair_count(), 6);
+        assert_eq!(topology.representable_incidence_pair_count(), 4);
+        assert!((topology.incidence_operator_pair_coverage_ratio() - (4.0 / 6.0)).abs() < 1.0e-12);
         assert_eq!(
             topology.prep_recovery_edge_count,
             summary.prep_recovery_edges.len()
@@ -3552,6 +3573,8 @@ mod tests {
         assert!((topology.edges[0].length - 0.4).abs() < 1.0e-12);
         assert!((topology.edges[1].length - 0.2_f64.hypot(0.4)).abs() < 1.0e-12);
         assert!((topology.edges[2].length - 0.2).abs() < 1.0e-12);
+        assert!((topology.edges[3].length - 0.4).abs() < 1.0e-12);
+        assert!((topology.edges[4].length - 0.2_f64.hypot(0.4)).abs() < 1.0e-12);
     }
 
     #[test]

@@ -516,11 +516,13 @@ fn prep_coordinate_edge_length(
     to: usize,
     fallback_length: f64,
 ) -> f64 {
-    if from >= VECTOR_COMPONENT_COUNT || to >= VECTOR_COMPONENT_COUNT {
+    if from >= coordinates.element_topology_sample_node_coordinates_m.len()
+        || to >= coordinates.element_topology_sample_node_coordinates_m.len()
+    {
         return fallback_length;
     }
-    let from_coord = coordinates.reference_element_coordinates_m[from];
-    let to_coord = coordinates.reference_element_coordinates_m[to];
+    let from_coord = coordinates.element_topology_sample_node_coordinates_m[from];
+    let to_coord = coordinates.element_topology_sample_node_coordinates_m[to];
     finite_positive_or(
         ((to_coord[0] - from_coord[0]).powi(2)
             + (to_coord[1] - from_coord[1]).powi(2)
@@ -1087,6 +1089,16 @@ mod tests {
                     [0, 0],
                     [0, 0],
                 ],
+                element_topology_sample_node_coordinates_m: [
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 0.5, 0.0],
+                    [1.0, 0.5, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
                 element_topology_sample_element_edges: [[0, 1, 2], [2, 3, 4], [0, 0, 0], [0, 0, 0]],
                 element_topology_sample_element_orientations: [
                     [1, 1, -1],
@@ -1106,6 +1118,7 @@ mod tests {
             coordinates.element_topology_sample_element_count = 0;
             coordinates.element_topology_sample_edge_count = 0;
             coordinates.element_topology_sample_edge_nodes = [[0; 2]; 8];
+            coordinates.element_topology_sample_node_coordinates_m = [[0.0; 3]; 8];
             coordinates.element_topology_sample_element_edges = [[0; 3]; 4];
             coordinates.element_topology_sample_element_orientations = [[0; 3]; 4];
             coordinates.element_topology_sample_element_areas_m2 = [0.0; 4];

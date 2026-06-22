@@ -161,6 +161,7 @@ pub struct PrepCoordinateSummary {
     pub element_topology_sample_element_count: usize,
     pub element_topology_sample_edge_count: usize,
     pub element_topology_sample_edge_nodes: [[u32; 2]; 8],
+    pub element_topology_sample_node_coordinates_m: [[f64; 3]; 8],
     pub element_topology_sample_element_edges: [[u32; 3]; 4],
     pub element_topology_sample_element_orientations: [[i8; 3]; 4],
     pub element_topology_sample_element_areas_m2: [f64; 4],
@@ -478,6 +479,8 @@ pub fn assemble_linear_system(
             element_topology_sample_element_count: prep.element_topology_sample_element_count,
             element_topology_sample_edge_count: prep.element_topology_sample_edge_count,
             element_topology_sample_edge_nodes: prep.element_topology_sample_edge_nodes,
+            element_topology_sample_node_coordinates_m: prep
+                .element_topology_sample_node_coordinates_m,
             element_topology_sample_element_edges: prep.element_topology_sample_element_edges,
             element_topology_sample_element_orientations: prep
                 .element_topology_sample_element_orientations,

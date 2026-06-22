@@ -715,7 +715,10 @@ fn thermal_prep_triangle_elements(
             }
             for node in coordinates.element_topology_sample_edge_nodes[edge_index] {
                 let node = node as usize;
-                if node < node_count && node < VECTOR_COMPONENT_COUNT && !nodes.contains(&node) {
+                if node < node_count
+                    && node < coordinates.element_topology_sample_node_coordinates_m.len()
+                    && !nodes.contains(&node)
+                {
                     nodes.push(node);
                 }
             }
@@ -724,9 +727,9 @@ fn thermal_prep_triangle_elements(
             continue;
         }
         let triangle = [
-            coordinates.reference_element_coordinates_m[nodes[0]],
-            coordinates.reference_element_coordinates_m[nodes[1]],
-            coordinates.reference_element_coordinates_m[nodes[2]],
+            coordinates.element_topology_sample_node_coordinates_m[nodes[0]],
+            coordinates.element_topology_sample_node_coordinates_m[nodes[1]],
+            coordinates.element_topology_sample_node_coordinates_m[nodes[2]],
         ];
         if thermal_triangle_area(&triangle) <= 1.0e-18 {
             continue;

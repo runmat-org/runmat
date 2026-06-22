@@ -308,6 +308,10 @@ fn default_element_topology_sample_edge_nodes() -> [[u32; 2]; 8] {
     [[0; 2]; 8]
 }
 
+fn default_element_topology_sample_node_coordinates_m() -> [[f64; 3]; 8] {
+    [[0.0; 3]; 8]
+}
+
 fn default_element_topology_sample_element_edges() -> [[u32; 3]; 4] {
     [[0; 3]; 4]
 }
@@ -376,6 +380,8 @@ pub struct FeaPrepContext {
     pub element_topology_sample_edge_count: usize,
     #[serde(default = "default_element_topology_sample_edge_nodes")]
     pub element_topology_sample_edge_nodes: [[u32; 2]; 8],
+    #[serde(default = "default_element_topology_sample_node_coordinates_m")]
+    pub element_topology_sample_node_coordinates_m: [[f64; 3]; 8],
     #[serde(default = "default_element_topology_sample_element_edges")]
     pub element_topology_sample_element_edges: [[u32; 3]; 4],
     #[serde(default = "default_element_topology_sample_element_orientations")]

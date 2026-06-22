@@ -131,6 +131,16 @@ fn sample_analysis_run_prep_context() -> AnalysisRunPrepContext {
             [0, 0],
             [0, 0],
         ],
+        element_topology_sample_node_coordinates_m: [
+            [0.0, 0.0, 0.0],
+            [0.4, 0.0, 0.0],
+            [0.0, 0.2, 0.0],
+            [0.4, 0.2, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ],
         element_topology_sample_element_edges: [[0, 1, 2], [2, 3, 4], [0, 0, 0], [0, 0, 0]],
         element_topology_sample_element_orientations: [
             [1, 1, -1],
