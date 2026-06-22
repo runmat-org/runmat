@@ -60,15 +60,16 @@ All families return common run fields: `run_id`, fields, diagnostics, quality ga
 | --- | --- |
 | `modal_results` | Modal paths. |
 | `thermal_results` | Thermal and coupled thermal paths. |
-| `transient_results` | Transient, CFD, CHT, and FSI paths where applicable. |
+| `transient_results` | Structural transient paths where applicable. |
 | `nonlinear_results` | Nonlinear structural paths. |
 | `electromagnetic_results` | Electromagnetic paths. |
+| Family-specific fields | Acoustic, CFD, CHT, and FSI paths expose their primary payload through typed `run.fields`, diagnostics, summaries, and result queries. |
 
 ## Support Is Per Family
 
 A family can be implemented and tested without being production-grade for every engineering use. Current support varies by family:
 
-- dedicated solver-backed paths exist for several structural, thermal, nonlinear, transient, modal, acoustic, and electromagnetic workflows,
+- dedicated solver-backed paths exist for structural, thermal, nonlinear, transient, modal, acoustic, electromagnetic, CFD, CHT, and FSI workflows,
 - CFD, CHT, and FSI have governed fluid/coupled paths with typed fields, diagnostics, known-answer gates, and typed invalid-authoring errors,
 - V&V maturity depends on known-answer tests, convergence checks, independent references, and governed thresholds.
 

@@ -217,7 +217,7 @@ The typed constructors are:
 | `fea.loadCase(...)` | Force, pressure, body force, current density, or coil current. |
 | `fea.step(...)` | Analysis step. |
 | `fea.domain(...)` | Thermo-mechanical, electro-thermal, electromagnetic, or CFD domain data. |
-| `fea.interface(...)` | Contact interfaces. |
+| `fea.interface(...)` | Contact, conjugate heat-transfer, or fluid-structure interfaces. |
 | `fea.runOptions(...)` | Family-specific solver and quality options. |
 | `fea.model(...)` | Explicit model assembled from typed components. |
 | `fea.study(...)` | Study assembled from geometry, physics profile/model data, backend, and run options. |
