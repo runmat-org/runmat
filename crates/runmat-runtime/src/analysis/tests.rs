@@ -76,6 +76,40 @@ fn analysis_test_guard() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn sample_analysis_run_prep_context() -> AnalysisRunPrepContext {
+    AnalysisRunPrepContext {
+        prepared_mesh_count: 1,
+        prepared_node_count: 16,
+        prepared_element_count: 20,
+        mapped_region_count: 3,
+        min_scaled_jacobian: 0.86,
+        mean_aspect_ratio: 1.5,
+        inverted_element_count: 0,
+        mapped_load_count: 1,
+        mapped_bc_count: 3,
+        layout_seed: 29,
+        topology_dof_multiplier: 1.2,
+        topology_bandwidth_estimate: 4,
+        mapped_region_participation_ratio: 0.9,
+        topology_surface_patch_ratio: 0.35,
+        topology_volume_core_ratio: 0.55,
+        topology_mixed_family_ratio: 0.05,
+        topology_region_span_mean: 5.0,
+        topology_region_block_count: 3,
+        topology_region_mesh_mean: 4.0,
+        topology_region_mesh_variance: 0.5,
+        topology_triangle_family_ratio: 0.2,
+        topology_quad_family_ratio: 0.3,
+        topology_tet_family_ratio: 0.25,
+        topology_hex_family_ratio: 0.25,
+        coordinate_span_x_m: 2.4,
+        coordinate_span_y_m: 0.6,
+        coordinate_span_z_m: 0.4,
+        coordinate_active_dimension_count: 3,
+        coordinate_characteristic_length_m: 0.2,
+    }
+}
+
 fn sample_model() -> AnalysisModel {
     AnalysisModel {
         model_id: AnalysisModelId("beam_model".to_string()),
@@ -5616,7 +5650,8 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
         .any(|diag| diag.code == "FEA_CFD_FLOW"
             && diag.message.contains("inlet_velocity=4.25")
             && diag.message.contains("reynolds_number=")
-            && diag.message.contains("solve_family=steady_state")));
+            && diag.message.contains("solve_family=steady_state")
+            && diag.message.contains("topology_basis=implicit_channel")));
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_CFD_RESIDUAL"
             && diag.message.contains("max_momentum_residual=")
@@ -5627,6 +5662,8 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
             && diag
                 .message
                 .contains("basis=finite_volume_velocity_pressure")
+            && diag.message.contains("topology_basis=implicit_channel")
+            && diag.message.contains("domain_length_m=")
             && diag.message.contains("mass_balance_residual=")
             && diag.message.contains("pressure_drop_pa=")
     }));
@@ -5690,6 +5727,49 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
 }
 
 #[test]
+fn analysis_run_cfd_uses_prep_control_volume_topology() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps[0].kind = AnalysisStepKind::Cfd;
+    model.boundary_conditions = sample_cfd_boundary_conditions(3.0);
+    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
+
+    let run = solve_cfd_finite_volume_run(
+        &model,
+        model.cfd.as_ref().expect("cfd domain should exist"),
+        ComputeBackend::Cpu,
+        &AnalysisCfdRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            time_step_s: 1.0e-3,
+            step_count: 2,
+            max_linear_iters: 32,
+            tolerance: 1.0e-8,
+            residual_warn_threshold: 1.0e-4,
+            prep_context: Some(sample_analysis_run_prep_context()),
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
+        },
+        Some(sample_analysis_run_prep_context()),
+    );
+
+    let velocity = run
+        .field(FEA_FIELD_CFD_VELOCITY)
+        .expect("cfd velocity field should be present");
+    assert_eq!(velocity.shape, vec![15, 3]);
+    assert!(run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_CFD_ASSEMBLY"
+            && diag
+                .message
+                .contains("topology_basis=prep_control_volume_connectivity")
+            && diag.message.contains("control_volume_count=15")
+            && diag.message.contains("domain_length_m=2.4")
+            && diag.message.contains("active_dimension_count=3")
+    }));
+}
+
+#[test]
 fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
@@ -5750,7 +5830,15 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         .run
         .diagnostics
         .iter()
-        .any(|diag| diag.code == "FEA_CFD_FLOW" && diag.message.contains("reynolds_number=")));
+        .any(|diag| diag.code == "FEA_CFD_FLOW"
+            && diag.message.contains("reynolds_number=")
+            && diag.message.contains("topology_basis=implicit_channel")));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_CFD_ASSEMBLY"
+            && diag.message.contains("topology_basis=implicit_channel")
+            && diag.message.contains("control_volume_count=")
+            && diag.message.contains("domain_length_m=")
+    }));
     assert!(envelope
         .data
         .run
@@ -5894,7 +5982,9 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         .run
         .diagnostics
         .iter()
-        .any(|diag| diag.code == "FEA_CFD_FLOW" && diag.message.contains("reynolds_number=")));
+        .any(|diag| diag.code == "FEA_CFD_FLOW"
+            && diag.message.contains("reynolds_number=")
+            && diag.message.contains("topology_basis=implicit_channel")));
     assert!(envelope
         .data
         .run
@@ -5902,6 +5992,12 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         .iter()
         .any(|diag| diag.code == "FEA_CFD_RESIDUAL"
             && diag.message.contains("max_momentum_residual=")));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_CFD_ASSEMBLY"
+            && diag.message.contains("topology_basis=implicit_channel")
+            && diag.message.contains("control_volume_count=")
+            && diag.message.contains("domain_length_m=")
+    }));
     assert!(envelope
         .data
         .run

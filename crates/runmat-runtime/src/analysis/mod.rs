@@ -3345,6 +3345,88 @@ fn cfd_node_count_from_model(
         .min(512)
 }
 
+#[derive(Clone, Copy, Debug)]
+struct CfdDomainTopology {
+    basis: CfdDomainTopologyBasis,
+    node_count: usize,
+    control_volume_count: usize,
+    domain_length_m: f64,
+    hydraulic_diameter_m: f64,
+    dx_m: f64,
+    active_dimension_count: usize,
+}
+
+impl CfdDomainTopology {
+    fn from_model(model: &AnalysisModel, prep_context: Option<AnalysisRunPrepContext>) -> Self {
+        let node_count = cfd_node_count_from_model(model, prep_context);
+        match prep_context {
+            Some(prep) => Self::from_prep(node_count, prep),
+            None => Self::implicit_channel(node_count),
+        }
+    }
+
+    fn implicit_channel(node_count: usize) -> Self {
+        let node_count = node_count.max(2);
+        let control_volume_count = node_count.saturating_sub(1).max(1);
+        Self {
+            basis: CfdDomainTopologyBasis::ImplicitChannel,
+            node_count,
+            control_volume_count,
+            domain_length_m: 1.0,
+            hydraulic_diameter_m: 1.0,
+            dx_m: 1.0 / control_volume_count as f64,
+            active_dimension_count: 1,
+        }
+    }
+
+    fn from_prep(node_count: usize, prep: AnalysisRunPrepContext) -> Self {
+        let node_count = node_count.max(2);
+        let control_volume_count = node_count.saturating_sub(1).max(1);
+        let fallback_length = finite_positive_or(prep.coordinate_characteristic_length_m, 1.0)
+            * control_volume_count as f64;
+        let domain_length_m = finite_positive_or(prep.coordinate_span_x_m, fallback_length);
+        let transverse_y = finite_positive_or(prep.coordinate_span_y_m, 0.0);
+        let transverse_z = finite_positive_or(prep.coordinate_span_z_m, 0.0);
+        let hydraulic_diameter_m = if transverse_y > 0.0 && transverse_z > 0.0 {
+            (2.0 * transverse_y * transverse_z / (transverse_y + transverse_z)).max(1.0e-12)
+        } else {
+            finite_positive_or(prep.coordinate_characteristic_length_m, 1.0)
+        };
+        Self {
+            basis: CfdDomainTopologyBasis::PrepControlVolumeConnectivity,
+            node_count,
+            control_volume_count,
+            domain_length_m,
+            hydraulic_diameter_m,
+            dx_m: domain_length_m / control_volume_count as f64,
+            active_dimension_count: prep.coordinate_active_dimension_count.max(1),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CfdDomainTopologyBasis {
+    PrepControlVolumeConnectivity,
+    ImplicitChannel,
+}
+
+impl CfdDomainTopologyBasis {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::PrepControlVolumeConnectivity => "prep_control_volume_connectivity",
+            Self::ImplicitChannel => "implicit_channel",
+        }
+    }
+}
+
+fn finite_positive_or(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        fallback
+    }
+}
+
 #[derive(Clone, Debug)]
 struct CfdBoundarySummary {
     inlet_boundary_count: usize,
@@ -3503,13 +3585,13 @@ fn validate_authored_cfd_boundary_conditions(model: &AnalysisModel) -> Result<()
 
 #[derive(Clone, Debug)]
 struct CfdVelocityPressureSolution {
+    topology: CfdDomainTopology,
     velocity: Vec<f64>,
     pressure: Vec<f64>,
     residual_momentum: Vec<f64>,
     residual_continuity: Vec<f64>,
     mass_balance_residual: f64,
     pressure_drop_pa: f64,
-    hydraulic_diameter_m: f64,
     control_volume_count: usize,
     inlet_boundary_count: usize,
     outlet_boundary_count: usize,
@@ -3538,28 +3620,27 @@ struct CfdKnownAnswerMetrics {
 
 fn recover_cfd_velocity_pressure(
     domain: &runmat_analysis_core::CfdDomain,
-    node_count: usize,
+    topology: CfdDomainTopology,
     step_index: usize,
 ) -> (Vec<f64>, Vec<f64>) {
-    let boundary_summary = CfdBoundarySummary::implicit_channel(domain, node_count);
-    let solution =
-        solve_cfd_velocity_pressure(domain, &boundary_summary, node_count, step_index, 1);
+    let boundary_summary = CfdBoundarySummary::implicit_channel(domain, topology.node_count);
+    let solution = solve_cfd_velocity_pressure(domain, &boundary_summary, topology, step_index, 1);
     (solution.velocity, solution.pressure)
 }
 
 fn solve_cfd_velocity_pressure(
     domain: &runmat_analysis_core::CfdDomain,
     boundary_summary: &CfdBoundarySummary,
-    node_count: usize,
+    topology: CfdDomainTopology,
     step_index: usize,
     step_count: usize,
 ) -> CfdVelocityPressureSolution {
-    let node_count = node_count.max(2);
+    let node_count = topology.node_count.max(2);
     let profile_scale = cfd_profile_scale(domain, step_index);
     let nominal_inlet_velocity = boundary_summary.nominal_inlet_velocity_m_per_s;
     let inlet_velocity = nominal_inlet_velocity * profile_scale;
     let reynolds = cfd_reynolds_number_for_velocity(domain, nominal_inlet_velocity).max(1.0);
-    let hydraulic_diameter_m = 1.0;
+    let hydraulic_diameter_m = topology.hydraulic_diameter_m;
     let friction_factor = if reynolds <= 2300.0 {
         64.0 / reynolds
     } else {
@@ -3571,7 +3652,7 @@ fn solve_cfd_velocity_pressure(
         * inlet_velocity.abs()
         * friction_factor
         / hydraulic_diameter_m;
-    let pressure_drop_pa = friction_gradient_pa_per_m.max(0.0);
+    let pressure_drop_pa = (friction_gradient_pa_per_m * topology.domain_length_m).max(0.0);
     let denom = node_count.saturating_sub(1).max(1) as f64;
     let mut velocity = Vec::with_capacity(node_count * 3);
     let mut pressure = Vec::with_capacity(node_count);
@@ -3589,21 +3670,21 @@ fn solve_cfd_velocity_pressure(
     }
 
     let (residual_momentum, residual_continuity) =
-        cfd_residual_norms(&velocity, &pressure, domain, step_count);
+        cfd_residual_norms(&velocity, &pressure, domain, topology, step_count);
     let mass_balance_residual = residual_continuity.iter().copied().fold(0.0_f64, f64::max);
     let inlet_velocity_realization_ratio =
         inlet_velocity.abs() / nominal_inlet_velocity.abs().max(1.0e-12);
     let (transient_scale_min, transient_scale_max) = cfd_transient_scale_bounds(domain);
 
     CfdVelocityPressureSolution {
+        topology,
         velocity,
         pressure,
         residual_momentum,
         residual_continuity,
         mass_balance_residual,
         pressure_drop_pa,
-        hydraulic_diameter_m,
-        control_volume_count: node_count.saturating_sub(1),
+        control_volume_count: topology.control_volume_count,
         inlet_boundary_count: boundary_summary.inlet_boundary_count,
         outlet_boundary_count: boundary_summary.outlet_boundary_count,
         wall_boundary_count: boundary_summary.wall_boundary_count(),
@@ -3703,6 +3784,7 @@ fn cfd_known_answer_metrics(solution: &CfdVelocityPressureSolution) -> CfdKnownA
 
 fn cfd_known_answer_diagnostic(
     metrics: &CfdKnownAnswerMetrics,
+    topology: CfdDomainTopology,
 ) -> runmat_analysis_fea::diagnostics::FeaDiagnostic {
     let severity = if (metrics.pressure_drop_balance_ratio - 1.0).abs() <= 1.0e-10
         && metrics.mass_flux_uniformity_ratio <= 1.0e-10
@@ -3718,7 +3800,8 @@ fn cfd_known_answer_diagnostic(
         code: "FEA_CFD_KNOWN_ANSWER".to_string(),
         severity,
         message: format!(
-            "basis=finite_volume_channel pressure_drop_balance_ratio={} mass_flux_uniformity_ratio={} pressure_monotonic_cell_fraction={} known_answer_coverage_ratio={}",
+            "basis=finite_volume_channel topology_basis={} pressure_drop_balance_ratio={} mass_flux_uniformity_ratio={} pressure_monotonic_cell_fraction={} known_answer_coverage_ratio={}",
+            topology.basis.as_str(),
             metrics.pressure_drop_balance_ratio,
             metrics.mass_flux_uniformity_ratio,
             metrics.pressure_monotonic_cell_fraction,
@@ -3727,11 +3810,12 @@ fn cfd_known_answer_diagnostic(
     }
 }
 
-fn recover_cfd_vorticity(velocity: &[f64], node_count: usize) -> Vec<f64> {
+fn recover_cfd_vorticity(velocity: &[f64], node_count: usize, dx_m: f64) -> Vec<f64> {
     let mut vorticity = vec![0.0; node_count * 3];
     if node_count < 2 {
         return vorticity;
     }
+    let dx_m = dx_m.max(1.0e-12);
 
     for node in 0..node_count {
         let prev = node.saturating_sub(1);
@@ -3744,8 +3828,8 @@ fn recover_cfd_vorticity(velocity: &[f64], node_count: usize) -> Vec<f64> {
             - velocity.get(prev_base + 1).copied().unwrap_or(0.0);
         let base = node * 3;
         vorticity[base] = 0.0;
-        vorticity[base + 1] = -dvx * 0.5;
-        vorticity[base + 2] = dvy * 0.5;
+        vorticity[base + 1] = -dvx / (2.0 * dx_m);
+        vorticity[base + 2] = dvy / (2.0 * dx_m);
     }
 
     vorticity
@@ -3770,11 +3854,12 @@ fn cfd_residual_norms(
     velocity: &[f64],
     pressure: &[f64],
     domain: &runmat_analysis_core::CfdDomain,
+    topology: CfdDomainTopology,
     step_count: usize,
 ) -> (Vec<f64>, Vec<f64>) {
     let node_count = pressure.len().max(1);
     let reynolds = cfd_reynolds_number(domain).max(1.0);
-    let hydraulic_diameter_m = 1.0_f64;
+    let hydraulic_diameter_m = topology.hydraulic_diameter_m.max(1.0e-12);
     let friction_factor = if reynolds <= 2300.0 {
         64.0 / reynolds
     } else {
@@ -3790,11 +3875,7 @@ fn cfd_residual_norms(
         * mean_axial_velocity.abs()
         * friction_factor
         / hydraulic_diameter_m;
-    let dx = if node_count <= 1 {
-        1.0
-    } else {
-        1.0 / (node_count - 1) as f64
-    };
+    let dx = topology.dx_m.max(1.0e-12);
     let mut momentum_base = 0.0_f64;
     let mut continuity_base = 0.0_f64;
     for node in 0..node_count {
@@ -3841,7 +3922,7 @@ fn build_cfd_run_fields(
     let velocity = cell_centered_vector_from_nodal(&solution.velocity, node_count);
     let pressure = cell_centered_scalar_from_nodal(&solution.pressure);
     let cell_count = pressure.len().max(1);
-    let vorticity = recover_cfd_vorticity(&velocity, cell_count);
+    let vorticity = recover_cfd_vorticity(&velocity, cell_count, solution.topology.dx_m);
     let boundary_face_count = solution.wall_boundary_count.max(1);
     let wall_shear_stress = recover_cfd_wall_shear_stress(domain, &velocity, boundary_face_count);
     let residual_count = solution.residual_momentum.len();
@@ -3871,6 +3952,40 @@ fn build_cfd_run_fields(
             vec![cfd_reynolds_number(domain)],
         ),
     ]
+}
+
+fn cfd_assembly_diagnostic(
+    topology: CfdDomainTopology,
+    pressure_drop_pa: f64,
+    mass_balance_residual: f64,
+    residual_warn_threshold: f64,
+) -> runmat_analysis_fea::diagnostics::FeaDiagnostic {
+    runmat_analysis_fea::diagnostics::FeaDiagnostic {
+        code: "FEA_CFD_ASSEMBLY".to_string(),
+        severity: if mass_balance_residual <= residual_warn_threshold {
+            runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+        } else {
+            runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "basis=finite_volume_velocity_pressure topology_basis={} control_volume_count={} hydraulic_diameter_m={} domain_length_m={} dx_m={} active_dimension_count={} pressure_drop_pa={} mass_balance_residual={}",
+            topology.basis.as_str(),
+            topology.control_volume_count,
+            topology.hydraulic_diameter_m,
+            topology.domain_length_m,
+            topology.dx_m,
+            topology.active_dimension_count,
+            pressure_drop_pa,
+            mass_balance_residual,
+        ),
+    }
+}
+
+fn pressure_drop_from_nodal_pressure(pressure: &[f64]) -> f64 {
+    match (pressure.first(), pressure.last()) {
+        (Some(first), Some(last)) => first - last,
+        _ => 0.0,
+    }
 }
 
 fn cell_centered_vector_from_nodal(nodal: &[f64], node_count: usize) -> Vec<f64> {
@@ -3912,20 +4027,16 @@ fn solve_cfd_finite_volume_run(
     options: &AnalysisCfdRunOptions,
     prep_context: Option<AnalysisRunPrepContext>,
 ) -> FeaRunResult {
-    let node_count = cfd_node_count_from_model(model, prep_context);
+    let topology = CfdDomainTopology::from_model(model, prep_context);
+    let node_count = topology.node_count;
     let step_count = options.step_count.max(1);
     let field_step = match domain.solve_family {
         runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
         runmat_analysis_core::CfdSolveFamily::Transient => step_count.saturating_sub(1),
     };
     let boundary_summary = CfdBoundarySummary::from_model(model, domain, node_count);
-    let solution = solve_cfd_velocity_pressure(
-        domain,
-        &boundary_summary,
-        node_count,
-        field_step,
-        step_count,
-    );
+    let solution =
+        solve_cfd_velocity_pressure(domain, &boundary_summary, topology, field_step, step_count);
     let max_momentum_residual = solution
         .residual_momentum
         .iter()
@@ -3965,21 +4076,12 @@ fn solve_cfd_finite_volume_run(
                     step_count,
                 ),
             },
-            runmat_analysis_fea::diagnostics::FeaDiagnostic {
-                code: "FEA_CFD_ASSEMBLY".to_string(),
-                severity: if solution.mass_balance_residual <= options.residual_warn_threshold {
-                    runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
-                } else {
-                    runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
-                },
-                message: format!(
-                    "basis=finite_volume_velocity_pressure control_volume_count={} hydraulic_diameter_m={} pressure_drop_pa={} mass_balance_residual={}",
-                    solution.control_volume_count,
-                    solution.hydraulic_diameter_m,
-                    solution.pressure_drop_pa,
-                    solution.mass_balance_residual,
-                ),
-            },
+            cfd_assembly_diagnostic(
+                solution.topology,
+                solution.pressure_drop_pa,
+                solution.mass_balance_residual,
+                options.residual_warn_threshold,
+            ),
             runmat_analysis_fea::diagnostics::FeaDiagnostic {
                 code: "FEA_CFD_BOUNDARY_CONDITIONS".to_string(),
                 severity: if solution.boundary_coverage_ratio >= 1.0
@@ -4024,7 +4126,7 @@ fn solve_cfd_finite_volume_run(
                     solution.transient_scale_variation,
                 ),
             },
-            cfd_known_answer_diagnostic(&known_answer_metrics),
+            cfd_known_answer_diagnostic(&known_answer_metrics, topology),
         ],
         fields,
     }
@@ -4056,10 +4158,11 @@ fn field_scalar_magnitudes(field: &AnalysisField, fallback_len: usize) -> Vec<f6
 
 fn build_cht_run_fields(
     domain: &runmat_analysis_core::CfdDomain,
-    node_count: usize,
+    topology: CfdDomainTopology,
     thermal_run: &runmat_analysis_fea::FeaThermalRunResult,
 ) -> (Vec<AnalysisField>, ChtInterfaceClosure) {
-    let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(domain, node_count, 0);
+    let node_count = topology.node_count;
+    let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(domain, topology, 0);
     let mean_axial_velocity = mean_cfd_axial_velocity(&fluid_velocity);
     let mut fields = vec![
         AnalysisField::host_f64(
@@ -4324,7 +4427,7 @@ fn cht_known_answer_diagnostic(
 
 fn build_fsi_run_fields(
     domain: &runmat_analysis_core::CfdDomain,
-    node_count: usize,
+    topology: CfdDomainTopology,
     step_count: usize,
     structural_compliance_per_pa: f64,
     max_linear_iters: usize,
@@ -4335,10 +4438,11 @@ fn build_fsi_run_fields(
     let mut fields = Vec::new();
     let mut closure = FsiInterfaceClosure::default();
     let step_count = step_count.max(1);
+    let node_count = topology.node_count;
 
     for step_index in 0..step_count {
         let (fluid_velocity, fluid_pressure) =
-            recover_cfd_velocity_pressure(domain, node_count, step_index);
+            recover_cfd_velocity_pressure(domain, topology, step_index);
         let interface_step = solve_fsi_partitioned_interface(
             &fluid_pressure,
             structural_compliance_per_pa,
@@ -4956,6 +5060,7 @@ pub fn analysis_run_cfd_with_options_op(
         );
     }
 
+    let flow_topology = CfdDomainTopology::from_model(model, prep_context);
     let flow_boundary_summary = CfdBoundarySummary::from_model(model, cfd_domain, 2);
     let flow_inlet_velocity = flow_boundary_summary.nominal_inlet_velocity_m_per_s;
     let reynolds_number = cfd_reynolds_number_for_velocity(cfd_domain, flow_inlet_velocity);
@@ -4967,7 +5072,7 @@ pub fn analysis_run_cfd_with_options_op(
         code: "FEA_CFD_FLOW".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
         message: format!(
-            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={}",
+            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={} topology_basis={} domain_length_m={} hydraulic_diameter_m={}",
             cfd_domain.reference_density_kg_per_m3,
             cfd_domain.dynamic_viscosity_pa_s,
             flow_inlet_velocity,
@@ -4975,6 +5080,9 @@ pub fn analysis_run_cfd_with_options_op(
             reynolds_number,
             solve_family,
             cfd_domain.time_profile.len(),
+            flow_topology.basis.as_str(),
+            flow_topology.domain_length_m,
+            flow_topology.hydraulic_diameter_m,
         ),
     });
 
@@ -5446,17 +5554,19 @@ pub fn analysis_run_cht_with_options_op(
         )
     })?;
 
-    let node_count = cfd_node_count_from_model(model, prep_context);
+    let topology = CfdDomainTopology::from_model(model, prep_context);
+    let node_count = topology.node_count;
     let field_step = match cfd_domain.solve_family {
         runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
         runmat_analysis_core::CfdSolveFamily::Transient => options.step_count.saturating_sub(1),
     };
     let (fluid_velocity, fluid_pressure) =
-        recover_cfd_velocity_pressure(cfd_domain, node_count, field_step);
+        recover_cfd_velocity_pressure(cfd_domain, topology, field_step);
     let (cfd_residual_momentum, cfd_residual_continuity) = cfd_residual_norms(
         &fluid_velocity,
         &fluid_pressure,
         cfd_domain,
+        topology,
         options.step_count,
     );
     let max_cfd_momentum_residual = cfd_residual_momentum
@@ -5468,7 +5578,7 @@ pub fn analysis_run_cht_with_options_op(
         .copied()
         .fold(0.0_f64, f64::max);
     let (cht_fields, cht_interface_closure) =
-        build_cht_run_fields(cfd_domain, node_count, &thermal_run);
+        build_cht_run_fields(cfd_domain, topology, &thermal_run);
     let mut run = thermal_run.run.clone();
     run.solver_method = "cht_conjugate_projection".to_string();
     run.preconditioner = "thermal_cfd_projection".to_string();
@@ -5478,7 +5588,7 @@ pub fn analysis_run_cht_with_options_op(
         code: "FEA_CFD_FLOW".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
         message: format!(
-            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={}",
+            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={} topology_basis={} domain_length_m={} hydraulic_diameter_m={}",
             cfd_domain.reference_density_kg_per_m3,
             cfd_domain.dynamic_viscosity_pa_s,
             cfd_domain.inlet_velocity_m_per_s,
@@ -5489,6 +5599,9 @@ pub fn analysis_run_cht_with_options_op(
                 runmat_analysis_core::CfdSolveFamily::Transient => "transient",
             },
             cfd_domain.time_profile.len(),
+            topology.basis.as_str(),
+            topology.domain_length_m,
+            topology.hydraulic_diameter_m,
         ),
     });
     let cfd_residual_severity = if max_cfd_momentum_residual <= options.residual_warn_threshold
@@ -5510,6 +5623,12 @@ pub fn analysis_run_cht_with_options_op(
             options.step_count,
         ),
     });
+    run.diagnostics.push(cfd_assembly_diagnostic(
+        topology,
+        pressure_drop_from_nodal_pressure(&fluid_pressure),
+        max_cfd_continuity_residual,
+        options.residual_warn_threshold,
+    ));
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
         code: "FEA_CHT_COUPLING".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
@@ -5986,17 +6105,19 @@ pub fn analysis_run_fsi_with_options_op(
     )?;
 
     let solve_start = Instant::now();
-    let node_count = cfd_node_count_from_model(model, prep_context);
+    let topology = CfdDomainTopology::from_model(model, prep_context);
+    let node_count = topology.node_count;
     let field_step = match cfd_domain.solve_family {
         runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
         runmat_analysis_core::CfdSolveFamily::Transient => options.step_count.saturating_sub(1),
     };
     let (fluid_velocity, fluid_pressure) =
-        recover_cfd_velocity_pressure(cfd_domain, node_count, field_step);
+        recover_cfd_velocity_pressure(cfd_domain, topology, field_step);
     let (cfd_residual_momentum, cfd_residual_continuity) = cfd_residual_norms(
         &fluid_velocity,
         &fluid_pressure,
         cfd_domain,
+        topology,
         options.step_count,
     );
     let max_cfd_momentum_residual = cfd_residual_momentum
@@ -6010,7 +6131,7 @@ pub fn analysis_run_fsi_with_options_op(
     let structural_compliance_per_pa = fsi_structural_compliance_per_pa(model);
     let (fsi_fields, fsi_interface_closure) = build_fsi_run_fields(
         cfd_domain,
-        node_count,
+        topology,
         options.step_count,
         structural_compliance_per_pa,
         options.max_linear_iters,
@@ -6034,7 +6155,7 @@ pub fn analysis_run_fsi_with_options_op(
         code: "FEA_CFD_FLOW".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
         message: format!(
-            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={}",
+            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={} topology_basis={} domain_length_m={} hydraulic_diameter_m={}",
             cfd_domain.reference_density_kg_per_m3,
             cfd_domain.dynamic_viscosity_pa_s,
             cfd_domain.inlet_velocity_m_per_s,
@@ -6045,6 +6166,9 @@ pub fn analysis_run_fsi_with_options_op(
                 runmat_analysis_core::CfdSolveFamily::Transient => "transient",
             },
             cfd_domain.time_profile.len(),
+            topology.basis.as_str(),
+            topology.domain_length_m,
+            topology.hydraulic_diameter_m,
         ),
     });
     let residual_severity = if max_interface_residual <= options.residual_warn_threshold {
@@ -6064,6 +6188,12 @@ pub fn analysis_run_fsi_with_options_op(
             options.step_count,
         ),
     });
+    run.diagnostics.push(cfd_assembly_diagnostic(
+        topology,
+        pressure_drop_from_nodal_pressure(&fluid_pressure),
+        max_cfd_continuity_residual,
+        options.residual_warn_threshold,
+    ));
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
         code: "FEA_FSI_INTERFACE_RESIDUAL".to_string(),
         severity: residual_severity,
