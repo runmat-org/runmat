@@ -5340,7 +5340,7 @@ pub(super) fn run_fixture(
                     "FEA_CHT_INTERFACE_CLOSURE",
                     "thermal_network_edge_count",
                 ),
-                Some(0.0),
+                Some(1.0),
                 None,
             );
             push_threshold_assertion(
