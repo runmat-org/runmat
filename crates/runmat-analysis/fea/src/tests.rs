@@ -1166,7 +1166,9 @@ fn nonlinear_prepared_state_recovery_uses_prep_connectivity_edges() {
         .iter()
         .find(|diag| diag.code == "FEA_NONLINEAR_STATE_TOPOLOGY")
         .expect("nonlinear state topology diagnostic should be present");
-    assert!(topology.message.contains("basis=prep_element_connectivity"));
+    assert!(topology
+        .message
+        .contains("basis=prep_constant_strain_b_matrix"));
     assert!(topology.message.contains("prep_recovery_edge_count="));
     assert!(topology.message.contains("mean_edge_length_m="));
     assert!(topology.message.contains("max_edge_strain_norm="));
