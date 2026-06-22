@@ -6,14 +6,15 @@ use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, AccelProviderFuture, CorrcoefOptions, CovarianceOptions,
     FindDirection, FspecialRequest, GpuTensorHandle, GpuTensorStorage, HostTensorOwned,
-    HostTensorView, ImfilterOptions, PagefunRequest, ProviderBandwidth, ProviderCholResult,
-    ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
-    ProviderEigResult, ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions,
-    ProviderIirFilterResult, ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult,
-    ProviderLuResult, ProviderModulationRequest, ProviderNanMode, ProviderNormOrder,
-    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions,
-    ProviderQrPivot, ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind, SetdiffOptions,
-    SetdiffResult, SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
+    HostTensorView, ImfilterOptions, PagefunRequest, ProviderBandwidth,
+    ProviderBitModulationRequest, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
+    ProviderConvMode, ProviderConvOrientation, ProviderEigResult, ProviderFindResult,
+    ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
+    ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderModulationRequest,
+    ProviderNanMode, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
+    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrResult, ProviderScanDirection,
+    ProviderSymmetryKind, SetdiffOptions, SetdiffResult, SortComparison, SortResult,
+    SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -2722,6 +2723,108 @@ impl AccelProvider for InProcessProvider {
             let handle = self.allocate_tensor_with_storage(
                 out,
                 request.input.shape.clone(),
+                GpuTensorStorage::ComplexInterleaved,
+            );
+            Ok(handle)
+        })
+    }
+
+    fn modulate_bits_constellation<'a>(
+        &'a self,
+        request: ProviderBitModulationRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(request.input)
+                    != GpuTensorStorage::ComplexInterleaved,
+                "modulate_bits_constellation requires a real-valued bit input"
+            );
+            ensure!(
+                !request.constellation.is_empty() && request.constellation.len().is_multiple_of(2),
+                "modulate_bits_constellation requires interleaved real/imag constellation pairs"
+            );
+            ensure!(
+                request.input_rows > 0 && request.bits_per_symbol > 0,
+                "modulate_bits_constellation: invalid bit grouping"
+            );
+            ensure!(
+                request.input_rows.is_multiple_of(request.bits_per_symbol),
+                "modulate_bits_constellation: bit rows must be a multiple of bits_per_symbol"
+            );
+            let order = request.constellation.len() / 2;
+            let data = {
+                let guard = registry().lock().unwrap();
+                guard
+                    .get(&request.input.buffer_id)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("buffer not found: {}", request.input.buffer_id)
+                    })?
+                    .clone()
+            };
+            let logical_len = request
+                .input
+                .shape
+                .iter()
+                .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+                .ok_or_else(|| anyhow!("modulate_bits_constellation: input shape overflow"))?;
+            ensure!(
+                logical_len == data.len(),
+                "modulate_bits_constellation: input data length does not match shape"
+            );
+            ensure!(
+                request.input.shape.first().copied() == Some(request.input_rows),
+                "modulate_bits_constellation: input_rows must match the input leading dimension"
+            );
+            ensure!(
+                logical_len.is_multiple_of(request.input_rows),
+                "modulate_bits_constellation: bit input shape is inconsistent"
+            );
+            let output_rows = request.input_rows / request.bits_per_symbol;
+            let channels = logical_len / request.input_rows;
+            let output_len = output_rows
+                .checked_mul(channels)
+                .ok_or_else(|| anyhow!("modulate_bits_constellation: output shape overflow"))?;
+            let out_capacity = output_len
+                .checked_mul(2)
+                .ok_or_else(|| anyhow!("modulate_bits_constellation: output length overflow"))?;
+            let mut out = Vec::with_capacity(out_capacity);
+            for channel in 0..channels {
+                let channel_offset = channel * request.input_rows;
+                for group in 0..output_rows {
+                    let mut symbol = 0usize;
+                    for bit_idx in 0..request.bits_per_symbol {
+                        let value =
+                            data[channel_offset + group * request.bits_per_symbol + bit_idx];
+                        ensure!(
+                            value.is_finite(),
+                            "modulate_bits_constellation: bits must be finite"
+                        );
+                        let rounded = value.round();
+                        ensure!(
+                            (value - rounded).abs() <= 1.0e-9 && (rounded == 0.0 || rounded == 1.0),
+                            "modulate_bits_constellation: bits must be 0 or 1"
+                        );
+                        symbol = (symbol << 1) | rounded as usize;
+                    }
+                    ensure!(
+                        symbol < order,
+                        "modulate_bits_constellation: symbols must be in range"
+                    );
+                    let point = symbol * 2;
+                    out.push(request.constellation[point]);
+                    out.push(request.constellation[point + 1]);
+                }
+            }
+            let mut output_shape = request.input.shape.clone();
+            if output_shape.is_empty() {
+                output_shape.push(output_rows);
+                output_shape.push(1);
+            } else {
+                output_shape[0] = output_rows;
+            }
+            let handle = self.allocate_tensor_with_storage(
+                out,
+                output_shape,
                 GpuTensorStorage::ComplexInterleaved,
             );
             Ok(handle)

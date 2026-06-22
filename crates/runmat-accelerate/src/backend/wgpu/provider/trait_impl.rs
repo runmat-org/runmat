@@ -1,7 +1,7 @@
 use super::*;
 use runmat_accelerate_api::{
-    ProviderEnvelopeRequest, ProviderEnvelopeResult, ProviderHilbertRequest,
-    ProviderModulationRequest,
+    ProviderBitModulationRequest, ProviderEnvelopeRequest, ProviderEnvelopeResult,
+    ProviderHilbertRequest, ProviderModulationRequest,
 };
 
 impl AccelProvider for WgpuProvider {
@@ -340,6 +340,13 @@ impl AccelProvider for WgpuProvider {
         request: ProviderModulationRequest<'a>,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.modulate_constellation_exec(&request).await })
+    }
+
+    fn modulate_bits_constellation<'a>(
+        &'a self,
+        request: ProviderBitModulationRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.modulate_bits_constellation_exec(&request).await })
     }
 
     fn elem_ge<'a>(

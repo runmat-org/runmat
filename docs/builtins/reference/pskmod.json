@@ -23,7 +23,7 @@
       "bool"
     ],
     "broadcasting": "none",
-    "notes": "Integer-symbol gpuArray inputs use the active provider's modulation hook to produce complex-interleaved GPU storage directly. Bit-input gpuArrays and providers without the hook fall back to host-compatible validation and re-upload."
+    "notes": "Integer-symbol and bit-input gpuArrays use the active provider's modulation hooks to produce complex-interleaved GPU storage directly. Providers without those hooks fall back to host-compatible validation and re-upload."
   },
   "fusion": {
     "elementwise": false,
@@ -67,7 +67,7 @@
   "faqs": [
     {
       "question": "Does pskmod execute on the GPU?",
-      "answer": "Yes for integer-symbol gpuArrays when the active provider implements the modulation hook. Bit-input gpuArrays fall back to host grouping and validation before returning a resident complex-interleaved output."
+      "answer": "Yes when the active provider implements the modulation hooks. Integer-symbol and bit-input gpuArrays can produce resident complex-interleaved outputs directly."
     },
     {
       "question": "Is custom symbol ordering supported?",
@@ -92,9 +92,9 @@
     "label": "`crates/runmat-runtime/src/builtins/comms/pskmod.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/comms/pskmod.rs"
   },
-  "gpu_residency": "The builtin declares `NewHandle` residency for gpuArray inputs. Integer-symbol gpuArray inputs stay resident through provider-side constellation modulation and produce a complex-interleaved GPU handle. Bit-input gpuArrays require host-side bit grouping before the output is re-uploaded.",
+  "gpu_residency": "The builtin declares `NewHandle` residency for gpuArray inputs. Integer-symbol and bit-input gpuArray inputs stay resident through provider-side constellation modulation and produce a complex-interleaved GPU handle when provider support is available.",
   "gpu_behavior": [
     "RunMat represents complex GPU tensors as interleaved real/imaginary buffers with complex storage metadata, so downstream GPU-aware FFT and signal paths can consume the modulation output without a host result.",
-    "The provider hook receives a validated constellation table and writes the complex output on device. It reads back only a compact validation state for MATLAB-compatible symbol errors."
+    "The provider hooks receive a validated constellation table and write the complex output on device. They read back only a compact validation state for MATLAB-compatible symbol or bit errors."
   ]
 }
