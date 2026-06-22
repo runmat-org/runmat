@@ -19,6 +19,15 @@ struct ConductanceEdge {
     to: usize,
     conductance: f64,
     length_m: f64,
+    direction: [f64; VECTOR_COMPONENT_COUNT],
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ConductanceEdgeSeed {
+    from: usize,
+    to: usize,
+    length_m: f64,
+    direction: [f64; VECTOR_COMPONENT_COUNT],
 }
 
 #[derive(Debug)]
@@ -223,7 +232,8 @@ fn edge_electric_field_values(solve: &ElectroThermalPotentialSolve) -> Vec<f64> 
     let mut values = Vec::with_capacity(solve.graph.edges.len() * VECTOR_COMPONENT_COUNT);
     for edge in &solve.graph.edges {
         let voltage_drop = solve.potential[edge.from] - solve.potential[edge.to];
-        values.extend_from_slice(&[voltage_drop / edge.length_m.max(1.0e-12), 0.0, 0.0]);
+        let magnitude = voltage_drop / edge.length_m.max(1.0e-12);
+        values.extend(edge.direction.iter().map(|component| magnitude * component));
     }
     values
 }
@@ -234,11 +244,8 @@ fn edge_current_density_values(solve: &ElectroThermalPotentialSolve, signed_span
     }
     let mut values = Vec::with_capacity(solve.edge_current.len() * VECTOR_COMPONENT_COUNT);
     for (edge, current) in solve.graph.edges.iter().zip(solve.edge_current.iter()) {
-        values.extend_from_slice(&[
-            current.abs() * signed_span / edge.length_m.max(1.0e-12),
-            0.0,
-            0.0,
-        ]);
+        let magnitude = current.abs() * signed_span / edge.length_m.max(1.0e-12);
+        values.extend(edge.direction.iter().map(|component| magnitude * component));
     }
     values
 }
@@ -400,17 +407,19 @@ fn build_conductance_domain_graph(
                 to: index + 1,
                 conductance,
                 length_m: 1.0,
+                direction: [1.0, 0.0, 0.0],
             })
             .collect::<Vec<_>>()
     } else {
         graph_edges
             .iter()
             .zip(conductance_profile)
-            .map(|((from, to, length_m), conductance)| ConductanceEdge {
-                from: *from,
-                to: *to,
-                conductance: conductance / length_m.max(1.0e-12),
-                length_m: *length_m,
+            .map(|(seed, conductance)| ConductanceEdge {
+                from: seed.from,
+                to: seed.to,
+                conductance: conductance / seed.length_m.max(1.0e-12),
+                length_m: seed.length_m,
+                direction: seed.direction,
             })
             .collect::<Vec<_>>()
     };
@@ -478,7 +487,7 @@ fn build_conductance_domain_graph(
 fn prep_element_topology_conductance_edges(
     summary: &ElectroThermalAssemblySummary,
     node_count: usize,
-) -> Vec<(usize, usize, f64)> {
+) -> Vec<ConductanceEdgeSeed> {
     if node_count < 2 {
         return Vec::new();
     }
@@ -501,35 +510,49 @@ fn prep_element_topology_conductance_edges(
                 return None;
             }
             let (from, to) = if from < to { (from, to) } else { (to, from) };
-            let length_m = prep_coordinate_edge_length(coordinates, from, to, fallback_length);
-            Some((from, to, length_m))
+            let (length_m, direction) =
+                prep_coordinate_edge_geometry(coordinates, from, to, fallback_length);
+            Some(ConductanceEdgeSeed {
+                from,
+                to,
+                length_m,
+                direction,
+            })
         })
         .collect::<Vec<_>>();
-    edges.sort_by_key(|(from, to, _)| (*from, *to));
-    edges.dedup_by_key(|(from, to, _)| (*from, *to));
+    edges.sort_by_key(|edge| (edge.from, edge.to));
+    edges.dedup_by_key(|edge| (edge.from, edge.to));
     edges
 }
 
-fn prep_coordinate_edge_length(
+fn prep_coordinate_edge_geometry(
     coordinates: crate::assembly::PrepCoordinateSummary,
     from: usize,
     to: usize,
     fallback_length: f64,
-) -> f64 {
+) -> (f64, [f64; VECTOR_COMPONENT_COUNT]) {
     if from >= coordinates.element_topology_sample_node_coordinates_m.len()
         || to >= coordinates.element_topology_sample_node_coordinates_m.len()
     {
-        return fallback_length;
+        return (fallback_length, [1.0, 0.0, 0.0]);
     }
     let from_coord = coordinates.element_topology_sample_node_coordinates_m[from];
     let to_coord = coordinates.element_topology_sample_node_coordinates_m[to];
-    finite_positive_or(
-        ((to_coord[0] - from_coord[0]).powi(2)
-            + (to_coord[1] - from_coord[1]).powi(2)
-            + (to_coord[2] - from_coord[2]).powi(2))
-        .sqrt(),
+    let delta = [
+        to_coord[0] - from_coord[0],
+        to_coord[1] - from_coord[1],
+        to_coord[2] - from_coord[2],
+    ];
+    let length = finite_positive_or(
+        (delta[0].powi(2) + delta[1].powi(2) + delta[2].powi(2)).sqrt(),
         fallback_length,
-    )
+    );
+    let direction = if length > 1.0e-12 {
+        [delta[0] / length, delta[1] / length, delta[2] / length]
+    } else {
+        [1.0, 0.0, 0.0]
+    };
+    (length, direction)
 }
 
 fn finite_positive_or(value: f64, fallback: f64) -> f64 {
@@ -543,7 +566,7 @@ fn finite_positive_or(value: f64, fallback: f64) -> f64 {
 fn prep_recovery_conductance_edges(
     summary: &ElectroThermalAssemblySummary,
     node_count: usize,
-) -> Vec<(usize, usize, f64)> {
+) -> Vec<ConductanceEdgeSeed> {
     if node_count < 2 {
         return Vec::new();
     }
@@ -552,22 +575,30 @@ fn prep_recovery_conductance_edges(
         .iter()
         .filter_map(|edge| prep_recovery_conductance_edge(edge, node_count))
         .collect::<Vec<_>>();
-    edges.sort_by_key(|(from, to, _)| (*from, *to));
-    edges.dedup_by_key(|(from, to, _)| (*from, *to));
+    edges.sort_by_key(|edge| (edge.from, edge.to));
+    edges.dedup_by_key(|edge| (edge.from, edge.to));
     edges
 }
 
 fn prep_recovery_conductance_edge(
     edge: &PrepRecoveryEdgeSummary,
     node_count: usize,
-) -> Option<(usize, usize, f64)> {
+) -> Option<ConductanceEdgeSeed> {
     let from = (edge.from_dof / VECTOR_COMPONENT_COUNT).min(node_count.saturating_sub(1));
     let to = (edge.to_dof / VECTOR_COMPONENT_COUNT).min(node_count.saturating_sub(1));
     if from == to {
         return None;
     }
     let (from, to) = if from < to { (from, to) } else { (to, from) };
-    Some((from, to, edge.edge_length_m.max(1.0e-12)))
+    let axis = edge.element_family_index % VECTOR_COMPONENT_COUNT;
+    let mut direction = [0.0; VECTOR_COMPONENT_COUNT];
+    direction[axis] = 1.0;
+    Some(ConductanceEdgeSeed {
+        from,
+        to,
+        length_m: edge.edge_length_m.max(1.0e-12),
+        direction,
+    })
 }
 
 fn build_domain_topology(
@@ -1237,6 +1268,18 @@ mod tests {
             vec![5, VECTOR_COMPONENT_COUNT]
         );
         assert_eq!(fields.static_fields[3].shape, vec![5]);
+        let electric_field = fields.static_fields[1]
+            .as_host_f64()
+            .expect("electric field should be host values");
+        assert!(electric_field
+            .chunks_exact(VECTOR_COMPONENT_COUNT)
+            .any(|component| component[1].abs() > 0.0));
+        let current_density = fields.static_fields[2]
+            .as_host_f64()
+            .expect("current density should be host values");
+        assert!(current_density
+            .chunks_exact(VECTOR_COMPONENT_COUNT)
+            .any(|component| component[1].abs() > 0.0));
         assert!(fields.diagnostics[0]
             .message
             .contains("basis=prep_element_topology_graph"));
