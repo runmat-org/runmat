@@ -70,7 +70,10 @@ fn test_collection_with_live_objects() {
 
         // Live objects should still be accessible
         for (i, ptr) in live_objects.iter().enumerate() {
-            assert_eq!(gc_deref(ptr), Value::Num(i as f64));
+            assert_eq!(
+                gc_clone_value(ptr).expect("valid GC handle"),
+                Value::Num(i as f64)
+            );
         }
 
         // Some garbage should have been collected
@@ -183,7 +186,10 @@ fn test_collection_with_different_generations() {
 
         // Young objects should still be accessible (they were promoted)
         for (i, ptr) in young_objects.iter().enumerate() {
-            assert_eq!(gc_deref(ptr), Value::Num(i as f64));
+            assert_eq!(
+                gc_clone_value(ptr).expect("valid GC handle"),
+                Value::Num(i as f64)
+            );
         }
 
         // Clean up roots
@@ -268,7 +274,7 @@ fn test_allocation_after_collection() {
             .expect("allocation after collection should succeed");
 
         assert_eq!(
-            gc_deref(&new_ptr),
+            gc_clone_value(&new_ptr).expect("valid GC handle"),
             Value::String("post-collection".to_string())
         );
     });
@@ -327,7 +333,10 @@ fn test_collection_performance() {
 
         // Objects should still be accessible (they're kept alive by the Vec)
         for (i, ptr) in objects.iter().enumerate() {
-            assert_eq!(gc_deref(ptr), Value::Num(i as f64));
+            assert_eq!(
+                gc_clone_value(ptr).expect("valid GC handle"),
+                Value::Num(i as f64)
+            );
         }
 
         // Clean up roots

@@ -36,7 +36,7 @@ pub struct RootId(pub usize);
 
 /// Trait for objects that can serve as GC roots
 pub trait GcRoot {
-    /// Scan this root and return all reachable GC pointers
+    /// Scan this root and return all reachable GC handles.
     fn scan(&self) -> Vec<GcHandle<Value>>;
 
     /// Get a human-readable description of this root
@@ -497,7 +497,7 @@ mod tests {
         let root_id = scanner.register_root(root).expect("should register");
 
         let roots = scanner.scan_roots().expect("should scan");
-        assert_eq!(roots.len(), 0); // No GC pointers yet
+        assert_eq!(roots.len(), 0); // No GC handles yet
 
         let info = scanner.root_info();
         assert_eq!(info.len(), 1);

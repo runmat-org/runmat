@@ -31,7 +31,7 @@ static FINALIZERS: once_cell::sync::Lazy<
     parking_lot::Mutex<HashMap<usize, std::sync::Arc<dyn GcFinalizer>>>,
 > = once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(HashMap::new()));
 
-/// Register a finalizer for the provided GC pointer.
+/// Register a finalizer for the provided GC handle.
 pub fn gc_register_finalizer(
     ptr: GcHandle<Value>,
     f: std::sync::Arc<dyn GcFinalizer>,
@@ -44,7 +44,7 @@ pub fn gc_register_finalizer(
     Ok(())
 }
 
-/// Remove any registered finalizer for the provided GC pointer.
+/// Remove any registered finalizer for the provided GC handle.
 pub fn gc_unregister_finalizer(ptr: GcHandle<Value>) -> Result<()> {
     let addr = unsafe { ptr.as_raw() } as usize;
     if addr == 0 {
@@ -84,7 +84,7 @@ pub enum GcError {
     #[error("Out of memory: {0}")]
     OutOfMemory(String),
 
-    #[error("Invalid GC pointer: {0}")]
+    #[error("Invalid GC handle: {0}")]
     InvalidPointer(String),
 
     #[error("Collection failed: {0}")]
@@ -496,11 +496,6 @@ thread_local! {
 static WRITE_BARRIERS: once_cell::sync::Lazy<Arc<WriteBarrierManager>> =
     once_cell::sync::Lazy::new(|| Arc::new(WriteBarrierManager::new(true, false)));
 
-/// Helper function to clone a GC value through an explicitly raw pointer access.
-pub fn gc_deref(ptr: &GcHandle<Value>) -> Value {
-    gc_clone_value(ptr).expect("valid GC pointer")
-}
-
 /// Global GC functions for easy access
 pub fn gc_allocate(value: Value) -> Result<GcHandle<Value>> {
     GC.allocate(value)
@@ -668,7 +663,10 @@ mod tests {
         gc_test_context(|| {
             let value = Value::Num(42.0);
             let ptr = gc_allocate(value).expect("allocation failed");
-            assert_eq!(gc_deref(&ptr), Value::Num(42.0));
+            assert_eq!(
+                gc_clone_value(&ptr).expect("valid GC handle"),
+                Value::Num(42.0)
+            );
         });
     }
 
@@ -724,7 +722,10 @@ mod tests {
             }
 
             let _ = gc_collect_minor().expect("collection failed");
-            assert_eq!(gc_deref(&protected), Value::Num(42.0));
+            assert_eq!(
+                gc_clone_value(&protected).expect("valid GC handle"),
+                Value::Num(42.0)
+            );
 
             gc_remove_root(protected).expect("root removal failed");
         });
@@ -734,11 +735,17 @@ mod tests {
     fn test_gc_allocation_and_roots() {
         gc_test_context(|| {
             let v = gc_allocate(Value::Num(7.0)).expect("allocation failed");
-            assert_eq!(gc_deref(&v), Value::Num(7.0));
+            assert_eq!(
+                gc_clone_value(&v).expect("valid GC handle"),
+                Value::Num(7.0)
+            );
 
             gc_add_root(v.clone()).expect("root add failed");
             let _ = gc_collect_minor().expect("collection failed");
-            assert_eq!(gc_deref(&v), Value::Num(7.0));
+            assert_eq!(
+                gc_clone_value(&v).expect("valid GC handle"),
+                Value::Num(7.0)
+            );
 
             gc_remove_root(v).expect("root remove failed");
         });
@@ -750,7 +757,7 @@ mod tests {
             let raw = Box::into_raw(Box::new(Value::Num(1.0)));
             let ptr = unsafe { GcHandle::from_raw(raw) };
 
-            let err = gc_clone_value(&ptr).expect_err("non-GC pointer should be rejected");
+            let err = gc_clone_value(&ptr).expect_err("non-GC handle should be rejected");
             assert!(matches!(err, GcError::InvalidPointer(_)));
 
             unsafe {

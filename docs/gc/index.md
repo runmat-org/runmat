@@ -45,7 +45,7 @@ The GC manages the outer `Value` allocation. Nested payloads such as `Vec`, `Str
 | `CellArray` | Stores owned `Vec<Value>` elements. A cell element can contain a handle, but the cell itself does not allocate every element in the GC. |
 | `HandleObject` | Stores a `GcHandle<Value>` target to preserve handle identity. |
 | `Listener` | Stores `GcHandle<Value>` references to the target and callback. |
-| `Object` and `Struct` payloads | Can be placed behind a GC pointer when identity or sharing is required. |
+| `Object` and `Struct` payloads | Can be placed behind a GC handle when identity or sharing is required. |
 | `GpuTensor` | Registers a finalizer so provider-owned GPU buffers are freed when the GC value is collected. |
 
 Plain numeric arrays, strings, logical arrays, and tensors are not deep-managed by the GC. Their heap buffers are owned by Rust allocation inside the stored `Value`.
@@ -94,7 +94,7 @@ Roots are the entry points that keep GC values alive.
 | Root source | Code entity | Purpose |
 | --- | --- | --- |
 | Explicit roots | `gc_add_root` / `gc_remove_root` | Protect a specific `GcHandle<Value>` by address. |
-| VM stack | `StackRoot` | Scans the interpreter stack for nested GC pointers. |
+| VM stack | `StackRoot` | Scans the interpreter stack for nested GC handles. |
 | VM variables | `VariableArrayRoot` | Scans the interpreter variable array. |
 | Global values | `GlobalRoot` | Keeps runtime/global values reachable during execution. |
 | Registered roots | `RootScanner` | Stores root objects by `RootId` and removes inactive roots. |
