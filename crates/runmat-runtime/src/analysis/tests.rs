@@ -6014,6 +6014,9 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
                 .contains("heat_flux_realization_residual_ratio=")
             && diag.message.contains("coupled_interface_iteration_count=")
             && diag.message.contains("coupled_interface_residual_ratio=")
+            && diag.message.contains("thermal_network_node_count=")
+            && diag.message.contains("thermal_network_edge_count=")
+            && diag.message.contains("thermal_network_residual_ratio=")
     }));
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_CHT_KNOWN_ANSWER"
@@ -6029,6 +6032,7 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
             && diag
                 .message
                 .contains("heat_flux_realization_residual_ratio=")
+            && diag.message.contains("thermal_network_residual_ratio=")
             && diag.message.contains("known_answer_coverage_ratio=")
     }));
     let thermal = envelope

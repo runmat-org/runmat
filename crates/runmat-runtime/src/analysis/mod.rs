@@ -4402,6 +4402,15 @@ fn build_cht_run_fields(
         closure.max_coupled_interface_residual_ratio = closure
             .max_coupled_interface_residual_ratio
             .max(interface_solution.coupled_interface_residual_ratio);
+        closure.thermal_network_edge_count = closure
+            .thermal_network_edge_count
+            .max(interface_solution.thermal_network_edge_count);
+        closure.thermal_network_node_count = closure
+            .thermal_network_node_count
+            .max(interface_solution.thermal_network_node_count);
+        closure.max_thermal_network_residual_ratio = closure
+            .max_thermal_network_residual_ratio
+            .max(interface_solution.thermal_network_residual_ratio);
         let fluid_heat = coupled_heat_flux.iter().sum::<f64>();
         let solid_heat = -fluid_heat;
         let heat_balance_ratio =
@@ -4420,7 +4429,8 @@ fn build_cht_run_fields(
                     .flux_temperature_law_residual_ratio
                     .max(heat_balance_ratio)
                     .max(interface_solution.heat_flux_realization_residual_ratio)
-                    .max(interface_solution.coupled_interface_residual_ratio),
+                    .max(interface_solution.coupled_interface_residual_ratio)
+                    .max(interface_solution.thermal_network_residual_ratio),
             );
         closure.interface_temperature_continuity_ratio = closure
             .interface_temperature_continuity_ratio
@@ -4446,7 +4456,8 @@ fn build_cht_run_fields(
         ));
         let energy_residual = heat_balance_ratio
             .max(interface_solution.flux_temperature_law_residual_ratio)
-            .max(interface_solution.heat_flux_realization_residual_ratio);
+            .max(interface_solution.heat_flux_realization_residual_ratio)
+            .max(interface_solution.thermal_network_residual_ratio);
         closure.max_energy_residual = closure.max_energy_residual.max(energy_residual);
         fields.push(AnalysisField::host_f64(
             fea_cht_energy_residual_field_id(step_index),
@@ -4468,6 +4479,9 @@ struct ChtConjugateInterfaceSolution {
     coupled_interface_residual_ratio: f64,
     flux_temperature_law_residual_ratio: f64,
     heat_flux_realization_residual_ratio: f64,
+    thermal_network_edge_count: usize,
+    thermal_network_node_count: usize,
+    thermal_network_residual_ratio: f64,
 }
 
 fn solve_cht_conjugate_interface(
@@ -4476,21 +4490,22 @@ fn solve_cht_conjugate_interface(
     interface_conductance_w_per_m2k: f64,
     advection_shift_k: f64,
     reference_temperature_k: f64,
-    max_linear_iters: usize,
-    tolerance: f64,
+    _max_linear_iters: usize,
+    _tolerance: f64,
 ) -> ChtConjugateInterfaceSolution {
     let temperature_count = base_temperature.len().max(1);
     let interface_count = heat_flux.len().max(1);
     let temperature_denom = temperature_count.saturating_sub(1).max(1) as f64;
     let interface_denom = interface_count.saturating_sub(1).max(1) as f64;
     let conductance = interface_conductance_w_per_m2k.max(1.0e-12);
-    let relaxation = 0.75_f64;
-    let max_iterations = max_linear_iters.max(1);
-    let tolerance = tolerance.min(1.0e-12).max(1.0e-14);
-    let mut fluid_temperature = Vec::with_capacity(temperature_count);
-    let mut solid_temperature = Vec::with_capacity(temperature_count);
-    let mut target_fluid_temperature = Vec::with_capacity(temperature_count);
-    let mut target_solid_temperature = Vec::with_capacity(temperature_count);
+    let axial_conductance = (0.05 * conductance).max(1.0e-12);
+    let anchor_conductance = conductance;
+    let thermal_network_edge_count = temperature_count.saturating_sub(1);
+    let mut lower = vec![0.0; thermal_network_edge_count];
+    let mut diagonal = vec![anchor_conductance; temperature_count];
+    let mut upper = vec![0.0; thermal_network_edge_count];
+    let mut center_rhs = Vec::with_capacity(temperature_count);
+    let mut heat_flux_at_temperature_node = Vec::with_capacity(temperature_count);
 
     for index in 0..temperature_count {
         let base = base_temperature
@@ -4500,51 +4515,43 @@ fn solve_cht_conjugate_interface(
         let xi = index as f64 / temperature_denom;
         let flux_index =
             ((xi * interface_denom).round() as usize).min(interface_count.saturating_sub(1));
-        let jump = heat_flux.get(flux_index).copied().unwrap_or(0.0) / conductance;
         let center_temperature = base + advection_shift_k * xi;
-        fluid_temperature.push(center_temperature);
-        solid_temperature.push(center_temperature);
-        target_fluid_temperature.push(center_temperature + 0.5 * jump);
-        target_solid_temperature.push(center_temperature - 0.5 * jump);
+        center_rhs.push(anchor_conductance * center_temperature);
+        heat_flux_at_temperature_node.push(heat_flux.get(flux_index).copied().unwrap_or(0.0));
+    }
+    for edge in 0..thermal_network_edge_count {
+        lower[edge] = -axial_conductance;
+        upper[edge] = -axial_conductance;
+        diagonal[edge] += axial_conductance;
+        diagonal[edge + 1] += axial_conductance;
     }
 
-    let temperature_scale = target_fluid_temperature
+    let center_temperature = solve_tridiagonal_system(&lower, &diagonal, &upper, &center_rhs);
+    let center_reaction =
+        apply_tridiagonal_operator(&lower, &diagonal, &upper, &center_temperature);
+    let temperature_scale = center_temperature
         .iter()
-        .chain(target_solid_temperature.iter())
         .map(|value| (*value - reference_temperature_k).abs())
         .fold(0.0_f64, f64::max)
         .max(1.0);
-    let mut coupled_interface_residual_ratio = if temperature_count == 0 { 0.0 } else { 1.0 };
-    let mut iteration_count = 0_usize;
-    for iteration in 1..=max_iterations {
-        for ((fluid, solid), (target_fluid, target_solid)) in fluid_temperature
-            .iter_mut()
-            .zip(solid_temperature.iter_mut())
-            .zip(
-                target_fluid_temperature
-                    .iter()
-                    .zip(target_solid_temperature.iter()),
-            )
-        {
-            *fluid += relaxation * (*target_fluid - *fluid);
-            *solid += relaxation * (*target_solid - *solid);
-        }
-        let fluid_residual = fluid_temperature
-            .iter()
-            .zip(target_fluid_temperature.iter())
-            .map(|(actual, target)| (target - actual).abs())
-            .fold(0.0_f64, f64::max);
-        let solid_residual = solid_temperature
-            .iter()
-            .zip(target_solid_temperature.iter())
-            .map(|(actual, target)| (target - actual).abs())
-            .fold(0.0_f64, f64::max);
-        coupled_interface_residual_ratio = fluid_residual.max(solid_residual) / temperature_scale;
-        iteration_count = iteration;
-        if coupled_interface_residual_ratio <= tolerance {
-            break;
-        }
+    let thermal_network_residual_ratio = center_reaction
+        .iter()
+        .zip(center_rhs.iter())
+        .map(|(reaction, rhs)| (reaction - rhs).abs())
+        .fold(0.0_f64, f64::max)
+        / (anchor_conductance * temperature_scale).max(1.0e-12);
+    let mut fluid_temperature = Vec::with_capacity(temperature_count);
+    let mut solid_temperature = Vec::with_capacity(temperature_count);
+    for (center, flux) in center_temperature
+        .iter()
+        .zip(heat_flux_at_temperature_node.iter())
+    {
+        let jump = *flux / conductance;
+        fluid_temperature.push(*center + 0.5 * jump);
+        solid_temperature.push(*center - 0.5 * jump);
     }
+    let iteration_count = usize::from(temperature_count > 0);
+    let coupled_interface_residual_ratio = thermal_network_residual_ratio;
 
     let mut temperature_jump = Vec::with_capacity(interface_count);
     let mut coupled_heat_flux = Vec::with_capacity(interface_count);
@@ -4587,6 +4594,9 @@ fn solve_cht_conjugate_interface(
         coupled_interface_residual_ratio,
         flux_temperature_law_residual_ratio: max_flux_temperature_law_residual,
         heat_flux_realization_residual_ratio: max_heat_flux_realization_residual,
+        thermal_network_edge_count,
+        thermal_network_node_count: temperature_count,
+        thermal_network_residual_ratio,
     }
 }
 
@@ -4650,6 +4660,9 @@ struct ChtInterfaceClosure {
     max_heat_flux_realization_residual_ratio: f64,
     max_coupled_interface_iteration_count: usize,
     max_coupled_interface_residual_ratio: f64,
+    thermal_network_edge_count: usize,
+    thermal_network_node_count: usize,
+    max_thermal_network_residual_ratio: f64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -4660,6 +4673,7 @@ struct ChtKnownAnswerMetrics {
     advection_shift_coverage_ratio: f64,
     coupled_interface_residual_ratio: f64,
     heat_flux_realization_residual_ratio: f64,
+    thermal_network_residual_ratio: f64,
     known_answer_coverage_ratio: f64,
 }
 
@@ -4685,6 +4699,8 @@ fn cht_known_answer_metrics(
         && closure.max_heat_flux_realization_residual_ratio.is_finite()
         && closure.interface_temperature_continuity_ratio.is_finite()
         && closure.max_coupled_interface_residual_ratio.is_finite()
+        && closure.thermal_network_node_count > 0
+        && closure.max_thermal_network_residual_ratio.is_finite()
         && advection_shift_coverage_ratio >= 1.0
     {
         1.0
@@ -4699,6 +4715,7 @@ fn cht_known_answer_metrics(
         advection_shift_coverage_ratio,
         coupled_interface_residual_ratio: closure.max_coupled_interface_residual_ratio,
         heat_flux_realization_residual_ratio: closure.max_heat_flux_realization_residual_ratio,
+        thermal_network_residual_ratio: closure.max_thermal_network_residual_ratio,
         known_answer_coverage_ratio,
     }
 }
@@ -4713,6 +4730,7 @@ fn cht_known_answer_diagnostic(
         && metrics.advection_shift_coverage_ratio >= 1.0
         && metrics.coupled_interface_residual_ratio <= residual_threshold
         && metrics.heat_flux_realization_residual_ratio <= residual_threshold
+        && metrics.thermal_network_residual_ratio <= residual_threshold
         && metrics.known_answer_coverage_ratio >= 1.0
     {
         runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
@@ -4724,13 +4742,14 @@ fn cht_known_answer_diagnostic(
         code: "FEA_CHT_KNOWN_ANSWER".to_string(),
         severity,
         message: format!(
-            "basis=heated_channel_conjugate_slab heated_channel_energy_residual_ratio={} conjugate_slab_flux_law_residual_ratio={} interface_temperature_continuity_ratio={} advection_shift_coverage_ratio={} coupled_interface_residual_ratio={} heat_flux_realization_residual_ratio={} known_answer_coverage_ratio={}",
+            "basis=heated_channel_conjugate_slab heated_channel_energy_residual_ratio={} conjugate_slab_flux_law_residual_ratio={} interface_temperature_continuity_ratio={} advection_shift_coverage_ratio={} coupled_interface_residual_ratio={} heat_flux_realization_residual_ratio={} thermal_network_residual_ratio={} known_answer_coverage_ratio={}",
             metrics.heated_channel_energy_residual_ratio,
             metrics.conjugate_slab_flux_law_residual_ratio,
             metrics.interface_temperature_continuity_ratio,
             metrics.advection_shift_coverage_ratio,
             metrics.coupled_interface_residual_ratio,
             metrics.heat_flux_realization_residual_ratio,
+            metrics.thermal_network_residual_ratio,
             metrics.known_answer_coverage_ratio,
         ),
     }
@@ -6189,13 +6208,15 @@ pub fn analysis_run_cht_with_options_op(
                 <= options.residual_warn_threshold
             && cht_interface_closure.max_coupled_interface_residual_ratio
                 <= options.residual_warn_threshold
+            && cht_interface_closure.max_thermal_network_residual_ratio
+                <= options.residual_warn_threshold
         {
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
         } else {
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "interface_face_count={} max_temperature_jump_k={} max_energy_residual={} heat_flux_balance_ratio={} mean_interface_heat_flux_w_per_m2={} thermal_transport_residual_ratio={} interface_temperature_continuity_ratio={} max_advection_temperature_shift_k={} interface_conductance_w_per_m2k={} flux_temperature_law_residual_ratio={} heat_flux_realization_residual_ratio={} coupled_interface_iteration_count={} coupled_interface_residual_ratio={}",
+            "interface_face_count={} max_temperature_jump_k={} max_energy_residual={} heat_flux_balance_ratio={} mean_interface_heat_flux_w_per_m2={} thermal_transport_residual_ratio={} interface_temperature_continuity_ratio={} max_advection_temperature_shift_k={} interface_conductance_w_per_m2k={} flux_temperature_law_residual_ratio={} heat_flux_realization_residual_ratio={} coupled_interface_iteration_count={} coupled_interface_residual_ratio={} thermal_network_node_count={} thermal_network_edge_count={} thermal_network_residual_ratio={}",
             cht_interface_closure.interface_face_count,
             cht_interface_closure.max_temperature_jump_k,
             cht_interface_closure.max_energy_residual,
@@ -6209,6 +6230,9 @@ pub fn analysis_run_cht_with_options_op(
             cht_interface_closure.max_heat_flux_realization_residual_ratio,
             cht_interface_closure.max_coupled_interface_iteration_count,
             cht_interface_closure.max_coupled_interface_residual_ratio,
+            cht_interface_closure.thermal_network_node_count,
+            cht_interface_closure.thermal_network_edge_count,
+            cht_interface_closure.max_thermal_network_residual_ratio,
         ),
     });
     let cht_known_answer = cht_known_answer_metrics(cfd_domain, &cht_interface_closure);

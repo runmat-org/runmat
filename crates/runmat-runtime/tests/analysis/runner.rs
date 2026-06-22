@@ -5156,6 +5156,48 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
+                "cht_thermal_network_node_count",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "thermal_network_node_count",
+                ),
+                Some(1.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_thermal_network_edge_count",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "thermal_network_edge_count",
+                ),
+                Some(0.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_thermal_network_residual_ratio",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "thermal_network_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-9),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
                 "cht_heated_channel_energy_residual_ratio",
                 "FEA_CHT_KNOWN_ANSWER",
                 diagnostic_metric(
@@ -5204,6 +5246,20 @@ pub(super) fn run_fixture(
                     &cpu_envelope.data,
                     "FEA_CHT_KNOWN_ANSWER",
                     "heat_flux_realization_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-9),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_known_answer_thermal_network_residual_ratio",
+                "FEA_CHT_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_KNOWN_ANSWER",
+                    "thermal_network_residual_ratio",
                 ),
                 Some(0.0),
                 Some(1.0e-9),
