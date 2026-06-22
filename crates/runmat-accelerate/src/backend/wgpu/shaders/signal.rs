@@ -259,6 +259,357 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     )
 }
 
+pub(crate) fn envelope_center_real_to_complex_shader(
+    channel_len: usize,
+    channel_count: usize,
+    precision: NumericPrecision,
+) -> String {
+    let (ty, zero, cast) = spectral_shader_numeric_fragments(precision);
+    format!(
+        r#"
+struct Tensor {{
+    data: array<{ty}>,
+}};
+
+struct Params {{
+    len: u32,
+    offset: u32,
+    _pad1: u32,
+    _pad2: u32,
+}};
+
+@group(0) @binding(0) var<storage, read> Input: Tensor;
+@group(0) @binding(1) var<storage, read_write> Out: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+fn channel_mean(col: u32) -> {ty} {{
+    var sum = {zero};
+    var row = 0u;
+    loop {{
+        if row >= {channel_len}u {{
+            break;
+        }}
+        sum = sum + Input.data[col * {channel_len}u + row];
+        row = row + 1u;
+    }}
+    return sum / {cast}({channel_len}.0);
+}}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let local = gid.x;
+    if local >= params.len {{
+        return;
+    }}
+    let idx = params.offset + local;
+    let total = {channel_len}u * {channel_count}u * 2u;
+    if idx >= total {{
+        return;
+    }}
+    let complex_idx = idx / 2u;
+    let part = idx % 2u;
+    let row = complex_idx % {channel_len}u;
+    let col = complex_idx / {channel_len}u;
+    if part == 0u {{
+        Out.data[idx] = Input.data[col * {channel_len}u + row] - channel_mean(col);
+    }} else {{
+        Out.data[idx] = {zero};
+    }}
+}}
+"#,
+        ty = ty,
+        zero = zero,
+        cast = cast,
+        channel_len = channel_len,
+        channel_count = channel_count,
+    )
+}
+
+pub(crate) fn envelope_analytic_mask_shader(
+    channel_len: usize,
+    channel_count: usize,
+    precision: NumericPrecision,
+) -> String {
+    let (ty, _, cast) = spectral_shader_numeric_fragments(precision);
+    format!(
+        r#"
+struct Tensor {{
+    data: array<{ty}>,
+}};
+
+struct Params {{
+    len: u32,
+    offset: u32,
+    _pad1: u32,
+    _pad2: u32,
+}};
+
+@group(0) @binding(0) var<storage, read> Input: Tensor;
+@group(0) @binding(1) var<storage, read_write> Out: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+fn analytic_multiplier(row: u32) -> {ty} {{
+    if row == 0u {{
+        return {cast}(1.0);
+    }}
+    if ({channel_len}u % 2u) == 0u {{
+        if row < ({channel_len}u / 2u) {{
+            return {cast}(2.0);
+        }}
+        if row == ({channel_len}u / 2u) {{
+            return {cast}(1.0);
+        }}
+        return {cast}(0.0);
+    }}
+    if row <= ({channel_len}u / 2u) {{
+        return {cast}(2.0);
+    }}
+    return {cast}(0.0);
+}}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let local = gid.x;
+    if local >= params.len {{
+        return;
+    }}
+    let idx = params.offset + local;
+    let total = {channel_len}u * {channel_count}u * 2u;
+    if idx >= total {{
+        return;
+    }}
+    let row = (idx / 2u) % {channel_len}u;
+    Out.data[idx] = Input.data[idx] * analytic_multiplier(row);
+}}
+"#,
+        ty = ty,
+        cast = cast,
+        channel_len = channel_len,
+        channel_count = channel_count,
+    )
+}
+
+pub(crate) fn envelope_analytic_bounds_shader(
+    channel_len: usize,
+    channel_count: usize,
+    precision: NumericPrecision,
+) -> String {
+    let (ty, zero, cast) = spectral_shader_numeric_fragments(precision);
+    format!(
+        r#"
+struct Tensor {{
+    data: array<{ty}>,
+}};
+
+struct Params {{
+    len: u32,
+    offset: u32,
+    _pad1: u32,
+    _pad2: u32,
+}};
+
+@group(0) @binding(0) var<storage, read> Input: Tensor;
+@group(0) @binding(1) var<storage, read> Analytic: Tensor;
+@group(0) @binding(2) var<storage, read_write> Upper: Tensor;
+@group(0) @binding(3) var<storage, read_write> Lower: Tensor;
+@group(0) @binding(4) var<uniform> params: Params;
+
+fn channel_mean(col: u32) -> {ty} {{
+    var sum = {zero};
+    var row = 0u;
+    loop {{
+        if row >= {channel_len}u {{
+            break;
+        }}
+        sum = sum + Input.data[col * {channel_len}u + row];
+        row = row + 1u;
+    }}
+    return sum / {cast}({channel_len}.0);
+}}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let local = gid.x;
+    if local >= params.len {{
+        return;
+    }}
+    let idx = params.offset + local;
+    let total = {channel_len}u * {channel_count}u;
+    if idx >= total {{
+        return;
+    }}
+    let row = idx % {channel_len}u;
+    let col = idx / {channel_len}u;
+    let base = (col * {channel_len}u + row) * 2u;
+    let re = Analytic.data[base];
+    let im = Analytic.data[base + 1u];
+    let mag = sqrt(re * re + im * im);
+    let mean = channel_mean(col);
+    Upper.data[idx] = mean + mag;
+    Lower.data[idx] = mean - mag;
+}}
+"#,
+        ty = ty,
+        zero = zero,
+        cast = cast,
+        channel_len = channel_len,
+        channel_count = channel_count,
+    )
+}
+
+pub(crate) fn envelope_rms_bounds_shader(
+    channel_len: usize,
+    channel_count: usize,
+    window_len: usize,
+    precision: NumericPrecision,
+) -> String {
+    let (ty, zero, cast) = spectral_shader_numeric_fragments(precision);
+    let half_before = (window_len - 1) / 2;
+    let half_after = window_len / 2;
+    format!(
+        r#"
+struct Tensor {{
+    data: array<{ty}>,
+}};
+
+struct Params {{
+    len: u32,
+    offset: u32,
+    _pad1: u32,
+    _pad2: u32,
+}};
+
+@group(0) @binding(0) var<storage, read> Input: Tensor;
+@group(0) @binding(1) var<storage, read_write> Upper: Tensor;
+@group(0) @binding(2) var<storage, read_write> Lower: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let local = gid.x;
+    if local >= params.len {{
+        return;
+    }}
+    let idx = params.offset + local;
+    let total = {channel_len}u * {channel_count}u;
+    if idx >= total {{
+        return;
+    }}
+    let row = idx % {channel_len}u;
+    let col = idx / {channel_len}u;
+    let start = select(0u, row - {half_before}u, row >= {half_before}u);
+    let end_raw = row + {half_after}u + 1u;
+    let end = min(end_raw, {channel_len}u);
+    var sum = {zero};
+    var source = start;
+    loop {{
+        if source >= end {{
+            break;
+        }}
+        let value = Input.data[col * {channel_len}u + source];
+        sum = sum + value * value;
+        source = source + 1u;
+    }}
+    let count = {cast}(end - start);
+    let upper = sqrt(sum / count);
+    Upper.data[idx] = upper;
+    Lower.data[idx] = -upper;
+}}
+"#,
+        ty = ty,
+        zero = zero,
+        cast = cast,
+        channel_len = channel_len,
+        channel_count = channel_count,
+        half_before = half_before,
+        half_after = half_after,
+    )
+}
+
+pub(crate) fn envelope_analytic_fir_bounds_shader(
+    channel_len: usize,
+    channel_count: usize,
+    filter_len: usize,
+    precision: NumericPrecision,
+) -> String {
+    let (ty, zero, cast) = spectral_shader_numeric_fragments(precision);
+    let center = filter_len / 2;
+    format!(
+        r#"
+struct Tensor {{
+    data: array<{ty}>,
+}};
+
+struct Params {{
+    len: u32,
+    offset: u32,
+    _pad1: u32,
+    _pad2: u32,
+}};
+
+@group(0) @binding(0) var<storage, read> Input: Tensor;
+@group(0) @binding(1) var<storage, read> Kernel: Tensor;
+@group(0) @binding(2) var<storage, read_write> Upper: Tensor;
+@group(0) @binding(3) var<storage, read_write> Lower: Tensor;
+@group(0) @binding(4) var<uniform> params: Params;
+
+fn channel_mean(col: u32) -> {ty} {{
+    var sum = {zero};
+    var row = 0u;
+    loop {{
+        if row >= {channel_len}u {{
+            break;
+        }}
+        sum = sum + Input.data[col * {channel_len}u + row];
+        row = row + 1u;
+    }}
+    return sum / {cast}({channel_len}.0);
+}}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let local = gid.x;
+    if local >= params.len {{
+        return;
+    }}
+    let idx = params.offset + local;
+    let total = {channel_len}u * {channel_count}u;
+    if idx >= total {{
+        return;
+    }}
+    let row = idx % {channel_len}u;
+    let col = idx / {channel_len}u;
+    let mean = channel_mean(col);
+    let centered = Input.data[col * {channel_len}u + row] - mean;
+    var quadrature = {zero};
+    var tap = 0u;
+    loop {{
+        if tap >= {filter_len}u {{
+            break;
+        }}
+        let shifted = i32(row) + i32(tap) - i32({center}u);
+        if shifted >= 0 && shifted < i32({channel_len}u) {{
+            let source = u32(shifted);
+            let source_value = Input.data[col * {channel_len}u + source] - mean;
+            quadrature = quadrature + source_value * Kernel.data[tap];
+        }}
+        tap = tap + 1u;
+    }}
+    let mag = sqrt(centered * centered + quadrature * quadrature);
+    Upper.data[idx] = mean + mag;
+    Lower.data[idx] = mean - mag;
+}}
+"#,
+        ty = ty,
+        zero = zero,
+        cast = cast,
+        channel_len = channel_len,
+        channel_count = channel_count,
+        filter_len = filter_len,
+        center = center,
+    )
+}
+
 fn spectral_centered_shift(nfft: usize) -> usize {
     if nfft.is_multiple_of(2) {
         nfft / 2 + 1

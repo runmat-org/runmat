@@ -1,4 +1,5 @@
 use super::*;
+use runmat_accelerate_api::{ProviderEnvelopeRequest, ProviderEnvelopeResult};
 
 impl AccelProvider for WgpuProvider {
     fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {
@@ -747,6 +748,12 @@ impl AccelProvider for WgpuProvider {
         request: &'a ProviderSpectralRequest<'a>,
     ) -> AccelProviderFuture<'a, ProviderSpectralResult> {
         Box::pin(async move { self.uniform_spectral_estimate_exec(request).await })
+    }
+    fn signal_envelope<'a>(
+        &'a self,
+        request: &'a ProviderEnvelopeRequest<'a>,
+    ) -> AccelProviderFuture<'a, ProviderEnvelopeResult> {
+        Box::pin(async move { self.signal_envelope_exec(request).await })
     }
     fn conv2d(
         &self,

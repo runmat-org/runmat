@@ -263,6 +263,28 @@ pub struct ProviderSpectralResult {
     pub cols: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderEnvelopeMethod {
+    Analytic,
+    AnalyticFir { filter_len: usize },
+    Rms { window_len: usize },
+}
+
+#[derive(Clone, Debug)]
+pub struct ProviderEnvelopeRequest<'a> {
+    pub input: &'a GpuTensorHandle,
+    pub channel_len: usize,
+    pub channel_count: usize,
+    pub output_shape: &'a [usize],
+    pub method: ProviderEnvelopeMethod,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProviderEnvelopeResult {
+    pub upper: GpuTensorHandle,
+    pub lower: GpuTensorHandle,
+}
+
 pub async fn uniform_spectral_estimate(
     request: ProviderSpectralRequest<'_>,
 ) -> anyhow::Result<ProviderSpectralResult> {
@@ -278,6 +300,35 @@ pub async fn uniform_spectral_estimate(
     let provider =
         provider().ok_or_else(|| anyhow!("uniform_spectral_estimate: GPU provider unavailable"))?;
     provider.uniform_spectral_estimate(&request).await
+}
+
+pub async fn signal_envelope(
+    request: ProviderEnvelopeRequest<'_>,
+) -> anyhow::Result<ProviderEnvelopeResult> {
+    let expected_len = request.channel_len.checked_mul(request.channel_count);
+    if request.channel_len == 0
+        || request.channel_count == 0
+        || request.output_shape.is_empty()
+        || request
+            .output_shape
+            .iter()
+            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+            != expected_len
+    {
+        return Err(anyhow!("signal_envelope: invalid request"));
+    }
+
+    match request.method {
+        ProviderEnvelopeMethod::AnalyticFir { filter_len }
+        | ProviderEnvelopeMethod::Rms {
+            window_len: filter_len,
+        } if filter_len == 0 => return Err(anyhow!("signal_envelope: invalid request")),
+        _ => {}
+    }
+
+    let provider =
+        provider().ok_or_else(|| anyhow!("signal_envelope: GPU provider unavailable"))?;
+    provider.signal_envelope(&request).await
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2056,6 +2107,12 @@ pub trait AccelProvider: Send + Sync {
         _request: &'a ProviderSpectralRequest<'a>,
     ) -> AccelProviderFuture<'a, ProviderSpectralResult> {
         unsupported_future("uniform_spectral_estimate not supported by provider")
+    }
+    fn signal_envelope<'a>(
+        &'a self,
+        _request: &'a ProviderEnvelopeRequest<'a>,
+    ) -> AccelProviderFuture<'a, ProviderEnvelopeResult> {
+        unsupported_future("signal_envelope not supported by provider")
     }
     /// Reorder tensor dimensions according to `order`, expressed as zero-based indices.
     fn permute(

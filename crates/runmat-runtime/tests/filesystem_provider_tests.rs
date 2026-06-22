@@ -377,6 +377,7 @@ fn remote_provider_supports_repl_and_tabular_builtins() {
     let _guard = vfs::replace_provider(remote);
 
     exercise_repl_filesystem_builtins_through_provider();
+    exercise_recent_import_export_builtins_through_provider();
 
     call_builtin("mkdir", &[Value::from("remote")]).expect("mkdir succeeds");
     let matrix = Tensor {
