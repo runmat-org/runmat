@@ -1250,6 +1250,21 @@ REQUIRED_FIXTURES = {
     },
 }
 
+EM_TOPOLOGY_ASSERTIONS = {
+    "electromagnetic_edge_dof_count",
+    "electromagnetic_element_count",
+    "electromagnetic_oriented_edge_count",
+    "electromagnetic_prep_recovery_edge_count",
+    "electromagnetic_incidence_element_count",
+    "electromagnetic_incidence_orientation_count",
+    "electromagnetic_incidence_pair_count",
+    "electromagnetic_incidence_operator_pair_coverage_ratio",
+}
+
+for _fixture_id, _required_assertions in REQUIRED_FIXTURES.items():
+    if _fixture_id.startswith("electromagnetic_reference_"):
+        _required_assertions.update(EM_TOPOLOGY_ASSERTIONS)
+
 REQUIRED_ERROR_FIXTURES = {
     "acoustic_harmonic_missing_source": {
         "validate_ok": True,

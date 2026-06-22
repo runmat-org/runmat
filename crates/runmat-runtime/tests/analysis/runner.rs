@@ -3568,6 +3568,110 @@ fn push_thermal_standalone_threshold_assertions(
     );
 }
 
+fn push_em_reference_topology_threshold_assertions(
+    fixture_id: &str,
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    run: &AnalysisRunResult,
+) {
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "electromagnetic_edge_dof_count",
+        "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+        diagnostic_metric(run, "FEA_EM_MAXWELL_EDGE_TOPOLOGY", "edge_dof_count"),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "electromagnetic_element_count",
+        "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+        diagnostic_metric(run, "FEA_EM_MAXWELL_EDGE_TOPOLOGY", "element_count"),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "electromagnetic_oriented_edge_count",
+        "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+        diagnostic_metric(run, "FEA_EM_MAXWELL_EDGE_TOPOLOGY", "oriented_edge_count"),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "electromagnetic_prep_recovery_edge_count",
+        "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+        diagnostic_metric(
+            run,
+            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+            "prep_recovery_edge_count",
+        ),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "electromagnetic_incidence_element_count",
+        "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+        diagnostic_metric(
+            run,
+            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+            "incidence_element_count",
+        ),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "electromagnetic_incidence_orientation_count",
+        "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+        diagnostic_metric(
+            run,
+            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+            "incidence_orientation_count",
+        ),
+        Some(3.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "electromagnetic_incidence_pair_count",
+        "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+        diagnostic_metric(run, "FEA_EM_MAXWELL_EDGE_TOPOLOGY", "incidence_pair_count"),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "electromagnetic_incidence_operator_pair_coverage_ratio",
+        "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+        diagnostic_metric(
+            run,
+            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+            "incidence_operator_pair_coverage_ratio",
+        ),
+        Some(0.5),
+        Some(1.0),
+    );
+}
+
 fn push_electro_thermal_source_coupling_threshold_assertions(
     fixture_id: &str,
     assertions: &mut Vec<ThresholdAssertionRecord>,
@@ -8429,6 +8533,12 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id.starts_with("electromagnetic_reference_") {
+                        push_em_reference_topology_threshold_assertions(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                        );
                         push_threshold_assertion(
                             spec.id,
                             &mut threshold_assertions,
