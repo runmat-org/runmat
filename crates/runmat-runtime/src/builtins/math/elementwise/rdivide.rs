@@ -42,7 +42,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Uses elem_div when shapes match, scalar_div for tensor ./ scalar, and scalar_rdiv for scalar ./ tensor; implicit expansion or unsupported operand kinds fall back to the CPU before 'like' prototypes are honoured.",
+    notes: "Uses elem_div when shapes match, including complex-interleaved gpuArrays, attempts provider-side implicit expansion with repmat, and uses scalar_div/scalar_rdiv for real scalar cases; unsupported shapes or operand kinds fall back to the CPU before 'like' prototypes are honoured.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::rdivide")]
@@ -524,13 +524,13 @@ async fn rdivide_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> Builtin
             }
         }
     }
-    let left = gpu_helpers::gather_tensor_async(&lhs)
+    let left = gpu_helpers::gather_value_async(&Value::GpuTensor(lhs))
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    let right = gpu_helpers::gather_tensor_async(&rhs)
+    let right = gpu_helpers::gather_value_async(&Value::GpuTensor(rhs))
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    rdivide_host(Value::Tensor(left), Value::Tensor(right))
+    rdivide_host(left, right)
 }
 
 fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, Vec<usize>)> {
@@ -571,10 +571,10 @@ async fn rdivide_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResul
             }
         }
     }
-    let host_lhs = gpu_helpers::gather_tensor_async(&lhs)
+    let host_lhs = gpu_helpers::gather_value_async(&Value::GpuTensor(lhs))
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    rdivide_host(Value::Tensor(host_lhs), rhs)
+    rdivide_host(host_lhs, rhs)
 }
 
 async fn rdivide_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -585,10 +585,10 @@ async fn rdivide_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResu
             }
         }
     }
-    let host_rhs = gpu_helpers::gather_tensor_async(&rhs)
+    let host_rhs = gpu_helpers::gather_value_async(&Value::GpuTensor(rhs))
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    rdivide_host(lhs, Value::Tensor(host_rhs))
+    rdivide_host(lhs, host_rhs)
 }
 
 fn rdivide_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {

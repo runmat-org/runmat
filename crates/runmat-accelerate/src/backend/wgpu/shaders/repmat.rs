@@ -18,7 +18,7 @@ struct Params {
     len: u32,
     offset: u32,
     rank: u32,
-    _pad: u32,
+    storage_factor: u32,
     base_shape: PackedArray,
     new_shape: PackedArray,
     base_strides: PackedArray,
@@ -36,7 +36,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let global_index = params.offset + idx;
 
-    var remaining = global_index;
+    let factor = max(params.storage_factor, 1u);
+    let lane = global_index % factor;
+    var remaining = global_index / factor;
     var src_index: u32 = 0u;
     var dim: u32 = 0u;
 
@@ -60,7 +62,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         dim = dim + 1u;
     }
 
-    Output.data[global_index] = Input.data[src_index];
+    Output.data[global_index] = Input.data[(src_index * factor) + lane];
 }
 "#;
 
@@ -84,7 +86,7 @@ struct Params {
     len: u32,
     offset: u32,
     rank: u32,
-    _pad: u32,
+    storage_factor: u32,
     base_shape: PackedArray,
     new_shape: PackedArray,
     base_strides: PackedArray,
@@ -102,7 +104,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let global_index = params.offset + idx;
 
-    var remaining = global_index;
+    let factor = max(params.storage_factor, 1u);
+    let lane = global_index % factor;
+    var remaining = global_index / factor;
     var src_index: u32 = 0u;
     var dim: u32 = 0u;
 
@@ -126,6 +130,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         dim = dim + 1u;
     }
 
-    Output.data[global_index] = Input.data[src_index];
+    Output.data[global_index] = Input.data[(src_index * factor) + lane];
 }
 "#;

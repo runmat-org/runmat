@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses provider elem_sub for matching gpuArray shapes, scalar_sub for gpuArray - scalar, scalar_rsub for scalar - gpuArray, and gathers to host for implicit expansion or unsupported operand types."
+    "notes": "Uses provider elem_sub for matching gpuArray shapes, including complex-interleaved gpuArrays, attempts provider-side implicit expansion with repmat, uses scalar_sub for gpuArray - real scalar and scalar_rsub for real scalar - gpuArray, and gathers to host for unsupported operand types."
   },
   "fusion": {
     "elementwise": true,
@@ -226,6 +226,6 @@
   },
   "gpu_residency": "RunMat's auto-offload planner keeps tensors on the GPU whenever fused expressions benefit from device execution. Explicit `gpuArray` / `gather` calls remain supported for MATLAB code that manages residency manually. When the active provider lacks the kernels needed for a particular call (for example, implicit expansion between gpuArrays of different shapes), RunMat gathers back to the host, computes the MATLAB-accurate result, and resumes execution seamlessly.",
   "gpu_behavior": [
-    "When a gpuArray provider is active:\n\n1. If both operands are gpuArrays with identical shapes, RunMat dispatches to the provider's `elem_sub` hook. 2. If the left operand is a gpuArray and the right operand is a scalar, RunMat calls `scalar_sub` to keep the computation on the device. 3. If the right operand is a gpuArray and the left operand is a scalar, RunMat calls `scalar_rsub` so the scalar subtraction also remains on the device. 4. Implicit-expansion workloads (e.g., mixing row and column vectors) or unsupported operand kinds gather transparently to host memory, compute the result with full MATLAB semantics, and return a host tensor unless a `'like'` GPU prototype is supplied—in which case the runtime re-uploads the output to honour the residency request."
+    "When a gpuArray provider is active:\n\n1. If both operands are gpuArrays with identical shapes, RunMat dispatches to the provider's `elem_sub` hook, including for complex-interleaved resident handles. 2. If the left operand is a gpuArray and the right operand is a real scalar, RunMat calls `scalar_sub` to keep the computation on the device. 3. If the right operand is a gpuArray and the left operand is a real scalar, RunMat calls `scalar_rsub` so the scalar subtraction also remains on the device. 4. For shape-compatible implicit expansion, RunMat first expands gpuArray operands on device with `repmat` and then dispatches `elem_sub`. 5. Unsupported shapes or operand kinds gather transparently to host memory, compute the result with full MATLAB semantics, and return a host tensor unless a `'like'` GPU prototype is supplied—in which case the runtime re-uploads the output to honour the residency request."
   ]
 }
