@@ -38,7 +38,6 @@ pub fn run_modal_with_options(
     );
     check_cancelled("fea.run_modal")?;
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
-    super::reject_moment_loads_without_rotational_dofs(model)?;
     emit_phase(
         "fea.run_modal",
         FeaProgressPhase::RegionResolution,
@@ -63,6 +62,7 @@ pub fn run_modal_with_options(
         options.thermo_mechanical_context,
         options.electro_thermal_context,
     );
+    super::reject_moment_loads_without_rotational_dofs(model, &summary)?;
     emit_phase(
         "fea.run_modal",
         FeaProgressPhase::ModelAssembly,

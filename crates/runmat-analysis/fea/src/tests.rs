@@ -131,6 +131,30 @@ fn moment_loads_require_rotational_dofs() {
 }
 
 #[test]
+fn assembly_summary_reports_structural_dof_layout_metrics() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.loads[0].kind = runmat_analysis_core::LoadKind::Moment {
+        mx: 0.0,
+        my: 0.0,
+        mz: 125.0,
+    };
+
+    let summary = crate::assembly::assemble_linear_system(&model, None, None, None);
+
+    assert_eq!(summary.dof_count, 3);
+    assert_eq!(summary.structural_node_count, 1);
+    assert_eq!(summary.structural_translational_dof_count, 3);
+    assert_eq!(summary.structural_rotational_dof_count, 0);
+    assert_eq!(summary.structural_rotation_node_count, 0);
+    assert_eq!(summary.structural_moment_load_count, 1);
+    assert_eq!(summary.structural_direct_rotational_moment_load_count, 0);
+    assert_eq!(summary.structural_rotational_constraint_count, 0);
+    assert_eq!(summary.structural_beam_element_count, 0);
+    assert_eq!(summary.structural_shell_element_count, 0);
+    assert_eq!(summary.structural_solid_element_count, 1);
+}
+
+#[test]
 fn thermo_mechanical_linear_static_emits_coupled_fields() {
     let model = fixture_model(FixtureId::ThermoMechanicalKickoff);
     let result = crate::run_linear_static_with_options(

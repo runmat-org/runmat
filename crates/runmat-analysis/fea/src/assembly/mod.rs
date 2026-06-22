@@ -1,5 +1,9 @@
+pub mod dofs;
+
 use runmat_analysis_core::AnalysisModel;
 use serde::{Deserialize, Serialize};
+
+use self::dofs::StructuralDofLayout;
 
 use crate::operator::OperatorSystem;
 use crate::physics::coupling::thermo_mechanical;
@@ -10,6 +14,26 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssemblySummary {
     pub dof_count: usize,
+    #[serde(default)]
+    pub structural_node_count: usize,
+    #[serde(default)]
+    pub structural_translational_dof_count: usize,
+    #[serde(default)]
+    pub structural_rotational_dof_count: usize,
+    #[serde(default)]
+    pub structural_rotation_node_count: usize,
+    #[serde(default)]
+    pub structural_moment_load_count: usize,
+    #[serde(default)]
+    pub structural_direct_rotational_moment_load_count: usize,
+    #[serde(default)]
+    pub structural_rotational_constraint_count: usize,
+    #[serde(default)]
+    pub structural_beam_element_count: usize,
+    #[serde(default)]
+    pub structural_shell_element_count: usize,
+    #[serde(default)]
+    pub structural_solid_element_count: usize,
     pub constrained_dof_count: usize,
     pub load_count: usize,
     pub structural_material: StructuralMaterialSummary,
@@ -332,6 +356,19 @@ pub fn assemble_linear_system(
             runmat_analysis_core::LoadKind::HeatSource { .. } => {}
         }
     }
+
+    let structural_dof_layout = StructuralDofLayout::legacy_translational_rows(dof_count);
+    let structural_moment_load_count = model
+        .loads
+        .iter()
+        .filter(|load| matches!(load.kind, runmat_analysis_core::LoadKind::Moment { .. }))
+        .count();
+    let structural_direct_rotational_moment_load_count =
+        if structural_dof_layout.has_rotational_dofs() {
+            structural_moment_load_count
+        } else {
+            0
+        };
 
     let constrained_dof_count = model.boundary_conditions.len().min(dof_count);
     let mut constrained = vec![false; dof_count];
@@ -813,6 +850,18 @@ pub fn assemble_linear_system(
 
     AssemblySummary {
         dof_count,
+        structural_node_count: structural_dof_layout.node_count(),
+        structural_translational_dof_count: structural_dof_layout.translational_dof_count(),
+        structural_rotational_dof_count: structural_dof_layout.rotational_dof_count(),
+        structural_rotation_node_count: structural_dof_layout.rotation_node_count(),
+        structural_moment_load_count,
+        structural_direct_rotational_moment_load_count,
+        structural_rotational_constraint_count: 0,
+        structural_beam_element_count: 0,
+        structural_shell_element_count: 0,
+        structural_solid_element_count: prep_context_ref
+            .map(|prep| prep.prepared_element_count.max(prep.prepared_mesh_count))
+            .unwrap_or_else(|| element_count_for_legacy_dofs(dof_count)),
         constrained_dof_count,
         load_count: model.loads.len().saturating_add(prep_load_bonus),
         structural_material,
@@ -896,6 +945,10 @@ fn topology_fingerprint(
         hash = hash.wrapping_mul(1099511628211_u64);
     }
     hash
+}
+
+fn element_count_for_legacy_dofs(dof_count: usize) -> usize {
+    dof_count.div_ceil(3).max(1)
 }
 
 fn apply_prep_native_element_assembly(
