@@ -6146,6 +6146,7 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
             .contains("max_displacement_transfer_residual_m=")
         && diag.message.contains("max_coupling_iteration_count=")
         && diag.message.contains("pressure_feedback_residual_ratio=")
+        && diag.message.contains("two_way_interface_residual_ratio=")
         && diag
             .message
             .contains("pressure_displacement_law_residual_ratio=")
@@ -6168,6 +6169,7 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
             && diag
                 .message
                 .contains("partitioned_pressure_feedback_residual_ratio=")
+            && diag.message.contains("two_way_interface_residual_ratio=")
             && diag.message.contains("known_answer_coverage_ratio=")));
     assert!(envelope
         .data

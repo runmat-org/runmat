@@ -5187,6 +5187,20 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
+                "fsi_two_way_interface_residual_ratio",
+                "FEA_FSI_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_INTERFACE_CLOSURE",
+                    "two_way_interface_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-8),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
                 "fsi_pressure_displacement_law_residual_ratio",
                 "FEA_FSI_INTERFACE_CLOSURE",
                 diagnostic_metric(
@@ -5263,6 +5277,20 @@ pub(super) fn run_fixture(
                     &cpu_envelope.data,
                     "FEA_FSI_KNOWN_ANSWER",
                     "partitioned_pressure_feedback_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-8),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_known_answer_two_way_interface_residual_ratio",
+                "FEA_FSI_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_KNOWN_ANSWER",
+                    "two_way_interface_residual_ratio",
                 ),
                 Some(0.0),
                 Some(1.0e-8),
