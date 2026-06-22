@@ -19,7 +19,7 @@ pub(crate) fn collect_value_roots(value: &Value, roots: &mut Vec<GcPtr<Value>>) 
     match value {
         Value::Cell(cells) => {
             for cell_value in &cells.data {
-                roots.push(cell_value.clone());
+                collect_value_roots(cell_value, roots);
             }
         }
         Value::Struct(struct_value) => {

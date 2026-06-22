@@ -37,7 +37,7 @@ pub(crate) async fn parse_dims(value: &Value, builtin: &str) -> BuiltinResult<Ve
             }
             let mut dims = Vec::with_capacity(ca.data.len());
             for cell in &ca.data {
-                let coerced = match &**cell {
+                let coerced = match cell {
                     Value::Num(n) => coerce_positive_int(*n, builtin)?,
                     Value::Int(i) => coerce_positive_int(i.to_f64(), builtin)?,
                     _ => {

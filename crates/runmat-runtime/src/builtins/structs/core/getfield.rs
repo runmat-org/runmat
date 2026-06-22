@@ -393,7 +393,7 @@ fn parse_index_selector(value: Value) -> BuiltinResult<IndexSelector> {
 
     let mut components = Vec::with_capacity(cell.data.len());
     for handle in &cell.data {
-        let entry = unsafe { &*handle.as_raw() };
+        let entry = handle;
         components.push(parse_index_component(entry)?);
     }
 
@@ -956,8 +956,7 @@ async fn get_field_value(value: Value, name: &str) -> BuiltinResult<Value> {
                 ));
             }
             // Default to first element when no index is specified
-            let first_handle = &cell.data[0];
-            let first_entry = unsafe { &*first_handle.as_raw() };
+            let first_entry = &cell.data[0];
             match first_entry {
                 Value::Struct(st) => get_struct_field(st, name),
                 _ => Err(getfield_error(&GETFIELD_ERROR_NON_STRUCT_REFERENCE)),
@@ -1096,7 +1095,7 @@ fn exception_stack_to_value(stack: &[String]) -> BuiltinResult<Value> {
 fn is_struct_array(cell: &CellArray) -> bool {
     cell.data
         .iter()
-        .all(|handle| matches!(unsafe { &*handle.as_raw() }, Value::Struct(_)))
+        .all(|handle| matches!(handle, Value::Struct(_)))
 }
 
 #[cfg(test)]
@@ -1214,7 +1213,7 @@ pub(crate) mod tests {
         };
         assert_eq!(cell.rows, 2);
         assert_eq!(cell.cols, 1);
-        let first = unsafe { &*cell.data[0].as_raw() }.clone();
+        let first = cell.data[0].clone();
         assert_eq!(first, Value::String("demo.m:5".to_string()));
     }
 

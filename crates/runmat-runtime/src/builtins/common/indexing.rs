@@ -284,7 +284,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                         "RunMat:CellIndexOutOfBounds",
                     ));
                 }
-                Ok((*ca.data[idx - 1]).clone())
+                Ok(ca.data[idx - 1].clone())
             } else if indices.len() == 2 {
                 let row = indices[0] as usize;
                 let col = indices[1] as usize;
@@ -294,7 +294,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                         "RunMat:CellSubscriptOutOfBounds",
                     ));
                 }
-                Ok((*ca.data[(row - 1) * ca.cols + (col - 1)]).clone())
+                Ok(ca.data[(row - 1) * ca.cols + (col - 1)].clone())
             } else {
                 Err(indexing_error(format!(
                     "Cell arrays support 1 or 2 indices, got {}",

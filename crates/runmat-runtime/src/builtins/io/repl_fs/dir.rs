@@ -610,7 +610,7 @@ pub(crate) mod tests {
             Value::Cell(cell) => cell
                 .data
                 .iter()
-                .map(|ptr| unsafe { &*ptr.as_raw() }.clone())
+                .map(|ptr| ptr.clone())
                 .map(|value| match value {
                     Value::Struct(st) => st,
                     other => panic!("expected struct entry, got {other:?}"),

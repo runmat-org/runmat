@@ -157,7 +157,7 @@ fn collect_struct_fieldnames(st: &StructValue) -> Vec<String> {
 fn collect_struct_array_fieldnames(array: &CellArray) -> BuiltinResult<Vec<String>> {
     let mut names = BTreeSet::new();
     for handle in array.data.iter() {
-        let value = unsafe { &*handle.as_raw() };
+        let value = handle;
         let Value::Struct(st) = value else {
             return Err(fieldnames_error_with_message(
                 FIELDNAMES_ERROR_STRUCT_ARRAY_CONTENTS.message,
@@ -586,7 +586,7 @@ pub(crate) mod tests {
     fn cell_strings(cell: &CellArray) -> Vec<String> {
         cell.data
             .iter()
-            .map(|ptr| match unsafe { &*ptr.as_raw() } {
+            .map(|ptr| match ptr {
                 Value::CharArray(ca) => ca.data.iter().collect(),
                 other => panic!("expected character array cell element, got {other:?}"),
             })

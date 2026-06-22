@@ -603,7 +603,7 @@ async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
             }
             Value::Cell(cell) => {
                 for handle in &cell.data {
-                    let inner = unsafe { &*handle.as_raw() };
+                    let inner = handle;
                     let gathered = gather_if_needed_async(inner)
                         .await
                         .map_err(map_control_flow)?;

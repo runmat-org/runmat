@@ -1255,14 +1255,14 @@ fn row_major_pos_from_linear(cell: &runmat_builtins::CellArray, idx: usize) -> R
 
 fn turbine_index_cell_value(cell: &runmat_builtins::CellArray, indices: &[usize]) -> Result<Value> {
     match indices.len() {
-        1 => Ok((*cell.data[row_major_pos_from_linear(cell, indices[0])?]).clone()),
+        1 => Ok(cell.data[row_major_pos_from_linear(cell, indices[0])?].clone()),
         2 => {
             let row = indices[0];
             let col = indices[1];
             if row == 0 || row > cell.rows || col == 0 || col > cell.cols {
                 return Err(execution_error("Cell subscript out of bounds"));
             }
-            Ok((*cell.data[(row - 1) * cell.cols + (col - 1)]).clone())
+            Ok(cell.data[(row - 1) * cell.cols + (col - 1)].clone())
         }
         _ => Err(execution_error("Unsupported number of cell indices")),
     }

@@ -201,7 +201,7 @@ fn classify_struct<'a>(value: &'a Value) -> BuiltinResult<StructContext<'a>> {
             if cell
                 .data
                 .iter()
-                .all(|handle| matches!(unsafe { &*handle.as_raw() }, Value::Struct(_)))
+                .all(|handle| matches!(handle, Value::Struct(_)))
             {
                 Ok(StructContext::StructArray(cell))
             } else {
@@ -325,14 +325,14 @@ fn struct_array_field_intersection(cell: &CellArray) -> BuiltinResult<HashSet<St
     }
 
     let mut iter = cell.data.iter();
-    let first = unsafe { &*iter.next().unwrap().as_raw() };
+    let first = iter.next().unwrap();
     let Value::Struct(first_struct) = first else {
         return Err(isfield_error(&ISFIELD_ERROR_STRUCT_ARRAY_CONTENTS));
     };
     let mut fields: HashSet<String> = first_struct.fields.keys().cloned().collect();
 
     for handle in iter {
-        let value = unsafe { &*handle.as_raw() };
+        let value = handle;
         let Value::Struct(struct_value) = value else {
             return Err(isfield_error(&ISFIELD_ERROR_STRUCT_ARRAY_CONTENTS));
         };
@@ -365,7 +365,7 @@ fn collect_cell_names(cell: &CellArray) -> BuiltinResult<Vec<String>> {
         for (coord, stride) in coords.iter().zip(row_strides.iter()) {
             row_index += coord * stride;
         }
-        let value = unsafe { &*cell.data[row_index].as_raw() };
+        let value = &cell.data[row_index];
         names.push(value_to_field_name(value)?);
     }
     Ok(names)

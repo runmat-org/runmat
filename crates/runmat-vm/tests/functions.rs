@@ -3172,7 +3172,7 @@ fn cellfun_upper_function_handle_round_trip() {
             let texts: Vec<String> = ca
                 .data
                 .iter()
-                .map(|ptr| String::try_from(&**ptr))
+                .map(|ptr| String::try_from(ptr))
                 .collect::<Result<_, _>>()
                 .unwrap_or_default();
             if texts == vec!["ADA", "LINUS", "KATHERINE"] {

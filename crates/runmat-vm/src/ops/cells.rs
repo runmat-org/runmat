@@ -10,23 +10,10 @@ fn map_cell_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeEr
     mex("ShapeMismatch", &format!("{context}: {err}"))
 }
 
-fn allocate_cell_handle(value: Value) -> Result<runmat_gc::GcPtr<Value>, RuntimeError> {
-    runmat_gc::gc_allocate(value).map_err(|e| {
-        mex(
-            "CellAllocationFailed",
-            &format!("failed to allocate cell element handle: {e}"),
-        )
-    })
-}
-
 fn empty_numeric_cell_value() -> Result<Value, RuntimeError> {
     Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
         .map_err(|e| map_cell_shape_error("cell growth empty filler", e))
-}
-
-fn allocate_empty_cell_handle() -> Result<runmat_gc::GcPtr<Value>, RuntimeError> {
-    allocate_cell_handle(empty_numeric_cell_value()?)
 }
 
 fn exact_index_from_f64(value: f64) -> Option<i64> {
@@ -168,7 +155,7 @@ pub fn index_cell_value(ca: &CellArray, indices: &[usize]) -> Result<Value, Runt
     match indices.len() {
         1 => {
             let i = indices[0];
-            Ok((*ca.data[row_major_pos_from_linear(ca, i)?]).clone())
+            Ok(ca.data[row_major_pos_from_linear(ca, i)?].clone())
         }
         2 => {
             let r = indices[0];
@@ -179,7 +166,7 @@ pub fn index_cell_value(ca: &CellArray, indices: &[usize]) -> Result<Value, Runt
                     "Cell subscript out of bounds",
                 ));
             }
-            Ok((*ca.data[(r - 1) * ca.cols + (c - 1)]).clone())
+            Ok(ca.data[(r - 1) * ca.cols + (c - 1)].clone())
         }
         _ => Err(mex(
             "UnsupportedCellIndexCount",
@@ -232,14 +219,14 @@ pub fn gather_cell_paren_linear_indices(
         output_shape.to_vec()
     };
     Ok(Value::Cell(
-        CellArray::new_handles_with_shape(handles, shape)
+        CellArray::new_with_shape(handles, shape)
             .map_err(|e| map_cell_shape_error("cell paren indexing error", e))?,
     ))
 }
 
 pub fn gather_cell_member(ca: &CellArray, field: &str) -> Result<Value, RuntimeError> {
     if ca.data.len() == 1 {
-        return Ok(match &*ca.data[0] {
+        return Ok(match &ca.data[0] {
             Value::Struct(st) => st.fields.get(field).cloned().unwrap_or(Value::Num(0.0)),
             other => other.clone(),
         });
@@ -247,7 +234,7 @@ pub fn gather_cell_member(ca: &CellArray, field: &str) -> Result<Value, RuntimeE
 
     let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
     for value in &ca.data {
-        match &**value {
+        match value {
             Value::Struct(st) => out.push(st.fields.get(field).cloned().unwrap_or(Value::Num(0.0))),
             other => out.push(other.clone()),
         }
@@ -280,11 +267,11 @@ where
 
     for i in 0..ca.data.len() {
         let rv = if let Some(rc) = rhs_cell {
-            (*rc.data[i]).clone()
+            rc.data[i].clone()
         } else {
             rhs.clone()
         };
-        match &mut *ca.data[i] {
+        match &mut ca.data[i] {
             Value::Struct(st) => {
                 if let Some(oldv) = st.fields.get(&field) {
                     on_write(oldv, &rv);
@@ -391,7 +378,7 @@ where
                     ));
                 }
                 while ca.data.len() < i {
-                    ca.data.push(allocate_empty_cell_handle()?);
+                    ca.data.push(empty_numeric_cell_value()?);
                 }
                 let len = ca.data.len();
                 if old_len == 0 {
@@ -416,7 +403,7 @@ where
                     on_write(oldv, &rhs);
                 }
             }
-            ca.data[pos] = allocate_cell_handle(rhs)?;
+            ca.data[pos] = rhs;
             Ok(Value::Cell(ca))
         }
         2 => {
@@ -441,7 +428,7 @@ where
                 })?;
                 let mut grown = Vec::with_capacity(total);
                 for _ in 0..total {
-                    grown.push(allocate_empty_cell_handle()?);
+                    grown.push(empty_numeric_cell_value()?);
                 }
                 for row in 0..old_rows {
                     for col in 0..old_cols {
@@ -459,7 +446,7 @@ where
             if let Some(oldv) = ca.data.get(lin) {
                 on_write(oldv, &rhs);
             }
-            ca.data[lin] = allocate_cell_handle(rhs)?;
+            ca.data[lin] = rhs;
             Ok(Value::Cell(ca))
         }
         _ => Err(mex(
@@ -497,7 +484,7 @@ where
                 ));
             }
             while ca.data.len() < max_pos {
-                ca.data.push(allocate_empty_cell_handle()?);
+                ca.data.push(empty_numeric_cell_value()?);
             }
             let len = ca.data.len();
             if old_len == 0 || ca.rows <= 1 {
@@ -519,7 +506,7 @@ where
         if let Some(oldv) = ca.data.get(pos) {
             on_write(oldv, rhs);
         }
-        ca.data[pos] = allocate_cell_handle(rhs.clone())?;
+        ca.data[pos] = rhs.clone();
     }
     Ok(Value::Cell(ca))
 }
@@ -556,7 +543,7 @@ pub fn delete_cell_linear(mut ca: CellArray, idx: usize) -> Result<Value, Runtim
         vec![len, 1]
     };
     Ok(Value::Cell(
-        CellArray::new_handles_with_shape(ca.data, shape)
+        CellArray::new_with_shape(ca.data, shape)
             .map_err(|e| map_cell_shape_error("cell deletion error", e))?,
     ))
 }
@@ -628,7 +615,7 @@ pub fn assign_cell_paren_linear_indices_with_policy(
             vec![len, 1]
         };
         return Ok(Value::Cell(
-            CellArray::new_handles_with_shape(ca.data, shape)
+            CellArray::new_with_shape(ca.data, shape)
                 .map_err(|e| map_cell_shape_error("cell deletion error", e))?,
         ));
     }
@@ -647,11 +634,11 @@ pub fn assign_cell_paren_linear_indices_with_policy(
     for (k, &idx) in indices.iter().enumerate() {
         let pos = row_major_pos_from_linear(&ca, idx)?;
         let rhs_pos = if rhs_cell.data.len() == 1 { 0 } else { k };
-        let newv = (*rhs_cell.data[rhs_pos]).clone();
+        let newv = rhs_cell.data[rhs_pos].clone();
         if let Some(oldv) = ca.data.get(pos) {
             runmat_gc::gc_record_write(oldv, &newv);
         }
-        ca.data[pos] = allocate_cell_handle(newv)?;
+        ca.data[pos] = newv;
     }
     Ok(Value::Cell(ca))
 }
@@ -667,7 +654,7 @@ fn assign_cell_paren_from_cell(
             "Only scalar cell paren assignment is supported",
         ));
     }
-    let newv = (*rhs.data[0]).clone();
+    let newv = rhs.data[0].clone();
     let lin = match indices.len() {
         1 => {
             let i = indices[0];
@@ -694,7 +681,7 @@ fn assign_cell_paren_from_cell(
     if let Some(oldv) = ca.data.get(lin) {
         runmat_gc::gc_record_write(oldv, &newv);
     }
-    ca.data[lin] = allocate_cell_handle(newv)?;
+    ca.data[lin] = newv;
     Ok(Value::Cell(ca))
 }
 

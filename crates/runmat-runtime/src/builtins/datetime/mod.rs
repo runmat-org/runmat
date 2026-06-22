@@ -1171,7 +1171,7 @@ async fn datetime_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
             "datetime.subsref: only linear datetime indexing is currently supported",
         ));
     }
-    let selector = (*cell.data[0]).clone();
+    let selector = cell.data[0].clone();
     let selector = match selector {
         Value::Tensor(tensor) => tensor,
         Value::Num(value) => Tensor::new(vec![value], vec![1, 1])

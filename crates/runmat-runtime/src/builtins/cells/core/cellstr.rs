@@ -223,7 +223,7 @@ fn cellstr_from_string_array(sa: StringArray) -> BuiltinResult<Value> {
 async fn cellstr_from_cell(cell: CellArray) -> BuiltinResult<Value> {
     let mut values = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
-        let element = unsafe { &*ptr.as_raw() };
+        let element = ptr;
         let gathered = gather_if_needed_async(element).await?;
         values.push(coerce_to_char_vector(gathered)?);
     }
@@ -339,7 +339,7 @@ pub(crate) mod tests {
     fn cell_to_strings(cell: &CellArray) -> Vec<String> {
         cell.data
             .iter()
-            .map(|ptr| match unsafe { &*ptr.as_raw() } {
+            .map(|ptr| match ptr {
                 Value::CharArray(ca) => ca.data.iter().collect(),
                 other => panic!("expected CharArray in cell, found {other:?}"),
             })
@@ -483,7 +483,7 @@ pub(crate) mod tests {
             Value::Cell(cell) => {
                 assert_eq!(cell.rows, 1);
                 assert_eq!(cell.cols, 1);
-                match unsafe { &*cell.data[0].as_raw() } {
+                match &cell.data[0] {
                     Value::CharArray(row) => {
                         assert_eq!(row.rows, 1);
                         assert_eq!(row.cols, 0);
@@ -506,7 +506,7 @@ pub(crate) mod tests {
             Value::Cell(cell) => {
                 assert_eq!(cell.rows, 1);
                 assert_eq!(cell.cols, 1);
-                match unsafe { &*cell.data[0].as_raw() } {
+                match &cell.data[0] {
                     Value::CharArray(row) => {
                         assert_eq!(row.rows, ca.rows);
                         assert_eq!(row.cols, ca.cols);

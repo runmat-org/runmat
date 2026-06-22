@@ -2796,7 +2796,7 @@ fn parse_slice_spec(slice_spec: &Value, shape: &[usize]) -> BuiltinResult<Vec<Di
             }
             let mut ranges = Vec::with_capacity(shape.len());
             for (dim, extent) in shape.iter().enumerate() {
-                if let Some(item) = cell.data.get(dim).map(|v| &**v) {
+                if let Some(item) = cell.data.get(dim) {
                     ranges.push(parse_dim_range(item, *extent)?);
                 } else {
                     ranges.push(DimRange {

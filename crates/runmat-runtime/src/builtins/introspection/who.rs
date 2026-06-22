@@ -440,7 +440,7 @@ async fn extract_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
         Value::Cell(ca) => {
             let mut names = Vec::with_capacity(ca.data.len());
             for handle in &ca.data {
-                let inner = unsafe { &*handle.as_raw() };
+                let inner = handle;
                 if let Some(text) = value_to_string_scalar(inner) {
                     names.push(text);
                     continue;
@@ -510,7 +510,7 @@ pub(crate) mod tests {
             Value::Cell(cell) => cell
                 .data
                 .iter()
-                .map(|ptr| unsafe { &*ptr.as_raw() })
+                .map(|ptr| ptr)
                 .map(|value| match value {
                     Value::String(s) => s.clone(),
                     Value::CharArray(ca) if ca.rows == 1 => ca

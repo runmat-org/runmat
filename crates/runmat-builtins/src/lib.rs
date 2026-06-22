@@ -1099,7 +1099,7 @@ impl TryFrom<&Value> for Vec<Value> {
     type Error = String;
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
-            Value::Cell(c) => Ok(c.data.iter().map(|p| (**p).clone()).collect()),
+            Value::Cell(c) => Ok(c.data.clone()),
             _ => Err(format!("cannot convert {v:?} to Vec<Value>")),
         }
     }
@@ -2374,7 +2374,7 @@ mod display_tests {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellArray {
-    pub data: Vec<GcPtr<Value>>,
+    pub data: Vec<Value>,
     /// Full MATLAB-visible shape vector (column-major semantics).
     pub shape: Vec<usize>,
     /// Cached row count for 2-D interop; equals `shape[0]` when present.
@@ -2384,37 +2384,6 @@ pub struct CellArray {
 }
 
 impl CellArray {
-    pub fn new_handles(
-        handles: Vec<GcPtr<Value>>,
-        rows: usize,
-        cols: usize,
-    ) -> Result<Self, String> {
-        Self::new_handles_with_shape(handles, vec![rows, cols])
-    }
-
-    pub fn new_handles_with_shape(
-        handles: Vec<GcPtr<Value>>,
-        shape: Vec<usize>,
-    ) -> Result<Self, String> {
-        let expected = total_len(&shape)
-            .ok_or_else(|| "Cell data shape exceeds platform limits".to_string())?;
-        if expected != handles.len() {
-            return Err(format!(
-                "Cell data length {} doesn't match shape {:?} ({} elements)",
-                handles.len(),
-                shape,
-                expected
-            ));
-        }
-        let (rows, cols) = shape_rows_cols(&shape);
-        Ok(CellArray {
-            data: handles,
-            shape,
-            rows,
-            cols,
-        })
-    }
-
     pub fn new(data: Vec<Value>, rows: usize, cols: usize) -> Result<Self, String> {
         Self::new_with_shape(data, vec![rows, cols])
     }
@@ -2430,12 +2399,13 @@ impl CellArray {
                 expected
             ));
         }
-        // Note: data will be allocated into GC handles by callers (runtime/vm) to avoid builtins↔gc cycles
-        let handles: Vec<GcPtr<Value>> = data
-            .into_iter()
-            .map(|v| unsafe { GcPtr::from_raw(Box::into_raw(Box::new(v))) })
-            .collect();
-        Self::new_handles_with_shape(handles, shape)
+        let (rows, cols) = shape_rows_cols(&shape);
+        Ok(CellArray {
+            data,
+            shape,
+            rows,
+            cols,
+        })
     }
 
     pub fn get(&self, row: usize, col: usize) -> Result<Value, String> {
@@ -2445,7 +2415,7 @@ impl CellArray {
                 self.rows, self.cols
             ));
         }
-        Ok((*self.data[row * self.cols + col]).clone())
+        Ok(self.data[row * self.cols + col].clone())
     }
 }
 

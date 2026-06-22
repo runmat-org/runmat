@@ -1298,7 +1298,7 @@ async fn flatten_keys(
         Value::Cell(cell) => {
             let mut out = Vec::with_capacity(cell.data.len());
             for ptr in &cell.data {
-                let element = unsafe { &*ptr.as_raw() };
+                let element = ptr;
                 if matches!(element, Value::Cell(_)) {
                     return Err(map_error(
                         "containers.Map: nested cell arrays are not supported for keys",
@@ -1357,7 +1357,7 @@ async fn flatten_values(value: &Value, builtin: &'static str) -> BuiltinResult<V
             let mut out = Vec::with_capacity(cell.data.len());
             for ptr in &cell.data {
                 out.push(
-                    gather_if_needed_async(unsafe { &*ptr.as_raw() })
+                    gather_if_needed_async(ptr)
                         .await
                         .map_err(|err| attach_builtin_context(err, builtin))?,
                 );
@@ -1755,7 +1755,7 @@ fn extract_key_arguments(payload: &Value, builtin: &'static str) -> BuiltinResul
         Value::Cell(cell) => {
             let mut out = Vec::with_capacity(cell.data.len());
             for ptr in &cell.data {
-                out.push(unsafe { &*ptr.as_raw() }.clone());
+                out.push(ptr.clone());
             }
             Ok(out)
         }
@@ -1817,7 +1817,7 @@ async fn collect_key_spec(
             let mut values = Vec::with_capacity(cell.data.len());
             for ptr in &cell.data {
                 values.push(
-                    gather_if_needed_async(unsafe { &*ptr.as_raw() })
+                    gather_if_needed_async(ptr)
                         .await
                         .map_err(|err| attach_builtin_context(err, builtin))?,
                 );

@@ -708,7 +708,7 @@ fn status_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
         Value::Cell(cell) => {
             emit_stderr_line("Warning status:".to_string());
             for idx in 0..cell.data.len() {
-                let entry = (*cell.data[idx]).clone();
+                let entry = cell.data[idx].clone();
                 if let Value::Struct(st) = entry {
                     let identifier = st
                         .fields
@@ -776,7 +776,7 @@ fn apply_state_value(value: &Value) -> crate::BuiltinResult<()> {
         Value::Struct(st) => apply_state_struct(st),
         Value::Cell(cell) => {
             for idx in 0..cell.data.len() {
-                let entry = (*cell.data[idx]).clone();
+                let entry = cell.data[idx].clone();
                 apply_state_value(&entry)?;
             }
             Ok(())
@@ -1185,7 +1185,7 @@ pub(crate) mod tests {
             Value::Cell(cell) => cell
                 .data
                 .iter()
-                .map(|ptr| unsafe { &*ptr.as_raw() }.clone())
+                .map(|ptr| ptr.clone())
                 .map(|value| match value {
                     Value::Struct(st) => st,
                     other => panic!("expected struct entry, got {other:?}"),

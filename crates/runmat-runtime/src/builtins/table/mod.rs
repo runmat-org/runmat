@@ -2864,7 +2864,7 @@ fn selector_values(payload: &Value) -> BuiltinResult<Vec<Value>> {
         Value::Cell(cell) => {
             let mut out = Vec::with_capacity(cell.data.len());
             for handle in &cell.data {
-                out.push(unsafe { &*handle.as_raw() }.clone());
+                out.push(handle.clone());
             }
             Ok(out)
         }
@@ -3764,11 +3764,7 @@ fn option_value_is_empty(value: &Value) -> bool {
             array.data.is_empty() || (array.data.len() == 1 && array.data[0].trim().is_empty())
         }
         Value::Cell(cell) => {
-            cell.data.is_empty()
-                || cell
-                    .data
-                    .iter()
-                    .all(|handle| option_value_is_empty(unsafe { &*handle.as_raw() }))
+            cell.data.is_empty() || cell.data.iter().all(|handle| option_value_is_empty(handle))
         }
         _ => false,
     }
@@ -3782,7 +3778,7 @@ fn string_list(value: &Value) -> BuiltinResult<Vec<String>> {
         Value::Cell(cell) => {
             let mut out = Vec::with_capacity(cell.data.len());
             for handle in &cell.data {
-                let value = unsafe { &*handle.as_raw() };
+                let value = handle;
                 out.extend(string_list(value)?);
             }
             Ok(out)

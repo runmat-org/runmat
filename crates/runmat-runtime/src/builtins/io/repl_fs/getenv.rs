@@ -487,19 +487,17 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 2);
-                unsafe {
-                    match &*ca.data[0].as_raw() {
-                        Value::CharArray(first) => {
-                            let text: String = first.data.iter().collect();
-                            assert_eq!(text, "one");
-                        }
-                        other => panic!("expected char array in first cell, got {other:?}"),
+                match &ca.data[0] {
+                    Value::CharArray(first) => {
+                        let text: String = first.data.iter().collect();
+                        assert_eq!(text, "one");
                     }
-                    match &*ca.data[1].as_raw() {
-                        Value::String(s) => assert_eq!(s, "two"),
-                        other => panic!("expected string in second cell, got {other:?}"),
-                    }
-                }
+                    other => panic!("expected char array in first cell, got {other:?}"),
+                };
+                match &ca.data[1] {
+                    Value::String(s) => assert_eq!(s, "two"),
+                    other => panic!("expected string in second cell, got {other:?}"),
+                };
             }
             other => panic!("expected cell array, got {other:?}"),
         }

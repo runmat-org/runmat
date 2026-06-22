@@ -72,9 +72,9 @@ fn test_cell_allocation() {
 
         if let Value::Cell(ref contents) = *ptr {
             assert_eq!(contents.data.len(), 3);
-            assert_eq!(&*contents.data[0], &Value::Num(1.0));
-            assert_eq!(&*contents.data[1], &Value::String("nested".to_string()));
-            assert_eq!(&*contents.data[2], &Value::Bool(false));
+            assert_eq!(&contents.data[0], &Value::Num(1.0));
+            assert_eq!(&contents.data[1], &Value::String("nested".to_string()));
+            assert_eq!(&contents.data[2], &Value::Bool(false));
         } else {
             panic!("Expected Cell value");
         }
@@ -194,18 +194,15 @@ fn test_nested_cell_allocation() {
         if let Value::Cell(ref outer_contents) = *ptr {
             assert_eq!(outer_contents.data.len(), 2);
 
-            if let Value::Cell(ref inner_contents) = *outer_contents.data[0] {
+            if let Value::Cell(ref inner_contents) = outer_contents.data[0] {
                 assert_eq!(inner_contents.data.len(), 2);
-                assert_eq!(&*inner_contents.data[0], &Value::Num(1.0));
-                assert_eq!(&*inner_contents.data[1], &Value::Num(2.0));
+                assert_eq!(&inner_contents.data[0], &Value::Num(1.0));
+                assert_eq!(&inner_contents.data[1], &Value::Num(2.0));
             } else {
                 panic!("Expected inner Cell value");
             }
 
-            assert_eq!(
-                &*outer_contents.data[1],
-                &Value::String("outer".to_string())
-            );
+            assert_eq!(&outer_contents.data[1], &Value::String("outer".to_string()));
         } else {
             panic!("Expected outer Cell value");
         }

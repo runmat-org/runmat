@@ -526,25 +526,30 @@ mod tests {
     }
 
     #[test]
-    fn collector_marks_cell_element_handles_reachable_from_gc_object() {
+    fn collector_marks_handles_reachable_through_owned_cell_values() {
         let config = GcConfig::default();
         let stats = GcStats::new();
         let mut allocator = GenerationalAllocator::new(&config);
         let mut collector = MarkSweepCollector::new(&config);
 
-        let element = allocator
+        let target = allocator
             .allocate(Value::String("alive".to_string()), &stats)
-            .expect("element allocation");
-        let cell =
-            runmat_builtins::CellArray::new_handles(vec![element], 1, 1).expect("cell shape");
+            .expect("target allocation");
+        let target_addr = unsafe { target.as_raw() } as usize;
+        let handle_value = Value::HandleObject(runmat_builtins::HandleRef {
+            class_name: "TestHandle".to_string(),
+            target,
+            valid: true,
+        });
+        let cell = runmat_builtins::CellArray::new(vec![handle_value], 1, 1).expect("cell shape");
         let cell_root = allocator
             .allocate(Value::Cell(cell), &stats)
             .expect("cell allocation");
 
-        let collected = collector
-            .collect_young_generation(&mut allocator, &[cell_root], &stats)
-            .expect("collection should succeed");
+        collector
+            .mark_phase(&[cell_root], 0)
+            .expect("mark phase should succeed");
 
-        assert_eq!(collected, 0);
+        assert!(collector.marked_objects.lock().contains(&target_addr));
     }
 }

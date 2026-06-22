@@ -493,7 +493,7 @@ async fn extract_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
         Value::Cell(ca) => {
             let mut names = Vec::with_capacity(ca.data.len());
             for handle in &ca.data {
-                let inner = unsafe { &*handle.as_raw() };
+                let inner = handle;
                 if let Some(text) = value_to_string_scalar(inner) {
                     names.push(text);
                     continue;
@@ -593,9 +593,9 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
         Value::Cell(ca) => {
             let mut total = 0usize;
             for handle in &ca.data {
-                let ptr = unsafe { handle.as_raw() } as usize;
+                let ptr = handle as *const Value as usize;
                 if seen.insert(ptr) {
-                    let value = unsafe { &*handle.as_raw() };
+                    let value = handle;
                     total = total.saturating_add(value_memory_bytes(value, seen));
                 }
             }
@@ -746,7 +746,7 @@ pub(crate) mod tests {
             Value::Cell(cell) => cell
                 .data
                 .iter()
-                .map(|ptr| unsafe { &*ptr.as_raw() }.clone())
+                .map(|ptr| ptr.clone())
                 .map(|value| match value {
                     Value::Struct(st) => st,
                     other => panic!("expected struct entry, got {other:?}"),

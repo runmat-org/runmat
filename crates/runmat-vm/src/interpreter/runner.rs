@@ -610,7 +610,7 @@ fn value_is_text(value: &Value) -> bool {
     match value {
         Value::String(_) | Value::StringArray(_) => true,
         Value::CharArray(chars) => chars.rows == 1,
-        Value::Cell(cell) => cell.data.iter().all(|entry| match &**entry {
+        Value::Cell(cell) => cell.data.iter().all(|entry| match &entry {
             Value::CharArray(chars) => chars.rows == 1,
             Value::String(_) => true,
             _ => false,

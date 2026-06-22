@@ -20,7 +20,6 @@ use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, ObjectInstance, StructValue,
     Tensor, Value,
 };
-use runmat_gc_api::GcPtr;
 use runmat_macros::runtime_builtin;
 use std::convert::TryFrom;
 
@@ -516,9 +515,9 @@ async fn assign_into_struct_array(
         .ok_or_else(|| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))?
         .clone();
 
-    let current = unsafe { &*handle.as_raw() }.clone();
+    let current = handle.clone();
     let updated = assign_into_value(current, steps, rhs).await?;
-    cell.data[position] = allocate_cell_handle(updated)?;
+    cell.data[position] = updated;
     Ok(Value::Cell(cell))
 }
 
@@ -673,13 +672,13 @@ async fn assign_with_selector(
                 .get(position)
                 .ok_or_else(|| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))?
                 .clone();
-            let existing = unsafe { &*handle.as_raw() }.clone();
+            let existing = handle.clone();
             let new_value = if rest.is_empty() {
                 rhs
             } else {
                 assign_into_value(existing, rest, rhs).await?
             };
-            cell.data[position] = allocate_cell_handle(new_value)?;
+            cell.data[position] = new_value;
             Ok(Value::Cell(cell))
         }
         Value::Tensor(mut tensor) => {
@@ -1067,7 +1066,7 @@ fn parse_index_selector(value: Value) -> BuiltinResult<IndexSelector> {
     };
     let mut components = Vec::with_capacity(cell.data.len());
     for handle in &cell.data {
-        let entry = unsafe { &*handle.as_raw() };
+        let entry = handle;
         components.push(parse_index_component(entry)?);
     }
     Ok(IndexSelector { components })
@@ -1405,18 +1404,10 @@ fn value_to_bool(value: Value) -> BuiltinResult<bool> {
     }
 }
 
-fn allocate_cell_handle(value: Value) -> BuiltinResult<GcPtr<Value>> {
-    runmat_gc::gc_allocate(value).map_err(|e| {
-        setfield_flow(format!(
-            "setfield: failed to allocate cell element in GC: {e}"
-        ))
-    })
-}
-
 fn is_struct_array(cell: &CellArray) -> bool {
     cell.data
         .iter()
-        .all(|handle| matches!(unsafe { &*handle.as_raw() }, Value::Struct(_)))
+        .all(|handle| matches!(handle, Value::Struct(_)))
 }
 
 #[cfg(test)]
@@ -1511,7 +1502,7 @@ pub(crate) mod tests {
         .expect("setfield");
         match updated {
             Value::Cell(cell) => {
-                let second = unsafe { &*cell.data[1].as_raw() }.clone();
+                let second = &cell.data[1].clone();
                 match second {
                     Value::Struct(st) => {
                         assert_eq!(st.fields.get("id"), Some(&Value::Int(IntValue::I32(42))));
@@ -1556,7 +1547,7 @@ pub(crate) mod tests {
                 let samples = st.fields.get("samples").expect("samples field");
                 match samples {
                     Value::Cell(cell) => {
-                        let value = unsafe { &*cell.data[1].as_raw() }.clone();
+                        let value = &cell.data[1].clone();
                         match value {
                             Value::Struct(inner) => {
                                 assert_eq!(inner.fields.get("value"), Some(&Value::Num(10.0)));
@@ -1599,7 +1590,7 @@ pub(crate) mod tests {
         .expect("setfield");
         match updated {
             Value::Cell(cell) => {
-                let second = unsafe { &*cell.data[1].as_raw() }.clone();
+                let second = &cell.data[1].clone();
                 match second {
                     Value::Struct(st) => {
                         assert_eq!(st.fields.get("id"), Some(&Value::Int(IntValue::I32(99))));

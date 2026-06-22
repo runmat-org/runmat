@@ -378,7 +378,7 @@ pub(crate) mod tests {
     }
 
     fn cell_to_vec(cell: &runmat_builtins::CellArray) -> Vec<Value> {
-        cell.data.iter().map(|ptr| (**ptr).clone()).collect()
+        cell.data.iter().map(|ptr| (ptr).clone()).collect()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -87,7 +87,7 @@ fn cell_paren_scalar_index_returns_cell_container() {
     for value in vars {
         match value {
             Value::Cell(cell) if cell.data.len() == 1 => {
-                if matches!((*cell.data[0]).clone(), Value::Num(n) if (n - 20.0).abs() < 1e-9) {
+                if matches!(cell.data[0].clone(), Value::Num(n) if (n - 20.0).abs() < 1e-9) {
                     saw_container = true;
                 }
             }
@@ -114,8 +114,8 @@ fn cell_paren_range_index_returns_cell_subset() {
     for value in vars {
         match value {
             Value::Cell(cell) if cell.data.len() == 2 => {
-                let first = (*cell.data[0]).clone();
-                let second = (*cell.data[1]).clone();
+                let first = cell.data[0].clone();
+                let second = cell.data[1].clone();
                 if matches!(first, Value::Num(n) if (n - 2.0).abs() < 1e-9)
                     && matches!(second, Value::Num(n) if (n - 3.0).abs() < 1e-9)
                 {
