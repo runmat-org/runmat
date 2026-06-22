@@ -292,6 +292,14 @@ fn default_prep_coordinate_characteristic_length_m() -> f64 {
     1.0
 }
 
+fn default_zero_usize() -> usize {
+    0
+}
+
+fn default_zero_f64() -> f64 {
+    0.0
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct FeaPrepContext {
     pub prepared_mesh_count: usize,
@@ -328,6 +336,16 @@ pub struct FeaPrepContext {
     pub coordinate_active_dimension_count: usize,
     #[serde(default = "default_prep_coordinate_characteristic_length_m")]
     pub coordinate_characteristic_length_m: f64,
+    #[serde(default = "default_zero_usize")]
+    pub element_geometry_node_count: usize,
+    #[serde(default = "default_zero_usize")]
+    pub element_geometry_edge_count: usize,
+    #[serde(default = "default_zero_f64")]
+    pub mean_element_edge_length_m: f64,
+    #[serde(default = "default_zero_f64")]
+    pub mean_element_area_m2: f64,
+    #[serde(default = "default_zero_f64")]
+    pub element_geometry_coverage_ratio: f64,
     pub calibration_profile_override: Option<FeaPrepCalibrationProfile>,
 }
 

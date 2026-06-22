@@ -130,7 +130,12 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .run
         .diagnostics
         .iter()
-        .any(|diag| diag.code == "FEA_PREP_CONTEXT"));
+        .any(|diag| diag.code == "FEA_PREP_CONTEXT"
+            && diag.message.contains("element_geometry_node_count=")
+            && diag.message.contains("element_geometry_edge_count=")
+            && diag.message.contains("mean_element_edge_length_m=")
+            && diag.message.contains("mean_element_area_m2=")
+            && diag.message.contains("element_geometry_coverage_ratio=")));
     assert!(prep_enhanced
         .data
         .run

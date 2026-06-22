@@ -12278,6 +12278,11 @@ fn to_fea_prep_context(
         coordinate_span_z_m: prep.coordinate_span_z_m,
         coordinate_active_dimension_count: prep.coordinate_active_dimension_count,
         coordinate_characteristic_length_m: prep.coordinate_characteristic_length_m,
+        element_geometry_node_count: prep.element_geometry_node_count,
+        element_geometry_edge_count: prep.element_geometry_edge_count,
+        mean_element_edge_length_m: prep.mean_element_edge_length_m,
+        mean_element_area_m2: prep.mean_element_area_m2,
+        element_geometry_coverage_ratio: prep.element_geometry_coverage_ratio,
         calibration_profile_override: calibration_profile.and_then(map_calibration_profile),
     })
 }
@@ -13744,6 +13749,70 @@ fn resolve_run_prep_context(
     } else {
         1.0
     };
+    let element_geometry_node_count = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| mesh.element_geometry_node_count as usize)
+        .sum::<usize>();
+    let element_geometry_edge_count = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| mesh.element_geometry_edge_count as usize)
+        .sum::<usize>();
+    let (edge_length_sum, edge_length_weight) = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .filter_map(|mesh| {
+            let length = mesh.mean_element_edge_length_m;
+            (length.is_finite() && length > 0.0)
+                .then_some((length, mesh.element_count.max(1) as f64))
+        })
+        .fold((0.0_f64, 0.0_f64), |(sum, weight_sum), (length, weight)| {
+            (sum + length * weight, weight_sum + weight)
+        });
+    let mean_element_edge_length_m = if edge_length_weight > 0.0 {
+        edge_length_sum / edge_length_weight
+    } else {
+        0.0
+    };
+    let (area_sum, area_weight) = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .filter_map(|mesh| {
+            let area = mesh.mean_element_area_m2;
+            (area.is_finite() && area > 0.0).then_some((area, mesh.element_count.max(1) as f64))
+        })
+        .fold((0.0_f64, 0.0_f64), |(sum, weight_sum), (area, weight)| {
+            (sum + area * weight, weight_sum + weight)
+        });
+    let mean_element_area_m2 = if area_weight > 0.0 {
+        area_sum / area_weight
+    } else {
+        0.0
+    };
+    let (coverage_sum, coverage_weight) = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| {
+            (
+                mesh.element_geometry_coverage_ratio.clamp(0.0, 1.0),
+                mesh.element_count.max(1) as f64,
+            )
+        })
+        .fold(
+            (0.0_f64, 0.0_f64),
+            |(sum, weight_sum), (coverage, weight)| (sum + coverage * weight, weight_sum + weight),
+        );
+    let element_geometry_coverage_ratio = if coverage_weight > 0.0 {
+        coverage_sum / coverage_weight
+    } else {
+        0.0
+    };
 
     Ok(Some(AnalysisRunPrepContext {
         prepared_mesh_count,
@@ -13804,6 +13873,11 @@ fn resolve_run_prep_context(
         coordinate_span_z_m,
         coordinate_active_dimension_count,
         coordinate_characteristic_length_m,
+        element_geometry_node_count,
+        element_geometry_edge_count,
+        mean_element_edge_length_m,
+        mean_element_area_m2,
+        element_geometry_coverage_ratio,
     }))
 }
 

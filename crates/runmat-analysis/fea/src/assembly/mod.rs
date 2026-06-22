@@ -151,6 +151,11 @@ pub struct PrepCoordinateSummary {
     pub span_m: [f64; 3],
     pub active_dimension_count: usize,
     pub characteristic_length_m: f64,
+    pub element_geometry_node_count: usize,
+    pub element_geometry_edge_count: usize,
+    pub mean_element_edge_length_m: f64,
+    pub mean_element_area_m2: f64,
+    pub element_geometry_coverage_ratio: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -455,6 +460,11 @@ pub fn assemble_linear_system(
             ],
             active_dimension_count: prep.coordinate_active_dimension_count.max(1),
             characteristic_length_m: prep.coordinate_characteristic_length_m,
+            element_geometry_node_count: prep.element_geometry_node_count,
+            element_geometry_edge_count: prep.element_geometry_edge_count,
+            mean_element_edge_length_m: prep.mean_element_edge_length_m,
+            mean_element_area_m2: prep.mean_element_area_m2,
+            element_geometry_coverage_ratio: prep.element_geometry_coverage_ratio,
         });
 
         prep_assembly = Some(PrepAssemblySummary {

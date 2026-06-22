@@ -117,7 +117,7 @@ pub(crate) fn prep_diagnostic(prep: FeaPrepContext) -> FeaDiagnostic {
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "prepared_mesh_count={} prepared_node_count={} prepared_element_count={} mapped_region_count={} mapped_load_count={} mapped_bc_count={} min_scaled_jacobian={} mean_aspect_ratio={} inverted_element_count={} topology_dof_multiplier={} topology_bandwidth_estimate={} mapped_region_participation_ratio={} topology_surface_patch_ratio={} topology_volume_core_ratio={} topology_mixed_family_ratio={} topology_region_span_mean={} topology_region_block_count={} topology_region_mesh_mean={} topology_region_mesh_variance={} topology_triangle_family_ratio={} topology_quad_family_ratio={} topology_tet_family_ratio={} topology_hex_family_ratio={} calibration_profile_override={}",
+            "prepared_mesh_count={} prepared_node_count={} prepared_element_count={} mapped_region_count={} mapped_load_count={} mapped_bc_count={} min_scaled_jacobian={} mean_aspect_ratio={} inverted_element_count={} topology_dof_multiplier={} topology_bandwidth_estimate={} mapped_region_participation_ratio={} topology_surface_patch_ratio={} topology_volume_core_ratio={} topology_mixed_family_ratio={} topology_region_span_mean={} topology_region_block_count={} topology_region_mesh_mean={} topology_region_mesh_variance={} topology_triangle_family_ratio={} topology_quad_family_ratio={} topology_tet_family_ratio={} topology_hex_family_ratio={} element_geometry_node_count={} element_geometry_edge_count={} mean_element_edge_length_m={} mean_element_area_m2={} element_geometry_coverage_ratio={} calibration_profile_override={}",
             prep.prepared_mesh_count,
             prep.prepared_node_count,
             prep.prepared_element_count,
@@ -141,6 +141,11 @@ pub(crate) fn prep_diagnostic(prep: FeaPrepContext) -> FeaDiagnostic {
             prep.topology_quad_family_ratio,
             prep.topology_tet_family_ratio,
             prep.topology_hex_family_ratio,
+            prep.element_geometry_node_count,
+            prep.element_geometry_edge_count,
+            prep.mean_element_edge_length_m,
+            prep.mean_element_area_m2,
+            prep.element_geometry_coverage_ratio,
             prep.calibration_profile_override
                 .map(|profile| match profile {
                     FeaPrepCalibrationProfile::Fast => "fast",

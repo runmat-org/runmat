@@ -218,7 +218,7 @@ pub fn run_linear_static_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis={} active_stiffness_edge_count={} prep_recovery_edge_count={} constrained_edge_count={} recovery_element_count={} max_edge_displacement_jump={} max_edge_strain_norm={} mean_edge_stiffness_ratio={} mean_edge_length_m={} strain_component_coverage_ratio={}",
+            "basis={} active_stiffness_edge_count={} prep_recovery_edge_count={} constrained_edge_count={} recovery_element_count={} max_edge_displacement_jump={} max_edge_strain_norm={} mean_edge_stiffness_ratio={} mean_edge_length_m={} strain_component_coverage_ratio={} element_geometry_node_count={} element_geometry_edge_count={} element_geometry_coverage_ratio={}",
             recovery_metrics.basis,
             recovery_metrics.active_stiffness_edge_count,
             recovery_metrics.prep_recovery_edge_count,
@@ -228,7 +228,10 @@ pub fn run_linear_static_with_options(
             recovery_metrics.max_edge_strain_norm,
             recovery_metrics.mean_edge_stiffness_ratio,
             recovery_metrics.mean_edge_length_m,
-            recovery_metrics.strain_component_coverage_ratio
+            recovery_metrics.strain_component_coverage_ratio,
+            recovery_metrics.element_geometry_node_count,
+            recovery_metrics.element_geometry_edge_count,
+            recovery_metrics.element_geometry_coverage_ratio
         ),
     });
     extend_common_run_diagnostics(

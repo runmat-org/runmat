@@ -902,6 +902,11 @@ fn prep_for_analysis_op_returns_versioned_deterministic_result() {
         .any(|span| *span > 0.0));
     assert!(prepared_mesh.coordinate_active_dimension_count >= 1);
     assert!(prepared_mesh.coordinate_characteristic_length_m > 0.0);
+    assert!(prepared_mesh.element_geometry_node_count > 0);
+    assert!(prepared_mesh.element_geometry_edge_count > 0);
+    assert!(prepared_mesh.mean_element_edge_length_m > 0.0);
+    assert!(prepared_mesh.mean_element_area_m2 > 0.0);
+    assert!(prepared_mesh.element_geometry_coverage_ratio > 0.0);
     assert!(!first.data.prep.region_mappings.is_empty());
 }
 

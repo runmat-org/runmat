@@ -100,6 +100,9 @@ pub struct StructuralFieldRecoveryMetrics {
     pub mean_edge_stiffness_ratio: f64,
     pub mean_edge_length_m: f64,
     pub strain_component_coverage_ratio: f64,
+    pub element_geometry_node_count: usize,
+    pub element_geometry_edge_count: usize,
+    pub element_geometry_coverage_ratio: f64,
     pub basis: &'static str,
 }
 
@@ -148,6 +151,18 @@ pub fn structural_field_recovery_metrics(
     };
     let strain_component_coverage_ratio =
         strain_component_coverage_ratio(displacement, &recovery_edges);
+    let element_geometry_node_count = summary
+        .prep_coordinates
+        .map(|coordinates| coordinates.element_geometry_node_count)
+        .unwrap_or(0);
+    let element_geometry_edge_count = summary
+        .prep_coordinates
+        .map(|coordinates| coordinates.element_geometry_edge_count)
+        .unwrap_or(0);
+    let element_geometry_coverage_ratio = summary
+        .prep_coordinates
+        .map(|coordinates| coordinates.element_geometry_coverage_ratio)
+        .unwrap_or(0.0);
 
     StructuralFieldRecoveryMetrics {
         active_stiffness_edge_count,
@@ -159,6 +174,9 @@ pub fn structural_field_recovery_metrics(
         mean_edge_stiffness_ratio,
         mean_edge_length_m,
         strain_component_coverage_ratio,
+        element_geometry_node_count,
+        element_geometry_edge_count,
+        element_geometry_coverage_ratio,
         basis: recovery_edges
             .first()
             .map(|edge| edge.basis.as_str())

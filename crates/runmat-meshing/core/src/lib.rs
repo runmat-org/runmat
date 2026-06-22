@@ -1,6 +1,6 @@
 use runmat_geometry_core::{GeometryAsset, MeshKind};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -55,6 +55,14 @@ fn default_coordinate_characteristic_length_m() -> f64 {
     1.0
 }
 
+fn default_zero_u64() -> u64 {
+    0
+}
+
+fn default_zero_f64() -> f64 {
+    0.0
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PreparedMeshDescriptor {
     pub prepared_mesh_id: String,
@@ -71,6 +79,16 @@ pub struct PreparedMeshDescriptor {
     pub coordinate_active_dimension_count: u8,
     #[serde(default = "default_coordinate_characteristic_length_m")]
     pub coordinate_characteristic_length_m: f64,
+    #[serde(default = "default_zero_u64")]
+    pub element_geometry_node_count: u64,
+    #[serde(default = "default_zero_u64")]
+    pub element_geometry_edge_count: u64,
+    #[serde(default = "default_zero_f64")]
+    pub mean_element_edge_length_m: f64,
+    #[serde(default = "default_zero_f64")]
+    pub mean_element_area_m2: f64,
+    #[serde(default = "default_zero_f64")]
+    pub element_geometry_coverage_ratio: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,6 +200,7 @@ pub fn prepare_geometry_for_analysis(
             coordinate_active_dimension_count,
             node_count,
         );
+        let element_geometry = mesh_element_geometry_metrics(geometry, &mesh.mesh_id);
         let region_span_hint = (geometry.regions.len().max(1) as u32)
             .clamp(1, 64)
             .saturating_sub((prepared_meshes.len() as u32) % 2);
@@ -197,6 +216,11 @@ pub fn prepare_geometry_for_analysis(
             coordinate_span_m,
             coordinate_active_dimension_count,
             coordinate_characteristic_length_m,
+            element_geometry_node_count: element_geometry.node_count,
+            element_geometry_edge_count: element_geometry.edge_count,
+            mean_element_edge_length_m: element_geometry.mean_edge_length_m,
+            mean_element_area_m2: element_geometry.mean_area_m2,
+            element_geometry_coverage_ratio: element_geometry.coverage_ratio,
         });
     }
 
@@ -312,6 +336,115 @@ pub fn prepare_geometry_for_analysis(
     })
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct ElementGeometryMetrics {
+    node_count: u64,
+    edge_count: u64,
+    mean_edge_length_m: f64,
+    mean_area_m2: f64,
+    coverage_ratio: f64,
+}
+
+fn mesh_element_geometry_metrics(
+    geometry: &GeometryAsset,
+    mesh_id: &str,
+) -> ElementGeometryMetrics {
+    let Some(surface) = geometry
+        .surface_meshes
+        .iter()
+        .find(|surface| surface.mesh_id == mesh_id)
+    else {
+        return ElementGeometryMetrics::default();
+    };
+    let Some(descriptor) = geometry.meshes.iter().find(|mesh| mesh.mesh_id == mesh_id) else {
+        return ElementGeometryMetrics::default();
+    };
+
+    let mut referenced_nodes = BTreeSet::<u32>::new();
+    let mut unique_edges = BTreeSet::<(u32, u32)>::new();
+    let mut edge_length_sum = 0.0_f64;
+    let mut edge_length_count = 0_u64;
+    let mut area_sum = 0.0_f64;
+    let mut valid_triangle_count = 0_u64;
+    for triangle in &surface.triangles {
+        let indices = [triangle[0], triangle[1], triangle[2]];
+        let Some(vertices) = triangle_vertices(&surface.vertices, indices) else {
+            continue;
+        };
+        valid_triangle_count += 1;
+        for index in indices {
+            referenced_nodes.insert(index);
+        }
+        for (left, right) in [
+            (indices[0], indices[1]),
+            (indices[1], indices[2]),
+            (indices[2], indices[0]),
+        ] {
+            unique_edges.insert((left.min(right), left.max(right)));
+        }
+        for (left, right) in [
+            (vertices[0], vertices[1]),
+            (vertices[1], vertices[2]),
+            (vertices[2], vertices[0]),
+        ] {
+            edge_length_sum += distance_m(left, right);
+            edge_length_count += 1;
+        }
+        area_sum += triangle_area_m2(vertices);
+    }
+
+    ElementGeometryMetrics {
+        node_count: referenced_nodes.len() as u64,
+        edge_count: unique_edges.len() as u64,
+        mean_edge_length_m: if edge_length_count == 0 {
+            0.0
+        } else {
+            edge_length_sum / edge_length_count as f64
+        },
+        mean_area_m2: if valid_triangle_count == 0 {
+            0.0
+        } else {
+            area_sum / valid_triangle_count as f64
+        },
+        coverage_ratio: if descriptor.element_count == 0 {
+            0.0
+        } else {
+            (valid_triangle_count as f64 / descriptor.element_count as f64).clamp(0.0, 1.0)
+        },
+    }
+}
+
+fn triangle_vertices(vertices: &[[f64; 3]], indices: [u32; 3]) -> Option<[[f64; 3]; 3]> {
+    let a = *vertices.get(indices[0] as usize)?;
+    let b = *vertices.get(indices[1] as usize)?;
+    let c = *vertices.get(indices[2] as usize)?;
+    Some([a, b, c])
+}
+
+fn distance_m(left: [f64; 3], right: [f64; 3]) -> f64 {
+    ((right[0] - left[0]).powi(2) + (right[1] - left[1]).powi(2) + (right[2] - left[2]).powi(2))
+        .sqrt()
+}
+
+fn triangle_area_m2(vertices: [[f64; 3]; 3]) -> f64 {
+    let ab = [
+        vertices[1][0] - vertices[0][0],
+        vertices[1][1] - vertices[0][1],
+        vertices[1][2] - vertices[0][2],
+    ];
+    let ac = [
+        vertices[2][0] - vertices[0][0],
+        vertices[2][1] - vertices[0][1],
+        vertices[2][2] - vertices[0][2],
+    ];
+    let cross = [
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    ];
+    0.5 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt()
+}
+
 fn mesh_coordinate_span_m(geometry: &GeometryAsset, mesh_id: &str) -> [f64; 3] {
     let Some(surface) = geometry
         .surface_meshes
@@ -379,7 +512,7 @@ mod tests {
     use super::*;
     use runmat_geometry_core::{
         GeometrySource, MaterialEvidence, MeshDescriptor, Region, RegionEntityMapping,
-        SourceGeometry, SourceGeometryKind, TessellationProfile, UnitSystem,
+        SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
     };
 
     fn sample_geometry() -> GeometryAsset {
@@ -440,6 +573,35 @@ mod tests {
             .first()
             .expect("prepared mesh descriptor should exist");
         assert!(descriptor.region_span_hint >= 1);
+    }
+
+    #[test]
+    fn meshing_prep_carries_element_geometry_metrics() {
+        let mut geometry = sample_geometry();
+        geometry.meshes[0].vertex_count = 4;
+        geometry.meshes[0].element_count = 2;
+        geometry.surface_meshes = vec![SurfaceMesh::new(
+            "mesh_a",
+            vec![
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+            vec![[0, 1, 2], [0, 2, 3]],
+        )];
+
+        let prep = prepare_geometry_for_analysis(&geometry, MeshingOptions::default())
+            .expect("meshing prep should work");
+        let descriptor = prep
+            .prepared_meshes
+            .first()
+            .expect("prepared mesh descriptor should exist");
+        assert_eq!(descriptor.element_geometry_node_count, 4);
+        assert_eq!(descriptor.element_geometry_edge_count, 5);
+        assert!(descriptor.mean_element_edge_length_m > 1.0);
+        assert!((descriptor.mean_element_area_m2 - 0.5).abs() < 1.0e-12);
+        assert_eq!(descriptor.element_geometry_coverage_ratio, 1.0);
     }
 
     #[test]

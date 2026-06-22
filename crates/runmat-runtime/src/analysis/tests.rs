@@ -107,6 +107,11 @@ fn sample_analysis_run_prep_context() -> AnalysisRunPrepContext {
         coordinate_span_z_m: 0.4,
         coordinate_active_dimension_count: 3,
         coordinate_characteristic_length_m: 0.2,
+        element_geometry_node_count: 4,
+        element_geometry_edge_count: 5,
+        mean_element_edge_length_m: 0.2,
+        mean_element_area_m2: 0.04,
+        element_geometry_coverage_ratio: 1.0,
     }
 }
 

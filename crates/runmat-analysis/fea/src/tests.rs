@@ -237,6 +237,11 @@ fn prepared_structural_recovery_uses_prep_connectivity_edges() {
                 coordinate_span_z_m: 0.4,
                 coordinate_active_dimension_count: 3,
                 coordinate_characteristic_length_m: 0.2,
+                element_geometry_node_count: 4,
+                element_geometry_edge_count: 5,
+                mean_element_edge_length_m: 0.2,
+                mean_element_area_m2: 0.04,
+                element_geometry_coverage_ratio: 1.0,
                 calibration_profile_override: None,
             }),
             ..LinearStaticSolveOptions::default()
@@ -245,12 +250,23 @@ fn prepared_structural_recovery_uses_prep_connectivity_edges() {
     .expect("prepared linear static solve should succeed");
 
     assert!(result.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_PREP_CONTEXT"
+            && diag.message.contains("element_geometry_node_count=4")
+            && diag.message.contains("element_geometry_edge_count=5")
+            && diag.message.contains("mean_element_edge_length_m=0.2")
+            && diag.message.contains("mean_element_area_m2=0.04")
+            && diag.message.contains("element_geometry_coverage_ratio=1")
+    }));
+    assert!(result.diagnostics.iter().any(|diag| {
         diag.code == "FEA_STRUCTURAL_FIELD_RECOVERY"
             && diag.message.contains("basis=prep_element_connectivity")
             && diag.message.contains("prep_recovery_edge_count=")
             && diag.message.contains("mean_edge_length_m=")
             && diag.message.contains("max_edge_strain_norm=")
             && diag.message.contains("strain_component_coverage_ratio=")
+            && diag.message.contains("element_geometry_node_count=4")
+            && diag.message.contains("element_geometry_edge_count=5")
+            && diag.message.contains("element_geometry_coverage_ratio=1")
     }));
 }
 
@@ -585,6 +601,11 @@ fn prepared_thermal_recovery_uses_prep_edge_graph() {
                 coordinate_span_z_m: 0.4,
                 coordinate_active_dimension_count: 3,
                 coordinate_characteristic_length_m: 0.2,
+                element_geometry_node_count: 4,
+                element_geometry_edge_count: 5,
+                mean_element_edge_length_m: 0.2,
+                mean_element_area_m2: 0.04,
+                element_geometry_coverage_ratio: 1.0,
                 calibration_profile_override: None,
             }),
             thermo_mechanical_context: Some(FeaThermoMechanicalContext {
@@ -1106,6 +1127,11 @@ fn nonlinear_prepared_state_recovery_uses_prep_connectivity_edges() {
                 coordinate_span_z_m: 0.5,
                 coordinate_active_dimension_count: 3,
                 coordinate_characteristic_length_m: 0.25,
+                element_geometry_node_count: 4,
+                element_geometry_edge_count: 5,
+                mean_element_edge_length_m: 0.25,
+                mean_element_area_m2: 0.0625,
+                element_geometry_coverage_ratio: 1.0,
                 calibration_profile_override: None,
             }),
             ..NonlinearSolveOptions::default()
