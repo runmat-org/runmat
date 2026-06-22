@@ -91,6 +91,21 @@ pub fn recover_result_fields(
     ]
 }
 
+pub fn recover_structural_stress_from_displacement(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+) -> Vec<f64> {
+    let mut displacement_values = displacement.to_vec();
+    let dof_count = summary.dof_count.max(3);
+    if displacement_values.len() < dof_count {
+        displacement_values.resize(dof_count, 0.0);
+    }
+    let node_count = dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1);
+    displacement_values.resize(node_count * VECTOR_COMPONENT_COUNT, 0.0);
+    let strain_recovery = recover_structural_strain(summary, &displacement_values);
+    recover_stress(&strain_recovery.values, summary.structural_material)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StructuralFieldRecoveryMetrics {
     pub active_stiffness_edge_count: usize,

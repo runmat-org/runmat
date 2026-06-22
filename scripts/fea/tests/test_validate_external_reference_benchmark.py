@@ -6735,6 +6735,14 @@ class ValidateExternalReferenceBenchmarkTests(unittest.TestCase):
     def test_fails_when_required_fixture_metrics_are_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "external_reference_benchmark.json"
+            metrics = [
+                metric
+                for metric in required_metrics_payload()
+                if not (
+                    metric.get("fixture_id") == "cfd_steady_gpu_provider"
+                    and metric.get("name") == "cfd_reference_density_kg_per_m3"
+                )
+            ]
             path.write_text(
                 json.dumps(
                     {
@@ -6745,15 +6753,7 @@ class ValidateExternalReferenceBenchmarkTests(unittest.TestCase):
                             "secondary": "calculix_cross_check",
                         },
                         "generated_at": "2026-03-10T00:00:00Z",
-                        "metrics": [
-                            {
-                                "name": "cfd_reference_density_kg_per_m3",
-                                "fixture_id": "cfd_steady_gpu_provider",
-                                "observed": 1.0,
-                                "reference": 1.02,
-                                "pass": True,
-                            }
-                        ],
+                        "metrics": metrics,
                     }
                 )
             )

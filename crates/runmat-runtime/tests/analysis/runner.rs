@@ -3965,6 +3965,48 @@ fn push_structural_reference_kinematics_threshold_assertions(
         Some(1.0),
         Some(1.0),
     );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_reference_closed_form_displacement_error_ratio",
+        "FEA_STRUCTURAL_REFERENCE_KINEMATICS",
+        diagnostic_metric(
+            run,
+            "FEA_STRUCTURAL_REFERENCE_KINEMATICS",
+            "closed_form_displacement_error_ratio",
+        ),
+        Some(0.0),
+        Some(1.0e-7),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_reference_closed_form_stress_error_ratio",
+        "FEA_STRUCTURAL_REFERENCE_KINEMATICS",
+        diagnostic_metric(
+            run,
+            "FEA_STRUCTURAL_REFERENCE_KINEMATICS",
+            "closed_form_stress_error_ratio",
+        ),
+        Some(0.0),
+        Some(1.0e-7),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_reference_closed_form_coverage_ratio",
+        "FEA_STRUCTURAL_REFERENCE_KINEMATICS",
+        diagnostic_metric(
+            run,
+            "FEA_STRUCTURAL_REFERENCE_KINEMATICS",
+            "closed_form_reference_coverage_ratio",
+        ),
+        Some(1.0),
+        Some(1.0),
+    );
 }
 
 fn validate_fallback_event_schema(event: &str) -> bool {

@@ -1497,6 +1497,13 @@ fn structural_bar_and_beam_reference_fixtures_emit_known_answer_checks() {
             && diag
                 .message
                 .contains("directional_reference_coverage_ratio=1")
+            && diag
+                .message
+                .contains("closed_form_displacement_error_ratio=")
+            && diag.message.contains("closed_form_stress_error_ratio=")
+            && diag
+                .message
+                .contains("closed_form_reference_coverage_ratio=1")
     }));
     assert!(bending.diagnostics.iter().any(|diag| {
         diag.code == "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER"
@@ -1513,6 +1520,13 @@ fn structural_bar_and_beam_reference_fixtures_emit_known_answer_checks() {
             && diag
                 .message
                 .contains("directional_reference_coverage_ratio=1")
+            && diag
+                .message
+                .contains("closed_form_displacement_error_ratio=")
+            && diag.message.contains("closed_form_stress_error_ratio=")
+            && diag
+                .message
+                .contains("closed_form_reference_coverage_ratio=1")
     }));
 
     let axial_displacement = field(&axial, FEA_FIELD_STRUCTURAL_DISPLACEMENT)
