@@ -7,16 +7,101 @@ pub mod thermal;
 pub mod thermo_mechanical;
 pub mod transient;
 
-use runmat_analysis_core::AnalysisModel;
+use runmat_analysis_core::{AnalysisModel, LoadKind, StructuralElementKind, StructuralModel};
 
-use crate::{assembly::AssemblySummary, contracts::FeaRunError};
+use crate::{
+    assembly::{dofs::StructuralDofKind, AssemblySummary},
+    contracts::FeaRunError,
+};
+
+const MOMENT_REQUIRES_ROTATIONAL_DOF_MESSAGE: &str =
+    "moment loads require rotational-DOF structural elements";
 
 pub(crate) fn reject_moment_loads_without_rotational_dofs(
     model: &AnalysisModel,
     summary: &AssemblySummary,
 ) -> Result<(), FeaRunError> {
-    crate::assembly::dofs::validate_moment_loads_against_layout(
-        model,
-        &summary.structural_dof_layout,
-    )
+    for load in &model.loads {
+        if !matches!(load.kind, LoadKind::Moment { .. }) {
+            continue;
+        }
+        if !summary.structural_dof_layout.has_rotational_dofs() {
+            return Err(moment_load_error(load));
+        }
+        let Some(structural) = model.structural.as_ref() else {
+            continue;
+        };
+        let target_nodes = structural_target_nodes(structural, &load.region_id);
+        if target_nodes.is_empty()
+            || target_nodes
+                .iter()
+                .any(|node_index| !node_has_rotational_dofs(summary, *node_index))
+        {
+            return Err(moment_load_error(load));
+        }
+    }
+    Ok(())
+}
+
+fn moment_load_error(load: &runmat_analysis_core::LoadCase) -> FeaRunError {
+    FeaRunError::InvalidModel(format!(
+        "{}; load_id={} region_id={}",
+        MOMENT_REQUIRES_ROTATIONAL_DOF_MESSAGE, load.load_id, load.region_id
+    ))
+}
+
+fn node_has_rotational_dofs(summary: &AssemblySummary, node_index: usize) -> bool {
+    [
+        StructuralDofKind::Rx,
+        StructuralDofKind::Ry,
+        StructuralDofKind::Rz,
+    ]
+    .iter()
+    .any(|kind| {
+        summary
+            .structural_dof_layout
+            .index(node_index, *kind)
+            .is_some()
+    })
+}
+
+fn structural_target_nodes(structural: &StructuralModel, region_id: &str) -> Vec<usize> {
+    if let Some(node_id) = structural_node_selector(region_id) {
+        return structural_node_index(structural, node_id)
+            .into_iter()
+            .collect();
+    }
+    let mut nodes = Vec::new();
+    for element in &structural.elements {
+        if element.region_id != region_id {
+            continue;
+        }
+        match &element.kind {
+            StructuralElementKind::Beam(beam) => {
+                for node_id in beam.node_ids {
+                    if let Some(index) = structural_node_index(structural, node_id) {
+                        if !nodes.contains(&index) {
+                            nodes.push(index);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    nodes
+}
+
+fn structural_node_index(structural: &StructuralModel, node_id: u32) -> Option<usize> {
+    structural
+        .nodes
+        .iter()
+        .position(|node| node.node_id == node_id)
+}
+
+fn structural_node_selector(region_id: &str) -> Option<u32> {
+    region_id
+        .strip_prefix("node:")
+        .unwrap_or(region_id)
+        .parse::<u32>()
+        .ok()
 }

@@ -1794,6 +1794,19 @@ fn structural_invalid_moment_without_rotational_dofs_fixture_is_typed() {
 }
 
 #[test]
+fn moment_load_region_must_resolve_to_rotational_dofs() {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    model.loads[0].region_id = "node:99".to_string();
+
+    let err = crate::run_linear_static(&model, ComputeBackend::Cpu)
+        .expect_err("unresolved beam moment target should fail");
+    assert!(err
+        .to_string()
+        .contains("moment loads require rotational-DOF structural elements"));
+    assert!(err.to_string().contains("region_id=node:99"));
+}
+
+#[test]
 fn multi_material_fixture_has_distinct_response_profile() {
     let baseline = crate::run_linear_static(
         &fixture_model(FixtureId::CantileverLinearStatic),

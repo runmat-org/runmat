@@ -1,10 +1,4 @@
-use runmat_analysis_core::{AnalysisModel, LoadKind};
 use serde::{Deserialize, Serialize};
-
-use crate::contracts::FeaRunError;
-
-const MOMENT_REQUIRES_ROTATIONAL_DOF_MESSAGE: &str =
-    "moment loads require rotational-DOF structural elements";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -187,26 +181,6 @@ impl StructuralDofLayout {
     pub fn has_rotational_dofs(&self) -> bool {
         self.rotational_dof_count() > 0
     }
-}
-
-pub(crate) fn validate_moment_loads_against_layout(
-    model: &AnalysisModel,
-    layout: &StructuralDofLayout,
-) -> Result<(), FeaRunError> {
-    if layout.has_rotational_dofs() {
-        return Ok(());
-    }
-    if let Some(load) = model
-        .loads
-        .iter()
-        .find(|load| matches!(load.kind, LoadKind::Moment { .. }))
-    {
-        return Err(FeaRunError::InvalidModel(format!(
-            "{}; load_id={} region_id={}",
-            MOMENT_REQUIRES_ROTATIONAL_DOF_MESSAGE, load.load_id, load.region_id
-        )));
-    }
-    Ok(())
 }
 
 #[cfg(test)]
