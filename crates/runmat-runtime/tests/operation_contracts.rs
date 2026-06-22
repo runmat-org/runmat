@@ -4,12 +4,15 @@ use runmat_analysis_core::{
 };
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::{
+    fea_cht_fluid_temperature_field_id, fea_cht_interface_heat_flux_field_id,
+    fea_cht_interface_temperature_jump_field_id, fea_cht_solid_temperature_field_id,
     fea_fsi_interface_displacement_field_id, fea_fsi_interface_pressure_field_id,
     fea_fsi_interface_traction_field_id, fea_modal_mode_shape_field_id,
     fea_nonlinear_load_factor_field_id, fea_nonlinear_residual_norm_field_id,
     fea_transient_residual_norm_field_id, ComputeBackend, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
     FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_VELOCITY,
-    FEA_FIELD_CFD_VORTICITY, FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
+    FEA_FIELD_CFD_VORTICITY, FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE,
+    FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
     FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
     FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
@@ -22,9 +25,10 @@ use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_plan_study_op, analysis_plan_study_sweep_op,
     analysis_results_by_run_id_op, analysis_results_compare_op, analysis_results_op,
-    analysis_run_acoustic_op, analysis_run_cfd_op, analysis_run_electromagnetic_op,
-    analysis_run_fsi_op, analysis_run_linear_static_op, analysis_run_linear_static_with_options,
-    analysis_run_modal_op, analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
+    analysis_run_acoustic_op, analysis_run_cfd_op, analysis_run_cht_op,
+    analysis_run_electromagnetic_op, analysis_run_fsi_op, analysis_run_linear_static_op,
+    analysis_run_linear_static_with_options, analysis_run_modal_op,
+    analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
     analysis_run_nonlinear_with_options_op, analysis_run_study_op, analysis_run_study_sweep_op,
     analysis_run_transient_op, analysis_run_transient_with_options_op, analysis_trends_op,
     analysis_validate, analysis_validate_study_op, analysis_validate_study_sweep_op,
@@ -1302,6 +1306,85 @@ fn analysis_run_cfd_contract_shapes_cell_and_boundary_fields() {
     assert_eq!(vorticity.shape, velocity.shape);
     assert_eq!(wall_shear.shape, vec![1, 3]);
     assert_ne!(wall_shear.shape[0], velocity.shape[0]);
+}
+
+#[test]
+fn analysis_run_cht_contract_shapes_coupled_interface_fields() {
+    let geometry = geometry_load_op(
+        "/part.stl",
+        TRIANGLE_STL.as_bytes(),
+        OperationContext::new(Some("trace-contract-cht-1".to_string()), None),
+    )
+    .expect("geometry load should succeed");
+    let model = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_cht_model".to_string(),
+            profile: AnalysisCreateModelProfile::ChtCoupled,
+            prep_context: None,
+        },
+        OperationContext::new(Some("trace-contract-cht-2".to_string()), None),
+    )
+    .expect("cht model should be created");
+
+    let envelope = analysis_run_cht_op(
+        &model.data,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-cht-3".to_string()), None),
+    )
+    .expect("cht run should return envelope");
+    assert_eq!(envelope.operation, "fea.run_cht");
+    assert_eq!(envelope.op_version, "fea.run_cht/v1");
+    assert_eq!(envelope.data.run.solver_method, "cht_conjugate_projection");
+    assert!(envelope.data.transient_results.is_none());
+
+    let fluid_velocity = envelope
+        .data
+        .run
+        .field(FEA_FIELD_CHT_FLUID_VELOCITY)
+        .expect("cht fluid velocity should be present");
+    let fluid_pressure = envelope
+        .data
+        .run
+        .field(FEA_FIELD_CHT_FLUID_PRESSURE)
+        .expect("cht fluid pressure should be present");
+    let fluid_temperature = envelope
+        .data
+        .run
+        .field(&fea_cht_fluid_temperature_field_id(0))
+        .expect("cht fluid temperature should be present");
+    let solid_temperature = envelope
+        .data
+        .run
+        .field(&fea_cht_solid_temperature_field_id(0))
+        .expect("cht solid temperature should be present");
+    let interface_heat_flux = envelope
+        .data
+        .run
+        .field(&fea_cht_interface_heat_flux_field_id(0))
+        .expect("cht interface heat flux should be present");
+    let interface_temperature_jump = envelope
+        .data
+        .run
+        .field(&fea_cht_interface_temperature_jump_field_id(0))
+        .expect("cht interface temperature jump should be present");
+    let thermal = envelope
+        .data
+        .thermal_results
+        .as_ref()
+        .expect("cht should retain the thermal payload");
+    let thermal_flux_face_count = thermal
+        .heat_flux_snapshots
+        .first()
+        .and_then(|field| field.shape.first().copied())
+        .expect("thermal heat-flux snapshot should carry a recovery domain");
+
+    assert_eq!(fluid_velocity.shape.len(), 2);
+    assert_eq!(fluid_velocity.shape[1], 3);
+    assert_eq!(fluid_pressure.shape, vec![fluid_velocity.shape[0]]);
+    assert_eq!(solid_temperature.shape, fluid_temperature.shape);
+    assert_eq!(interface_heat_flux.shape, vec![thermal_flux_face_count]);
+    assert_eq!(interface_temperature_jump.shape, interface_heat_flux.shape);
 }
 
 #[test]
