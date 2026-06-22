@@ -585,6 +585,13 @@ impl AccelProvider for WgpuProvider {
         )
     }
 
+    fn unary_angle<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.unary_angle_exec(a) })
+    }
+
     fn unary_abs<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.unary_abs_exec(a) })
     }

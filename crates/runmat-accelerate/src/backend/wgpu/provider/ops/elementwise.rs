@@ -182,6 +182,15 @@ impl WgpuProvider {
         self.complex_unary_exec(a, ComplexUnaryOp::Conj, true)
     }
 
+    pub(crate) fn unary_angle_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_storage(a)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Angle, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Angle, false)
+    }
+
     fn complex_unary_exec(
         &self,
         a: &GpuTensorHandle,

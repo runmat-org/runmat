@@ -3409,6 +3409,33 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn unary_angle<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let out: Vec<f64> = if runmat_accelerate_api::handle_storage(a)
+                == GpuTensorStorage::ComplexInterleaved
+            {
+                ensure!(
+                    abuf.len() % 2 == 0,
+                    "unary_angle: complex-interleaved buffer has odd length"
+                );
+                abuf.chunks_exact(2)
+                    .map(|pair| pair[1].atan2(pair[0]))
+                    .collect()
+            } else {
+                abuf.iter().map(|&x| 0.0f64.atan2(x)).collect()
+            };
+            drop(guard);
+            Ok(self.allocate_tensor(out, a.shape.clone()))
+        })
+    }
+
     fn unary_real<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

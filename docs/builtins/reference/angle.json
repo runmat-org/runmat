@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Falls back to the host implementation when the active provider lacks unary_angle or when complex tensors require host-side conversion."
+    "notes": "Uses provider unary_angle for real and complex-interleaved gpuArrays; falls back to the host implementation only when the hook is unavailable or host-only conversions are required."
   },
   "fusion": {
     "elementwise": true,
@@ -58,7 +58,7 @@
     },
     {
       "description": "Working with GPU-resident arrays",
-      "input": "G = gpuArray([1 -1; -1 1]);\ntheta = angle(gather(G));\ndisp(theta)",
+      "input": "G = gpuArray([1 -1; -1 1]);\ntheta = gather(angle(G));\ndisp(theta)",
       "output": "theta =\n\n     0.0000    3.1416\n     3.1416    0.0000"
     },
     {
@@ -95,7 +95,7 @@
     },
     {
       "question": "What about GPU execution for complex tensors?",
-      "answer": "Complex runtime tensors currently live on the host. RunMat gathers them automatically, computes the phase angle, and resumes execution. Future providers may add native complex kernels without changing this builtin."
+      "answer": "Host complex tensors execute on the CPU. Complex-interleaved gpuArrays stay GPU-resident when the active provider implements unary_angle, computing the phase angle directly on device."
     },
     {
       "question": "Will GPU results match CPU results exactly?",
@@ -214,6 +214,6 @@
   },
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's fusion planner and Accelerate layer manage residency automatically, keeping tensors on the GPU whenever device execution is advantageous. Explicit `gpuArray` / `gather` calls remain available for MATLAB compatibility or when you need deterministic residency control.",
   "gpu_behavior": [
-    "When RunMat Accelerate is active, tensors that already reside on the GPU remain on the device. Providers that implement the `unary_angle` hook execute the phase computation directly on the GPU, using the same `atan2(imag, real)` logic as the host path. If the hook is missing—or if the input requires host-side conversions such as complex tensors—RunMat gathers the data, evaluates the phase angle on the CPU, and then honors any downstream fusion or residency decisions automatically."
+    "When RunMat Accelerate is active, tensors that already reside on the GPU remain on the device. Providers that implement the `unary_angle` hook execute the phase computation directly on the GPU, using `atan2(0, real)` for real storage and `atan2(imag, real)` for complex-interleaved storage. If the hook is missing or an input requires host-only conversion, RunMat gathers the data, evaluates the phase angle on the CPU, and then honors any downstream fusion or residency decisions automatically."
   ]
 }

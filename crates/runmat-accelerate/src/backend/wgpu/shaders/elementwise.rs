@@ -6,6 +6,7 @@ pub(crate) enum ComplexUnaryOp {
     Imag,
     Abs,
     Conj,
+    Angle,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +45,7 @@ pub(crate) fn complex_unary_shader(op: ComplexUnaryOp, precision: NumericPrecisi
         ComplexUnaryOp::Conj => {
             "select(A.data[idx], -A.data[idx], (idx % 2u) == 1u)"
         }
+        ComplexUnaryOp::Angle => "atan2(A.data[idx * 2u + 1u], A.data[idx * 2u])",
     };
     format!(
         r#"
