@@ -615,7 +615,7 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis={} edge_dof_count={} element_count={} oriented_edge_count={} constrained_edge_count={} gauge_anchor_count={} prep_recovery_edge_count={} curl_curl_energy_scale={}",
+            "basis={} edge_dof_count={} element_count={} oriented_edge_count={} constrained_edge_count={} gauge_anchor_count={} prep_recovery_edge_count={} vector_basis_dimension_count={} reference_element_area_m2={} curl_curl_energy_scale={}",
             maxwell_topology.basis.as_str(),
             maxwell_topology.edge_count(),
             maxwell_topology.element_count(),
@@ -623,6 +623,8 @@ pub fn run_electromagnetic_with_options(
             maxwell_topology.constrained_edge_count(),
             maxwell_topology.gauge_anchor_count(),
             maxwell_topology.prep_recovery_edge_count,
+            maxwell_topology.vector_basis_dimension_count,
+            maxwell_topology.reference_element_area_m2,
             maxwell_topology.curl_curl_energy_scale(),
         ),
     });
@@ -2169,6 +2171,8 @@ struct MaxwellEdgeTopology {
     edges: Vec<MaxwellEdge>,
     gauge_anchor_nodes: Vec<usize>,
     prep_recovery_edge_count: usize,
+    vector_basis_dimension_count: usize,
+    reference_element_area_m2: f64,
 }
 
 struct CurlCurlAssemblyInputs<'a> {
@@ -2188,12 +2192,59 @@ impl MaxwellEdgeTopology {
         spacing: f64,
         constrained: &[bool],
     ) -> Self {
-        Self::from_prep_recovery_edges(
-            node_count,
-            constrained,
-            summary.prep_recovery_edges.iter().copied(),
-        )
-        .unwrap_or_else(|| Self::line_graph(node_count, spacing, constrained))
+        Self::from_reference_element(summary, node_count, constrained).unwrap_or_else(|| {
+            Self::from_prep_recovery_edges(
+                node_count,
+                constrained,
+                summary.prep_recovery_edges.iter().copied(),
+            )
+            .unwrap_or_else(|| Self::line_graph(node_count, spacing, constrained))
+        })
+    }
+
+    fn from_reference_element(
+        summary: &AssemblySummary,
+        node_count: usize,
+        constrained: &[bool],
+    ) -> Option<Self> {
+        let prep_coordinates = summary.prep_coordinates.as_ref()?;
+        if node_count < 3
+            || prep_coordinates.element_geometry_coverage_ratio <= 0.0
+            || prep_coordinates.reference_element_area_m2 <= 0.0
+            || !prep_coordinates.reference_element_area_m2.is_finite()
+            || !maxwell_reference_coordinates_are_valid(
+                prep_coordinates.reference_element_coordinates_m,
+            )
+        {
+            return None;
+        }
+        let coordinates = prep_coordinates.reference_element_coordinates_m;
+        let edge_nodes = [(0_usize, 1_usize), (1, 2), (2, 0)];
+        let edges = edge_nodes
+            .iter()
+            .filter_map(|(from_node, to_node)| {
+                let length = maxwell_distance3(coordinates[*from_node], coordinates[*to_node]);
+                (length.is_finite() && length > 0.0).then_some(MaxwellEdge {
+                    from_node: *from_node,
+                    to_node: *to_node,
+                    orientation: 1.0,
+                    length,
+                    constrained: constrained.get(*from_node).copied().unwrap_or(false)
+                        || constrained.get(*to_node).copied().unwrap_or(false),
+                })
+            })
+            .collect::<Vec<_>>();
+        if edges.len() != 3 {
+            return None;
+        }
+        Some(Self {
+            basis: MaxwellEdgeTopologyBasis::PrepReferenceVectorElement,
+            edges,
+            gauge_anchor_nodes: gauge_anchor_nodes(constrained),
+            prep_recovery_edge_count: summary.prep_recovery_edges.len(),
+            vector_basis_dimension_count: 3,
+            reference_element_area_m2: prep_coordinates.reference_element_area_m2,
+        })
     }
 
     fn from_prep_recovery_edges<I>(
@@ -2246,6 +2297,8 @@ impl MaxwellEdgeTopology {
             prep_recovery_edge_count: edges.len(),
             edges,
             gauge_anchor_nodes: gauge_anchor_nodes(constrained),
+            vector_basis_dimension_count: 1,
+            reference_element_area_m2: 0.0,
         })
     }
 
@@ -2274,6 +2327,8 @@ impl MaxwellEdgeTopology {
             edges,
             gauge_anchor_nodes: gauge_anchor_nodes(constrained),
             prep_recovery_edge_count: 0,
+            vector_basis_dimension_count: 1,
+            reference_element_area_m2: 0.0,
         }
     }
 
@@ -2650,6 +2705,7 @@ impl MaxwellEdgeResidualMetrics {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MaxwellEdgeTopologyBasis {
+    PrepReferenceVectorElement,
     PrepEdgeCurlConforming,
     LineEdgeCurlConforming,
 }
@@ -2657,10 +2713,42 @@ enum MaxwellEdgeTopologyBasis {
 impl MaxwellEdgeTopologyBasis {
     fn as_str(self) -> &'static str {
         match self {
+            Self::PrepReferenceVectorElement => "prep_reference_vector_element",
             Self::PrepEdgeCurlConforming => "prep_edge_curl_conforming",
             Self::LineEdgeCurlConforming => "line_edge_curl_conforming",
         }
     }
+}
+
+fn maxwell_reference_coordinates_are_valid(coordinates: [[f64; 3]; 3]) -> bool {
+    coordinates.iter().flatten().all(|value| value.is_finite())
+        && maxwell_triangle_area_3d_m2(coordinates) > 0.0
+}
+
+fn maxwell_triangle_area_3d_m2(coordinates: [[f64; 3]; 3]) -> f64 {
+    let edge01 = maxwell_sub3(coordinates[1], coordinates[0]);
+    let edge02 = maxwell_sub3(coordinates[2], coordinates[0]);
+    0.5 * maxwell_norm3(maxwell_cross3(edge01, edge02))
+}
+
+fn maxwell_distance3(left: [f64; 3], right: [f64; 3]) -> f64 {
+    maxwell_norm3(maxwell_sub3(left, right))
+}
+
+fn maxwell_sub3(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+fn maxwell_cross3(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
+}
+
+fn maxwell_norm3(value: [f64; 3]) -> f64 {
+    (value[0] * value[0] + value[1] * value[1] + value[2] * value[2]).sqrt()
 }
 
 fn gauge_anchor_nodes(constrained: &[bool]) -> Vec<usize> {
@@ -2896,7 +2984,9 @@ fn em_homogeneous_known_answer_diagnostic(
 
 #[cfg(test)]
 mod tests {
-    use crate::assembly::PrepRecoveryEdgeSummary;
+    use crate::assembly::{assemble_linear_system, PrepRecoveryEdgeSummary};
+    use crate::contracts::FeaPrepContext;
+    use crate::fixtures::{fixture_model, FixtureId};
     use crate::operator::OperatorSystem;
 
     use runmat_analysis_core::{ConductivityFrequencyPoint, MaterialElectricalModel};
@@ -3139,6 +3229,81 @@ mod tests {
         assert_eq!(topology.constrained_edge_count(), 2);
         assert!((curl_real[0] - 1.0).abs() < 1.0e-12);
         assert!((curl_real[1] - 1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn maxwell_edge_topology_prefers_prep_reference_vector_element() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let summary = assemble_linear_system(
+            &model,
+            Some(FeaPrepContext {
+                prepared_mesh_count: 1,
+                prepared_node_count: 12,
+                prepared_element_count: 18,
+                mapped_region_count: 2,
+                min_scaled_jacobian: 0.82,
+                mean_aspect_ratio: 1.6,
+                inverted_element_count: 0,
+                mapped_load_count: 1,
+                mapped_bc_count: 1,
+                layout_seed: 17,
+                topology_dof_multiplier: 1.4,
+                topology_bandwidth_estimate: 3,
+                mapped_region_participation_ratio: 0.8,
+                topology_surface_patch_ratio: 0.25,
+                topology_volume_core_ratio: 0.65,
+                topology_mixed_family_ratio: 0.05,
+                topology_region_span_mean: 4.0,
+                topology_region_block_count: 2,
+                topology_region_mesh_mean: 3.0,
+                topology_region_mesh_variance: 0.4,
+                topology_triangle_family_ratio: 0.2,
+                topology_quad_family_ratio: 0.3,
+                topology_tet_family_ratio: 0.3,
+                topology_hex_family_ratio: 0.2,
+                coordinate_span_x_m: 2.4,
+                coordinate_span_y_m: 0.6,
+                coordinate_span_z_m: 0.4,
+                coordinate_active_dimension_count: 3,
+                coordinate_characteristic_length_m: 0.2,
+                element_geometry_node_count: 4,
+                element_geometry_edge_count: 5,
+                mean_element_edge_length_m: 0.2,
+                mean_element_area_m2: 0.04,
+                element_geometry_coverage_ratio: 1.0,
+                reference_element_coordinates_m: [
+                    [0.0, 0.0, 0.0],
+                    [0.4, 0.0, 0.0],
+                    [0.0, 0.2, 0.0],
+                ],
+                reference_element_area_m2: 0.04,
+                calibration_profile_override: None,
+            }),
+            None,
+            None,
+        );
+        let topology = MaxwellEdgeTopology::from_assembly_or_line(
+            &summary,
+            6,
+            0.2,
+            &[true, false, false, false, false, true],
+        );
+
+        assert_eq!(
+            topology.basis,
+            MaxwellEdgeTopologyBasis::PrepReferenceVectorElement
+        );
+        assert_eq!(topology.edge_count(), 3);
+        assert_eq!(topology.oriented_edge_count(), 3);
+        assert_eq!(topology.vector_basis_dimension_count, 3);
+        assert_eq!(
+            topology.prep_recovery_edge_count,
+            summary.prep_recovery_edges.len()
+        );
+        assert!((topology.reference_element_area_m2 - 0.04).abs() < 1.0e-12);
+        assert!((topology.edges[0].length - 0.4).abs() < 1.0e-12);
+        assert!((topology.edges[1].length - 0.2_f64.hypot(0.4)).abs() < 1.0e-12);
+        assert!((topology.edges[2].length - 0.2).abs() < 1.0e-12);
     }
 
     #[test]
