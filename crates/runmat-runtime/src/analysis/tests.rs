@@ -15,7 +15,7 @@ use runmat_analysis_core::{
     AnalysisStepKind, BoundaryCondition, BoundaryConditionKind, CfdSolveFamily,
     ConductivityFrequencyPoint, ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind,
     MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialThermalModel, ReferenceFrame,
+    MaterialThermalModel, ReferenceFrame, StructuralElementKind,
 };
 use runmat_analysis_fea::{
     fea_acoustic_frequency_response_field_id, fea_cht_energy_residual_field_id,
@@ -186,6 +186,7 @@ fn sample_model() -> AnalysisModel {
             plastic: None,
         }],
         material_assignments: Vec::new(),
+        structural: None,
         thermo_mechanical: None,
         electro_thermal: None,
         electromagnetic: None,
@@ -861,6 +862,88 @@ run:
             rz: 0.3
         }
     ));
+}
+
+#[test]
+fn fea_document_resolves_beam_structural_model_data() {
+    let tmp = tempfile::tempdir().expect("tempdir should be created");
+    std::fs::write(tmp.path().join("assembly.step"), SIMPLE_STEP)
+        .expect("fixture geometry should write");
+    let input = r#"
+version: 1
+kind: study
+id: beam_static
+geometry:
+  path: assembly.step
+  units: meter
+model:
+  id: beam_model
+  profile: linear_static_structural
+  defaults: none
+regions:
+  beam_span:
+    selector: "name:Bracket_A"
+materials:
+  steel:
+    mechanical:
+      youngs_modulus_pa: 200000000000.0
+      poisson_ratio: 0.30
+material_assignments:
+  - region: beam_span
+    material: steel
+nodes:
+  - id: 1
+    coordinates_m: [0.0, 0.0, 0.0]
+  - id: 2
+    coordinates_m: [1.0, 0.0, 0.0]
+elements:
+  - id: beam_1
+    region: beam_span
+    type: beam
+    nodes: [1, 2]
+    section: rect_20x10
+    reference_axis: [0.0, 0.0, 1.0]
+sections:
+  - id: rect_20x10
+    area_m2: 2.0e-4
+    iy_m4: 1.6e-9
+    iz_m4: 6.4e-9
+    torsion_j_m4: 2.4e-9
+boundary_conditions:
+  - id: fixed_root
+    region: beam_span
+    kind: fixed
+loads:
+  - id: tip_force
+    region: beam_span
+    type: force
+    vector: [0.0, -1000.0, 0.0]
+steps:
+  - id: static_step
+    kind: static
+run:
+  backend: cpu
+"#;
+
+    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
+        .expect("FEA study document should resolve");
+
+    let FeaResolvedDocument::Study(study) = resolved else {
+        panic!("expected resolved study");
+    };
+    let model = study.model.as_ref().expect("explicit model should resolve");
+    let structural = model
+        .structural
+        .as_ref()
+        .expect("structural model should resolve");
+    assert_eq!(structural.nodes.len(), 2);
+    assert_eq!(structural.elements.len(), 1);
+    assert_eq!(structural.beam_sections.len(), 1);
+    assert_eq!(structural.elements[0].region_id, "region_1");
+    let StructuralElementKind::Beam(beam) = &structural.elements[0].kind;
+    assert_eq!(beam.node_ids, [1, 2]);
+    assert_eq!(beam.section_id, "rect_20x10");
+    assert_eq!(beam.reference_axis, [0.0, 0.0, 1.0]);
 }
 
 #[test]

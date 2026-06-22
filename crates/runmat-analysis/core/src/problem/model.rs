@@ -9,6 +9,7 @@ use super::{
     material_assignment::MaterialAssignment,
     materials::MaterialModel,
     steps::AnalysisStep,
+    structure::StructuralModel,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +32,8 @@ pub struct AnalysisModel {
     pub materials: Vec<MaterialModel>,
     #[serde(default)]
     pub material_assignments: Vec<MaterialAssignment>,
+    #[serde(default)]
+    pub structural: Option<StructuralModel>,
     #[serde(default)]
     pub thermo_mechanical: Option<ThermoMechanicalDomain>,
     #[serde(default)]

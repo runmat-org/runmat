@@ -2,11 +2,12 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use runmat_analysis_core::{
-    AnalysisInterface, AnalysisModel, AnalysisModelId, AnalysisStep, BoundaryCondition,
-    BoundaryConditionKind, CfdDomain, ElectroThermalDomain, ElectromagneticDomain,
-    EvidenceConfidence, LoadCase, LoadKind, MaterialAcousticModel, MaterialAssignment,
-    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialPlasticModel,
-    MaterialThermalModel, ReferenceFrame, ThermoMechanicalDomain,
+    AnalysisInterface, AnalysisModel, AnalysisModelId, AnalysisStep, BeamElementModel,
+    BeamSectionModel, BoundaryCondition, BoundaryConditionKind, CfdDomain, ElectroThermalDomain,
+    ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind, MaterialAcousticModel,
+    MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
+    MaterialPlasticModel, MaterialThermalModel, ReferenceFrame, StructuralElement,
+    StructuralElementKind, StructuralModel, StructuralNode, ThermoMechanicalDomain,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{GeometryAsset, UnitSystem};
@@ -62,6 +63,14 @@ struct FeaStudyDocument {
     materials: BTreeMap<String, FeaMaterialDocument>,
     #[serde(default)]
     material_assignments: Vec<FeaMaterialAssignmentDocument>,
+    #[serde(default)]
+    structural: Option<FeaStructuralDocument>,
+    #[serde(default)]
+    nodes: Vec<FeaStructuralNodeDocument>,
+    #[serde(default)]
+    elements: Vec<FeaStructuralElementDocument>,
+    #[serde(default)]
+    sections: Vec<FeaBeamSectionDocument>,
     #[serde(default)]
     boundary_conditions: Vec<FeaBoundaryConditionDocument>,
     #[serde(default)]
@@ -142,6 +151,53 @@ struct FeaMaterialAssignmentDocument {
     expected_material: Option<String>,
     #[serde(default = "default_assignment_confidence")]
     confidence: EvidenceConfidence,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaStructuralDocument {
+    #[serde(default)]
+    nodes: Vec<FeaStructuralNodeDocument>,
+    #[serde(default)]
+    elements: Vec<FeaStructuralElementDocument>,
+    #[serde(default)]
+    sections: Vec<FeaBeamSectionDocument>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaStructuralNodeDocument {
+    id: u32,
+    coordinates_m: [f64; 3],
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaStructuralElementDocument {
+    id: String,
+    region: String,
+    #[serde(rename = "type", alias = "kind")]
+    element_type: FeaStructuralElementType,
+    nodes: [u32; 2],
+    section: String,
+    #[serde(default)]
+    reference_axis: Option<[f64; 3]>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FeaStructuralElementType {
+    Beam,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaBeamSectionDocument {
+    id: String,
+    area_m2: f64,
+    iy_m4: f64,
+    iz_m4: f64,
+    torsion_j_m4: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -437,6 +493,9 @@ fn resolve_model(
             .map(|assignment| resolve_material_assignment(assignment, geometry, &study.regions))
             .collect::<Result<Vec<_>, _>>()?;
     }
+    if has_structural_model_data(study) {
+        model.structural = Some(resolve_structural_model(study, geometry)?);
+    }
     if !study.boundary_conditions.is_empty() {
         model.boundary_conditions = study
             .boundary_conditions
@@ -506,6 +565,65 @@ fn resolve_material_assignment(
             .unwrap_or_else(|| assignment.material.clone()),
         assigned_material_id: assignment.material.clone(),
         confidence: assignment.confidence,
+    })
+}
+
+fn resolve_structural_model(
+    study: &FeaStudyDocument,
+    geometry: &GeometryAsset,
+) -> Result<StructuralModel, String> {
+    let structural = study.structural.as_ref();
+    let node_docs = structural
+        .map(|value| value.nodes.as_slice())
+        .unwrap_or(study.nodes.as_slice());
+    let element_docs = structural
+        .map(|value| value.elements.as_slice())
+        .unwrap_or(study.elements.as_slice());
+    let section_docs = structural
+        .map(|value| value.sections.as_slice())
+        .unwrap_or(study.sections.as_slice());
+
+    Ok(StructuralModel {
+        nodes: node_docs
+            .iter()
+            .map(|node| StructuralNode {
+                node_id: node.id,
+                coordinates_m: node.coordinates_m,
+            })
+            .collect(),
+        elements: element_docs
+            .iter()
+            .map(|element| resolve_structural_element(element, geometry, &study.regions))
+            .collect::<Result<Vec<_>, _>>()?,
+        beam_sections: section_docs
+            .iter()
+            .map(|section| BeamSectionModel {
+                section_id: section.id.clone(),
+                area_m2: section.area_m2,
+                iy_m4: section.iy_m4,
+                iz_m4: section.iz_m4,
+                torsion_j_m4: section.torsion_j_m4,
+            })
+            .collect(),
+    })
+}
+
+fn resolve_structural_element(
+    element: &FeaStructuralElementDocument,
+    geometry: &GeometryAsset,
+    aliases: &BTreeMap<String, FeaRegionDocument>,
+) -> Result<StructuralElement, String> {
+    let kind = match element.element_type {
+        FeaStructuralElementType::Beam => StructuralElementKind::Beam(BeamElementModel {
+            node_ids: element.nodes,
+            section_id: element.section.clone(),
+            reference_axis: element.reference_axis.unwrap_or([0.0, 0.0, 1.0]),
+        }),
+    };
+    Ok(StructuralElement {
+        element_id: element.id.clone(),
+        region_id: resolve_region_ref(&element.region, geometry, aliases)?,
+        kind,
     })
 }
 
@@ -731,6 +849,7 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         frame: ReferenceFrame::Global,
         materials: Vec::new(),
         material_assignments: Vec::new(),
+        structural: None,
         thermo_mechanical: None,
         electro_thermal: None,
         electromagnetic: None,
@@ -748,12 +867,23 @@ fn has_explicit_model_data(study: &FeaStudyDocument) -> bool {
         || !study.boundary_conditions.is_empty()
         || !study.loads.is_empty()
         || !study.steps.is_empty()
+        || has_structural_model_data(study)
         || study.domains.thermo_mechanical.is_some()
         || study.domains.electro_thermal.is_some()
         || study.domains.electromagnetic.is_some()
         || study.domains.cfd.is_some()
         || !study.interfaces.is_empty()
         || study.model.frame.is_some()
+}
+
+fn has_structural_model_data(study: &FeaStudyDocument) -> bool {
+    study.structural.as_ref().is_some_and(|structural| {
+        !structural.nodes.is_empty()
+            || !structural.elements.is_empty()
+            || !structural.sections.is_empty()
+    }) || !study.nodes.is_empty()
+        || !study.elements.is_empty()
+        || !study.sections.is_empty()
 }
 
 fn resolve_region_ref(

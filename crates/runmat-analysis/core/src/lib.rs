@@ -9,6 +9,7 @@ pub mod problem {
     pub mod materials;
     pub mod model;
     pub mod steps;
+    pub mod structure;
 }
 pub mod field;
 pub mod validate;
@@ -33,6 +34,10 @@ pub use problem::materials::{
 };
 pub use problem::model::{AnalysisModel, AnalysisModelId, ReferenceFrame};
 pub use problem::steps::{AnalysisStep, AnalysisStepKind};
+pub use problem::structure::{
+    BeamElementModel, BeamSectionModel, StructuralElement, StructuralElementKind, StructuralModel,
+    StructuralNode,
+};
 pub use validate::{validate_model, validate_model_against_geometry, AnalysisValidationError};
 
 #[cfg(test)]
@@ -61,6 +66,7 @@ mod tests {
                 plastic: None,
             }],
             material_assignments: Vec::new(),
+            structural: None,
             thermo_mechanical: None,
             electro_thermal: None,
             electromagnetic: None,
@@ -189,6 +195,49 @@ mod tests {
         let decoded: BoundaryCondition =
             serde_json::from_value(json).expect("bc should deserialize");
         assert_eq!(decoded, bc);
+    }
+
+    #[test]
+    fn structural_beam_model_round_trips() {
+        let mut model = valid_model();
+        model.structural = Some(StructuralModel {
+            nodes: vec![
+                StructuralNode {
+                    node_id: 1,
+                    coordinates_m: [0.0, 0.0, 0.0],
+                },
+                StructuralNode {
+                    node_id: 2,
+                    coordinates_m: [1.0, 0.0, 0.0],
+                },
+            ],
+            elements: vec![StructuralElement {
+                element_id: "beam_1".to_string(),
+                region_id: "beam_span".to_string(),
+                kind: StructuralElementKind::Beam(BeamElementModel {
+                    node_ids: [1, 2],
+                    section_id: "section_1".to_string(),
+                    reference_axis: [0.0, 0.0, 1.0],
+                }),
+            }],
+            beam_sections: vec![BeamSectionModel {
+                section_id: "section_1".to_string(),
+                area_m2: 2.0e-4,
+                iy_m4: 1.6e-9,
+                iz_m4: 6.4e-9,
+                torsion_j_m4: 2.4e-9,
+            }],
+        });
+
+        let json = serde_json::to_value(&model).expect("model should serialize");
+        assert_eq!(
+            json["structural"]["elements"][0]["kind"]["beam"]["node_ids"][1],
+            2
+        );
+
+        let decoded: AnalysisModel =
+            serde_json::from_value(json).expect("model should deserialize");
+        assert_eq!(decoded, model);
     }
 
     #[test]

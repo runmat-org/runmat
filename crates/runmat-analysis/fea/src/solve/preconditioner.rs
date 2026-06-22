@@ -211,6 +211,7 @@ mod tests {
                 plastic: None,
             }],
             material_assignments: Vec::new(),
+            structural: None,
             thermo_mechanical: None,
             electro_thermal: None,
             electromagnetic: None,

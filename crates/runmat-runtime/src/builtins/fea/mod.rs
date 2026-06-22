@@ -1709,6 +1709,7 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         frame: ReferenceFrame::Global,
         materials: Vec::new(),
         material_assignments: Vec::new(),
+        structural: None,
         thermo_mechanical: None,
         electro_thermal: None,
         electromagnetic: None,

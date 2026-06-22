@@ -918,6 +918,7 @@ pub fn analysis_create_model_op(
         frame: ReferenceFrame::Global,
         materials: inferred_materials,
         material_assignments: inferred_assignments,
+        structural: None,
         thermo_mechanical,
         electro_thermal: None,
         electromagnetic,

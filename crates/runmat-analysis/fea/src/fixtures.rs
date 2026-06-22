@@ -103,6 +103,7 @@ fn cantilever_linear_static() -> AnalysisModel {
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Verified,
         }],
+        structural: None,
         thermo_mechanical: None,
         electro_thermal: None,
         electromagnetic: None,
