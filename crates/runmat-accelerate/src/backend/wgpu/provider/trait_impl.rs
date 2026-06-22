@@ -317,6 +317,21 @@ impl AccelProvider for WgpuProvider {
         })
     }
 
+    fn complex_from_real<'a>(
+        &'a self,
+        real: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.complex_from_real_exec(real) })
+    }
+
+    fn complex_from_real_imag<'a>(
+        &'a self,
+        real: &'a GpuTensorHandle,
+        imag: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.complex_from_real_imag_exec(real, imag) })
+    }
+
     fn elem_ge<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

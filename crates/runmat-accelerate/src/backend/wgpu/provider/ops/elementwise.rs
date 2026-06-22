@@ -10,7 +10,9 @@ use super::backend_shared::{
 use super::backend_types::WgpuProvider;
 use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::resources::UniformBufferKey;
-use crate::backend::wgpu::shaders::elementwise::{complex_unary_shader, ComplexUnaryOp};
+use crate::backend::wgpu::shaders::elementwise::{
+    complex_from_real_imag_shader, complex_from_real_shader, complex_unary_shader, ComplexUnaryOp,
+};
 use crate::backend::wgpu::shaders::logical::{
     ELEM_EQ_SHADER_F32, ELEM_EQ_SHADER_F64, ELEM_GE_SHADER_F32, ELEM_GE_SHADER_F64,
     ELEM_GT_SHADER_F32, ELEM_GT_SHADER_F64, ELEM_LE_SHADER_F32, ELEM_LE_SHADER_F64,
@@ -45,6 +47,102 @@ impl WgpuProvider {
         Ok(self.register_existing_buffer(entry.buffer, entry.shape, entry.len))
     }
 
+    pub(crate) fn complex_from_real_exec(&self, real: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(real)?;
+        ensure!(
+            runmat_accelerate_api::handle_storage(real)
+                != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            "complex_from_real requires a real-valued input"
+        );
+        let out_len = entry
+            .len
+            .checked_mul(2)
+            .ok_or_else(|| anyhow!("complex_from_real: output length overflow"))?;
+        let handle = if out_len == 0 {
+            let buffer = self.create_storage_buffer(0, "runmat-complex-from-real-empty");
+            self.register_existing_buffer_with_storage(
+                buffer,
+                entry.shape,
+                out_len,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            )
+        } else {
+            let shader = complex_from_real_shader(self.precision);
+            let out = self.fused_elementwise_with_telemetry_exec(
+                &shader,
+                std::slice::from_ref(real),
+                &entry.shape,
+                out_len,
+            )?;
+            runmat_accelerate_api::set_handle_storage(
+                &out,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            );
+            out
+        };
+        Ok(handle)
+    }
+
+    pub(crate) fn complex_from_real_imag_exec(
+        &self,
+        real: &GpuTensorHandle,
+        imag: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry_real = self.get_entry(real)?;
+        let entry_imag = self.get_entry(imag)?;
+        ensure!(
+            runmat_accelerate_api::handle_storage(real)
+                != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                && runmat_accelerate_api::handle_storage(imag)
+                    != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            "complex_from_real_imag requires real-valued inputs"
+        );
+
+        let real_scalar = entry_real.len == 1;
+        let imag_scalar = entry_imag.len == 1;
+        let out_shape = if entry_real.shape == entry_imag.shape {
+            entry_real.shape.clone()
+        } else if real_scalar {
+            entry_imag.shape.clone()
+        } else if imag_scalar {
+            entry_real.shape.clone()
+        } else {
+            return Err(anyhow!(
+                "complex_from_real_imag: shape mismatch between inputs"
+            ));
+        };
+        let logical_len = out_shape
+            .iter()
+            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+            .ok_or_else(|| anyhow!("complex_from_real_imag: output shape overflow"))?;
+        let out_len = logical_len
+            .checked_mul(2)
+            .ok_or_else(|| anyhow!("complex_from_real_imag: output length overflow"))?;
+        let handle = if out_len == 0 {
+            let buffer = self.create_storage_buffer(0, "runmat-complex-from-real-imag-empty");
+            self.register_existing_buffer_with_storage(
+                buffer,
+                out_shape,
+                out_len,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            )
+        } else {
+            let shader = complex_from_real_imag_shader(self.precision, real_scalar, imag_scalar);
+            let out = self.fused_elementwise_with_telemetry_exec(
+                &shader,
+                &[real.clone(), imag.clone()],
+                &out_shape,
+                out_len,
+            )?;
+            runmat_accelerate_api::set_handle_storage(
+                &out,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            );
+            out
+        };
+        Ok(handle)
+    }
+
     pub(crate) fn unary_real_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(a)?;
         if runmat_accelerate_api::handle_storage(a)
@@ -60,7 +158,7 @@ impl WgpuProvider {
         if runmat_accelerate_api::handle_storage(a)
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
-            return Ok(self.fill_exec(&entry.shape, 0.0)?);
+            return self.fill_exec(&entry.shape, 0.0);
         }
         self.complex_unary_exec(a, ComplexUnaryOp::Imag, false)
     }
