@@ -50,7 +50,7 @@ Use these labels in [Current Status](/docs/fea/status):
 | `scripts/fea/governance` | Benchmark report validation, external references, readiness, thresholds, and promotion calibration. |
 | `scripts/fea/prep_calibration` and `scripts/fea/thermo_artifacts` | Prep and thermo-field artifact drift, promotion, and validation workflows. |
 
-These checks provide strong L0-L2 coverage across many paths. L3-L5 require family-specific known-answer, convergence, external-reference, and governance evidence.
+These checks provide strong L0-L2 evidence across many paths. They do not by themselves declare a family full L2. Full-family L2 requires every exposed mode, material, boundary/source type, result field, invalid-case class, and backend parity/fallback path for that family to meet the L2 bar. L3-L5 require deeper family-specific known-answer, convergence, external-reference, and governance evidence.
 
 ## Current Gaps
 
@@ -69,18 +69,18 @@ The main gaps for production-grade claims are:
 
 | Family | Current maturity | Main missing evidence |
 | --- | --- | --- |
-| Linear static structural | L2, with limited known-answer checks | More analytic, patch, mesh convergence, and independent references. |
-| Modal structural | L2 | Repeated/near-repeated mode cases, known eigenfrequency references, modal convergence studies, external solver comparisons. |
-| Thermal standalone | L1-L2 | Heat-equation known answers, convergence, external thermal references. |
-| Structural transient | L2 | Time integration known answers, conservation checks, time-step convergence. |
-| Nonlinear structural | L2 | Independent nonlinear, plasticity, and contact references with tolerance envelopes. |
-| Thermo-mechanical | L1-L2 | Coupled known-answer cases and independent thermo-mechanical references. |
-| Electro-thermal | L1-L2 | Coupled electrical/thermal references and conservation checks. |
-| Electromagnetic | L1-L2 | Maxwell field validation, source/boundary realization references, larger workload studies. |
-| Acoustic harmonic | L2 governed path | Broader impedance/radiation validation, mesh convergence, and external acoustic references. |
-| CFD | L1-L2 governed path | Canonical CFD benchmarks, conservation checks, independent fluid references, and GPU parity beyond explicit fallback. |
-| CHT | L1-L2 governed path | Coupled fluid/thermal benchmarks, full fluid/solid mesh assembly, and independent CHT references. |
-| FSI | L1-L2 governed path | Full interface iteration, two-way FSI benchmarks, and independent FSI references. |
+| Linear static structural | L2 evidence in progress | Coordinate-based recovery, broader analytic/patch checks, mesh convergence, and independent references. |
+| Modal structural | L2 evidence in progress | Repeated/near-repeated mode cases, known eigenfrequency references, modal convergence studies, external solver comparisons. |
+| Thermal standalone | L2 evidence in progress | Coordinate/element thermal gradients, heat-equation known answers, convergence, external thermal references. |
+| Structural transient | L2 evidence in progress | Time integration known answers, conservation checks, time-step convergence. |
+| Nonlinear structural | L2 evidence in progress | Coordinate/contact-surface recovery and independent nonlinear, plasticity, and contact references with tolerance envelopes. |
+| Thermo-mechanical | L2 evidence in progress | Coupled known-answer cases and independent thermo-mechanical references. |
+| Electro-thermal | L2 evidence in progress | True electrical mesh/domain connectivity, coupled electrical/thermal references, and conservation checks. |
+| Electromagnetic | L2 evidence in progress | True mesh edge/vector elements, full curl-curl Maxwell operators, Maxwell field validation, source/boundary realization references, larger workload studies. |
+| Acoustic harmonic | L2 evidence in progress | Broader impedance/radiation validation, mesh convergence, and external acoustic references. |
+| CFD | L2 evidence in progress | True fluid mesh/control-volume connectivity, canonical CFD benchmarks, conservation checks, independent fluid references, and GPU parity beyond explicit fallback. |
+| CHT | L2 evidence in progress | Full fluid/solid mesh assembly, coupled fluid/thermal benchmarks, and independent CHT references. |
+| FSI | L2 evidence in progress | Full interface iteration, two-way FSI benchmarks, and independent FSI references. |
 
 ## Adding A V&V Case
 
