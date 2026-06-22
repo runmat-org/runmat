@@ -5372,6 +5372,16 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
     let mut model = sample_model();
     model.steps[0].kind = AnalysisStepKind::Cfd;
     model.boundary_conditions = sample_cfd_boundary_conditions(4.25);
+    model
+        .boundary_conditions
+        .retain(|boundary| boundary.bc_id != "bc_cfd_wall_lower");
+    if let Some(wall) = model
+        .boundary_conditions
+        .iter_mut()
+        .find(|boundary| boundary.bc_id == "bc_cfd_wall_upper")
+    {
+        wall.kind = BoundaryConditionKind::CfdSlipWall;
+    }
     model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
 
     let envelope = analysis_run_cfd_with_options_op(
@@ -5429,7 +5439,8 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
     assert_eq!(velocity.shape[1], 3);
     assert_eq!(pressure.shape, vec![velocity.shape[0]]);
     assert_eq!(vorticity.shape, velocity.shape);
-    assert_eq!(wall_shear.shape, velocity.shape);
+    assert_eq!(wall_shear.shape, vec![1, 3]);
+    assert_ne!(wall_shear.shape[0], velocity.shape[0]);
     assert!(envelope
         .data
         .run
@@ -5455,11 +5466,12 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_CFD_BOUNDARY_CONDITIONS"
             && diag.message.contains("boundary_source=authored")
-            && diag.message.contains("authored_boundary_count=4")
+            && diag.message.contains("authored_boundary_count=3")
             && diag.message.contains("inlet_boundary_count=1")
             && diag.message.contains("outlet_boundary_count=1")
-            && diag.message.contains("wall_boundary_count=2")
-            && diag.message.contains("no_slip_wall_boundary_count=2")
+            && diag.message.contains("wall_boundary_count=1")
+            && diag.message.contains("no_slip_wall_boundary_count=0")
+            && diag.message.contains("slip_wall_boundary_count=1")
             && diag.message.contains("boundary_coverage_ratio=1")
             && diag.message.contains("nominal_inlet_velocity_m_per_s=4.25")
     }));

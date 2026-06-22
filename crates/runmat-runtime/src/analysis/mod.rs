@@ -3842,7 +3842,8 @@ fn build_cfd_run_fields(
     let pressure = cell_centered_scalar_from_nodal(&solution.pressure);
     let cell_count = pressure.len().max(1);
     let vorticity = recover_cfd_vorticity(&velocity, cell_count);
-    let wall_shear_stress = recover_cfd_wall_shear_stress(domain, &velocity, cell_count);
+    let boundary_face_count = solution.wall_boundary_count.max(1);
+    let wall_shear_stress = recover_cfd_wall_shear_stress(domain, &velocity, boundary_face_count);
     let residual_count = solution.residual_momentum.len();
 
     vec![
@@ -3851,7 +3852,7 @@ fn build_cfd_run_fields(
         AnalysisField::host_f64(FEA_FIELD_CFD_VORTICITY, vec![cell_count, 3], vorticity),
         AnalysisField::host_f64(
             FEA_FIELD_CFD_WALL_SHEAR_STRESS,
-            vec![cell_count, 3],
+            vec![boundary_face_count, 3],
             wall_shear_stress,
         ),
         AnalysisField::host_f64(
