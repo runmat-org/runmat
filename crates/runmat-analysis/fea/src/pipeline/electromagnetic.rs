@@ -1327,6 +1327,21 @@ fn electromagnetic_formulation_diagnostic(
         && reference_frequency_hz > 0.0
         && effective_permittivity_f_per_m.is_finite()
         && effective_permittivity_f_per_m > 0.0;
+    let magnetostatic_curl_curl_coverage_ratio = 1.0_f64;
+    let magnetoquasistatic_eddy_current_coverage_ratio = if includes_magnetoquasistatic_eddy_current
+    {
+        1.0
+    } else {
+        0.0
+    };
+    let full_wave_displacement_current_coverage_ratio = if includes_full_wave_displacement_current {
+        1.0
+    } else {
+        0.0
+    };
+    let formulation_coverage_ratio = magnetostatic_curl_curl_coverage_ratio
+        .min(magnetoquasistatic_eddy_current_coverage_ratio)
+        .min(full_wave_displacement_current_coverage_ratio);
     let active_formulation = if includes_full_wave_displacement_current {
         "full_wave_harmonic"
     } else if includes_magnetoquasistatic_eddy_current {
@@ -1345,10 +1360,14 @@ fn electromagnetic_formulation_diagnostic(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "formulation_family=frequency_domain_maxwell active_formulation={} includes_magnetostatic_curl_curl=true includes_magnetoquasistatic_eddy_current={} includes_full_wave_displacement_current={} reference_frequency_hz={} omega_rad_per_s={} conductivity_mean_s_per_m={} effective_permittivity_f_per_m={} displacement_to_conduction_ratio={} material_frequency_response_coverage_ratio={}",
+            "formulation_family=frequency_domain_maxwell active_formulation={} includes_magnetostatic_curl_curl=true includes_magnetoquasistatic_eddy_current={} includes_full_wave_displacement_current={} magnetostatic_curl_curl_coverage_ratio={} magnetoquasistatic_eddy_current_coverage_ratio={} full_wave_displacement_current_coverage_ratio={} formulation_coverage_ratio={} reference_frequency_hz={} omega_rad_per_s={} conductivity_mean_s_per_m={} effective_permittivity_f_per_m={} displacement_to_conduction_ratio={} material_frequency_response_coverage_ratio={}",
             active_formulation,
             includes_magnetoquasistatic_eddy_current,
             includes_full_wave_displacement_current,
+            magnetostatic_curl_curl_coverage_ratio,
+            magnetoquasistatic_eddy_current_coverage_ratio,
+            full_wave_displacement_current_coverage_ratio,
+            formulation_coverage_ratio,
             reference_frequency_hz,
             omega_rad_per_s,
             material_stats.conductivity_mean,

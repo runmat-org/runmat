@@ -9762,6 +9762,36 @@ pub fn analysis_results_op(
     );
     let electromagnetic_enabled =
         diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_EM_STATIC", "enabled");
+    let electromagnetic_formulation_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_FORMULATION",
+        "formulation_coverage_ratio",
+    );
+    let electromagnetic_magnetostatic_curl_curl_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_FORMULATION",
+        "magnetostatic_curl_curl_coverage_ratio",
+    );
+    let electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_FORMULATION",
+        "magnetoquasistatic_eddy_current_coverage_ratio",
+    );
+    let electromagnetic_full_wave_displacement_current_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_FORMULATION",
+        "full_wave_displacement_current_coverage_ratio",
+    );
+    let electromagnetic_displacement_to_conduction_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_FORMULATION",
+        "displacement_to_conduction_ratio",
+    );
+    let electromagnetic_material_frequency_response_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_FORMULATION",
+        "material_frequency_response_coverage_ratio",
+    );
     let electromagnetic_reference_frequency_hz = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_EM_STATIC",
@@ -10001,6 +10031,12 @@ pub fn analysis_results_op(
         thermal_monotonic_response_fraction,
         thermal_response_realization_ratio,
         electromagnetic_enabled,
+        electromagnetic_formulation_coverage_ratio,
+        electromagnetic_magnetostatic_curl_curl_coverage_ratio,
+        electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio,
+        electromagnetic_full_wave_displacement_current_coverage_ratio,
+        electromagnetic_displacement_to_conduction_ratio,
+        electromagnetic_material_frequency_response_coverage_ratio,
         electromagnetic_reference_frequency_hz,
         electromagnetic_applied_current_a,
         electromagnetic_solve_quality,

@@ -1268,6 +1268,15 @@ EM_APPLIED_CURRENT_REQUIRED_FIELDS = {
     "electromagnetic_applied_current_a",
 }
 
+EM_FORMULATION_REQUIRED_FIELDS = {
+    "electromagnetic_formulation_coverage_ratio",
+    "electromagnetic_magnetostatic_curl_curl_coverage_ratio",
+    "electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio",
+    "electromagnetic_full_wave_displacement_current_coverage_ratio",
+    "electromagnetic_displacement_to_conduction_ratio",
+    "electromagnetic_material_frequency_response_coverage_ratio",
+}
+
 EM_SOURCE_ENERGY_CONSISTENCY_REQUIRED_FIELDS = {
     "electromagnetic_source_region_energy_consistency_ratio",
 }
@@ -1719,6 +1728,17 @@ def main() -> int:
             if record.get("electromagnetic_enabled") is not True:
                 errors.append(
                     f"fixture {fixture_id} missing true EM enabled flag: electromagnetic_enabled"
+                )
+            missing_fields = []
+            for field in sorted(EM_FORMULATION_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM formulation fields: "
+                    + ", ".join(missing_fields)
                 )
             missing_fields = []
             for field in sorted(EM_BALANCE_REQUIRED_FIELDS):

@@ -3711,6 +3711,12 @@ pub(super) fn run_fixture(
     let mut thermal_monotonic_response_fraction = None;
     let mut thermal_response_realization_ratio = None;
     let mut electromagnetic_enabled = None;
+    let mut electromagnetic_formulation_coverage_ratio = None;
+    let mut electromagnetic_magnetostatic_curl_curl_coverage_ratio = None;
+    let mut electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio = None;
+    let mut electromagnetic_full_wave_displacement_current_coverage_ratio = None;
+    let mut electromagnetic_displacement_to_conduction_ratio = None;
+    let mut electromagnetic_material_frequency_response_coverage_ratio = None;
     let mut electromagnetic_reference_frequency_hz = None;
     let mut electromagnetic_applied_current_a = None;
     let mut electromagnetic_solve_quality = None;
@@ -3827,6 +3833,12 @@ pub(super) fn run_fixture(
                     thermal_monotonic_response_fraction,
                     thermal_response_realization_ratio,
                     electromagnetic_enabled,
+                    electromagnetic_formulation_coverage_ratio,
+                    electromagnetic_magnetostatic_curl_curl_coverage_ratio,
+                    electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio,
+                    electromagnetic_full_wave_displacement_current_coverage_ratio,
+                    electromagnetic_displacement_to_conduction_ratio,
+                    electromagnetic_material_frequency_response_coverage_ratio,
                     electromagnetic_reference_frequency_hz,
                     electromagnetic_applied_current_a,
                     electromagnetic_solve_quality,
@@ -7704,6 +7716,90 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "electromagnetic_formulation_coverage_ratio",
+                            "FEA_EM_FORMULATION",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_FORMULATION",
+                                "formulation_coverage_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electromagnetic_magnetostatic_curl_curl_coverage_ratio",
+                            "FEA_EM_FORMULATION",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_FORMULATION",
+                                "magnetostatic_curl_curl_coverage_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio",
+                            "FEA_EM_FORMULATION",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_FORMULATION",
+                                "magnetoquasistatic_eddy_current_coverage_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electromagnetic_full_wave_displacement_current_coverage_ratio",
+                            "FEA_EM_FORMULATION",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_FORMULATION",
+                                "full_wave_displacement_current_coverage_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electromagnetic_material_frequency_response_coverage_ratio",
+                            "FEA_EM_FORMULATION",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_FORMULATION",
+                                "material_frequency_response_coverage_ratio",
+                            ),
+                            Some(0.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electromagnetic_displacement_to_conduction_ratio",
+                            "FEA_EM_FORMULATION",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_FORMULATION",
+                                "displacement_to_conduction_ratio",
+                            ),
+                            Some(0.0),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "electromagnetic_source_energy_diagnostic_coverage_ratio",
                             "FEA_EM_SOURCE_ENERGY",
                             diagnostic_metric(
@@ -9283,6 +9379,12 @@ pub(super) fn run_fixture(
                                 thermal_monotonic_response_fraction,
                                 thermal_response_realization_ratio,
                                 electromagnetic_enabled,
+                                electromagnetic_formulation_coverage_ratio,
+                                electromagnetic_magnetostatic_curl_curl_coverage_ratio,
+                                electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio,
+                                electromagnetic_full_wave_displacement_current_coverage_ratio,
+                                electromagnetic_displacement_to_conduction_ratio,
+                                electromagnetic_material_frequency_response_coverage_ratio,
                                 electromagnetic_reference_frequency_hz,
                                 electromagnetic_applied_current_a,
                                 electromagnetic_solve_quality,
@@ -9411,6 +9513,30 @@ pub(super) fn run_fixture(
                     thermal_response_realization_ratio =
                         gpu_results.data.summary.thermal_response_realization_ratio;
                     electromagnetic_enabled = gpu_results.data.summary.electromagnetic_enabled;
+                    electromagnetic_formulation_coverage_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_formulation_coverage_ratio;
+                    electromagnetic_magnetostatic_curl_curl_coverage_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_magnetostatic_curl_curl_coverage_ratio;
+                    electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio;
+                    electromagnetic_full_wave_displacement_current_coverage_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_full_wave_displacement_current_coverage_ratio;
+                    electromagnetic_displacement_to_conduction_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_displacement_to_conduction_ratio;
+                    electromagnetic_material_frequency_response_coverage_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_material_frequency_response_coverage_ratio;
                     electromagnetic_reference_frequency_hz = gpu_results
                         .data
                         .summary
@@ -9720,6 +9846,12 @@ pub(super) fn run_fixture(
                                     thermal_monotonic_response_fraction,
                                     thermal_response_realization_ratio,
                                     electromagnetic_enabled,
+                                    electromagnetic_formulation_coverage_ratio,
+                                    electromagnetic_magnetostatic_curl_curl_coverage_ratio,
+                                    electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio,
+                                    electromagnetic_full_wave_displacement_current_coverage_ratio,
+                                    electromagnetic_displacement_to_conduction_ratio,
+                                    electromagnetic_material_frequency_response_coverage_ratio,
                                     electromagnetic_reference_frequency_hz,
                                     electromagnetic_applied_current_a,
                                     electromagnetic_solve_quality,
@@ -9885,6 +10017,12 @@ pub(super) fn run_fixture(
         thermal_monotonic_response_fraction,
         thermal_response_realization_ratio,
         electromagnetic_enabled,
+        electromagnetic_formulation_coverage_ratio,
+        electromagnetic_magnetostatic_curl_curl_coverage_ratio,
+        electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio,
+        electromagnetic_full_wave_displacement_current_coverage_ratio,
+        electromagnetic_displacement_to_conduction_ratio,
+        electromagnetic_material_frequency_response_coverage_ratio,
         electromagnetic_reference_frequency_hz,
         electromagnetic_applied_current_a,
         electromagnetic_solve_quality,

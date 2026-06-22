@@ -4436,6 +4436,7 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
             && diag
                 .message
                 .contains("includes_full_wave_displacement_current=true")
+            && diag.message.contains("formulation_coverage_ratio=1")
             && diag
                 .message
                 .contains("material_frequency_response_coverage_ratio=")

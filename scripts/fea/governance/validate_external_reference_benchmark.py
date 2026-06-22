@@ -42,6 +42,15 @@ CONTACT_FRICTIONLESS_COMPLEX_KNOWN_ANSWER_REQUIRED_FIELDS = {
     "contact_frictionless_complex_known_known_answer_coverage_ratio",
 }
 
+EM_FORMULATION_REQUIRED_FIELDS = {
+    "electromagnetic_formulation_coverage_ratio",
+    "electromagnetic_magnetostatic_curl_curl_coverage_ratio",
+    "electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio",
+    "electromagnetic_full_wave_displacement_current_coverage_ratio",
+    "electromagnetic_displacement_to_conduction_ratio",
+    "electromagnetic_material_frequency_response_coverage_ratio",
+}
+
 
 REQUIRED_METRICS_BY_FIXTURE = {
     "cantilever_gpu_provider": {
@@ -294,7 +303,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "em_homogeneous_known_gauge_anchor_residual_ratio",
         "em_homogeneous_known_flux_divergence_ratio",
         "em_homogeneous_known_answer_coverage_ratio",
-    },
+    }
+    | EM_FORMULATION_REQUIRED_FIELDS,
     "electromagnetic_reference_heterogeneous_gpu_provider": {
         "electromagnetic_source_energy_diagnostic_coverage_ratio",
         "electromagnetic_source_energy_consistency_ratio",
@@ -366,7 +376,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "em_heterogeneous_flux_phasor_coherence_ratio",
         "em_heterogeneous_energy_imbalance_ratio",
         "em_heterogeneous_boundary_anchor_ratio",
-    },
+    }
+    | EM_FORMULATION_REQUIRED_FIELDS,
     "electromagnetic_reference_boundary_penalty_stress_gpu_provider": {
         "electromagnetic_source_energy_diagnostic_coverage_ratio",
         "electromagnetic_source_energy_consistency_ratio",
@@ -409,7 +420,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "electromagnetic_boundary_penalty_conditioning_contribution",
         "electromagnetic_source_overlap_ratio",
         "electromagnetic_insulation_leakage_ratio",
-    },
+    }
+    | EM_FORMULATION_REQUIRED_FIELDS,
     "electromagnetic_reference_multi_region_phased_source_gpu_provider": {
         "electromagnetic_source_energy_diagnostic_coverage_ratio",
         "electromagnetic_source_energy_consistency_ratio",
@@ -451,7 +463,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "electromagnetic_boundary_penalty_conditioning_contribution",
         "electromagnetic_source_overlap_ratio",
         "electromagnetic_insulation_leakage_ratio",
-    },
+    }
+    | EM_FORMULATION_REQUIRED_FIELDS,
     "electromagnetic_reference_sparse_assignments_gpu_provider": {
         "electromagnetic_source_energy_diagnostic_coverage_ratio",
         "electromagnetic_source_energy_consistency_ratio",
@@ -496,7 +509,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "electromagnetic_boundary_penalty_conditioning_contribution",
         "electromagnetic_source_overlap_ratio",
         "electromagnetic_insulation_leakage_ratio",
-    },
+    }
+    | EM_FORMULATION_REQUIRED_FIELDS,
     "electromagnetic_reference_fallback_heavy_gpu_provider": {
         "electromagnetic_source_energy_diagnostic_coverage_ratio",
         "electromagnetic_source_energy_consistency_ratio",
@@ -541,7 +555,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "electromagnetic_boundary_penalty_conditioning_contribution",
         "electromagnetic_source_overlap_ratio",
         "electromagnetic_insulation_leakage_ratio",
-    },
+    }
+    | EM_FORMULATION_REQUIRED_FIELDS,
     "electromagnetic_reference_overlap_interference_gpu_provider": {
         "electromagnetic_source_energy_diagnostic_coverage_ratio",
         "electromagnetic_source_energy_consistency_ratio",
@@ -583,7 +598,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "electromagnetic_boundary_penalty_conditioning_contribution",
         "electromagnetic_source_overlap_ratio",
         "electromagnetic_insulation_leakage_ratio",
-    },
+    }
+    | EM_FORMULATION_REQUIRED_FIELDS,
     "electromagnetic_reference_boundary_kernel_gpu_provider": {
         "electromagnetic_source_energy_diagnostic_coverage_ratio",
         "electromagnetic_source_energy_consistency_ratio",
@@ -625,7 +641,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "electromagnetic_boundary_penalty_conditioning_contribution",
         "electromagnetic_source_overlap_ratio",
         "electromagnetic_insulation_leakage_ratio",
-    },
+    }
+    | EM_FORMULATION_REQUIRED_FIELDS,
     "cfd_steady_gpu_provider": {
         "cfd_reference_density_kg_per_m3",
         "cfd_dynamic_viscosity_pa_s",
