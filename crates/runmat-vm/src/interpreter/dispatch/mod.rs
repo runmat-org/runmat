@@ -192,7 +192,7 @@ fn for_each_gpu_handle_in_value_with_visited(
             Ok(())
         }
         Value::HandleObject(handle) => {
-            let raw_target = runmat_gc::gc_ptr_addr(&handle.target);
+            let raw_target = runmat_gc::gc_handle_addr(&handle.target);
             if visited_handle_targets.insert(raw_target) {
                 runmat_gc::gc_with_value(&handle.target, |target| {
                     for_each_gpu_handle_in_value_with_visited(target, f, visited_handle_targets)
@@ -516,7 +516,7 @@ fn collect_spawn_task_ids_in_value_with_visited(
             }
         }
         Value::HandleObject(handle) => {
-            let raw_target = runmat_gc::gc_ptr_addr(&handle.target);
+            let raw_target = runmat_gc::gc_handle_addr(&handle.target);
             if visited_handle_targets.insert(raw_target) {
                 let _ = runmat_gc::gc_with_value(&handle.target, |target| {
                     collect_spawn_task_ids_in_value_with_visited(
@@ -580,7 +580,7 @@ fn value_contains_spawn_task_id_with_visited(
             value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
         }),
         Value::HandleObject(handle) => {
-            let raw_target = runmat_gc::gc_ptr_addr(&handle.target);
+            let raw_target = runmat_gc::gc_handle_addr(&handle.target);
             if !visited_handle_targets.insert(raw_target) {
                 return false;
             }

@@ -1891,7 +1891,7 @@ pub extern "C" fn runtime_builtin_matrix_dispatch(
         Ok(result) => {
             // Allocate result in GC memory and return pointer
             match runmat_gc::gc_allocate(result) {
-                Ok(gc_ptr) => runmat_gc::gc_ptr_addr(&gc_ptr) as i64,
+                Ok(gc_ptr) => runmat_gc::gc_handle_addr(&gc_ptr) as i64,
                 Err(_) => {
                     log::error!("Failed to allocate GC memory for result");
                     0
@@ -1942,7 +1942,7 @@ pub extern "C" fn runtime_create_matrix(
             let value = runmat_builtins::Value::Tensor(matrix);
             // Allocate in GC memory and return pointer
             match runmat_gc::gc_allocate(value) {
-                Ok(gc_ptr) => runmat_gc::gc_ptr_addr(&gc_ptr) as i64,
+                Ok(gc_ptr) => runmat_gc::gc_handle_addr(&gc_ptr) as i64,
                 Err(_) => {
                     log::error!("Failed to allocate GC memory for matrix");
                     0

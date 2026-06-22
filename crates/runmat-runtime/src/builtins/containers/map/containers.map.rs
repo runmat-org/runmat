@@ -1224,7 +1224,7 @@ fn extract_handle<'a>(value: &'a Value, builtin: &'static str) -> BuiltinResult<
 }
 
 fn ensure_handle(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<()> {
-    if !runmat_builtins::is_handle_valid(handle) {
+    if !crate::is_handle_valid(handle) {
         return Err(map_error("containers.Map: handle is invalid", builtin));
     }
     if handle.class_name != CLASS_NAME {
@@ -1868,7 +1868,7 @@ async fn collect_key_spec(
 
 pub fn map_length(value: &Value) -> Option<usize> {
     if let Value::HandleObject(handle) = value {
-        if runmat_builtins::is_handle_valid(handle) && handle.class_name == CLASS_NAME {
+        if crate::is_handle_valid(handle) && handle.class_name == CLASS_NAME {
             if let Ok(id) = map_id(handle, BUILTIN_CONSTRUCTOR) {
                 return MAP_REGISTRY.with(|registry| {
                     registry

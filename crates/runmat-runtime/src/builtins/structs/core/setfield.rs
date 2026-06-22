@@ -1038,7 +1038,7 @@ async fn assign_into_handle(
             "setfield: expected at least one field name when assigning into a handle",
         ));
     }
-    if !runmat_builtins::is_handle_valid(&handle) {
+    if !crate::is_handle_valid(&handle) {
         return Err(setfield_flow(format!(
             "Invalid or deleted handle object '{}'.",
             handle.class_name
@@ -1761,7 +1761,7 @@ pub(crate) mod tests {
         .expect("setfield handle update");
 
         match updated {
-            Value::HandleObject(h) => assert!(runmat_builtins::is_handle_valid(&h)),
+            Value::HandleObject(h) => assert!(crate::is_handle_valid(&h)),
             other => panic!("expected handle, got {other:?}"),
         }
 

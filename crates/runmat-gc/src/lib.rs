@@ -462,8 +462,17 @@ pub fn gc_clone_value(ptr: &GcHandle<Value>) -> Result<Value> {
     GC.clone_value(ptr)
 }
 
-pub fn gc_ptr_addr(ptr: &GcHandle<Value>) -> usize {
-    (unsafe { ptr.as_raw() }) as usize
+pub fn gc_handle_addr(handle: &GcHandle<Value>) -> usize {
+    handle.addr()
+}
+
+pub fn gc_handle_from_addr(addr: usize) -> Result<GcHandle<Value>> {
+    if addr == 0 {
+        return Err(GcError::InvalidPointer(
+            "null GC value handle address".to_string(),
+        ));
+    }
+    Ok(unsafe { GcHandle::from_raw(addr as *const Value) })
 }
 
 pub fn gc_stats() -> GcStats {

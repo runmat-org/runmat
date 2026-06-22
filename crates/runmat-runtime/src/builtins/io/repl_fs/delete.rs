@@ -476,7 +476,7 @@ async fn process_handle_value(
                     ));
                 }
             }
-            let _ = runmat_builtins::set_handle_valid(handle, false);
+            let _ = crate::set_handle_valid(handle, false);
             let mut invalid = handle.clone();
             invalid.valid = false;
             *mutated_last = Some(Value::HandleObject(invalid));

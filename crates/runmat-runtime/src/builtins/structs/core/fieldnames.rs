@@ -178,7 +178,7 @@ fn collect_object_fieldnames(obj: &ObjectInstance) -> Vec<String> {
 fn collect_handle_fieldnames(handle: &HandleRef) -> BuiltinResult<Vec<String>> {
     let mut names = class_instance_property_names(&handle.class_name);
 
-    if runmat_builtins::is_handle_valid(handle) {
+    if crate::is_handle_valid(handle) {
         let target = runmat_gc::gc_clone_value(&handle.target).map_err(|e| {
             fieldnames_error_with_message(
                 format!("fieldnames: invalid handle target: {e}"),

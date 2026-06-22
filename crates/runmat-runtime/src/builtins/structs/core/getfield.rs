@@ -1036,7 +1036,7 @@ async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Val
 
 #[async_recursion::async_recursion(?Send)]
 async fn get_handle_field(handle: &HandleRef, name: &str) -> BuiltinResult<Value> {
-    if !runmat_builtins::is_handle_valid(handle) {
+    if !crate::is_handle_valid(handle) {
         return Err(getfield_error_with_message(
             format!("Invalid or deleted handle object '{}'.", handle.class_name),
             &GETFIELD_ERROR_INVALID_HANDLE,

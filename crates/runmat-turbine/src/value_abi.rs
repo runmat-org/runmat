@@ -84,7 +84,7 @@ impl TurbineValue {
                 Ok(Self {
                     tag: TurbineValueTag::GcHandle,
                     reserved: 0,
-                    payload: runmat_gc::gc_ptr_addr(&ptr) as u64,
+                    payload: runmat_gc::gc_handle_addr(&ptr) as u64,
                 })
             }
         }
@@ -100,8 +100,8 @@ impl TurbineValue {
                 if self.payload == 0 {
                     return Err(crate::execution_error("null Turbine GC value handle"));
                 }
-                let ptr =
-                    unsafe { runmat_gc::GcHandle::<Value>::from_raw(self.payload as *const Value) };
+                let ptr = runmat_gc::gc_handle_from_addr(self.payload as usize)
+                    .map_err(|err| crate::execution_error(err.to_string()))?;
                 runmat_gc::gc_clone_value(&ptr)
                     .map_err(|err| crate::execution_error(err.to_string()))
             }

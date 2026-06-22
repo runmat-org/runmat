@@ -44,6 +44,36 @@ pub const CALL_BOUND_METHOD_BUILTIN_NAME: &str = "__runmat_call_bound_method__";
 pub const OBJECT_SUBSREF_METHOD: &str = "subsref";
 pub const OBJECT_SUBSASGN_METHOD: &str = "subsasgn";
 pub(crate) const IDENT_UNDEFINED_FUNCTION: &str = "RunMat:UndefinedFunction";
+pub(crate) const HANDLE_VALID_FLAG_PROPERTY: &str = "__runmat_handle_valid__";
+
+pub(crate) fn is_handle_valid(handle: &runmat_builtins::HandleRef) -> bool {
+    if !handle.valid || handle.target.is_null() {
+        return false;
+    }
+    runmat_gc::gc_with_value(&handle.target, |target| match target {
+        Value::Object(obj) => !matches!(
+            obj.properties.get(HANDLE_VALID_FLAG_PROPERTY),
+            Some(Value::Bool(false))
+        ),
+        _ => true,
+    })
+    .unwrap_or(false)
+}
+
+pub(crate) fn set_handle_valid(handle: &runmat_builtins::HandleRef, valid: bool) -> bool {
+    if handle.target.is_null() {
+        return false;
+    }
+    runmat_gc::gc_with_value_mut(&handle.target, |target| match target {
+        Value::Object(obj) => {
+            obj.properties
+                .insert(HANDLE_VALID_FLAG_PROPERTY.to_string(), Value::Bool(valid));
+            true
+        }
+        _ => false,
+    })
+    .unwrap_or(false)
+}
 
 pub fn object_property_getter_name(field: &str) -> String {
     format!("get.{field}")
@@ -392,7 +422,7 @@ pub(crate) async fn new_handle_object_builtin(class_name: String) -> crate::Buil
 
 pub(crate) async fn isvalid_builtin(v: Value) -> crate::BuiltinResult<Value> {
     match v {
-        Value::HandleObject(h) => Ok(Value::Bool(runmat_builtins::is_handle_valid(&h))),
+        Value::HandleObject(h) => Ok(Value::Bool(crate::is_handle_valid(&h))),
         Value::Listener(l) => Ok(Value::Bool(l.valid && l.enabled)),
         _ => Ok(Value::Bool(false)),
     }
@@ -512,7 +542,7 @@ pub(crate) async fn addlistener_builtin(
     callback: Value,
 ) -> crate::BuiltinResult<Value> {
     let key_ptr: usize = match &target {
-        Value::HandleObject(h) => runmat_gc::gc_ptr_addr(&h.target),
+        Value::HandleObject(h) => runmat_gc::gc_handle_addr(&h.target),
         Value::Object(o) => o as *const _ as usize,
         _ => {
             return Err(
@@ -562,7 +592,7 @@ pub(crate) async fn notify_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     let key_ptr: usize = match &target {
-        Value::HandleObject(h) => runmat_gc::gc_ptr_addr(&h.target),
+        Value::HandleObject(h) => runmat_gc::gc_handle_addr(&h.target),
         Value::Object(o) => o as *const _ as usize,
         _ => {
             return Err(

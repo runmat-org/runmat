@@ -47,6 +47,9 @@ impl<T> GcHandle<T> {
     pub fn is_null(&self) -> bool {
         self.ptr.is_null()
     }
+    pub fn addr(&self) -> usize {
+        self.ptr as usize
+    }
     /// # Safety
     ///
     /// The returned raw pointer may become invalid if the underlying object is

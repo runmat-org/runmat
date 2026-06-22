@@ -259,8 +259,8 @@ fn ne_identity(lhs: &Value, rhs: &Value) -> Option<Value> {
 
 fn handle_ptr(value: &Value) -> Option<usize> {
     match value {
-        Value::HandleObject(handle) => Some(runmat_gc::gc_ptr_addr(&handle.target)),
-        Value::Listener(listener) => Some(runmat_gc::gc_ptr_addr(&listener.target)),
+        Value::HandleObject(handle) => Some(runmat_gc::gc_handle_addr(&handle.target)),
+        Value::Listener(listener) => Some(runmat_gc::gc_handle_addr(&listener.target)),
         _ => None,
     }
 }

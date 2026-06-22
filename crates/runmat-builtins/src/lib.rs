@@ -2089,45 +2089,17 @@ pub struct HandleRef {
     pub valid: bool,
 }
 
-const HANDLE_VALID_FLAG_PROPERTY: &str = "__runmat_handle_valid__";
-
 pub fn is_handle_valid(handle: &HandleRef) -> bool {
-    if !handle.valid {
-        return false;
-    }
-    let raw = unsafe { handle.target.as_raw() };
-    if raw.is_null() {
-        return false;
-    }
-    match unsafe { &*raw } {
-        Value::Object(obj) => !matches!(
-            obj.properties.get(HANDLE_VALID_FLAG_PROPERTY),
-            Some(Value::Bool(false))
-        ),
-        _ => true,
-    }
+    handle.valid && !handle.target.is_null()
 }
 
-pub fn set_handle_valid(handle: &HandleRef, valid: bool) -> bool {
-    let raw = unsafe { handle.target.as_raw_mut() };
-    if raw.is_null() {
-        return false;
-    }
-    match unsafe { &mut *raw } {
-        Value::Object(obj) => {
-            obj.properties
-                .insert(HANDLE_VALID_FLAG_PROPERTY.to_string(), Value::Bool(valid));
-            true
-        }
-        _ => false,
-    }
+pub fn set_handle_valid(_handle: &HandleRef, _valid: bool) -> bool {
+    false
 }
 
 impl PartialEq for HandleRef {
     fn eq(&self, other: &Self) -> bool {
-        let a = unsafe { self.target.as_raw() } as usize;
-        let b = unsafe { other.target.as_raw() } as usize;
-        a == b
+        self.target == other.target
     }
 }
 
@@ -2144,11 +2116,7 @@ pub struct Listener {
 
 impl Listener {
     pub fn class_name(&self) -> String {
-        match unsafe { &*self.target.as_raw() } {
-            Value::Object(o) => o.class_name.clone(),
-            Value::HandleObject(h) => h.class_name.clone(),
-            _ => String::new(),
-        }
+        String::new()
     }
 }
 
@@ -2186,21 +2154,21 @@ impl fmt::Display for Value {
             ),
             Value::Object(obj) => write!(f, "{}(props={})", obj.class_name, obj.properties.len()),
             Value::HandleObject(h) => {
-                let ptr = unsafe { h.target.as_raw() } as usize;
                 write!(
                     f,
                     "<handle {} @0x{:x} valid={}>",
-                    h.class_name, ptr, h.valid
+                    h.class_name,
+                    h.target.addr(),
+                    h.valid
                 )
             }
             Value::Listener(l) => {
-                let ptr = unsafe { l.target.as_raw() } as usize;
                 write!(
                     f,
                     "<listener id={} {}@0x{:x} '{}' enabled={} valid={}>",
                     l.id,
                     l.class_name(),
-                    ptr,
+                    l.target.addr(),
                     l.event_name,
                     l.enabled,
                     l.valid
