@@ -170,7 +170,7 @@ pub(crate) mod tests {
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, Listener, LogicalArray,
         MException, ObjectInstance, ResolveContext, StringArray, StructValue, Tensor, Type,
     };
-    use runmat_gc_api::GcPtr;
+    use runmat_gc_api::GcHandle;
 
     fn run_isnumeric(value: Value) -> BuiltinResult<Value> {
         block_on(super::isnumeric_builtin(value))
@@ -274,7 +274,7 @@ pub(crate) mod tests {
         );
         let handle = HandleRef {
             class_name: "runmat.Handle".into(),
-            target: GcPtr::null(),
+            target: GcHandle::null(),
             valid: true,
         };
         assert_eq!(
@@ -283,9 +283,9 @@ pub(crate) mod tests {
         );
         let listener = Listener {
             id: 1,
-            target: GcPtr::null(),
+            target: GcHandle::null(),
             event_name: "changed".into(),
-            callback: GcPtr::null(),
+            callback: GcHandle::null(),
             enabled: true,
             valid: true,
         };

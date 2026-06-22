@@ -5,17 +5,17 @@
 //! execution context (stacks, global variables, etc.).
 
 use crate::Value;
-use crate::{GcError, GcPtr, Result};
+use crate::{GcError, GcHandle, Result};
 use runmat_time::Instant;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Recursively collect immediate GC roots from an owned Value tree.
 ///
-/// This helper deliberately does not dereference collected `GcPtr`s. Root
+/// This helper deliberately does not dereference collected `GcHandle`s. Root
 /// scanning should discover handles reachable from ordinary Rust-owned values;
 /// the collector is responsible for tracing each discovered GC object.
-pub(crate) fn collect_value_roots(value: &Value, roots: &mut Vec<GcPtr<Value>>) {
+pub(crate) fn collect_value_roots(value: &Value, roots: &mut Vec<GcHandle<Value>>) {
     match value {
         Value::Cell(cells) => {
             for cell_value in &cells.data {
@@ -84,7 +84,7 @@ pub struct RootId(pub usize);
 /// Trait for objects that can serve as GC roots
 pub trait GcRoot {
     /// Scan this root and return all reachable GC pointers
-    fn scan(&self) -> Vec<GcPtr<Value>>;
+    fn scan(&self) -> Vec<GcHandle<Value>>;
 
     /// Get a human-readable description of this root
     fn description(&self) -> String;
@@ -122,7 +122,7 @@ impl StackRoot {
 }
 
 impl GcRoot for StackRoot {
-    fn scan(&self) -> Vec<GcPtr<Value>> {
+    fn scan(&self) -> Vec<GcHandle<Value>> {
         unsafe {
             if self.stack_ptr.is_null() {
                 return Vec::new();
@@ -181,7 +181,7 @@ impl VariableArrayRoot {
 }
 
 impl GcRoot for VariableArrayRoot {
-    fn scan(&self) -> Vec<GcPtr<Value>> {
+    fn scan(&self) -> Vec<GcHandle<Value>> {
         unsafe {
             if self.vars_ptr.is_null() {
                 return Vec::new();
@@ -247,7 +247,7 @@ impl GlobalRoot {
 }
 
 impl GcRoot for GlobalRoot {
-    fn scan(&self) -> Vec<GcPtr<Value>> {
+    fn scan(&self) -> Vec<GcHandle<Value>> {
         let mut roots = Vec::new();
         for value in &self.values {
             collect_value_roots(value, &mut roots);
@@ -314,7 +314,7 @@ impl RootScanner {
     }
 
     /// Scan all roots and return reachable objects
-    pub fn scan_roots(&self) -> Result<Vec<GcPtr<Value>>> {
+    pub fn scan_roots(&self) -> Result<Vec<GcHandle<Value>>> {
         log::trace!("Starting root scan");
         let scan_start = Instant::now();
 
@@ -440,7 +440,7 @@ mod tests {
     use super::*;
     use runmat_builtins::{Closure, HandleRef, Listener, ObjectInstance, StructValue};
 
-    fn ptr_addr(ptr: GcPtr<Value>) -> usize {
+    fn ptr_addr(ptr: GcHandle<Value>) -> usize {
         (unsafe { ptr.as_raw() }) as usize
     }
 

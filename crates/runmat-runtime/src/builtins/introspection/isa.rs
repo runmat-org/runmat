@@ -253,7 +253,7 @@ pub(crate) mod tests {
         CellArray, CharArray, ClassDef, HandleRef, IntValue, Listener, LogicalArray,
         ObjectInstance, StringArray, StructValue, Tensor,
     };
-    use runmat_gc_api::GcPtr;
+    use runmat_gc_api::GcHandle;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -387,7 +387,7 @@ pub(crate) mod tests {
     fn isa_handle_aliases_and_inheritance() {
         let handle = HandleRef {
             class_name: "TestHandle".into(),
-            target: GcPtr::null(),
+            target: GcHandle::null(),
             valid: true,
         };
         assert_eq!(
@@ -443,9 +443,9 @@ pub(crate) mod tests {
     fn isa_listener_alias_matches() {
         let listener = Listener {
             id: 1,
-            target: GcPtr::null(),
+            target: GcHandle::null(),
             event_name: "Changed".into(),
-            callback: GcPtr::null(),
+            callback: GcHandle::null(),
             enabled: true,
             valid: true,
         };

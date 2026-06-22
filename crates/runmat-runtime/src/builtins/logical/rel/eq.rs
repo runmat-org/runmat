@@ -640,28 +640,24 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eq_handle_identity() {
-        unsafe {
-            let raw = Box::into_raw(Box::new(Value::Num(1.0)));
-            let ptr = runmat_gc_api::GcPtr::from_raw(raw);
-            let handle = HandleRef {
-                class_name: "Dummy".to_string(),
-                target: ptr,
-                valid: true,
-            };
-            let a = Value::HandleObject(handle.clone());
-            let b = Value::HandleObject(handle.clone());
-            assert_eq!(run_eq(a.clone(), b.clone()).unwrap(), Value::Bool(true));
+        let ptr = runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc allocation");
+        let handle = HandleRef {
+            class_name: "Dummy".to_string(),
+            target: ptr,
+            valid: true,
+        };
+        let a = Value::HandleObject(handle.clone());
+        let b = Value::HandleObject(handle.clone());
+        assert_eq!(run_eq(a.clone(), b.clone()).unwrap(), Value::Bool(true));
 
-            let other_raw = Box::into_raw(Box::new(Value::Num(2.0)));
-            let other_ptr = runmat_gc_api::GcPtr::from_raw(other_raw);
-            let other_handle = HandleRef {
-                class_name: "Dummy".to_string(),
-                target: other_ptr,
-                valid: true,
-            };
-            let other = Value::HandleObject(other_handle);
-            assert_eq!(run_eq(a, other).unwrap(), Value::Bool(false));
-        }
+        let other_ptr = runmat_gc::gc_allocate(Value::Num(2.0)).expect("gc allocation");
+        let other_handle = HandleRef {
+            class_name: "Dummy".to_string(),
+            target: other_ptr,
+            valid: true,
+        };
+        let other = Value::HandleObject(other_handle);
+        assert_eq!(run_eq(a, other).unwrap(), Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

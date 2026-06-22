@@ -6,7 +6,7 @@
 
 use cranelift::prelude::*;
 use runmat_builtins::{CellArray, Value};
-use runmat_gc::{gc_allocate, GcPtr};
+use runmat_gc::{gc_allocate, GcHandle};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
@@ -14,8 +14,8 @@ use std::sync::{Arc, RwLock};
 /// JIT memory manager for marshaling data between Cranelift and RunMat runtime
 pub struct JitMemoryManager {
     /// Global memory pools for different data types
-    string_pool: Arc<RwLock<HashMap<String, GcPtr<Value>>>>,
-    array_pool: Arc<RwLock<HashMap<String, GcPtr<Value>>>>, // Use string hash of f64 vector
+    string_pool: Arc<RwLock<HashMap<String, GcHandle<Value>>>>,
+    array_pool: Arc<RwLock<HashMap<String, GcHandle<Value>>>>, // Use string hash of f64 vector
 
     /// Statistics
     allocated_strings: AtomicUsize,

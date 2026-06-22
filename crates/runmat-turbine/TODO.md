@@ -68,7 +68,7 @@ Since we want a production-hardened system with (to start) full MATLAB code exec
   - Insert `gc_record_write` at all field/element writes:
     - StoreIndexCell, StoreMember, StoreMemberDynamic, Struct field writes, cell element writes.
 - Allocation
-  - Route all allocations via runtime helpers returning `Value` and ensure no raw unrooted `GcPtr` escapes between safepoints.
+  - Route all allocations via runtime helpers returning `Value` and ensure no raw unrooted `GcHandle` escapes between safepoints.
 - Acceptance
   - GC stress tests (existing + JIT-specific) pass with the JIT: deep recursion, large cells, repeated slice updates, persistent/global churn.
   - No lost/incorrect references under minor/major GC.

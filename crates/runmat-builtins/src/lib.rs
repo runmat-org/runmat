@@ -1,6 +1,6 @@
 pub use inventory;
 pub mod symbolic;
-use runmat_gc_api::GcPtr;
+use runmat_gc_api::GcHandle;
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -2085,7 +2085,7 @@ impl MException {
 #[derive(Debug, Clone)]
 pub struct HandleRef {
     pub class_name: String,
-    pub target: GcPtr<Value>,
+    pub target: GcHandle<Value>,
     pub valid: bool,
 }
 
@@ -2135,9 +2135,9 @@ impl PartialEq for HandleRef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Listener {
     pub id: u64,
-    pub target: GcPtr<Value>,
+    pub target: GcHandle<Value>,
     pub event_name: String,
-    pub callback: GcPtr<Value>,
+    pub callback: GcHandle<Value>,
     pub enabled: bool,
     pub valid: bool,
 }

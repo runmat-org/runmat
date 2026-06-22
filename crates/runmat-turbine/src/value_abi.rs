@@ -101,7 +101,7 @@ impl TurbineValue {
                     return Err(crate::execution_error("null Turbine GC value handle"));
                 }
                 let ptr =
-                    unsafe { runmat_gc::GcPtr::<Value>::from_raw(self.payload as *const Value) };
+                    unsafe { runmat_gc::GcHandle::<Value>::from_raw(self.payload as *const Value) };
                 runmat_gc::gc_clone_value(&ptr)
                     .map_err(|err| crate::execution_error(err.to_string()))
             }

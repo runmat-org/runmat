@@ -4,7 +4,7 @@
 //! allocation strategies for different object lifetimes.
 
 use crate::Value;
-use crate::{GcConfig, GcError, GcPtr, GcStats, Result};
+use crate::{GcConfig, GcError, GcHandle, GcStats, Result};
 use std::collections::{HashMap, HashSet};
 use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -268,7 +268,7 @@ impl GenerationalAllocator {
     }
 
     /// Allocate a Value object
-    pub fn allocate(&mut self, value: Value, stats: &GcStats) -> Result<GcPtr<Value>> {
+    pub fn allocate(&mut self, value: Value, stats: &GcStats) -> Result<GcHandle<Value>> {
         let size = self.estimate_value_size(&value);
 
         // Always allocate in young generation first
@@ -282,7 +282,7 @@ impl GenerationalAllocator {
         // Update statistics
         stats.record_allocation(size);
 
-        Ok(unsafe { GcPtr::from_raw(ptr as *const Value) })
+        Ok(unsafe { GcHandle::from_raw(ptr as *const Value) })
     }
 
     /// Drain allocated object pointers from the young generation
@@ -307,11 +307,11 @@ impl GenerationalAllocator {
 
     /// Promote an object to the next generation
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn promote(&mut self, ptr: *const Value, _from_gen: usize) -> Result<GcPtr<Value>> {
+    pub fn promote(&mut self, ptr: *const Value, _from_gen: usize) -> Result<GcHandle<Value>> {
         // Non-moving logical promotion: mark pointer as promoted for barrier/collection logic
         let raw = ptr as *const u8;
         self.promoted_ptrs.insert(raw);
-        Ok(unsafe { GcPtr::from_raw(ptr) })
+        Ok(unsafe { GcHandle::from_raw(ptr) })
     }
 
     /// Check if young generation currently tracks any survivors

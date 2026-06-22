@@ -618,41 +618,34 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_handle_identity() {
-        unsafe {
-            let raw = Box::into_raw(Box::new(Value::Num(1.0)));
-            let gc = runmat_gc_api::GcPtr::from_raw(raw);
-            let handle = HandleRef {
-                class_name: "TestHandle".into(),
-                target: gc,
-                valid: true,
-            };
-            let lhs = Value::HandleObject(handle.clone());
-            let rhs = Value::HandleObject(handle);
-            let result = run_ne(lhs, rhs).expect("ne");
-            assert_eq!(result, Value::Bool(false));
-        }
+        let gc = runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc allocation");
+        let handle = HandleRef {
+            class_name: "TestHandle".into(),
+            target: gc,
+            valid: true,
+        };
+        let lhs = Value::HandleObject(handle.clone());
+        let rhs = Value::HandleObject(handle);
+        let result = run_ne(lhs, rhs).expect("ne");
+        assert_eq!(result, Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_handle_difference() {
-        unsafe {
-            let raw_a = Box::into_raw(Box::new(Value::Num(1.0)));
-            let raw_b = Box::into_raw(Box::new(Value::Num(2.0)));
-            let handle_a = HandleRef {
-                class_name: "TestHandle".into(),
-                target: runmat_gc_api::GcPtr::from_raw(raw_a),
-                valid: true,
-            };
-            let handle_b = HandleRef {
-                class_name: "TestHandle".into(),
-                target: runmat_gc_api::GcPtr::from_raw(raw_b),
-                valid: true,
-            };
-            let result =
-                run_ne(Value::HandleObject(handle_a), Value::HandleObject(handle_b)).expect("ne");
-            assert_eq!(result, Value::Bool(true));
-        }
+        let handle_a = HandleRef {
+            class_name: "TestHandle".into(),
+            target: runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc allocation"),
+            valid: true,
+        };
+        let handle_b = HandleRef {
+            class_name: "TestHandle".into(),
+            target: runmat_gc::gc_allocate(Value::Num(2.0)).expect("gc allocation"),
+            valid: true,
+        };
+        let result =
+            run_ne(Value::HandleObject(handle_a), Value::HandleObject(handle_b)).expect("ne");
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

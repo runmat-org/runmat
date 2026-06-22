@@ -125,7 +125,7 @@ pub(crate) mod tests {
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, Listener, LogicalArray,
         MException, ObjectInstance, StringArray, StructValue, SymbolicExpr, Tensor,
     };
-    use runmat_gc_api::GcPtr;
+    use runmat_gc_api::GcHandle;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -228,7 +228,7 @@ pub(crate) mod tests {
     fn class_reports_handle_class_names() {
         let fallback = HandleRef {
             class_name: String::new(),
-            target: GcPtr::null(),
+            target: GcHandle::null(),
             valid: false,
         };
         let fallback_name = class_builtin(Value::HandleObject(fallback)).expect("class");
@@ -236,7 +236,7 @@ pub(crate) mod tests {
 
         let handle = HandleRef {
             class_name: "MockHandle".into(),
-            target: GcPtr::null(),
+            target: GcHandle::null(),
             valid: true,
         };
         let name = class_builtin(Value::HandleObject(handle)).expect("class");
@@ -252,9 +252,9 @@ pub(crate) mod tests {
 
         let listener = Listener {
             id: 1,
-            target: GcPtr::null(),
+            target: GcHandle::null(),
             event_name: "changed".into(),
-            callback: GcPtr::null(),
+            callback: GcHandle::null(),
             enabled: true,
             valid: true,
         };

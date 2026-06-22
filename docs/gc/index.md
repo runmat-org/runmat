@@ -2,16 +2,16 @@
 title: "Memory Management"
 category: "Memory Management"
 section: "11.0"
-last_updated: "May 28, 2026"
+last_updated: "June 22, 2026"
 ---
 
 # Memory Management
 
-`runmat-gc` provides garbage-collected storage for runtime values that need stable identity or shared ownership across the VM and runtime. It is used for cell contents, handle-object targets, listener callbacks, selected struct/object payloads, and JIT/runtime bridge values.
+`runmat-gc` provides garbage-collected storage for runtime values that need stable identity, reachability through cycles, or finalizer-backed lifetime management. It is used for handle-object targets, listener targets/callbacks, selected struct/object payloads, provider-owned resources that need finalizers, and JIT/runtime bridge values.
 
 For the broader runtime value model, see [Runtime Values & Type Model](/docs/runtime/values). This page focuses on the subset of values that need GC-managed identity or reachability.
 
-The collector is non-moving. A `GcPtr<Value>` is an address-stable pointer to a `Value` allocated by the GC. Collection marks reachable values from registered roots, drops unreachable values in place, and keeps the outer pointer identity stable for surviving objects.
+The collector is non-moving. A `GcHandle<Value>` is an opaque, address-stable token for a `Value` allocated by the GC. Collection marks reachable values from registered roots, drops unreachable values in place, and keeps the outer handle identity stable for surviving objects.
 
 ## Runtime Shape
 
@@ -20,7 +20,7 @@ flowchart TD
   Runtime["runtime / VM allocation site"]
   Allocate["gc_allocate(Value)"]
   Young["young generation blocks"]
-  Ptr["GcPtr<Value>"]
+  Ptr["GcHandle<Value>"]
   Roots["registered roots<br/>stack, vars, globals, explicit roots"]
   Barriers["remembered-set barriers"]
   Minor["minor collection"]
@@ -42,9 +42,9 @@ The GC manages the outer `Value` allocation. Nested payloads such as `Vec`, `Str
 
 | Value shape | GC role |
 | --- | --- |
-| `CellArray` | Stores `Vec<GcPtr<Value>>`, so each cell element can be shared and independently rooted. |
-| `HandleObject` | Stores a `GcPtr<Value>` target to preserve handle identity. |
-| `Listener` | Stores `GcPtr<Value>` references to the target and callback. |
+| `CellArray` | Stores owned `Vec<Value>` elements. A cell element can contain a handle, but the cell itself does not allocate every element in the GC. |
+| `HandleObject` | Stores a `GcHandle<Value>` target to preserve handle identity. |
+| `Listener` | Stores `GcHandle<Value>` references to the target and callback. |
 | `Object` and `Struct` payloads | Can be placed behind a GC pointer when identity or sharing is required. |
 | `GpuTensor` | Registers a finalizer so provider-owned GPU buffers are freed when the GC value is collected. |
 
@@ -72,7 +72,7 @@ flowchart TD
   Start["collection requested"]
   Guard["collection_in_progress guard"]
   Roots["combine roots<br/>explicit + root scanner + barrier roots"]
-  Mark["mark reachable GcPtr<Value>"]
+  Mark["mark reachable GcHandle<Value>"]
   Trace["trace nested GC references<br/>cells, handles, listeners, closures, objects, structs"]
   Sweep["drop unmarked young values"]
   Survivors["record survivors and logical promotions"]
@@ -93,7 +93,7 @@ Roots are the entry points that keep GC values alive.
 
 | Root source | Code entity | Purpose |
 | --- | --- | --- |
-| Explicit roots | `gc_add_root` / `gc_remove_root` | Protect a specific `GcPtr<Value>` by address. |
+| Explicit roots | `gc_add_root` / `gc_remove_root` | Protect a specific `GcHandle<Value>` by address. |
 | VM stack | `StackRoot` | Scans the interpreter stack for nested GC pointers. |
 | VM variables | `VariableArrayRoot` | Scans the interpreter variable array. |
 | Global values | `GlobalRoot` | Keeps runtime/global values reachable during execution. |
@@ -108,7 +108,7 @@ Generational collection must preserve references from older objects to younger o
 
 The barrier path checks each value's logical generation. If the old value is older than the new value, the old address is inserted into the remembered set. Minor GC then treats remembered-set entries as additional roots.
 
-Write barriers are used in mutation paths such as cell assignment, object property writes, and indexing writes that can install a new GC-managed value into an existing aggregate.
+Write barriers are used in mutation paths such as object property writes and indexing writes that can install a new GC-managed value into an existing aggregate.
 
 ## Configuration
 
@@ -161,6 +161,6 @@ The CLI and session APIs use the same stats object. `summary_report()` formats a
 
 ## Boundaries
 
-The GC is responsible for `GcPtr<Value>` lifetimes, not every byte used by the runtime. It does not replace Rust ownership for ordinary tensors, strings, vectors, or host-side buffers. GPU buffers are provider-owned and are released through registered finalizers when a GC-managed `Value::GpuTensor` is collected.
+The GC is responsible for `GcHandle<Value>` lifetimes, not every byte used by the runtime. It does not replace Rust ownership for ordinary tensors, strings, cell elements, vectors, or host-side buffers. GPU buffers are provider-owned and are released through registered finalizers when a GC-managed `Value::GpuTensor` is collected.
 
 This design keeps MATLAB identity-bearing values stable while letting Rust continue to own the bulk storage for ordinary value payloads.
