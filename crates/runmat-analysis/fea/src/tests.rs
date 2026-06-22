@@ -572,6 +572,11 @@ fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_MODAL_SEPARATION"));
+    assert!(result.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_MODAL_CLUSTER"
+            && diag.message.contains("near_repeated_mode_pair_count=")
+            && diag.message.contains("cluster_coverage_ratio=")
+    }));
 }
 
 #[test]
