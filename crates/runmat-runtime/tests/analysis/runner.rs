@@ -3896,6 +3896,36 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-1),
             );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "modal_adjacent_mode_pair_count",
+                "FEA_MODAL_CLUSTER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_MODAL_CLUSTER",
+                    "adjacent_mode_pair_count",
+                ),
+                spec.modal_mode_count
+                    .and_then(|mode_count| mode_count.checked_sub(1))
+                    .map(|count| count as f64),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "modal_cluster_coverage_ratio",
+                "FEA_MODAL_CLUSTER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_MODAL_CLUSTER",
+                    "cluster_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
         }
         if let Some(max_offdiag) = spec.max_modal_orthogonality_offdiag {
             let observed = diagnostic_metric(
