@@ -71,12 +71,7 @@ fn source_lookup_cwd(source_name: &str) -> Option<PathBuf> {
 }
 
 fn resolved_source_path(source_name: &str, cwd: &Path) -> PathBuf {
-    let source_path = PathBuf::from(source_name);
-    if source_path.is_absolute() {
-        source_path
-    } else {
-        cwd.join(source_path)
-    }
+    crate::diagnostic_path::resolve_against_base(source_name, cwd)
 }
 
 fn is_class_source_body(stmts: &[runmat_parser::Stmt]) -> bool {
@@ -525,7 +520,10 @@ async fn discover_companion_from_composition_graph_async(
                         body,
                         private_owner_scope.as_deref(),
                         private_aliases,
-                        Some((file_path.to_string_lossy().to_string(), contents)),
+                        Some((
+                            crate::diagnostic_path::display_path_from_base(&file_path, cwd),
+                            contents,
+                        )),
                     );
                 }
             }
@@ -625,7 +623,10 @@ pub(super) async fn discover_companion_source_statements_async(
                 body,
                 private_owner_scope.as_deref(),
                 private_aliases,
-                Some((path.to_string_lossy().to_string(), contents)),
+                Some((
+                    crate::diagnostic_path::display_path_from_base(&path, cwd),
+                    contents,
+                )),
             );
         }
     }

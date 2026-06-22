@@ -2551,6 +2551,55 @@ fn execute_request_path_error_returns_resolved_source_context() {
 }
 
 #[test]
+fn execute_request_path_source_context_is_relative_to_cwd() {
+    let _guard = cwd_lock();
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("nested")).expect("create nested dir");
+    let source_path = dir.path().join("nested/runtime-relative.m");
+    let source_text = "x = [1];\ny = x(2);\n";
+    std::fs::write(&source_path, source_text).expect("write test source");
+    let _cwd = push_cwd(dir.path());
+
+    let response = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Path("nested/runtime-relative".to_string()),
+        compatibility: CompatMode::Matlab,
+        host_policy: abi::HostExecutionPolicy::default(),
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(125)),
+    }));
+
+    assert_eq!(
+        response.source_context.source_name(),
+        "nested/runtime-relative.m"
+    );
+    let outcome = response
+        .result
+        .expect("runtime failures are returned as outcome diagnostics");
+    let diagnostic = outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == abi::DiagnosticSeverity::Error)
+        .expect("runtime error diagnostic");
+    assert!(
+        diagnostic
+            .callstack
+            .iter()
+            .any(|frame| frame.contains("nested/runtime-relative.m")),
+        "runtime callstack should include cwd-relative source name: {:?}",
+        diagnostic.callstack
+    );
+    assert!(
+        diagnostic
+            .callstack
+            .iter()
+            .all(|frame| !frame.contains(&dir.path().to_string_lossy().to_string())),
+        "runtime callstack should not include tempdir absolute path: {:?}",
+        diagnostic.callstack
+    );
+}
+
+#[test]
 fn execute_request_runtime_diagnostic_preserves_span_and_callstack() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "x = [1];\ny = x(2);\n";

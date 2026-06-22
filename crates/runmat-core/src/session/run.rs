@@ -1338,6 +1338,7 @@ async fn source_input_text(
         crate::abi::SourceInput::Text { name, text } => Ok((name, text)),
         crate::abi::SourceInput::Path(path) => {
             let source_path = resolve_path_source_input(&path).await?;
+            let source_name = crate::diagnostic_path::display_path_for_current_cwd(&source_path);
 
             let text = runmat_filesystem::read_to_string_async(&source_path)
                 .await
@@ -1351,7 +1352,7 @@ async fn source_input_text(
                         .build(),
                     )
                 })?;
-            Ok((source_path.to_string_lossy().to_string(), text))
+            Ok((source_name, text))
         }
     }
 }
@@ -1365,21 +1366,17 @@ async fn resolve_path_source_input(
         use std::path::Path;
 
         let cwd = runmat_filesystem::current_dir().map_err(|err| {
-        RunError::Runtime(
-            build_runtime_error(format!(
-                "failed to resolve current working directory while resolving source path '{path}': {err}"
-            ))
-            .with_identifier("RunMat:SourceResolveFailed")
-            .build(),
-        )
-    })?;
+            RunError::Runtime(
+                build_runtime_error(format!(
+                    "failed to resolve current working directory while resolving source path '{path}': {err}"
+                ))
+                .with_identifier("RunMat:SourceResolveFailed")
+                .build(),
+            )
+        })?;
 
         let source_path = std::path::PathBuf::from(path);
-        let candidate = if source_path.is_absolute() {
-            source_path.clone()
-        } else {
-            cwd.join(&source_path)
-        };
+        let candidate = crate::diagnostic_path::resolve_against_base(path, &cwd);
 
         if let Ok(metadata) = runmat_filesystem::metadata_async(&candidate).await {
             if metadata.is_file() {
@@ -1429,11 +1426,7 @@ async fn resolve_path_source_input(
             )
         })?;
         let source_path = PathBuf::from(path);
-        let candidate = if source_path.is_absolute() {
-            source_path.clone()
-        } else {
-            cwd.join(&source_path)
-        };
+        let candidate = crate::diagnostic_path::resolve_against_base(path, &cwd);
 
         if let Ok(metadata) = runmat_filesystem::metadata_async(&candidate).await {
             if metadata.is_file() {
@@ -1520,6 +1513,7 @@ path = "src/main"
         let (source_name, source_text) =
             futures::executor::block_on(source_input_text(SourceInput::Path("main".to_string())))
                 .expect("named entrypoint should resolve");
+        assert_eq!(source_name, "src/main.m");
         let resolved = std::path::PathBuf::from(source_name)
             .canonicalize()
             .unwrap();
@@ -1545,7 +1539,7 @@ path = "src/main"
         ))
         .expect("path without extension should infer .m");
 
-        assert!(source_name.ends_with("src/main.m"));
+        assert_eq!(source_name, "src/main.m");
         assert_eq!(source_text.trim(), "x = 1;");
     }
 
@@ -1562,7 +1556,7 @@ path = "src/main"
             ))
             .expect("memory provider should resolve path without extension");
 
-            assert_eq!(source_name, "/main.m");
+            assert_eq!(source_name, "main.m");
             assert_eq!(source_text, "x = 1;");
         });
     }
