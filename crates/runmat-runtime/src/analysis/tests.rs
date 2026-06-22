@@ -44,11 +44,12 @@ use runmat_analysis_fea::{
     FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
     FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
     FEA_FIELD_EM_CURRENT_DENSITY_REAL, FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
-    FEA_FIELD_EM_ENERGY_DENSITY, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
-    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_RESIDUAL_REAL,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
-    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
-    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_ENERGY_DENSITY,
+    FEA_FIELD_EM_MAGNETIC_FIELD_REAL, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
+    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_POYNTING_VECTOR_REAL,
+    FEA_FIELD_EM_RESIDUAL_REAL, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
@@ -4319,21 +4320,43 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         OperationContext::new(None, None),
     )
     .expect("em results should be queryable");
-    assert!(results
-        .data
-        .field_descriptors
-        .iter()
-        .any(|descriptor| descriptor.field_id == FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG));
-    assert!(results
-        .data
-        .field_descriptors
-        .iter()
-        .any(|descriptor| descriptor.field_id == FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL));
-    assert!(results
-        .data
-        .field_descriptors
-        .iter()
-        .any(|descriptor| descriptor.field_id == FEA_FIELD_EM_ELECTRIC_FIELD_REAL));
+    let descriptor = |field_id: &str| {
+        results
+            .data
+            .field_descriptors
+            .iter()
+            .find(|descriptor| descriptor.field_id == field_id)
+            .expect("EM descriptor should be present")
+    };
+    for field_id in [
+        FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
+        FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
+        FEA_FIELD_EM_MAGNETIC_FIELD_REAL,
+        FEA_FIELD_EM_CURRENT_DENSITY_REAL,
+        FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
+        FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL,
+        FEA_FIELD_EM_POYNTING_VECTOR_REAL,
+    ] {
+        let descriptor = descriptor(field_id);
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
+        assert_eq!(descriptor.component_count, Some(3));
+    }
+    assert_eq!(
+        descriptor(FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE).kind,
+        AnalysisFieldKind::Scalar
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE).component_count,
+        None
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_EM_ENERGY_DENSITY).kind,
+        AnalysisFieldKind::Scalar
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_EM_RESIDUAL_REAL).kind,
+        AnalysisFieldKind::Scalar
+    );
     let em_diag = envelope
         .data
         .run
