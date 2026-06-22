@@ -281,6 +281,109 @@ fn poly_integral_complex_interleaved(coeffs: &[f64], constant: f64) -> Result<Ve
     Ok(out)
 }
 
+#[derive(Clone, Copy)]
+enum ElementwiseBinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+fn logical_len_for_shape(context: &str, shape: &[usize]) -> Result<usize> {
+    shape
+        .iter()
+        .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
+        .ok_or_else(|| anyhow!("{context}: shape product overflow"))
+}
+
+fn ensure_storage_len(
+    context: &str,
+    data: &[f64],
+    shape: &[usize],
+    storage: &GpuTensorStorage,
+) -> Result<usize> {
+    let logical_len = logical_len_for_shape(context, shape)?;
+    let expected = match storage {
+        GpuTensorStorage::Real => logical_len,
+        GpuTensorStorage::ComplexInterleaved => logical_len
+            .checked_mul(2)
+            .ok_or_else(|| anyhow!("{context}: storage length overflow"))?,
+    };
+    ensure!(
+        data.len() == expected,
+        "{context}: storage length does not match logical shape"
+    );
+    Ok(logical_len)
+}
+
+fn storage_pair(data: &[f64], storage: &GpuTensorStorage, idx: usize) -> (f64, f64) {
+    match storage {
+        GpuTensorStorage::Real => (data[idx], 0.0),
+        GpuTensorStorage::ComplexInterleaved => (data[idx * 2], data[idx * 2 + 1]),
+    }
+}
+
+fn elementwise_binary_data(
+    context: &str,
+    lhs: &[f64],
+    lhs_storage: GpuTensorStorage,
+    rhs: &[f64],
+    rhs_storage: GpuTensorStorage,
+    shape: &[usize],
+    op: ElementwiseBinaryOp,
+) -> Result<(Vec<f64>, GpuTensorStorage)> {
+    let logical_len = ensure_storage_len(context, lhs, shape, &lhs_storage)?;
+    ensure!(
+        ensure_storage_len(context, rhs, shape, &rhs_storage)? == logical_len,
+        "{context}: rhs logical length does not match lhs"
+    );
+    let output_storage = if lhs_storage == GpuTensorStorage::ComplexInterleaved
+        || rhs_storage == GpuTensorStorage::ComplexInterleaved
+    {
+        GpuTensorStorage::ComplexInterleaved
+    } else {
+        GpuTensorStorage::Real
+    };
+
+    if output_storage == GpuTensorStorage::Real {
+        let mut out = Vec::with_capacity(logical_len);
+        for idx in 0..logical_len {
+            let value = match op {
+                ElementwiseBinaryOp::Add => lhs[idx] + rhs[idx],
+                ElementwiseBinaryOp::Sub => lhs[idx] - rhs[idx],
+                ElementwiseBinaryOp::Mul => lhs[idx] * rhs[idx],
+                ElementwiseBinaryOp::Div => {
+                    if rhs[idx] == 0.0 {
+                        f64::INFINITY * lhs[idx].signum()
+                    } else {
+                        lhs[idx] / rhs[idx]
+                    }
+                }
+            };
+            out.push(value);
+        }
+        return Ok((out, GpuTensorStorage::Real));
+    }
+
+    let mut out = Vec::with_capacity(logical_len * 2);
+    for idx in 0..logical_len {
+        let (ar, ai) = storage_pair(lhs, &lhs_storage, idx);
+        let (br, bi) = storage_pair(rhs, &rhs_storage, idx);
+        let (re, im) = match op {
+            ElementwiseBinaryOp::Add => (ar + br, ai + bi),
+            ElementwiseBinaryOp::Sub => (ar - br, ai - bi),
+            ElementwiseBinaryOp::Mul => (ar * br - ai * bi, ar * bi + ai * br),
+            ElementwiseBinaryOp::Div => {
+                let denom = br * br + bi * bi;
+                ((ar * br + ai * bi) / denom, (ai * br - ar * bi) / denom)
+            }
+        };
+        out.push(re);
+        out.push(im);
+    }
+    Ok((out, GpuTensorStorage::ComplexInterleaved))
+}
+
 fn poly_convolve_real(a: &[f64], b: &[f64]) -> Vec<f64> {
     if a.is_empty() || b.is_empty() {
         return Vec::new();
@@ -2294,30 +2397,28 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let guard = registry().lock().unwrap();
-            let abuf = guard
-                .get(&a.buffer_id)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let bbuf = guard
-                .get(&b.buffer_id)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
             if a.shape != b.shape {
                 return Err(anyhow::anyhow!("shape mismatch"));
             }
-            let mut out = vec![0.0; abuf.len()];
-            for i in 0..abuf.len() {
-                out[i] = abuf[i] + bbuf[i];
-            }
-            drop(guard);
-            // Upload new buffer to registry
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: 0,
-                buffer_id: id,
-            })
+            let (out, storage) = {
+                let guard = registry().lock().unwrap();
+                let abuf = guard
+                    .get(&a.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+                let bbuf = guard
+                    .get(&b.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
+                elementwise_binary_data(
+                    "elem_add",
+                    abuf,
+                    runmat_accelerate_api::handle_storage(a),
+                    bbuf,
+                    runmat_accelerate_api::handle_storage(b),
+                    &a.shape,
+                    ElementwiseBinaryOp::Add,
+                )?
+            };
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
         })
     }
 
@@ -2327,29 +2428,28 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let guard = registry().lock().unwrap();
-            let abuf = guard
-                .get(&a.buffer_id)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let bbuf = guard
-                .get(&b.buffer_id)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
             if a.shape != b.shape {
                 return Err(anyhow::anyhow!("shape mismatch"));
             }
-            let mut out = vec![0.0; abuf.len()];
-            for i in 0..abuf.len() {
-                out[i] = abuf[i] * bbuf[i];
-            }
-            drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: 0,
-                buffer_id: id,
-            })
+            let (out, storage) = {
+                let guard = registry().lock().unwrap();
+                let abuf = guard
+                    .get(&a.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+                let bbuf = guard
+                    .get(&b.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
+                elementwise_binary_data(
+                    "elem_mul",
+                    abuf,
+                    runmat_accelerate_api::handle_storage(a),
+                    bbuf,
+                    runmat_accelerate_api::handle_storage(b),
+                    &a.shape,
+                    ElementwiseBinaryOp::Mul,
+                )?
+            };
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
         })
     }
 
@@ -2359,29 +2459,28 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let guard = registry().lock().unwrap();
-            let abuf = guard
-                .get(&a.buffer_id)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let bbuf = guard
-                .get(&b.buffer_id)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
             if a.shape != b.shape {
                 return Err(anyhow::anyhow!("shape mismatch"));
             }
-            let mut out = vec![0.0; abuf.len()];
-            for i in 0..abuf.len() {
-                out[i] = abuf[i] - bbuf[i];
-            }
-            drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: 0,
-                buffer_id: id,
-            })
+            let (out, storage) = {
+                let guard = registry().lock().unwrap();
+                let abuf = guard
+                    .get(&a.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+                let bbuf = guard
+                    .get(&b.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
+                elementwise_binary_data(
+                    "elem_sub",
+                    abuf,
+                    runmat_accelerate_api::handle_storage(a),
+                    bbuf,
+                    runmat_accelerate_api::handle_storage(b),
+                    &a.shape,
+                    ElementwiseBinaryOp::Sub,
+                )?
+            };
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
         })
     }
 
@@ -2391,33 +2490,28 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let guard = registry().lock().unwrap();
-            let abuf = guard
-                .get(&a.buffer_id)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let bbuf = guard
-                .get(&b.buffer_id)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
             if a.shape != b.shape {
                 return Err(anyhow::anyhow!("shape mismatch"));
             }
-            let mut out = vec![0.0; abuf.len()];
-            for i in 0..abuf.len() {
-                out[i] = if bbuf[i] == 0.0 {
-                    f64::INFINITY * abuf[i].signum()
-                } else {
-                    abuf[i] / bbuf[i]
-                };
-            }
-            drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: 0,
-                buffer_id: id,
-            })
+            let (out, storage) = {
+                let guard = registry().lock().unwrap();
+                let abuf = guard
+                    .get(&a.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+                let bbuf = guard
+                    .get(&b.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
+                elementwise_binary_data(
+                    "elem_div",
+                    abuf,
+                    runmat_accelerate_api::handle_storage(a),
+                    bbuf,
+                    runmat_accelerate_api::handle_storage(b),
+                    &a.shape,
+                    ElementwiseBinaryOp::Div,
+                )?
+            };
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
         })
     }
 
@@ -4015,120 +4109,134 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn scalar_add(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
-        let guard = registry().lock().unwrap();
-        let abuf = guard
-            .get(&a.buffer_id)
-            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-        let out: Vec<f64> = abuf.iter().map(|&x| x + scalar).collect();
-        drop(guard);
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut guard2 = registry().lock().unwrap();
-        guard2.insert(id, out);
-        Ok(GpuTensorHandle {
-            shape: a.shape.clone(),
-            device_id: 0,
-            buffer_id: id,
-        })
+        let storage = runmat_accelerate_api::handle_storage(a);
+        let out = {
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let logical_len = ensure_storage_len("scalar_add", abuf, &a.shape, &storage)?;
+            if storage == GpuTensorStorage::Real {
+                abuf.iter().map(|&x| x + scalar).collect()
+            } else {
+                let mut out = Vec::with_capacity(logical_len * 2);
+                for idx in 0..logical_len {
+                    let (re, im) = storage_pair(abuf, &storage, idx);
+                    out.push(re + scalar);
+                    out.push(im);
+                }
+                out
+            }
+        };
+        Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
     }
 
     fn scalar_sub(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
-        let guard = registry().lock().unwrap();
-        let abuf = guard
-            .get(&a.buffer_id)
-            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-        let out: Vec<f64> = abuf.iter().map(|&x| x - scalar).collect();
-        drop(guard);
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut guard2 = registry().lock().unwrap();
-        guard2.insert(id, out);
-        Ok(GpuTensorHandle {
-            shape: a.shape.clone(),
-            device_id: 0,
-            buffer_id: id,
-        })
+        let storage = runmat_accelerate_api::handle_storage(a);
+        let out = {
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let logical_len = ensure_storage_len("scalar_sub", abuf, &a.shape, &storage)?;
+            if storage == GpuTensorStorage::Real {
+                abuf.iter().map(|&x| x - scalar).collect()
+            } else {
+                let mut out = Vec::with_capacity(logical_len * 2);
+                for idx in 0..logical_len {
+                    let (re, im) = storage_pair(abuf, &storage, idx);
+                    out.push(re - scalar);
+                    out.push(im);
+                }
+                out
+            }
+        };
+        Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
     }
 
     fn scalar_mul(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
-        let guard = registry().lock().unwrap();
-        let abuf = guard
-            .get(&a.buffer_id)
-            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-        let out: Vec<f64> = abuf.iter().map(|&x| x * scalar).collect();
-        drop(guard);
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut guard2 = registry().lock().unwrap();
-        guard2.insert(id, out);
-        Ok(GpuTensorHandle {
-            shape: a.shape.clone(),
-            device_id: 0,
-            buffer_id: id,
-        })
+        let storage = runmat_accelerate_api::handle_storage(a);
+        let out = {
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            ensure_storage_len("scalar_mul", abuf, &a.shape, &storage)?;
+            abuf.iter().map(|&x| x * scalar).collect()
+        };
+        Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
     }
 
     fn scalar_div(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
-        let guard = registry().lock().unwrap();
-        let abuf = guard
-            .get(&a.buffer_id)
-            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-        let out: Vec<f64> = if scalar == 0.0 {
-            abuf.iter().map(|&x| f64::INFINITY * x.signum()).collect()
-        } else {
-            abuf.iter().map(|&x| x / scalar).collect()
+        let storage = runmat_accelerate_api::handle_storage(a);
+        let out = {
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            ensure_storage_len("scalar_div", abuf, &a.shape, &storage)?;
+            if storage == GpuTensorStorage::Real && scalar == 0.0 {
+                abuf.iter().map(|&x| f64::INFINITY * x.signum()).collect()
+            } else {
+                abuf.iter().map(|&x| x / scalar).collect()
+            }
         };
-        drop(guard);
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut guard2 = registry().lock().unwrap();
-        guard2.insert(id, out);
-        Ok(GpuTensorHandle {
-            shape: a.shape.clone(),
-            device_id: 0,
-            buffer_id: id,
-        })
+        Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
     }
 
     fn scalar_rsub(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
-        // compute scalar - a
-        let guard = registry().lock().unwrap();
-        let abuf = guard
-            .get(&a.buffer_id)
-            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-        let out: Vec<f64> = abuf.iter().map(|&x| scalar - x).collect();
-        drop(guard);
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut guard2 = registry().lock().unwrap();
-        guard2.insert(id, out);
-        Ok(GpuTensorHandle {
-            shape: a.shape.clone(),
-            device_id: 0,
-            buffer_id: id,
-        })
+        let storage = runmat_accelerate_api::handle_storage(a);
+        let out = {
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let logical_len = ensure_storage_len("scalar_rsub", abuf, &a.shape, &storage)?;
+            if storage == GpuTensorStorage::Real {
+                abuf.iter().map(|&x| scalar - x).collect()
+            } else {
+                let mut out = Vec::with_capacity(logical_len * 2);
+                for idx in 0..logical_len {
+                    let (re, im) = storage_pair(abuf, &storage, idx);
+                    out.push(scalar - re);
+                    out.push(-im);
+                }
+                out
+            }
+        };
+        Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
     }
 
     fn scalar_rdiv(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
-        // compute scalar ./ a
-        let guard = registry().lock().unwrap();
-        let abuf = guard
-            .get(&a.buffer_id)
-            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-        let out: Vec<f64> = abuf
-            .iter()
-            .map(|&x| {
-                if x == 0.0 {
-                    f64::INFINITY * scalar.signum()
-                } else {
-                    scalar / x
+        let storage = runmat_accelerate_api::handle_storage(a);
+        let out = {
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let logical_len = ensure_storage_len("scalar_rdiv", abuf, &a.shape, &storage)?;
+            if storage == GpuTensorStorage::Real {
+                abuf.iter()
+                    .map(|&x| {
+                        if x == 0.0 {
+                            f64::INFINITY * scalar.signum()
+                        } else {
+                            scalar / x
+                        }
+                    })
+                    .collect()
+            } else {
+                let mut out = Vec::with_capacity(logical_len * 2);
+                for idx in 0..logical_len {
+                    let (re, im) = storage_pair(abuf, &storage, idx);
+                    let denom = re * re + im * im;
+                    out.push(scalar * re / denom);
+                    out.push(-scalar * im / denom);
                 }
-            })
-            .collect();
-        drop(guard);
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut guard2 = registry().lock().unwrap();
-        guard2.insert(id, out);
-        Ok(GpuTensorHandle {
-            shape: a.shape.clone(),
-            device_id: 0,
-            buffer_id: id,
-        })
+                out
+            }
+        };
+        Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
     }
 
     fn transpose(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -6391,6 +6499,66 @@ pub fn reset_inprocess_rng() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    fn complex_handle(
+        provider: &InProcessProvider,
+        values: &[(f64, f64)],
+        shape: &[usize],
+    ) -> GpuTensorHandle {
+        let mut interleaved = Vec::with_capacity(values.len() * 2);
+        for &(re, im) in values {
+            interleaved.push(re);
+            interleaved.push(im);
+        }
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &interleaved,
+                shape,
+            })
+            .expect("upload complex");
+        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
+        handle
+    }
+
+    fn real_handle(
+        provider: &InProcessProvider,
+        values: &[f64],
+        shape: &[usize],
+    ) -> GpuTensorHandle {
+        provider
+            .upload(&HostTensorView {
+                data: values,
+                shape,
+            })
+            .expect("upload real")
+    }
+
+    fn assert_complex_close(
+        provider: &InProcessProvider,
+        handle: &GpuTensorHandle,
+        expected: &[(f64, f64)],
+    ) {
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(handle),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        let host = block_on(provider.download(handle)).expect("download complex");
+        assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
+        assert_eq!(host.data.len(), expected.len() * 2);
+        for (idx, &(re, im)) in expected.iter().enumerate() {
+            assert!(
+                (host.data[idx * 2] - re).abs() < 1e-12,
+                "real lane {idx}: got {}, expected {re}",
+                host.data[idx * 2]
+            );
+            assert!(
+                (host.data[idx * 2 + 1] - im).abs() < 1e-12,
+                "imag lane {idx}: got {}, expected {im}",
+                host.data[idx * 2 + 1]
+            );
+        }
+    }
 
     #[test]
     fn upload_overwrites_stale_handle_metadata() {
@@ -6431,5 +6599,70 @@ mod tests {
             GpuTensorStorage::Real
         );
         assert!(!runmat_accelerate_api::handle_is_logical(&handle));
+    }
+
+    #[test]
+    fn complex_elementwise_arithmetic_preserves_storage() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(9_000_100, Ordering::Relaxed);
+        let shape = [1, 2];
+        let a = complex_handle(&provider, &[(1.0, 2.0), (-3.0, 0.5)], &shape);
+        let b = complex_handle(&provider, &[(4.0, -1.0), (2.0, 3.0)], &shape);
+
+        let add = block_on(provider.elem_add(&a, &b)).expect("add");
+        let sub = block_on(provider.elem_sub(&a, &b)).expect("sub");
+        let mul = block_on(provider.elem_mul(&a, &b)).expect("mul");
+        let div = block_on(provider.elem_div(&a, &b)).expect("div");
+
+        assert_complex_close(&provider, &add, &[(5.0, 1.0), (-1.0, 3.5)]);
+        assert_complex_close(&provider, &sub, &[(-3.0, 3.0), (-5.0, -2.5)]);
+        assert_complex_close(&provider, &mul, &[(6.0, 7.0), (-7.5, -8.0)]);
+        assert_complex_close(
+            &provider,
+            &div,
+            &[(2.0 / 17.0, 9.0 / 17.0), (-4.5 / 13.0, 10.0 / 13.0)],
+        );
+    }
+
+    #[test]
+    fn mixed_real_complex_elementwise_arithmetic_preserves_storage() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(9_000_200, Ordering::Relaxed);
+        let shape = [1, 2];
+        let real = real_handle(&provider, &[2.0, -4.0], &shape);
+        let complex = complex_handle(&provider, &[(1.0, 3.0), (-2.0, 0.5)], &shape);
+
+        let add = block_on(provider.elem_add(&real, &complex)).expect("add");
+        let mul = block_on(provider.elem_mul(&real, &complex)).expect("mul");
+        let div = block_on(provider.elem_div(&real, &complex)).expect("div");
+
+        assert_complex_close(&provider, &add, &[(3.0, 3.0), (-6.0, 0.5)]);
+        assert_complex_close(&provider, &mul, &[(2.0, 6.0), (8.0, -2.0)]);
+        assert_complex_close(&provider, &div, &[(0.2, -0.6), (32.0 / 17.0, 8.0 / 17.0)]);
+    }
+
+    #[test]
+    fn complex_scalar_arithmetic_preserves_storage() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(9_000_300, Ordering::Relaxed);
+        let handle = complex_handle(&provider, &[(1.0, 2.0), (-4.0, 0.5)], &[1, 2]);
+
+        let add = provider.scalar_add(&handle, 3.0).expect("scalar add");
+        let sub = provider.scalar_sub(&handle, 3.0).expect("scalar sub");
+        let rsub = provider.scalar_rsub(&handle, 3.0).expect("scalar rsub");
+        let mul = provider.scalar_mul(&handle, 2.0).expect("scalar mul");
+        let div = provider.scalar_div(&handle, 2.0).expect("scalar div");
+        let rdiv = provider.scalar_rdiv(&handle, 2.0).expect("scalar rdiv");
+
+        assert_complex_close(&provider, &add, &[(4.0, 2.0), (-1.0, 0.5)]);
+        assert_complex_close(&provider, &sub, &[(-2.0, 2.0), (-7.0, 0.5)]);
+        assert_complex_close(&provider, &rsub, &[(2.0, -2.0), (7.0, -0.5)]);
+        assert_complex_close(&provider, &mul, &[(2.0, 4.0), (-8.0, 1.0)]);
+        assert_complex_close(&provider, &div, &[(0.5, 1.0), (-2.0, 0.25)]);
+        assert_complex_close(
+            &provider,
+            &rdiv,
+            &[(0.4, -0.8), (-32.0 / 65.0, -4.0 / 65.0)],
+        );
     }
 }

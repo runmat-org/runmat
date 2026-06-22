@@ -558,7 +558,9 @@ pub(crate) mod tests {
     }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
-    use runmat_accelerate_api::{AccelProvider, HostTensorView};
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
         IntValue, LogicalArray, ResolveContext, StringArray, StructValue, Tensor, Type,
     };
