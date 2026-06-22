@@ -363,7 +363,7 @@ use runner::run_fixture;
 
 #[test]
 fn fea_conformance_manifest_uses_physical_fixture_language() {
-    let forbidden_terms = ["proxy", "placeholder"];
+    let forbidden_terms = ["proxy", "placeholder", "baseline"];
     for spec in manifest_specs() {
         let id = spec.id.to_ascii_lowercase();
         let description = spec.description.to_ascii_lowercase();

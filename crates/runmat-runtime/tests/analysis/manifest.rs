@@ -301,7 +301,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "acoustic_harmonic_cpu",
-            description: "acoustic harmonic baseline fixture on cpu",
+            description: "acoustic harmonic Helmholtz fixture on cpu",
             model: || fixture_model(FixtureId::ModalLarge),
             run_kind: AnalysisRunKind::Acoustic,
             expect_validate_error: None,
@@ -325,7 +325,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "acoustic_harmonic_gpu_provider",
-            description: "acoustic harmonic baseline fixture with provider-backed acceleration",
+            description: "acoustic harmonic Helmholtz fixture with provider-backed acceleration",
             model: || fixture_model(FixtureId::ModalLarge),
             run_kind: AnalysisRunKind::Acoustic,
             expect_validate_error: None,
@@ -349,7 +349,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "acoustic_harmonic_gpu_fallback",
-            description: "acoustic harmonic baseline fixture with no-provider host fallback",
+            description: "acoustic harmonic Helmholtz fixture with no-provider host fallback",
             model: || fixture_model(FixtureId::ModalLarge),
             run_kind: AnalysisRunKind::Acoustic,
             expect_validate_error: None,
@@ -547,7 +547,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "cfd_steady_cpu",
-            description: "cfd steady baseline fixture on cpu with flow diagnostics",
+            description: "cfd steady finite-volume fixture on cpu with flow diagnostics",
             model: || fixture_model(FixtureId::CantileverLinearStatic),
             run_kind: AnalysisRunKind::Cfd,
             expect_validate_error: None,
@@ -571,7 +571,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "cfd_steady_gpu_provider",
-            description: "cfd steady baseline fixture with provider-backed acceleration",
+            description: "cfd steady finite-volume fixture with provider-backed acceleration",
             model: || fixture_model(FixtureId::CantileverLinearStatic),
             run_kind: AnalysisRunKind::Cfd,
             expect_validate_error: None,
@@ -595,7 +595,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "cfd_steady_gpu_fallback",
-            description: "cfd steady baseline fixture with no-provider host fallback",
+            description: "cfd steady finite-volume fixture with no-provider host fallback",
             model: || fixture_model(FixtureId::CantileverLinearStatic),
             run_kind: AnalysisRunKind::Cfd,
             expect_validate_error: None,
@@ -745,7 +745,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "cht_coupled_cpu",
-            description: "cht coupled baseline fixture on cpu with coupled diagnostics",
+            description: "cht coupled channel/interface fixture on cpu with coupled diagnostics",
             model: || fixture_model(FixtureId::CantileverLinearStatic),
             run_kind: AnalysisRunKind::Cht,
             expect_validate_error: None,
@@ -793,7 +793,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "cht_coupled_gpu_provider",
-            description: "cht coupled baseline fixture with provider-backed acceleration",
+            description: "cht coupled channel/interface fixture with provider-backed acceleration",
             model: || fixture_model(FixtureId::CantileverLinearStatic),
             run_kind: AnalysisRunKind::Cht,
             expect_validate_error: None,
@@ -817,7 +817,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "cht_coupled_gpu_fallback",
-            description: "cht coupled baseline fixture with no-provider host fallback",
+            description: "cht coupled channel/interface fixture with no-provider host fallback",
             model: || fixture_model(FixtureId::CantileverLinearStatic),
             run_kind: AnalysisRunKind::Cht,
             expect_validate_error: None,
@@ -892,7 +892,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "fsi_coupled_cpu",
-            description: "fsi coupled baseline fixture on cpu with coupled diagnostics",
+            description: "fsi coupled partitioned-interface fixture on cpu with coupled diagnostics",
             model: || fixture_model(FixtureId::CantileverLinearStatic),
             run_kind: AnalysisRunKind::Fsi,
             expect_validate_error: None,
@@ -940,7 +940,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "fsi_coupled_gpu_provider",
-            description: "fsi coupled baseline fixture with provider-backed acceleration",
+            description: "fsi coupled partitioned-interface fixture with provider-backed acceleration",
             model: || fixture_model(FixtureId::CantileverLinearStatic),
             run_kind: AnalysisRunKind::Fsi,
             expect_validate_error: None,
@@ -1012,7 +1012,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "fsi_coupled_gpu_fallback",
-            description: "fsi coupled baseline fixture with no-provider host fallback",
+            description: "fsi coupled partitioned-interface fixture with no-provider host fallback",
             model: || fixture_model(FixtureId::CantileverLinearStatic),
             run_kind: AnalysisRunKind::Fsi,
             expect_validate_error: None,
@@ -1600,7 +1600,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
         },
         FixtureSpec {
             id: "nonlinear_assembly_cpu",
-            description: "nonlinear assembly fixture baseline CPU execution",
+            description: "nonlinear assembly fixture CPU execution",
             model: || fixture_model(FixtureId::NonlinearAssembly),
             run_kind: AnalysisRunKind::Nonlinear,
             expect_validate_error: None,
