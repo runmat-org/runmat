@@ -48,6 +48,23 @@ class ValidatePublicFieldIdsTests(unittest.TestCase):
 
         self.assertEqual(validate([path]), [])
 
+    def test_rejects_public_placeholder_enum_variants(self):
+        path = self.write_contract(
+            '\n'.join(
+                [
+                    'pub enum ModalFrequencyBasis {',
+                    '    NativeEigenSolve,',
+                    '    PlaceholderLinearStatic,',
+                    '}',
+                ]
+            )
+        )
+
+        errors = validate([path])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("PlaceholderLinearStatic", errors[0])
+        self.assertEqual(main([str(path)]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
