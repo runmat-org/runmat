@@ -1254,9 +1254,33 @@ fn structural_bar_and_beam_reference_fixtures_emit_known_answer_checks() {
         diag.code == "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER"
             && diag.message.contains("known_answer_coverage_ratio=1")
     }));
+    assert!(axial.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_STRUCTURAL_REFERENCE_KINEMATICS"
+            && diag.message.contains("case=axial_bar_tension")
+            && diag.message.contains("primary_component=x")
+            && diag
+                .message
+                .contains("transverse_displacement_leakage_ratio=")
+            && diag.message.contains("primary_stress_component_ratio=")
+            && diag
+                .message
+                .contains("directional_reference_coverage_ratio=1")
+    }));
     assert!(bending.diagnostics.iter().any(|diag| {
         diag.code == "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER"
             && diag.message.contains("known_answer_coverage_ratio=1")
+    }));
+    assert!(bending.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_STRUCTURAL_REFERENCE_KINEMATICS"
+            && diag.message.contains("case=beam_transverse_bending")
+            && diag.message.contains("primary_component=y")
+            && diag
+                .message
+                .contains("transverse_displacement_leakage_ratio=")
+            && diag.message.contains("primary_stress_component_ratio=")
+            && diag
+                .message
+                .contains("directional_reference_coverage_ratio=1")
     }));
 
     let axial_displacement = field(&axial, FEA_FIELD_STRUCTURAL_DISPLACEMENT)

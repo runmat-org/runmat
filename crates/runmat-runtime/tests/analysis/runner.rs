@@ -3548,6 +3548,56 @@ fn push_linear_structural_threshold_assertions(
     );
 }
 
+fn push_structural_reference_kinematics_threshold_assertions(
+    fixture_id: &str,
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    run: &AnalysisRunResult,
+) {
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_reference_transverse_displacement_leakage_ratio",
+        "FEA_STRUCTURAL_REFERENCE_KINEMATICS",
+        diagnostic_metric(
+            run,
+            "FEA_STRUCTURAL_REFERENCE_KINEMATICS",
+            "transverse_displacement_leakage_ratio",
+        ),
+        Some(0.0),
+        Some(0.1),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_reference_primary_stress_component_ratio",
+        "FEA_STRUCTURAL_REFERENCE_KINEMATICS",
+        diagnostic_metric(
+            run,
+            "FEA_STRUCTURAL_REFERENCE_KINEMATICS",
+            "primary_stress_component_ratio",
+        ),
+        Some(0.5),
+        Some(1.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "structural_reference_directional_coverage_ratio",
+        "FEA_STRUCTURAL_REFERENCE_KINEMATICS",
+        diagnostic_metric(
+            run,
+            "FEA_STRUCTURAL_REFERENCE_KINEMATICS",
+            "directional_reference_coverage_ratio",
+        ),
+        Some(1.0),
+        Some(1.0),
+    );
+}
+
 fn validate_fallback_event_schema(event: &str) -> bool {
     let parts: Vec<&str> = event.splitn(3, ':').collect();
     if parts.len() != 3 {
@@ -4279,6 +4329,18 @@ pub(super) fn run_fixture(
                 | "structural_beam_bending_reference_gpu_provider"
         ) {
             push_linear_structural_threshold_assertions(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                &cpu_envelope.data,
+            );
+        }
+        if matches!(
+            spec.id,
+            "structural_axial_bar_reference_gpu_provider"
+                | "structural_beam_bending_reference_gpu_provider"
+        ) {
+            push_structural_reference_kinematics_threshold_assertions(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
