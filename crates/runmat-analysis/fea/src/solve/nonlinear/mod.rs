@@ -457,13 +457,19 @@ pub fn solve_nonlinear_system(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis={} element_count={} active_recovery_edge_count={} prep_recovery_edge_count={} constrained_recovery_edge_count={} mean_edge_length_m={}",
+            "basis={} element_count={} active_recovery_edge_count={} prep_recovery_edge_count={} constrained_recovery_edge_count={} mean_edge_length_m={} max_edge_strain_norm={} strain_component_coverage_ratio={}",
             recovery_topology.basis,
             recovery_topology.element_count,
             recovery_topology.active_recovery_edge_count,
             recovery_topology.prep_recovery_edge_count,
             recovery_topology.constrained_recovery_edge_count,
             recovery_topology.mean_edge_length_m(),
+            recovery_topology.max_edge_strain_norm(
+                displacement_snapshots.last().map(Vec::as_slice)
+            ),
+            recovery_topology.strain_component_coverage_ratio(
+                displacement_snapshots.last().map(Vec::as_slice)
+            ),
         ),
     });
     diagnostics.push(FeaDiagnostic {
@@ -749,6 +755,43 @@ impl NonlinearRecoveryTopology {
             .sum::<f64>()
             / self.edges.len() as f64
     }
+
+    fn max_edge_strain_norm(&self, displacement: Option<&[f64]>) -> f64 {
+        let Some(displacement) = displacement else {
+            return 0.0;
+        };
+        self.edges
+            .iter()
+            .map(|edge| {
+                nonlinear_edge_strain_tensor(displacement, edge)
+                    .iter()
+                    .map(|value| value * value)
+                    .sum::<f64>()
+                    .sqrt()
+            })
+            .fold(0.0_f64, f64::max)
+    }
+
+    fn strain_component_coverage_ratio(&self, displacement: Option<&[f64]>) -> f64 {
+        let Some(displacement) = displacement else {
+            return 0.0;
+        };
+        let expected_component_count = self.edges.len() * TENSOR_COMPONENT_COUNT;
+        if expected_component_count == 0 {
+            return 0.0;
+        }
+        let active_component_count = self
+            .edges
+            .iter()
+            .map(|edge| {
+                nonlinear_edge_strain_tensor(displacement, edge)
+                    .iter()
+                    .filter(|value| value.abs() > 0.0)
+                    .count()
+            })
+            .sum::<usize>();
+        active_component_count as f64 / expected_component_count as f64
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -919,16 +962,54 @@ fn recover_increment_strain(
 
     for (element_index, edge) in recovery_topology.edges.iter().enumerate() {
         let offset = element_index * TENSOR_COMPONENT_COUNT;
-        let jump = padded.get(edge.to_dof).copied().unwrap_or(0.0)
-            - padded.get(edge.from_dof).copied().unwrap_or(0.0);
-        strain[offset + edge.component] =
-            jump / finite_positive_or(edge.edge_length_m, edge.hop.max(1) as f64);
-        strain[offset + 3] = 0.5 * (strain[offset] + strain[offset + edge.shear_pair.0]);
-        strain[offset + 4] =
-            0.5 * (strain[offset + edge.shear_pair.0] + strain[offset + edge.shear_pair.1]);
-        strain[offset + 5] = 0.5 * (strain[offset] + strain[offset + edge.shear_pair.1]);
+        let edge_strain = nonlinear_edge_strain_tensor(&padded, edge);
+        strain[offset..offset + TENSOR_COMPONENT_COUNT].copy_from_slice(&edge_strain);
     }
     strain
+}
+
+fn nonlinear_edge_strain_tensor(displacement: &[f64], edge: &NonlinearRecoveryEdge) -> [f64; 6] {
+    let length = finite_positive_or(edge.edge_length_m, edge.hop.max(1) as f64);
+    let from_node = edge.from_dof / VECTOR_COMPONENT_COUNT;
+    let to_node = edge.to_dof / VECTOR_COMPONENT_COUNT;
+    if from_node == to_node {
+        let jump = displacement.get(edge.to_dof).copied().unwrap_or(0.0)
+            - displacement.get(edge.from_dof).copied().unwrap_or(0.0);
+        let mut tensor = [0.0; TENSOR_COMPONENT_COUNT];
+        tensor[edge.component] = jump / length;
+        tensor[3] = 0.5 * (tensor[0] + tensor[edge.shear_pair.0]);
+        tensor[4] = 0.5 * (tensor[edge.shear_pair.0] + tensor[edge.shear_pair.1]);
+        tensor[5] = 0.5 * (tensor[0] + tensor[edge.shear_pair.1]);
+        return tensor;
+    }
+
+    let to = nonlinear_nodal_displacement(displacement, to_node);
+    let from = nonlinear_nodal_displacement(displacement, from_node);
+    let gradient = [
+        (to[0] - from[0]) / length,
+        (to[1] - from[1]) / length,
+        (to[2] - from[2]) / length,
+    ];
+    [
+        gradient[0],
+        gradient[1],
+        gradient[2],
+        0.5 * (gradient[0] + gradient[1]),
+        0.5 * (gradient[1] + gradient[2]),
+        0.5 * (gradient[0] + gradient[2]),
+    ]
+}
+
+fn nonlinear_nodal_displacement(
+    displacement: &[f64],
+    node: usize,
+) -> [f64; VECTOR_COMPONENT_COUNT] {
+    let base = node * VECTOR_COMPONENT_COUNT;
+    [
+        displacement.get(base).copied().unwrap_or(0.0),
+        displacement.get(base + 1).copied().unwrap_or(0.0),
+        displacement.get(base + 2).copied().unwrap_or(0.0),
+    ]
 }
 
 fn recover_plastic_strain(

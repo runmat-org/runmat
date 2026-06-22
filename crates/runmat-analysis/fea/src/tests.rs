@@ -995,6 +995,10 @@ fn nonlinear_prepared_state_recovery_uses_prep_connectivity_edges() {
     assert!(topology.message.contains("basis=prep_element_connectivity"));
     assert!(topology.message.contains("prep_recovery_edge_count="));
     assert!(topology.message.contains("mean_edge_length_m="));
+    assert!(topology.message.contains("max_edge_strain_norm="));
+    assert!(topology
+        .message
+        .contains("strain_component_coverage_ratio="));
 }
 
 #[test]
