@@ -2208,7 +2208,7 @@ impl MaxwellEdgeTopology {
                 prep_coordinates.reference_element_coordinates_m[node]
             }
         };
-        let edges = edge_nodes
+        let mut edges = edge_nodes
             .iter()
             .filter_map(|(from_node, to_node)| {
                 let length = maxwell_distance3(
@@ -2227,6 +2227,39 @@ impl MaxwellEdgeTopology {
             .collect::<Vec<_>>();
         if edges.len() < 3 {
             return None;
+        }
+        let mut seen_edges = edges
+            .iter()
+            .map(|edge| {
+                (
+                    edge.from_node.min(edge.to_node),
+                    edge.from_node.max(edge.to_node),
+                )
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        for prep_edge in &summary.prep_recovery_edges {
+            if prep_edge.from_dof >= node_count || prep_edge.to_dof >= node_count {
+                continue;
+            }
+            let from_node = prep_edge.from_dof;
+            let to_node = prep_edge.to_dof;
+            if from_node == to_node {
+                continue;
+            }
+            let lo = from_node.min(to_node);
+            let hi = from_node.max(to_node);
+            if !seen_edges.insert((lo, hi)) {
+                continue;
+            }
+            let orientation = if from_node <= to_node { 1.0 } else { -1.0 };
+            edges.push(MaxwellEdge {
+                from_node: lo,
+                to_node: hi,
+                orientation,
+                length: finite_positive_or(prep_edge.edge_length_m, hi.abs_diff(lo).max(1) as f64),
+                constrained: constrained.get(lo).copied().unwrap_or(false)
+                    || constrained.get(hi).copied().unwrap_or(false),
+            });
         }
         let vector_basis_dimension_count = edges.len();
         let elements = if sample_usable {
@@ -3511,9 +3544,9 @@ mod tests {
             topology.basis,
             MaxwellEdgeTopologyBasis::PrepReferenceVectorElement
         );
-        assert_eq!(topology.edge_count(), 5);
-        assert_eq!(topology.oriented_edge_count(), 5);
-        assert_eq!(topology.vector_basis_dimension_count, 5);
+        assert_eq!(topology.edge_count(), 7);
+        assert_eq!(topology.oriented_edge_count(), 7);
+        assert_eq!(topology.vector_basis_dimension_count, 7);
         assert_eq!(topology.incidence_element_count(), 2);
         assert_eq!(topology.incidence_orientation_count(), 6);
         assert_eq!(topology.incidence_pair_count(), 6);
