@@ -15,10 +15,18 @@ pub struct FluidStructureInterfaceModel {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConjugateHeatTransferInterfaceModel {
+    pub thermal_conductance_w_per_m2k: f64,
+    pub contact_resistance_m2k_per_w: f64,
+    pub relaxation_factor: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisInterfaceKind {
     Contact(ContactInterfaceModel),
     FluidStructure(FluidStructureInterfaceModel),
+    ConjugateHeatTransfer(ConjugateHeatTransferInterfaceModel),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

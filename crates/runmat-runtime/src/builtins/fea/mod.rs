@@ -1417,6 +1417,22 @@ fn create_interface_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
                 "fluid-structure interface",
             )?)
         }
+        "conjugate_heat_transfer" | "conjugateheattransfer" | "cht" => {
+            AnalysisInterfaceKind::ConjugateHeatTransfer(json_deserialize(
+                INTERFACE_NAME,
+                json_with_overrides(
+                    INTERFACE_NAME,
+                    serde_json::json!({
+                        "thermal_conductance_w_per_m2k": 500.0,
+                        "contact_resistance_m2k_per_w": 0.0,
+                        "relaxation_factor": 0.5
+                    }),
+                    fields,
+                    "conjugate heat-transfer interface",
+                )?,
+                "conjugate heat-transfer interface",
+            )?)
+        }
         other => {
             return Err(builtin_error(
                 INTERFACE_NAME,

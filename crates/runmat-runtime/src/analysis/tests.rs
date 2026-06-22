@@ -4076,6 +4076,56 @@ fn analysis_run_cht_rejects_contact_interface_mapping() {
 }
 
 #[test]
+fn analysis_run_cht_uses_authored_conjugate_heat_transfer_interface() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_cht_model();
+    model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
+        interface_id: "cht_channel_slab_interface".to_string(),
+        primary_region_id: "fluid_channel".to_string(),
+        secondary_region_id: "solid_slab".to_string(),
+        kind: runmat_analysis_core::AnalysisInterfaceKind::ConjugateHeatTransfer(
+            runmat_analysis_core::ConjugateHeatTransferInterfaceModel {
+                thermal_conductance_w_per_m2k: 750.0,
+                contact_resistance_m2k_per_w: 0.0,
+                relaxation_factor: 0.5,
+            },
+        ),
+    }];
+
+    let envelope = analysis_run_cht_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisChtRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            time_step_s: 1.0e-3,
+            step_count: 4,
+            max_linear_iters: 64,
+            tolerance: 1.0e-8,
+            residual_warn_threshold: 1.0e-4,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("cht run should accept authored conjugate heat-transfer interface");
+
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_CHT_INTERFACE_CLOSURE"
+            && diag.message.contains("interface_conductance_w_per_m2k=750")
+    }));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_CHT_COUPLING"
+            && diag.message.contains("authored_interface_count=1")));
+}
+
+#[test]
 fn analysis_run_fsi_rejects_models_without_transient_step() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();

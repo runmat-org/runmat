@@ -1039,6 +1039,42 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 },
             ],
         });
+        if spec_id == "cht_coupled_channel_slab_cpu" {
+            model.cfd = Some(runmat_analysis_core::CfdDomain {
+                enabled: true,
+                solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
+                reference_density_kg_per_m3: 1.225,
+                dynamic_viscosity_pa_s: 1.81e-5,
+                inlet_velocity_m_per_s: 4.1,
+                turbulence_intensity: 0.052,
+                time_profile: vec![
+                    runmat_analysis_core::CfdTimeProfilePoint {
+                        normalized_time: 0.0,
+                        inlet_scale: 0.7,
+                    },
+                    runmat_analysis_core::CfdTimeProfilePoint {
+                        normalized_time: 0.5,
+                        inlet_scale: 0.9,
+                    },
+                    runmat_analysis_core::CfdTimeProfilePoint {
+                        normalized_time: 1.0,
+                        inlet_scale: 1.0,
+                    },
+                ],
+            });
+            model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
+                interface_id: format!("cht_channel_slab_interface_{spec_id}"),
+                primary_region_id: "fluid_channel".to_string(),
+                secondary_region_id: "solid_slab".to_string(),
+                kind: runmat_analysis_core::AnalysisInterfaceKind::ConjugateHeatTransfer(
+                    runmat_analysis_core::ConjugateHeatTransferInterfaceModel {
+                        thermal_conductance_w_per_m2k: 750.0,
+                        contact_resistance_m2k_per_w: 0.0,
+                        relaxation_factor: 0.5,
+                    },
+                ),
+            }];
+        }
         if spec_id == "cht_coupled_invalid_cfd_domain" {
             if let Some(cfd_domain) = model.cfd.as_mut() {
                 cfd_domain.dynamic_viscosity_pa_s = 0.0;
@@ -4631,6 +4667,11 @@ pub(super) fn run_fixture(
             }
         }
         if spec.id.starts_with("cht_coupled_") {
+            let expected_cht_profile_point_count = if spec.id == "cht_coupled_channel_slab_cpu" {
+                3.0
+            } else {
+                2.0
+            };
             push_threshold_assertion(
                 spec.id,
                 &mut threshold_assertions,
@@ -4688,8 +4729,8 @@ pub(super) fn run_fixture(
                 "cht_profile_point_count",
                 "FEA_CFD_FLOW",
                 diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "profile_point_count"),
-                Some(2.0),
-                Some(2.0),
+                Some(expected_cht_profile_point_count),
+                Some(expected_cht_profile_point_count),
             );
             push_threshold_assertion(
                 spec.id,
@@ -4963,6 +5004,22 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
+            if spec.id == "cht_coupled_channel_slab_cpu" {
+                push_threshold_assertion(
+                    spec.id,
+                    &mut threshold_assertions,
+                    &mut failures,
+                    "cht_authored_interface_count",
+                    "FEA_CHT_COUPLING",
+                    diagnostic_metric(
+                        &cpu_envelope.data,
+                        "FEA_CHT_COUPLING",
+                        "authored_interface_count",
+                    ),
+                    Some(1.0),
+                    Some(1.0),
+                );
+            }
         }
         if spec.id.starts_with("fsi_coupled_") {
             let expected_fsi_profile_point_count = if spec.id == "fsi_coupled_pipe_plate_cpu" {

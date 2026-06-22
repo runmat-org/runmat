@@ -4182,6 +4182,7 @@ fn build_cht_run_fields(
     domain: &runmat_analysis_core::CfdDomain,
     topology: CfdDomainTopology,
     thermal_run: &runmat_analysis_fea::FeaThermalRunResult,
+    authored_interface_conductance_w_per_m2k: Option<f64>,
 ) -> (Vec<AnalysisField>, ChtInterfaceClosure) {
     let node_count = topology.node_count;
     let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(domain, topology, 0);
@@ -4221,7 +4222,9 @@ fn build_cht_run_fields(
             .map(f64::abs)
             .fold(0.0_f64, f64::max);
         let target_jump_k = 0.05_f64;
-        let interface_conductance_w_per_m2k = (max_heat_flux / target_jump_k).max(25.0);
+        let interface_conductance_w_per_m2k = authored_interface_conductance_w_per_m2k
+            .unwrap_or_else(|| (max_heat_flux / target_jump_k).max(25.0))
+            .max(1.0e-12);
         let advection_shift_k = cht_advection_shift_k(
             domain,
             mean_axial_velocity,
@@ -4357,6 +4360,23 @@ fn cht_advection_shift_k(
         / 1.0e5)
         .clamp(0.0, 5.0);
     thermal_span_k * reynolds_ratio * domain.turbulence_intensity.clamp(0.0, 1.0) * 2.0e-3
+}
+
+fn cht_interface_conductance_w_per_m2k(model: &AnalysisModel) -> Option<f64> {
+    model
+        .interfaces
+        .iter()
+        .find_map(|interface| match &interface.kind {
+            AnalysisInterfaceKind::ConjugateHeatTransfer(interface)
+                if interface.thermal_conductance_w_per_m2k.is_finite()
+                    && interface.thermal_conductance_w_per_m2k > 0.0 =>
+            {
+                Some(interface.thermal_conductance_w_per_m2k)
+            }
+            AnalysisInterfaceKind::ConjugateHeatTransfer(_)
+            | AnalysisInterfaceKind::FluidStructure(_)
+            | AnalysisInterfaceKind::Contact(_) => None,
+        })
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -4808,7 +4828,9 @@ fn fsi_interface_normal_stiffness_pa_per_m(model: &AnalysisModel) -> Option<f64>
             {
                 Some(fluid_structure.normal_stiffness_pa_per_m)
             }
-            AnalysisInterfaceKind::FluidStructure(_) | AnalysisInterfaceKind::Contact(_) => None,
+            AnalysisInterfaceKind::FluidStructure(_)
+            | AnalysisInterfaceKind::ConjugateHeatTransfer(_)
+            | AnalysisInterfaceKind::Contact(_) => None,
         })
 }
 
@@ -5618,8 +5640,12 @@ pub fn analysis_run_cht_with_options_op(
         .iter()
         .copied()
         .fold(0.0_f64, f64::max);
-    let (cht_fields, cht_interface_closure) =
-        build_cht_run_fields(cfd_domain, topology, &thermal_run);
+    let (cht_fields, cht_interface_closure) = build_cht_run_fields(
+        cfd_domain,
+        topology,
+        &thermal_run,
+        cht_interface_conductance_w_per_m2k(model),
+    );
     let mut run = thermal_run.run.clone();
     run.solver_method = "cht_conjugate_projection".to_string();
     run.preconditioner = "thermal_cfd_projection".to_string();
@@ -5676,11 +5702,12 @@ pub fn analysis_run_cht_with_options_op(
         code: "FEA_CHT_COUPLING".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
         message: format!(
-            "reference_temperature_k={} applied_temperature_delta_k={} step_count={} time_step_s={}",
+            "reference_temperature_k={} applied_temperature_delta_k={} step_count={} time_step_s={} authored_interface_count={}",
             thermal_run.reference_temperature_k,
             applied_temperature_delta_k,
             options.step_count,
             options.time_step_s,
+            model.interfaces.len(),
         ),
     });
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -11859,7 +11886,8 @@ fn model_contact_interface_options(model: &AnalysisModel) -> Option<ContactInter
                 max_penetration_ratio: contact.max_penetration_ratio,
                 friction_coefficient: contact.friction_coefficient,
             }),
-            AnalysisInterfaceKind::FluidStructure(_) => None,
+            AnalysisInterfaceKind::FluidStructure(_)
+            | AnalysisInterfaceKind::ConjugateHeatTransfer(_) => None,
         })
         .next()
 }
@@ -12390,6 +12418,79 @@ fn validate_coupled_flow_interfaces(
                             (
                                 "relaxation_factor".to_string(),
                                 fluid_structure.relaxation_factor.to_string(),
+                            ),
+                        ]),
+                    ));
+                }
+            }
+            AnalysisInterfaceKind::ConjugateHeatTransfer(cht_interface) => {
+                if family != "CHT" {
+                    return Err((
+                        format!(
+                            "{family} coupling does not accept conjugate heat-transfer interfaces as fluid/structure interface mappings"
+                        ),
+                        BTreeMap::from([
+                            ("interface_id".to_string(), interface.interface_id.clone()),
+                            (
+                                "primary_region_id".to_string(),
+                                interface.primary_region_id.clone(),
+                            ),
+                            (
+                                "secondary_region_id".to_string(),
+                                interface.secondary_region_id.clone(),
+                            ),
+                            (
+                                "interface_kind".to_string(),
+                                "conjugate_heat_transfer".to_string(),
+                            ),
+                        ]),
+                    ));
+                }
+                if !cht_interface.thermal_conductance_w_per_m2k.is_finite()
+                    || cht_interface.thermal_conductance_w_per_m2k <= 0.0
+                {
+                    return Err((
+                        format!(
+                            "{family} conjugate heat-transfer interface requires finite positive thermal_conductance_w_per_m2k"
+                        ),
+                        BTreeMap::from([
+                            ("interface_id".to_string(), interface.interface_id.clone()),
+                            (
+                                "thermal_conductance_w_per_m2k".to_string(),
+                                cht_interface.thermal_conductance_w_per_m2k.to_string(),
+                            ),
+                        ]),
+                    ));
+                }
+                if !cht_interface.contact_resistance_m2k_per_w.is_finite()
+                    || cht_interface.contact_resistance_m2k_per_w < 0.0
+                {
+                    return Err((
+                        format!(
+                            "{family} conjugate heat-transfer interface requires finite non-negative contact_resistance_m2k_per_w"
+                        ),
+                        BTreeMap::from([
+                            ("interface_id".to_string(), interface.interface_id.clone()),
+                            (
+                                "contact_resistance_m2k_per_w".to_string(),
+                                cht_interface.contact_resistance_m2k_per_w.to_string(),
+                            ),
+                        ]),
+                    ));
+                }
+                if !cht_interface.relaxation_factor.is_finite()
+                    || cht_interface.relaxation_factor <= 0.0
+                    || cht_interface.relaxation_factor > 1.0
+                {
+                    return Err((
+                        format!(
+                            "{family} conjugate heat-transfer interface requires relaxation_factor in (0, 1]"
+                        ),
+                        BTreeMap::from([
+                            ("interface_id".to_string(), interface.interface_id.clone()),
+                            (
+                                "relaxation_factor".to_string(),
+                                cht_interface.relaxation_factor.to_string(),
                             ),
                         ]),
                     ));

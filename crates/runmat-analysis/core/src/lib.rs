@@ -22,7 +22,8 @@ pub use problem::domains::{
     ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
 };
 pub use problem::interfaces::{
-    AnalysisInterface, AnalysisInterfaceKind, ContactInterfaceModel, FluidStructureInterfaceModel,
+    AnalysisInterface, AnalysisInterfaceKind, ConjugateHeatTransferInterfaceModel,
+    ContactInterfaceModel, FluidStructureInterfaceModel,
 };
 pub use problem::loads::{LoadCase, LoadKind};
 pub use problem::material_assignment::{EvidenceConfidence, MaterialAssignment};
