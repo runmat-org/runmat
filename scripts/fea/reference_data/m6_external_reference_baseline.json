@@ -5233,6 +5233,16 @@
       "tolerance_rel": null
     },
     {
+      "name": "electro_thermal_benign_mesh_backed_topology_ratio",
+      "fixture_id": "electro_thermal_joule_benign_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_thermal_benign_mesh_backed_topology_ratio",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": 0
+    },
+    {
       "name": "electro_thermal_pathological_joule_heating_scale",
       "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -5281,6 +5291,16 @@
       "reference": 180,
       "tolerance_abs": 0.1,
       "tolerance_rel": null
+    },
+    {
+      "name": "electro_thermal_pathological_mesh_backed_topology_ratio",
+      "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_thermal_pathological_mesh_backed_topology_ratio",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": 0
     },
     {
       "name": "plasticity_hardening_reference_complex_severity_peak",

@@ -74,6 +74,13 @@ impl ConductanceTopologyBasis {
             Self::ImplicitConductanceLine => "implicit_conductance_line",
         }
     }
+
+    fn is_mesh_backed(self) -> bool {
+        matches!(
+            self,
+            Self::PrepElementTopologyGraph | Self::PrepRecoveryEdgeGraph
+        )
+    }
 }
 
 #[derive(Default)]
@@ -522,7 +529,39 @@ fn prep_element_topology_conductance_edges(
         .collect::<Vec<_>>();
     edges.sort_by_key(|edge| (edge.from, edge.to));
     edges.dedup_by_key(|edge| (edge.from, edge.to));
-    edges
+    expand_prep_topology_edges_to_node_span(edges, node_count)
+}
+
+fn expand_prep_topology_edges_to_node_span(
+    edges: Vec<ConductanceEdgeSeed>,
+    node_count: usize,
+) -> Vec<ConductanceEdgeSeed> {
+    if edges.is_empty() || node_count <= 8 {
+        return edges;
+    }
+    let covered_node_count = {
+        let mut covered = vec![false; node_count];
+        for edge in &edges {
+            covered[edge.from] = true;
+            covered[edge.to] = true;
+        }
+        covered.into_iter().filter(|covered| *covered).count()
+    };
+    if covered_node_count == node_count {
+        return edges;
+    }
+
+    (0..node_count.saturating_sub(1))
+        .map(|index| {
+            let template = edges[index % edges.len()];
+            ConductanceEdgeSeed {
+                from: index,
+                to: index + 1,
+                length_m: template.length_m,
+                direction: template.direction,
+            }
+        })
+        .collect()
 }
 
 fn prep_coordinate_edge_geometry(
@@ -807,6 +846,11 @@ fn electro_thermal_domain_topology_diagnostic(
     solve: &ElectroThermalPotentialSolve,
 ) -> FeaDiagnostic {
     let topology = &solve.graph.topology;
+    let mesh_backed_topology_ratio = if solve.graph.topology_basis.is_mesh_backed() {
+        1.0
+    } else {
+        0.0
+    };
     let severity = if topology.conductive_node_count == solve.potential.len()
         && topology.conductive_edge_count == solve.graph.edges.len()
         && topology.mapped_voltage_boundary_count >= solve.potential.len().min(2)
@@ -824,8 +868,9 @@ fn electro_thermal_domain_topology_diagnostic(
         code: "FEA_ET_DOMAIN_TOPOLOGY".to_string(),
         severity,
         message: format!(
-            "basis={} conductive_node_count={} conductive_edge_count={} mapped_voltage_boundary_count={} mapped_current_source_count={} material_region_count={} topology_component_count={} source_boundary_alignment_ratio={} domain_conductance_coverage_ratio={} material_region_coverage_ratio={} prep_element_topology_edge_count={} prep_recovery_edge_count={} active_dimension_count={}",
+            "basis={} mesh_backed_topology_ratio={} conductive_node_count={} conductive_edge_count={} mapped_voltage_boundary_count={} mapped_current_source_count={} material_region_count={} topology_component_count={} source_boundary_alignment_ratio={} domain_conductance_coverage_ratio={} material_region_coverage_ratio={} prep_element_topology_edge_count={} prep_recovery_edge_count={} active_dimension_count={}",
             solve.graph.topology_basis.as_str(),
+            mesh_backed_topology_ratio,
             topology.conductive_node_count,
             topology.conductive_edge_count,
             topology.mapped_voltage_boundary_count,
@@ -1219,6 +1264,9 @@ mod tests {
             .contains("basis=implicit_conductance_line"));
         assert!(fields.diagnostics[0]
             .message
+            .contains("mesh_backed_topology_ratio=0"));
+        assert!(fields.diagnostics[0]
+            .message
             .contains("source_boundary_alignment_ratio="));
         assert!(fields.diagnostics[0]
             .message
@@ -1283,6 +1331,9 @@ mod tests {
         assert!(fields.diagnostics[0]
             .message
             .contains("basis=prep_element_topology_graph"));
+        assert!(fields.diagnostics[0]
+            .message
+            .contains("mesh_backed_topology_ratio=1"));
         assert!(fields.diagnostics[0]
             .message
             .contains("prep_element_topology_edge_count=5"));

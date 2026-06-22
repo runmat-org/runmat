@@ -6613,6 +6613,11 @@ def evaluate_release_readiness(
             None,
         ),
         (
+            "electro_thermal_joule_benign_gpu_provider",
+            "electro_thermal_benign_mesh_backed_topology_ratio",
+            None,
+        ),
+        (
             "electro_thermal_joule_pathological_gpu_provider",
             "electro_thermal_pathological_joule_heating_scale",
             "electro_joule_heating_scale",
@@ -6655,6 +6660,11 @@ def evaluate_release_readiness(
         (
             "electro_thermal_joule_pathological_gpu_provider",
             "electro_thermal_pathological_conduction_graph_coverage_ratio",
+            None,
+        ),
+        (
+            "electro_thermal_joule_pathological_gpu_provider",
+            "electro_thermal_pathological_mesh_backed_topology_ratio",
             None,
         ),
     ]

@@ -14,6 +14,7 @@ use runmat_runtime::analysis::{
     ElectroThermalCouplingOptions, ElectroTimeProfilePoint, PlasticityConstitutiveOptions,
     ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
 };
+use runmat_runtime::geometry::{geometry_prep_for_analysis_op, GeometryPrepForAnalysisSpec};
 use sha2::{Digest, Sha256};
 
 fn thermo_field_payload_hash_for_value(payload: &serde_json::Value) -> String {
@@ -648,6 +649,57 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
             ],
         }),
         _ => None,
+    }
+}
+
+fn electro_thermal_prep_artifact_id_for_fixture(
+    spec_id: &str,
+    model: &AnalysisModel,
+) -> Option<String> {
+    if !matches!(
+        spec_id,
+        "electro_thermal_joule_benign_gpu_provider"
+            | "electro_thermal_joule_pathological_gpu_provider"
+    ) {
+        return None;
+    }
+
+    let mut geometry = geometry_load_op(
+        &format!("/synthetic/{spec_id}_prep.stl"),
+        SYNTHETIC_TRIANGLE_STL.as_bytes(),
+        OperationContext::new(Some(format!("trace-prep-geometry-{spec_id}")), None),
+    )
+    .expect("load synthetic prep geometry for electro-thermal fixture")
+    .data;
+    geometry.geometry_id = model.geometry_id.clone();
+    geometry.revision = model.geometry_revision;
+
+    let prep = geometry_prep_for_analysis_op(
+        &geometry,
+        GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(Some(format!("trace-prep-artifact-{spec_id}")), None),
+    )
+    .expect("prepare trusted electro-thermal fixture geometry");
+    Some(prep.data.prep_artifact_id)
+}
+
+fn transient_options_for_spec(
+    spec: &FixtureSpec,
+    model: &AnalysisModel,
+) -> AnalysisTransientRunOptions {
+    let requested_bucket_rel_tol = std::env::var("RUNMAT_TRANSIENT_DT_BUCKET_REL_TOL")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok());
+    AnalysisTransientRunOptions {
+        step_count: spec
+            .transient_step_count
+            .unwrap_or(AnalysisTransientRunOptions::default().step_count),
+        dt_bucket_rel_tolerance: requested_bucket_rel_tol.unwrap_or(
+            AnalysisTransientRunOptions::production_recommended().dt_bucket_rel_tolerance,
+        ),
+        prep_context: None,
+        prep_artifact_id: electro_thermal_prep_artifact_id_for_fixture(spec.id, model),
+        ..AnalysisTransientRunOptions::production_recommended()
     }
 }
 
@@ -2558,21 +2610,7 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
         AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Cpu,
-            {
-                let requested_bucket_rel_tol = std::env::var("RUNMAT_TRANSIENT_DT_BUCKET_REL_TOL")
-                    .ok()
-                    .and_then(|value| value.parse::<f64>().ok());
-                AnalysisTransientRunOptions {
-                    step_count: spec
-                        .transient_step_count
-                        .unwrap_or(AnalysisTransientRunOptions::default().step_count),
-                    dt_bucket_rel_tolerance: requested_bucket_rel_tol.unwrap_or(
-                        AnalysisTransientRunOptions::production_recommended()
-                            .dt_bucket_rel_tolerance,
-                    ),
-                    ..AnalysisTransientRunOptions::production_recommended()
-                }
-            },
+            transient_options_for_spec(spec, model),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Thermal => analysis_run_thermal_with_options_op(
@@ -2706,21 +2744,7 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
         AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Gpu,
-            {
-                let requested_bucket_rel_tol = std::env::var("RUNMAT_TRANSIENT_DT_BUCKET_REL_TOL")
-                    .ok()
-                    .and_then(|value| value.parse::<f64>().ok());
-                AnalysisTransientRunOptions {
-                    step_count: spec
-                        .transient_step_count
-                        .unwrap_or(AnalysisTransientRunOptions::default().step_count),
-                    dt_bucket_rel_tolerance: requested_bucket_rel_tol.unwrap_or(
-                        AnalysisTransientRunOptions::production_recommended()
-                            .dt_bucket_rel_tolerance,
-                    ),
-                    ..AnalysisTransientRunOptions::production_recommended()
-                }
-            },
+            transient_options_for_spec(spec, model),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Thermal => analysis_run_thermal_with_options_op(
@@ -6878,6 +6902,20 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "electro_thermal_benign_mesh_backed_topology_ratio",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "mesh_backed_topology_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "electro_thermal_benign_material_region_coverage_ratio",
                             "FEA_ET_DOMAIN_TOPOLOGY",
                             diagnostic_metric(
@@ -7172,6 +7210,20 @@ pub(super) fn run_fixture(
                                 &gpu_envelope.data,
                                 "FEA_ET_DOMAIN_TOPOLOGY",
                                 "domain_conductance_coverage_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_mesh_backed_topology_ratio",
+                            "FEA_ET_DOMAIN_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_DOMAIN_TOPOLOGY",
+                                "mesh_backed_topology_ratio",
                             ),
                             Some(1.0),
                             Some(1.0),
