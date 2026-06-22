@@ -17,7 +17,7 @@ use runmat_runtime::analysis::{
 use runmat_runtime::geometry::{geometry_prep_for_analysis_op, GeometryPrepForAnalysisSpec};
 use sha2::{Digest, Sha256};
 
-const SYNTHETIC_THERMAL_PREP_OBJ: &str =
+const SYNTHETIC_TWO_TRIANGLE_PREP_OBJ: &str =
     "o thermal_prep\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3\nf 1 3 4\n";
 
 fn thermo_field_payload_hash_for_value(payload: &serde_json::Value) -> String {
@@ -698,7 +698,7 @@ fn thermal_prep_artifact_id_for_fixture(spec_id: &str, model: &AnalysisModel) ->
 
     let mut geometry = geometry_load_op(
         &format!("/synthetic/{spec_id}_prep.obj"),
-        SYNTHETIC_THERMAL_PREP_OBJ.as_bytes(),
+        SYNTHETIC_TWO_TRIANGLE_PREP_OBJ.as_bytes(),
         OperationContext::new(Some(format!("trace-prep-geometry-{spec_id}")), None),
     )
     .expect("load synthetic prep geometry for thermal fixture")
@@ -712,6 +712,33 @@ fn thermal_prep_artifact_id_for_fixture(spec_id: &str, model: &AnalysisModel) ->
         OperationContext::new(Some(format!("trace-prep-artifact-{spec_id}")), None),
     )
     .expect("prepare trusted thermal fixture geometry");
+    Some(prep.data.prep_artifact_id)
+}
+
+fn electromagnetic_prep_artifact_id_for_fixture(
+    spec_id: &str,
+    model: &AnalysisModel,
+) -> Option<String> {
+    if !spec_id.starts_with("electromagnetic_reference_") {
+        return None;
+    }
+
+    let mut geometry = geometry_load_op(
+        &format!("/synthetic/{spec_id}_prep.obj"),
+        SYNTHETIC_TWO_TRIANGLE_PREP_OBJ.as_bytes(),
+        OperationContext::new(Some(format!("trace-prep-geometry-{spec_id}")), None),
+    )
+    .expect("load synthetic prep geometry for electromagnetic fixture")
+    .data;
+    geometry.geometry_id = model.geometry_id.clone();
+    geometry.revision = model.geometry_revision;
+
+    let prep = geometry_prep_for_analysis_op(
+        &geometry,
+        GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(Some(format!("trace-prep-artifact-{spec_id}")), None),
+    )
+    .expect("prepare trusted electromagnetic fixture geometry");
     Some(prep.data.prep_artifact_id)
 }
 
@@ -758,6 +785,25 @@ fn thermal_options_for_spec(
             .unwrap_or(AnalysisThermalRunOptions::default().step_count),
         prep_artifact_id: thermal_prep_artifact_id_for_fixture(spec.id, model),
         ..AnalysisThermalRunOptions::default()
+    }
+}
+
+fn electromagnetic_options_for_spec(
+    spec: &FixtureSpec,
+    model: &AnalysisModel,
+) -> AnalysisElectromagneticRunOptions {
+    AnalysisElectromagneticRunOptions {
+        deterministic_mode: true,
+        precision_mode: PrecisionMode::Fp64,
+        quality_policy: QualityPolicy::Balanced,
+        residual_target: 1.0e-6,
+        harmonic_tolerance: 1.0e-7,
+        harmonic_max_iterations: 96,
+        prep_context: None,
+        prep_artifact_id: electromagnetic_prep_artifact_id_for_fixture(spec.id, model),
+        prep_calibration_profile: None,
+        sweep_enabled: !electromagnetic_sweep_frequency_hz_for_fixture(spec.id).is_empty(),
+        sweep_frequency_hz: electromagnetic_sweep_frequency_hz_for_fixture(spec.id),
     }
 }
 
@@ -2766,19 +2812,7 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
         AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
             model,
             ComputeBackend::Cpu,
-            AnalysisElectromagneticRunOptions {
-                deterministic_mode: true,
-                precision_mode: PrecisionMode::Fp64,
-                quality_policy: QualityPolicy::Balanced,
-                residual_target: 1.0e-6,
-                harmonic_tolerance: 1.0e-7,
-                harmonic_max_iterations: 96,
-                prep_context: None,
-                prep_artifact_id: None,
-                prep_calibration_profile: None,
-                sweep_enabled: !electromagnetic_sweep_frequency_hz_for_fixture(spec.id).is_empty(),
-                sweep_frequency_hz: electromagnetic_sweep_frequency_hz_for_fixture(spec.id),
-            },
+            electromagnetic_options_for_spec(spec, model),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
     })
@@ -2895,19 +2929,7 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
         AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
             model,
             ComputeBackend::Gpu,
-            AnalysisElectromagneticRunOptions {
-                deterministic_mode: true,
-                precision_mode: PrecisionMode::Fp64,
-                quality_policy: QualityPolicy::Balanced,
-                residual_target: 1.0e-6,
-                harmonic_tolerance: 1.0e-7,
-                harmonic_max_iterations: 96,
-                prep_context: None,
-                prep_artifact_id: None,
-                prep_calibration_profile: None,
-                sweep_enabled: !electromagnetic_sweep_frequency_hz_for_fixture(spec.id).is_empty(),
-                sweep_frequency_hz: electromagnetic_sweep_frequency_hz_for_fixture(spec.id),
-            },
+            electromagnetic_options_for_spec(spec, model),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
     };
@@ -9026,6 +9048,76 @@ pub(super) fn run_fixture(
                             ),
                             Some(1.0),
                             None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_prep_recovery_edge_count",
+                            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                                "prep_recovery_edge_count",
+                            ),
+                            Some(1.0),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_incidence_element_count",
+                            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                                "incidence_element_count",
+                            ),
+                            Some(1.0),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_incidence_orientation_count",
+                            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                                "incidence_orientation_count",
+                            ),
+                            Some(3.0),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_incidence_pair_count",
+                            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                                "incidence_pair_count",
+                            ),
+                            Some(1.0),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_incidence_operator_pair_coverage_ratio",
+                            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
+                                "incidence_operator_pair_coverage_ratio",
+                            ),
+                            Some(0.5),
+                            Some(1.0),
                         );
                         push_threshold_assertion(
                             spec.id,

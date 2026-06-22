@@ -562,10 +562,10 @@ pub fn run_electromagnetic_with_options(
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1_000.0;
     let edge_vector_potential_real = harmonic_solve.real_solution.clone();
     let edge_vector_potential_imag = harmonic_solve.imag_solution.clone();
-    let vector_potential_real =
-        maxwell_topology.node_potential_from_edge_line_integrals(&edge_vector_potential_real);
-    let vector_potential_imag =
-        maxwell_topology.node_potential_from_edge_line_integrals(&edge_vector_potential_imag);
+    let vector_potential_real = maxwell_topology
+        .node_potential_from_edge_line_integrals(&edge_vector_potential_real, node_count);
+    let vector_potential_imag = maxwell_topology
+        .node_potential_from_edge_line_integrals(&edge_vector_potential_imag, node_count);
     let gauge_anchor_residual_ratio = maxwell_topology
         .gauge_anchor_residual_ratio(&vector_potential_real, &vector_potential_imag);
     let gauge_penalty_ratio = boundary_penalty_diag.iter().sum::<f64>()
@@ -1169,12 +1169,12 @@ pub fn run_electromagnetic_with_options(
     );
     let residual_real_field = AnalysisField::host_f64(
         FEA_FIELD_EM_RESIDUAL_REAL,
-        vec![node_count],
+        vec![element_count],
         residual_real_values,
     );
     let residual_imag_field = AnalysisField::host_f64(
         FEA_FIELD_EM_RESIDUAL_IMAG,
-        vec![node_count],
+        vec![element_count],
         residual_imag_values,
     );
     let electric_flux_density_real_field = AnalysisField::host_f64(
@@ -2588,7 +2588,11 @@ impl MaxwellEdgeTopology {
             .collect()
     }
 
-    fn node_potential_from_edge_line_integrals(&self, line_integrals: &[f64]) -> Vec<f64> {
+    fn node_potential_from_edge_line_integrals(
+        &self,
+        line_integrals: &[f64],
+        minimum_node_count: usize,
+    ) -> Vec<f64> {
         let node_count = self
             .edges
             .iter()
@@ -2596,6 +2600,7 @@ impl MaxwellEdgeTopology {
             .max()
             .map(|max_node| max_node + 1)
             .unwrap_or(0);
+        let node_count = node_count.max(minimum_node_count);
         let mut nodal = vec![0.0_f64; node_count];
         let mut counts = vec![0usize; node_count];
         for (edge, line_integral) in self.edges.iter().zip(line_integrals.iter().copied()) {
