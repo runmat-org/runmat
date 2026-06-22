@@ -4609,7 +4609,7 @@ fn build_cht_run_fields(
             .copied()
             .map(f64::abs)
             .fold(0.0_f64, f64::max);
-        let target_jump_k = 0.05_f64;
+        let target_jump_k = 0.01_f64;
         let interface_conductance_w_per_m2k = authored_interface_conductance_w_per_m2k
             .unwrap_or_else(|| (max_heat_flux / target_jump_k).max(25.0))
             .max(1.0e-12);

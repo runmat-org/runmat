@@ -3416,6 +3416,20 @@ fn push_thermal_standalone_threshold_assertions(
         fixture_id,
         assertions,
         failures,
+        "thermal_standalone_prep_triangle_element_count",
+        "FEA_THERMAL_FIELD_RECOVERY",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_FIELD_RECOVERY",
+            "prep_triangle_element_count",
+        ),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
         "thermal_standalone_prep_active_dimension_count",
         "FEA_THERMAL_FIELD_RECOVERY",
         diagnostic_metric(

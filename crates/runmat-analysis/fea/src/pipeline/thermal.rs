@@ -21,6 +21,29 @@ use crate::{
 const VECTOR_COMPONENT_COUNT: usize = 3;
 const BOUNDARY_HEAT_FLUX_COMPONENT_COUNT: usize = 6;
 
+fn thermal_solution_node_count(summary: &AssemblySummary) -> usize {
+    let assembly_node_count = (summary.dof_count / VECTOR_COMPONENT_COUNT).max(1);
+    let prep_sample_node_count = summary
+        .prep_coordinates
+        .map(|coordinates| {
+            if coordinates.element_topology_sample_element_count == 0
+                || coordinates.element_topology_sample_edge_count == 0
+            {
+                return 0;
+            }
+            coordinates
+                .element_topology_sample_edge_nodes
+                .iter()
+                .take(coordinates.element_topology_sample_edge_count.min(8))
+                .flat_map(|edge| edge.iter())
+                .map(|node| *node as usize + 1)
+                .max()
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
+    assembly_node_count.max(prep_sample_node_count).max(1)
+}
+
 pub fn run_thermal(
     model: &AnalysisModel,
     backend: ComputeBackend,
@@ -88,7 +111,7 @@ pub fn run_thermal_with_options(
         Some(5),
     );
     check_cancelled("fea.run_thermal")?;
-    let node_count = (summary.dof_count / 3).max(1);
+    let node_count = thermal_solution_node_count(&summary);
 
     let region_avg_delta = if thermo_context.region_temperature_deltas.is_empty() {
         thermo_context.applied_temperature_delta_k
