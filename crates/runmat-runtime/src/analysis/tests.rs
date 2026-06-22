@@ -6372,6 +6372,8 @@ fn cht_prepared_topology_uses_boundary_faces_for_interface_fields() {
     );
     assert_eq!(fluid_interface_face_count(topology), 8);
     assert_eq!(closure.interface_face_count, 8);
+    assert_eq!(closure.thermal_network_node_count, 8);
+    assert_eq!(closure.thermal_network_edge_count, 11);
     assert_eq!(heat_flux.shape, vec![8]);
     assert_eq!(temperature_jump.shape, vec![8]);
 }

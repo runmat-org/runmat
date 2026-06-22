@@ -4267,7 +4267,7 @@ fn fluid_interface_face_count(topology: CfdDomainTopology) -> usize {
     .max(1)
 }
 
-fn fsi_interface_structural_coupling_edge_target(
+fn coupled_interface_graph_edge_target(
     topology: CfdDomainTopology,
     interface_face_count: usize,
 ) -> usize {
@@ -4516,6 +4516,7 @@ fn build_cht_run_fields(
         let interface_solution = solve_cht_conjugate_interface(
             &base_temperature,
             &heat_flux,
+            topology,
             interface_conductance_w_per_m2k,
             advection_shift_k,
             thermal_run.reference_temperature_k,
@@ -4648,6 +4649,7 @@ struct ChtConjugateInterfaceSolution {
 fn solve_cht_conjugate_interface(
     base_temperature: &[f64],
     heat_flux: &[f64],
+    topology: CfdDomainTopology,
     interface_conductance_w_per_m2k: f64,
     advection_shift_k: f64,
     reference_temperature_k: f64,
@@ -4656,41 +4658,42 @@ fn solve_cht_conjugate_interface(
 ) -> ChtConjugateInterfaceSolution {
     let temperature_count = base_temperature.len().max(1);
     let interface_count = heat_flux.len().max(1);
-    let temperature_denom = temperature_count.saturating_sub(1).max(1) as f64;
     let interface_denom = interface_count.saturating_sub(1).max(1) as f64;
     let conductance = interface_conductance_w_per_m2k.max(1.0e-12);
     let axial_conductance = (0.05 * conductance).max(1.0e-12);
     let anchor_conductance = conductance;
-    let thermal_network_edge_count = temperature_count.saturating_sub(1);
-    let mut lower = vec![0.0; thermal_network_edge_count];
-    let mut diagonal = vec![anchor_conductance; temperature_count];
-    let mut upper = vec![0.0; thermal_network_edge_count];
-    let mut center_rhs = Vec::with_capacity(temperature_count);
-    let mut heat_flux_at_temperature_node = Vec::with_capacity(temperature_count);
+    let base_interface_temperature = resample_scalar_profile(base_temperature, interface_count);
+    let thermal_network_edges = coupled_interface_graph_edges(
+        interface_count,
+        coupled_interface_graph_edge_target(topology, interface_count),
+    );
+    let mut operator = vec![vec![0.0; interface_count]; interface_count];
+    for (row, diagonal) in operator.iter_mut().enumerate() {
+        diagonal[row] = anchor_conductance;
+    }
+    for (left, right) in &thermal_network_edges {
+        operator[*left][*left] += axial_conductance;
+        operator[*right][*right] += axial_conductance;
+        operator[*left][*right] -= axial_conductance;
+        operator[*right][*left] -= axial_conductance;
+    }
+    let mut center_rhs = Vec::with_capacity(interface_count);
 
-    for index in 0..temperature_count {
-        let base = base_temperature
+    for index in 0..interface_count {
+        let base = base_interface_temperature
             .get(index)
             .copied()
             .unwrap_or(reference_temperature_k);
-        let xi = index as f64 / temperature_denom;
-        let flux_index =
-            ((xi * interface_denom).round() as usize).min(interface_count.saturating_sub(1));
+        let xi = index as f64 / interface_denom;
         let center_temperature = base + advection_shift_k * xi;
         center_rhs.push(anchor_conductance * center_temperature);
-        heat_flux_at_temperature_node.push(heat_flux.get(flux_index).copied().unwrap_or(0.0));
-    }
-    for edge in 0..thermal_network_edge_count {
-        lower[edge] = -axial_conductance;
-        upper[edge] = -axial_conductance;
-        diagonal[edge] += axial_conductance;
-        diagonal[edge + 1] += axial_conductance;
     }
 
-    let center_temperature = solve_tridiagonal_system(&lower, &diagonal, &upper, &center_rhs);
-    let center_reaction =
-        apply_tridiagonal_operator(&lower, &diagonal, &upper, &center_temperature);
-    let temperature_scale = center_temperature
+    let mut matrix = operator.clone();
+    let mut rhs = center_rhs.clone();
+    let interface_center_temperature = solve_dense_real_system(&mut matrix, &mut rhs);
+    let center_reaction = apply_dense_real_operator(&operator, &interface_center_temperature);
+    let temperature_scale = interface_center_temperature
         .iter()
         .map(|value| (*value - reference_temperature_k).abs())
         .fold(0.0_f64, f64::max)
@@ -4701,16 +4704,20 @@ fn solve_cht_conjugate_interface(
         .map(|(reaction, rhs)| (reaction - rhs).abs())
         .fold(0.0_f64, f64::max)
         / (anchor_conductance * temperature_scale).max(1.0e-12);
-    let mut fluid_temperature = Vec::with_capacity(temperature_count);
-    let mut solid_temperature = Vec::with_capacity(temperature_count);
-    for (center, flux) in center_temperature
+    let mut interface_fluid_temperature = Vec::with_capacity(interface_count);
+    let mut interface_solid_temperature = Vec::with_capacity(interface_count);
+    for (center, flux) in interface_center_temperature
         .iter()
-        .zip(heat_flux_at_temperature_node.iter())
+        .zip(heat_flux.iter().chain(std::iter::repeat(&0.0)))
     {
         let jump = *flux / conductance;
-        fluid_temperature.push(*center + 0.5 * jump);
-        solid_temperature.push(*center - 0.5 * jump);
+        interface_fluid_temperature.push(*center + 0.5 * jump);
+        interface_solid_temperature.push(*center - 0.5 * jump);
     }
+    let fluid_temperature =
+        resample_scalar_profile(&interface_fluid_temperature, temperature_count);
+    let solid_temperature =
+        resample_scalar_profile(&interface_solid_temperature, temperature_count);
     let iteration_count = usize::from(temperature_count > 0);
     let coupled_interface_residual_ratio = thermal_network_residual_ratio;
 
@@ -4725,15 +4732,12 @@ fn solve_cht_conjugate_interface(
         .fold(0.0_f64, f64::max)
         .max(1.0e-12);
     for index in 0..interface_count {
-        let xi = index as f64 / interface_denom;
-        let temperature_index =
-            ((xi * temperature_denom).round() as usize).min(temperature_count.saturating_sub(1));
-        let jump = fluid_temperature
-            .get(temperature_index)
+        let jump = interface_fluid_temperature
+            .get(index)
             .copied()
             .unwrap_or(reference_temperature_k)
-            - solid_temperature
-                .get(temperature_index)
+            - interface_solid_temperature
+                .get(index)
                 .copied()
                 .unwrap_or(reference_temperature_k);
         let coupled_flux = conductance * jump;
@@ -4755,8 +4759,8 @@ fn solve_cht_conjugate_interface(
         coupled_interface_residual_ratio,
         flux_temperature_law_residual_ratio: max_flux_temperature_law_residual,
         heat_flux_realization_residual_ratio: max_heat_flux_realization_residual,
-        thermal_network_edge_count,
-        thermal_network_node_count: temperature_count,
+        thermal_network_edge_count: thermal_network_edges.len(),
+        thermal_network_node_count: interface_count,
         thermal_network_residual_ratio,
     }
 }
@@ -5130,7 +5134,7 @@ fn solve_fsi_partitioned_interface(
     let interface_stiffness_pa_per_m = 1.0 / compliance;
     let feedback_stiffness_pa_per_m = 0.25 * interface_stiffness_pa_per_m;
     let structural_edge_target =
-        fsi_interface_structural_coupling_edge_target(topology, interface_face_count);
+        coupled_interface_graph_edge_target(topology, interface_face_count);
     let mut interface_pressure = vec![0.0; face_pressure.len()];
     let mut structural_traction = vec![0.0; face_pressure.len()];
     let mut structural_face_displacement = vec![0.0; face_pressure.len() * 3];
@@ -5297,7 +5301,7 @@ fn solve_fsi_structural_interface_response(
 
     let diagonal_stiffness = interface_stiffness_pa_per_m.max(1.0e-9);
     let coupling_stiffness = 0.20 * diagonal_stiffness;
-    let coupling_edges = fsi_interface_face_graph_edges(face_count, coupling_edge_target);
+    let coupling_edges = coupled_interface_graph_edges(face_count, coupling_edge_target);
     let mut operator = vec![vec![0.0; face_count]; face_count];
     for (row, diagonal) in operator.iter_mut().enumerate() {
         diagonal[row] = diagonal_stiffness;
@@ -5334,7 +5338,7 @@ fn solve_fsi_structural_interface_response(
     }
 }
 
-fn fsi_interface_face_graph_edges(face_count: usize, edge_target: usize) -> Vec<(usize, usize)> {
+fn coupled_interface_graph_edges(face_count: usize, edge_target: usize) -> Vec<(usize, usize)> {
     if face_count < 2 || edge_target == 0 {
         return Vec::new();
     }
@@ -5416,60 +5420,6 @@ fn vector_field_from_x_profile(x: &[f64], target_count: usize) -> Vec<f64> {
         field.extend_from_slice(&[displacement_x, 0.0, 0.0]);
     }
     field
-}
-
-fn solve_tridiagonal_system(
-    lower: &[f64],
-    diagonal: &[f64],
-    upper: &[f64],
-    rhs: &[f64],
-) -> Vec<f64> {
-    let n = diagonal.len().min(rhs.len());
-    if n == 0 {
-        return Vec::new();
-    }
-    let mut c_prime = vec![0.0; n.saturating_sub(1)];
-    let mut d_prime = vec![0.0; n];
-    let first_pivot = diagonal[0].abs().max(1.0e-18).copysign(diagonal[0]);
-    if n > 1 {
-        c_prime[0] = upper[0] / first_pivot;
-    }
-    d_prime[0] = rhs[0] / first_pivot;
-    for row in 1..n {
-        let pivot = diagonal[row] - lower[row - 1] * c_prime[row - 1];
-        let pivot = pivot.abs().max(1.0e-18).copysign(pivot);
-        if row + 1 < n {
-            c_prime[row] = upper[row] / pivot;
-        }
-        d_prime[row] = (rhs[row] - lower[row - 1] * d_prime[row - 1]) / pivot;
-    }
-
-    let mut solution = vec![0.0; n];
-    solution[n - 1] = d_prime[n - 1];
-    for row in (0..n - 1).rev() {
-        solution[row] = d_prime[row] - c_prime[row] * solution[row + 1];
-    }
-    solution
-}
-
-fn apply_tridiagonal_operator(
-    lower: &[f64],
-    diagonal: &[f64],
-    upper: &[f64],
-    x: &[f64],
-) -> Vec<f64> {
-    let n = diagonal.len().min(x.len());
-    let mut result = vec![0.0; n];
-    for row in 0..n {
-        result[row] += diagonal[row] * x[row];
-        if row > 0 {
-            result[row] += lower[row - 1] * x[row - 1];
-        }
-        if row + 1 < n {
-            result[row] += upper[row] * x[row + 1];
-        }
-    }
-    result
 }
 
 #[derive(Debug, Clone, Copy, Default)]
