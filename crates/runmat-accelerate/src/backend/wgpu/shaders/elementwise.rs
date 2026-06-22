@@ -8,6 +8,28 @@ pub(crate) enum ComplexUnaryOp {
     Conj,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ComplexBinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+impl ComplexBinaryOp {
+    pub(crate) fn try_from_binary_op(
+        op: crate::backend::wgpu::types::BinaryOpCode,
+    ) -> Option<Self> {
+        match op {
+            crate::backend::wgpu::types::BinaryOpCode::Add => Some(Self::Add),
+            crate::backend::wgpu::types::BinaryOpCode::Sub => Some(Self::Sub),
+            crate::backend::wgpu::types::BinaryOpCode::Mul => Some(Self::Mul),
+            crate::backend::wgpu::types::BinaryOpCode::Div => Some(Self::Div),
+            _ => None,
+        }
+    }
+}
+
 pub(crate) fn complex_unary_shader(op: ComplexUnaryOp, precision: NumericPrecision) -> String {
     let ty = match precision {
         NumericPrecision::F64 => "f64",
@@ -152,6 +174,92 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         ty = ty,
         real_index = real_index,
         imag_index = imag_index,
+    )
+}
+
+pub(crate) fn complex_binary_shader(
+    op: ComplexBinaryOp,
+    precision: NumericPrecision,
+    lhs_complex: bool,
+    rhs_complex: bool,
+) -> String {
+    let ty = match precision {
+        NumericPrecision::F64 => "f64",
+        NumericPrecision::F32 => "f32",
+    };
+    let lhs_real = if lhs_complex {
+        "A.data[elem * 2u]"
+    } else {
+        "A.data[elem]"
+    };
+    let lhs_imag = if lhs_complex {
+        "A.data[elem * 2u + 1u]"
+    } else {
+        "0.0"
+    };
+    let rhs_real = if rhs_complex {
+        "B.data[elem * 2u]"
+    } else {
+        "B.data[elem]"
+    };
+    let rhs_imag = if rhs_complex {
+        "B.data[elem * 2u + 1u]"
+    } else {
+        "0.0"
+    };
+    let body = match op {
+        ComplexBinaryOp::Add => "let out_re = ar + br;\n    let out_im = ai + bi;",
+        ComplexBinaryOp::Sub => "let out_re = ar - br;\n    let out_im = ai - bi;",
+        ComplexBinaryOp::Mul => {
+            "let out_re = (ar * br) - (ai * bi);\n    let out_im = (ar * bi) + (ai * br);"
+        }
+        ComplexBinaryOp::Div => {
+            "let denom = (br * br) + (bi * bi);\n    let out_re = ((ar * br) + (ai * bi)) / denom;\n    let out_im = ((ai * br) - (ar * bi)) / denom;"
+        }
+    };
+    format!(
+        r#"
+struct Tensor {{
+    data: array<{ty}>,
+}};
+
+struct Params {{
+    len: u32,
+    offset: u32,
+    _pad0: u32,
+    _pad1: u32,
+}};
+
+@group(0) @binding(0) var<storage, read> A: Tensor;
+@group(0) @binding(1) var<storage, read> B: Tensor;
+@group(0) @binding(2) var<storage, read_write> Out: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let local = gid.x;
+    if local >= params.len {{
+        return;
+    }}
+    let idx = params.offset + local;
+    if idx >= params.len + params.offset {{
+        return;
+    }}
+    let elem = idx / 2u;
+    let ar = {lhs_real};
+    let ai = {lhs_imag};
+    let br = {rhs_real};
+    let bi = {rhs_imag};
+    {body}
+    Out.data[idx] = select(out_re, out_im, (idx % 2u) == 1u);
+}}
+"#,
+        ty = ty,
+        lhs_real = lhs_real,
+        lhs_imag = lhs_imag,
+        rhs_real = rhs_real,
+        rhs_imag = rhs_imag,
+        body = body,
     )
 }
 

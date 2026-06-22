@@ -217,8 +217,16 @@ impl WgpuProvider {
                 .ok_or_else(|| anyhow!("repmat: dimension product exceeds GPU limits"))
         })?;
 
+        let storage = runmat_accelerate_api::handle_storage(handle);
+        let storage_factor = match storage {
+            runmat_accelerate_api::GpuTensorStorage::Real => 1usize,
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
+        let expected_input_len = orig_total
+            .checked_mul(storage_factor)
+            .ok_or_else(|| anyhow!("repmat: input storage length exceeds GPU limits"))?;
         ensure!(
-            orig_total == entry.len || (orig_total == 0 && entry.len == 0),
+            expected_input_len == entry.len || (orig_total == 0 && entry.len == 0),
             "repmat: internal shape mismatch"
         );
 
@@ -227,7 +235,11 @@ impl WgpuProvider {
                 .ok_or_else(|| anyhow!("repmat: requested output exceeds GPU limits"))
         })?;
 
-        if new_total > u32::MAX as usize {
+        let storage_total = new_total
+            .checked_mul(storage_factor)
+            .ok_or_else(|| anyhow!("repmat: requested output exceeds GPU limits"))?;
+
+        if storage_total > u32::MAX as usize {
             return Err(anyhow!("repmat: tensor too large for GPU kernel"));
         }
 
@@ -268,10 +280,12 @@ impl WgpuProvider {
 
         // Use checked allocation so we fail with a clear error instead of
         // creating an invalid WebGPU buffer (which later triggers a validation error).
-        let out_buffer = self.create_storage_buffer_checked(new_total, "runmat-repmat-out")?;
+        let out_buffer = self.create_storage_buffer_checked(storage_total, "runmat-repmat-out")?;
         let out_shape = new_shape.clone();
-        if new_total == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+        if storage_total == 0 {
+            return Ok(
+                self.register_existing_buffer_with_storage(out_buffer, out_shape, 0, storage)
+            );
         }
 
         {
@@ -301,14 +315,14 @@ impl WgpuProvider {
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let mut offset = 0usize;
-        while offset < new_total {
-            let remaining = new_total - offset;
+        while offset < storage_total {
+            let remaining = storage_total - offset;
             let chunk_len = remaining.min(chunk_capacity);
             let params = crate::backend::wgpu::params::RepmatParams {
                 len: chunk_len as u32,
                 offset: offset as u32,
                 rank: rank as u32,
-                _pad: 0,
+                storage_factor: storage_factor as u32,
                 base_shape: base_shape_arr,
                 new_shape: new_shape_arr,
                 base_strides: strides_arr,
@@ -348,7 +362,12 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, new_total))
+        Ok(self.register_existing_buffer_with_storage(
+            out_buffer,
+            out_shape,
+            storage_total,
+            storage,
+        ))
     }
     pub(crate) fn cat_exec(
         &self,
