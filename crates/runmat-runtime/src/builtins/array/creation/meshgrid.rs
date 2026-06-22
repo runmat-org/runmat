@@ -3,7 +3,7 @@
 use std::cmp::max;
 
 use log::warn;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -447,13 +447,9 @@ pub async fn evaluate(args: &[Value]) -> crate::BuiltinResult<MeshgridEval> {
         OutputTemplate::Like(spec) => spec.residency,
     };
 
-    let axes_all_real = !require_complex;
     let mut outputs: Vec<MeshgridOutput> = Vec::new();
 
-    if axes_all_real
-        && matches!(target_class, PrototypeClass::Real)
-        && matches!(target_residency, DevicePreference::Gpu)
-    {
+    if matches!(target_residency, DevicePreference::Gpu) {
         if let Some(gpu) = try_meshgrid_gpu_from_vector_axes(&x_axis, &y_axis, z_axis.as_ref())? {
             outputs = gpu;
         }
@@ -611,10 +607,19 @@ enum DevicePreference {
 
 fn analyse_like_prototype(proto: &Value) -> crate::BuiltinResult<PrototypeSpec> {
     match proto {
-        Value::GpuTensor(_) => Ok(PrototypeSpec {
-            residency: DevicePreference::Gpu,
-            class: PrototypeClass::Real,
-        }),
+        Value::GpuTensor(handle) => {
+            let class = if runmat_accelerate_api::handle_storage(handle)
+                == GpuTensorStorage::ComplexInterleaved
+            {
+                PrototypeClass::Complex
+            } else {
+                PrototypeClass::Real
+            };
+            Ok(PrototypeSpec {
+                residency: DevicePreference::Gpu,
+                class,
+            })
+        }
         Value::ComplexTensor(_) | Value::Complex(_, _) => Ok(PrototypeSpec {
             residency: DevicePreference::Host,
             class: PrototypeClass::Complex,
@@ -698,6 +703,8 @@ async fn axis_from_value(
         }),
         Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor, index),
         Value::GpuTensor(handle) => {
+            let is_complex = runmat_accelerate_api::handle_storage(&handle)
+                == GpuTensorStorage::ComplexInterleaved;
             // Fast path: if the gpuArray is vector-like, keep it on-device and avoid a download.
             // We'll validate any non-vector shapes by gathering below.
             if is_vector_shape(&handle.shape) {
@@ -705,17 +712,31 @@ async fn axis_from_value(
                 return Ok(AxisData {
                     values: Vec::new(),
                     len: vector_len_from_shape(&handle.shape),
-                    is_complex: false,
+                    is_complex,
                     gpu_real: Some(handle),
                 });
             }
 
             // Fallback: gather to validate / recover axes from meshgrid matrices.
-            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-            if is_vector_shape(&tensor.shape) {
-                *prefer_gpu = true;
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
+            match gathered {
+                Value::Tensor(tensor) => {
+                    if is_vector_shape(&tensor.shape) {
+                        *prefer_gpu = true;
+                    }
+                    axis_from_tensor(tensor, index)
+                }
+                Value::ComplexTensor(tensor) => {
+                    if is_vector_shape(&tensor.shape) {
+                        *prefer_gpu = true;
+                    }
+                    axis_from_complex_tensor(tensor, index)
+                }
+                other => Err(builtin_error(format!(
+                    "meshgrid: input argument {} must be numeric, got {other:?}",
+                    index + 1
+                ))),
             }
-            axis_from_tensor(tensor, index)
         }
         other => Err(builtin_error(format!(
             "meshgrid: input argument {} must be numeric, got {other:?}",
@@ -953,9 +974,27 @@ async fn axis_to_host_async(axis: &AxisData) -> crate::BuiltinResult<AxisData> {
         return Ok(axis.clone());
     }
     let handle = axis.gpu_real.as_ref().expect("checked gpu_real is_some");
-    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
-    // Index is only used for error messages; tensor came from a validated vector-like handle.
-    axis_from_tensor(tensor, 0)
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
+    // Index is only used for error messages; value came from a validated vector-like handle.
+    match gathered {
+        Value::Tensor(tensor) => axis_from_tensor(tensor, 0),
+        Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor, 0),
+        Value::Num(n) => Ok(AxisData {
+            values: vec![(n, 0.0)],
+            len: 1,
+            is_complex: false,
+            gpu_real: None,
+        }),
+        Value::Complex(re, im) => Ok(AxisData {
+            values: vec![(re, im)],
+            len: 1,
+            is_complex: im != 0.0,
+            gpu_real: None,
+        }),
+        other => Err(builtin_error(format!(
+            "meshgrid: expected numeric GPU axis, got {other:?}"
+        ))),
+    }
 }
 
 fn try_meshgrid_gpu_from_vector_axes(
@@ -1018,8 +1057,8 @@ fn try_meshgrid_gpu_from_vector_axes(
             .repmat(&y_base, &[1, nx, nz])
             .map_err(|e| builtin_error(format!("meshgrid: repmat Y failed: {e}")))?;
 
-        outputs.push(MeshgridOutput::GpuReal(x_grid));
-        outputs.push(MeshgridOutput::GpuReal(y_grid));
+        outputs.push(MeshgridOutput::Gpu(x_grid));
+        outputs.push(MeshgridOutput::Gpu(y_grid));
         let z_axis_row = provider
             .reshape(z, &[1, nz])
             .map_err(|e| builtin_error(format!("meshgrid: reshape Z failed: {e}")))?;
@@ -1029,7 +1068,7 @@ fn try_meshgrid_gpu_from_vector_axes(
         let z_grid = provider
             .repmat(&z_base, &[ny, nx, 1])
             .map_err(|e| builtin_error(format!("meshgrid: repmat Z failed: {e}")))?;
-        outputs.push(MeshgridOutput::GpuReal(z_grid));
+        outputs.push(MeshgridOutput::Gpu(z_grid));
     } else {
         let x_grid = provider
             .repmat(&x_row, &[ny, 1])
@@ -1037,8 +1076,8 @@ fn try_meshgrid_gpu_from_vector_axes(
         let y_grid = provider
             .repmat(&y_col, &[1, nx])
             .map_err(|e| builtin_error(format!("meshgrid: repmat Y failed: {e}")))?;
-        outputs.push(MeshgridOutput::GpuReal(x_grid));
-        outputs.push(MeshgridOutput::GpuReal(y_grid));
+        outputs.push(MeshgridOutput::Gpu(x_grid));
+        outputs.push(MeshgridOutput::Gpu(y_grid));
     }
 
     Ok(Some(outputs))
@@ -1155,10 +1194,7 @@ impl GridOutput {
             .map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
         match residency {
             DevicePreference::Host => Ok(complex_tensor_into_value(tensor)),
-            DevicePreference::Gpu => {
-                warn!("meshgrid: complex GPU outputs are not implemented; returning host complex array");
-                Ok(complex_tensor_into_value(tensor))
-            }
+            DevicePreference::Gpu => to_complex_gpu_tensor_value(tensor),
         }
     }
 }
@@ -1179,16 +1215,34 @@ fn to_gpu_tensor_value(tensor: Tensor) -> crate::BuiltinResult<Value> {
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn tensor_to_complex_value(tensor: Tensor) -> crate::BuiltinResult<Value> {
+fn to_complex_gpu_tensor_value(tensor: ComplexTensor) -> crate::BuiltinResult<Value> {
+    if let Some(provider) = runmat_accelerate_api::provider() {
+        match gpu_helpers::upload_complex_tensor(provider, &tensor) {
+            Ok(handle) => return Ok(gpu_helpers::complex_gpu_value(handle)),
+            Err(err) => {
+                warn!(
+                    "meshgrid: failed to upload complex tensor to GPU, returning host array: {err}"
+                )
+            }
+        }
+    }
+    Ok(complex_tensor_into_value(tensor))
+}
+
+fn tensor_to_complex_tensor(tensor: Tensor) -> crate::BuiltinResult<ComplexTensor> {
     let data: Vec<(f64, f64)> = tensor.data.iter().map(|&re| (re, 0.0)).collect();
-    let complex = ComplexTensor::new(data, tensor.shape.clone())
-        .map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
+    ComplexTensor::new(data, tensor.shape.clone())
+        .map_err(|e| builtin_error(format!("meshgrid: {e}")))
+}
+
+fn tensor_to_complex_value(tensor: Tensor) -> crate::BuiltinResult<Value> {
+    let complex = tensor_to_complex_tensor(tensor)?;
     Ok(complex_tensor_into_value(complex))
 }
 
 enum MeshgridOutput {
     Host(GridOutput),
-    GpuReal(GpuTensorHandle),
+    Gpu(GpuTensorHandle),
 }
 
 impl MeshgridOutput {
@@ -1199,7 +1253,7 @@ impl MeshgridOutput {
     ) -> crate::BuiltinResult<Value> {
         match self {
             MeshgridOutput::Host(host) => host.to_value(class, residency),
-            MeshgridOutput::GpuReal(handle) => match (class, residency) {
+            MeshgridOutput::Gpu(handle) => match (class, residency) {
                 (PrototypeClass::Real, DevicePreference::Gpu) => {
                     Ok(Value::GpuTensor(handle.clone()))
                 }
@@ -1208,13 +1262,26 @@ impl MeshgridOutput {
                     Ok(tensor::tensor_into_value(tensor))
                 }
                 (PrototypeClass::Complex, DevicePreference::Host) => {
-                    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
-                    tensor_to_complex_value(tensor)
+                    match gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?
+                    {
+                        Value::ComplexTensor(tensor) => Ok(complex_tensor_into_value(tensor)),
+                        Value::Complex(re, im) => Ok(Value::Complex(re, im)),
+                        Value::Tensor(tensor) => tensor_to_complex_value(tensor),
+                        Value::Num(n) => Ok(Value::Complex(n, 0.0)),
+                        other => Err(builtin_error(format!(
+                            "meshgrid: expected numeric GPU output, got {other:?}"
+                        ))),
+                    }
                 }
                 (PrototypeClass::Complex, DevicePreference::Gpu) => {
-                    warn!("meshgrid: complex GPU outputs are not implemented; returning host complex array");
-                    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
-                    tensor_to_complex_value(tensor)
+                    if runmat_accelerate_api::handle_storage(handle)
+                        == GpuTensorStorage::ComplexInterleaved
+                    {
+                        Ok(gpu_helpers::complex_gpu_value(handle.clone()))
+                    } else {
+                        let tensor = gpu_helpers::gather_tensor_async(handle).await?;
+                        to_complex_gpu_tensor_value(tensor_to_complex_tensor(tensor)?)
+                    }
                 }
             },
         }
@@ -1445,10 +1512,12 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn meshgrid_wgpu_matches_cpu() {
-        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        )
-        .expect("wgpu provider");
+        ) else {
+            return;
+        };
 
         let x = tensor_from_vec(vec![-1.0, 0.0, 1.0, 2.0], 1, 4);
         let y = tensor_from_vec(vec![5.0, 6.0], 2, 1);
@@ -1501,6 +1570,105 @@ pub(crate) mod tests {
             Value::Complex(_, _) => {}
             other => panic!("expected complex output, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn meshgrid_like_complex_gpu_prototype_keeps_complex_residency() {
+        test_support::with_test_provider(|provider| {
+            let x = tensor_from_vec(vec![1.0, 2.0], 1, 2);
+            let proto = ComplexTensor::new(vec![(0.0, 1.0)], vec![1, 1]).unwrap();
+            let proto_handle =
+                gpu_helpers::upload_complex_tensor(provider, &proto).expect("upload");
+
+            let eval = evaluate(&[
+                Value::Tensor(x),
+                Value::from("like"),
+                Value::GpuTensor(proto_handle),
+            ])
+            .expect("meshgrid");
+            let x_value = eval_first(&eval).expect("X");
+            let Value::GpuTensor(handle) = x_value else {
+                panic!("expected complex gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(handle)))
+                .expect("gather");
+            let Value::ComplexTensor(tensor) = gathered else {
+                panic!("expected complex tensor");
+            };
+            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(
+                tensor.data,
+                vec![(1.0, 0.0), (1.0, 0.0), (2.0, 0.0), (2.0, 0.0)]
+            );
+        });
+    }
+
+    #[test]
+    fn meshgrid_complex_gpu_axis_stays_resident() {
+        test_support::with_test_provider(|provider| {
+            let axis = ComplexTensor::new(vec![(1.0, 1.0), (2.0, -1.0)], vec![1, 2]).unwrap();
+            let axis_handle = gpu_helpers::upload_complex_tensor(provider, &axis).expect("upload");
+
+            let eval = evaluate(&[Value::GpuTensor(axis_handle)]).expect("meshgrid");
+            let x_value = eval_first(&eval).expect("X");
+            let Value::GpuTensor(handle) = x_value else {
+                panic!("expected complex gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(handle)))
+                .expect("gather");
+            let Value::ComplexTensor(tensor) = gathered else {
+                panic!("expected complex tensor");
+            };
+            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(
+                tensor.data,
+                vec![(1.0, 1.0), (1.0, 1.0), (2.0, -1.0), (2.0, -1.0)]
+            );
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn meshgrid_wgpu_complex_axis_matches_cpu_and_stays_resident() {
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+
+        let axis = ComplexTensor::new(vec![(1.0, 1.0), (2.0, -1.0)], vec![1, 2]).unwrap();
+        let cpu_eval = evaluate(&[Value::ComplexTensor(axis.clone())]).expect("meshgrid cpu");
+        let cpu_x = match eval_first(&cpu_eval).expect("X cpu") {
+            Value::ComplexTensor(tensor) => tensor,
+            other => panic!("expected cpu complex tensor, got {other:?}"),
+        };
+
+        let axis_handle = gpu_helpers::upload_complex_tensor(provider, &axis).expect("upload");
+        let gpu_eval = evaluate(&[Value::GpuTensor(axis_handle)]).expect("meshgrid gpu");
+        let gpu_x = eval_first(&gpu_eval).expect("X gpu");
+        let Value::GpuTensor(handle) = gpu_x else {
+            panic!("expected complex gpu tensor");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&handle),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        let gathered =
+            block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(handle))).expect("gather");
+        let Value::ComplexTensor(gpu_tensor) = gathered else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(gpu_tensor.shape, cpu_x.shape);
+        assert_eq!(gpu_tensor.data, cpu_x.data);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

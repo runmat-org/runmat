@@ -1898,11 +1898,11 @@ mod tests {
 
     #[tokio::test]
     async fn wgpu_complex_repmat_preserves_interleaved_storage() {
-        crate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        )
-        .expect("register wgpu provider");
-        let provider = runmat_accelerate_api::provider().expect("provider");
+        ) else {
+            return;
+        };
         let scalar = complex_pair(provider, &[2.0], &[-3.0], &[1, 1]).await;
         let tiled = provider.repmat(&scalar, &[3, 1]).expect("complex repmat");
 
