@@ -5992,6 +5992,9 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
             && diag
                 .message
                 .contains("flux_temperature_law_residual_ratio=")
+            && diag
+                .message
+                .contains("heat_flux_realization_residual_ratio=")
             && diag.message.contains("coupled_interface_iteration_count=")
             && diag.message.contains("coupled_interface_residual_ratio=")
     }));
@@ -6006,6 +6009,9 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
                 .contains("conjugate_slab_flux_law_residual_ratio=")
             && diag.message.contains("advection_shift_coverage_ratio=")
             && diag.message.contains("coupled_interface_residual_ratio=")
+            && diag
+                .message
+                .contains("heat_flux_realization_residual_ratio=")
             && diag.message.contains("known_answer_coverage_ratio=")
     }));
     let thermal = envelope

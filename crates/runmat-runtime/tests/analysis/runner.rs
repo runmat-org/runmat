@@ -5086,6 +5086,20 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
+                "cht_heat_flux_realization_residual_ratio",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "heat_flux_realization_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-9),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
                 "cht_coupled_interface_iteration_count",
                 "FEA_CHT_INTERFACE_CLOSURE",
                 diagnostic_metric(
@@ -5148,6 +5162,20 @@ pub(super) fn run_fixture(
                     &cpu_envelope.data,
                     "FEA_CHT_KNOWN_ANSWER",
                     "coupled_interface_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-9),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_known_answer_heat_flux_realization_residual_ratio",
+                "FEA_CHT_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_KNOWN_ANSWER",
+                    "heat_flux_realization_residual_ratio",
                 ),
                 Some(0.0),
                 Some(1.0e-9),
