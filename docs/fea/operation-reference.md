@@ -57,14 +57,14 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.validate/v1` | Validate model units, frame, materials, loads, boundary conditions, domains, and geometry compatibility. |
 | `fea.run_linear_static/v1` | Run the linear static structural path. |
 | `fea.run_modal/v1` | Run modal analysis. |
-| `fea.run_acoustic/v1` | Run the acoustic baseline path. |
+| `fea.run_acoustic/v1` | Run acoustic harmonic analysis. |
 | `fea.run_thermal/v1` | Run standalone thermal analysis. |
 | `fea.run_transient/v1` | Run structural transient analysis. |
 | `fea.run_nonlinear/v1` | Run nonlinear structural analysis. |
 | `fea.run_electromagnetic/v1` | Run electromagnetic analysis. |
-| `fea.run_cfd/v1` | Run the CFD baseline path. |
-| `fea.run_cht/v1` | Run the coupled CFD plus thermal baseline path. |
-| `fea.run_fsi/v1` | Run the coupled structural transient plus CFD baseline path. |
+| `fea.run_cfd/v1` | Run finite-volume incompressible CFD analysis. |
+| `fea.run_cht/v1` | Run coupled CFD plus thermal conjugate heat-transfer analysis. |
+| `fea.run_fsi/v1` | Run partitioned fluid-structure interaction analysis. |
 | `fea.results/v1` | Query fields, diagnostics, payload subsets, quality reasons, provenance, and summaries. |
 | `fea.results_compare/v1` | Compare selected fields between two persisted runs. |
 | `fea.trends/v1` | Summarize persisted runs by family. |

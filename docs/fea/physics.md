@@ -22,9 +22,9 @@ Choose the physics family from the engineering question. The selected model prof
 | Thermo-mechanical | Structural response with thermal coupling context. | `transient` |
 | Electro-thermal | Heating behavior from electrical coupling context. | Coupled thermal, transient, or nonlinear paths with electro-thermal domain data. |
 | Electromagnetic | Electromagnetic source, boundary, material, frequency, and sweep behavior. | `electromagnetic` |
-| CFD | Fluid-domain baseline behavior and diagnostics. | `cfd` |
-| CHT | Coupled fluid and thermal baseline behavior. | `cht` |
-| FSI | Coupled fluid and structural baseline behavior. | `fsi` |
+| CFD | Finite-volume incompressible fluid behavior, cell fields, residuals, and diagnostics. | `cfd` |
+| CHT | Coupled fluid and thermal behavior with interface heat-flux closure. | `cht` |
+| FSI | Partitioned fluid and structural behavior with interface pressure, traction, displacement, and closure diagnostics. | `fsi` |
 
 ## Choosing A Family
 
@@ -69,7 +69,7 @@ All families return common run fields: `run_id`, fields, diagnostics, quality ga
 A family can be implemented and tested without being production-grade for every engineering use. Current support varies by family:
 
 - dedicated solver-backed paths exist for several structural, thermal, nonlinear, transient, modal, acoustic, and electromagnetic workflows,
-- CFD, CHT, and FSI currently have baseline paths with typed diagnostics and payloads,
+- CFD, CHT, and FSI have governed fluid/coupled paths with typed fields, diagnostics, known-answer gates, and typed invalid-authoring errors,
 - V&V maturity depends on known-answer tests, convergence checks, independent references, and governed thresholds.
 
 Use [Current Status](/docs/fea/status) before relying on a family for a workflow, and use [Verification & Validation](/docs/fea/validation) for the evidence standard.

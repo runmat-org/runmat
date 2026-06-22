@@ -43,7 +43,7 @@ Quality policy controls how strict the publishability decision is. A run can ret
 
 ## Diagnostics
 
-Diagnostics explain observed behavior. They can describe solver fallback, modal residuals, nonlinear increment failures, electromagnetic source or boundary quality, thermal spread, CFD baseline flow signals, and similar family-specific conditions.
+Diagnostics explain observed behavior. They can describe solver fallback, modal residuals, nonlinear increment failures, electromagnetic source or boundary quality, thermal spread, CFD flow signals, and similar family-specific conditions.
 
 Read diagnostics with quality reasons:
 

@@ -77,10 +77,10 @@ The main gaps for production-grade claims are:
 | Thermo-mechanical | L1-L2 | Coupled known-answer cases and independent thermo-mechanical references. |
 | Electro-thermal | L1-L2 | Coupled electrical/thermal references and conservation checks. |
 | Electromagnetic | L1-L2 | Maxwell field validation, source/boundary realization references, larger workload studies. |
-| Acoustic harmonic | L2 baseline | Broader impedance/radiation validation, mesh convergence, and external acoustic references. |
-| CFD | L1-L2 baseline | Canonical CFD benchmarks, conservation checks, independent fluid references. |
-| CHT | L1-L2 baseline | Coupled fluid/thermal benchmarks and independent CHT references. |
-| FSI | L1-L2 baseline | Two-way FSI benchmarks and independent FSI references. |
+| Acoustic harmonic | L2 governed path | Broader impedance/radiation validation, mesh convergence, and external acoustic references. |
+| CFD | L1-L2 governed path | Canonical CFD benchmarks, conservation checks, independent fluid references, and GPU parity beyond explicit fallback. |
+| CHT | L1-L2 governed path | Coupled fluid/thermal benchmarks, full fluid/solid mesh assembly, and independent CHT references. |
+| FSI | L1-L2 governed path | Full interface iteration, two-way FSI benchmarks, and independent FSI references. |
 
 ## Adding A V&V Case
 
