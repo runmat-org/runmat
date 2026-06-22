@@ -575,6 +575,12 @@ pub fn run_electromagnetic_with_options(
             backend_kind.as_str()
         ),
     }];
+    diagnostics.push(electromagnetic_formulation_diagnostic(
+        domain.reference_frequency_hz,
+        omega,
+        &material_stats,
+        effective_permittivity,
+    ));
     if !harmonic_solve.converged {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_EM_HARMONIC_MAX_ITERS".to_string(),
@@ -1297,6 +1303,60 @@ struct RegionElectromagneticCoefficients {
 struct ElectromagneticCoefficientProfile {
     region_coefficients: Vec<RegionElectromagneticCoefficients>,
     stats: ElectromagneticMaterialStats,
+}
+
+fn electromagnetic_formulation_diagnostic(
+    reference_frequency_hz: f64,
+    omega_rad_per_s: f64,
+    material_stats: &ElectromagneticMaterialStats,
+    effective_permittivity_f_per_m: f64,
+) -> FeaDiagnostic {
+    let conduction_current_scale = material_stats.conductivity_mean.max(1.0e-12);
+    let displacement_current_scale =
+        omega_rad_per_s.max(0.0) * effective_permittivity_f_per_m.max(0.0);
+    let displacement_to_conduction_ratio =
+        displacement_current_scale / conduction_current_scale.max(1.0e-12);
+    let material_frequency_response_coverage_ratio = material_stats
+        .conductivity_frequency_response_coverage_ratio
+        .min(material_stats.relative_permittivity_frequency_response_coverage_ratio)
+        .min(material_stats.relative_permeability_frequency_response_coverage_ratio)
+        .clamp(0.0, 1.0);
+    let includes_magnetoquasistatic_eddy_current =
+        material_stats.conductivity_mean.is_finite() && material_stats.conductivity_mean > 0.0;
+    let includes_full_wave_displacement_current = reference_frequency_hz.is_finite()
+        && reference_frequency_hz > 0.0
+        && effective_permittivity_f_per_m.is_finite()
+        && effective_permittivity_f_per_m > 0.0;
+    let active_formulation = if includes_full_wave_displacement_current {
+        "full_wave_harmonic"
+    } else if includes_magnetoquasistatic_eddy_current {
+        "magnetoquasistatic_eddy_current"
+    } else {
+        "magnetostatic_curl_curl"
+    };
+
+    FeaDiagnostic {
+        code: "FEA_EM_FORMULATION".to_string(),
+        severity: if includes_magnetoquasistatic_eddy_current
+            && includes_full_wave_displacement_current
+        {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "formulation_family=frequency_domain_maxwell active_formulation={} includes_magnetostatic_curl_curl=true includes_magnetoquasistatic_eddy_current={} includes_full_wave_displacement_current={} reference_frequency_hz={} omega_rad_per_s={} conductivity_mean_s_per_m={} effective_permittivity_f_per_m={} displacement_to_conduction_ratio={} material_frequency_response_coverage_ratio={}",
+            active_formulation,
+            includes_magnetoquasistatic_eddy_current,
+            includes_full_wave_displacement_current,
+            reference_frequency_hz,
+            omega_rad_per_s,
+            material_stats.conductivity_mean,
+            effective_permittivity_f_per_m,
+            displacement_to_conduction_ratio,
+            material_frequency_response_coverage_ratio,
+        ),
+    }
 }
 
 fn electromagnetic_coefficient_profile(

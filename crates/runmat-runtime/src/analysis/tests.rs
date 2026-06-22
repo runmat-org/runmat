@@ -4420,6 +4420,27 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         .iter()
         .any(|diag| diag.code == "FEA_EM_STATIC"));
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_EM_FORMULATION"
+            && diag
+                .message
+                .contains("formulation_family=frequency_domain_maxwell")
+            && diag
+                .message
+                .contains("active_formulation=full_wave_harmonic")
+            && diag
+                .message
+                .contains("includes_magnetostatic_curl_curl=true")
+            && diag
+                .message
+                .contains("includes_magnetoquasistatic_eddy_current=true")
+            && diag
+                .message
+                .contains("includes_full_wave_displacement_current=true")
+            && diag
+                .message
+                .contains("material_frequency_response_coverage_ratio=")
+    }));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_EM_SOURCE_ENERGY"
             && diag.message.contains("source_region_coverage_ratio=")
             && diag
