@@ -5,6 +5,22 @@ use runmat_geometry_core::GeometryAsset;
 use runmat_meshing_core::RegionMeshMapping;
 use serde::{Deserialize, Serialize};
 
+fn default_prep_coordinate_span_m() -> f64 {
+    1.0
+}
+
+fn default_prep_coordinate_secondary_span_m() -> f64 {
+    0.0
+}
+
+fn default_prep_coordinate_active_dimension_count() -> usize {
+    1
+}
+
+fn default_prep_coordinate_characteristic_length_m() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalysisValidateResult {
     pub valid: bool,
@@ -51,6 +67,16 @@ pub struct AnalysisRunPrepContext {
     pub topology_quad_family_ratio: f64,
     pub topology_tet_family_ratio: f64,
     pub topology_hex_family_ratio: f64,
+    #[serde(default = "default_prep_coordinate_span_m")]
+    pub coordinate_span_x_m: f64,
+    #[serde(default = "default_prep_coordinate_secondary_span_m")]
+    pub coordinate_span_y_m: f64,
+    #[serde(default = "default_prep_coordinate_secondary_span_m")]
+    pub coordinate_span_z_m: f64,
+    #[serde(default = "default_prep_coordinate_active_dimension_count")]
+    pub coordinate_active_dimension_count: usize,
+    #[serde(default = "default_prep_coordinate_characteristic_length_m")]
+    pub coordinate_characteristic_length_m: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

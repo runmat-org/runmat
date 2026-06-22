@@ -112,11 +112,12 @@ pub struct PrepGraphAssemblySummary {
     pub graph_fingerprint: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct PrepRecoveryEdgeSummary {
     pub from_dof: usize,
     pub to_dof: usize,
     pub element_family_index: usize,
+    pub edge_length_m: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -990,6 +991,7 @@ fn apply_prep_element_connectivity_scatter(
             from_dof: *left,
             to_dof: *right,
             element_family_index: *family_index,
+            edge_length_m: prep_recovery_edge_length_m(prep, (*left).abs_diff(*right)),
         })
         .collect::<Vec<_>>();
     let (degree_min, degree_max, degree_mean, degree_p95, component_count) =
@@ -1123,6 +1125,16 @@ fn apply_prep_element_connectivity_scatter(
     };
 
     (connectivity_summary, graph_summary, recovery_edges)
+}
+
+fn prep_recovery_edge_length_m(prep: FeaPrepContext, hop: usize) -> f64 {
+    let characteristic = prep.coordinate_characteristic_length_m;
+    let length = characteristic * hop.max(1) as f64;
+    if length.is_finite() && length > 0.0 {
+        length
+    } else {
+        hop.max(1) as f64
+    }
 }
 
 fn apply_prep_calibration(

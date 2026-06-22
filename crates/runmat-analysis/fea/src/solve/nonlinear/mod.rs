@@ -457,12 +457,13 @@ pub fn solve_nonlinear_system(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis={} element_count={} active_recovery_edge_count={} prep_recovery_edge_count={} constrained_recovery_edge_count={}",
+            "basis={} element_count={} active_recovery_edge_count={} prep_recovery_edge_count={} constrained_recovery_edge_count={} mean_edge_length_m={}",
             recovery_topology.basis,
             recovery_topology.element_count,
             recovery_topology.active_recovery_edge_count,
             recovery_topology.prep_recovery_edge_count,
             recovery_topology.constrained_recovery_edge_count,
+            recovery_topology.mean_edge_length_m(),
         ),
     });
     diagnostics.push(FeaDiagnostic {
@@ -737,12 +738,26 @@ struct NonlinearRecoveryTopology {
     edges: Vec<NonlinearRecoveryEdge>,
 }
 
+impl NonlinearRecoveryTopology {
+    fn mean_edge_length_m(&self) -> f64 {
+        if self.edges.is_empty() {
+            return 0.0;
+        }
+        self.edges
+            .iter()
+            .map(|edge| edge.edge_length_m)
+            .sum::<f64>()
+            / self.edges.len() as f64
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct NonlinearRecoveryEdge {
     from_dof: usize,
     to_dof: usize,
     component: usize,
     hop: usize,
+    edge_length_m: f64,
     shear_pair: (usize, usize),
 }
 
@@ -775,6 +790,7 @@ fn nonlinear_recovery_topology(summary: &AssemblySummary) -> NonlinearRecoveryTo
                 to_dof: next,
                 component: element_index % VECTOR_COMPONENT_COUNT,
                 hop: VECTOR_COMPONENT_COUNT,
+                edge_length_m: VECTOR_COMPONENT_COUNT as f64,
                 shear_pair: (
                     (element_index + 1) % VECTOR_COMPONENT_COUNT,
                     (element_index + 2) % VECTOR_COMPONENT_COUNT,
@@ -830,11 +846,23 @@ fn nonlinear_prep_recovery_edge(
         to_dof,
         component,
         hop: to_dof.abs_diff(from_dof).max(1),
+        edge_length_m: finite_positive_or(
+            edge.edge_length_m,
+            to_dof.abs_diff(from_dof).max(1) as f64,
+        ),
         shear_pair: (
             (component + 1) % VECTOR_COMPONENT_COUNT,
             (component + 2) % VECTOR_COMPONENT_COUNT,
         ),
     })
+}
+
+fn finite_positive_or(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        fallback
+    }
 }
 
 fn constrained_prep_recovery_edge_count(summary: &AssemblySummary) -> usize {
@@ -893,7 +921,8 @@ fn recover_increment_strain(
         let offset = element_index * TENSOR_COMPONENT_COUNT;
         let jump = padded.get(edge.to_dof).copied().unwrap_or(0.0)
             - padded.get(edge.from_dof).copied().unwrap_or(0.0);
-        strain[offset + edge.component] = jump / edge.hop.max(1) as f64;
+        strain[offset + edge.component] =
+            jump / finite_positive_or(edge.edge_length_m, edge.hop.max(1) as f64);
         strain[offset + 3] = 0.5 * (strain[offset] + strain[offset + edge.shear_pair.0]);
         strain[offset + 4] =
             0.5 * (strain[offset + edge.shear_pair.0] + strain[offset + edge.shear_pair.1]);

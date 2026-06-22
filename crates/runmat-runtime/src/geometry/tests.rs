@@ -890,6 +890,18 @@ fn prep_for_analysis_op_returns_versioned_deterministic_result() {
         "geometry-prep-for-analysis/v1"
     );
     assert!(!first.data.prep.prepared_meshes.is_empty());
+    let prepared_mesh = first
+        .data
+        .prep
+        .prepared_meshes
+        .first()
+        .expect("prepared mesh should be present");
+    assert!(prepared_mesh
+        .coordinate_span_m
+        .iter()
+        .any(|span| *span > 0.0));
+    assert!(prepared_mesh.coordinate_active_dimension_count >= 1);
+    assert!(prepared_mesh.coordinate_characteristic_length_m > 0.0);
     assert!(!first.data.prep.region_mappings.is_empty());
 }
 

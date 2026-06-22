@@ -11529,6 +11529,11 @@ fn to_fea_prep_context(
         topology_quad_family_ratio: prep.topology_quad_family_ratio,
         topology_tet_family_ratio: prep.topology_tet_family_ratio,
         topology_hex_family_ratio: prep.topology_hex_family_ratio,
+        coordinate_span_x_m: prep.coordinate_span_x_m,
+        coordinate_span_y_m: prep.coordinate_span_y_m,
+        coordinate_span_z_m: prep.coordinate_span_z_m,
+        coordinate_active_dimension_count: prep.coordinate_active_dimension_count,
+        coordinate_characteristic_length_m: prep.coordinate_characteristic_length_m,
         calibration_profile_override: calibration_profile.and_then(map_calibration_profile),
     })
 }
@@ -12803,6 +12808,50 @@ fn resolve_run_prep_context(
             / artifact.prep.region_mappings.len() as f64)
             .clamp(0.0, 1.0)
     };
+    let coordinate_span_x_m = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| mesh.coordinate_span_m[0])
+        .fold(0.0_f64, f64::max)
+        .max(1.0e-12);
+    let coordinate_span_y_m = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| mesh.coordinate_span_m[1])
+        .fold(0.0_f64, f64::max);
+    let coordinate_span_z_m = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| mesh.coordinate_span_m[2])
+        .fold(0.0_f64, f64::max);
+    let coordinate_active_dimension_count = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| mesh.coordinate_active_dimension_count as usize)
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let (coordinate_length_sum, coordinate_length_weight) = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .filter_map(|mesh| {
+            let length = mesh.coordinate_characteristic_length_m;
+            (length.is_finite() && length > 0.0)
+                .then_some((length, mesh.element_count.max(1) as f64))
+        })
+        .fold((0.0_f64, 0.0_f64), |(sum, weight_sum), (length, weight)| {
+            (sum + length * weight, weight_sum + weight)
+        });
+    let coordinate_characteristic_length_m = if coordinate_length_weight > 0.0 {
+        coordinate_length_sum / coordinate_length_weight
+    } else {
+        1.0
+    };
 
     Ok(Some(AnalysisRunPrepContext {
         prepared_mesh_count,
@@ -12858,6 +12907,11 @@ fn resolve_run_prep_context(
         topology_quad_family_ratio,
         topology_tet_family_ratio,
         topology_hex_family_ratio,
+        coordinate_span_x_m,
+        coordinate_span_y_m,
+        coordinate_span_z_m,
+        coordinate_active_dimension_count,
+        coordinate_characteristic_length_m,
     }))
 }
 

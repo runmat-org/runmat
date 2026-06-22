@@ -276,6 +276,22 @@ impl FeaRunResult {
     }
 }
 
+fn default_prep_coordinate_span_m() -> f64 {
+    1.0
+}
+
+fn default_prep_coordinate_secondary_span_m() -> f64 {
+    0.0
+}
+
+fn default_prep_coordinate_active_dimension_count() -> usize {
+    1
+}
+
+fn default_prep_coordinate_characteristic_length_m() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct FeaPrepContext {
     pub prepared_mesh_count: usize,
@@ -302,6 +318,16 @@ pub struct FeaPrepContext {
     pub topology_quad_family_ratio: f64,
     pub topology_tet_family_ratio: f64,
     pub topology_hex_family_ratio: f64,
+    #[serde(default = "default_prep_coordinate_span_m")]
+    pub coordinate_span_x_m: f64,
+    #[serde(default = "default_prep_coordinate_secondary_span_m")]
+    pub coordinate_span_y_m: f64,
+    #[serde(default = "default_prep_coordinate_secondary_span_m")]
+    pub coordinate_span_z_m: f64,
+    #[serde(default = "default_prep_coordinate_active_dimension_count")]
+    pub coordinate_active_dimension_count: usize,
+    #[serde(default = "default_prep_coordinate_characteristic_length_m")]
+    pub coordinate_characteristic_length_m: f64,
     pub calibration_profile_override: Option<FeaPrepCalibrationProfile>,
 }
 

@@ -97,6 +97,7 @@ pub struct StructuralFieldRecoveryMetrics {
     pub recovery_element_count: usize,
     pub max_edge_displacement_jump: f64,
     pub mean_edge_stiffness_ratio: f64,
+    pub mean_edge_length_m: f64,
     pub basis: &'static str,
 }
 
@@ -113,6 +114,7 @@ pub fn structural_field_recovery_metrics(
     let constrained_edge_count = constrained_recovery_edge_count(summary);
     let mut max_edge_displacement_jump = 0.0_f64;
     let mut stiffness_ratio_sum = 0.0_f64;
+    let mut edge_length_sum = 0.0_f64;
     for edge in &recovery_edges {
         let jump = displacement
             .get(edge.to_dof)
@@ -121,11 +123,18 @@ pub fn structural_field_recovery_metrics(
             .unwrap_or(0.0);
         max_edge_displacement_jump = max_edge_displacement_jump.max(jump);
         stiffness_ratio_sum += edge.stiffness_ratio;
+        edge_length_sum += edge.edge_length_m;
     }
-    let mean_edge_stiffness_ratio = if recovery_edges.is_empty() {
+    let recovery_edge_count = recovery_edges.len();
+    let mean_edge_stiffness_ratio = if recovery_edge_count == 0 {
         0.0
     } else {
-        stiffness_ratio_sum / recovery_edges.len() as f64
+        stiffness_ratio_sum / recovery_edge_count as f64
+    };
+    let mean_edge_length_m = if recovery_edge_count == 0 {
+        0.0
+    } else {
+        edge_length_sum / recovery_edge_count as f64
     };
 
     StructuralFieldRecoveryMetrics {
@@ -135,6 +144,7 @@ pub fn structural_field_recovery_metrics(
         recovery_element_count: active_stiffness_edge_count.max(1),
         max_edge_displacement_jump,
         mean_edge_stiffness_ratio,
+        mean_edge_length_m,
         basis: recovery_edges
             .first()
             .map(|edge| edge.basis.as_str())
@@ -165,6 +175,7 @@ struct StructuralRecoveryEdge {
     to_dof: usize,
     component: usize,
     hop: usize,
+    edge_length_m: f64,
     stiffness_ratio: f64,
     basis: StructuralRecoveryBasis,
 }
@@ -232,6 +243,7 @@ fn structural_recovery_edges(summary: &AssemblySummary) -> Vec<StructuralRecover
                 to_dof,
                 component: from_dof % VECTOR_COMPONENT_COUNT,
                 hop: 1,
+                edge_length_m: 1.0,
                 stiffness_ratio: (*stiffness / diag_scale).abs(),
                 basis: StructuralRecoveryBasis::OperatorConnectivity,
             })
@@ -297,9 +309,18 @@ fn prep_recovery_edge(
         to_dof,
         component: from_dof % VECTOR_COMPONENT_COUNT,
         hop,
+        edge_length_m: finite_positive_or(edge.edge_length_m, hop as f64),
         stiffness_ratio: family_scale / (hop as f64 * diag_scale.sqrt().max(1.0)),
         basis: StructuralRecoveryBasis::PrepElementConnectivity,
     })
+}
+
+fn finite_positive_or(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        fallback
+    }
 }
 
 fn constrained_recovery_edge_count(summary: &AssemblySummary) -> usize {
@@ -360,7 +381,7 @@ fn recover_strain(displacement: &[f64], recovery_edges: &[StructuralRecoveryEdge
         let jump = displacement.get(edge.to_dof).copied().unwrap_or(0.0)
             - displacement.get(edge.from_dof).copied().unwrap_or(0.0);
         strain[element_index * TENSOR_COMPONENT_COUNT + edge.component] =
-            jump / edge.hop.max(1) as f64;
+            jump / finite_positive_or(edge.edge_length_m, edge.hop.max(1) as f64);
     }
     strain
 }

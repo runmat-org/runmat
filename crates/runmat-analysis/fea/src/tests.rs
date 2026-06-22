@@ -232,6 +232,11 @@ fn prepared_structural_recovery_uses_prep_connectivity_edges() {
                 topology_quad_family_ratio: 0.3,
                 topology_tet_family_ratio: 0.3,
                 topology_hex_family_ratio: 0.2,
+                coordinate_span_x_m: 2.4,
+                coordinate_span_y_m: 0.6,
+                coordinate_span_z_m: 0.4,
+                coordinate_active_dimension_count: 3,
+                coordinate_characteristic_length_m: 0.2,
                 calibration_profile_override: None,
             }),
             ..LinearStaticSolveOptions::default()
@@ -243,6 +248,7 @@ fn prepared_structural_recovery_uses_prep_connectivity_edges() {
         diag.code == "FEA_STRUCTURAL_FIELD_RECOVERY"
             && diag.message.contains("basis=prep_element_connectivity")
             && diag.message.contains("prep_recovery_edge_count=")
+            && diag.message.contains("mean_edge_length_m=")
     }));
 }
 
@@ -961,6 +967,11 @@ fn nonlinear_prepared_state_recovery_uses_prep_connectivity_edges() {
                 topology_quad_family_ratio: 0.25,
                 topology_tet_family_ratio: 0.35,
                 topology_hex_family_ratio: 0.2,
+                coordinate_span_x_m: 3.0,
+                coordinate_span_y_m: 0.8,
+                coordinate_span_z_m: 0.5,
+                coordinate_active_dimension_count: 3,
+                coordinate_characteristic_length_m: 0.25,
                 calibration_profile_override: None,
             }),
             ..NonlinearSolveOptions::default()
@@ -976,6 +987,7 @@ fn nonlinear_prepared_state_recovery_uses_prep_connectivity_edges() {
         .expect("nonlinear state topology diagnostic should be present");
     assert!(topology.message.contains("basis=prep_element_connectivity"));
     assert!(topology.message.contains("prep_recovery_edge_count="));
+    assert!(topology.message.contains("mean_edge_length_m="));
 }
 
 #[test]

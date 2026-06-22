@@ -43,7 +43,19 @@ pub enum ElementFamilyHint {
     Mixed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+fn default_coordinate_span_m() -> [f64; 3] {
+    [1.0, 0.0, 0.0]
+}
+
+fn default_coordinate_active_dimension_count() -> u8 {
+    1
+}
+
+fn default_coordinate_characteristic_length_m() -> f64 {
+    1.0
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PreparedMeshDescriptor {
     pub prepared_mesh_id: String,
     pub source_mesh_id: String,
@@ -53,6 +65,12 @@ pub struct PreparedMeshDescriptor {
     pub connectivity_class: MeshConnectivityClass,
     pub element_family_hint: ElementFamilyHint,
     pub region_span_hint: u32,
+    #[serde(default = "default_coordinate_span_m")]
+    pub coordinate_span_m: [f64; 3],
+    #[serde(default = "default_coordinate_active_dimension_count")]
+    pub coordinate_active_dimension_count: u8,
+    #[serde(default = "default_coordinate_characteristic_length_m")]
+    pub coordinate_characteristic_length_m: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,6 +174,14 @@ pub fn prepare_geometry_for_analysis(
                 }
             }
         };
+        let coordinate_span_m = mesh_coordinate_span_m(geometry, &mesh.mesh_id);
+        let coordinate_active_dimension_count =
+            coordinate_active_dimension_count(coordinate_span_m);
+        let coordinate_characteristic_length_m = coordinate_characteristic_length_m(
+            coordinate_span_m,
+            coordinate_active_dimension_count,
+            node_count,
+        );
         let region_span_hint = (geometry.regions.len().max(1) as u32)
             .clamp(1, 64)
             .saturating_sub((prepared_meshes.len() as u32) % 2);
@@ -168,6 +194,9 @@ pub fn prepare_geometry_for_analysis(
             connectivity_class,
             element_family_hint,
             region_span_hint,
+            coordinate_span_m,
+            coordinate_active_dimension_count,
+            coordinate_characteristic_length_m,
         });
     }
 
@@ -281,6 +310,68 @@ pub fn prepare_geometry_for_analysis(
             source_geometry_revision: geometry.revision,
         },
     })
+}
+
+fn mesh_coordinate_span_m(geometry: &GeometryAsset, mesh_id: &str) -> [f64; 3] {
+    let Some(surface) = geometry
+        .surface_meshes
+        .iter()
+        .find(|surface| surface.mesh_id == mesh_id)
+    else {
+        return default_coordinate_span_m();
+    };
+    let Some(first) = surface.vertices.first().copied() else {
+        return default_coordinate_span_m();
+    };
+    let mut min = first;
+    let mut max = first;
+    for vertex in &surface.vertices {
+        for axis in 0..3 {
+            min[axis] = min[axis].min(vertex[axis]);
+            max[axis] = max[axis].max(vertex[axis]);
+        }
+    }
+    [
+        finite_positive_or_default(max[0] - min[0], 0.0),
+        finite_positive_or_default(max[1] - min[1], 0.0),
+        finite_positive_or_default(max[2] - min[2], 0.0),
+    ]
+}
+
+fn coordinate_active_dimension_count(span_m: [f64; 3]) -> u8 {
+    span_m
+        .iter()
+        .filter(|span| span.is_finite() && **span > 1.0e-12)
+        .count()
+        .max(1) as u8
+}
+
+fn coordinate_characteristic_length_m(
+    span_m: [f64; 3],
+    active_dimension_count: u8,
+    node_count: u64,
+) -> f64 {
+    let active_spans = span_m
+        .into_iter()
+        .filter(|span| span.is_finite() && *span > 1.0e-12)
+        .collect::<Vec<_>>();
+    if active_spans.is_empty() {
+        return default_coordinate_characteristic_length_m();
+    }
+    let domain_measure = active_spans.iter().product::<f64>();
+    let node_scale = (node_count.max(2) as f64).powf(1.0 / active_dimension_count.max(1) as f64);
+    finite_positive_or_default(
+        domain_measure.powf(1.0 / active_dimension_count as f64) / node_scale,
+        1.0,
+    )
+}
+
+fn finite_positive_or_default(value: f64, default: f64) -> f64 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        default
+    }
 }
 
 #[cfg(test)]
