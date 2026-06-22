@@ -615,10 +615,15 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis={} edge_dof_count={} element_count={} oriented_edge_count={} constrained_edge_count={} gauge_anchor_count={} prep_recovery_edge_count={} vector_basis_dimension_count={} reference_element_area_m2={} curl_curl_energy_scale={}",
+            "basis={} edge_dof_count={} element_count={} incidence_element_count={} incidence_orientation_count={} incidence_pair_count={} representable_incidence_pair_count={} incidence_operator_pair_coverage_ratio={} oriented_edge_count={} constrained_edge_count={} gauge_anchor_count={} prep_recovery_edge_count={} vector_basis_dimension_count={} reference_element_area_m2={} curl_curl_energy_scale={}",
             maxwell_topology.basis.as_str(),
             maxwell_topology.edge_count(),
             maxwell_topology.element_count(),
+            maxwell_topology.incidence_element_count(),
+            maxwell_topology.incidence_orientation_count(),
+            maxwell_topology.incidence_pair_count(),
+            maxwell_topology.representable_incidence_pair_count(),
+            maxwell_topology.incidence_operator_pair_coverage_ratio(),
             maxwell_topology.oriented_edge_count(),
             maxwell_topology.constrained_edge_count(),
             maxwell_topology.gauge_anchor_count(),
@@ -2169,6 +2174,7 @@ fn block_dot(a: &[f64], b: &[f64]) -> f64 {
 struct MaxwellEdgeTopology {
     basis: MaxwellEdgeTopologyBasis,
     edges: Vec<MaxwellEdge>,
+    elements: Vec<MaxwellElementIncidence>,
     gauge_anchor_nodes: Vec<usize>,
     prep_recovery_edge_count: usize,
     vector_basis_dimension_count: usize,
@@ -2240,6 +2246,11 @@ impl MaxwellEdgeTopology {
         Some(Self {
             basis: MaxwellEdgeTopologyBasis::PrepReferenceVectorElement,
             edges,
+            elements: vec![MaxwellElementIncidence {
+                edge_indices: vec![0, 1, 2],
+                orientations: vec![1.0, 1.0, 1.0],
+                area_m2: prep_coordinates.reference_element_area_m2,
+            }],
             gauge_anchor_nodes: gauge_anchor_nodes(constrained),
             prep_recovery_edge_count: summary.prep_recovery_edges.len(),
             vector_basis_dimension_count: 3,
@@ -2255,38 +2266,63 @@ impl MaxwellEdgeTopology {
     where
         I: IntoIterator<Item = PrepRecoveryEdgeSummary>,
     {
-        use std::collections::BTreeSet;
+        use std::collections::{BTreeMap, BTreeSet};
 
         let mut seen = BTreeSet::new();
-        let edges = prep_edges
-            .into_iter()
-            .filter_map(|edge| {
-                if edge.from_dof >= node_count || edge.to_dof >= node_count || node_count < 2 {
-                    return None;
+        let mut element_edge_indices = BTreeMap::<usize, Vec<usize>>::new();
+        let mut edge_records = Vec::new();
+        for edge in prep_edges {
+            if edge.from_dof >= node_count || edge.to_dof >= node_count || node_count < 2 {
+                continue;
+            }
+            let from_node = edge.from_dof;
+            let to_node = edge.to_dof;
+            if from_node == to_node {
+                continue;
+            }
+            let lo = from_node.min(to_node);
+            let hi = from_node.max(to_node);
+            if !seen.insert((lo, hi, edge.element_family_index)) {
+                continue;
+            }
+            let orientation = if edge.from_dof <= edge.to_dof {
+                1.0
+            } else {
+                -1.0
+            };
+            let edge_index = edge_records.len();
+            element_edge_indices
+                .entry(edge.element_family_index)
+                .or_default()
+                .push(edge_index);
+            edge_records.push(MaxwellEdge {
+                from_node: lo,
+                to_node: hi,
+                orientation,
+                length: finite_positive_or(edge.edge_length_m, hi.abs_diff(lo).max(1) as f64),
+                constrained: constrained.get(lo).copied().unwrap_or(false)
+                    || constrained.get(hi).copied().unwrap_or(false),
+            });
+        }
+        let edges = edge_records;
+        let elements = element_edge_indices
+            .into_values()
+            .filter(|edge_indices| !edge_indices.is_empty())
+            .map(|edge_indices| {
+                let orientations = edge_indices
+                    .iter()
+                    .map(|index| edges[*index].orientation)
+                    .collect::<Vec<_>>();
+                let mean_length = edge_indices
+                    .iter()
+                    .map(|index| edges[*index].length)
+                    .sum::<f64>()
+                    / edge_indices.len().max(1) as f64;
+                MaxwellElementIncidence {
+                    edge_indices,
+                    orientations,
+                    area_m2: mean_length.max(1.0e-12).powi(2),
                 }
-                let from_node = edge.from_dof;
-                let to_node = edge.to_dof;
-                if from_node == to_node {
-                    return None;
-                }
-                let lo = from_node.min(to_node);
-                let hi = from_node.max(to_node);
-                if !seen.insert((lo, hi, edge.element_family_index)) {
-                    return None;
-                }
-                let orientation = if edge.from_dof <= edge.to_dof {
-                    1.0
-                } else {
-                    -1.0
-                };
-                Some(MaxwellEdge {
-                    from_node: lo,
-                    to_node: hi,
-                    orientation,
-                    length: finite_positive_or(edge.edge_length_m, hi.abs_diff(lo).max(1) as f64),
-                    constrained: constrained.get(lo).copied().unwrap_or(false)
-                        || constrained.get(hi).copied().unwrap_or(false),
-                })
             })
             .collect::<Vec<_>>();
         if edges.is_empty() {
@@ -2296,6 +2332,7 @@ impl MaxwellEdgeTopology {
             basis: MaxwellEdgeTopologyBasis::PrepEdgeCurlConforming,
             prep_recovery_edge_count: edges.len(),
             edges,
+            elements,
             gauge_anchor_nodes: gauge_anchor_nodes(constrained),
             vector_basis_dimension_count: 1,
             reference_element_area_m2: 0.0,
@@ -2325,6 +2362,7 @@ impl MaxwellEdgeTopology {
         Self {
             basis: MaxwellEdgeTopologyBasis::LineEdgeCurlConforming,
             edges,
+            elements: Vec::new(),
             gauge_anchor_nodes: gauge_anchor_nodes(constrained),
             prep_recovery_edge_count: 0,
             vector_basis_dimension_count: 1,
@@ -2338,6 +2376,40 @@ impl MaxwellEdgeTopology {
 
     fn element_count(&self) -> usize {
         self.edges.len()
+    }
+
+    fn incidence_element_count(&self) -> usize {
+        self.elements.len()
+    }
+
+    fn incidence_orientation_count(&self) -> usize {
+        self.elements
+            .iter()
+            .map(|element| element.edge_indices.len().min(element.orientations.len()))
+            .sum()
+    }
+
+    fn incidence_pair_count(&self) -> usize {
+        self.elements
+            .iter()
+            .map(MaxwellElementIncidence::pair_count)
+            .sum()
+    }
+
+    fn representable_incidence_pair_count(&self) -> usize {
+        self.elements
+            .iter()
+            .map(|element| element.representable_pair_count())
+            .sum()
+    }
+
+    fn incidence_operator_pair_coverage_ratio(&self) -> f64 {
+        let pair_count = self.incidence_pair_count();
+        if pair_count == 0 {
+            0.0
+        } else {
+            self.representable_incidence_pair_count() as f64 / pair_count as f64
+        }
     }
 
     fn oriented_edge_count(&self) -> usize {
@@ -2400,16 +2472,35 @@ impl MaxwellEdgeTopology {
             damping_diag[index] = boundary_penalty;
         }
 
-        for index in 0..stiffness_upper.len() {
-            let left = &self.edges[index];
-            let right = &self.edges[index + 1];
-            let shared_node = left.from_node == right.from_node
-                || left.from_node == right.to_node
-                || left.to_node == right.from_node
-                || left.to_node == right.to_node;
-            let coupling_scale = if shared_node { 0.20 } else { 0.05 };
-            stiffness_upper[index] = coupling_scale
-                * harmonic_mean(stiffness_diag[index], stiffness_diag[index + 1]).max(1.0e-12);
+        if self.elements.is_empty() {
+            for index in 0..stiffness_upper.len() {
+                let left = &self.edges[index];
+                let right = &self.edges[index + 1];
+                let shared_node = left.from_node == right.from_node
+                    || left.from_node == right.to_node
+                    || left.to_node == right.from_node
+                    || left.to_node == right.to_node;
+                let coupling_scale = if shared_node { 0.20 } else { 0.05 };
+                stiffness_upper[index] = coupling_scale
+                    * harmonic_mean(stiffness_diag[index], stiffness_diag[index + 1]).max(1.0e-12);
+            }
+        } else {
+            for element in &self.elements {
+                for (left_index, right_index, orientation_product) in element.edge_pairs() {
+                    let coupling = 0.20
+                        * orientation_product.abs()
+                        * harmonic_mean(stiffness_diag[left_index], stiffness_diag[right_index])
+                            .max(1.0e-12);
+                    let lower = left_index.min(right_index);
+                    let upper = left_index.max(right_index);
+                    if upper == lower + 1 {
+                        stiffness_upper[lower] = stiffness_upper[lower].max(coupling);
+                    } else {
+                        stiffness_diag[lower] += 0.5 * coupling;
+                        stiffness_diag[upper] += 0.5 * coupling;
+                    }
+                }
+            }
         }
         for (index, coupling) in stiffness_upper.iter().copied().enumerate() {
             stiffness_diag[index] += coupling.abs();
@@ -2529,6 +2620,39 @@ impl MaxwellEdgeTopology {
         let edge_count = self.edge_count();
         if edge_count == 0 {
             return Vec::new();
+        }
+        if self
+            .elements
+            .iter()
+            .any(|element| element.edge_indices.len() >= 3)
+        {
+            let mut curl = vec![0.0_f64; edge_count];
+            let mut weights = vec![0.0_f64; edge_count];
+            for element in &self.elements {
+                if element.edge_indices.len() < 3 {
+                    continue;
+                }
+                let mut circulation = 0.0_f64;
+                for (edge_index, orientation) in
+                    element.edge_indices.iter().zip(element.orientations.iter())
+                {
+                    let edge = &self.edges[*edge_index];
+                    circulation += orientation
+                        * tangential.get(*edge_index).copied().unwrap_or(0.0)
+                        * edge.length.max(1.0e-12);
+                }
+                let element_curl = circulation / element.area_m2.max(1.0e-12);
+                for edge_index in &element.edge_indices {
+                    curl[*edge_index] += element_curl;
+                    weights[*edge_index] += 1.0;
+                }
+            }
+            for (value, weight) in curl.iter_mut().zip(weights.iter().copied()) {
+                if weight > 0.0 {
+                    *value /= weight;
+                }
+            }
+            return curl;
         }
         if edge_count == 1 {
             let length = self.edges[0].length.max(1.0e-12);
@@ -2764,6 +2888,48 @@ fn finite_positive_or(value: f64, fallback: f64) -> f64 {
         value
     } else {
         fallback
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct MaxwellElementIncidence {
+    edge_indices: Vec<usize>,
+    orientations: Vec<f64>,
+    area_m2: f64,
+}
+
+impl MaxwellElementIncidence {
+    fn pair_count(&self) -> usize {
+        match self.edge_indices.len() {
+            0 | 1 => 0,
+            2 => 1,
+            len => len,
+        }
+    }
+
+    fn edge_pairs(&self) -> Vec<(usize, usize, f64)> {
+        let len = self.edge_indices.len().min(self.orientations.len());
+        if len < 2 {
+            return Vec::new();
+        }
+        let pair_count = if len == 2 { 1 } else { len };
+        let mut pairs = Vec::with_capacity(pair_count);
+        for offset in 0..pair_count {
+            let next = if offset + 1 < len { offset + 1 } else { 0 };
+            pairs.push((
+                self.edge_indices[offset],
+                self.edge_indices[next],
+                self.orientations[offset] * self.orientations[next],
+            ));
+        }
+        pairs
+    }
+
+    fn representable_pair_count(&self) -> usize {
+        self.edge_pairs()
+            .into_iter()
+            .filter(|(left, right, _)| left.abs_diff(*right) == 1)
+            .count()
     }
 }
 
@@ -3296,6 +3462,11 @@ mod tests {
         assert_eq!(topology.edge_count(), 3);
         assert_eq!(topology.oriented_edge_count(), 3);
         assert_eq!(topology.vector_basis_dimension_count, 3);
+        assert_eq!(topology.incidence_element_count(), 1);
+        assert_eq!(topology.incidence_orientation_count(), 3);
+        assert_eq!(topology.incidence_pair_count(), 3);
+        assert_eq!(topology.representable_incidence_pair_count(), 2);
+        assert!((topology.incidence_operator_pair_coverage_ratio() - (2.0 / 3.0)).abs() < 1.0e-12);
         assert_eq!(
             topology.prep_recovery_edge_count,
             summary.prep_recovery_edges.len()

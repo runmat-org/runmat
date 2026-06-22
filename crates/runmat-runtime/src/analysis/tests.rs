@@ -4441,6 +4441,14 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
             && diag.message.contains("edge_dof_count=")
     }));
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_EM_MAXWELL_EDGE_TOPOLOGY"
+            && diag.message.contains("incidence_element_count=")
+            && diag.message.contains("incidence_orientation_count=")
+            && diag
+                .message
+                .contains("incidence_operator_pair_coverage_ratio=")
+    }));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_EM_FORMULATION"
             && diag
                 .message
