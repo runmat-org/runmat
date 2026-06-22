@@ -22,6 +22,7 @@ pub struct AssemblySummary {
     pub prep_recovery_edges: Vec<PrepRecoveryEdgeSummary>,
     pub prep_calibration: Option<PrepCalibrationSummary>,
     pub prep_acceptance: Option<PrepAcceptanceSummary>,
+    pub prep_coordinates: Option<PrepCoordinateSummary>,
     pub thermo_mechanical: Option<ThermoMechanicalAssemblySummary>,
     pub electro_thermal: Option<ElectroThermalAssemblySummary>,
     pub operator: OperatorSystem,
@@ -143,6 +144,13 @@ pub struct PrepAcceptanceSummary {
     pub bounded_connectivity_fill: bool,
     pub acceptance_score: f64,
     pub acceptance_fingerprint: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PrepCoordinateSummary {
+    pub span_m: [f64; 3],
+    pub active_dimension_count: usize,
+    pub characteristic_length_m: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -321,6 +329,7 @@ pub fn assemble_linear_system(
     let mut prep_recovery_edges = Vec::new();
     let mut prep_calibration = None;
     let mut prep_acceptance = None;
+    let mut prep_coordinates = None;
     let mut thermo_mechanical = None;
     let mut electro_thermal = None;
     let mut topology_stiffness_scale = 1.0;
@@ -434,6 +443,15 @@ pub fn assemble_linear_system(
         prep_load_bonus = prep
             .mapped_region_count
             .saturating_add(prep.inverted_element_count.min(8));
+        prep_coordinates = Some(PrepCoordinateSummary {
+            span_m: [
+                prep.coordinate_span_x_m,
+                prep.coordinate_span_y_m,
+                prep.coordinate_span_z_m,
+            ],
+            active_dimension_count: prep.coordinate_active_dimension_count.max(1),
+            characteristic_length_m: prep.coordinate_characteristic_length_m,
+        });
 
         prep_assembly = Some(PrepAssemblySummary {
             active_region_count: prep.mapped_region_count,
@@ -757,6 +775,7 @@ pub fn assemble_linear_system(
         prep_recovery_edges,
         prep_calibration,
         prep_acceptance,
+        prep_coordinates,
         thermo_mechanical,
         electro_thermal,
         operator: OperatorSystem {

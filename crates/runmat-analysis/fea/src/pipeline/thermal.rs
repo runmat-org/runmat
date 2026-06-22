@@ -437,7 +437,7 @@ pub fn run_thermal_with_options(
         code: "FEA_THERMAL_FIELD_RECOVERY".to_string(),
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
-            "recovery_node_count={} recovery_dimensions={}x{}x{} recovery_spacing_x={} recovery_spacing_y={} recovery_spacing_z={} boundary_face_count={}",
+            "recovery_node_count={} recovery_dimensions={}x{}x{} recovery_spacing_x={} recovery_spacing_y={} recovery_spacing_z={} coordinate_active_dimension_count={} coordinate_characteristic_length_m={} boundary_face_count={}",
             recovery_topology.node_count,
             recovery_topology.dims[0],
             recovery_topology.dims[1],
@@ -445,6 +445,8 @@ pub fn run_thermal_with_options(
             recovery_topology.spacing[0],
             recovery_topology.spacing[1],
             recovery_topology.spacing[2],
+            recovery_topology.active_dimension_count,
+            recovery_topology.characteristic_length_m,
             BOUNDARY_HEAT_FLUX_COMPONENT_COUNT,
         ),
     });
@@ -557,6 +559,8 @@ struct ThermalRecoveryTopology {
     node_count: usize,
     dims: [usize; VECTOR_COMPONENT_COUNT],
     spacing: [f64; VECTOR_COMPONENT_COUNT],
+    active_dimension_count: usize,
+    characteristic_length_m: f64,
 }
 
 impl ThermalRecoveryTopology {
@@ -587,17 +591,23 @@ impl ThermalRecoveryTopology {
             .div_ceil(y_dim.max(1).saturating_mul(z_dim.max(1)))
             .max(1);
         let dims = [x_dim, y_dim, z_dim];
-        let spacing = dims.map(|dim| {
-            if dim <= 1 {
-                1.0
-            } else {
-                1.0 / (dim - 1) as f64
-            }
-        });
+        let inferred_active_dimension_count = dims.iter().filter(|dim| **dim > 1).count().max(1);
+        let coordinate_summary = summary.prep_coordinates;
+        let active_dimension_count = coordinate_summary
+            .map(|item| item.active_dimension_count.max(1))
+            .unwrap_or(inferred_active_dimension_count);
+        let characteristic_length_m = coordinate_summary
+            .map(|item| finite_positive_or(item.characteristic_length_m, 1.0))
+            .unwrap_or(1.0);
+        let spacing = coordinate_summary
+            .map(|item| thermal_axis_spacing(dims, item.span_m, characteristic_length_m))
+            .unwrap_or_else(|| thermal_normalized_axis_spacing(dims));
         Self {
             node_count: node_count.max(1),
             dims,
             spacing,
+            active_dimension_count,
+            characteristic_length_m,
         }
     }
 
@@ -624,6 +634,43 @@ impl ThermalRecoveryTopology {
             + coords[1].saturating_mul(self.dims[0])
             + coords[2].saturating_mul(self.dims[0].saturating_mul(self.dims[1]));
         (index < self.node_count).then_some(index)
+    }
+}
+
+fn thermal_normalized_axis_spacing(
+    dims: [usize; VECTOR_COMPONENT_COUNT],
+) -> [f64; VECTOR_COMPONENT_COUNT] {
+    dims.map(|dim| {
+        if dim <= 1 {
+            1.0
+        } else {
+            1.0 / (dim - 1) as f64
+        }
+    })
+}
+
+fn thermal_axis_spacing(
+    dims: [usize; VECTOR_COMPONENT_COUNT],
+    span_m: [f64; VECTOR_COMPONENT_COUNT],
+    characteristic_length_m: f64,
+) -> [f64; VECTOR_COMPONENT_COUNT] {
+    let fallback = finite_positive_or(characteristic_length_m, 1.0);
+    let mut spacing = [fallback; VECTOR_COMPONENT_COUNT];
+    for axis in 0..VECTOR_COMPONENT_COUNT {
+        spacing[axis] = if dims[axis] <= 1 {
+            finite_positive_or(span_m[axis], fallback)
+        } else {
+            finite_positive_or(span_m[axis] / (dims[axis] - 1) as f64, fallback)
+        };
+    }
+    spacing
+}
+
+fn finite_positive_or(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        fallback
     }
 }
 
