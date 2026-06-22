@@ -179,8 +179,13 @@ fn collect_handle_fieldnames(handle: &HandleRef) -> BuiltinResult<Vec<String>> {
     let mut names = class_instance_property_names(&handle.class_name);
 
     if runmat_builtins::is_handle_valid(handle) {
-        let target = unsafe { &*handle.target.as_raw() };
-        match target {
+        let target = runmat_gc::gc_clone_value(&handle.target).map_err(|e| {
+            fieldnames_error_with_message(
+                format!("fieldnames: invalid handle target: {e}"),
+                &FIELDNAMES_ERROR_INVALID_TARGET,
+            )
+        })?;
+        match &target {
             Value::Struct(st) => {
                 names.extend(collect_struct_fieldnames(st));
             }
@@ -488,9 +493,7 @@ pub(crate) mod tests {
         payload
             .fields
             .insert("Status".to_string(), Value::from("ready"));
-        let target = unsafe {
-            runmat_gc_api::GcPtr::from_raw(Box::into_raw(Box::new(Value::Struct(payload))))
-        };
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate target");
 
         let handle = HandleRef {
             class_name: class_name.to_string(),
@@ -557,9 +560,7 @@ pub(crate) mod tests {
         payload
             .fields
             .insert("Status".to_string(), Value::from("ready"));
-        let target = unsafe {
-            runmat_gc_api::GcPtr::from_raw(Box::into_raw(Box::new(Value::Struct(payload))))
-        };
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate target");
 
         let handle = HandleRef {
             class_name: child_name.to_string(),

@@ -192,10 +192,12 @@ fn for_each_gpu_handle_in_value_with_visited(
             Ok(())
         }
         Value::HandleObject(handle) => {
-            let raw_target = unsafe { handle.target.as_raw() } as usize;
+            let raw_target = runmat_gc::gc_ptr_addr(&handle.target);
             if visited_handle_targets.insert(raw_target) {
-                let target = unsafe { &*handle.target.as_raw() };
-                for_each_gpu_handle_in_value_with_visited(target, f, visited_handle_targets)?;
+                runmat_gc::gc_with_value(&handle.target, |target| {
+                    for_each_gpu_handle_in_value_with_visited(target, f, visited_handle_targets)
+                })
+                .map_err(|e| RuntimeError::new(format!("invalid handle target: {e}")))??;
             }
             Ok(())
         }
@@ -514,14 +516,15 @@ fn collect_spawn_task_ids_in_value_with_visited(
             }
         }
         Value::HandleObject(handle) => {
-            let raw_target = unsafe { handle.target.as_raw() } as usize;
+            let raw_target = runmat_gc::gc_ptr_addr(&handle.target);
             if visited_handle_targets.insert(raw_target) {
-                let target = unsafe { &*handle.target.as_raw() };
-                collect_spawn_task_ids_in_value_with_visited(
-                    target,
-                    output,
-                    visited_handle_targets,
-                );
+                let _ = runmat_gc::gc_with_value(&handle.target, |target| {
+                    collect_spawn_task_ids_in_value_with_visited(
+                        target,
+                        output,
+                        visited_handle_targets,
+                    );
+                });
             }
         }
         Value::Int(_)
@@ -577,12 +580,14 @@ fn value_contains_spawn_task_id_with_visited(
             value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
         }),
         Value::HandleObject(handle) => {
-            let raw_target = unsafe { handle.target.as_raw() } as usize;
+            let raw_target = runmat_gc::gc_ptr_addr(&handle.target);
             if !visited_handle_targets.insert(raw_target) {
                 return false;
             }
-            let target = unsafe { &*handle.target.as_raw() };
-            value_contains_spawn_task_id_with_visited(target, task_id, visited_handle_targets)
+            runmat_gc::gc_with_value(&handle.target, |target| {
+                value_contains_spawn_task_id_with_visited(target, task_id, visited_handle_targets)
+            })
+            .unwrap_or(false)
         }
         Value::Int(_)
         | Value::Num(_)

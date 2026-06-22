@@ -116,11 +116,12 @@ pub(crate) fn object_receiver_class_name(receiver: &Value) -> Option<String> {
     match receiver {
         Value::Object(obj) => Some(obj.class_name.clone()),
         Value::HandleObject(handle) => {
-            let target = unsafe { &*handle.target.as_raw() };
-            Some(match target {
+            let class_name = runmat_gc::gc_with_value(&handle.target, |target| match target {
                 Value::Object(obj) => obj.class_name.clone(),
                 _ => handle.class_name.clone(),
             })
+            .unwrap_or_else(|_| handle.class_name.clone());
+            Some(class_name)
         }
         _ => None,
     }
@@ -511,7 +512,7 @@ pub(crate) async fn addlistener_builtin(
     callback: Value,
 ) -> crate::BuiltinResult<Value> {
     let key_ptr: usize = match &target {
-        Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
+        Value::HandleObject(h) => runmat_gc::gc_ptr_addr(&h.target),
         Value::Object(o) => o as *const _ as usize,
         _ => {
             return Err(
@@ -561,7 +562,7 @@ pub(crate) async fn notify_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     let key_ptr: usize = match &target {
-        Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
+        Value::HandleObject(h) => runmat_gc::gc_ptr_addr(&h.target),
         Value::Object(o) => o as *const _ as usize,
         _ => {
             return Err(
@@ -588,7 +589,12 @@ pub(crate) async fn notify_builtin(
         let mut args = Vec::new();
         args.push(target.clone());
         args.extend(rest.iter().cloned());
-        let cbv: Value = unsafe { &*l.callback.as_raw() }.clone();
+        let cbv: Value = runmat_gc::gc_clone_value(&l.callback).map_err(|e| {
+            build_runtime_error(format!("notify: invalid listener callback handle: {e}"))
+                .with_builtin("notify")
+                .with_identifier("RunMat:NotifyInvalidCallback")
+                .build()
+        })?;
         let should_dispatch = match &cbv {
             Value::String(s) => !s.trim().is_empty(),
             Value::StringArray(sa) => sa.data.len() == 1 && !sa.data[0].trim().is_empty(),
@@ -756,12 +762,11 @@ pub async fn call_super_constructor(
                 }
             }
             Value::HandleObject(parent_handle) => {
-                let raw_parent = unsafe { parent_handle.target.as_raw() };
-                if !raw_parent.is_null() {
-                    if let Value::Object(parent_obj) = unsafe { (&*raw_parent).clone() } {
-                        for (name, value) in parent_obj.properties {
-                            receiver_obj.properties.insert(name, value);
-                        }
+                if let Ok(Value::Object(parent_obj)) =
+                    runmat_gc::gc_clone_value(&parent_handle.target)
+                {
+                    for (name, value) in parent_obj.properties {
+                        receiver_obj.properties.insert(name, value);
                     }
                 }
             }
@@ -779,15 +784,11 @@ pub async fn call_super_constructor(
             Ok(Value::Object(receiver_obj))
         }
         Value::HandleObject(handle) => {
-            let raw = unsafe { handle.target.as_raw_mut() };
-            if !raw.is_null() {
-                if let Value::Object(mut receiver_obj) = unsafe { (&*raw).clone() } {
-                    merge_parent_props_into_object(&mut receiver_obj, ctor_result);
-                    unsafe {
-                        *raw = Value::Object(receiver_obj);
-                    }
+            let _ = runmat_gc::gc_with_value_mut(&handle.target, |target| {
+                if let Value::Object(receiver_obj) = target {
+                    merge_parent_props_into_object(receiver_obj, ctor_result);
                 }
-            }
+            });
             Ok(Value::HandleObject(handle))
         }
         _ => Ok(receiver),
@@ -2856,8 +2857,9 @@ mod tests {
         let Value::Listener(listener) = listener else {
             panic!("expected listener value");
         };
+        let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
         assert!(matches!(
-            unsafe { &*listener.callback.as_raw() },
+            &callback,
             Value::BoundFunctionHandle { name, function }
                 if name == "event_callback" && *function == 61
         ));
@@ -2880,8 +2882,9 @@ mod tests {
         let Value::Listener(listener) = listener else {
             panic!("expected listener value");
         };
+        let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
         assert!(matches!(
-            unsafe { &*listener.callback.as_raw() },
+            &callback,
             Value::BoundFunctionHandle { name, function }
                 if name == "pkg.event_callback" && *function == 62
         ));
@@ -2904,8 +2907,9 @@ mod tests {
         let Value::Listener(listener) = listener else {
             panic!("expected listener value");
         };
+        let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
         assert!(matches!(
-            unsafe { &*listener.callback.as_raw() },
+            &callback,
             Value::BoundFunctionHandle { name, function }
                 if name == "event_callback" && *function == 63
         ));
@@ -2928,8 +2932,9 @@ mod tests {
         let Value::Listener(listener) = listener else {
             panic!("expected listener value");
         };
+        let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
         assert!(matches!(
-            unsafe { &*listener.callback.as_raw() },
+            &callback,
             Value::BoundFunctionHandle { name, function }
                 if name == "event_callback" && *function == 64
         ));
@@ -2955,8 +2960,9 @@ mod tests {
         let Value::Listener(listener) = listener else {
             panic!("expected listener value");
         };
+        let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
         assert!(matches!(
-            unsafe { &*listener.callback.as_raw() },
+            &callback,
             Value::BoundFunctionHandle { name, function }
                 if name == "event_callback" && *function == 66
         ));
@@ -2980,8 +2986,9 @@ mod tests {
         let Value::Listener(listener) = listener else {
             panic!("expected listener value");
         };
+        let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
         assert!(matches!(
-            unsafe { &*listener.callback.as_raw() },
+            &callback,
             Value::Closure(runmat_builtins::Closure {
                 function_name,
                 bound_function: Some(65),

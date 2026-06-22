@@ -628,25 +628,33 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
             acc.saturating_add(value_memory_bytes(v, seen))
         }),
         Value::HandleObject(handle) => {
-            let ptr = unsafe { handle.target.as_raw() } as usize;
+            let ptr = runmat_gc::gc_ptr_addr(&handle.target);
             if seen.insert(ptr) {
-                let inner = unsafe { &*handle.target.as_raw() };
-                value_memory_bytes(inner, seen)
+                runmat_gc::gc_with_value(&handle.target, |inner| value_memory_bytes(inner, seen))
+                    .unwrap_or(0)
             } else {
                 0
             }
         }
         Value::Listener(listener) => {
             let mut total = 0usize;
-            let target_ptr = unsafe { listener.target.as_raw() } as usize;
+            let target_ptr = runmat_gc::gc_ptr_addr(&listener.target);
             if seen.insert(target_ptr) {
-                let value = unsafe { &*listener.target.as_raw() };
-                total = total.saturating_add(value_memory_bytes(value, seen));
+                total = total.saturating_add(
+                    runmat_gc::gc_with_value(&listener.target, |value| {
+                        value_memory_bytes(value, seen)
+                    })
+                    .unwrap_or(0),
+                );
             }
-            let callback_ptr = unsafe { listener.callback.as_raw() } as usize;
+            let callback_ptr = runmat_gc::gc_ptr_addr(&listener.callback);
             if seen.insert(callback_ptr) {
-                let value = unsafe { &*listener.callback.as_raw() };
-                total = total.saturating_add(value_memory_bytes(value, seen));
+                total = total.saturating_add(
+                    runmat_gc::gc_with_value(&listener.callback, |value| {
+                        value_memory_bytes(value, seen)
+                    })
+                    .unwrap_or(0),
+                );
             }
             total
         }

@@ -84,7 +84,7 @@ impl TurbineValue {
                 Ok(Self {
                     tag: TurbineValueTag::GcHandle,
                     reserved: 0,
-                    payload: unsafe { ptr.as_raw() as u64 },
+                    payload: runmat_gc::gc_ptr_addr(&ptr) as u64,
                 })
             }
         }
@@ -102,7 +102,8 @@ impl TurbineValue {
                 }
                 let ptr =
                     unsafe { runmat_gc::GcPtr::<Value>::from_raw(self.payload as *const Value) };
-                Ok(unsafe { (&*ptr.as_raw()).clone() })
+                runmat_gc::gc_clone_value(&ptr)
+                    .map_err(|err| crate::execution_error(err.to_string()))
             }
         }
     }

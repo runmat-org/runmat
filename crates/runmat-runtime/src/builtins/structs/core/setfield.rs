@@ -1044,15 +1044,11 @@ async fn assign_into_handle(
             handle.class_name
         )));
     }
-    let current = unsafe { &*handle.target.as_raw() }.clone();
+    let current = runmat_gc::gc_clone_value(&handle.target)
+        .map_err(|e| setfield_flow(format!("setfield: invalid handle target: {e}")))?;
     let updated = assign_into_value(current, steps, rhs).await?;
-    let raw = unsafe { handle.target.as_raw_mut() };
-    if raw.is_null() {
-        return Err(setfield_flow("setfield: handle target is null"));
-    }
-    unsafe {
-        *raw = updated;
-    }
+    runmat_gc::gc_with_value_mut(&handle.target, |target| *target = updated)
+        .map_err(|e| setfield_flow(format!("setfield: invalid handle target: {e}")))?;
     Ok(Value::HandleObject(handle))
 }
 
@@ -1769,7 +1765,7 @@ pub(crate) mod tests {
             other => panic!("expected handle, got {other:?}"),
         }
 
-        let pointee = unsafe { &*gc_ptr.as_raw() };
+        let pointee = runmat_gc::gc_clone_value(&gc_ptr).expect("valid handle target");
         match pointee {
             Value::Struct(st) => {
                 assert_eq!(st.fields.get("x"), Some(&Value::Num(7.0)));

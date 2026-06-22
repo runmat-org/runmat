@@ -503,18 +503,13 @@ fn normalize_constructor_result(
                 Ok(Value::Object(object))
             }
             Value::HandleObject(handle) => {
-                let raw = unsafe { handle.target.as_raw_mut() };
-                if raw.is_null() {
-                    return Ok(Value::HandleObject(handle));
-                }
-                if let Value::Object(mut object) = unsafe { (&*raw).clone() } {
-                    for (field, value) in struct_value.fields {
-                        object.properties.insert(field, value);
+                let _ = runmat_gc::gc_with_value_mut(&handle.target, |target| {
+                    if let Value::Object(object) = target {
+                        for (field, value) in struct_value.fields {
+                            object.properties.insert(field, value);
+                        }
                     }
-                    unsafe {
-                        *raw = Value::Object(object);
-                    }
-                }
+                });
                 Ok(Value::HandleObject(handle))
             }
             _ => Ok(Value::Struct(struct_value)),

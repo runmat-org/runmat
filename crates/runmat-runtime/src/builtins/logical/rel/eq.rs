@@ -273,8 +273,8 @@ fn eq_identity(lhs: &Value, rhs: &Value) -> Option<Value> {
 
 fn handle_ptr(value: &Value) -> Option<usize> {
     match value {
-        Value::HandleObject(handle) => Some(unsafe { handle.target.as_raw() } as usize),
-        Value::Listener(listener) => Some(unsafe { listener.target.as_raw() } as usize),
+        Value::HandleObject(handle) => Some(runmat_gc::gc_ptr_addr(&handle.target)),
+        Value::Listener(listener) => Some(runmat_gc::gc_ptr_addr(&listener.target)),
         _ => None,
     }
 }

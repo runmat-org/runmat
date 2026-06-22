@@ -92,14 +92,15 @@ fn clear_handles_in_value_excluding_with_visited(
             }
         }
         Value::HandleObject(handle) => {
-            let raw_target = unsafe { handle.target.as_raw() } as usize;
+            let raw_target = runmat_gc::gc_ptr_addr(&handle.target);
             if visited_handle_targets.insert(raw_target) {
-                let target = unsafe { &*handle.target.as_raw() };
-                clear_handles_in_value_excluding_with_visited(
-                    target,
-                    keep_ids,
-                    visited_handle_targets,
-                );
+                let _ = runmat_gc::gc_with_value(&handle.target, |target| {
+                    clear_handles_in_value_excluding_with_visited(
+                        target,
+                        keep_ids,
+                        visited_handle_targets,
+                    );
+                });
             }
         }
         Value::Int(_)
@@ -166,10 +167,11 @@ fn collect_gpu_buffer_ids_with_visited(
             }
         }
         Value::HandleObject(handle) => {
-            let raw_target = unsafe { handle.target.as_raw() } as usize;
+            let raw_target = runmat_gc::gc_ptr_addr(&handle.target);
             if visited_handle_targets.insert(raw_target) {
-                let target = unsafe { &*handle.target.as_raw() };
-                collect_gpu_buffer_ids_with_visited(target, output, visited_handle_targets);
+                let _ = runmat_gc::gc_with_value(&handle.target, |target| {
+                    collect_gpu_buffer_ids_with_visited(target, output, visited_handle_targets);
+                });
             }
         }
         Value::Int(_)

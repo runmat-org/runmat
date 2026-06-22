@@ -191,7 +191,54 @@ impl GarbageCollector {
         Ok(ptr)
     }
 
-    // get_value by handle removed in favor of direct GcPtr usage
+    fn non_null_value_ptr(ptr: &GcPtr<Value>) -> Result<*const Value> {
+        let raw = unsafe { ptr.as_raw() };
+        if raw.is_null() {
+            return Err(GcError::InvalidPointer("null GC value handle".to_string()));
+        }
+        Ok(raw)
+    }
+
+    fn validate_value_ptr(&self, raw: *const Value) -> Result<()> {
+        let allocator = self.allocator.lock();
+        if allocator.find_generation(raw.cast::<u8>()).is_none() {
+            return Err(GcError::InvalidPointer(format!(
+                "GC value handle {:p} is not owned by the RunMat GC heap",
+                raw
+            )));
+        }
+        Ok(())
+    }
+
+    /// Access a GC-managed value after validating that the pointer belongs to the GC heap.
+    ///
+    /// This is an audited raw-pointer bridge for legacy `GcPtr<Value>` call sites. It is not the
+    /// final pinned-borrow API: callers must not allocate or trigger collection while using the
+    /// borrowed value.
+    pub fn with_value<R>(&self, ptr: &GcPtr<Value>, f: impl FnOnce(&Value) -> R) -> Result<R> {
+        let raw = Self::non_null_value_ptr(ptr)?;
+        self.validate_value_ptr(raw)?;
+        Ok(f(unsafe { &*raw }))
+    }
+
+    /// Mutably access a GC-managed value after validating that the pointer belongs to the GC heap.
+    ///
+    /// This is an audited raw-pointer bridge for legacy `GcPtr<Value>` call sites. It does not yet
+    /// enforce alias exclusivity beyond the existing same-thread runtime discipline.
+    pub fn with_value_mut<R>(
+        &self,
+        ptr: &GcPtr<Value>,
+        f: impl FnOnce(&mut Value) -> R,
+    ) -> Result<R> {
+        let raw = Self::non_null_value_ptr(ptr)? as *mut Value;
+        self.validate_value_ptr(raw)?;
+        Ok(f(unsafe { &mut *raw }))
+    }
+
+    /// Clone a GC-managed value through the guarded access path.
+    pub fn clone_value(&self, ptr: &GcPtr<Value>) -> Result<Value> {
+        self.with_value(ptr, Clone::clone)
+    }
 
     /// Check if collection should be triggered
     fn should_collect(&self) -> bool {
@@ -375,7 +422,7 @@ static WRITE_BARRIERS: once_cell::sync::Lazy<Arc<WriteBarrierManager>> =
 
 /// Helper function to clone a GC value through an explicitly raw pointer access.
 pub fn gc_deref(ptr: &GcPtr<Value>) -> Value {
-    unsafe { (&*ptr.as_raw()).clone() }
+    gc_clone_value(ptr).expect("valid GC pointer")
 }
 
 /// Global GC functions for easy access
@@ -398,6 +445,22 @@ pub fn gc_add_root(root: GcPtr<Value>) -> Result<()> {
 
 pub fn gc_remove_root(root: GcPtr<Value>) -> Result<()> {
     GC.remove_root(root)
+}
+
+pub fn gc_with_value<R>(ptr: &GcPtr<Value>, f: impl FnOnce(&Value) -> R) -> Result<R> {
+    GC.with_value(ptr, f)
+}
+
+pub fn gc_with_value_mut<R>(ptr: &GcPtr<Value>, f: impl FnOnce(&mut Value) -> R) -> Result<R> {
+    GC.with_value_mut(ptr, f)
+}
+
+pub fn gc_clone_value(ptr: &GcPtr<Value>) -> Result<Value> {
+    GC.clone_value(ptr)
+}
+
+pub fn gc_ptr_addr(ptr: &GcPtr<Value>) -> usize {
+    (unsafe { ptr.as_raw() }) as usize
 }
 
 pub fn gc_stats() -> GcStats {
@@ -591,6 +654,21 @@ mod tests {
             assert_eq!(gc_deref(&v), Value::Num(7.0));
 
             gc_remove_root(v).expect("root remove failed");
+        });
+    }
+
+    #[test]
+    fn guarded_access_rejects_non_gc_pointer() {
+        gc_test_context(|| {
+            let raw = Box::into_raw(Box::new(Value::Num(1.0)));
+            let ptr = unsafe { GcPtr::from_raw(raw) };
+
+            let err = gc_clone_value(&ptr).expect_err("non-GC pointer should be rejected");
+            assert!(matches!(err, GcError::InvalidPointer(_)));
+
+            unsafe {
+                drop(Box::from_raw(raw));
+            }
         });
     }
 }

@@ -38,9 +38,13 @@ impl JitMemoryManager {
         {
             let pool = self.string_pool.read().unwrap();
             if let Some(gc_ptr) = pool.get(s) {
-                let value_ptr = unsafe { gc_ptr.as_raw() };
-                if let Value::String(ref stored_str) = unsafe { &*value_ptr } {
-                    return Ok((stored_str.as_ptr(), stored_str.len()));
+                if let Some(result) = runmat_gc::gc_with_value(gc_ptr, |value| match value {
+                    Value::String(stored_str) => Some((stored_str.as_ptr(), stored_str.len())),
+                    _ => None,
+                })
+                .map_err(|e| format!("Invalid string pool GC handle: {e}"))?
+                {
+                    return Ok(result);
                 }
             }
         }
@@ -57,10 +61,14 @@ impl JitMemoryManager {
         }
 
         // Return pointer and length
-        let value_ptr = unsafe { gc_ptr.as_raw() };
-        if let Value::String(ref stored_str) = unsafe { &*value_ptr } {
+        if let Some(result) = runmat_gc::gc_with_value(&gc_ptr, |value| match value {
+            Value::String(stored_str) => Some((stored_str.as_ptr(), stored_str.len())),
+            _ => None,
+        })
+        .map_err(|e| format!("Invalid allocated string GC handle: {e}"))?
+        {
             self.allocated_strings.fetch_add(1, Ordering::Relaxed);
-            Ok((stored_str.as_ptr(), stored_str.len()))
+            Ok(result)
         } else {
             Err("Allocated value is not a string".to_string())
         }

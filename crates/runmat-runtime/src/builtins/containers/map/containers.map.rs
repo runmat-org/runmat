@@ -1240,7 +1240,12 @@ fn ensure_handle(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<()>
 }
 
 fn map_id(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<u64> {
-    let storage = unsafe { &*handle.target.as_raw() };
+    let storage = runmat_gc::gc_clone_value(&handle.target).map_err(|e| {
+        map_internal(
+            format!("containers.Map: invalid handle storage: {e}"),
+            builtin,
+        )
+    })?;
     match storage {
         Value::Struct(StructValue { fields }) => match fields.get("id") {
             Some(Value::Int(IntValue::U64(id))) => Ok(*id),

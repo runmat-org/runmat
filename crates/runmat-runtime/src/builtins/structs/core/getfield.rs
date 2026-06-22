@@ -1042,7 +1042,12 @@ async fn get_handle_field(handle: &HandleRef, name: &str) -> BuiltinResult<Value
             &GETFIELD_ERROR_INVALID_HANDLE,
         ));
     }
-    let target = unsafe { &*handle.target.as_raw() }.clone();
+    let target = runmat_gc::gc_clone_value(&handle.target).map_err(|e| {
+        getfield_error_with_message(
+            format!("getfield: invalid handle target: {e}"),
+            &GETFIELD_ERROR_INVALID_HANDLE,
+        )
+    })?;
     get_field_value(target, name).await
 }
 
@@ -1052,11 +1057,21 @@ fn get_listener_field(listener: &Listener, name: &str) -> BuiltinResult<Value> {
         "Valid" | "valid" => Ok(Value::Bool(listener.valid)),
         "EventName" | "event_name" => Ok(Value::String(listener.event_name.clone())),
         "Callback" | "callback" => {
-            let value = unsafe { &*listener.callback.as_raw() }.clone();
+            let value = runmat_gc::gc_clone_value(&listener.callback).map_err(|e| {
+                getfield_error_with_message(
+                    format!("getfield: invalid listener callback: {e}"),
+                    &GETFIELD_ERROR_INVALID_HANDLE,
+                )
+            })?;
             Ok(value)
         }
         "Target" | "target" => {
-            let value = unsafe { &*listener.target.as_raw() }.clone();
+            let value = runmat_gc::gc_clone_value(&listener.target).map_err(|e| {
+                getfield_error_with_message(
+                    format!("getfield: invalid listener target: {e}"),
+                    &GETFIELD_ERROR_INVALID_HANDLE,
+                )
+            })?;
             Ok(value)
         }
         "Id" | "id" => Ok(Value::Int(runmat_builtins::IntValue::U64(listener.id))),
@@ -1105,7 +1120,6 @@ pub(crate) mod tests {
         Access, CellArray, CharArray, ClassDef, ComplexTensor, HandleRef, IntValue, Listener,
         MException, ObjectInstance, PropertyDef, StructValue,
     };
-    use runmat_gc_api::GcPtr;
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
@@ -1385,7 +1399,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_invalid_handle_errors() {
-        let target = unsafe { GcPtr::from_raw(Box::into_raw(Box::new(Value::Num(1.0)))) };
+        let target = runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc allocate target");
         let handle = HandleRef {
             class_name: "Demo".to_string(),
             target,
@@ -1400,12 +1414,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_listener_fields_resolved() {
-        let target = unsafe { GcPtr::from_raw(Box::into_raw(Box::new(Value::Num(7.0)))) };
-        let callback = unsafe {
-            GcPtr::from_raw(Box::into_raw(Box::new(Value::FunctionHandle(
-                "cb".to_string(),
-            ))))
-        };
+        let target = runmat_gc::gc_allocate(Value::Num(7.0)).expect("gc allocate target");
+        let callback = runmat_gc::gc_allocate(Value::FunctionHandle("cb".to_string()))
+            .expect("gc allocate callback");
         let listener = Listener {
             id: 9,
             target,
