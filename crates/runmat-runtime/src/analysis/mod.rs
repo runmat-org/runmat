@@ -3355,7 +3355,7 @@ fn cfd_node_count_from_model(
         .min(512)
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct CfdDomainTopology {
     basis: CfdDomainTopologyBasis,
     geometry_source: CfdDomainGeometrySource,
@@ -3376,6 +3376,8 @@ struct CfdDomainTopology {
     element_topology_sample_element_count: usize,
     element_topology_sample_edge_count: usize,
     element_topology_sample_element_edges: [[u32; 3]; 4],
+    element_topology_edge_nodes: Vec<[u32; 2]>,
+    element_topology_element_edges: Vec<[u32; 3]>,
 }
 
 impl CfdDomainTopology {
@@ -3410,6 +3412,8 @@ impl CfdDomainTopology {
             element_topology_sample_element_count: 0,
             element_topology_sample_edge_count: 0,
             element_topology_sample_element_edges: [[0; 3]; 4],
+            element_topology_edge_nodes: Vec::new(),
+            element_topology_element_edges: Vec::new(),
         }
     }
 
@@ -3491,14 +3495,16 @@ impl CfdDomainTopology {
             element_topology_sample_element_count: prep.element_topology_sample_element_count,
             element_topology_sample_edge_count: prep.element_topology_sample_edge_count,
             element_topology_sample_element_edges: prep.element_topology_sample_element_edges,
+            element_topology_edge_nodes: prep.element_topology_edge_nodes.clone(),
+            element_topology_element_edges: prep.element_topology_element_edges.clone(),
         }
     }
 
-    fn face_area_m2(self) -> f64 {
+    fn face_area_m2(&self) -> f64 {
         self.face_area_m2.max(1.0e-12)
     }
 
-    fn control_volume_volume_m3(self) -> f64 {
+    fn control_volume_volume_m3(&self) -> f64 {
         self.face_area_m2() * self.dx_m.max(1.0e-12)
     }
 }
@@ -3739,7 +3745,7 @@ struct CfdKnownAnswerMetrics {
 
 fn recover_cfd_velocity_pressure(
     domain: &runmat_analysis_core::CfdDomain,
-    topology: CfdDomainTopology,
+    topology: &CfdDomainTopology,
     step_index: usize,
 ) -> (Vec<f64>, Vec<f64>) {
     let boundary_summary = CfdBoundarySummary::implicit_channel(domain, topology.node_count);
@@ -3758,7 +3764,7 @@ fn recover_cfd_velocity_pressure(
 fn solve_cfd_velocity_pressure(
     domain: &runmat_analysis_core::CfdDomain,
     boundary_summary: &CfdBoundarySummary,
-    topology: CfdDomainTopology,
+    topology: &CfdDomainTopology,
     step_index: usize,
     step_count: usize,
     max_linear_iters: usize,
@@ -3879,7 +3885,7 @@ fn solve_cfd_velocity_pressure(
     let (transient_scale_min, transient_scale_max) = cfd_transient_scale_bounds(domain);
 
     CfdVelocityPressureSolution {
-        topology,
+        topology: topology.clone(),
         velocity,
         pressure,
         residual_momentum,
@@ -3989,7 +3995,7 @@ fn cfd_known_answer_metrics(solution: &CfdVelocityPressureSolution) -> CfdKnownA
 
 fn cfd_known_answer_diagnostic(
     metrics: &CfdKnownAnswerMetrics,
-    topology: CfdDomainTopology,
+    topology: &CfdDomainTopology,
 ) -> runmat_analysis_fea::diagnostics::FeaDiagnostic {
     let severity = if (metrics.pressure_drop_balance_ratio - 1.0).abs() <= 1.0e-10
         && metrics.mass_flux_uniformity_ratio <= 1.0e-10
@@ -4059,7 +4065,7 @@ fn cfd_residual_norms(
     velocity: &[f64],
     pressure: &[f64],
     domain: &runmat_analysis_core::CfdDomain,
-    topology: CfdDomainTopology,
+    topology: &CfdDomainTopology,
     step_count: usize,
 ) -> (Vec<f64>, Vec<f64>) {
     let node_count = pressure.len().max(1);
@@ -4160,7 +4166,7 @@ fn build_cfd_run_fields(
 }
 
 fn cfd_assembly_diagnostic(
-    topology: CfdDomainTopology,
+    topology: &CfdDomainTopology,
     domain: &runmat_analysis_core::CfdDomain,
     time_step_s: f64,
     pressure_drop_pa: f64,
@@ -4277,7 +4283,7 @@ fn resample_scalar_profile(values: &[f64], target_count: usize) -> Vec<f64> {
         .collect()
 }
 
-fn fluid_interface_face_count(topology: CfdDomainTopology) -> usize {
+fn fluid_interface_face_count(topology: &CfdDomainTopology) -> usize {
     if topology.control_volume_connectivity_coverage_ratio > 0.0
         && topology.control_volume_boundary_face_count > 0
     {
@@ -4289,7 +4295,7 @@ fn fluid_interface_face_count(topology: CfdDomainTopology) -> usize {
 }
 
 fn coupled_interface_graph_edge_target(
-    topology: CfdDomainTopology,
+    topology: &CfdDomainTopology,
     interface_face_count: usize,
 ) -> usize {
     if interface_face_count < 2 {
@@ -4308,7 +4314,7 @@ fn coupled_interface_graph_edge_target(
 }
 
 fn coupled_interface_graph_edges_for_topology(
-    topology: CfdDomainTopology,
+    topology: &CfdDomainTopology,
     interface_face_count: usize,
 ) -> Vec<(usize, usize)> {
     use std::collections::BTreeSet;
@@ -4320,39 +4326,79 @@ fn coupled_interface_graph_edges_for_topology(
 
     let mut seen = BTreeSet::<(usize, usize)>::new();
     let mut edges = Vec::with_capacity(target);
+
+    let full_edge_count = topology
+        .element_topology_edge_nodes
+        .len()
+        .min(interface_face_count);
+    if full_edge_count > 0 {
+        for element_edges in &topology.element_topology_element_edges {
+            let local_edges = element_edges
+                .iter()
+                .map(|edge| *edge as usize)
+                .filter(|edge| *edge < full_edge_count)
+                .collect::<Vec<_>>();
+            if local_edges.len() < 2 {
+                continue;
+            }
+            let pair_count = if local_edges.len() == 2 {
+                1
+            } else {
+                local_edges.len()
+            };
+            for offset in 0..pair_count {
+                let next = if offset + 1 < local_edges.len() {
+                    offset + 1
+                } else {
+                    0
+                };
+                let left = local_edges[offset].min(local_edges[next]);
+                let right = local_edges[offset].max(local_edges[next]);
+                if left != right && seen.insert((left, right)) {
+                    edges.push((left, right));
+                    if edges.len() == target {
+                        return edges;
+                    }
+                }
+            }
+        }
+    }
+
     let sample_edge_count = topology
         .element_topology_sample_edge_count
         .min(interface_face_count);
-    for element_edges in topology
-        .element_topology_sample_element_edges
-        .iter()
-        .take(topology.element_topology_sample_element_count.min(4))
-    {
-        let local_edges = element_edges
+    if edges.is_empty() {
+        for element_edges in topology
+            .element_topology_sample_element_edges
             .iter()
-            .map(|edge| *edge as usize)
-            .filter(|edge| *edge < sample_edge_count)
-            .collect::<Vec<_>>();
-        if local_edges.len() < 2 {
-            continue;
-        }
-        let pair_count = if local_edges.len() == 2 {
-            1
-        } else {
-            local_edges.len()
-        };
-        for offset in 0..pair_count {
-            let next = if offset + 1 < local_edges.len() {
-                offset + 1
+            .take(topology.element_topology_sample_element_count.min(4))
+        {
+            let local_edges = element_edges
+                .iter()
+                .map(|edge| *edge as usize)
+                .filter(|edge| *edge < sample_edge_count)
+                .collect::<Vec<_>>();
+            if local_edges.len() < 2 {
+                continue;
+            }
+            let pair_count = if local_edges.len() == 2 {
+                1
             } else {
-                0
+                local_edges.len()
             };
-            let left = local_edges[offset].min(local_edges[next]);
-            let right = local_edges[offset].max(local_edges[next]);
-            if left != right && seen.insert((left, right)) {
-                edges.push((left, right));
-                if edges.len() == target {
-                    return edges;
+            for offset in 0..pair_count {
+                let next = if offset + 1 < local_edges.len() {
+                    offset + 1
+                } else {
+                    0
+                };
+                let left = local_edges[offset].min(local_edges[next]);
+                let right = local_edges[offset].max(local_edges[next]);
+                if left != right && seen.insert((left, right)) {
+                    edges.push((left, right));
+                    if edges.len() == target {
+                        return edges;
+                    }
                 }
             }
         }
@@ -4371,7 +4417,7 @@ fn coupled_interface_graph_edges_for_topology(
 }
 
 fn coupled_interface_connectivity_coverage_ratio(
-    topology: CfdDomainTopology,
+    topology: &CfdDomainTopology,
     interface_face_count: usize,
     edge_count: usize,
 ) -> f64 {
@@ -4383,7 +4429,7 @@ fn coupled_interface_connectivity_coverage_ratio(
 }
 
 fn coupled_interface_mesh_backed_connectivity_ratio(
-    topology: CfdDomainTopology,
+    topology: &CfdDomainTopology,
     edge_count: usize,
 ) -> f64 {
     if topology.basis == CfdDomainTopologyBasis::PrepControlVolumeConnectivity
@@ -4414,7 +4460,7 @@ fn solve_cfd_finite_volume_run(
     let solution = solve_cfd_velocity_pressure(
         domain,
         &boundary_summary,
-        topology,
+        &topology,
         field_step,
         step_count,
         options.max_linear_iters,
@@ -4460,7 +4506,7 @@ fn solve_cfd_finite_volume_run(
                 ),
             },
             cfd_assembly_diagnostic(
-                solution.topology,
+                &solution.topology,
                 domain,
                 options.time_step_s,
                 solution.pressure_drop_pa,
@@ -4533,7 +4579,7 @@ fn solve_cfd_finite_volume_run(
                     solution.transient_scale_variation,
                 ),
             },
-            cfd_known_answer_diagnostic(&known_answer_metrics, topology),
+            cfd_known_answer_diagnostic(&known_answer_metrics, &topology),
         ],
         fields,
     }
@@ -4565,7 +4611,7 @@ fn field_scalar_magnitudes(field: &AnalysisField, fallback_len: usize) -> Vec<f6
 
 fn build_cht_run_fields(
     domain: &runmat_analysis_core::CfdDomain,
-    topology: CfdDomainTopology,
+    topology: &CfdDomainTopology,
     thermal_run: &runmat_analysis_fea::FeaThermalRunResult,
     authored_interface_conductance_w_per_m2k: Option<f64>,
     max_linear_iters: usize,
@@ -4686,6 +4732,12 @@ fn build_cht_run_fields(
         closure.mesh_backed_interface_connectivity_ratio = closure
             .mesh_backed_interface_connectivity_ratio
             .max(interface_solution.mesh_backed_interface_connectivity_ratio);
+        closure.full_topology_edge_count = closure
+            .full_topology_edge_count
+            .max(interface_solution.full_topology_edge_count);
+        closure.full_topology_element_count = closure
+            .full_topology_element_count
+            .max(interface_solution.full_topology_element_count);
         closure.max_thermal_network_residual_ratio = closure
             .max_thermal_network_residual_ratio
             .max(interface_solution.thermal_network_residual_ratio);
@@ -4761,13 +4813,15 @@ struct ChtConjugateInterfaceSolution {
     thermal_network_node_count: usize,
     interface_connectivity_coverage_ratio: f64,
     mesh_backed_interface_connectivity_ratio: f64,
+    full_topology_edge_count: usize,
+    full_topology_element_count: usize,
     thermal_network_residual_ratio: f64,
 }
 
 fn solve_cht_conjugate_interface(
     base_temperature: &[f64],
     heat_flux: &[f64],
-    topology: CfdDomainTopology,
+    topology: &CfdDomainTopology,
     interface_conductance_w_per_m2k: f64,
     advection_shift_k: f64,
     reference_temperature_k: f64,
@@ -4886,6 +4940,8 @@ fn solve_cht_conjugate_interface(
         thermal_network_node_count: interface_count,
         interface_connectivity_coverage_ratio,
         mesh_backed_interface_connectivity_ratio,
+        full_topology_edge_count: topology.element_topology_edge_nodes.len(),
+        full_topology_element_count: topology.element_topology_element_edges.len(),
         thermal_network_residual_ratio,
     }
 }
@@ -4954,6 +5010,8 @@ struct ChtInterfaceClosure {
     thermal_network_node_count: usize,
     interface_connectivity_coverage_ratio: f64,
     mesh_backed_interface_connectivity_ratio: f64,
+    full_topology_edge_count: usize,
+    full_topology_element_count: usize,
     max_thermal_network_residual_ratio: f64,
 }
 
@@ -5059,7 +5117,7 @@ fn cht_known_answer_diagnostic(
 
 fn build_fsi_run_fields(
     domain: &runmat_analysis_core::CfdDomain,
-    topology: CfdDomainTopology,
+    topology: &CfdDomainTopology,
     step_count: usize,
     structural_compliance_per_pa: f64,
     max_linear_iters: usize,
@@ -5123,6 +5181,12 @@ fn build_fsi_run_fields(
         closure.mesh_backed_interface_connectivity_ratio = closure
             .mesh_backed_interface_connectivity_ratio
             .max(interface_step.mesh_backed_interface_connectivity_ratio);
+        closure.full_topology_edge_count = closure
+            .full_topology_edge_count
+            .max(interface_step.full_topology_edge_count);
+        closure.full_topology_element_count = closure
+            .full_topology_element_count
+            .max(interface_step.full_topology_element_count);
         closure.interface_stiffness_pa_per_m = closure
             .interface_stiffness_pa_per_m
             .max(interface_step.interface_stiffness_pa_per_m);
@@ -5242,6 +5306,8 @@ struct FsiPartitionedInterfaceStep {
     structural_coupling_edge_count: usize,
     interface_connectivity_coverage_ratio: f64,
     mesh_backed_interface_connectivity_ratio: f64,
+    full_topology_edge_count: usize,
+    full_topology_element_count: usize,
     interface_stiffness_pa_per_m: f64,
 }
 
@@ -5255,7 +5321,7 @@ struct FsiStructuralInterfaceResponse {
 
 fn solve_fsi_partitioned_interface(
     fluid_pressure: &[f64],
-    topology: CfdDomainTopology,
+    topology: &CfdDomainTopology,
     structural_compliance_per_pa: f64,
     max_linear_iters: usize,
     tolerance: f64,
@@ -5434,6 +5500,8 @@ fn solve_fsi_partitioned_interface(
         structural_coupling_edge_count,
         interface_connectivity_coverage_ratio,
         mesh_backed_interface_connectivity_ratio,
+        full_topology_edge_count: topology.element_topology_edge_nodes.len(),
+        full_topology_element_count: topology.element_topology_element_edges.len(),
         interface_stiffness_pa_per_m,
     }
 }
@@ -5597,6 +5665,8 @@ struct FsiInterfaceClosure {
     structural_coupling_edge_count: usize,
     interface_connectivity_coverage_ratio: f64,
     mesh_backed_interface_connectivity_ratio: f64,
+    full_topology_edge_count: usize,
+    full_topology_element_count: usize,
     interface_stiffness_pa_per_m: f64,
 }
 
@@ -6547,12 +6617,12 @@ pub fn analysis_run_cht_with_options_op(
         runmat_analysis_core::CfdSolveFamily::Transient => options.step_count.saturating_sub(1),
     };
     let (fluid_velocity, fluid_pressure) =
-        recover_cfd_velocity_pressure(cfd_domain, topology, field_step);
+        recover_cfd_velocity_pressure(cfd_domain, &topology, field_step);
     let (cfd_residual_momentum, cfd_residual_continuity) = cfd_residual_norms(
         &fluid_velocity,
         &fluid_pressure,
         cfd_domain,
-        topology,
+        &topology,
         options.step_count,
     );
     let max_cfd_momentum_residual = cfd_residual_momentum
@@ -6565,7 +6635,7 @@ pub fn analysis_run_cht_with_options_op(
         .fold(0.0_f64, f64::max);
     let (cht_fields, cht_interface_closure) = build_cht_run_fields(
         cfd_domain,
-        topology,
+        &topology,
         &thermal_run,
         cht_interface_conductance_w_per_m2k(model),
         options.max_linear_iters,
@@ -6621,7 +6691,7 @@ pub fn analysis_run_cht_with_options_op(
         ),
     });
     run.diagnostics.push(cfd_assembly_diagnostic(
-        topology,
+        &topology,
         cfd_domain,
         options.time_step_s,
         pressure_drop_from_nodal_pressure(&fluid_pressure),
@@ -6662,7 +6732,7 @@ pub fn analysis_run_cht_with_options_op(
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "interface_face_count={} max_temperature_jump_k={} max_energy_residual={} heat_flux_balance_ratio={} mean_interface_heat_flux_w_per_m2={} thermal_transport_residual_ratio={} interface_temperature_continuity_ratio={} max_advection_temperature_shift_k={} interface_conductance_w_per_m2k={} flux_temperature_law_residual_ratio={} heat_flux_realization_residual_ratio={} coupled_interface_iteration_count={} coupled_interface_residual_ratio={} thermal_network_node_count={} thermal_network_edge_count={} interface_connectivity_coverage_ratio={} mesh_backed_interface_connectivity_ratio={} thermal_network_residual_ratio={}",
+            "interface_face_count={} max_temperature_jump_k={} max_energy_residual={} heat_flux_balance_ratio={} mean_interface_heat_flux_w_per_m2={} thermal_transport_residual_ratio={} interface_temperature_continuity_ratio={} max_advection_temperature_shift_k={} interface_conductance_w_per_m2k={} flux_temperature_law_residual_ratio={} heat_flux_realization_residual_ratio={} coupled_interface_iteration_count={} coupled_interface_residual_ratio={} thermal_network_node_count={} thermal_network_edge_count={} interface_connectivity_coverage_ratio={} mesh_backed_interface_connectivity_ratio={} full_topology_edge_count={} full_topology_element_count={} thermal_network_residual_ratio={}",
             cht_interface_closure.interface_face_count,
             cht_interface_closure.max_temperature_jump_k,
             cht_interface_closure.max_energy_residual,
@@ -6680,6 +6750,8 @@ pub fn analysis_run_cht_with_options_op(
             cht_interface_closure.thermal_network_edge_count,
             cht_interface_closure.interface_connectivity_coverage_ratio,
             cht_interface_closure.mesh_backed_interface_connectivity_ratio,
+            cht_interface_closure.full_topology_edge_count,
+            cht_interface_closure.full_topology_element_count,
             cht_interface_closure.max_thermal_network_residual_ratio,
         ),
     });
@@ -7127,12 +7199,12 @@ pub fn analysis_run_fsi_with_options_op(
         runmat_analysis_core::CfdSolveFamily::Transient => options.step_count.saturating_sub(1),
     };
     let (fluid_velocity, fluid_pressure) =
-        recover_cfd_velocity_pressure(cfd_domain, topology, field_step);
+        recover_cfd_velocity_pressure(cfd_domain, &topology, field_step);
     let (cfd_residual_momentum, cfd_residual_continuity) = cfd_residual_norms(
         &fluid_velocity,
         &fluid_pressure,
         cfd_domain,
-        topology,
+        &topology,
         options.step_count,
     );
     let max_cfd_momentum_residual = cfd_residual_momentum
@@ -7146,7 +7218,7 @@ pub fn analysis_run_fsi_with_options_op(
     let structural_compliance_per_pa = fsi_structural_compliance_per_pa(model);
     let (fsi_fields, fsi_interface_closure) = build_fsi_run_fields(
         cfd_domain,
-        topology,
+        &topology,
         options.step_count,
         structural_compliance_per_pa,
         options.max_linear_iters,
@@ -7209,7 +7281,7 @@ pub fn analysis_run_fsi_with_options_op(
         ),
     });
     run.diagnostics.push(cfd_assembly_diagnostic(
-        topology,
+        &topology,
         cfd_domain,
         options.time_step_s,
         pressure_drop_from_nodal_pressure(&fluid_pressure),
@@ -7249,7 +7321,7 @@ pub fn analysis_run_fsi_with_options_op(
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "interface_node_count={} interface_face_count={} max_interface_residual={} force_balance_ratio={} max_displacement_transfer_residual_m={} max_interface_displacement_m={} mean_interface_pressure_pa={} max_traction_magnitude_pa={} max_coupling_iteration_count={} pressure_feedback_residual_ratio={} two_way_interface_residual_ratio={} structural_traction_update_residual_ratio={} pressure_displacement_law_residual_ratio={} structural_solve_residual_ratio={} interface_work_j_per_m2={} structural_strain_energy_j_per_m2={} interface_work_energy_residual_ratio={} structural_coupling_edge_count={} interface_connectivity_coverage_ratio={} mesh_backed_interface_connectivity_ratio={} interface_stiffness_pa_per_m={}",
+            "interface_node_count={} interface_face_count={} max_interface_residual={} force_balance_ratio={} max_displacement_transfer_residual_m={} max_interface_displacement_m={} mean_interface_pressure_pa={} max_traction_magnitude_pa={} max_coupling_iteration_count={} pressure_feedback_residual_ratio={} two_way_interface_residual_ratio={} structural_traction_update_residual_ratio={} pressure_displacement_law_residual_ratio={} structural_solve_residual_ratio={} interface_work_j_per_m2={} structural_strain_energy_j_per_m2={} interface_work_energy_residual_ratio={} structural_coupling_edge_count={} interface_connectivity_coverage_ratio={} mesh_backed_interface_connectivity_ratio={} full_topology_edge_count={} full_topology_element_count={} interface_stiffness_pa_per_m={}",
             fsi_interface_closure.interface_node_count,
             fsi_interface_closure.interface_face_count,
             fsi_interface_closure.max_interface_residual,
@@ -7270,6 +7342,8 @@ pub fn analysis_run_fsi_with_options_op(
             fsi_interface_closure.structural_coupling_edge_count,
             fsi_interface_closure.interface_connectivity_coverage_ratio,
             fsi_interface_closure.mesh_backed_interface_connectivity_ratio,
+            fsi_interface_closure.full_topology_edge_count,
+            fsi_interface_closure.full_topology_element_count,
             fsi_interface_closure.interface_stiffness_pa_per_m,
         ),
     });

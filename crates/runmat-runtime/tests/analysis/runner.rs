@@ -748,8 +748,12 @@ fn coupled_flow_prep_artifact_id_for_fixture(
 ) -> Option<String> {
     if !matches!(
         spec_id,
-        "cht_coupled_gpu_provider"
+        "cht_coupled_cpu"
+            | "cht_coupled_channel_slab_cpu"
+            | "cht_coupled_gpu_provider"
             | "cht_coupled_gpu_fallback"
+            | "fsi_coupled_cpu"
+            | "fsi_coupled_pipe_plate_cpu"
             | "fsi_coupled_gpu_provider"
             | "fsi_coupled_gpu_fallback"
     ) {
@@ -1244,7 +1248,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 secondary_region_id: "solid_slab".to_string(),
                 kind: runmat_analysis_core::AnalysisInterfaceKind::ConjugateHeatTransfer(
                     runmat_analysis_core::ConjugateHeatTransferInterfaceModel {
-                        thermal_conductance_w_per_m2k: 750.0,
+                        thermal_conductance_w_per_m2k: 2000.0,
                         contact_resistance_m2k_per_w: 0.0,
                         relaxation_factor: 0.5,
                     },
@@ -5543,6 +5547,34 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
+                "cht_full_topology_edge_count",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "full_topology_edge_count",
+                ),
+                Some(1.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_full_topology_element_count",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "full_topology_element_count",
+                ),
+                Some(1.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
                 "cht_thermal_network_residual_ratio",
                 "FEA_CHT_INTERFACE_CLOSURE",
                 diagnostic_metric(
@@ -5961,6 +5993,34 @@ pub(super) fn run_fixture(
                 ),
                 Some(fsi_mesh_backed_min),
                 Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_full_topology_edge_count",
+                "FEA_FSI_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_INTERFACE_CLOSURE",
+                    "full_topology_edge_count",
+                ),
+                Some(1.0),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_full_topology_element_count",
+                "FEA_FSI_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_INTERFACE_CLOSURE",
+                    "full_topology_element_count",
+                ),
+                Some(1.0),
+                None,
             );
             push_threshold_assertion(
                 spec.id,

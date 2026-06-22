@@ -6243,6 +6243,8 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
             && diag
                 .message
                 .contains("mesh_backed_interface_connectivity_ratio=")
+            && diag.message.contains("full_topology_edge_count=")
+            && diag.message.contains("full_topology_element_count=")
             && diag.message.contains("thermal_network_residual_ratio=")
     }));
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
@@ -6300,7 +6302,7 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         .and_then(|field| field.shape.first().copied())
         .expect("thermal heat-flux snapshot should carry a recovery domain");
     let expected_interface_face_count =
-        fluid_interface_face_count(CfdDomainTopology::from_model(&model, None));
+        fluid_interface_face_count(&CfdDomainTopology::from_model(&model, None));
     assert_eq!(solid_temperature.shape, fluid_temperature.shape);
     assert!(expected_interface_face_count >= thermal_flux_face_count);
     assert_eq!(
@@ -6435,6 +6437,8 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         && diag
             .message
             .contains("mesh_backed_interface_connectivity_ratio=")
+        && diag.message.contains("full_topology_edge_count=")
+        && diag.message.contains("full_topology_element_count=")
         && diag.message.contains("interface_stiffness_pa_per_m=")));
     assert!(envelope
         .data
@@ -6564,7 +6568,7 @@ fn cht_prepared_topology_uses_boundary_faces_for_interface_fields() {
 
     let (fields, closure) = build_cht_run_fields(
         cfd_domain,
-        topology,
+        &topology,
         &thermal_run,
         cht_interface_conductance_w_per_m2k(&model),
         64,
@@ -6583,12 +6587,14 @@ fn cht_prepared_topology_uses_boundary_faces_for_interface_fields() {
         topology.basis,
         CfdDomainTopologyBasis::PrepControlVolumeConnectivity
     );
-    assert_eq!(fluid_interface_face_count(topology), 8);
+    assert_eq!(fluid_interface_face_count(&topology), 8);
     assert_eq!(closure.interface_face_count, 8);
     assert_eq!(closure.thermal_network_node_count, 8);
     assert_eq!(closure.thermal_network_edge_count, 11);
     assert_eq!(closure.interface_connectivity_coverage_ratio, 1.0);
     assert_eq!(closure.mesh_backed_interface_connectivity_ratio, 1.0);
+    assert_eq!(closure.full_topology_edge_count, 5);
+    assert_eq!(closure.full_topology_element_count, 2);
     assert_eq!(heat_flux.shape, vec![8]);
     assert_eq!(temperature_jump.shape, vec![8]);
 }
@@ -6598,8 +6604,10 @@ fn prepared_coupled_interface_graph_uses_element_topology_sample() {
     let model = sample_cht_model();
     let prep_context = sample_analysis_run_prep_context();
     let topology = CfdDomainTopology::from_model(&model, Some(&prep_context));
-    let edges =
-        coupled_interface_graph_edges_for_topology(topology, fluid_interface_face_count(topology));
+    let edges = coupled_interface_graph_edges_for_topology(
+        &topology,
+        fluid_interface_face_count(&topology),
+    );
 
     assert!(edges.contains(&(0, 1)));
     assert!(edges.contains(&(1, 2)));
@@ -6617,12 +6625,12 @@ fn fsi_prepared_topology_uses_boundary_faces_for_interface_fields() {
     let cfd_domain = model.cfd.as_ref().expect("cfd domain should exist");
     let prep_context = sample_analysis_run_prep_context();
     let topology = CfdDomainTopology::from_model(&model, Some(&prep_context));
-    let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(cfd_domain, topology, 0);
+    let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(cfd_domain, &topology, 0);
     let (residual_momentum, residual_continuity) =
-        cfd_residual_norms(&fluid_velocity, &fluid_pressure, cfd_domain, topology, 4);
+        cfd_residual_norms(&fluid_velocity, &fluid_pressure, cfd_domain, &topology, 4);
     let (fields, closure) = build_fsi_run_fields(
         cfd_domain,
-        topology,
+        &topology,
         4,
         fsi_structural_compliance_per_pa(&model),
         64,
@@ -6643,11 +6651,13 @@ fn fsi_prepared_topology_uses_boundary_faces_for_interface_fields() {
         topology.basis,
         CfdDomainTopologyBasis::PrepControlVolumeConnectivity
     );
-    assert_eq!(fluid_interface_face_count(topology), 8);
+    assert_eq!(fluid_interface_face_count(&topology), 8);
     assert_eq!(closure.interface_face_count, 8);
     assert_eq!(closure.structural_coupling_edge_count, 11);
     assert_eq!(closure.interface_connectivity_coverage_ratio, 1.0);
     assert_eq!(closure.mesh_backed_interface_connectivity_ratio, 1.0);
+    assert_eq!(closure.full_topology_edge_count, 5);
+    assert_eq!(closure.full_topology_element_count, 2);
     assert_eq!(pressure.shape, vec![8]);
     assert_eq!(traction.shape, vec![8, 3]);
 }
