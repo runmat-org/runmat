@@ -3,7 +3,7 @@
 //! Implements mark-and-sweep collection for generational garbage collection,
 //! with optimizations for RunMat's value types and usage patterns.
 
-use crate::{GcConfig, GcPtr, GcStats, GenerationalAllocator, Result};
+use crate::{roots::collect_value_roots, GcConfig, GcPtr, GcStats, GenerationalAllocator, Result};
 use runmat_builtins::Value;
 use runmat_time::Instant;
 use std::collections::HashSet;
@@ -162,143 +162,14 @@ impl MarkSweepCollector {
 
         self.marked_objects.lock().insert(ptr_addr);
 
-        // Recursively mark referenced objects
-        match &*obj {
-            Value::Cell(cells) => {
-                for cell_value in &cells.data {
-                    // Mark nested Value objects for collection
-                    self.mark_value_contents(cell_value, max_generation)?;
-                }
-            }
-            Value::HandleObject(h) => {
-                let tgt = h.target.clone();
-                if !tgt.is_null() {
-                    self.mark_object(tgt, max_generation)?;
-                }
-            }
-            Value::Listener(l) => {
-                let tgt = l.target.clone();
-                if !tgt.is_null() {
-                    self.mark_object(tgt, max_generation)?;
-                }
-                let cb = l.callback.clone();
-                if !cb.is_null() {
-                    self.mark_object(cb, max_generation)?;
-                }
-            }
-            Value::Tensor(_) | Value::SparseTensor(_) | Value::ComplexTensor(_) => {
-                // Matrices don't contain references to other GC objects
-                // (their data is Vec<f64>)
-            }
-            Value::GpuTensor(_) => {
-                // GPU handle contains no GC references
-            }
-            Value::String(_) => {
-                // Strings don't contain references to other GC objects
-            }
-            Value::StringArray(_sa) => {
-                // String arrays hold owned Strings; no nested GC Values
-            }
-            Value::Int(_)
-            | Value::Num(_)
-            | Value::Complex(_, _)
-            | Value::Bool(_)
-            | Value::LogicalArray(_)
-            | Value::Symbolic(_) => {
-                // Primitive values don't contain references
-            }
-            Value::FunctionHandle(_)
-            | Value::ExternalFunctionHandle(_)
-            | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. } => {}
-            Value::ClassRef(_) => {}
-            Value::Closure(c) => {
-                for v in &c.captures {
-                    self.mark_value_contents(v, max_generation)?;
-                }
-            }
-            Value::Object(obj) => {
-                for v in obj.properties.values() {
-                    self.mark_value_contents(v, max_generation)?;
-                }
-            }
-            Value::Struct(st) => {
-                for v in st.fields.values() {
-                    self.mark_value_contents(v, max_generation)?;
-                }
-            }
-            Value::OutputList(values) => {
-                for v in values {
-                    self.mark_value_contents(v, max_generation)?;
-                }
-            }
-            Value::MException(_e) => {
-                // Contains only strings; no GC references
-            }
-            Value::CharArray(_ca) => {}
-        }
-
-        Ok(())
-    }
-
-    /// Mark objects contained within a Value for garbage collection
-    #[allow(clippy::only_used_in_recursion)]
-    fn mark_value_contents(&mut self, value: &Value, _max_generation: usize) -> Result<()> {
-        match value {
-            Value::Cell(cells) => {
-                for cell_value in &cells.data {
-                    self.mark_value_contents(cell_value, _max_generation)?;
-                }
-            }
-            Value::HandleObject(h) => {
-                let tgt = h.target.clone();
-                if !tgt.is_null() {
-                    self.mark_object(tgt, _max_generation)?;
-                }
-            }
-            Value::Listener(l) => {
-                let tgt = l.target.clone();
-                if !tgt.is_null() {
-                    self.mark_object(tgt, _max_generation)?;
-                }
-                let cb = l.callback.clone();
-                if !cb.is_null() {
-                    self.mark_object(cb, _max_generation)?;
-                }
-            }
-            Value::StringArray(_sa) => {}
-            Value::GpuTensor(_) => {}
-            Value::FunctionHandle(_)
-            | Value::ExternalFunctionHandle(_)
-            | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. } => {}
-            Value::ClassRef(_) => {}
-            Value::Closure(c) => {
-                for v in &c.captures {
-                    self.mark_value_contents(v, _max_generation)?;
-                }
-            }
-            Value::Object(obj) => {
-                for v in obj.properties.values() {
-                    self.mark_value_contents(v, _max_generation)?;
-                }
-            }
-            Value::Struct(st) => {
-                for v in st.fields.values() {
-                    self.mark_value_contents(v, _max_generation)?;
-                }
-            }
-            Value::OutputList(values) => {
-                for v in values {
-                    self.mark_value_contents(v, _max_generation)?;
-                }
-            }
-            Value::MException(_e) => {}
-            Value::CharArray(_ca) => {}
-            _ => {
-                // Other value types don't contain GC references yet
+        let mut child_roots = Vec::new();
+        collect_value_roots(&*obj, &mut child_roots);
+        for child in child_roots {
+            if !child.is_null() {
+                self.mark_object(child, max_generation)?;
             }
         }
+
         Ok(())
     }
 
@@ -652,5 +523,28 @@ mod tests {
 
         // No objects should be marked from null roots
         assert_eq!(collector.marked_objects.lock().len(), 0);
+    }
+
+    #[test]
+    fn collector_marks_cell_element_handles_reachable_from_gc_object() {
+        let config = GcConfig::default();
+        let stats = GcStats::new();
+        let mut allocator = GenerationalAllocator::new(&config);
+        let mut collector = MarkSweepCollector::new(&config);
+
+        let element = allocator
+            .allocate(Value::String("alive".to_string()), &stats)
+            .expect("element allocation");
+        let cell =
+            runmat_builtins::CellArray::new_handles(vec![element], 1, 1).expect("cell shape");
+        let cell_root = allocator
+            .allocate(Value::Cell(cell), &stats)
+            .expect("cell allocation");
+
+        let collected = collector
+            .collect_young_generation(&mut allocator, &[cell_root], &stats)
+            .expect("collection should succeed");
+
+        assert_eq!(collected, 0);
     }
 }

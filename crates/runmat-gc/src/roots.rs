@@ -10,17 +10,16 @@ use runmat_time::Instant;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Recursively collect GC roots from a Value.
+/// Recursively collect immediate GC roots from an owned Value tree.
 ///
-/// This is a shared helper used by all root types to traverse nested
-/// values (cells and structs) and collect GC pointers.
-fn collect_value_roots(value: &Value, roots: &mut Vec<GcPtr<Value>>) {
+/// This helper deliberately does not dereference collected `GcPtr`s. Root
+/// scanning should discover handles reachable from ordinary Rust-owned values;
+/// the collector is responsible for tracing each discovered GC object.
+pub(crate) fn collect_value_roots(value: &Value, roots: &mut Vec<GcPtr<Value>>) {
     match value {
         Value::Cell(cells) => {
             for cell_value in &cells.data {
                 roots.push(cell_value.clone());
-                let inner = unsafe { &*cell_value.as_raw() };
-                collect_value_roots(inner, roots);
             }
         }
         Value::Struct(struct_value) => {
@@ -28,7 +27,53 @@ fn collect_value_roots(value: &Value, roots: &mut Vec<GcPtr<Value>>) {
                 collect_value_roots(field_value, roots);
             }
         }
-        _ => {}
+        Value::HandleObject(handle) => {
+            if !handle.target.is_null() {
+                roots.push(handle.target.clone());
+            }
+        }
+        Value::Listener(listener) => {
+            if !listener.target.is_null() {
+                roots.push(listener.target.clone());
+            }
+            if !listener.callback.is_null() {
+                roots.push(listener.callback.clone());
+            }
+        }
+        Value::Closure(closure) => {
+            for capture in &closure.captures {
+                collect_value_roots(capture, roots);
+            }
+        }
+        Value::Object(object) => {
+            for property in object.properties.values() {
+                collect_value_roots(property, roots);
+            }
+        }
+        Value::OutputList(values) => {
+            for value in values {
+                collect_value_roots(value, roots);
+            }
+        }
+        Value::Int(_)
+        | Value::Num(_)
+        | Value::Complex(_, _)
+        | Value::Bool(_)
+        | Value::LogicalArray(_)
+        | Value::String(_)
+        | Value::StringArray(_)
+        | Value::CharArray(_)
+        | Value::Tensor(_)
+        | Value::SparseTensor(_)
+        | Value::ComplexTensor(_)
+        | Value::Symbolic(_)
+        | Value::GpuTensor(_)
+        | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
+        | Value::ClassRef(_)
+        | Value::MException(_) => {}
     }
 }
 
@@ -403,6 +448,11 @@ pub struct RootScannerStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{Closure, HandleRef, Listener, ObjectInstance, StructValue};
+
+    fn ptr_addr(ptr: GcPtr<Value>) -> usize {
+        (unsafe { ptr.as_raw() }) as usize
+    }
 
     #[test]
     fn test_global_root() {
@@ -413,8 +463,86 @@ mod tests {
         assert!(root.is_active());
 
         let scanned = root.scan();
-        // Currently returns empty since we don't have GC-allocated Values yet
         assert_eq!(scanned.len(), 0);
+    }
+
+    #[test]
+    fn global_root_scans_direct_handle_and_listener_targets() {
+        crate::gc_reset_for_test().expect("reset gc");
+        let target = crate::gc_allocate(Value::Object(ObjectInstance::new("widget".to_string())))
+            .expect("target allocation");
+        let callback = crate::gc_allocate(Value::FunctionHandle("onEvent".to_string()))
+            .expect("callback allocation");
+
+        let values = vec![
+            Value::HandleObject(HandleRef {
+                class_name: "widget".to_string(),
+                target: target.clone(),
+                valid: true,
+            }),
+            Value::Listener(Listener {
+                id: 1,
+                target: target.clone(),
+                event_name: "Changed".to_string(),
+                callback: callback.clone(),
+                enabled: true,
+                valid: true,
+            }),
+        ];
+
+        let root = GlobalRoot::new(values, "handles".to_string());
+        let scanned = root.scan();
+        let scanned_addrs: Vec<usize> = scanned.into_iter().map(ptr_addr).collect();
+
+        assert!(scanned_addrs.contains(&ptr_addr(target)));
+        assert!(scanned_addrs.contains(&ptr_addr(callback)));
+    }
+
+    #[test]
+    fn global_root_scans_owned_nested_value_containers() {
+        crate::gc_reset_for_test().expect("reset gc");
+        let handle_target =
+            crate::gc_allocate(Value::Object(ObjectInstance::new("nested".to_string())))
+                .expect("target allocation");
+        let callback = crate::gc_allocate(Value::FunctionHandle("cb".to_string()))
+            .expect("callback allocation");
+
+        let handle = Value::HandleObject(HandleRef {
+            class_name: "nested".to_string(),
+            target: handle_target.clone(),
+            valid: true,
+        });
+        let listener = Value::Listener(Listener {
+            id: 7,
+            target: handle_target.clone(),
+            event_name: "Changed".to_string(),
+            callback: callback.clone(),
+            enabled: true,
+            valid: true,
+        });
+
+        let mut object = ObjectInstance::new("owner".to_string());
+        object.properties.insert("h".to_string(), handle.clone());
+
+        let mut struct_value = StructValue::new();
+        struct_value.fields.insert(
+            "closure".to_string(),
+            Value::Closure(Closure {
+                function_name: "f".to_string(),
+                bound_function: None,
+                captures: vec![listener],
+            }),
+        );
+        struct_value
+            .fields
+            .insert("object".to_string(), Value::Object(object));
+
+        let root = GlobalRoot::new(vec![Value::Struct(struct_value)], "nested".to_string());
+        let scanned = root.scan();
+        let scanned_addrs: Vec<usize> = scanned.into_iter().map(ptr_addr).collect();
+
+        assert!(scanned_addrs.contains(&ptr_addr(handle_target)));
+        assert!(scanned_addrs.contains(&ptr_addr(callback)));
     }
 
     #[test]
@@ -449,7 +577,7 @@ mod tests {
         assert!(root.estimated_size() > 0);
 
         let scanned = root.scan();
-        assert_eq!(scanned.len(), 0); // No GC pointers in current implementation
+        assert_eq!(scanned.len(), 0);
     }
 
     #[test]
