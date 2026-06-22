@@ -9,9 +9,10 @@ use crate::{
     fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
     fea_thermo_mechanical_thermal_strain_field_id, fea_thermo_mechanical_thermal_stress_field_id,
     fea_thermo_mechanical_von_mises_field_id, fea_transient_acceleration_field_id,
+    fea_transient_angular_acceleration_field_id, fea_transient_angular_velocity_field_id,
     fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
-    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
-    fea_transient_von_mises_field_id,
+    fea_transient_rotation_field_id, fea_transient_strain_energy_field_id,
+    fea_transient_velocity_field_id, fea_transient_von_mises_field_id,
     fixtures::{fixture_model, FixtureId},
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
@@ -705,6 +706,56 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
         .expect("transient energy balance diagnostic should be emitted");
     assert!(energy_diag.message.contains("max_total_energy="));
     assert!(energy_diag.message.contains("energy_growth_ratio="));
+}
+
+#[test]
+fn transient_beam_moment_emits_rotational_snapshots() {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    model.steps = vec![runmat_analysis_core::AnalysisStep {
+        step_id: "beam_moment_transient".to_string(),
+        kind: runmat_analysis_core::AnalysisStepKind::Transient,
+    }];
+    let result =
+        crate::run_transient(&model, ComputeBackend::Cpu).expect("transient beam solve should run");
+
+    assert_eq!(result.time_points_s.len(), result.rotation_snapshots.len());
+    assert_eq!(
+        result.time_points_s.len(),
+        result.angular_velocity_snapshots.len()
+    );
+    assert_eq!(
+        result.time_points_s.len(),
+        result.angular_acceleration_snapshots.len()
+    );
+    assert_eq!(
+        result.rotation_snapshots[1].field_id,
+        fea_transient_rotation_field_id(1)
+    );
+    assert_eq!(
+        result.angular_velocity_snapshots[1].field_id,
+        fea_transient_angular_velocity_field_id(1)
+    );
+    assert_eq!(
+        result.angular_acceleration_snapshots[1].field_id,
+        fea_transient_angular_acceleration_field_id(1)
+    );
+    assert_eq!(result.rotation_snapshots[1].shape, vec![2, 3]);
+    assert_eq!(result.angular_velocity_snapshots[1].shape, vec![2, 3]);
+    assert_eq!(result.angular_acceleration_snapshots[1].shape, vec![2, 3]);
+
+    let final_rotation = result
+        .rotation_snapshots
+        .last()
+        .and_then(runmat_analysis_core::AnalysisField::as_host_f64)
+        .expect("rotation snapshot should be host-backed");
+    let final_angular_velocity = result
+        .angular_velocity_snapshots
+        .last()
+        .and_then(runmat_analysis_core::AnalysisField::as_host_f64)
+        .expect("angular velocity snapshot should be host-backed");
+
+    assert!(final_rotation.iter().any(|value| value.abs() > 0.0));
+    assert!(final_angular_velocity.iter().any(|value| value.abs() > 0.0));
 }
 
 #[test]

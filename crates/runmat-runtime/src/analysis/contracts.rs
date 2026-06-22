@@ -1911,9 +1911,15 @@ pub struct TransientResultsData {
     pub time_points_s: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
     #[serde(default)]
+    pub rotation_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
     pub velocity_snapshots: Vec<AnalysisField>,
     #[serde(default)]
+    pub angular_velocity_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
     pub acceleration_snapshots: Vec<AnalysisField>,
+    #[serde(default)]
+    pub angular_acceleration_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub von_mises_snapshots: Vec<AnalysisField>,
     #[serde(default)]

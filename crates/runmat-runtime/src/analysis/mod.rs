@@ -8239,8 +8239,11 @@ pub fn analysis_run_transient_with_options_op(
             transient_payload_version: "transient_results/v1".to_string(),
             time_points_s: transient_run.time_points_s,
             displacement_snapshots: transient_run.displacement_snapshots,
+            rotation_snapshots: transient_run.rotation_snapshots,
             velocity_snapshots: transient_run.velocity_snapshots,
+            angular_velocity_snapshots: transient_run.angular_velocity_snapshots,
             acceleration_snapshots: transient_run.acceleration_snapshots,
+            angular_acceleration_snapshots: transient_run.angular_acceleration_snapshots,
             von_mises_snapshots: transient_run.von_mises_snapshots,
             kinetic_energy_snapshots: transient_run.kinetic_energy_snapshots,
             strain_energy_snapshots: transient_run.strain_energy_snapshots,
@@ -10289,10 +10292,19 @@ fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<Analysi
         for field in &transient.displacement_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
+        for field in &transient.rotation_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
         for field in &transient.velocity_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
+        for field in &transient.angular_velocity_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
         for field in &transient.acceleration_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.angular_acceleration_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
         for field in &transient.von_mises_snapshots {
@@ -11260,10 +11272,22 @@ pub fn analysis_results_op(
                 let mut time_points_s = Vec::with_capacity(query.transient_snapshot_indices.len());
                 let mut displacement_snapshots =
                     Vec::with_capacity(query.transient_snapshot_indices.len());
+                let rotation_snapshots = filter_analysis_fields_by_indices(
+                    &transient.rotation_snapshots,
+                    &query.transient_snapshot_indices,
+                );
                 let mut velocity_snapshots =
                     Vec::with_capacity(query.transient_snapshot_indices.len());
+                let angular_velocity_snapshots = filter_analysis_fields_by_indices(
+                    &transient.angular_velocity_snapshots,
+                    &query.transient_snapshot_indices,
+                );
                 let mut acceleration_snapshots =
                     Vec::with_capacity(query.transient_snapshot_indices.len());
+                let angular_acceleration_snapshots = filter_analysis_fields_by_indices(
+                    &transient.angular_acceleration_snapshots,
+                    &query.transient_snapshot_indices,
+                );
                 let mut von_mises_snapshots =
                     Vec::with_capacity(query.transient_snapshot_indices.len());
                 let mut kinetic_energy_snapshots =
@@ -11566,8 +11590,11 @@ pub fn analysis_results_op(
                     transient_payload_version: transient.transient_payload_version.clone(),
                     time_points_s,
                     displacement_snapshots,
+                    rotation_snapshots,
                     velocity_snapshots,
+                    angular_velocity_snapshots,
                     acceleration_snapshots,
+                    angular_acceleration_snapshots,
                     von_mises_snapshots,
                     kinetic_energy_snapshots,
                     strain_energy_snapshots,

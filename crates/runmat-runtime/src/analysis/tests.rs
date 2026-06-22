@@ -35,23 +35,25 @@ use runmat_analysis_fea::{
     fea_thermo_mechanical_coupling_residual_field_id, fea_thermo_mechanical_displacement_field_id,
     fea_thermo_mechanical_temperature_field_id, fea_thermo_mechanical_thermal_strain_field_id,
     fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
-    fea_transient_acceleration_field_id, fea_transient_kinetic_energy_field_id,
-    fea_transient_residual_norm_field_id, fea_transient_strain_energy_field_id,
-    fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
-    FeaProgressPhase, FeaProgressStatus, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
-    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
-    FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
-    FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
-    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
-    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
-    FEA_FIELD_EM_CURRENT_DENSITY_REAL, FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
-    FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_ENERGY_DENSITY,
-    FEA_FIELD_EM_MAGNETIC_FIELD_REAL, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
-    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_POYNTING_VECTOR_REAL,
-    FEA_FIELD_EM_RESIDUAL_REAL, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
+    fea_transient_angular_velocity_field_id, fea_transient_kinetic_energy_field_id,
+    fea_transient_residual_norm_field_id, fea_transient_rotation_field_id,
+    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
+    fea_transient_von_mises_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
+    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY,
+    FEA_FIELD_CFD_RESIDUAL_MOMENTUM, FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY,
+    FEA_FIELD_CFD_VORTICITY, FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE,
+    FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
+    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL,
+    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_EM_CURRENT_DENSITY_REAL,
+    FEA_FIELD_EM_ELECTRIC_FIELD_REAL, FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL,
+    FEA_FIELD_EM_ENERGY_DENSITY, FEA_FIELD_EM_MAGNETIC_FIELD_REAL,
+    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
+    FEA_FIELD_EM_POYNTING_VECTOR_REAL, FEA_FIELD_EM_RESIDUAL_REAL,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
+    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
+    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
@@ -6102,6 +6104,76 @@ fn analysis_run_transient_returns_native_transient_result() {
         let descriptor = descriptor(&field_id);
         assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
         assert_eq!(descriptor.component_count, None);
+    }
+}
+
+#[test]
+fn analysis_run_transient_exposes_beam_rotational_snapshots() {
+    let _guard = analysis_test_guard();
+    let mut model = runmat_analysis_fea::fixtures::fixture_model(
+        runmat_analysis_fea::fixtures::FixtureId::StructuralBeamCantileverEndMomentReference,
+    );
+    model.steps = vec![AnalysisStep {
+        step_id: "beam_moment_transient".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+
+    let envelope = analysis_run_transient_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("beam transient run should return envelope");
+    let transient = envelope
+        .data
+        .transient_results
+        .as_ref()
+        .expect("transient payload should exist");
+
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.rotation_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.angular_velocity_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.angular_acceleration_snapshots.len()
+    );
+    assert_eq!(
+        transient.rotation_snapshots[1].field_id,
+        fea_transient_rotation_field_id(1)
+    );
+    assert_eq!(
+        transient.angular_velocity_snapshots[1].field_id,
+        fea_transient_angular_velocity_field_id(1)
+    );
+    assert_eq!(
+        transient.angular_acceleration_snapshots[1].field_id,
+        fea_transient_angular_acceleration_field_id(1)
+    );
+
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("transient beam results should be queryable");
+    for field_id in [
+        fea_transient_rotation_field_id(1),
+        fea_transient_angular_velocity_field_id(1),
+        fea_transient_angular_acceleration_field_id(1),
+    ] {
+        let descriptor = results
+            .data
+            .field_descriptors
+            .iter()
+            .find(|descriptor| descriptor.field_id == field_id)
+            .expect("rotational transient descriptor should be present");
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
+        assert_eq!(descriptor.component_count, Some(3));
     }
 }
 

@@ -1,13 +1,16 @@
 use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 
+use crate::assembly::{dofs::StructuralDofKind, AssemblySummary};
 use crate::{
     assembly::assemble_linear_system,
     contracts::{
-        fea_transient_acceleration_field_id, fea_transient_displacement_field_id,
+        fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
+        fea_transient_angular_velocity_field_id, fea_transient_displacement_field_id,
         fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
-        fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
-        fea_transient_von_mises_field_id, ComputeBackend, FeaRunError, FeaRunResult,
-        FeaTransientRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
+        fea_transient_rotation_field_id, fea_transient_strain_energy_field_id,
+        fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
+        FeaRunError, FeaRunResult, FeaTransientRunResult, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::{
         builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
@@ -166,6 +169,9 @@ pub fn run_transient_with_options(
         &transient.time_points_s,
         summary.dof_count,
     );
+    let rotation_values = recover_rotational_snapshots(&summary, &transient.displacement_snapshots);
+    let angular_velocity_values = recover_rotational_snapshots(&summary, &velocity_values);
+    let angular_acceleration_values = recover_rotational_snapshots(&summary, &acceleration_values);
     let von_mises_values =
         recover_von_mises_snapshots(&transient.displacement_snapshots, summary.dof_count);
     let kinetic_energy_values = recover_kinetic_energy_snapshots(&summary, &velocity_values);
@@ -192,6 +198,17 @@ pub fn run_transient_with_options(
             )
         })
         .collect::<Vec<_>>();
+    let rotation_snapshots = rotation_values
+        .into_iter()
+        .enumerate()
+        .map(|(index, snapshot)| {
+            AnalysisField::host_f64(
+                fea_transient_rotation_field_id(index),
+                rotational_vector_shape(&summary),
+                snapshot,
+            )
+        })
+        .collect::<Vec<_>>();
     let velocity_snapshots = velocity_values
         .into_iter()
         .enumerate()
@@ -203,6 +220,17 @@ pub fn run_transient_with_options(
             )
         })
         .collect::<Vec<_>>();
+    let angular_velocity_snapshots = angular_velocity_values
+        .into_iter()
+        .enumerate()
+        .map(|(index, snapshot)| {
+            AnalysisField::host_f64(
+                fea_transient_angular_velocity_field_id(index),
+                rotational_vector_shape(&summary),
+                snapshot,
+            )
+        })
+        .collect::<Vec<_>>();
     let acceleration_snapshots = acceleration_values
         .into_iter()
         .enumerate()
@@ -211,6 +239,17 @@ pub fn run_transient_with_options(
                 fea_transient_acceleration_field_id(index),
                 vector_shape(summary.dof_count.max(snapshot.len())),
                 padded_vector_values(snapshot, summary.dof_count),
+            )
+        })
+        .collect::<Vec<_>>();
+    let angular_acceleration_snapshots = angular_acceleration_values
+        .into_iter()
+        .enumerate()
+        .map(|(index, snapshot)| {
+            AnalysisField::host_f64(
+                fea_transient_angular_acceleration_field_id(index),
+                rotational_vector_shape(&summary),
+                snapshot,
             )
         })
         .collect::<Vec<_>>();
@@ -299,8 +338,11 @@ pub fn run_transient_with_options(
         run,
         time_points_s: transient.time_points_s,
         displacement_snapshots,
+        rotation_snapshots,
         velocity_snapshots,
+        angular_velocity_snapshots,
         acceleration_snapshots,
+        angular_acceleration_snapshots,
         von_mises_snapshots,
         kinetic_energy_snapshots,
         strain_energy_snapshots,
@@ -319,6 +361,52 @@ pub fn run_transient_with_options(
             .thermal_residual_snapshots,
         residual_norms: transient.residual_norms,
     })
+}
+
+fn recover_rotational_snapshots(
+    summary: &AssemblySummary,
+    snapshots: &[Vec<f64>],
+) -> Vec<Vec<f64>> {
+    if summary.structural_rotational_dof_count == 0 {
+        return Vec::new();
+    }
+    snapshots
+        .iter()
+        .map(|snapshot| recover_rotation_snapshot(summary, snapshot))
+        .collect()
+}
+
+fn recover_rotation_snapshot(summary: &AssemblySummary, snapshot: &[f64]) -> Vec<f64> {
+    let mut rotation = vec![0.0; rotational_vector_shape(summary).iter().product()];
+    for row in 0..summary.structural_dof_layout.total_dof_count() {
+        let Some(address) = summary.structural_dof_layout.address(row) else {
+            continue;
+        };
+        let Some(component) = rotational_component(address.kind) else {
+            continue;
+        };
+        let target = address.node_index * VECTOR_COMPONENT_COUNT + component;
+        if target < rotation.len() {
+            rotation[target] = snapshot.get(row).copied().unwrap_or(0.0);
+        }
+    }
+    rotation
+}
+
+fn rotational_vector_shape(summary: &AssemblySummary) -> Vec<usize> {
+    vec![
+        summary.structural_dof_layout.node_count(),
+        VECTOR_COMPONENT_COUNT,
+    ]
+}
+
+fn rotational_component(kind: StructuralDofKind) -> Option<usize> {
+    match kind {
+        StructuralDofKind::Rx => Some(0),
+        StructuralDofKind::Ry => Some(1),
+        StructuralDofKind::Rz => Some(2),
+        _ => None,
+    }
 }
 
 fn normalized_time_factors(time_points_s: &[f64], snapshot_count: usize) -> Vec<f64> {
