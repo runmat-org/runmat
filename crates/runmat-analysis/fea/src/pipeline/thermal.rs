@@ -437,7 +437,7 @@ pub fn run_thermal_with_options(
         code: "FEA_THERMAL_FIELD_RECOVERY".to_string(),
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
-            "basis={} recovery_node_count={} recovery_dimensions={}x{}x{} recovery_spacing_x={} recovery_spacing_y={} recovery_spacing_z={} coordinate_active_dimension_count={} coordinate_characteristic_length_m={} prep_recovery_edge_count={} boundary_face_count={}",
+            "basis={} recovery_node_count={} recovery_dimensions={}x{}x{} recovery_spacing_x={} recovery_spacing_y={} recovery_spacing_z={} coordinate_active_dimension_count={} coordinate_characteristic_length_m={} prep_recovery_edge_count={} prep_triangle_element_count={} boundary_face_count={}",
             recovery_topology.basis.as_str(),
             recovery_topology.node_count,
             recovery_topology.dims[0],
@@ -449,6 +449,7 @@ pub fn run_thermal_with_options(
             recovery_topology.active_dimension_count,
             recovery_topology.characteristic_length_m,
             recovery_topology.prep_recovery_edge_count,
+            recovery_topology.prep_triangle_elements.len(),
             BOUNDARY_HEAT_FLUX_COMPONENT_COUNT,
         ),
     });
@@ -566,10 +567,12 @@ struct ThermalRecoveryTopology {
     basis: ThermalRecoveryBasis,
     prep_recovery_edge_count: usize,
     prep_edge_elements: Vec<ThermalRecoveryEdge>,
+    prep_triangle_elements: Vec<ThermalRecoveryTriangle>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ThermalRecoveryBasis {
+    PrepElementTriangleTopology,
     PrepElementEdgeGraph,
     InferredLattice,
 }
@@ -577,6 +580,7 @@ enum ThermalRecoveryBasis {
 impl ThermalRecoveryBasis {
     const fn as_str(self) -> &'static str {
         match self {
+            Self::PrepElementTriangleTopology => "prep_element_triangle_topology",
             Self::PrepElementEdgeGraph => "prep_element_edge_graph",
             Self::InferredLattice => "inferred_lattice",
         }
@@ -589,6 +593,12 @@ struct ThermalRecoveryEdge {
     to_node: usize,
     axis: usize,
     length_m: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ThermalRecoveryTriangle {
+    nodes: [usize; VECTOR_COMPONENT_COUNT],
+    coordinates_m: [[f64; VECTOR_COMPONENT_COUNT]; VECTOR_COMPONENT_COUNT],
 }
 
 impl ThermalRecoveryTopology {
@@ -631,10 +641,13 @@ impl ThermalRecoveryTopology {
             .map(|item| thermal_axis_spacing(dims, item.span_m, characteristic_length_m))
             .unwrap_or_else(|| thermal_normalized_axis_spacing(dims));
         let prep_edge_elements = thermal_prep_edge_elements(summary, node_count.max(1));
-        let basis = if prep_edge_elements.is_empty() {
-            ThermalRecoveryBasis::InferredLattice
-        } else {
+        let prep_triangle_elements = thermal_prep_triangle_elements(summary, node_count.max(1));
+        let basis = if !prep_triangle_elements.is_empty() {
+            ThermalRecoveryBasis::PrepElementTriangleTopology
+        } else if !prep_edge_elements.is_empty() {
             ThermalRecoveryBasis::PrepElementEdgeGraph
+        } else {
+            ThermalRecoveryBasis::InferredLattice
         };
         Self {
             node_count: node_count.max(1),
@@ -645,6 +658,7 @@ impl ThermalRecoveryTopology {
             basis,
             prep_recovery_edge_count: prep_edge_elements.len(),
             prep_edge_elements,
+            prep_triangle_elements,
         }
     }
 
@@ -672,6 +686,57 @@ impl ThermalRecoveryTopology {
             + coords[2].saturating_mul(self.dims[0].saturating_mul(self.dims[1]));
         (index < self.node_count).then_some(index)
     }
+}
+
+fn thermal_prep_triangle_elements(
+    summary: &AssemblySummary,
+    node_count: usize,
+) -> Vec<ThermalRecoveryTriangle> {
+    let Some(coordinates) = summary.prep_coordinates else {
+        return Vec::new();
+    };
+    let sample_edge_count = coordinates.element_topology_sample_edge_count.min(8);
+    let sample_element_count = coordinates.element_topology_sample_element_count.min(4);
+    if sample_edge_count < 3 || sample_element_count == 0 {
+        return Vec::new();
+    }
+
+    let mut triangles = Vec::new();
+    for element_edges in coordinates
+        .element_topology_sample_element_edges
+        .iter()
+        .take(sample_element_count)
+    {
+        let mut nodes = Vec::with_capacity(VECTOR_COMPONENT_COUNT);
+        for edge_index in element_edges {
+            let edge_index = *edge_index as usize;
+            if edge_index >= sample_edge_count {
+                continue;
+            }
+            for node in coordinates.element_topology_sample_edge_nodes[edge_index] {
+                let node = node as usize;
+                if node < node_count && node < VECTOR_COMPONENT_COUNT && !nodes.contains(&node) {
+                    nodes.push(node);
+                }
+            }
+        }
+        if nodes.len() != VECTOR_COMPONENT_COUNT {
+            continue;
+        }
+        let triangle = [
+            coordinates.reference_element_coordinates_m[nodes[0]],
+            coordinates.reference_element_coordinates_m[nodes[1]],
+            coordinates.reference_element_coordinates_m[nodes[2]],
+        ];
+        if thermal_triangle_area(&triangle) <= 1.0e-18 {
+            continue;
+        }
+        triangles.push(ThermalRecoveryTriangle {
+            nodes: [nodes[0], nodes[1], nodes[2]],
+            coordinates_m: triangle,
+        });
+    }
+    triangles
 }
 
 fn thermal_prep_edge_elements(
@@ -757,6 +822,9 @@ fn recover_temperature_gradients(
     temperature_snapshots: &[Vec<f64>],
     topology: &ThermalRecoveryTopology,
 ) -> Vec<Vec<f64>> {
+    if !topology.prep_triangle_elements.is_empty() {
+        return recover_prep_triangle_temperature_gradients(temperature_snapshots, topology);
+    }
     if !topology.prep_edge_elements.is_empty() {
         return recover_prep_edge_temperature_gradients(temperature_snapshots, topology);
     }
@@ -774,6 +842,102 @@ fn recover_temperature_gradients(
             gradient
         })
         .collect()
+}
+
+fn recover_prep_triangle_temperature_gradients(
+    temperature_snapshots: &[Vec<f64>],
+    topology: &ThermalRecoveryTopology,
+) -> Vec<Vec<f64>> {
+    temperature_snapshots
+        .iter()
+        .map(|temperatures| {
+            let node_count = temperatures.len().max(topology.node_count).max(1);
+            let mut gradient = vec![0.0; node_count * VECTOR_COMPONENT_COUNT];
+            let mut contribution_count = vec![0usize; node_count];
+            for triangle in &topology.prep_triangle_elements {
+                let Some(triangle_gradient) =
+                    thermal_triangle_temperature_gradient(triangle, temperatures)
+                else {
+                    continue;
+                };
+                for node in triangle.nodes {
+                    let base = node * VECTOR_COMPONENT_COUNT;
+                    if base + VECTOR_COMPONENT_COUNT > gradient.len() {
+                        continue;
+                    }
+                    for axis in 0..VECTOR_COMPONENT_COUNT {
+                        gradient[base + axis] += triangle_gradient[axis];
+                    }
+                    contribution_count[node] = contribution_count[node].saturating_add(1);
+                }
+            }
+            for (node, count) in contribution_count.iter().enumerate() {
+                if *count == 0 {
+                    continue;
+                }
+                let base = node * VECTOR_COMPONENT_COUNT;
+                for axis in 0..VECTOR_COMPONENT_COUNT {
+                    gradient[base + axis] /= *count as f64;
+                }
+            }
+            gradient
+        })
+        .collect()
+}
+
+fn thermal_triangle_temperature_gradient(
+    triangle: &ThermalRecoveryTriangle,
+    temperatures: &[f64],
+) -> Option<[f64; VECTOR_COMPONENT_COUNT]> {
+    let [n0, n1, n2] = triangle.nodes;
+    let t0 = *temperatures.get(n0)?;
+    let t1 = *temperatures.get(n1)?;
+    let t2 = *temperatures.get(n2)?;
+    let p0 = triangle.coordinates_m[0];
+    let p1 = triangle.coordinates_m[1];
+    let p2 = triangle.coordinates_m[2];
+    let e1 = vector_sub(p1, p0);
+    let e2 = vector_sub(p2, p0);
+    let g11 = dot(e1, e1);
+    let g12 = dot(e1, e2);
+    let g22 = dot(e2, e2);
+    let determinant = g11 * g22 - g12 * g12;
+    if !determinant.is_finite() || determinant.abs() <= 1.0e-24 {
+        return None;
+    }
+    let rhs1 = t1 - t0;
+    let rhs2 = t2 - t0;
+    let c1 = (rhs1 * g22 - rhs2 * g12) / determinant;
+    let c2 = (rhs2 * g11 - rhs1 * g12) / determinant;
+    Some([
+        c1 * e1[0] + c2 * e2[0],
+        c1 * e1[1] + c2 * e2[1],
+        c1 * e1[2] + c2 * e2[2],
+    ])
+}
+
+fn vector_sub(
+    left: [f64; VECTOR_COMPONENT_COUNT],
+    right: [f64; VECTOR_COMPONENT_COUNT],
+) -> [f64; VECTOR_COMPONENT_COUNT] {
+    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+fn dot(left: [f64; VECTOR_COMPONENT_COUNT], right: [f64; VECTOR_COMPONENT_COUNT]) -> f64 {
+    left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}
+
+fn thermal_triangle_area(
+    coordinates: &[[f64; VECTOR_COMPONENT_COUNT]; VECTOR_COMPONENT_COUNT],
+) -> f64 {
+    let e1 = vector_sub(coordinates[1], coordinates[0]);
+    let e2 = vector_sub(coordinates[2], coordinates[0]);
+    let cross = [
+        e1[1] * e2[2] - e1[2] * e2[1],
+        e1[2] * e2[0] - e1[0] * e2[2],
+        e1[0] * e2[1] - e1[1] * e2[0],
+    ];
+    0.5 * dot(cross, cross).sqrt()
 }
 
 fn recover_prep_edge_temperature_gradients(
@@ -960,6 +1124,13 @@ fn average_nodal_scalar(snapshot: &[f64], element_nodes: &[usize]) -> f64 {
 }
 
 fn thermal_element_node_sets(topology: &ThermalRecoveryTopology) -> Vec<Vec<usize>> {
+    if !topology.prep_triangle_elements.is_empty() {
+        return topology
+            .prep_triangle_elements
+            .iter()
+            .map(|triangle| triangle.nodes.to_vec())
+            .collect();
+    }
     if !topology.prep_edge_elements.is_empty() {
         return topology
             .prep_edge_elements

@@ -591,7 +591,7 @@ fn thermal_solver_emits_heat_transfer_fields() {
 }
 
 #[test]
-fn prepared_thermal_recovery_uses_prep_edge_graph() {
+fn prepared_thermal_recovery_uses_prep_element_topology() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let result = crate::run_thermal_with_options(
         &model,
@@ -681,8 +681,12 @@ fn prepared_thermal_recovery_uses_prep_edge_graph() {
         .iter()
         .find(|diag| diag.code == "FEA_THERMAL_FIELD_RECOVERY")
         .expect("thermal recovery diagnostic should be emitted");
-    assert!(recovery.message.contains("basis=prep_element_edge_graph"));
+    assert!(recovery
+        .message
+        .contains("basis=prep_element_triangle_topology"));
     assert!(recovery.message.contains("prep_recovery_edge_count="));
+    assert!(recovery.message.contains("prep_triangle_element_count=1"));
+    assert_eq!(result.temperature_gradient_snapshots[1].shape[0], 1);
     assert_eq!(result.temperature_gradient_snapshots[1].shape[1], 3);
     assert_eq!(
         result.heat_flux_snapshots[1].shape,
