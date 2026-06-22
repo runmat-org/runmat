@@ -96,8 +96,10 @@ pub struct StructuralFieldRecoveryMetrics {
     pub constrained_edge_count: usize,
     pub recovery_element_count: usize,
     pub max_edge_displacement_jump: f64,
+    pub max_edge_strain_norm: f64,
     pub mean_edge_stiffness_ratio: f64,
     pub mean_edge_length_m: f64,
+    pub strain_component_coverage_ratio: f64,
     pub basis: &'static str,
 }
 
@@ -113,6 +115,7 @@ pub fn structural_field_recovery_metrics(
         .count();
     let constrained_edge_count = constrained_recovery_edge_count(summary);
     let mut max_edge_displacement_jump = 0.0_f64;
+    let mut max_edge_strain_norm = 0.0_f64;
     let mut stiffness_ratio_sum = 0.0_f64;
     let mut edge_length_sum = 0.0_f64;
     for edge in &recovery_edges {
@@ -122,6 +125,13 @@ pub fn structural_field_recovery_metrics(
             .map(|(right, left)| (right - left).abs())
             .unwrap_or(0.0);
         max_edge_displacement_jump = max_edge_displacement_jump.max(jump);
+        let strain_tensor = edge_strain_tensor(displacement, edge);
+        let strain_norm = strain_tensor
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt();
+        max_edge_strain_norm = max_edge_strain_norm.max(strain_norm);
         stiffness_ratio_sum += edge.stiffness_ratio;
         edge_length_sum += edge.edge_length_m;
     }
@@ -136,6 +146,8 @@ pub fn structural_field_recovery_metrics(
     } else {
         edge_length_sum / recovery_edge_count as f64
     };
+    let strain_component_coverage_ratio =
+        strain_component_coverage_ratio(displacement, &recovery_edges);
 
     StructuralFieldRecoveryMetrics {
         active_stiffness_edge_count,
@@ -143,8 +155,10 @@ pub fn structural_field_recovery_metrics(
         constrained_edge_count,
         recovery_element_count: active_stiffness_edge_count.max(1),
         max_edge_displacement_jump,
+        max_edge_strain_norm,
         mean_edge_stiffness_ratio,
         mean_edge_length_m,
+        strain_component_coverage_ratio,
         basis: recovery_edges
             .first()
             .map(|edge| edge.basis.as_str())
@@ -378,12 +392,69 @@ fn recover_strain(displacement: &[f64], recovery_edges: &[StructuralRecoveryEdge
     let element_count = recovery_edges.len().max(1);
     let mut strain = vec![0.0; element_count * TENSOR_COMPONENT_COUNT];
     for (element_index, edge) in recovery_edges.iter().enumerate() {
-        let jump = displacement.get(edge.to_dof).copied().unwrap_or(0.0)
-            - displacement.get(edge.from_dof).copied().unwrap_or(0.0);
-        strain[element_index * TENSOR_COMPONENT_COUNT + edge.component] =
-            jump / finite_positive_or(edge.edge_length_m, edge.hop.max(1) as f64);
+        let edge_strain = edge_strain_tensor(displacement, edge);
+        let base = element_index * TENSOR_COMPONENT_COUNT;
+        strain[base..base + TENSOR_COMPONENT_COUNT].copy_from_slice(&edge_strain);
     }
     strain
+}
+
+fn edge_strain_tensor(displacement: &[f64], edge: &StructuralRecoveryEdge) -> [f64; 6] {
+    let length = finite_positive_or(edge.edge_length_m, edge.hop.max(1) as f64);
+    let from_node = edge.from_dof / VECTOR_COMPONENT_COUNT;
+    let to_node = edge.to_dof / VECTOR_COMPONENT_COUNT;
+    if from_node == to_node {
+        let jump = displacement.get(edge.to_dof).copied().unwrap_or(0.0)
+            - displacement.get(edge.from_dof).copied().unwrap_or(0.0);
+        let mut tensor = [0.0; TENSOR_COMPONENT_COUNT];
+        tensor[edge.component] = jump / length;
+        return tensor;
+    }
+
+    let du = nodal_displacement(displacement, to_node);
+    let u0 = nodal_displacement(displacement, from_node);
+    let gradient = [
+        (du[0] - u0[0]) / length,
+        (du[1] - u0[1]) / length,
+        (du[2] - u0[2]) / length,
+    ];
+    [
+        gradient[0],
+        gradient[1],
+        gradient[2],
+        0.5 * (gradient[0] + gradient[1]),
+        0.5 * (gradient[1] + gradient[2]),
+        0.5 * (gradient[0] + gradient[2]),
+    ]
+}
+
+fn nodal_displacement(displacement: &[f64], node: usize) -> [f64; VECTOR_COMPONENT_COUNT] {
+    let base = node * VECTOR_COMPONENT_COUNT;
+    [
+        displacement.get(base).copied().unwrap_or(0.0),
+        displacement.get(base + 1).copied().unwrap_or(0.0),
+        displacement.get(base + 2).copied().unwrap_or(0.0),
+    ]
+}
+
+fn strain_component_coverage_ratio(
+    displacement: &[f64],
+    recovery_edges: &[StructuralRecoveryEdge],
+) -> f64 {
+    let expected_component_count = recovery_edges.len() * TENSOR_COMPONENT_COUNT;
+    if expected_component_count == 0 {
+        return 0.0;
+    }
+    let active_component_count = recovery_edges
+        .iter()
+        .map(|edge| {
+            edge_strain_tensor(displacement, edge)
+                .iter()
+                .filter(|value| value.abs() > 0.0)
+                .count()
+        })
+        .sum::<usize>();
+    active_component_count as f64 / expected_component_count as f64
 }
 
 fn recover_stress(strain: &[f64], material: StructuralMaterialSummary) -> Vec<f64> {

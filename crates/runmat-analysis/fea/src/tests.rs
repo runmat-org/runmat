@@ -249,6 +249,8 @@ fn prepared_structural_recovery_uses_prep_connectivity_edges() {
             && diag.message.contains("basis=prep_element_connectivity")
             && diag.message.contains("prep_recovery_edge_count=")
             && diag.message.contains("mean_edge_length_m=")
+            && diag.message.contains("max_edge_strain_norm=")
+            && diag.message.contains("strain_component_coverage_ratio=")
     }));
 }
 
