@@ -298,6 +298,7 @@ fn prepared_structural_recovery_uses_prep_connectivity_edges() {
         diag.code == "FEA_STRUCTURAL_FIELD_RECOVERY"
             && diag.message.contains("basis=prep_constant_strain_b_matrix")
             && diag.message.contains("prep_recovery_edge_count=")
+            && diag.message.contains("recovery_element_count=2")
             && diag.message.contains("mean_edge_length_m=")
             && diag.message.contains("max_edge_strain_norm=")
             && diag.message.contains("strain_component_coverage_ratio=")
@@ -1263,6 +1264,7 @@ fn nonlinear_prepared_state_recovery_uses_prep_connectivity_edges() {
     assert!(topology
         .message
         .contains("basis=prep_constant_strain_b_matrix"));
+    assert!(topology.message.contains("element_count=2"));
     assert!(topology.message.contains("prep_recovery_edge_count="));
     assert!(topology.message.contains("mean_edge_length_m="));
     assert!(topology.message.contains("max_edge_strain_norm="));

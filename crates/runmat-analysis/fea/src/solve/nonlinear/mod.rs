@@ -922,6 +922,21 @@ fn nonlinear_prep_b_matrix_elements(
     }
 
     let node_count = summary.dof_count.div_ceil(VECTOR_COMPONENT_COUNT);
+    let sample_elements = nonlinear_prep_sample_b_matrix_elements(
+        summary,
+        node_count,
+        prep_coordinates
+            .element_topology_sample_element_count
+            .min(4),
+        prep_coordinates.element_topology_sample_edge_count.min(8),
+        prep_coordinates.element_topology_sample_element_edges,
+        prep_coordinates.element_topology_sample_edge_nodes,
+        prep_coordinates.element_topology_sample_node_coordinates_m,
+    );
+    if !sample_elements.is_empty() {
+        return sample_elements;
+    }
+
     let mut nodes = prep_edges
         .iter()
         .flat_map(|edge| {
@@ -946,6 +961,57 @@ fn nonlinear_prep_b_matrix_elements(
         .map(|chunk| NonlinearBMatrixElement {
             nodes: [chunk[0], chunk[1], chunk[2]],
             coordinates_m: prep_coordinates.reference_element_coordinates_m,
+        })
+        .collect()
+}
+
+fn nonlinear_prep_sample_b_matrix_elements(
+    summary: &AssemblySummary,
+    node_count: usize,
+    sample_element_count: usize,
+    sample_edge_count: usize,
+    element_edges: [[u32; 3]; 4],
+    edge_nodes: [[u32; 2]; 8],
+    node_coordinates_m: [[f64; 3]; 8],
+) -> Vec<NonlinearBMatrixElement> {
+    if sample_element_count == 0 || sample_edge_count < 3 {
+        return Vec::new();
+    }
+    element_edges
+        .iter()
+        .take(sample_element_count)
+        .filter_map(|sample_edges| {
+            let mut nodes = Vec::with_capacity(3);
+            for edge_index in sample_edges {
+                let edge_index = *edge_index as usize;
+                if edge_index >= sample_edge_count {
+                    return None;
+                }
+                for node in edge_nodes[edge_index] {
+                    let node = node as usize;
+                    if node < node_count
+                        && node < node_coordinates_m.len()
+                        && nonlinear_node_has_unconstrained_dof(summary, node)
+                        && !nodes.contains(&node)
+                    {
+                        nodes.push(node);
+                    }
+                }
+            }
+            if nodes.len() != 3 {
+                return None;
+            }
+            let coordinates_m = [
+                node_coordinates_m[nodes[0]],
+                node_coordinates_m[nodes[1]],
+                node_coordinates_m[nodes[2]],
+            ];
+            nonlinear_reference_coordinates_are_valid(coordinates_m).then_some(
+                NonlinearBMatrixElement {
+                    nodes: [nodes[0], nodes[1], nodes[2]],
+                    coordinates_m,
+                },
+            )
         })
         .collect()
 }
