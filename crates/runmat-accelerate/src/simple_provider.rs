@@ -134,8 +134,9 @@ fn cos_complex_host(re: f64, im: f64) -> (f64, f64) {
 fn tan_complex_host(re: f64, im: f64) -> (f64, f64) {
     let two_re = 2.0 * re;
     let two_im = 2.0 * im;
-    let denom = two_re.cos() + two_im.cosh();
-    (two_re.sin() / denom, two_im.sinh() / denom)
+    let inv_cosh = 1.0 / two_im.cosh();
+    let denom = 1.0 + two_re.cos() * inv_cosh;
+    ((two_re.sin() * inv_cosh) / denom, two_im.tanh() / denom)
 }
 
 fn sign_scalar_host(value: f64) -> f64 {
