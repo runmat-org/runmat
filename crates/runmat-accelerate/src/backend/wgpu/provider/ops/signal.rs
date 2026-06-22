@@ -1,7 +1,13 @@
 use super::*;
 use crate::backend::wgpu::shaders::signal::{
-    spectral_frame_shader, spectral_power_shader, spectral_select_shader,
-    SpectralFrameShaderConfig, SpectralFrameShaderMode, SpectralRangeShaderMode,
+    envelope_analytic_bounds_shader, envelope_analytic_fir_bounds_shader,
+    envelope_analytic_mask_shader, envelope_center_real_to_complex_shader,
+    envelope_rms_bounds_shader, spectral_frame_shader, spectral_power_shader,
+    spectral_select_shader, SpectralFrameShaderConfig, SpectralFrameShaderMode,
+    SpectralRangeShaderMode,
+};
+use runmat_accelerate_api::{
+    ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderEnvelopeResult,
 };
 
 impl WgpuProvider {
@@ -100,6 +106,179 @@ impl WgpuProvider {
             rows,
             cols: request.frame_count,
         })
+    }
+
+    pub(crate) async fn signal_envelope_exec(
+        &self,
+        request: &ProviderEnvelopeRequest<'_>,
+    ) -> Result<ProviderEnvelopeResult> {
+        ensure!(
+            request.channel_len > 0
+                && request.channel_count > 0
+                && request
+                    .output_shape
+                    .iter()
+                    .try_fold(1usize, |acc, &dim| { acc.checked_mul(dim) })
+                    == request.channel_len.checked_mul(request.channel_count),
+            "signal_envelope: invalid request"
+        );
+        let entry = self.get_entry(request.input)?;
+        ensure!(
+            entry.precision == self.precision,
+            "signal_envelope: mixed precision tensors are not supported"
+        );
+        ensure!(
+            entry.storage == GpuTensorStorage::Real
+                && runmat_accelerate_api::handle_storage(request.input) == GpuTensorStorage::Real,
+            "signal_envelope: complex input tensors are not supported"
+        );
+        ensure!(
+            entry.len == request.channel_len * request.channel_count,
+            "signal_envelope: input length mismatch"
+        );
+
+        match request.method {
+            ProviderEnvelopeMethod::Analytic => self.signal_envelope_analytic_exec(request).await,
+            ProviderEnvelopeMethod::AnalyticFir { filter_len } => {
+                self.signal_envelope_analytic_fir_exec(request, filter_len)
+            }
+            ProviderEnvelopeMethod::Rms { window_len } => {
+                self.signal_envelope_rms_exec(request, window_len)
+            }
+        }
+    }
+
+    async fn signal_envelope_analytic_exec(
+        &self,
+        request: &ProviderEnvelopeRequest<'_>,
+    ) -> Result<ProviderEnvelopeResult> {
+        let complex_len = request
+            .channel_len
+            .checked_mul(request.channel_count)
+            .and_then(|len| len.checked_mul(2))
+            .ok_or_else(|| anyhow!("signal_envelope: analytic output too large"))?;
+        let channel_shape = [request.channel_len, request.channel_count];
+        let center_shader = envelope_center_real_to_complex_shader(
+            request.channel_len,
+            request.channel_count,
+            self.precision,
+        );
+        let centered = self.fused_elementwise_with_telemetry_exec(
+            &center_shader,
+            std::slice::from_ref(request.input),
+            &channel_shape,
+            complex_len,
+        )?;
+        runmat_accelerate_api::set_handle_storage(&centered, GpuTensorStorage::ComplexInterleaved);
+
+        let spectrum = self.fft_dim_exec(&centered, None, 0).await?;
+        self.free_exec(&centered).ok();
+
+        let mask_shader = envelope_analytic_mask_shader(
+            request.channel_len,
+            request.channel_count,
+            self.precision,
+        );
+        let filtered = self.fused_elementwise_with_telemetry_exec(
+            &mask_shader,
+            std::slice::from_ref(&spectrum),
+            &channel_shape,
+            complex_len,
+        )?;
+        self.free_exec(&spectrum).ok();
+        runmat_accelerate_api::set_handle_storage(&filtered, GpuTensorStorage::ComplexInterleaved);
+
+        let analytic = self.ifft_dim_exec(&filtered, None, 0).await?;
+        self.free_exec(&filtered).ok();
+
+        let real_len = request
+            .channel_len
+            .checked_mul(request.channel_count)
+            .ok_or_else(|| anyhow!("signal_envelope: output too large"))?;
+        let bounds_shader = envelope_analytic_bounds_shader(
+            request.channel_len,
+            request.channel_count,
+            self.precision,
+        );
+        let inputs = [request.input.clone(), analytic.clone()];
+        let mut outputs = self.fused_elementwise_multi_with_telemetry_exec(
+            &bounds_shader,
+            &inputs,
+            request.output_shape,
+            real_len,
+            2,
+        )?;
+        self.free_exec(&analytic).ok();
+        ensure!(outputs.len() == 2, "signal_envelope: missing outputs");
+        let lower = outputs.pop().expect("lower output");
+        let upper = outputs.pop().expect("upper output");
+        Ok(ProviderEnvelopeResult { upper, lower })
+    }
+
+    fn signal_envelope_analytic_fir_exec(
+        &self,
+        request: &ProviderEnvelopeRequest<'_>,
+        filter_len: usize,
+    ) -> Result<ProviderEnvelopeResult> {
+        ensure!(filter_len > 0, "signal_envelope: invalid filter length");
+        let real_len = request
+            .channel_len
+            .checked_mul(request.channel_count)
+            .ok_or_else(|| anyhow!("signal_envelope: output too large"))?;
+        let kernel_data = envelope_hilbert_fir_kernel(filter_len);
+        let kernel_shape = [filter_len, 1usize];
+        let kernel = self.upload_exec(&HostTensorView {
+            data: &kernel_data,
+            shape: &kernel_shape,
+        })?;
+        let shader = envelope_analytic_fir_bounds_shader(
+            request.channel_len,
+            request.channel_count,
+            filter_len,
+            self.precision,
+        );
+        let inputs = [request.input.clone(), kernel.clone()];
+        let mut outputs = self.fused_elementwise_multi_with_telemetry_exec(
+            &shader,
+            &inputs,
+            request.output_shape,
+            real_len,
+            2,
+        )?;
+        self.free_exec(&kernel).ok();
+        ensure!(outputs.len() == 2, "signal_envelope: missing outputs");
+        let lower = outputs.pop().expect("lower output");
+        let upper = outputs.pop().expect("upper output");
+        Ok(ProviderEnvelopeResult { upper, lower })
+    }
+
+    fn signal_envelope_rms_exec(
+        &self,
+        request: &ProviderEnvelopeRequest<'_>,
+        window_len: usize,
+    ) -> Result<ProviderEnvelopeResult> {
+        ensure!(window_len > 0, "signal_envelope: invalid window length");
+        let real_len = request
+            .channel_len
+            .checked_mul(request.channel_count)
+            .ok_or_else(|| anyhow!("signal_envelope: output too large"))?;
+        let shader = envelope_rms_bounds_shader(
+            request.channel_len,
+            request.channel_count,
+            window_len,
+            self.precision,
+        );
+        let mut outputs = self.fused_elementwise_multi_with_telemetry_exec(
+            &shader,
+            std::slice::from_ref(request.input),
+            request.output_shape,
+            real_len,
+            2,
+        )?;
+        ensure!(outputs.len() == 2, "signal_envelope: missing outputs");
+        let lower = outputs.pop().expect("lower output");
+        let upper = outputs.pop().expect("upper output");
+        Ok(ProviderEnvelopeResult { upper, lower })
     }
 
     pub(crate) fn conv2d_exec(
@@ -1403,6 +1582,53 @@ fn spectral_selected_frequency_len(nfft: usize, range: ProviderSpectralRange) ->
     }
 }
 
+fn envelope_hilbert_fir_kernel(filter_len: usize) -> Vec<f64> {
+    if filter_len == 0 {
+        return Vec::new();
+    }
+    let center = (filter_len as f64 - 1.0) / 2.0;
+    let denominator = envelope_modified_bessel_i0(8.0);
+    (0..filter_len)
+        .map(|idx| {
+            let k = idx as f64 - center;
+            let ideal = if k.abs() <= f64::EPSILON {
+                0.0
+            } else {
+                let rounded = k.round();
+                if (rounded - k).abs() <= f64::EPSILON && (rounded as i64).rem_euclid(2) == 0 {
+                    0.0
+                } else {
+                    2.0 / (std::f64::consts::PI * k)
+                }
+            };
+            ideal * envelope_kaiser_window(idx, filter_len, denominator)
+        })
+        .collect()
+}
+
+fn envelope_kaiser_window(idx: usize, len: usize, denominator: f64) -> f64 {
+    if len <= 1 {
+        return 1.0;
+    }
+    let ratio = 2.0 * idx as f64 / (len - 1) as f64 - 1.0;
+    let argument = 8.0 * (1.0 - ratio * ratio).max(0.0).sqrt();
+    envelope_modified_bessel_i0(argument) / denominator
+}
+
+fn envelope_modified_bessel_i0(x: f64) -> f64 {
+    let y = x * x / 4.0;
+    let mut term = 1.0;
+    let mut sum = 1.0;
+    for k in 1..=32 {
+        term *= y / ((k * k) as f64);
+        sum += term;
+        if term.abs() <= sum.abs() * 1.0e-15 {
+            break;
+        }
+    }
+    sum
+}
+
 fn spectral_frame_shader_mode(mode: ProviderSpectralFrameMode) -> SpectralFrameShaderMode {
     match mode {
         ProviderSpectralFrameMode::Sliding { hop } => SpectralFrameShaderMode::Sliding { hop },
@@ -1426,5 +1652,93 @@ fn spectral_range_shader_mode(range: ProviderSpectralRange) -> SpectralRangeShad
         ProviderSpectralRange::Onesided => SpectralRangeShaderMode::Onesided,
         ProviderSpectralRange::Twosided => SpectralRangeShaderMode::Twosided,
         ProviderSpectralRange::Centered => SpectralRangeShaderMode::Centered,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use runmat_accelerate_api::{
+        AccelProvider, HostTensorView, ProviderEnvelopeMethod, ProviderEnvelopeRequest,
+    };
+    use std::sync::{Mutex, OnceLock};
+
+    fn with_wgpu_provider<F, R>(f: F) -> Option<R>
+    where
+        F: FnOnce(&'static dyn AccelProvider) -> R,
+    {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let _guard = LOCK.get_or_init(|| Mutex::new(())).lock().expect("lock");
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return None;
+        };
+        Some(f(provider))
+    }
+
+    fn run_envelope(method: ProviderEnvelopeMethod, values: &[f64], shape: &[usize]) -> Vec<f64> {
+        with_wgpu_provider(|provider| {
+            let input = provider
+                .upload(&HostTensorView {
+                    data: values,
+                    shape,
+                })
+                .expect("upload");
+            let result = pollster::block_on(provider.signal_envelope(&ProviderEnvelopeRequest {
+                input: &input,
+                channel_len: values.len(),
+                channel_count: 1,
+                output_shape: shape,
+                method,
+            }))
+            .expect("envelope");
+            let upper = pollster::block_on(provider.download(&result.upper)).expect("download");
+            provider.free(&input).ok();
+            provider.free(&result.upper).ok();
+            provider.free(&result.lower).ok();
+            upper.data
+        })
+        .unwrap_or_default()
+    }
+
+    #[test]
+    fn signal_envelope_rms_provider_matches_centered_window() {
+        let values = [0.0, 3.0, 4.0, 0.0];
+        let upper = run_envelope(
+            ProviderEnvelopeMethod::Rms { window_len: 3 },
+            &values,
+            &[4, 1],
+        );
+        if upper.is_empty() {
+            return;
+        }
+        assert!((upper[1] - (25.0f64 / 3.0).sqrt()).abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn signal_envelope_analytic_provider_keeps_constant_bounds() {
+        let values = [2.5; 8];
+        let upper = run_envelope(ProviderEnvelopeMethod::Analytic, &values, &[8, 1]);
+        if upper.is_empty() {
+            return;
+        }
+        for value in upper {
+            assert!((value - 2.5).abs() < 1.0e-10);
+        }
+    }
+
+    #[test]
+    fn signal_envelope_analytic_fir_provider_keeps_constant_bounds() {
+        let values = [1.25; 8];
+        let upper = run_envelope(
+            ProviderEnvelopeMethod::AnalyticFir { filter_len: 5 },
+            &values,
+            &[8, 1],
+        );
+        if upper.is_empty() {
+            return;
+        }
+        for value in upper {
+            assert!((value - 1.25).abs() < 1.0e-10);
+        }
     }
 }
