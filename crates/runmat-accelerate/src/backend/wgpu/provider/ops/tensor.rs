@@ -146,15 +146,31 @@ impl WgpuProvider {
         let entry = buffers
             .get_mut(&handle.buffer_id)
             .ok_or_else(|| anyhow!("reshape: unknown buffer {}", handle.buffer_id))?;
+        let storage = if runmat_accelerate_api::handle_storage(handle)
+            == GpuTensorStorage::ComplexInterleaved
+        {
+            GpuTensorStorage::ComplexInterleaved
+        } else {
+            entry.storage.clone()
+        };
+        let lane_factor = match storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
+        let expected_len = new_len
+            .checked_mul(lane_factor)
+            .ok_or_else(|| anyhow!("reshape: dimension product exceeds GPU limits"))?;
         ensure!(
-            entry.len == new_len,
+            entry.len == expected_len,
             "reshape: product of dimensions ({}) must equal original tensor length ({})",
             new_len,
-            entry.len
+            entry.len / lane_factor
         );
         entry.shape = new_shape.to_vec();
+        entry.storage = storage.clone();
         let mut updated = handle.clone();
         updated.shape = new_shape.to_vec();
+        runmat_accelerate_api::set_handle_storage(&updated, storage);
         Ok(updated)
     }
 

@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Providers update GPU tensor shape metadata in place; no kernels are dispatched."
+    "notes": "Providers update GPU tensor shape metadata in place for real and complex-interleaved tensors; no kernels are dispatched."
   },
   "fusion": {
     "elementwise": false,
@@ -63,6 +63,10 @@
     {
       "description": "Reshaping GPU data without gathering",
       "input": "G = gpuArray(1:1000);\nH = reshape(G, 10, 100)"
+    },
+    {
+      "description": "Reshaping complex GPU data keeps complex residency",
+      "input": "Z = gpuArray([1+2i 3+4i 5+6i]);\nR = reshape(Z, 3, 1);\nisgpuarray(R)"
     },
     {
       "description": "Handling zero-sized dimensions",
@@ -162,6 +166,6 @@
     "url": "crates/runmat-runtime/src/builtins/array/shape/reshape.rs"
   },
   "gpu_behavior": [
-    "When the input lives on the GPU, RunMat asks the active acceleration provider to apply the `reshape` hook so the backend can update its residency metadata. No data transfers or kernel launches are needed, so `gpuArray` inputs stay on the device. Providers that do not override the hook fall back to updating the tensor handle directly, which is sufficient for the in-process reference backend."
+    "When the input lives on the GPU, RunMat asks the active acceleration provider to apply the `reshape` hook so the backend can update its residency metadata. No data transfers or kernel launches are needed, so real and complex-interleaved `gpuArray` inputs stay on the device with their storage metadata preserved. Providers that do not override the hook fall back to updating the tensor handle directly, which is sufficient for the in-process reference backend."
   ]
 }
