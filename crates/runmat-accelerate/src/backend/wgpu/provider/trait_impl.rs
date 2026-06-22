@@ -1,6 +1,7 @@
 use super::*;
 use runmat_accelerate_api::{
-    ProviderEnvelopeRequest, ProviderEnvelopeResult, ProviderModulationRequest,
+    ProviderEnvelopeRequest, ProviderEnvelopeResult, ProviderHilbertRequest,
+    ProviderModulationRequest,
 };
 
 impl AccelProvider for WgpuProvider {
@@ -800,6 +801,12 @@ impl AccelProvider for WgpuProvider {
         request: &'a ProviderEnvelopeRequest<'a>,
     ) -> AccelProviderFuture<'a, ProviderEnvelopeResult> {
         Box::pin(async move { self.signal_envelope_exec(request).await })
+    }
+    fn signal_hilbert<'a>(
+        &'a self,
+        request: &'a ProviderHilbertRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.signal_hilbert_exec(request).await })
     }
     fn conv2d(
         &self,
