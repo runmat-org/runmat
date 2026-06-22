@@ -4,7 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.fea.governance.validate_analysis_report_nonlinear import main
+from scripts.fea.governance.validate_analysis_report_nonlinear import (
+    EM_FORMULATION_REQUIRED_FIELDS,
+    REQUIRED_ERROR_FIXTURES,
+    REQUIRED_FIXTURES,
+    main,
+)
 
 
 TRANSIENT_ENERGY_BALANCE_ASSERTIONS = {
@@ -63,6 +68,7 @@ EM_SOURCE_ENERGY_ASSERTIONS = {
 
 
 def _record(fixture_id: str, assertion_names: set[str]) -> dict:
+    assertion_names = assertion_names | REQUIRED_FIXTURES.get(fixture_id, set())
     if fixture_id.startswith("electromagnetic_reference_"):
         assertion_names = assertion_names | EM_SOURCE_ENERGY_ASSERTIONS
     record = {
@@ -79,6 +85,8 @@ def _record(fixture_id: str, assertion_names: set[str]) -> dict:
         record["gpu_solver_fallback_apply_count"] = 0.0
         record["electromagnetic_solve_quality"] = 1.0
         record["electromagnetic_enabled"] = True
+        for field in EM_FORMULATION_REQUIRED_FIELDS:
+            record[field] = 1.0
         record["electromagnetic_energy_imbalance_ratio"] = 0.0
         record["electromagnetic_flux_divergence_ratio"] = 0.0
         record["electromagnetic_real_residual_norm"] = 0.0
@@ -95,7 +103,7 @@ def _record(fixture_id: str, assertion_names: set[str]) -> dict:
         record["electromagnetic_condition_number_estimate"] = 1.0
         record["electromagnetic_reference_frequency_hz"] = 1.0
         record["electromagnetic_assignment_coverage_ratio"] = 1.0
-        record["electromagnetic_assigned_coefficient_coverage_ratio"] = 0.0
+        record["electromagnetic_assigned_coefficient_coverage_ratio"] = 1.0
         record["electromagnetic_boundary_anchor_ratio"] = 1.0
         record["electromagnetic_conductivity_spread_ratio"] = 1.0
         record["electromagnetic_relative_permittivity_spread_ratio"] = 1.0
@@ -123,7 +131,7 @@ def _error_record(fixture_id: str, run_error_code: str) -> dict:
 
 class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
     def _base_records(self) -> list[dict]:
-        return [
+        records = [
             _record(
                 "cantilever_gpu_provider",
                 {
@@ -1017,26 +1025,6 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 },
             ),
             _error_record(
-                "acoustic_harmonic_missing_source",
-                "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_SOURCE",
-            ),
-            _error_record(
-                "acoustic_harmonic_missing_boundary",
-                "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_BOUNDARY",
-            ),
-            _error_record(
-                "electromagnetic_missing_material",
-                "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_MATERIAL",
-            ),
-            _error_record(
-                "electromagnetic_missing_source",
-                "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE",
-            ),
-            _error_record(
-                "electromagnetic_missing_boundary",
-                "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_BOUNDARY",
-            ),
-            _error_record(
                 "nonlinear_invalid_plasticity_options",
                 "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
             ),
@@ -1467,6 +1455,19 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 },
             ),
         ]
+        present_fixtures = {record["fixture_id"] for record in records}
+        records.extend(
+            _error_record(fixture_id, spec["run_error_code"])
+            for fixture_id, spec in REQUIRED_ERROR_FIXTURES.items()
+            if fixture_id not in present_fixtures
+        )
+        present_fixtures = {record["fixture_id"] for record in records}
+        records.extend(
+            _record(fixture_id, required)
+            for fixture_id, required in REQUIRED_FIXTURES.items()
+            if fixture_id not in present_fixtures
+        )
+        return records
 
     def _run_main_with_report(self, report_path: Path) -> int:
         import sys

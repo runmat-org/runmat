@@ -1295,24 +1295,39 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "acoustic_known_answer_coverage_ratio",
     },
     "modal_large_cpu": {
+        "modal_max_residual_norm",
         "modal_max_m_orthogonality_offdiag",
         "modal_min_relative_frequency_separation",
+        "modal_adjacent_mode_pair_count",
+        "modal_cluster_coverage_ratio",
     },
     "modal_large_cpu_stress16": {
+        "modal_max_residual_norm",
         "modal_max_m_orthogonality_offdiag",
         "modal_min_relative_frequency_separation",
+        "modal_adjacent_mode_pair_count",
+        "modal_cluster_coverage_ratio",
     },
     "modal_large_gpu_fallback": {
+        "modal_max_residual_norm",
         "modal_max_m_orthogonality_offdiag",
         "modal_min_relative_frequency_separation",
+        "modal_adjacent_mode_pair_count",
+        "modal_cluster_coverage_ratio",
     },
     "modal_large_gpu_provider": {
+        "modal_max_residual_norm",
         "modal_max_m_orthogonality_offdiag",
         "modal_min_relative_frequency_separation",
+        "modal_adjacent_mode_pair_count",
+        "modal_cluster_coverage_ratio",
     },
     "modal_large_gpu_provider_stress16": {
+        "modal_max_residual_norm",
         "modal_max_m_orthogonality_offdiag",
         "modal_min_relative_frequency_separation",
+        "modal_adjacent_mode_pair_count",
+        "modal_cluster_coverage_ratio",
     },
     "transient_long_cpu": {
         "transient_max_residual_norm",
@@ -1352,6 +1367,13 @@ REQUIRED_METRICS_BY_FIXTURE = {
     }
     | TRANSIENT_ENERGY_BALANCE_REQUIRED_FIELDS,
 }
+
+REQUIRED_METRICS_BY_FIXTURE["cht_coupled_channel_slab_cpu"] = (
+    REQUIRED_METRICS_BY_FIXTURE["cht_coupled_cpu"] | {"cht_authored_interface_count"}
+)
+REQUIRED_METRICS_BY_FIXTURE["fsi_coupled_pipe_plate_cpu"] = (
+    REQUIRED_METRICS_BY_FIXTURE["fsi_coupled_cpu"] | {"fsi_authored_interface_count"}
+)
 
 
 def is_true(value: str) -> bool:

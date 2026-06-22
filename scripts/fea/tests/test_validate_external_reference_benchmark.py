@@ -13,6 +13,7 @@ from scripts.fea.governance.validate_analysis_report_nonlinear import (
     EM_CONDITIONING_REQUIRED_FIELDS,
     EM_CONSTITUTIVE_REQUIRED_FIELDS,
     EM_CORE_ASSIGNMENT_REQUIRED_FIELDS,
+    EM_FORMULATION_REQUIRED_FIELDS,
     EM_FREQUENCY_REQUIRED_FIELDS,
     EM_GROUND_ANCHOR_EFFECTIVENESS_REQUIRED_FIELDS,
     EM_SOLVE_QUALITY_REQUIRED_FIELDS,
@@ -33,7 +34,7 @@ from scripts.fea.governance.validate_external_reference_benchmark import (
 
 
 def required_metrics_payload(*, cfd_density_pass: bool = True):
-    return [
+    metrics = [
         *[
             {
                 "name": name,
@@ -6579,6 +6580,28 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
     ]
+    observed_metrics = {
+        (metric["fixture_id"], metric["name"])
+        for metric in metrics
+        if isinstance(metric.get("fixture_id"), str)
+        and isinstance(metric.get("name"), str)
+    }
+    for fixture_id, required_names in REQUIRED_METRICS_BY_FIXTURE.items():
+        for name in sorted(required_names):
+            key = (fixture_id, name)
+            if key in observed_metrics:
+                continue
+            metrics.append(
+                {
+                    "name": name,
+                    "fixture_id": fixture_id,
+                    "observed": 1.0,
+                    "reference": 1.0,
+                    "pass": True,
+                }
+            )
+            observed_metrics.add(key)
+    return metrics
 
 
 class ValidateExternalReferenceBenchmarkTests(unittest.TestCase):
@@ -6623,6 +6646,7 @@ class ValidateExternalReferenceBenchmarkTests(unittest.TestCase):
             EM_SOLVE_QUALITY_REQUIRED_FIELDS,
             EM_RESIDUAL_REQUIRED_FIELDS,
             EM_BALANCE_REQUIRED_FIELDS,
+            EM_FORMULATION_REQUIRED_FIELDS,
         )
 
         required_external_em_metrics = {
