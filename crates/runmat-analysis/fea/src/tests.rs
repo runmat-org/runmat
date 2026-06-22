@@ -115,6 +115,22 @@ fn canonical_cantilever_benchmark_runs() {
 }
 
 #[test]
+fn moment_loads_require_rotational_dofs() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.loads[0].kind = runmat_analysis_core::LoadKind::Moment {
+        mx: 0.0,
+        my: 0.0,
+        mz: 125.0,
+    };
+
+    let err = crate::run_linear_static(&model, ComputeBackend::Cpu)
+        .expect_err("moment loads should require rotational DOFs");
+    let message = err.to_string();
+    assert!(message.contains("moment loads require rotational-DOF structural elements"));
+    assert!(message.contains("load_id=tip_load"));
+}
+
+#[test]
 fn thermo_mechanical_linear_static_emits_coupled_fields() {
     let model = fixture_model(FixtureId::ThermoMechanicalKickoff);
     let result = crate::run_linear_static_with_options(

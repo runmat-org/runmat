@@ -737,6 +737,68 @@ studies:
 }
 
 #[test]
+fn fea_document_resolves_moment_loads() {
+    let _guard = analysis_test_guard();
+    let tmp = tempfile::tempdir().expect("tempdir should be created");
+    fs::write(tmp.path().join("assembly.step"), SIMPLE_STEP)
+        .expect("fixture geometry should write");
+    let input = r#"
+version: 1
+kind: study
+id: beam_static
+geometry:
+  path: assembly.step
+  units: meter
+model:
+  id: beam_model
+  profile: linear_static_structural
+  defaults: none
+regions:
+  tip:
+    selector: "name:Bracket_A"
+materials:
+  steel:
+    mechanical:
+      youngs_modulus_pa: 200000000000.0
+      poisson_ratio: 0.30
+material_assignments:
+  - region: tip
+    material: steel
+boundary_conditions:
+  - id: fixed_tip
+    region: tip
+    kind: fixed
+loads:
+  - id: tip_moment
+    region: tip
+    type: moment
+    vector: [10.0, 20.0, 30.0]
+steps:
+  - id: static_step
+    kind: static
+run:
+  backend: cpu
+"#;
+
+    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
+        .expect("FEA study document should resolve");
+
+    let FeaResolvedDocument::Study(study) = resolved else {
+        panic!("expected resolved study");
+    };
+    let model = study.model.as_ref().expect("explicit model should resolve");
+    assert_eq!(model.loads.len(), 1);
+    assert!(matches!(
+        model.loads[0].kind,
+        LoadKind::Moment {
+            mx: 10.0,
+            my: 20.0,
+            mz: 30.0
+        }
+    ));
+}
+
+#[test]
 fn analysis_create_model_returns_v1_envelope() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();

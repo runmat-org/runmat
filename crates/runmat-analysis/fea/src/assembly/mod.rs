@@ -301,6 +301,7 @@ pub fn assemble_linear_system(
                     rhs[base + 2] += *fz;
                 }
             }
+            runmat_analysis_core::LoadKind::Moment { .. } => {}
             runmat_analysis_core::LoadKind::Pressure { magnitude_pa } => {
                 rhs[base] += magnitude_pa * 1.0e-3;
                 if base + 1 < dof_count {

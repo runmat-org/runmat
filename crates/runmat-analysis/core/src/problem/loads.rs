@@ -12,6 +12,11 @@ pub enum LoadKind {
         fy: f64,
         fz: f64,
     },
+    Moment {
+        mx: f64,
+        my: f64,
+        mz: f64,
+    },
     Pressure {
         magnitude_pa: f64,
     },

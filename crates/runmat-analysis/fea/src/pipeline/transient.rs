@@ -44,6 +44,7 @@ pub fn run_transient_with_options(
     );
     check_cancelled("fea.run_transient")?;
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+    super::reject_moment_loads_without_rotational_dofs(model)?;
     emit_phase(
         "fea.run_transient",
         FeaProgressPhase::RegionResolution,

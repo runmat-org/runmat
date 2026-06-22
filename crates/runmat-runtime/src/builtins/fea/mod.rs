@@ -394,7 +394,7 @@ pub async fn fea_boundary_condition_builtin(args: Vec<Value>) -> BuiltinResult<V
     name = "fea.loadCase",
     category = "fea",
     summary = "Create a typed FEA load case.",
-    keywords = "fea,load,force,pressure,current",
+    keywords = "fea,load,force,moment,torque,pressure,current",
     descriptor(crate::builtins::fea::FEA_COMPONENT_DESCRIPTOR),
     builtin_path = "crate::builtins::fea"
 )]
@@ -1217,6 +1217,10 @@ fn create_load_case_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         "force" => {
             let [fx, fy, fz] = remove_required_vector3(&mut fields, LOAD_CASE_NAME, "vector")?;
             LoadKind::Force { fx, fy, fz }
+        }
+        "moment" | "torque" => {
+            let [mx, my, mz] = remove_required_vector3(&mut fields, LOAD_CASE_NAME, "vector")?;
+            LoadKind::Moment { mx, my, mz }
         }
         "pressure" => LoadKind::Pressure {
             magnitude_pa: remove_required_f64(&mut fields, LOAD_CASE_NAME, "magnitude_pa")?,
@@ -3028,6 +3032,10 @@ mod tests {
         Value::Tensor(Tensor::new_2d(vec![0.0, -1000.0, 0.0], 1, 3).expect("tensor should build"))
     }
 
+    fn moment_vector() -> Value {
+        Value::Tensor(Tensor::new_2d(vec![10.0, 20.0, 30.0], 1, 3).expect("tensor should build"))
+    }
+
     #[test]
     fn fea_study_requires_geometry_asset() {
         let err = block_on(fea_study_builtin(vec![
@@ -3088,6 +3096,41 @@ run:
         };
         assert_eq!(plan_object.class_name, FEA_PLAN_CLASS);
         assert!(plan_object.properties.contains_key("operation_sequence"));
+    }
+
+    #[test]
+    fn fea_load_case_accepts_moment_and_torque_alias() {
+        for kind in ["moment", "torque"] {
+            let load = block_on(fea_load_case_builtin(vec![
+                Value::String(format!("tip_{kind}")),
+                Value::String("tip_node".to_string()),
+                Value::String(kind.to_string()),
+                Value::String("Vector".to_string()),
+                moment_vector(),
+            ]))
+            .expect("moment load should build");
+            assert_object_class(&load, FEA_LOAD_CASE_CLASS);
+
+            let Value::Object(object) = load else {
+                panic!("expected load object");
+            };
+            let Some(Value::String(payload)) = object.properties.get(FEA_PAYLOAD_JSON_PROPERTY)
+            else {
+                panic!("expected load JSON payload");
+            };
+            let decoded: LoadCase =
+                serde_json::from_str(payload).expect("load payload should decode");
+            assert_eq!(decoded.load_id, format!("tip_{kind}"));
+            assert_eq!(decoded.region_id, "tip_node");
+            assert!(matches!(
+                decoded.kind,
+                LoadKind::Moment {
+                    mx: 10.0,
+                    my: 20.0,
+                    mz: 30.0
+                }
+            ));
+        }
     }
 
     #[test]

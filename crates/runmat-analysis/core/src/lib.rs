@@ -149,6 +149,27 @@ mod tests {
     }
 
     #[test]
+    fn moment_load_kind_serializes_as_snake_case() {
+        let load = LoadCase {
+            load_id: "tip_moment".to_string(),
+            region_id: "tip".to_string(),
+            kind: LoadKind::Moment {
+                mx: 1.0,
+                my: 2.0,
+                mz: 3.0,
+            },
+        };
+
+        let json = serde_json::to_value(&load).expect("load should serialize");
+        assert_eq!(json["kind"]["moment"]["mx"], 1.0);
+        assert_eq!(json["kind"]["moment"]["my"], 2.0);
+        assert_eq!(json["kind"]["moment"]["mz"], 3.0);
+
+        let decoded: LoadCase = serde_json::from_value(json).expect("load should deserialize");
+        assert_eq!(decoded, load);
+    }
+
+    #[test]
     fn electrical_model_defaults_frequency_response() {
         let electrical = MaterialElectricalModel::default();
         assert!(electrical.conductivity_frequency_response.is_empty());

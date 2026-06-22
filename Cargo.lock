@@ -5370,6 +5370,7 @@ version = "0.5.0"
 dependencies = [
  "runmat-geometry-core",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
 ]
 

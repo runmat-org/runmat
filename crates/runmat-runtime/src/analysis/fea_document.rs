@@ -178,6 +178,8 @@ struct FeaLoadDocument {
 #[serde(rename_all = "snake_case")]
 enum FeaLoadType {
     Force,
+    Moment,
+    Torque,
     Pressure,
     BodyForce,
     CurrentDensity,
@@ -480,6 +482,10 @@ fn resolve_load(
         FeaLoadType::Force => {
             let [fx, fy, fz] = load_vector(load, "force")?;
             LoadKind::Force { fx, fy, fz }
+        }
+        FeaLoadType::Moment | FeaLoadType::Torque => {
+            let [mx, my, mz] = load_vector(load, "moment")?;
+            LoadKind::Moment { mx, my, mz }
         }
         FeaLoadType::Pressure => LoadKind::Pressure {
             magnitude_pa: required_f64(load.magnitude_pa, "pressure.magnitude_pa")?,
