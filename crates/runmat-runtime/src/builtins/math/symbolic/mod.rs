@@ -1,4 +1,5 @@
 pub(crate) mod digits;
+pub(crate) mod int;
 pub(crate) mod limit;
 pub(crate) mod sym;
 pub(crate) mod syms;

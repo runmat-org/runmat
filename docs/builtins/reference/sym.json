@@ -64,6 +64,10 @@
       "url": "./limit"
     },
     {
+      "label": "int",
+      "url": "./int"
+    },
+    {
       "label": "vpa",
       "url": "./vpa"
     },

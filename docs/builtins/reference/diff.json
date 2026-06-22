@@ -153,6 +153,10 @@
       "url": "./all"
     },
     {
+      "label": "int",
+      "url": "./int"
+    },
+    {
       "label": "any",
       "url": "./any"
     },
