@@ -1,7 +1,7 @@
 use runmat_analysis_core::AnalysisField;
 
 use crate::{
-    assembly::ElectroThermalAssemblySummary,
+    assembly::{ElectroThermalAssemblySummary, PrepRecoveryEdgeSummary},
     contracts::{
         fea_electro_thermal_temperature_field_id, fea_electro_thermal_thermal_residual_field_id,
         FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
@@ -18,17 +18,22 @@ struct ConductanceEdge {
     from: usize,
     to: usize,
     conductance: f64,
+    length_m: f64,
 }
 
 #[derive(Debug)]
 struct ConductanceDomainGraph {
     edges: Vec<ConductanceEdge>,
     topology: ElectroThermalDomainTopology,
+    topology_basis: ConductanceTopologyBasis,
     boundary_node_count: usize,
     max_node_degree: usize,
     mean_node_degree: f64,
     conductance_span_ratio: f64,
     topology_coverage_ratio: f64,
+    prep_recovery_edge_count: usize,
+    mean_edge_length_m: f64,
+    active_dimension_count: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +47,21 @@ struct ElectroThermalDomainTopology {
     source_boundary_alignment_ratio: f64,
     domain_conductance_coverage_ratio: f64,
     material_region_coverage_ratio: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConductanceTopologyBasis {
+    PrepElementConductanceGraph,
+    ImplicitConductanceLine,
+}
+
+impl ConductanceTopologyBasis {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::PrepElementConductanceGraph => "prep_element_conductance_graph",
+            Self::ImplicitConductanceLine => "implicit_conductance_line",
+        }
+    }
 }
 
 #[derive(Default)]
@@ -200,7 +220,7 @@ fn edge_electric_field_values(solve: &ElectroThermalPotentialSolve) -> Vec<f64> 
     let mut values = Vec::with_capacity(solve.graph.edges.len() * VECTOR_COMPONENT_COUNT);
     for edge in &solve.graph.edges {
         let voltage_drop = solve.potential[edge.from] - solve.potential[edge.to];
-        values.extend_from_slice(&[voltage_drop, 0.0, 0.0]);
+        values.extend_from_slice(&[voltage_drop / edge.length_m.max(1.0e-12), 0.0, 0.0]);
     }
     values
 }
@@ -210,8 +230,12 @@ fn edge_current_density_values(solve: &ElectroThermalPotentialSolve, signed_span
         return vec![0.0; VECTOR_COMPONENT_COUNT];
     }
     let mut values = Vec::with_capacity(solve.edge_current.len() * VECTOR_COMPONENT_COUNT);
-    for current in &solve.edge_current {
-        values.extend_from_slice(&[current.abs() * signed_span, 0.0, 0.0]);
+    for (edge, current) in solve.graph.edges.iter().zip(solve.edge_current.iter()) {
+        values.extend_from_slice(&[
+            current.abs() * signed_span / edge.length_m.max(1.0e-12),
+            0.0,
+            0.0,
+        ]);
     }
     values
 }
@@ -344,17 +368,41 @@ fn build_conductance_domain_graph(
     summary: &ElectroThermalAssemblySummary,
     node_count: usize,
 ) -> ConductanceDomainGraph {
-    let edge_count = node_count.saturating_sub(1);
-    let conductance = conductivity_profile(summary, edge_count);
-    let edges = conductance
-        .into_iter()
-        .enumerate()
-        .map(|(index, conductance)| ConductanceEdge {
-            from: index,
-            to: index + 1,
-            conductance,
-        })
-        .collect::<Vec<_>>();
+    let prep_edges = prep_conductance_edges(summary, node_count);
+    let topology_basis = if prep_edges.is_empty() {
+        ConductanceTopologyBasis::ImplicitConductanceLine
+    } else {
+        ConductanceTopologyBasis::PrepElementConductanceGraph
+    };
+    let edge_count = if prep_edges.is_empty() {
+        node_count.saturating_sub(1)
+    } else {
+        prep_edges.len()
+    };
+    let conductance_profile = conductivity_profile(summary, edge_count);
+    let edges = if prep_edges.is_empty() {
+        conductance_profile
+            .into_iter()
+            .enumerate()
+            .map(|(index, conductance)| ConductanceEdge {
+                from: index,
+                to: index + 1,
+                conductance,
+                length_m: 1.0,
+            })
+            .collect::<Vec<_>>()
+    } else {
+        prep_edges
+            .into_iter()
+            .zip(conductance_profile)
+            .map(|((from, to, length_m), conductance)| ConductanceEdge {
+                from,
+                to,
+                conductance: conductance / length_m.max(1.0e-12),
+                length_m,
+            })
+            .collect::<Vec<_>>()
+    };
     let mut node_degrees = vec![0_usize; node_count];
     for edge in &edges {
         node_degrees[edge.from] += 1;
@@ -390,16 +438,59 @@ fn build_conductance_domain_graph(
     };
 
     let topology = build_domain_topology(summary, node_count, &edges, &node_degrees);
+    let mean_edge_length_m = if edges.is_empty() {
+        0.0
+    } else {
+        edges.iter().map(|edge| edge.length_m).sum::<f64>() / edges.len() as f64
+    };
+    let active_dimension_count = summary
+        .prep_coordinates
+        .map(|coordinates| coordinates.active_dimension_count.max(1))
+        .unwrap_or(1);
 
     ConductanceDomainGraph {
         edges,
         topology,
+        topology_basis,
         boundary_node_count: node_count.min(2),
         max_node_degree,
         mean_node_degree,
         conductance_span_ratio,
         topology_coverage_ratio,
+        prep_recovery_edge_count: summary.prep_recovery_edges.len(),
+        mean_edge_length_m,
+        active_dimension_count,
     }
+}
+
+fn prep_conductance_edges(
+    summary: &ElectroThermalAssemblySummary,
+    node_count: usize,
+) -> Vec<(usize, usize, f64)> {
+    if node_count < 2 {
+        return Vec::new();
+    }
+    let mut edges = summary
+        .prep_recovery_edges
+        .iter()
+        .filter_map(|edge| prep_conductance_edge(edge, node_count))
+        .collect::<Vec<_>>();
+    edges.sort_by_key(|(from, to, _)| (*from, *to));
+    edges.dedup_by_key(|(from, to, _)| (*from, *to));
+    edges
+}
+
+fn prep_conductance_edge(
+    edge: &PrepRecoveryEdgeSummary,
+    node_count: usize,
+) -> Option<(usize, usize, f64)> {
+    let from = (edge.from_dof / VECTOR_COMPONENT_COUNT).min(node_count.saturating_sub(1));
+    let to = (edge.to_dof / VECTOR_COMPONENT_COUNT).min(node_count.saturating_sub(1));
+    if from == to {
+        return None;
+    }
+    let (from, to) = if from < to { (from, to) } else { (to, from) };
+    Some((from, to, edge.edge_length_m.max(1.0e-12)))
 }
 
 fn build_domain_topology(
@@ -625,7 +716,8 @@ fn electro_thermal_domain_topology_diagnostic(
         code: "FEA_ET_DOMAIN_TOPOLOGY".to_string(),
         severity,
         message: format!(
-            "basis=electrical_domain_topology_graph conductive_node_count={} conductive_edge_count={} mapped_voltage_boundary_count={} mapped_current_source_count={} material_region_count={} topology_component_count={} source_boundary_alignment_ratio={} domain_conductance_coverage_ratio={} material_region_coverage_ratio={}",
+            "basis={} conductive_node_count={} conductive_edge_count={} mapped_voltage_boundary_count={} mapped_current_source_count={} material_region_count={} topology_component_count={} source_boundary_alignment_ratio={} domain_conductance_coverage_ratio={} material_region_coverage_ratio={} prep_recovery_edge_count={} active_dimension_count={}",
+            solve.graph.topology_basis.as_str(),
             topology.conductive_node_count,
             topology.conductive_edge_count,
             topology.mapped_voltage_boundary_count,
@@ -635,6 +727,8 @@ fn electro_thermal_domain_topology_diagnostic(
             topology.source_boundary_alignment_ratio,
             topology.domain_conductance_coverage_ratio,
             topology.material_region_coverage_ratio,
+            solve.graph.prep_recovery_edge_count,
+            solve.graph.active_dimension_count,
         ),
     }
 }
@@ -652,7 +746,8 @@ fn electro_thermal_potential_solve_diagnostic(
         code: "FEA_ET_POTENTIAL_SOLVE".to_string(),
         severity,
         message: format!(
-            "basis=conductance_domain_graph node_count={} edge_count={} boundary_node_count={} max_node_degree={} mean_node_degree={} conductance_span_ratio={} topology_coverage_ratio={} potential_span_v={} residual_norm={} equation_scale={} current_balance_residual={} integrated_joule_heat_w={} condition_estimate={}",
+            "basis={} node_count={} edge_count={} boundary_node_count={} max_node_degree={} mean_node_degree={} conductance_span_ratio={} topology_coverage_ratio={} mean_edge_length_m={} potential_span_v={} residual_norm={} equation_scale={} current_balance_residual={} integrated_joule_heat_w={} condition_estimate={}",
+            solve.graph.topology_basis.as_str(),
             node_count,
             solve.graph.edges.len(),
             solve.graph.boundary_node_count,
@@ -660,6 +755,7 @@ fn electro_thermal_potential_solve_diagnostic(
             solve.graph.mean_node_degree,
             solve.graph.conductance_span_ratio,
             solve.graph.topology_coverage_ratio,
+            solve.graph.mean_edge_length_m,
             solve.potential_span_v,
             solve.residual_norm,
             solve.equation_scale,
@@ -710,7 +806,8 @@ fn electro_thermal_conduction_conservation_diagnostic(
         code: "FEA_ET_CONDUCTION_CONSERVATION".to_string(),
         severity,
         message: format!(
-            "basis=conductance_domain_graph node_count={} edge_count={} ohms_law_residual_ratio={} joule_heat_balance_ratio={} potential_monotonic_edge_fraction={} conduction_graph_coverage_ratio={}",
+            "basis={} node_count={} edge_count={} ohms_law_residual_ratio={} joule_heat_balance_ratio={} potential_monotonic_edge_fraction={} conduction_graph_coverage_ratio={}",
+            solve.graph.topology_basis.as_str(),
             node_count,
             solve.graph.edges.len(),
             ohms_law_residual_ratio,
@@ -822,17 +919,18 @@ fn conduction_graph_coverage_ratio(node_count: usize, solve: &ElectroThermalPote
 }
 
 fn potential_monotonic_edge_fraction(solve: &ElectroThermalPotentialSolve) -> f64 {
-    let edge_count = solve.potential.len().saturating_sub(1);
+    let edge_count = solve.graph.edges.len();
     if edge_count == 0 {
         return 1.0;
     }
     let signed_span = solve.potential[0] - solve.potential[solve.potential.len() - 1];
     let tolerance = solve.potential_span_v.max(1.0) * 1.0e-12;
     let monotonic_edges = solve
-        .potential
-        .windows(2)
-        .filter(|pair| {
-            let drop = pair[0] - pair[1];
+        .graph
+        .edges
+        .iter()
+        .filter(|edge| {
+            let drop = solve.potential[edge.from] - solve.potential[edge.to];
             if signed_span >= 0.0 {
                 drop >= -tolerance
             } else {
@@ -859,6 +957,39 @@ mod tests {
             temporal_profile_variation: 0.15,
             region_scale_count: 2,
             coupling_fingerprint: 42,
+            prep_recovery_edges: Vec::new(),
+            prep_coordinates: None,
+        }
+    }
+
+    fn prep_summary() -> ElectroThermalAssemblySummary {
+        ElectroThermalAssemblySummary {
+            prep_recovery_edges: vec![
+                PrepRecoveryEdgeSummary {
+                    from_dof: 0,
+                    to_dof: 3,
+                    element_family_index: 0,
+                    edge_length_m: 0.4,
+                },
+                PrepRecoveryEdgeSummary {
+                    from_dof: 3,
+                    to_dof: 6,
+                    element_family_index: 0,
+                    edge_length_m: 0.5,
+                },
+                PrepRecoveryEdgeSummary {
+                    from_dof: 6,
+                    to_dof: 9,
+                    element_family_index: 1,
+                    edge_length_m: 0.6,
+                },
+            ],
+            prep_coordinates: Some(crate::assembly::PrepCoordinateSummary {
+                span_m: [1.5, 0.4, 0.2],
+                active_dimension_count: 3,
+                characteristic_length_m: 0.5,
+            }),
+            ..summary()
         }
     }
 
@@ -873,6 +1004,25 @@ mod tests {
         assert!(solve.integrated_joule_heat_w > 0.0);
         assert_eq!(solve.graph.edges.len(), 15);
         assert_eq!(solve.graph.max_node_degree, 2);
+        assert_eq!(
+            solve.graph.topology_basis,
+            ConductanceTopologyBasis::ImplicitConductanceLine
+        );
+    }
+
+    #[test]
+    fn conductance_domain_graph_uses_prep_recovery_edges() {
+        let solve = solve_conductance_domain_graph(&prep_summary(), 4);
+
+        assert_eq!(solve.graph.edges.len(), 3);
+        assert_eq!(
+            solve.graph.topology_basis,
+            ConductanceTopologyBasis::PrepElementConductanceGraph
+        );
+        assert_eq!(solve.graph.prep_recovery_edge_count, 3);
+        assert_eq!(solve.graph.active_dimension_count, 3);
+        assert!((solve.graph.mean_edge_length_m - 0.5).abs() <= 1.0e-12);
+        assert!(solve.residual_norm <= 1.0e-10);
     }
 
     #[test]
@@ -884,17 +1034,20 @@ mod tests {
         assert_eq!(fields.diagnostics[0].code, "FEA_ET_DOMAIN_TOPOLOGY");
         assert!(fields.diagnostics[0]
             .message
-            .contains("basis=electrical_domain_topology_graph"));
+            .contains("basis=implicit_conductance_line"));
         assert!(fields.diagnostics[0]
             .message
             .contains("source_boundary_alignment_ratio="));
+        assert!(fields.diagnostics[0]
+            .message
+            .contains("prep_recovery_edge_count=0"));
         assert_eq!(fields.diagnostics[1].code, "FEA_ET_POTENTIAL_SOLVE");
         assert!(fields.diagnostics[1]
             .message
             .contains("current_balance_residual="));
         assert!(fields.diagnostics[1]
             .message
-            .contains("basis=conductance_domain_graph"));
+            .contains("basis=implicit_conductance_line"));
         assert_eq!(fields.diagnostics[2].code, "FEA_ET_CONDUCTION_CONSERVATION");
         assert!(fields.diagnostics[2]
             .message
@@ -918,6 +1071,33 @@ mod tests {
             vec![15, VECTOR_COMPONENT_COUNT]
         );
         assert_eq!(fields.static_fields[3].shape, vec![15]);
+    }
+
+    #[test]
+    fn recovered_fields_report_prep_conductance_topology() {
+        let fields = recover_electro_thermal_fields(Some(&prep_summary()), &[1.0], &[0.01], 12);
+
+        assert_eq!(
+            fields.static_fields[1].shape,
+            vec![3, VECTOR_COMPONENT_COUNT]
+        );
+        assert_eq!(
+            fields.static_fields[2].shape,
+            vec![3, VECTOR_COMPONENT_COUNT]
+        );
+        assert_eq!(fields.static_fields[3].shape, vec![3]);
+        assert!(fields.diagnostics[0]
+            .message
+            .contains("basis=prep_element_conductance_graph"));
+        assert!(fields.diagnostics[0]
+            .message
+            .contains("prep_recovery_edge_count=3"));
+        assert!(fields.diagnostics[0]
+            .message
+            .contains("active_dimension_count=3"));
+        assert!(fields.diagnostics[1]
+            .message
+            .contains("mean_edge_length_m=0.5"));
     }
 
     #[test]

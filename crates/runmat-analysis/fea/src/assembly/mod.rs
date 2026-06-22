@@ -185,6 +185,10 @@ pub struct ElectroThermalAssemblySummary {
     pub temporal_profile_variation: f64,
     pub region_scale_count: usize,
     pub coupling_fingerprint: u64,
+    #[serde(default)]
+    pub prep_recovery_edges: Vec<PrepRecoveryEdgeSummary>,
+    #[serde(default)]
+    pub prep_coordinates: Option<PrepCoordinateSummary>,
 }
 
 pub fn assemble_linear_system(
@@ -757,6 +761,8 @@ pub fn assemble_linear_system(
                     conductivity_spread_ratio,
                     temporal_variation,
                 ),
+                prep_recovery_edges: prep_recovery_edges.clone(),
+                prep_coordinates,
             });
         }
     }
