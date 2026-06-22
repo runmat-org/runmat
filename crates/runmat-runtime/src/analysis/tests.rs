@@ -5817,6 +5817,14 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
             && diag.message.contains("nominal_inlet_velocity_m_per_s=4.25")
     }));
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_CFD_PRESSURE_CORRECTION"
+            && diag.message.contains("iteration_count=")
+            && diag.message.contains("max_linear_iters=64")
+            && diag.message.contains("tolerance=0.00000001")
+            && diag.message.contains("pressure_correction_residual_ratio=")
+            && diag.message.contains("velocity_correction_residual_ratio=")
+    }));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_CFD_TRANSIENT_EVOLUTION"
             && diag.message.contains("solve_family=steady_state")
             && diag.message.contains("transient_scale_variation=")

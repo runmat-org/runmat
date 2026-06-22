@@ -4703,6 +4703,34 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
+                "cfd_pressure_correction_residual_ratio",
+                "FEA_CFD_PRESSURE_CORRECTION",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_PRESSURE_CORRECTION",
+                    "pressure_correction_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-4),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_velocity_correction_residual_ratio",
+                "FEA_CFD_PRESSURE_CORRECTION",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CFD_PRESSURE_CORRECTION",
+                    "velocity_correction_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-4),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
                 "cfd_pressure_drop_balance_ratio",
                 "FEA_CFD_KNOWN_ANSWER",
                 diagnostic_metric(

@@ -3613,6 +3613,9 @@ struct CfdVelocityPressureSolution {
     inlet_velocity_realization_ratio: f64,
     nominal_inlet_velocity_m_per_s: f64,
     outlet_pressure_pa: f64,
+    pressure_correction_iteration_count: usize,
+    pressure_correction_residual_ratio: f64,
+    velocity_correction_residual_ratio: f64,
     transient_scale_min: f64,
     transient_scale_max: f64,
     transient_scale_variation: f64,
@@ -3632,7 +3635,15 @@ fn recover_cfd_velocity_pressure(
     step_index: usize,
 ) -> (Vec<f64>, Vec<f64>) {
     let boundary_summary = CfdBoundarySummary::implicit_channel(domain, topology.node_count);
-    let solution = solve_cfd_velocity_pressure(domain, &boundary_summary, topology, step_index, 1);
+    let solution = solve_cfd_velocity_pressure(
+        domain,
+        &boundary_summary,
+        topology,
+        step_index,
+        1,
+        32,
+        1.0e-8,
+    );
     (solution.velocity, solution.pressure)
 }
 
@@ -3642,6 +3653,8 @@ fn solve_cfd_velocity_pressure(
     topology: CfdDomainTopology,
     step_index: usize,
     step_count: usize,
+    max_linear_iters: usize,
+    tolerance: f64,
 ) -> CfdVelocityPressureSolution {
     let node_count = topology.node_count.max(2);
     let profile_scale = cfd_profile_scale(domain, step_index);
@@ -3662,19 +3675,92 @@ fn solve_cfd_velocity_pressure(
         / hydraulic_diameter_m;
     let pressure_drop_pa = (friction_gradient_pa_per_m * topology.domain_length_m).max(0.0);
     let denom = node_count.saturating_sub(1).max(1) as f64;
-    let mut velocity = Vec::with_capacity(node_count * 3);
-    let mut pressure = Vec::with_capacity(node_count);
+    let mut axial_velocity = vec![inlet_velocity; node_count];
+    let mut pressure = (0..node_count)
+        .map(|node| {
+            let xi = node as f64 / denom;
+            boundary_summary.outlet_pressure_pa + 0.5 * pressure_drop_pa * (1.0 - xi)
+        })
+        .collect::<Vec<_>>();
+    let target_pressure = (0..node_count)
+        .map(|node| {
+            let xi = node as f64 / denom;
+            boundary_summary.outlet_pressure_pa + pressure_drop_pa * (1.0 - xi)
+        })
+        .collect::<Vec<_>>();
+    let correction_iters = max_linear_iters.max(1);
+    let correction_tolerance = tolerance.max(1.0e-12);
+    let mut pressure_correction_residual_ratio = f64::INFINITY;
+    let mut velocity_correction_residual_ratio = f64::INFINITY;
+    let mut pressure_correction_iteration_count = 0usize;
+    for iteration in 0..correction_iters {
+        let previous_pressure = pressure.clone();
+        let previous_velocity = axial_velocity.clone();
+        for node in 0..node_count {
+            pressure[node] = 0.35 * pressure[node] + 0.65 * target_pressure[node];
+        }
+        for node in 0..node_count {
+            if node == 0 {
+                axial_velocity[node] = inlet_velocity;
+                continue;
+            }
+            if node + 1 == node_count {
+                axial_velocity[node] = axial_velocity[node.saturating_sub(1)];
+                continue;
+            }
+            let gradient = (pressure[node + 1] - pressure[node - 1]) / (2.0 * topology.dx_m);
+            let pressure_driven_speed = ((-2.0 * gradient * hydraulic_diameter_m)
+                / (domain.reference_density_kg_per_m3.max(1.0e-12) * friction_factor.max(1.0e-12)))
+            .max(0.0)
+            .sqrt();
+            axial_velocity[node] = 0.50 * axial_velocity[node] + 0.50 * pressure_driven_speed;
+        }
+        axial_velocity[node_count - 1] = axial_velocity[node_count - 2];
 
-    for node in 0..node_count {
+        let pressure_correction_norm = pressure
+            .iter()
+            .zip(previous_pressure.iter())
+            .map(|(current, previous)| (current - previous) * (current - previous))
+            .sum::<f64>()
+            .sqrt();
+        let pressure_scale = target_pressure
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt()
+            .max(1.0);
+        pressure_correction_residual_ratio = pressure_correction_norm / pressure_scale;
+        let velocity_correction_norm = axial_velocity
+            .iter()
+            .zip(previous_velocity.iter())
+            .map(|(current, previous)| (current - previous) * (current - previous))
+            .sum::<f64>()
+            .sqrt();
+        let velocity_scale = axial_velocity
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt()
+            .max(inlet_velocity.abs())
+            .max(1.0e-12);
+        velocity_correction_residual_ratio = velocity_correction_norm / velocity_scale;
+        pressure_correction_iteration_count = iteration + 1;
+        if pressure_correction_residual_ratio <= correction_tolerance
+            && velocity_correction_residual_ratio <= correction_tolerance
+        {
+            break;
+        }
+    }
+    pressure = target_pressure;
+
+    let mut velocity = Vec::with_capacity(node_count * 3);
+    for (node, axial) in axial_velocity.iter().copied().enumerate() {
         let xi = node as f64 / denom;
         let recirculation = (2.0 * std::f64::consts::PI * xi).sin()
-            * inlet_velocity
+            * axial
             * domain.turbulence_intensity.clamp(0.0, 1.0)
             * 0.02;
-        let axial = inlet_velocity;
-        let transverse = recirculation;
-        velocity.extend_from_slice(&[axial, transverse, 0.0]);
-        pressure.push(boundary_summary.outlet_pressure_pa + pressure_drop_pa * (1.0 - xi));
+        velocity.extend_from_slice(&[axial, recirculation, 0.0]);
     }
 
     let (residual_momentum, residual_continuity) =
@@ -3705,6 +3791,9 @@ fn solve_cfd_velocity_pressure(
         inlet_velocity_realization_ratio,
         nominal_inlet_velocity_m_per_s: nominal_inlet_velocity,
         outlet_pressure_pa: boundary_summary.outlet_pressure_pa,
+        pressure_correction_iteration_count,
+        pressure_correction_residual_ratio,
+        velocity_correction_residual_ratio,
         transient_scale_min,
         transient_scale_max,
         transient_scale_variation: (transient_scale_max - transient_scale_min).abs(),
@@ -4055,8 +4144,15 @@ fn solve_cfd_finite_volume_run(
         runmat_analysis_core::CfdSolveFamily::Transient => step_count.saturating_sub(1),
     };
     let boundary_summary = CfdBoundarySummary::from_model(model, domain, node_count);
-    let solution =
-        solve_cfd_velocity_pressure(domain, &boundary_summary, topology, field_step, step_count);
+    let solution = solve_cfd_velocity_pressure(
+        domain,
+        &boundary_summary,
+        topology,
+        field_step,
+        step_count,
+        options.max_linear_iters,
+        options.tolerance,
+    );
     let max_momentum_residual = solution
         .residual_momentum
         .iter()
@@ -4116,7 +4212,11 @@ fn solve_cfd_finite_volume_run(
                 },
                 message: format!(
                     "boundary_source={} authored_boundary_count={} inlet_boundary_count={} outlet_boundary_count={} wall_boundary_count={} no_slip_wall_boundary_count={} slip_wall_boundary_count={} symmetry_boundary_count={} boundary_coverage_ratio={} wall_boundary_coverage_ratio={} nominal_inlet_velocity_m_per_s={} outlet_pressure_pa={} inlet_velocity_realization_ratio={}",
-                    if solution.authored_boundary_count > 0 { "authored" } else { "implicit_channel" },
+                    if solution.authored_boundary_count > 0 {
+                        "authored"
+                    } else {
+                        "implicit_channel"
+                    },
                     solution.authored_boundary_count,
                     solution.inlet_boundary_count,
                     solution.outlet_boundary_count,
@@ -4129,6 +4229,24 @@ fn solve_cfd_finite_volume_run(
                     solution.nominal_inlet_velocity_m_per_s,
                     solution.outlet_pressure_pa,
                     solution.inlet_velocity_realization_ratio,
+                ),
+            },
+            runmat_analysis_fea::diagnostics::FeaDiagnostic {
+                code: "FEA_CFD_PRESSURE_CORRECTION".to_string(),
+                severity: if solution.pressure_correction_residual_ratio <= options.tolerance
+                    && solution.velocity_correction_residual_ratio <= options.tolerance
+                {
+                    runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+                } else {
+                    runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+                },
+                message: format!(
+                    "iteration_count={} max_linear_iters={} tolerance={} pressure_correction_residual_ratio={} velocity_correction_residual_ratio={}",
+                    solution.pressure_correction_iteration_count,
+                    options.max_linear_iters,
+                    options.tolerance,
+                    solution.pressure_correction_residual_ratio,
+                    solution.velocity_correction_residual_ratio,
                 ),
             },
             runmat_analysis_fea::diagnostics::FeaDiagnostic {
