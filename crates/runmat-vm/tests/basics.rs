@@ -69,6 +69,25 @@ fn nan_constant_and_constructor_coexist() {
 }
 
 #[test]
+fn inf_constant_and_constructor_coexist() {
+    let input = "\
+        a = inf;
+        b = inf(2, 3);
+        c = Inf;
+        out = [isinf(a), numel(b), all(isinf(b(:))), isinf(c)];
+    ";
+    let vars = execute_source(input);
+    let out = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            _ => None,
+        })
+        .expect("expected output tensor");
+    assert_eq!(out.data, vec![1.0, 6.0, 1.0, 1.0]);
+}
+
+#[test]
 fn hilbert_builtin_executes_for_fm_demod_shape() {
     let input = r#"
         t = 0:0.001:0.01;
