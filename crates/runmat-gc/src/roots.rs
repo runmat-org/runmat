@@ -82,7 +82,7 @@ pub(crate) fn collect_value_roots(value: &Value, roots: &mut Vec<GcPtr<Value>>) 
 pub struct RootId(pub usize);
 
 /// Trait for objects that can serve as GC roots
-pub trait GcRoot: Send + Sync {
+pub trait GcRoot {
     /// Scan this root and return all reachable GC pointers
     fn scan(&self) -> Vec<GcPtr<Value>>;
 
@@ -120,11 +120,6 @@ impl StackRoot {
         }
     }
 }
-
-// Safety: StackRoot is used in a single-threaded context where the pointer
-// remains valid and is not shared across threads unsafely
-unsafe impl Send for StackRoot {}
-unsafe impl Sync for StackRoot {}
 
 impl GcRoot for StackRoot {
     fn scan(&self) -> Vec<GcPtr<Value>> {
@@ -184,11 +179,6 @@ impl VariableArrayRoot {
         }
     }
 }
-
-// Safety: VariableArrayRoot is used in a single-threaded context where the pointer
-// remains valid and is not shared across threads unsafely
-unsafe impl Send for VariableArrayRoot {}
-unsafe impl Sync for VariableArrayRoot {}
 
 impl GcRoot for VariableArrayRoot {
     fn scan(&self) -> Vec<GcPtr<Value>> {

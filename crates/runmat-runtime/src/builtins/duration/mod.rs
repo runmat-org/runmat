@@ -1,5 +1,5 @@
+use std::cell::Cell;
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -20,7 +20,9 @@ const FORMAT_FIELD: &str = "Format";
 pub(crate) const DEFAULT_DURATION_FORMAT: &str = "hh:mm:ss";
 const SECONDS_PER_DAY: f64 = 86_400.0;
 
-static DURATION_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
+thread_local! {
+    static DURATION_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
+}
 
 const DURATION_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DURATION.INVALID_ARGUMENT",
@@ -256,7 +258,10 @@ fn duration_error(message: impl Into<String>) -> RuntimeError {
 }
 
 fn ensure_duration_class_registered() {
-    DURATION_CLASS_REGISTERED.get_or_init(|| {
+    DURATION_CLASS_REGISTERED.with(|registered| {
+        if registered.get() {
+            return;
+        }
         let mut properties = HashMap::new();
         properties.insert(
             FORMAT_FIELD.to_string(),
@@ -304,6 +309,7 @@ fn ensure_duration_class_registered() {
             properties,
             methods,
         });
+        registered.set(true);
     });
 }
 

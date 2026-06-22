@@ -5796,6 +5796,7 @@ dependencies = [
  "runmat-thread-local",
  "runmat-time",
  "serde",
+ "stacker",
  "tracing",
 ]
 

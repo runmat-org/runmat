@@ -1,6 +1,5 @@
 //! MATLAB-compatible `jsondecode` builtin for deserialising JSON text into RunMat values.
 
-use once_cell::sync::Lazy;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -310,11 +309,6 @@ fn decode_json_array(values: &[JsonValue]) -> BuiltinResult<Value> {
 }
 
 fn empty_double() -> BuiltinResult<Value> {
-    static EMPTY_DOUBLE: Lazy<Option<Value>> =
-        Lazy::new(|| Tensor::new(Vec::new(), vec![0, 0]).map(Value::Tensor).ok());
-    if let Some(value) = EMPTY_DOUBLE.as_ref() {
-        return Ok(value.clone());
-    }
     Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
         .map_err(|e| {

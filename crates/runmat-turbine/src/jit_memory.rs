@@ -175,12 +175,15 @@ pub struct JitMemoryStats {
     pub array_pool_size: usize,
 }
 
-/// Global JIT memory manager instance
-static GLOBAL_JIT_MEMORY: std::sync::OnceLock<JitMemoryManager> = std::sync::OnceLock::new();
+// Global JIT memory manager instance for the current thread.
+thread_local! {
+    static GLOBAL_JIT_MEMORY: &'static JitMemoryManager =
+        Box::leak(Box::new(JitMemoryManager::new()));
+}
 
 /// Get the global JIT memory manager
 pub fn get_jit_memory_manager() -> &'static JitMemoryManager {
-    GLOBAL_JIT_MEMORY.get_or_init(JitMemoryManager::new)
+    GLOBAL_JIT_MEMORY.with(|manager| *manager)
 }
 
 /// Helper function to allocate a string for JIT use

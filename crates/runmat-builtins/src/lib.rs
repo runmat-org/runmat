@@ -2520,28 +2520,14 @@ pub struct ClassDef {
     pub methods: HashMap<String, MethodDef>,
 }
 
-use std::sync::Mutex;
-
-static CLASS_REGISTRY: OnceLock<Mutex<HashMap<String, ClassDef>>> = OnceLock::new();
-static SEALED_CLASS_REGISTRY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-static ABSTRACT_CLASS_REGISTRY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-static STATIC_VALUES: OnceLock<Mutex<HashMap<(String, String), Value>>> = OnceLock::new();
-static ENUMERATION_REGISTRY: OnceLock<Mutex<HashMap<String, HashSet<String>>>> = OnceLock::new();
-
-fn registry() -> &'static Mutex<HashMap<String, ClassDef>> {
-    CLASS_REGISTRY.get_or_init(|| Mutex::new(primitive_class_registry()))
-}
-
-fn sealed_registry() -> &'static Mutex<HashSet<String>> {
-    SEALED_CLASS_REGISTRY.get_or_init(|| Mutex::new(HashSet::new()))
-}
-
-fn abstract_registry() -> &'static Mutex<HashSet<String>> {
-    ABSTRACT_CLASS_REGISTRY.get_or_init(|| Mutex::new(HashSet::new()))
-}
-
-fn enumeration_registry() -> &'static Mutex<HashMap<String, HashSet<String>>> {
-    ENUMERATION_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+thread_local! {
+    static CLASS_REGISTRY: RefCell<HashMap<String, ClassDef>> =
+        RefCell::new(primitive_class_registry());
+    static SEALED_CLASS_REGISTRY: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+    static ABSTRACT_CLASS_REGISTRY: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+    static STATIC_VALUES: RefCell<HashMap<(String, String), Value>> = RefCell::new(HashMap::new());
+    static ENUMERATION_REGISTRY: RefCell<HashMap<String, HashSet<String>>> =
+        RefCell::new(HashMap::new());
 }
 
 fn primitive_class_registry() -> HashMap<String, ClassDef> {
@@ -2583,141 +2569,151 @@ pub fn register_class_with_sealed(def: ClassDef, is_sealed: bool) {
 }
 
 pub fn register_class_with_modifiers(def: ClassDef, is_sealed: bool, is_abstract: bool) {
-    let mut m = registry().lock().unwrap();
     let class_name = def.name.clone();
-    m.insert(class_name.clone(), def);
-    let mut sealed = sealed_registry().lock().unwrap();
-    if is_sealed {
-        sealed.insert(class_name.clone());
-    } else {
-        sealed.remove(&class_name);
-    }
-    let mut abstract_classes = abstract_registry().lock().unwrap();
-    if is_abstract {
-        abstract_classes.insert(class_name.clone());
-    } else {
-        abstract_classes.remove(&class_name);
-    }
-    enumeration_registry()
-        .lock()
-        .unwrap()
-        .entry(class_name)
-        .or_default();
+    CLASS_REGISTRY.with(|registry| {
+        registry.borrow_mut().insert(class_name.clone(), def);
+    });
+    SEALED_CLASS_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        if is_sealed {
+            registry.insert(class_name.clone());
+        } else {
+            registry.remove(&class_name);
+        }
+    });
+    ABSTRACT_CLASS_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        if is_abstract {
+            registry.insert(class_name.clone());
+        } else {
+            registry.remove(&class_name);
+        }
+    });
+    ENUMERATION_REGISTRY.with(|registry| {
+        registry.borrow_mut().entry(class_name).or_default();
+    });
 }
 
 pub fn register_class_enumerations(class_name: &str, members: impl IntoIterator<Item = String>) {
-    let mut registry = enumeration_registry().lock().unwrap();
-    let entry = registry.entry(class_name.to_string()).or_default();
-    entry.clear();
-    entry.extend(members);
+    ENUMERATION_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let entry = registry.entry(class_name.to_string()).or_default();
+        entry.clear();
+        entry.extend(members);
+    });
 }
 
 pub fn class_has_enumeration_member(class_name: &str, member: &str) -> bool {
-    enumeration_registry()
-        .lock()
-        .unwrap()
-        .get(class_name)
-        .is_some_and(|members| members.contains(member))
+    ENUMERATION_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .get(class_name)
+            .is_some_and(|members| members.contains(member))
+    })
 }
 
 pub fn get_class(name: &str) -> Option<ClassDef> {
-    registry().lock().unwrap().get(name).cloned()
+    CLASS_REGISTRY.with(|registry| registry.borrow().get(name).cloned())
 }
 
 pub fn class_names() -> Vec<String> {
-    registry().lock().unwrap().keys().cloned().collect()
+    CLASS_REGISTRY.with(|registry| registry.borrow().keys().cloned().collect())
 }
 
 pub fn is_class_sealed(name: &str) -> bool {
-    sealed_registry().lock().unwrap().contains(name)
+    SEALED_CLASS_REGISTRY.with(|registry| registry.borrow().contains(name))
 }
 
 pub fn is_class_abstract(name: &str) -> bool {
-    abstract_registry().lock().unwrap().contains(name)
+    ABSTRACT_CLASS_REGISTRY.with(|registry| registry.borrow().contains(name))
 }
 
 pub fn is_class_or_subclass(class_name: &str, ancestor_name: &str) -> bool {
     if class_name == ancestor_name {
         return true;
     }
-    let reg = registry().lock().unwrap();
-    let mut current = Some(class_name.to_string());
-    let mut visited = std::collections::HashSet::new();
-    while let Some(name) = current {
-        if !visited.insert(name.clone()) {
-            break;
+    CLASS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let mut current = Some(class_name.to_string());
+        let mut visited = std::collections::HashSet::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if name == ancestor_name {
+                return true;
+            }
+            current = registry
+                .get(&name)
+                .and_then(|class_def| class_def.parent.clone());
         }
-        if name == ancestor_name {
-            return true;
-        }
-        current = reg
-            .get(&name)
-            .and_then(|class_def| class_def.parent.clone());
-    }
-    false
+        false
+    })
 }
 
 /// Resolve a property through the inheritance chain, returning the property definition and
 /// the name of the class where it was defined.
 pub fn lookup_property(class_name: &str, prop: &str) -> Option<(PropertyDef, String)> {
-    let reg = registry().lock().unwrap();
-    let mut current = Some(class_name.to_string());
-    let mut visited = std::collections::HashSet::new();
-    while let Some(name) = current {
-        if !visited.insert(name.clone()) {
-            break;
-        }
-        if let Some(cls) = reg.get(&name) {
-            if let Some(p) = cls.properties.get(prop) {
-                return Some((p.clone(), name));
+    CLASS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let mut current = Some(class_name.to_string());
+        let mut visited = std::collections::HashSet::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
             }
-            current = cls.parent.clone();
-        } else {
-            break;
+            if let Some(cls) = registry.get(&name) {
+                if let Some(p) = cls.properties.get(prop) {
+                    return Some((p.clone(), name));
+                }
+                current = cls.parent.clone();
+            } else {
+                break;
+            }
         }
-    }
-    None
+        None
+    })
 }
 
 /// Resolve a method through the inheritance chain, returning the method definition and
 /// the name of the class where it was defined.
 pub fn lookup_method(class_name: &str, method: &str) -> Option<(MethodDef, String)> {
-    let reg = registry().lock().unwrap();
-    let mut current = Some(class_name.to_string());
-    let mut visited = std::collections::HashSet::new();
-    while let Some(name) = current {
-        if !visited.insert(name.clone()) {
-            break;
-        }
-        if let Some(cls) = reg.get(&name) {
-            if let Some(m) = cls.methods.get(method) {
-                return Some((m.clone(), name));
+    CLASS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let mut current = Some(class_name.to_string());
+        let mut visited = std::collections::HashSet::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
             }
-            current = cls.parent.clone();
-        } else {
-            break;
+            if let Some(cls) = registry.get(&name) {
+                if let Some(m) = cls.methods.get(method) {
+                    return Some((m.clone(), name));
+                }
+                current = cls.parent.clone();
+            } else {
+                break;
+            }
         }
-    }
-    None
-}
-
-fn static_values() -> &'static Mutex<HashMap<(String, String), Value>> {
-    STATIC_VALUES.get_or_init(|| Mutex::new(HashMap::new()))
+        None
+    })
 }
 
 pub fn get_static_property_value(class_name: &str, prop: &str) -> Option<Value> {
-    static_values()
-        .lock()
-        .unwrap()
-        .get(&(class_name.to_string(), prop.to_string()))
-        .cloned()
+    STATIC_VALUES.with(|values| {
+        values
+            .borrow()
+            .get(&(class_name.to_string(), prop.to_string()))
+            .cloned()
+    })
 }
 
 pub fn set_static_property_value(class_name: &str, prop: &str, value: Value) {
-    static_values()
-        .lock()
-        .unwrap()
-        .insert((class_name.to_string(), prop.to_string()), value);
+    STATIC_VALUES.with(|values| {
+        values
+            .borrow_mut()
+            .insert((class_name.to_string(), prop.to_string()), value);
+    });
 }
 
 /// Set a static property, resolving the defining ancestor class for storage.

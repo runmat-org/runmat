@@ -7,19 +7,8 @@ use runmat_runtime::RuntimeError;
 
 const EXEC_STACK_BYTES: usize = 32 * 1024 * 1024;
 
-fn run_with_stack<T>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, RuntimeError>
-where
-    T: Send + 'static,
-{
-    let handle = std::thread::Builder::new()
-        .name("runmat-vm-test".to_string())
-        .stack_size(EXEC_STACK_BYTES)
-        .spawn(f)
-        .map_err(|err| RuntimeError::new(format!("failed to spawn test thread: {err}")))?;
-    match handle.join() {
-        Ok(result) => Ok(result),
-        Err(_) => Err(RuntimeError::new("test thread panicked")),
-    }
+fn run_with_stack<T>(f: impl FnOnce() -> T) -> Result<T, RuntimeError> {
+    Ok(stacker::grow(EXEC_STACK_BYTES, f))
 }
 
 pub fn compile_source(source: &str) -> Result<runmat_vm::Bytecode, RuntimeError> {

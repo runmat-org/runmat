@@ -1,7 +1,7 @@
 //! MATLAB-compatible `ss` state-space model constructor for RunMat.
 
+use std::cell::Cell;
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -20,7 +20,9 @@ use crate::{build_runtime_error, dispatcher, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "ss";
 const SS_CLASS: &str = "ss";
 
-static SS_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
+thread_local! {
+    static SS_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
+}
 
 const SS_OUTPUT_SYS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "sys",
@@ -215,7 +217,10 @@ fn ss_error_with_message(
 }
 
 fn ensure_ss_class_registered() {
-    SS_CLASS_REGISTERED.get_or_init(|| {
+    SS_CLASS_REGISTERED.with(|registered| {
+        if registered.get() {
+            return;
+        }
         let mut properties = HashMap::new();
         for name in [
             "A",
@@ -250,6 +255,7 @@ fn ensure_ss_class_registered() {
             properties,
             methods,
         });
+        registered.set(true);
     });
 }
 

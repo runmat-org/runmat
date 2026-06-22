@@ -228,7 +228,7 @@ impl GarbageCollector {
             );
         }
         // External roots
-        if let Ok(mut ext) = ROOT_SCANNER.scan_roots() {
+        if let Ok(mut ext) = ROOT_SCANNER.with(|scanner| scanner.scan_roots()) {
             combined_roots.append(&mut ext);
         }
         combined_roots.extend(gc_barrier_minor_roots());
@@ -284,7 +284,7 @@ impl GarbageCollector {
                     .map(|&addr| unsafe { GcPtr::from_raw(addr as *const Value) }),
             );
         }
-        if let Ok(mut ext) = ROOT_SCANNER.scan_roots() {
+        if let Ok(mut ext) = ROOT_SCANNER.with(|scanner| scanner.scan_roots()) {
             combined_roots.append(&mut ext);
         }
         combined_roots.extend(gc_barrier_minor_roots());
@@ -364,8 +364,10 @@ unsafe impl Sync for GarbageCollector {}
 /// Global garbage collector instance
 static GC: once_cell::sync::Lazy<Arc<GarbageCollector>> =
     once_cell::sync::Lazy::new(|| Arc::new(GarbageCollector::new().expect("Failed to create GC")));
-static ROOT_SCANNER: once_cell::sync::Lazy<Arc<RootScanner>> =
-    once_cell::sync::Lazy::new(|| Arc::new(RootScanner::new()));
+
+thread_local! {
+    static ROOT_SCANNER: RootScanner = RootScanner::new();
+}
 
 /// Global write barrier manager
 static WRITE_BARRIERS: once_cell::sync::Lazy<Arc<WriteBarrierManager>> =
@@ -412,11 +414,11 @@ pub fn gc_get_config() -> GcConfig {
 
 /// Simplified root registration for backwards compatibility
 pub fn gc_register_root(root: Box<dyn GcRoot>) -> Result<RootId> {
-    ROOT_SCANNER.register_root(root)
+    ROOT_SCANNER.with(|scanner| scanner.register_root(root))
 }
 
 pub fn gc_unregister_root(root_id: RootId) -> Result<()> {
-    ROOT_SCANNER.unregister_root(root_id)
+    ROOT_SCANNER.with(|scanner| scanner.unregister_root(root_id))
 }
 
 /// Record a write for GC barriers (approximate old->young tracking)
@@ -548,13 +550,13 @@ mod tests {
                             let ptr = gc_allocate(value).expect("allocation failed");
                             ptrs.push(ptr);
                         }
-                        ptrs
+                        ptrs.len()
                     })
                 })
                 .collect();
 
             for handle in handles {
-                let _ptrs = handle.join().expect("thread failed");
+                assert_eq!(handle.join().expect("thread failed"), 100);
             }
 
             let _ = gc_collect_major();

@@ -1,12 +1,9 @@
 //! MATLAB-compatible `containers.Map` constructor and methods for RunMat.
 
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    OnceLock, RwLock,
-};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use once_cell::sync::Lazy;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -427,12 +424,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-static MAP_REGISTRY: Lazy<RwLock<HashMap<u64, MapStore>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
-static CONTAINERS_MAP_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
+
+thread_local! {
+    static MAP_REGISTRY: RefCell<HashMap<u64, MapStore>> = RefCell::new(HashMap::new());
+    static CONTAINERS_MAP_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
+}
 
 fn ensure_containers_map_class_registered() {
-    CONTAINERS_MAP_CLASS_REGISTERED.get_or_init(|| {
+    CONTAINERS_MAP_CLASS_REGISTERED.with(|registered| {
+        if registered.get() {
+            return;
+        }
         let mut properties = HashMap::new();
         for name in ["Count", "KeyType", "ValueType"] {
             properties.insert(
@@ -478,6 +480,7 @@ fn ensure_containers_map_class_registered() {
             properties,
             methods,
         });
+        registered.set(true);
     });
 }
 
@@ -1157,10 +1160,9 @@ fn allocate_handle(store: MapStore, builtin: &'static str) -> BuiltinResult<Valu
     ensure_containers_map_class_registered();
 
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    MAP_REGISTRY
-        .write()
-        .map_err(|_| map_internal("containers.Map: registry lock poisoned", builtin))?
-        .insert(id, store);
+    MAP_REGISTRY.with(|registry| {
+        registry.borrow_mut().insert(id, store);
+    });
     let mut struct_value = StructValue::new();
     struct_value
         .fields
@@ -1182,13 +1184,15 @@ where
     let handle = extract_handle(map, builtin)?;
     ensure_handle(handle, builtin)?;
     let id = map_id(handle, builtin)?;
-    let guard = MAP_REGISTRY
-        .read()
-        .map_err(|_| map_internal("containers.Map: registry lock poisoned", builtin))?;
-    let store = guard
-        .get(&id)
-        .ok_or_else(|| map_internal("containers.Map: internal storage not found", builtin))?;
-    f(store)
+    MAP_REGISTRY.with(|registry| {
+        let registry = registry
+            .try_borrow()
+            .map_err(|_| map_internal("containers.Map: registry already borrowed", builtin))?;
+        let store = registry
+            .get(&id)
+            .ok_or_else(|| map_internal("containers.Map: internal storage not found", builtin))?;
+        f(store)
+    })
 }
 
 fn with_store_mut<F, R>(map: &Value, builtin: &'static str, f: F) -> BuiltinResult<R>
@@ -1198,13 +1202,15 @@ where
     let handle = extract_handle(map, builtin)?;
     ensure_handle(handle, builtin)?;
     let id = map_id(handle, builtin)?;
-    let mut guard = MAP_REGISTRY
-        .write()
-        .map_err(|_| map_internal("containers.Map: registry lock poisoned", builtin))?;
-    let store = guard
-        .get_mut(&id)
-        .ok_or_else(|| map_internal("containers.Map: internal storage not found", builtin))?;
-    f(store)
+    MAP_REGISTRY.with(|registry| {
+        let mut registry = registry
+            .try_borrow_mut()
+            .map_err(|_| map_internal("containers.Map: registry already borrowed", builtin))?;
+        let store = registry
+            .get_mut(&id)
+            .ok_or_else(|| map_internal("containers.Map: internal storage not found", builtin))?;
+        f(store)
+    })
 }
 
 fn extract_handle<'a>(value: &'a Value, builtin: &'static str) -> BuiltinResult<&'a HandleRef> {
@@ -1859,9 +1865,12 @@ pub fn map_length(value: &Value) -> Option<usize> {
     if let Value::HandleObject(handle) = value {
         if runmat_builtins::is_handle_valid(handle) && handle.class_name == CLASS_NAME {
             if let Ok(id) = map_id(handle, BUILTIN_CONSTRUCTOR) {
-                if let Ok(registry) = MAP_REGISTRY.read() {
-                    return registry.get(&id).map(|store| store.len());
-                }
+                return MAP_REGISTRY.with(|registry| {
+                    registry
+                        .try_borrow()
+                        .ok()
+                        .and_then(|registry| registry.get(&id).map(|store| store.len()))
+                });
             }
         }
     }

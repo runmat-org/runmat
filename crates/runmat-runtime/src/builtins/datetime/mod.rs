@@ -1,5 +1,5 @@
+use std::cell::Cell;
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, Timelike, Weekday};
 use runmat_builtins::{
@@ -23,7 +23,9 @@ const DEFAULT_DATETIME_FORMAT: &str = "dd-MMM-yyyy HH:mm:ss";
 const UNIX_DATENUM: f64 = 719_529.0;
 const SECONDS_PER_DAY: f64 = 86_400.0;
 
-static DATETIME_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
+thread_local! {
+    static DATETIME_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
+}
 
 const DATETIME_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DATETIME.INVALID_ARGUMENT",
@@ -528,7 +530,10 @@ fn datetime_error(message: impl Into<String>) -> RuntimeError {
 }
 
 fn ensure_datetime_class_registered() {
-    DATETIME_CLASS_REGISTERED.get_or_init(|| {
+    DATETIME_CLASS_REGISTERED.with(|registered| {
+        if registered.get() {
+            return;
+        }
         let mut properties = HashMap::new();
         properties.insert(
             FORMAT_FIELD.to_string(),
@@ -576,6 +581,7 @@ fn ensure_datetime_class_registered() {
             properties,
             methods,
         });
+        registered.set(true);
     });
 }
 

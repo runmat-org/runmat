@@ -1,10 +1,10 @@
-#[cfg(not(target_arch = "wasm32"))]
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 use std::sync::Mutex;
-use std::sync::{Arc, OnceLock, RwLock, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 
+#[cfg(target_arch = "wasm32")]
 use once_cell::sync::Lazy;
 use runmat_accelerate_api::ReductionFlavor;
 use runmat_builtins::Value;
@@ -672,8 +672,13 @@ struct ActiveContext {
     active_group: Option<usize>,
 }
 
-static PLAN_CACHE: Lazy<RwLock<HashMap<usize, Weak<FusionPlan>>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
+thread_local! {
+    static PLAN_CACHE: RefCell<HashMap<usize, Weak<FusionPlan>>> = RefCell::new(HashMap::new());
+}
+
+fn with_plan_cache<R>(f: impl FnOnce(&mut HashMap<usize, Weak<FusionPlan>>) -> R) -> R {
+    PLAN_CACHE.with(|cache| f(&mut cache.borrow_mut()))
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 thread_local! {
@@ -738,19 +743,15 @@ pub fn prepare_fusion_plan(
         return None;
     }
     let key = graph as *const AccelGraph as usize;
-    if let Some(plan) = PLAN_CACHE
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&key).and_then(|weak| weak.upgrade()))
-    {
+    if let Some(plan) = with_plan_cache(|cache| cache.get(&key).and_then(|weak| weak.upgrade())) {
         return Some(plan);
     }
 
     let plan = FusionPlan::from_graph(graph, &groups);
     let plan = Arc::new(plan);
-    if let Ok(mut guard) = PLAN_CACHE.write() {
-        guard.insert(key, Arc::downgrade(&plan));
-    }
+    with_plan_cache(|cache| {
+        cache.insert(key, Arc::downgrade(&plan));
+    });
     Some(plan)
 }
 

@@ -1,7 +1,7 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
 
 use chrono::Utc;
 use runmat_builtins::{ObjectInstance, Tensor, Value};
@@ -123,9 +123,12 @@ pub enum TxnStatus {
     Aborted,
 }
 
-fn tx_registry() -> &'static Mutex<HashMap<String, PendingTxn>> {
-    static REG: OnceLock<Mutex<HashMap<String, PendingTxn>>> = OnceLock::new();
-    REG.get_or_init(|| Mutex::new(HashMap::new()))
+thread_local! {
+    static TX_REGISTRY: RefCell<HashMap<String, PendingTxn>> = RefCell::new(HashMap::new());
+}
+
+fn with_tx_registry<T>(f: impl FnOnce(&mut HashMap<String, PendingTxn>) -> T) -> T {
+    TX_REGISTRY.with(|registry| f(&mut registry.borrow_mut()))
 }
 
 pub fn data_error(message: impl Into<String>) -> RuntimeError {
@@ -1000,8 +1003,9 @@ pub fn start_tx(dataset_path: String, base_sequence: u64) -> String {
         attrs: BTreeMap::new(),
         status: TxnStatus::Open,
     };
-    let mut guard = tx_registry().lock().expect("tx registry lock poisoned");
-    guard.insert(tx_id.clone(), pending);
+    with_tx_registry(|registry| {
+        registry.insert(tx_id.clone(), pending);
+    });
     tx_id
 }
 
@@ -1009,33 +1013,37 @@ pub fn with_tx_mut<T>(
     tx_id: &str,
     f: impl FnOnce(&mut PendingTxn) -> BuiltinResult<T>,
 ) -> BuiltinResult<T> {
-    let mut guard = tx_registry().lock().expect("tx registry lock poisoned");
-    let tx = guard.get_mut(tx_id).ok_or_else(|| {
-        data_error_with_identifier(
-            format!("transaction '{tx_id}' not found"),
-            DATA_TRANSACTION_NOT_FOUND_IDENTIFIER,
-        )
-    })?;
-    f(tx)
+    with_tx_registry(|registry| {
+        let tx = registry.get_mut(tx_id).ok_or_else(|| {
+            data_error_with_identifier(
+                format!("transaction '{tx_id}' not found"),
+                DATA_TRANSACTION_NOT_FOUND_IDENTIFIER,
+            )
+        })?;
+        f(tx)
+    })
 }
 
 pub fn with_tx<T>(
     tx_id: &str,
     f: impl FnOnce(&PendingTxn) -> BuiltinResult<T>,
 ) -> BuiltinResult<T> {
-    let guard = tx_registry().lock().expect("tx registry lock poisoned");
-    let tx = guard.get(tx_id).ok_or_else(|| {
-        data_error_with_identifier(
-            format!("transaction '{tx_id}' not found"),
-            DATA_TRANSACTION_NOT_FOUND_IDENTIFIER,
-        )
-    })?;
-    f(tx)
+    TX_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let tx = registry.get(tx_id).ok_or_else(|| {
+            data_error_with_identifier(
+                format!("transaction '{tx_id}' not found"),
+                DATA_TRANSACTION_NOT_FOUND_IDENTIFIER,
+            )
+        })?;
+        f(tx)
+    })
 }
 
 pub fn remove_tx(tx_id: &str) {
-    let mut guard = tx_registry().lock().expect("tx registry lock poisoned");
-    let _ = guard.remove(tx_id);
+    with_tx_registry(|registry| {
+        let _ = registry.remove(tx_id);
+    });
 }
 
 #[cfg(test)]

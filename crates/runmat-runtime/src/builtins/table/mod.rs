@@ -1,10 +1,10 @@
 //! MATLAB table datatype support and tabular workflow builtins.
 
+use std::cell::Cell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
 use calamine::{open_workbook_auto_from_rs, Data as SpreadsheetData, Reader as SpreadsheetReader};
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
@@ -42,7 +42,9 @@ const USER_DATA: &str = "UserData";
 const DEFAULT_ROW_DIM_NAME: &str = "Rows";
 const DEFAULT_VARIABLE_DIM_NAME: &str = "Variables";
 
-static TABLE_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
+thread_local! {
+    static TABLE_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
+}
 
 const ANY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -413,7 +415,10 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 }
 
 pub fn ensure_table_class_registered() {
-    TABLE_CLASS_REGISTERED.get_or_init(|| {
+    TABLE_CLASS_REGISTERED.with(|registered| {
+        if registered.get() {
+            return;
+        }
         let mut properties = HashMap::new();
         properties.insert(
             PROPERTIES_MEMBER.to_string(),
@@ -450,6 +455,7 @@ pub fn ensure_table_class_registered() {
             properties,
             methods,
         });
+        registered.set(true);
     });
 }
 

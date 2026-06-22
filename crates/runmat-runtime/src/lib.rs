@@ -397,7 +397,7 @@ pub(crate) async fn isvalid_builtin(v: Value) -> crate::BuiltinResult<Value> {
     }
 }
 
-use std::sync::{Mutex, OnceLock};
+use std::cell::RefCell;
 
 #[derive(Default)]
 struct EventRegistry {
@@ -405,22 +405,22 @@ struct EventRegistry {
     listeners: std::collections::HashMap<(usize, String), Vec<runmat_builtins::Listener>>,
 }
 
-static EVENT_REGISTRY: OnceLock<Mutex<EventRegistry>> = OnceLock::new();
-
-fn events() -> &'static Mutex<EventRegistry> {
-    EVENT_REGISTRY.get_or_init(|| Mutex::new(EventRegistry::default()))
+thread_local! {
+    static EVENT_REGISTRY: RefCell<EventRegistry> = RefCell::new(EventRegistry::default());
 }
 
 pub(crate) fn invalidate_listener_registration(listener_id: u64) {
-    let mut reg = events().lock().unwrap();
-    for listeners in reg.listeners.values_mut() {
-        for listener in listeners.iter_mut() {
-            if listener.id == listener_id {
-                listener.valid = false;
-                listener.enabled = false;
+    EVENT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        for listeners in registry.listeners.values_mut() {
+            for listener in listeners.iter_mut() {
+                if listener.id == listener_id {
+                    listener.valid = false;
+                    listener.enabled = false;
+                }
             }
         }
-    }
+    });
 }
 
 pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Value) -> Value {
@@ -522,11 +522,11 @@ pub(crate) async fn addlistener_builtin(
             )
         }
     };
-    let mut reg = events().lock().unwrap();
-    let id = {
-        reg.next_id += 1;
-        reg.next_id
-    };
+    let id = EVENT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        registry.next_id += 1;
+        registry.next_id
+    });
     let tgt_gc = match target {
         Value::HandleObject(h) => h.target,
         Value::Object(o) => {
@@ -544,10 +544,14 @@ pub(crate) async fn addlistener_builtin(
         enabled: true,
         valid: true,
     };
-    reg.listeners
-        .entry((key_ptr, event_name))
-        .or_default()
-        .push(listener.clone());
+    EVENT_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .listeners
+            .entry((key_ptr, event_name))
+            .or_default()
+            .push(listener.clone());
+    });
     Ok(Value::Listener(listener))
 }
 
@@ -569,16 +573,16 @@ pub(crate) async fn notify_builtin(
         }
     };
     let mut to_call: Vec<runmat_builtins::Listener> = Vec::new();
-    {
-        let reg = events().lock().unwrap();
-        if let Some(list) = reg.listeners.get(&(key_ptr, event_name.clone())) {
+    EVENT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        if let Some(list) = registry.listeners.get(&(key_ptr, event_name.clone())) {
             for l in list {
                 if l.valid && l.enabled {
                     to_call.push(l.clone());
                 }
             }
         }
-    }
+    });
     for l in to_call {
         // Call callback via feval-like protocol.
         let mut args = Vec::new();

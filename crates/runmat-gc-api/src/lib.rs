@@ -4,6 +4,20 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 
+/// Opaque pointer token for a RunMat GC allocation.
+///
+/// `GcPtr` is intentionally not `Send` or `Sync`; a handle does not prove that
+/// the pointed-to object can be accessed safely from another thread.
+///
+/// ```compile_fail
+/// fn assert_send<T: Send>() {}
+/// assert_send::<runmat_gc_api::GcPtr<u8>>();
+/// ```
+///
+/// ```compile_fail
+/// fn assert_sync<T: Sync>() {}
+/// assert_sync::<runmat_gc_api::GcPtr<u8>>();
+/// ```
 #[derive(Copy, Clone)]
 pub struct GcPtr<T> {
     ptr: *const T,
@@ -82,9 +96,6 @@ impl<T> fmt::Display for GcPtr<T> {
         }
     }
 }
-
-unsafe impl<T: Send> Send for GcPtr<T> {}
-unsafe impl<T: Sync> Sync for GcPtr<T> {}
 
 #[cfg(test)]
 mod tests {
