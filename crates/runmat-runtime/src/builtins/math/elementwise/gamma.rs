@@ -232,10 +232,19 @@ async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    Ok(tensor::tensor_into_value(gamma_tensor(tensor)?))
+    match gathered {
+        Value::Complex(re, im) => Ok(gamma_complex_scalar_value(Complex64::new(re, im))),
+        Value::ComplexTensor(ct) => gamma_complex_tensor(ct),
+        Value::Tensor(tensor) => Ok(tensor::tensor_into_value(gamma_tensor(tensor)?)),
+        Value::Num(n) => Ok(Value::Num(gamma_real_scalar(n))),
+        other => Err(gamma_error_with_detail(
+            &GAMMA_ERROR_INVALID_INPUT,
+            format!("unsupported gathered gpuArray value {other:?}"),
+        )),
+    }
 }
 
 fn gamma_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
@@ -409,9 +418,7 @@ async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<V
         },
         PrototypeClass::Complex => match analysis.device {
             DevicePreference::Host => convert_to_host_complex(value).await,
-            DevicePreference::Gpu => Err(builtin_error(
-                "gamma: complex GPU prototypes are not supported yet",
-            )),
+            DevicePreference::Gpu => convert_to_gpu_complex(value).await,
         },
     }
 }
@@ -480,10 +487,11 @@ async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
             Ok(complex_tensor_into_value(complex))
         }
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_tensor_async(&handle)
+            let proxy = Value::GpuTensor(handle);
+            let gathered = gpu_helpers::gather_value_async(&proxy)
                 .await
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-            convert_to_host_complex(Value::Tensor(gathered)).await
+            convert_to_host_complex(gathered).await
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
@@ -494,6 +502,69 @@ async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
         Value::Int(i) => convert_to_host_complex(Value::Num(i.to_f64())).await,
         other => Err(builtin_error(format!(
             "gamma: cannot convert {other:?} to complex output via 'like'"
+        ))),
+    }
+}
+
+#[async_recursion::async_recursion(?Send)]
+async fn convert_to_gpu_complex(value: Value) -> BuiltinResult<Value> {
+    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+        gamma_error_with_detail(
+            &GAMMA_ERROR_GPU_UNSUPPORTED,
+            "complex GPU output requested via 'like' but no acceleration provider is active",
+        )
+    })?;
+    match value {
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_storage(&handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                Ok(Value::GpuTensor(handle))
+            } else if let Some(handle_provider) =
+                runmat_accelerate_api::provider_for_handle(&handle)
+            {
+                match handle_provider.complex_from_real(&handle).await {
+                    Ok(out) => Ok(Value::GpuTensor(out)),
+                    Err(_) => {
+                        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+                            .await
+                            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+                        convert_to_gpu_complex(gathered).await
+                    }
+                }
+            } else {
+                Err(gamma_error_with_detail(
+                    &GAMMA_ERROR_GPU_UNSUPPORTED,
+                    "complex GPU output requested but the input handle has no provider",
+                ))
+            }
+        }
+        Value::Complex(re, im) => {
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map_err(|e| builtin_error(format!("gamma: {e}")))?;
+            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
+            Ok(Value::GpuTensor(handle))
+        }
+        Value::ComplexTensor(tensor) => {
+            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
+            Ok(Value::GpuTensor(handle))
+        }
+        Value::Num(n) => convert_to_gpu_complex(Value::Complex(n, 0.0)).await,
+        Value::Tensor(tensor) => {
+            let data = tensor.data.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
+            let complex = ComplexTensor::new(data, tensor.shape.clone())
+                .map_err(|e| builtin_error(format!("gamma: {e}")))?;
+            convert_to_gpu_complex(Value::ComplexTensor(complex)).await
+        }
+        Value::LogicalArray(logical) => {
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| builtin_error(format!("gamma: {e}")))?;
+            convert_to_gpu_complex(Value::Tensor(tensor)).await
+        }
+        Value::Bool(b) => convert_to_gpu_complex(Value::Num(if b { 1.0 } else { 0.0 })).await,
+        Value::Int(i) => convert_to_gpu_complex(Value::Num(i.to_f64())).await,
+        other => Err(builtin_error(format!(
+            "gamma: cannot convert {other:?} to complex GPU output via 'like'"
         ))),
     }
 }
@@ -518,10 +589,19 @@ struct LikeAnalysis {
 #[async_recursion::async_recursion(?Send)]
 async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
     match proto {
-        Value::GpuTensor(_) => Ok(LikeAnalysis {
-            class: PrototypeClass::Real,
-            device: DevicePreference::Gpu,
-        }),
+        Value::GpuTensor(handle) => {
+            let class = if runmat_accelerate_api::handle_storage(handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                PrototypeClass::Complex
+            } else {
+                PrototypeClass::Real
+            };
+            Ok(LikeAnalysis {
+                class,
+                device: DevicePreference::Gpu,
+            })
+        }
         Value::Tensor(_)
         | Value::Num(_)
         | Value::Int(_)
@@ -547,7 +627,7 @@ async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
+    use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
@@ -769,6 +849,93 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[test]
+    fn gamma_gpu_complex_input_falls_back_to_complex_host() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new(vec![(0.5, 0.75), (2.0, -0.25)], vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &input).expect("upload");
+            let result = gamma_builtin(Value::GpuTensor(handle), Vec::new()).expect("gamma");
+            let Value::ComplexTensor(out) = result else {
+                panic!("expected complex tensor, got {result:?}");
+            };
+            assert_eq!(out.shape, vec![1, 2]);
+            for (idx, &(re, im)) in input.data.iter().enumerate() {
+                let expected = gamma_complex_scalar(Complex64::new(re, im));
+                approx_eq(out.data[idx].0, expected.re, 1e-12);
+                approx_eq(out.data[idx].1, expected.im, 1e-12);
+            }
+        });
+    }
+
+    #[test]
+    fn gamma_like_complex_gpu_prototype_uploads_complex_result() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+            let proto_tensor = ComplexTensor::new(vec![(0.0, 1.0)], vec![1, 1]).unwrap();
+            let proto = gpu_helpers::upload_complex_tensor(provider, &proto_tensor)
+                .expect("upload complex prototype");
+            let result = gamma_builtin(
+                Value::Tensor(input),
+                vec![Value::from("like"), Value::GpuTensor(proto)],
+            )
+            .expect("gamma");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected complex gpu tensor, got {result:?}");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&handle),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(handle))).unwrap();
+            let Value::ComplexTensor(out) = gathered else {
+                panic!("expected gathered complex tensor, got {gathered:?}");
+            };
+            assert_eq!(out.shape, vec![2, 1]);
+            approx_eq(out.data[0].0, 1.0, 1e-12);
+            approx_eq(out.data[0].1, 0.0, 1e-12);
+            approx_eq(out.data[1].0, 1.0, 1e-12);
+            approx_eq(out.data[1].1, 0.0, 1e-12);
+        });
+    }
+
+    #[test]
+    fn gamma_like_complex_gpu_prototype_converts_resident_real_gpu_result() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+            let input_view = HostTensorView {
+                data: &input.data,
+                shape: &input.shape,
+            };
+            let input_handle = provider.upload(&input_view).expect("upload input");
+            let proto_tensor = ComplexTensor::new(vec![(0.0, 1.0)], vec![1, 1]).unwrap();
+            let proto = gpu_helpers::upload_complex_tensor(provider, &proto_tensor)
+                .expect("upload complex prototype");
+            let result = gamma_builtin(
+                Value::GpuTensor(input_handle),
+                vec![Value::from("like"), Value::GpuTensor(proto)],
+            )
+            .expect("gamma");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected complex gpu tensor, got {result:?}");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&handle),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(handle))).unwrap();
+            let Value::ComplexTensor(out) = gathered else {
+                panic!("expected gathered complex tensor, got {gathered:?}");
+            };
+            assert_eq!(out.shape, vec![2, 1]);
+            approx_eq(out.data[0].0, 1.0, 1e-12);
+            approx_eq(out.data[0].1, 0.0, 1e-12);
+            approx_eq(out.data[1].0, 1.0, 1e-12);
+            approx_eq(out.data[1].1, 0.0, 1e-12);
         });
     }
 
