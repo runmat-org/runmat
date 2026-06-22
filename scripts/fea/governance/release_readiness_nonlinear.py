@@ -4656,13 +4656,19 @@ def evaluate_release_readiness(
     em_min_sparse_source_realization_ratio_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REALIZATION_RATIO",
-            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REALIZATION_RATIO", "0.2"),
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REALIZATION_RATIO",
+                "0.95",
+            ),
         )
     )
     em_max_sparse_energy_imbalance_ratio_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ENERGY_IMBALANCE_RATIO",
-            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ENERGY_IMBALANCE_RATIO", "0.7"),
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ENERGY_IMBALANCE_RATIO",
+                "0.35",
+            ),
         )
     )
     em_min_multiregion_assignment_coverage_ratio_threshold = float(
@@ -4706,7 +4712,7 @@ def evaluate_release_readiness(
             "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_SOURCE_REALIZATION_RATIO",
             profile_default(
                 "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_SOURCE_REALIZATION_RATIO",
-                "0.1",
+                "0.95",
             ),
         )
     )
@@ -4715,7 +4721,7 @@ def evaluate_release_readiness(
             "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ENERGY_IMBALANCE_RATIO",
             profile_default(
                 "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ENERGY_IMBALANCE_RATIO",
-                "0.8",
+                "0.35",
             ),
         )
     )

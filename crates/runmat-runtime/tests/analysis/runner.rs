@@ -9364,8 +9364,8 @@ pub(super) fn run_fixture(
                                 "FEA_EM_STATIC",
                                 "source_realization_ratio",
                             ),
-                            Some(0.2),
-                            Some(0.35),
+                            Some(1.0),
+                            Some(1.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -9420,8 +9420,8 @@ pub(super) fn run_fixture(
                                 "FEA_EM_STATIC",
                                 "energy_imbalance_ratio",
                             ),
+                            Some(0.0),
                             Some(0.35),
-                            Some(1.0),
                         );
                     }
                     if spec.id == "electromagnetic_reference_multiregion_assignments_gpu_provider" {
@@ -9520,8 +9520,8 @@ pub(super) fn run_fixture(
                                 "FEA_EM_STATIC",
                                 "energy_imbalance_ratio",
                             ),
+                            Some(0.0),
                             Some(0.35),
-                            Some(1.0),
                         );
                     }
                     if spec.id == "electromagnetic_reference_overlap_interference_gpu_provider" {

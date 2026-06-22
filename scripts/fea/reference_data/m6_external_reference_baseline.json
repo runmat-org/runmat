@@ -1794,9 +1794,9 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "em_sparse_source_realization_ratio",
-      "reference": 0.25,
-      "tolerance_abs": 0.12,
-      "tolerance_rel": 0.35
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": 0
     },
     {
       "name": "em_sparse_source_region_coverage_ratio",
@@ -1834,9 +1834,9 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "em_sparse_energy_imbalance_ratio",
-      "reference": 0.427,
-      "tolerance_abs": 0.18,
-      "tolerance_rel": 0.35
+      "reference": 0.22,
+      "tolerance_abs": 0.13,
+      "tolerance_rel": 0.6
     },
     {
       "name": "electromagnetic_solve_quality",
@@ -1850,8 +1850,8 @@
       "name": "electromagnetic_energy_imbalance_ratio",
       "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
       "field": "electromagnetic_energy_imbalance_ratio",
-      "reference": 0.427,
-      "tolerance_abs": 0.2,
+      "reference": 0.22,
+      "tolerance_abs": 0.13,
       "tolerance_rel": 0.5
     },
     {
