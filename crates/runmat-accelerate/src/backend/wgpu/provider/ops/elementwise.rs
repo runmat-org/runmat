@@ -10,6 +10,7 @@ use super::backend_shared::{
 use super::backend_types::WgpuProvider;
 use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::resources::UniformBufferKey;
+use crate::backend::wgpu::shaders::elementwise::{complex_unary_shader, ComplexUnaryOp};
 use crate::backend::wgpu::shaders::logical::{
     ELEM_EQ_SHADER_F32, ELEM_EQ_SHADER_F64, ELEM_GE_SHADER_F32, ELEM_GE_SHADER_F64,
     ELEM_GT_SHADER_F32, ELEM_GT_SHADER_F64, ELEM_LE_SHADER_F32, ELEM_LE_SHADER_F64,
@@ -30,7 +31,8 @@ impl WgpuProvider {
 
     pub(crate) fn logical_isreal_exec(&self, a: &GpuTensorHandle) -> Result<bool> {
         let _ = self.get_entry(a)?;
-        Ok(true)
+        Ok(runmat_accelerate_api::handle_storage(a)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)
     }
 
     pub(crate) fn unary_double_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -41,6 +43,81 @@ impl WgpuProvider {
         }
         let entry = self.get_entry(a)?;
         Ok(self.register_existing_buffer(entry.buffer, entry.shape, entry.len))
+    }
+
+    pub(crate) fn unary_real_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if runmat_accelerate_api::handle_storage(a)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return Ok(self.register_existing_buffer(entry.buffer, entry.shape, entry.len));
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Real, false)
+    }
+
+    pub(crate) fn unary_imag_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if runmat_accelerate_api::handle_storage(a)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return Ok(self.fill_exec(&entry.shape, 0.0)?);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Imag, false)
+    }
+
+    pub(crate) fn unary_abs_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_storage(a)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Abs, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Abs, false)
+    }
+
+    pub(crate) fn unary_conj_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_storage(a)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Conj, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Conj, true)
+    }
+
+    fn complex_unary_exec(
+        &self,
+        a: &GpuTensorHandle,
+        op: ComplexUnaryOp,
+        output_complex: bool,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        ensure!(
+            runmat_accelerate_api::handle_storage(a)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            "complex unary operation requires complex-interleaved input"
+        );
+        ensure!(
+            entry.len % 2 == 0,
+            "complex unary operation requires even interleaved buffer length"
+        );
+        let len = if output_complex {
+            entry.len
+        } else {
+            entry.len / 2
+        };
+        let shader = complex_unary_shader(op, self.precision);
+        let out = self.fused_elementwise_with_telemetry_exec(
+            &shader,
+            std::slice::from_ref(a),
+            &entry.shape,
+            len,
+        )?;
+        if output_complex {
+            runmat_accelerate_api::set_handle_storage(
+                &out,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            );
+        }
+        Ok(out)
     }
 
     pub(crate) fn unary_pow2_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {

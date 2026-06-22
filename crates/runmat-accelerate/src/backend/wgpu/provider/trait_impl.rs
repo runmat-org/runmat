@@ -571,9 +571,7 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn unary_abs<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Abs, a) },
-        )
+        Box::pin(async move { self.unary_abs_exec(a) })
     }
 
     fn unary_heaviside<'a>(
@@ -589,9 +587,21 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Conj, a) },
-        )
+        Box::pin(async move { self.unary_conj_exec(a) })
+    }
+
+    fn unary_imag<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.unary_imag_exec(a) })
+    }
+
+    fn unary_real<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.unary_real_exec(a) })
     }
 
     fn unary_exp<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {

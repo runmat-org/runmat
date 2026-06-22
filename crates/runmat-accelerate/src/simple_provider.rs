@@ -332,16 +332,28 @@ impl InProcessProvider {
     }
 
     fn allocate_tensor(&self, data: Vec<f64>, shape: Vec<usize>) -> GpuTensorHandle {
+        self.allocate_tensor_with_storage(data, shape, GpuTensorStorage::Real)
+    }
+
+    fn allocate_tensor_with_storage(
+        &self,
+        data: Vec<f64>,
+        shape: Vec<usize>,
+        storage: GpuTensorStorage,
+    ) -> GpuTensorHandle {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         registry()
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, data);
-        GpuTensorHandle {
+        let handle = GpuTensorHandle {
             shape,
             device_id: 0,
             buffer_id: id,
-        }
+        };
+        runmat_accelerate_api::set_handle_storage(&handle, storage);
+        runmat_accelerate_api::set_handle_logical(&handle, false);
+        handle
     }
 
     fn load_polynomial(&self, handle: &GpuTensorHandle) -> Result<(Vec<f64>, PolyOrientation)> {
@@ -2754,7 +2766,7 @@ impl AccelProvider for InProcessProvider {
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow!("logical_isreal: unknown buffer {}", a.buffer_id))?;
         }
-        Ok(true)
+        Ok(runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved)
     }
 
     fn logical_isfinite(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -3281,22 +3293,106 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn unary_real<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let data = {
+                let guard = registry().lock().unwrap();
+                guard
+                    .get(&a.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?
+                    .clone()
+            };
+            if runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved {
+                return Ok(self.allocate_tensor(data, a.shape.clone()));
+            }
+            ensure!(
+                data.len() % 2 == 0,
+                "unary_real: complex-interleaved buffer has odd length"
+            );
+            let out = data.chunks_exact(2).map(|pair| pair[0]).collect();
+            Ok(self.allocate_tensor(out, a.shape.clone()))
+        })
+    }
+
+    fn unary_imag<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let data = {
+                let guard = registry().lock().unwrap();
+                guard
+                    .get(&a.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?
+                    .clone()
+            };
+            if runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved {
+                return Ok(self.allocate_tensor(vec![0.0; data.len()], a.shape.clone()));
+            }
+            ensure!(
+                data.len() % 2 == 0,
+                "unary_imag: complex-interleaved buffer has odd length"
+            );
+            let out = data.chunks_exact(2).map(|pair| pair[1]).collect();
+            Ok(self.allocate_tensor(out, a.shape.clone()))
+        })
+    }
+
     fn unary_abs<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out: Vec<f64> = abuf.iter().map(|&x| x.abs()).collect();
+            let out: Vec<f64> = if runmat_accelerate_api::handle_storage(a)
+                == GpuTensorStorage::ComplexInterleaved
+            {
+                ensure!(
+                    abuf.len() % 2 == 0,
+                    "unary_abs: complex-interleaved buffer has odd length"
+                );
+                abuf.chunks_exact(2)
+                    .map(|pair| pair[0].hypot(pair[1]))
+                    .collect()
+            } else {
+                abuf.iter().map(|&x| x.abs()).collect()
+            };
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: 0,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor(out, a.shape.clone()))
+        })
+    }
+
+    fn unary_conj<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let data = {
+                let guard = registry().lock().unwrap();
+                guard
+                    .get(&a.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?
+                    .clone()
+            };
+            if runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved {
+                return Ok(self.allocate_tensor(data, a.shape.clone()));
+            }
+            ensure!(
+                data.len() % 2 == 0,
+                "unary_conj: complex-interleaved buffer has odd length"
+            );
+            let mut out = data;
+            for pair in out.chunks_exact_mut(2) {
+                pair[1] = -pair[1];
+            }
+            Ok(self.allocate_tensor_with_storage(
+                out,
+                a.shape.clone(),
+                GpuTensorStorage::ComplexInterleaved,
+            ))
         })
     }
 

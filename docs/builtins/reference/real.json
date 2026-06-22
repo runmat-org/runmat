@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Falls back to the host when the active provider lacks unary_real or when inputs require host-side conversions (complex tensors, characters)."
+    "notes": "Uses unary_real to keep real GPU tensors resident and to extract real components from complex-interleaved GPU tensors. Falls back to the host only when the active provider lacks the hook or when inputs require host-side conversions such as characters."
   },
   "fusion": {
     "elementwise": true,
@@ -212,6 +212,6 @@
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's fusion planner and Accelerate layer track residency automatically, keeping tensors on the GPU whenever device execution is beneficial. Explicit `gpuArray` / `gather` calls remain available for MATLAB compatibility or when you need deterministic residency control (e.g., integrating with third-party GPU kernels).",
   "gpu_behavior": [
     "**Hook available:** The real part is taken directly on the device with no host transfers (the WGPU provider and the in-process provider both implement this hook).",
-    "**Hook missing or unsupported dtype:** RunMat gathers the tensor to host memory, applies the CPU semantics (including logical and character promotion), and hands control back to the caller. Downstream fusion can still re-upload if the planner decides it is profitable.\n\nComplex GPU tensors are currently gathered because device-side complex storage is not yet available; providers can add fused support later without changing this builtin."
+    "**Hook missing or unsupported dtype:** RunMat gathers the tensor to host memory, applies the CPU semantics (including logical and character promotion), and hands control back to the caller. Downstream fusion can still re-upload if the planner decides it is profitable.\n\nWhen a provider supports complex-interleaved storage, `real` extracts the real lane on the device and returns a real GPU tensor with the original shape."
   ]
 }
