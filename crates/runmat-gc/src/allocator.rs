@@ -6,6 +6,7 @@
 use crate::Value;
 use crate::{GcConfig, GcError, GcPtr, GcStats, Result};
 use std::collections::{HashMap, HashSet};
+use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Size classes for object allocation
@@ -133,9 +134,10 @@ impl Generation {
         }
     }
 
-    /// Align size to pointer boundary
+    /// Align size to the type stored by this allocator.
     fn align_size(&self, size: usize) -> usize {
-        (size + std::mem::align_of::<*const u8>() - 1) & !(std::mem::align_of::<*const u8>() - 1)
+        let align = std::mem::align_of::<Value>();
+        (size + align - 1) & !(align - 1)
     }
 
     /// Get total allocated bytes
@@ -182,24 +184,33 @@ impl Generation {
 /// A block of memory for allocation
 #[derive(Debug)]
 struct MemoryBlock {
-    memory: Vec<u8>,
-    current_offset: usize,
-    size: usize,
+    memory: Vec<MaybeUninit<Value>>,
+    current_slot: usize,
+    size_bytes: usize,
 }
 
 impl MemoryBlock {
-    fn new(size: usize) -> Self {
+    fn new(size_bytes: usize) -> Self {
+        let slot_count = Self::slots_for_bytes(size_bytes);
+        let mut memory = Vec::with_capacity(slot_count);
+        memory.resize_with(slot_count, MaybeUninit::uninit);
         Self {
-            memory: vec![0; size],
-            current_offset: 0,
-            size,
+            memory,
+            current_slot: 0,
+            size_bytes: slot_count * std::mem::size_of::<Value>(),
         }
     }
 
-    fn allocate(&mut self, size: usize) -> Option<*mut u8> {
-        if self.current_offset + size <= self.size {
-            let ptr = unsafe { self.memory.as_mut_ptr().add(self.current_offset) };
-            self.current_offset += size;
+    fn slots_for_bytes(size_bytes: usize) -> usize {
+        let value_size = std::mem::size_of::<Value>();
+        std::cmp::max(1, size_bytes.div_ceil(value_size))
+    }
+
+    fn allocate(&mut self, size_bytes: usize) -> Option<*mut u8> {
+        let slots_needed = Self::slots_for_bytes(size_bytes);
+        if self.current_slot + slots_needed <= self.memory.len() {
+            let ptr = self.memory[self.current_slot].as_mut_ptr().cast::<u8>();
+            self.current_slot += slots_needed;
             Some(ptr)
         } else {
             None
@@ -207,14 +218,12 @@ impl MemoryBlock {
     }
 
     fn reset(&mut self) {
-        self.current_offset = 0;
-        // Zero out memory for security
-        self.memory.fill(0);
+        self.current_slot = 0;
     }
 
     fn contains(&self, ptr: *const u8) -> bool {
         let start = self.memory.as_ptr() as usize;
-        let end = start + self.size;
+        let end = start + self.size_bytes;
         let addr = ptr as usize;
         addr >= start && addr < end
     }
@@ -463,5 +472,21 @@ mod tests {
             .expect("allocation should succeed");
 
         assert_eq!(*ptr, Value::Num(42.0));
+    }
+
+    #[test]
+    fn allocator_returns_value_aligned_pointers() {
+        let config = GcConfig::default();
+        let mut allocator = GenerationalAllocator::new(&config);
+        let stats = GcStats::new();
+        let align = std::mem::align_of::<Value>();
+
+        for i in 0..128 {
+            let ptr = allocator
+                .allocate(Value::Num(i as f64), &stats)
+                .expect("allocation should succeed");
+            let addr = unsafe { ptr.as_raw() } as usize;
+            assert_eq!(addr % align, 0, "GC allocation was not Value-aligned");
+        }
     }
 }
