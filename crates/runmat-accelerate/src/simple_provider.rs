@@ -652,8 +652,14 @@ fn states_to_column_major(
     out
 }
 
-fn permute_data(data: &[f64], shape: &[usize], order: &[usize]) -> Result<(Vec<f64>, Vec<usize>)> {
+fn permute_data(
+    data: &[f64],
+    shape: &[usize],
+    order: &[usize],
+    lane_factor: usize,
+) -> Result<(Vec<f64>, Vec<usize>)> {
     ensure!(!order.is_empty(), "permute: order must not be empty");
+    ensure!(lane_factor > 0, "permute: lane factor must be positive");
     let rank = order.len();
     ensure!(
         shape.len() <= rank,
@@ -679,7 +685,9 @@ fn permute_data(data: &[f64], shape: &[usize], order: &[usize]) -> Result<(Vec<f
         src_shape.extend(std::iter::repeat_n(1, rank - src_shape.len()));
     }
 
-    let total = product(&src_shape);
+    let total = product(&src_shape)
+        .checked_mul(lane_factor)
+        .ok_or_else(|| anyhow!("permute: shape/product exceeds supported size"))?;
     ensure!(
         total == data.len(),
         "permute: shape/product mismatch ({} vs {})",
@@ -692,15 +700,32 @@ fn permute_data(data: &[f64], shape: &[usize], order: &[usize]) -> Result<(Vec<f
         dst_shape[dst_dim] = src_shape[src_dim];
     }
 
-    let src_strides = compute_strides(&src_shape);
-    let dst_total = product(&dst_shape);
+    let mut kernel_src_shape = Vec::with_capacity(rank + usize::from(lane_factor > 1));
+    let mut kernel_dst_shape = Vec::with_capacity(rank + usize::from(lane_factor > 1));
+    let mut kernel_order = Vec::with_capacity(rank + usize::from(lane_factor > 1));
+    if lane_factor > 1 {
+        kernel_src_shape.push(lane_factor);
+        kernel_dst_shape.push(lane_factor);
+        kernel_order.push(0);
+        kernel_src_shape.extend(src_shape.iter().copied());
+        kernel_dst_shape.extend(dst_shape.iter().copied());
+        kernel_order.extend(order.iter().map(|&dim| dim + 1));
+    } else {
+        kernel_src_shape.extend(src_shape.iter().copied());
+        kernel_dst_shape.extend(dst_shape.iter().copied());
+        kernel_order.extend(order.iter().copied());
+    }
+
+    let kernel_rank = kernel_order.len();
+    let src_strides = compute_strides(&kernel_src_shape);
+    let dst_total = product(&kernel_dst_shape);
     let mut out = vec![0.0f64; dst_total];
-    let mut dst_coords = vec![0usize; rank];
-    let mut src_coords = vec![0usize; rank];
+    let mut dst_coords = vec![0usize; kernel_rank];
+    let mut src_coords = vec![0usize; kernel_rank];
 
     for (dst_index, out_value) in out.iter_mut().enumerate() {
         let mut rem = dst_index;
-        for (dim, &size) in dst_shape.iter().enumerate() {
+        for (dim, &size) in kernel_dst_shape.iter().enumerate() {
             if size == 0 {
                 dst_coords[dim] = 0;
             } else {
@@ -708,7 +733,7 @@ fn permute_data(data: &[f64], shape: &[usize], order: &[usize]) -> Result<(Vec<f
                 rem /= size;
             }
         }
-        for (dst_dim, &src_dim) in order.iter().enumerate() {
+        for (dst_dim, &src_dim) in kernel_order.iter().enumerate() {
             src_coords[src_dim] = dst_coords[dst_dim];
         }
         let mut src_index = 0usize;
@@ -4048,27 +4073,31 @@ impl AccelProvider for InProcessProvider {
         }
         let rows = a.shape[0];
         let cols = a.shape[1];
+        let storage = runmat_accelerate_api::handle_storage(a);
+        let lane_factor = match storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
         let guard = registry().lock().unwrap();
         let abuf = guard
             .get(&a.buffer_id)
             .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        ensure!(
+            rows.checked_mul(cols)
+                .and_then(|logical| logical.checked_mul(lane_factor))
+                == Some(abuf.len()),
+            "transpose: shape/data length mismatch"
+        );
         let mut out = vec![0.0; abuf.len()];
         for i in 0..rows {
             for j in 0..cols {
-                let src = i + j * rows;
-                let dst = j + i * cols;
-                out[dst] = abuf[src];
+                let src = (i + j * rows) * lane_factor;
+                let dst = (j + i * cols) * lane_factor;
+                out[dst..dst + lane_factor].copy_from_slice(&abuf[src..src + lane_factor]);
             }
         }
         drop(guard);
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut guard2 = registry().lock().unwrap();
-        guard2.insert(id, out);
-        Ok(GpuTensorHandle {
-            shape: vec![cols, rows],
-            device_id: 0,
-            buffer_id: id,
-        })
+        Ok(self.allocate_tensor_with_storage(out, vec![cols, rows], storage))
     }
     fn conv1d(
         &self,
@@ -4420,6 +4449,11 @@ impl AccelProvider for InProcessProvider {
         })
     }
     fn permute(&self, handle: &GpuTensorHandle, order: &[usize]) -> Result<GpuTensorHandle> {
+        let storage = runmat_accelerate_api::handle_storage(handle);
+        let lane_factor = match storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
         let data = {
             let guard = registry().lock().unwrap();
             guard
@@ -4427,8 +4461,8 @@ impl AccelProvider for InProcessProvider {
                 .ok_or_else(|| anyhow!("permute: unknown tensor handle {}", handle.buffer_id))?
                 .clone()
         };
-        let (permuted, new_shape) = permute_data(&data, &handle.shape, order)?;
-        Ok(self.allocate_tensor(permuted, new_shape))
+        let (permuted, new_shape) = permute_data(&data, &handle.shape, order, lane_factor)?;
+        Ok(self.allocate_tensor_with_storage(permuted, new_shape, storage))
     }
 
     fn flip(&self, handle: &GpuTensorHandle, axes: &[usize]) -> Result<GpuTensorHandle> {
