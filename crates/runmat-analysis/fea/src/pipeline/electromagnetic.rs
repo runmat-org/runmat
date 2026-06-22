@@ -6,7 +6,7 @@ use runmat_analysis_core::{
 };
 
 use crate::{
-    assembly::assemble_linear_system,
+    assembly::{assemble_linear_system, AssemblySummary, PrepRecoveryEdgeSummary},
     contracts::{
         ComputeBackend, ElectromagneticSolveOptions, FeaElectromagneticRunResult, FeaRunError,
         FeaRunResult, FEA_FIELD_EM_CURRENT_DENSITY_IMAG, FEA_FIELD_EM_CURRENT_DENSITY_REAL,
@@ -547,7 +547,8 @@ pub fn run_electromagnetic_with_options(
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1_000.0;
     let vector_potential_real = harmonic_solve.real_solution.clone();
     let vector_potential_imag = harmonic_solve.imag_solution.clone();
-    let maxwell_topology = MaxwellEdgeTopology::line_graph(node_count, h, &constrained);
+    let maxwell_topology =
+        MaxwellEdgeTopology::from_assembly_or_line(&summary, node_count, h, &constrained);
     let edge_vector_potential_real = maxwell_topology.edge_line_integrals(&vector_potential_real);
     let edge_vector_potential_imag = maxwell_topology.edge_line_integrals(&vector_potential_imag);
     let gauge_anchor_residual_ratio = maxwell_topology
@@ -592,12 +593,14 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis=line_edge_curl_conforming edge_dof_count={} element_count={} oriented_edge_count={} constrained_edge_count={} gauge_anchor_count={} curl_curl_energy_scale={}",
+            "basis={} edge_dof_count={} element_count={} oriented_edge_count={} constrained_edge_count={} gauge_anchor_count={} prep_recovery_edge_count={} curl_curl_energy_scale={}",
+            maxwell_topology.basis.as_str(),
             maxwell_topology.edge_count(),
             maxwell_topology.element_count(),
             maxwell_topology.oriented_edge_count(),
             maxwell_topology.constrained_edge_count(),
             maxwell_topology.gauge_anchor_count(),
+            maxwell_topology.prep_recovery_edge_count,
             maxwell_topology.curl_curl_energy_scale(),
         ),
     });
@@ -2041,11 +2044,80 @@ fn block_dot(a: &[f64], b: &[f64]) -> f64 {
 
 #[derive(Debug, Clone, PartialEq)]
 struct MaxwellEdgeTopology {
+    basis: MaxwellEdgeTopologyBasis,
     edges: Vec<MaxwellEdge>,
     gauge_anchor_nodes: Vec<usize>,
+    prep_recovery_edge_count: usize,
 }
 
 impl MaxwellEdgeTopology {
+    fn from_assembly_or_line(
+        summary: &AssemblySummary,
+        node_count: usize,
+        spacing: f64,
+        constrained: &[bool],
+    ) -> Self {
+        Self::from_prep_recovery_edges(
+            node_count,
+            constrained,
+            summary.prep_recovery_edges.iter().copied(),
+        )
+        .unwrap_or_else(|| Self::line_graph(node_count, spacing, constrained))
+    }
+
+    fn from_prep_recovery_edges<I>(
+        node_count: usize,
+        constrained: &[bool],
+        prep_edges: I,
+    ) -> Option<Self>
+    where
+        I: IntoIterator<Item = PrepRecoveryEdgeSummary>,
+    {
+        use std::collections::BTreeSet;
+
+        let mut seen = BTreeSet::new();
+        let edges = prep_edges
+            .into_iter()
+            .filter_map(|edge| {
+                if edge.from_dof >= node_count || edge.to_dof >= node_count || node_count < 2 {
+                    return None;
+                }
+                let from_node = edge.from_dof;
+                let to_node = edge.to_dof;
+                if from_node == to_node {
+                    return None;
+                }
+                let lo = from_node.min(to_node);
+                let hi = from_node.max(to_node);
+                if !seen.insert((lo, hi, edge.element_family_index)) {
+                    return None;
+                }
+                let orientation = if edge.from_dof <= edge.to_dof {
+                    1.0
+                } else {
+                    -1.0
+                };
+                Some(MaxwellEdge {
+                    from_node: lo,
+                    to_node: hi,
+                    orientation,
+                    length: finite_positive_or(edge.edge_length_m, hi.abs_diff(lo).max(1) as f64),
+                    constrained: constrained.get(lo).copied().unwrap_or(false)
+                        || constrained.get(hi).copied().unwrap_or(false),
+                })
+            })
+            .collect::<Vec<_>>();
+        if edges.is_empty() {
+            return None;
+        }
+        Some(Self {
+            basis: MaxwellEdgeTopologyBasis::PrepEdgeCurlConforming,
+            prep_recovery_edge_count: edges.len(),
+            edges,
+            gauge_anchor_nodes: gauge_anchor_nodes(constrained),
+        })
+    }
+
     fn line_graph(node_count: usize, spacing: f64, constrained: &[bool]) -> Self {
         let edge_count = node_count.saturating_sub(1);
         let length = if spacing.is_finite() && spacing > 0.0 {
@@ -2066,14 +2138,11 @@ impl MaxwellEdgeTopology {
                 }
             })
             .collect::<Vec<_>>();
-        let gauge_anchor_nodes = constrained
-            .iter()
-            .enumerate()
-            .filter_map(|(index, value)| (*value).then_some(index))
-            .collect::<Vec<_>>();
         Self {
+            basis: MaxwellEdgeTopologyBasis::LineEdgeCurlConforming,
             edges,
-            gauge_anchor_nodes,
+            gauge_anchor_nodes: gauge_anchor_nodes(constrained),
+            prep_recovery_edge_count: 0,
         }
     }
 
@@ -2160,6 +2229,37 @@ impl MaxwellEdgeTopology {
         } else {
             (anchor_energy / total_energy).sqrt()
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MaxwellEdgeTopologyBasis {
+    PrepEdgeCurlConforming,
+    LineEdgeCurlConforming,
+}
+
+impl MaxwellEdgeTopologyBasis {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::PrepEdgeCurlConforming => "prep_edge_curl_conforming",
+            Self::LineEdgeCurlConforming => "line_edge_curl_conforming",
+        }
+    }
+}
+
+fn gauge_anchor_nodes(constrained: &[bool]) -> Vec<usize> {
+    constrained
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| (*value).then_some(index))
+        .collect()
+}
+
+fn finite_positive_or(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        fallback
     }
 }
 
@@ -2379,6 +2479,8 @@ fn em_homogeneous_known_answer_diagnostic(
 
 #[cfg(test)]
 mod tests {
+    use crate::assembly::PrepRecoveryEdgeSummary;
+
     use runmat_analysis_core::{ConductivityFrequencyPoint, MaterialElectricalModel};
 
     use super::{
@@ -2386,7 +2488,7 @@ mod tests {
         dispersive_loss_scale_at_frequency, dispersive_phase_attenuation_for_loss_scale,
         flux_density_from_complex_vector_potential, flux_density_from_magnitude_vector_potential,
         flux_phasor_coherence_ratio, relative_permeability_scale_at_frequency,
-        relative_permittivity_scale_at_frequency, MaxwellEdgeTopology,
+        relative_permittivity_scale_at_frequency, MaxwellEdgeTopology, MaxwellEdgeTopologyBasis,
     };
 
     #[test]
@@ -2581,6 +2683,44 @@ mod tests {
         assert!(curl_real.iter().all(|value| (*value - 1.0).abs() < 1.0e-12));
         assert!((curl_imag[1] - 1.0).abs() < 1.0e-12);
         assert!(curl_mag[1] > curl_mag[0]);
+    }
+
+    #[test]
+    fn maxwell_edge_topology_prefers_prepared_recovery_edges() {
+        let prep_edges = vec![
+            PrepRecoveryEdgeSummary {
+                from_dof: 0,
+                to_dof: 2,
+                element_family_index: 3,
+                edge_length_m: 0.5,
+            },
+            PrepRecoveryEdgeSummary {
+                from_dof: 2,
+                to_dof: 5,
+                element_family_index: 2,
+                edge_length_m: 0.75,
+            },
+        ];
+
+        let topology = MaxwellEdgeTopology::from_prep_recovery_edges(
+            6,
+            &[true, false, false, false, false, true],
+            prep_edges,
+        )
+        .expect("prepared edges should build Maxwell topology");
+        let real = vec![0.0, 0.0, 0.5, 0.0, 0.0, 1.25];
+        let imag = vec![0.0; 6];
+        let (curl_real, _, _) = topology.curl_from_nodal_vector_potential(&real, &imag);
+
+        assert_eq!(
+            topology.basis,
+            MaxwellEdgeTopologyBasis::PrepEdgeCurlConforming
+        );
+        assert_eq!(topology.edge_count(), 2);
+        assert_eq!(topology.prep_recovery_edge_count, 2);
+        assert_eq!(topology.constrained_edge_count(), 2);
+        assert!((curl_real[0] - 1.0).abs() < 1.0e-12);
+        assert!((curl_real[1] - 1.0).abs() < 1.0e-12);
     }
 
     #[test]
