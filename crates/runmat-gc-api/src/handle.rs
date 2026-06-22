@@ -37,13 +37,6 @@ impl<T> GcHandle<T> {
         }
     }
 
-    pub fn null() -> Self {
-        Self {
-            ptr: std::ptr::null(),
-            _phantom: PhantomData,
-        }
-    }
-
     pub fn is_null(&self) -> bool {
         self.ptr.is_null()
     }
@@ -142,9 +135,14 @@ mod tests {
 
     #[test]
     fn debug_and_display_do_not_dereference_pointee() {
-        let ptr = GcHandle::<u64>::null();
+        let raw = Box::into_raw(Box::new(7_u64));
+        let ptr = unsafe { GcHandle::from_raw(raw) };
 
-        assert_eq!(format!("{ptr:?}"), "GcHandle(null)");
-        assert_eq!(ptr.to_string(), "null");
+        assert!(format!("{ptr:?}").starts_with("GcHandle(0x"));
+        assert!(ptr.to_string().starts_with("0x"));
+
+        unsafe {
+            drop(Box::from_raw(raw));
+        }
     }
 }

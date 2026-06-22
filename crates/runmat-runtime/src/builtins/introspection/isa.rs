@@ -253,11 +253,14 @@ pub(crate) mod tests {
         CellArray, CharArray, ClassDef, HandleRef, IntValue, Listener, LogicalArray,
         ObjectInstance, StringArray, StructValue, Tensor,
     };
-    use runmat_gc_api::GcHandle;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn test_handle_target() -> runmat_gc::GcHandle<Value> {
+        runmat_gc::gc_allocate(Value::Num(0.0)).expect("gc allocation")
+    }
 
     fn unique_class_name(prefix: &str) -> String {
         let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -387,7 +390,7 @@ pub(crate) mod tests {
     fn isa_handle_aliases_and_inheritance() {
         let handle = HandleRef {
             class_name: "TestHandle".into(),
-            target: GcHandle::null(),
+            target: test_handle_target(),
             valid: true,
         };
         assert_eq!(
@@ -443,9 +446,9 @@ pub(crate) mod tests {
     fn isa_listener_alias_matches() {
         let listener = Listener {
             id: 1,
-            target: GcHandle::null(),
+            target: test_handle_target(),
             event_name: "Changed".into(),
-            callback: GcHandle::null(),
+            callback: test_handle_target(),
             enabled: true,
             valid: true,
         };

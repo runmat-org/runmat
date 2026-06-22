@@ -512,18 +512,15 @@ mod tests {
     }
 
     #[test]
-    fn test_mark_phase_with_roots() {
+    fn test_mark_phase_with_empty_roots() {
         let config = GcConfig::default();
         let mut collector = MarkSweepCollector::new(&config);
 
-        // Create some mock roots
-        let roots = vec![GcHandle::null()]; // Null pointer should be handled gracefully
+        let roots = Vec::new();
 
-        // Should not panic with null roots
         let result = collector.mark_phase(&roots, 0);
         assert!(result.is_ok());
 
-        // No objects should be marked from null roots
         assert_eq!(collector.marked_objects.lock().len(), 0);
     }
 
