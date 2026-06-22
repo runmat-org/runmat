@@ -16,7 +16,7 @@ use crate::builtins::math::linalg::ops::transpose_real_sparse_tensor;
 use crate::builtins::math::linalg::type_resolvers::transpose_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use log::warn;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -130,23 +130,6 @@ fn internal_error(message: impl Into<String>) -> RuntimeError {
     builtin_error_with_message(message, &CTRANSPOSE_ERROR_INTERNAL)
 }
 
-fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
-    if let Some(identifier) = err.identifier() {
-        builder = builder.with_identifier(identifier.to_string());
-    }
-    if let Some(task_id) = err.context.task_id.clone() {
-        builder = builder.with_task_id(task_id);
-    }
-    if !err.context.call_stack.is_empty() {
-        builder = builder.with_call_stack(err.context.call_stack.clone());
-    }
-    if let Some(phase) = err.context.phase.clone() {
-        builder = builder.with_phase(phase);
-    }
-    builder.with_source(err).build()
-}
-
 #[runmat_macros::register_fusion_spec(
     builtin_path = "crate::builtins::math::linalg::ops::ctranspose"
 )]
@@ -224,6 +207,27 @@ fn ctranspose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         let permuted = permute_complex_tensor(NAME, ct, &order)?;
         ctranspose_complex_tensor_value(permuted)
     }
+}
+
+fn ctranspose_complex_tensor_preserve_complex(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {
+    let rank = ct.shape.len();
+    let transposed = if rank == 0 {
+        ct
+    } else if rank <= 2 {
+        let data = ctranspose_complex_matrix(&ct);
+        ComplexTensor::new(data, vec![ct.cols, ct.rows])
+            .map_err(|e| internal_error(format!("{NAME}: {e}")))?
+    } else {
+        let order = ctranspose_order(rank);
+        permute_complex_tensor(NAME, ct, &order)?
+    };
+    let shape = transposed.shape.clone();
+    let data = transposed
+        .data
+        .into_iter()
+        .map(|(re, im)| (re, -im))
+        .collect();
+    ComplexTensor::new(data, shape).map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 fn ctranspose_complex_tensor_value(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -361,8 +365,12 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if rank == 0 {
         return Ok(Value::GpuTensor(handle));
     }
+    let input_complex =
+        runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
 
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) =
+        runmat_accelerate_api::provider_for_handle(&handle).or_else(runmat_accelerate_api::provider)
+    {
         let mut transposed: Option<GpuTensorHandle> = None;
         if rank <= 2 {
             match provider.transpose(&handle) {
@@ -404,7 +412,13 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                             info.base_cols,
                         );
                     }
-                    return Ok(Value::GpuTensor(conjugated));
+                    if input_complex
+                        || runmat_accelerate_api::handle_storage(&conjugated)
+                            == GpuTensorStorage::ComplexInterleaved
+                    {
+                        return Ok(gpu_helpers::complex_gpu_value(conjugated));
+                    }
+                    return Ok(gpu_helpers::resident_gpu_value(conjugated));
                 }
                 Err(err) => {
                     let info = provider.device_info_struct();
@@ -418,23 +432,69 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
     }
 
-    let host = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(map_control_flow)?;
-    let transposed = ctranspose_tensor(host)?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let view = HostTensorView {
-            data: &transposed.data,
-            shape: &transposed.shape,
-        };
-        match provider.upload(&view) {
-            Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
-            Err(err) => warn!(
-                "ctranspose: re-upload after host fallback failed; returning host tensor ({err})"
-            ),
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
+    let transposed_value = match gathered {
+        Value::Tensor(tensor) => tensor::tensor_into_value(ctranspose_tensor(tensor)?),
+        Value::ComplexTensor(tensor) if input_complex => {
+            Value::ComplexTensor(ctranspose_complex_tensor_preserve_complex(tensor)?)
+        }
+        Value::ComplexTensor(tensor) => ctranspose_complex_tensor(tensor)?,
+        Value::LogicalArray(array) => Value::LogicalArray(ctranspose_logical_array(array)?),
+        Value::Num(n) => Value::Num(n),
+        Value::Complex(re, im) => ctranspose_complex_scalar(re, im)?,
+        Value::Bool(flag) => Value::Bool(flag),
+        Value::Int(value) => Value::Int(value),
+        other => {
+            return Err(invalid_input(format!(
+                "ctranspose: unsupported gathered gpu value {other:?}"
+            )));
+        }
+    };
+    if let Some(provider) =
+        runmat_accelerate_api::provider_for_handle(&handle).or_else(runmat_accelerate_api::provider)
+    {
+        match &transposed_value {
+            Value::Tensor(transposed) => {
+                let view = HostTensorView {
+                    data: &transposed.data,
+                    shape: &transposed.shape,
+                };
+                match provider.upload(&view) {
+                    Ok(uploaded) => return Ok(gpu_helpers::resident_gpu_value(uploaded)),
+                    Err(err) => warn!(
+                        "ctranspose: re-upload after host fallback failed; returning host tensor ({err})"
+                    ),
+                }
+            }
+            Value::ComplexTensor(transposed) => {
+                match gpu_helpers::upload_complex_tensor(provider, transposed) {
+                    Ok(uploaded) => return Ok(gpu_helpers::complex_gpu_value(uploaded)),
+                    Err(err) => warn!(
+                        "ctranspose: complex re-upload after host fallback failed; returning host tensor ({err})"
+                    ),
+                }
+            }
+            Value::LogicalArray(transposed) => {
+                let data: Vec<f64> = transposed
+                    .data
+                    .iter()
+                    .map(|&bit| if bit == 0 { 0.0 } else { 1.0 })
+                    .collect();
+                let view = HostTensorView {
+                    data: &data,
+                    shape: &transposed.shape,
+                };
+                match provider.upload(&view) {
+                    Ok(uploaded) => return Ok(gpu_helpers::logical_gpu_value(uploaded)),
+                    Err(err) => warn!(
+                        "ctranspose: logical re-upload after host fallback failed; returning host logical array ({err})"
+                    ),
+                }
+            }
+            _ => {}
         }
     }
-    Ok(tensor::tensor_into_value(transposed))
+    Ok(transposed_value)
 }
 
 fn ctranspose_order(rank: usize) -> Vec<usize> {
@@ -498,7 +558,7 @@ pub(crate) mod tests {
     }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{AccelProvider, HostTensorView};
     use runmat_builtins::{
         IntValue, LogicalArray, ResolveContext, StringArray, StructValue, Tensor, Type,
     };
@@ -768,12 +828,132 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn ctranspose_complex_gpu_inprocess_stays_resident() {
+        test_support::with_test_provider(|provider| {
+            let complex = ComplexTensor::new(
+                vec![
+                    (1.0, 2.0),
+                    (3.0, -4.0),
+                    (5.0, 6.0),
+                    (7.0, -8.0),
+                    (9.0, 10.0),
+                    (11.0, -12.0),
+                ],
+                vec![2, 3],
+            )
+            .unwrap();
+            let expected = match call_ctranspose(Value::ComplexTensor(complex.clone()))
+                .expect("cpu ctranspose")
+            {
+                Value::ComplexTensor(tensor) => tensor,
+                other => panic!("expected complex tensor result, got {other:?}"),
+            };
+
+            let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+            let result = call_ctranspose(Value::GpuTensor(handle)).expect("gpu ctranspose");
+            let Value::GpuTensor(out_handle) = result else {
+                panic!("expected complex gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out_handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(
+                crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
+            )
+            .expect("gather complex");
+            assert_eq!(gathered.shape, expected.shape);
+            assert_eq!(gathered.data, expected.data);
+        });
+    }
+
+    #[test]
+    fn ctranspose_complex_gpu_all_real_input_preserves_complex_storage() {
+        test_support::with_test_provider(|provider| {
+            let complex = ComplexTensor::new(
+                vec![(1.0, 0.0), (2.0, -0.0), (3.0, 0.0), (4.0, -0.0)],
+                vec![2, 2],
+            )
+            .unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+            let result = call_ctranspose(Value::GpuTensor(handle)).expect("gpu ctranspose");
+            let Value::GpuTensor(out_handle) = result else {
+                panic!("expected complex gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out_handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(
+                crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
+            )
+            .expect("gather complex");
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(
+                gathered.data,
+                vec![(1.0, -0.0), (3.0, -0.0), (2.0, 0.0), (4.0, 0.0)]
+            );
+        });
+    }
+
+    #[test]
+    fn ctranspose_complex_gpu_inprocess_nd_stays_resident() {
+        test_support::with_test_provider(|provider| {
+            let complex = ComplexTensor::new(
+                vec![
+                    (1.0, -1.0),
+                    (2.0, -2.0),
+                    (3.0, -3.0),
+                    (4.0, -4.0),
+                    (5.0, -5.0),
+                    (6.0, -6.0),
+                    (7.0, -7.0),
+                    (8.0, -8.0),
+                ],
+                vec![2, 2, 2],
+            )
+            .unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+            let result = call_ctranspose(Value::GpuTensor(handle)).expect("gpu ctranspose");
+            let Value::GpuTensor(out_handle) = result else {
+                panic!("expected complex gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out_handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(
+                crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
+            )
+            .expect("gather complex");
+            assert_eq!(gathered.shape, vec![2, 2, 2]);
+            assert_eq!(
+                gathered.data,
+                vec![
+                    (1.0, 1.0),
+                    (3.0, 3.0),
+                    (2.0, 2.0),
+                    (4.0, 4.0),
+                    (5.0, 5.0),
+                    (7.0, 7.0),
+                    (6.0, 6.0),
+                    (8.0, 8.0),
+                ]
+            );
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn ctranspose_wgpu_matches_cpu() {
-        let _ = wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default());
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) =
+            wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default())
+        else {
+            return;
+        };
         let data: Vec<f64> = (1..=12).map(|n| n as f64).collect();
         let tensor = Tensor::new(data, vec![3, 4]).expect("tensor");
         let cpu_value = call_ctranspose(Value::Tensor(tensor.clone())).expect("cpu");
@@ -791,5 +971,92 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu_tensor.shape);
         assert_eq!(gathered.data, cpu_tensor.data);
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn ctranspose_wgpu_complex_matches_cpu_and_stays_resident() {
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) =
+            wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default())
+        else {
+            return;
+        };
+        let complex = ComplexTensor::new(
+            vec![
+                (1.0, 2.0),
+                (3.0, -4.0),
+                (5.0, 6.0),
+                (7.0, -8.0),
+                (9.0, 10.0),
+                (11.0, -12.0),
+            ],
+            vec![2, 3],
+        )
+        .unwrap();
+        let expected =
+            match call_ctranspose(Value::ComplexTensor(complex.clone())).expect("cpu ctranspose") {
+                Value::ComplexTensor(tensor) => tensor,
+                other => panic!("expected complex tensor result, got {other:?}"),
+            };
+
+        let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+        let result = call_ctranspose(Value::GpuTensor(handle)).expect("gpu ctranspose");
+        let Value::GpuTensor(out_handle) = result else {
+            panic!("expected complex gpu tensor");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&out_handle),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        let gathered = block_on(
+            crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
+        )
+        .expect("gather complex");
+        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.data, expected.data);
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn ctranspose_wgpu_complex_nd_matches_cpu_and_stays_resident() {
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) =
+            wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default())
+        else {
+            return;
+        };
+        let complex = ComplexTensor::new(
+            vec![
+                (1.0, -1.0),
+                (2.0, -2.0),
+                (3.0, -3.0),
+                (4.0, -4.0),
+                (5.0, -5.0),
+                (6.0, -6.0),
+                (7.0, -7.0),
+                (8.0, -8.0),
+            ],
+            vec![2, 2, 2],
+        )
+        .unwrap();
+        let expected =
+            ctranspose_complex_tensor_preserve_complex(complex.clone()).expect("cpu ctranspose");
+
+        let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+        let result = call_ctranspose(Value::GpuTensor(handle)).expect("gpu ctranspose");
+        let Value::GpuTensor(out_handle) = result else {
+            panic!("expected complex gpu tensor");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&out_handle),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        let gathered = block_on(
+            crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
+        )
+        .expect("gather complex");
+        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.data, expected.data);
     }
 }
