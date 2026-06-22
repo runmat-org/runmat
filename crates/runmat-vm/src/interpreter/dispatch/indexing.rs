@@ -768,18 +768,26 @@ async fn resolve_end_expr_value(
             match expr {
                 EndExpr::End => Ok(end_value),
                 EndExpr::Const(v) => Ok(*v),
-                EndExpr::Var(i) => idx_end_expr::value_to_f64(vars.get(*i).ok_or_else(|| {
-                    crate::interpreter::errors::mex(
-                        "MissingNumericIndex",
-                        "missing variable for end expression",
-                    )
-                })?)
-                .map_err(|_| {
-                    crate::interpreter::errors::mex(
-                        "UnsupportedIndexType",
-                        "end expression must be numeric",
-                    )
-                }),
+                EndExpr::Var(i) => {
+                    let mut value = vars
+                        .get(*i)
+                        .ok_or_else(|| {
+                            crate::interpreter::errors::mex(
+                                "MissingNumericIndex",
+                                "missing variable for end expression",
+                            )
+                        })?
+                        .clone();
+                    if matches!(value, Value::GpuTensor(_)) {
+                        value = runmat_runtime::dispatcher::gather_if_needed_async(&value).await?;
+                    }
+                    idx_end_expr::value_to_f64(&value).map_err(|_| {
+                        crate::interpreter::errors::mex(
+                            "UnsupportedIndexType",
+                            "end expression must be numeric",
+                        )
+                    })
+                }
                 EndExpr::ResolvedCall {
                     identity,
                     fallback_policy,

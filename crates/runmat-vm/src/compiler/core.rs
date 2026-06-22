@@ -3609,8 +3609,7 @@ impl Compiler {
         let step_expr = step
             .as_ref()
             .and_then(|step| self.mir_operand_end_expr(step));
-        let end_expr = self.mir_operand_end_expr(&end);
-        let end_expr = end_expr.or_else(|| self.mir_operand_any_end_expr(&end))?;
+        let end_expr = self.mir_operand_range_bound_expr(&end)?;
         Some(MirRangeEndSpec {
             start_expr,
             step_expr,
@@ -3637,9 +3636,22 @@ impl Compiler {
                 .unwrap_or(false)
     }
 
-    fn mir_operand_any_end_expr(&self, operand: &MirOperand) -> Option<EndExpr> {
-        self.mir_operand_end_expr_internal(operand)
-            .map(|(expr, _)| expr)
+    fn mir_operand_range_bound_expr(&self, operand: &MirOperand) -> Option<EndExpr> {
+        match operand {
+            MirOperand::Constant(MirConstant::Number(value)) => {
+                value.parse::<f64>().ok().map(EndExpr::Const)
+            }
+            MirOperand::Local(local) => {
+                let slot = self.mir_local_slot(*local).ok()?;
+                let (expr, has_end) = self.mir_local_end_expr_internal(*local)?;
+                if has_end {
+                    Some(expr)
+                } else {
+                    Some(EndExpr::Var(slot))
+                }
+            }
+            MirOperand::Constant(_) | MirOperand::FunctionHandle(_) => None,
+        }
     }
 
     fn mir_operand_rvalue(&self, operand: &MirOperand) -> Option<MirRvalue> {

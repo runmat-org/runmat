@@ -69,6 +69,24 @@ fn has_object_num_property(
     })
 }
 
+#[test]
+fn min_max_row_vector_after_linear_assignment_reduce_to_scalars_for_fprintf() {
+    execute_source(
+        r#"
+        a = single(zeros(1, 3));
+        a(1) = single(0.3);
+        a(2) = single(0.1);
+        a(3) = single(0.5);
+        mn = min(a);
+        mx = max(a);
+        mn_size = size(mn);
+        mx_size = size(mx);
+        fprintf('%.4f', mn);
+        fprintf('%.4f', mx);
+        "#,
+    );
+}
+
 fn assert_import_ambiguity_error(err: &runmat_runtime::RuntimeError) {
     assert_eq!(
         err.identifier(),

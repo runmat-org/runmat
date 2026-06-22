@@ -4803,7 +4803,7 @@ impl AccelProvider for InProcessProvider {
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let (vals, inds, vshape) = if dim <= 1 {
+            let (vals, inds, vshape) = if dim == 0 {
                 let mut m: Vec<f64> = vec![f64::INFINITY; cols];
                 let mut idx: Vec<f64> = vec![1.0; cols];
                 for c in 0..cols {
@@ -4889,7 +4889,7 @@ impl AccelProvider for InProcessProvider {
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let (vals, inds, vshape) = if dim <= 1 {
+            let (vals, inds, vshape) = if dim == 0 {
                 let mut m: Vec<f64> = vec![f64::NEG_INFINITY; cols];
                 let mut idx: Vec<f64> = vec![1.0; cols];
                 for c in 0..cols {
@@ -5836,6 +5836,40 @@ pub fn reset_inprocess_rng() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reduce_min_max_dim1_reduce_row_vector_to_scalar() {
+        let provider = InProcessProvider::new();
+        let data = [3.0, 1.0, 5.0];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &data,
+                shape: &[1, 3],
+            })
+            .expect("upload");
+
+        let min_result =
+            futures::executor::block_on(provider.reduce_min_dim(&handle, 1)).expect("min dim1");
+        let min_values =
+            futures::executor::block_on(provider.download(&min_result.values)).expect("min values");
+        let min_indices = futures::executor::block_on(provider.download(&min_result.indices))
+            .expect("min indices");
+        assert_eq!(min_values.shape, vec![1, 1]);
+        assert_eq!(min_values.data, vec![1.0]);
+        assert_eq!(min_indices.shape, vec![1, 1]);
+        assert_eq!(min_indices.data, vec![2.0]);
+
+        let max_result =
+            futures::executor::block_on(provider.reduce_max_dim(&handle, 1)).expect("max dim1");
+        let max_values =
+            futures::executor::block_on(provider.download(&max_result.values)).expect("max values");
+        let max_indices = futures::executor::block_on(provider.download(&max_result.indices))
+            .expect("max indices");
+        assert_eq!(max_values.shape, vec![1, 1]);
+        assert_eq!(max_values.data, vec![5.0]);
+        assert_eq!(max_indices.shape, vec![1, 1]);
+        assert_eq!(max_indices.data, vec![3.0]);
+    }
 
     #[test]
     fn upload_overwrites_stale_handle_metadata() {

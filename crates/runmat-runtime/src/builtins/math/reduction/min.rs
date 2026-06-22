@@ -2063,6 +2063,45 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn min_row_vector_reduces_across_columns() {
+        let tensor = Tensor::new(vec![3.0, 1.0, 5.0], vec![1, 3]).unwrap();
+        let eval = evaluate(Value::Tensor(tensor), &[]).expect("evaluate");
+        let (values, indices) = eval.into_pair();
+        assert_eq!(values, Value::Num(1.0));
+        assert_eq!(indices, Value::Num(2.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn min_single_row_vector_reduces_across_columns() {
+        let tensor = Tensor::from_f32(vec![3.0, 1.0, 5.0], vec![1, 3]).unwrap();
+        let eval = evaluate(Value::Tensor(tensor), &[]).expect("evaluate");
+        let (values, indices) = eval.into_pair();
+        assert_eq!(values, Value::Num(1.0));
+        assert_eq!(indices, Value::Num(2.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn min_registered_single_row_vector_reduces_across_columns() {
+        let tensor = Tensor::from_f32(vec![3.0, 1.0, 5.0], vec![1, 3]).unwrap();
+        let value = block_on(crate::call_builtin_async_with_outputs(
+            "min",
+            &[Value::Tensor(tensor)],
+            1,
+        ))
+        .expect("dispatch min");
+        match value {
+            Value::OutputList(values) => {
+                assert_eq!(values.len(), 1);
+                assert_eq!(values[0], Value::Num(1.0));
+            }
+            other => assert_eq!(other, Value::Num(1.0)),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn min_matrix_default_dimension() {
         let tensor = Tensor::new(vec![3.0, 4.0, 1.0, 2.0, 5.0, 6.0], vec![2, 3]).unwrap();
         let eval = evaluate(Value::Tensor(tensor), &[]).expect("evaluate");
