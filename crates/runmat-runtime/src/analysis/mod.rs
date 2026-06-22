@@ -3904,7 +3904,7 @@ fn cell_centered_scalar_from_nodal(nodal: &[f64]) -> Vec<f64> {
     cell_values
 }
 
-fn solve_cfd_baseline(
+fn solve_cfd_finite_volume_run(
     model: &AnalysisModel,
     domain: &runmat_analysis_core::CfdDomain,
     backend: ComputeBackend,
@@ -4929,7 +4929,7 @@ pub fn analysis_run_cfd_with_options_op(
     )?;
 
     let solve_start = Instant::now();
-    let mut run = solve_cfd_baseline(model, cfd_domain, backend, &options, prep_context);
+    let mut run = solve_cfd_finite_volume_run(model, cfd_domain, backend, &options, prep_context);
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
     run.diagnostics
         .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
