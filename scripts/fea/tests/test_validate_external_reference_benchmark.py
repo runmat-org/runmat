@@ -595,6 +595,9 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
                 (f"{prefix}_active_entity_coverage_ratio", 1.0),
                 (f"{prefix}_nonpenetration_gap_min", 1.0e-4),
                 (f"{prefix}_friction_coefficient", 0.0),
+                (f"{prefix}_open_gap_pressure_residual", 0.0),
+                (f"{prefix}_pressure_gap_complementarity_residual", 0.0),
+                (f"{prefix}_closed_entity_coverage_ratio", 1.0),
                 (f"{prefix}_known_answer_coverage_ratio", 1.0),
             )
         ],

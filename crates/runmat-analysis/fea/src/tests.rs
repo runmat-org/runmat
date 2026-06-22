@@ -15,12 +15,12 @@ use crate::{
     fixtures::{fixture_model, FixtureId},
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
-    ComputeBackend, FeaElectroThermalContext, FeaPrepContext, FeaRunResult,
-    FeaThermoMechanicalContext, LinearStaticSolveOptions, ModalSolveOptions, ThermalSolveOptions,
-    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
-    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
-    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
-    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    ComputeBackend, FeaContactInterfaceContext, FeaElectroThermalContext, FeaPrepContext,
+    FeaRunResult, FeaThermoMechanicalContext, LinearStaticSolveOptions, ModalSolveOptions,
+    ThermalSolveOptions, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
+    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL,
+    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
@@ -1010,6 +1010,63 @@ fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
     assert!(convergence.message.contains("iteration_spike_count="));
     assert!(convergence.message.contains("convergence_stall_count="));
     assert!(convergence.message.contains("backtrack_burst_count="));
+}
+
+#[test]
+fn nonlinear_contact_reference_enforces_pressure_gap_complementarity() {
+    let mut options = NonlinearSolveOptions::default();
+    options.contact_context = Some(FeaContactInterfaceContext {
+        enabled: true,
+        penalty_stiffness_scale: 2.0,
+        max_penetration_ratio: 0.01,
+        friction_coefficient: 0.0,
+    });
+    let model = fixture_model(FixtureId::NonlinearContactFrictionlessReference);
+    let result = crate::run_nonlinear_with_options(&model, ComputeBackend::Cpu, options)
+        .expect("frictionless contact reference solve should succeed");
+
+    let final_pressure = result
+        .contact_pressure_snapshots
+        .last()
+        .expect("contact pressure snapshot should be present")
+        .as_host_f64()
+        .expect("contact pressure should be host-backed");
+    let final_gap = result
+        .contact_gap_snapshots
+        .last()
+        .expect("contact gap snapshot should be present")
+        .as_host_f64()
+        .expect("contact gap should be host-backed");
+    assert!(
+        final_pressure.iter().any(|pressure| *pressure > 0.0),
+        "reference contact should close and develop pressure"
+    );
+    assert!(
+        final_gap.iter().all(|gap| *gap >= 0.0),
+        "projected contact gap should be nonpenetrating"
+    );
+    for (pressure, gap) in final_pressure.iter().zip(final_gap.iter()) {
+        assert!(
+            *pressure == 0.0 || *gap <= 1.0e-12,
+            "active contact pressure must only occur on closed gaps"
+        );
+    }
+
+    let known_answer = result
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_CONTACT_KNOWN_ANSWER")
+        .expect("contact known-answer diagnostic should be present");
+    assert!(known_answer
+        .message
+        .contains("open_gap_pressure_residual=0"));
+    assert!(known_answer
+        .message
+        .contains("pressure_gap_complementarity_residual=0"));
+    assert!(known_answer
+        .message
+        .contains("closed_entity_coverage_ratio=1"));
 }
 
 #[test]

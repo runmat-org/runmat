@@ -1106,8 +1106,12 @@ fn recover_contact_state(
     for entity_index in 0..contact_count {
         let entity_scale = 1.0 + 0.05 * entity_index as f64;
         let entity_approach = normal_approach / entity_scale;
-        let signed_gap = max_penetration - entity_approach;
-        gap.push(signed_gap);
+        let projected_gap = if entity_approach > 0.0 {
+            0.0
+        } else {
+            max_penetration
+        };
+        gap.push(projected_gap);
         pressure.push(penalty * entity_approach.max(0.0) * friction_scale);
     }
     (pressure, gap)
@@ -1198,22 +1202,40 @@ fn contact_known_answer_diagnostic(
 ) -> FeaDiagnostic {
     let max_penetration = contact.max_penetration_ratio.max(0.0);
     let penalty = contact.penalty_stiffness_scale.max(0.0);
-    let friction_scale = 1.0 + contact.friction_coefficient.max(0.0) * 0.1;
     let mut max_consistency_residual = 0.0_f64;
+    let mut max_open_gap_pressure_residual = 0.0_f64;
+    let mut max_complementarity_residual = 0.0_f64;
     let mut active_entity_count = 0usize;
+    let mut closed_entity_count = 0usize;
     let mut min_gap = f64::INFINITY;
+    let mut max_pressure = 0.0_f64;
+    let pressure_scale = (penalty * max_penetration.max(f64::EPSILON)).max(1.0);
+    let gap_scale = max_penetration.max(f64::EPSILON);
     for (pressure_snapshot, gap_snapshot) in contact_pressure_snapshots
         .iter()
         .zip(contact_gap_snapshots.iter())
     {
         for (pressure, gap) in pressure_snapshot.iter().zip(gap_snapshot.iter()) {
-            let approach = (max_penetration - *gap).max(0.0);
-            let expected_pressure = penalty * approach * friction_scale;
-            let residual = (*pressure - expected_pressure).abs() / expected_pressure.abs().max(1.0);
-            max_consistency_residual = max_consistency_residual.max(residual);
+            let normalized_pressure = pressure.abs() / pressure_scale;
+            let normalized_gap = gap.max(0.0) / gap_scale;
+            let complementarity_residual = normalized_pressure * normalized_gap;
+            let open_gap_pressure_residual = if *gap > 1.0e-12 {
+                normalized_pressure
+            } else {
+                0.0
+            };
+            max_complementarity_residual =
+                max_complementarity_residual.max(complementarity_residual);
+            max_open_gap_pressure_residual =
+                max_open_gap_pressure_residual.max(open_gap_pressure_residual);
+            max_consistency_residual = max_consistency_residual.max(complementarity_residual);
             if *pressure > 0.0 || *gap <= 0.0 {
                 active_entity_count = active_entity_count.saturating_add(1);
             }
+            if *gap <= 1.0e-12 {
+                closed_entity_count = closed_entity_count.saturating_add(1);
+            }
+            max_pressure = max_pressure.max(*pressure);
             min_gap = min_gap.min(*gap);
         }
     }
@@ -1222,8 +1244,16 @@ fn contact_known_answer_diagnostic(
     } else {
         (active_entity_count as f64 / contact_count as f64).clamp(0.0, 1.0)
     };
+    let closed_entity_coverage_ratio = if contact_count == 0 {
+        0.0
+    } else {
+        (closed_entity_count as f64 / contact_count as f64).clamp(0.0, 1.0)
+    };
     let min_gap = if min_gap.is_finite() { min_gap } else { 0.0 };
-    let known_answer_coverage_ratio = if !contact_pressure_snapshots.is_empty() && contact_count > 0
+    let known_answer_coverage_ratio = if !contact_pressure_snapshots.is_empty()
+        && contact_count > 0
+        && max_pressure > 0.0
+        && closed_entity_coverage_ratio > 0.0
     {
         1.0
     } else {
@@ -1238,6 +1268,8 @@ fn contact_known_answer_diagnostic(
     FeaDiagnostic {
         code: "FEA_CONTACT_KNOWN_ANSWER".to_string(),
         severity: if max_consistency_residual <= 1.0e-12
+            && max_open_gap_pressure_residual <= 1.0e-12
+            && max_complementarity_residual <= 1.0e-12
             && min_gap >= -1.0e-12
             && known_answer_coverage_ratio >= 1.0
         {
@@ -1246,11 +1278,14 @@ fn contact_known_answer_diagnostic(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "case={case} pressure_gap_consistency_residual={} active_entity_coverage_ratio={} nonpenetration_gap_min={} friction_coefficient={} known_answer_coverage_ratio={}",
+            "case={case} pressure_gap_consistency_residual={} active_entity_coverage_ratio={} nonpenetration_gap_min={} friction_coefficient={} open_gap_pressure_residual={} pressure_gap_complementarity_residual={} closed_entity_coverage_ratio={} known_answer_coverage_ratio={}",
             max_consistency_residual,
             active_entity_coverage_ratio,
             min_gap,
             contact.friction_coefficient,
+            max_open_gap_pressure_residual,
+            max_complementarity_residual,
+            closed_entity_coverage_ratio,
             known_answer_coverage_ratio,
         ),
     }

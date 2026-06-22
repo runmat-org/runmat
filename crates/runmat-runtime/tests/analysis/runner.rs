@@ -3091,6 +3091,48 @@ fn push_contact_known_answer_threshold_assertions(
         fixture_id,
         assertions,
         failures,
+        &format!("{prefix}_open_gap_pressure_residual"),
+        "FEA_CONTACT_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_CONTACT_KNOWN_ANSWER",
+            "open_gap_pressure_residual",
+        ),
+        Some(0.0),
+        Some(1.0e-12),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_pressure_gap_complementarity_residual"),
+        "FEA_CONTACT_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_CONTACT_KNOWN_ANSWER",
+            "pressure_gap_complementarity_residual",
+        ),
+        Some(0.0),
+        Some(1.0e-12),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        &format!("{prefix}_closed_entity_coverage_ratio"),
+        "FEA_CONTACT_KNOWN_ANSWER",
+        diagnostic_metric(
+            run,
+            "FEA_CONTACT_KNOWN_ANSWER",
+            "closed_entity_coverage_ratio",
+        ),
+        Some(1.0),
+        Some(1.0),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
         &format!("{prefix}_friction_coefficient"),
         "FEA_CONTACT_KNOWN_ANSWER",
         diagnostic_metric(run, "FEA_CONTACT_KNOWN_ANSWER", "friction_coefficient"),

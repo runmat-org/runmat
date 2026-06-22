@@ -33,6 +33,9 @@ CONTACT_FRICTIONLESS_KNOWN_ANSWER_REQUIRED_FIELDS = {
     "contact_frictionless_known_active_entity_coverage_ratio",
     "contact_frictionless_known_nonpenetration_gap_min",
     "contact_frictionless_known_friction_coefficient",
+    "contact_frictionless_known_open_gap_pressure_residual",
+    "contact_frictionless_known_pressure_gap_complementarity_residual",
+    "contact_frictionless_known_closed_entity_coverage_ratio",
     "contact_frictionless_known_known_answer_coverage_ratio",
 }
 
@@ -41,6 +44,9 @@ CONTACT_FRICTIONLESS_COMPLEX_KNOWN_ANSWER_REQUIRED_FIELDS = {
     "contact_frictionless_complex_known_active_entity_coverage_ratio",
     "contact_frictionless_complex_known_nonpenetration_gap_min",
     "contact_frictionless_complex_known_friction_coefficient",
+    "contact_frictionless_complex_known_open_gap_pressure_residual",
+    "contact_frictionless_complex_known_pressure_gap_complementarity_residual",
+    "contact_frictionless_complex_known_closed_entity_coverage_ratio",
     "contact_frictionless_complex_known_known_answer_coverage_ratio",
 }
 
