@@ -2,7 +2,7 @@
 title: "Verification & Validation"
 category: "FEA"
 section: "13.7"
-last_updated: "June 21, 2026"
+last_updated: "June 22, 2026"
 ---
 
 # Verification & Validation
@@ -75,12 +75,12 @@ The main gaps for production-grade claims are:
 | Structural transient | L2 evidence in progress | Time integration known answers, conservation checks, time-step convergence. |
 | Nonlinear structural | L2 evidence in progress | True contact-surface maps, broader nonlinear-law coverage, and independent nonlinear, plasticity, and contact references with tolerance envelopes. |
 | Thermo-mechanical | L2 evidence in progress | Broader coupled known-answer cases and independent thermo-mechanical references. |
-| Electro-thermal | L2 evidence in progress | Broader coupled electrical/thermal references, conservation studies across more authored cases, and unbounded mesh connectivity once prep artifacts carry full connectivity maps. |
-| Electromagnetic | L2 evidence in progress | Full mesh-native per-element edge incidence/orientation maps, Maxwell field validation, source/boundary realization references, convergence studies, larger workload studies. |
+| Electro-thermal | L2 evidence in progress | Broader coupled electrical/thermal references, conservation studies across more authored cases, mesh-convergence evidence, and larger workload studies. |
+| Electromagnetic | L2 evidence in progress | Broader Maxwell field validation, source/boundary realization references, convergence studies, independent references, and larger workload studies. |
 | Acoustic harmonic | L2 evidence in progress | Broader impedance/radiation validation, mesh convergence, and external acoustic references. |
 | CFD | L2 evidence in progress | Canonical CFD benchmarks, conservation checks, independent fluid references, and GPU parity beyond explicit fallback. |
-| CHT | L2 evidence in progress | Full unbounded fluid/solid interface connectivity, coupled fluid/thermal benchmarks, and independent CHT references. |
-| FSI | L2 evidence in progress | Full unbounded structural/interface mesh connectivity, broader two-way FSI benchmarks, and independent FSI references. |
+| CHT | L2 evidence in progress | Broader coupled fluid/thermal benchmarks, mesh-convergence evidence, and independent CHT references. |
+| FSI | L2 evidence in progress | Broader two-way FSI benchmarks, mesh-convergence evidence, and independent FSI references. |
 
 ## Adding A V&V Case
 

@@ -2,7 +2,7 @@
 title: "Geometry"
 category: "FEA"
 section: "13.2"
-last_updated: "June 11, 2026"
+last_updated: "June 22, 2026"
 ---
 
 # Geometry
@@ -106,6 +106,8 @@ Use `geometry.prep_for_analysis/v1` when you need deterministic analysis-prep da
 | `adaptive_refine` | Create refinement-oriented quality and topology data. |
 
 Prep artifacts are useful when later steps must prove which geometry revision, mappings, and prep data were used.
+
+Prepared analysis artifacts carry both bounded compatibility samples and full element topology vectors. The full vectors include node coordinates, edge-node incidence, element-edge incidence/orientation, and element areas. Prep-aware EM, electro-thermal, CHT, and FSI paths use those vectors for edge or interface graph construction where available, and conformance gates assert that governed prepared fixtures are not satisfied by an implicit line or diagnostic-only topology fallback.
 
 ## Prep Artifact Checks
 
