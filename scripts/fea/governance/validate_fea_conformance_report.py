@@ -50,6 +50,25 @@ CONTACT_FRICTIONLESS_COMPLEX_KNOWN_ANSWER_REQUIRED_FIELDS = {
     "contact_frictionless_complex_known_known_answer_coverage_ratio",
 }
 
+STRUCTURAL_BEAM_MOMENT_REQUIRED_FIELDS = {
+    "structural_rotational_dof_count",
+    "structural_rotation_node_count",
+    "structural_moment_load_count",
+    "structural_direct_rotational_moment_load_count",
+    "structural_beam_element_count",
+    "structural_beam_local_frame_coverage_ratio",
+    "structural_beam_stiffness_matrix_symmetry_residual",
+    "structural_reaction_moment_norm_n_m",
+    "structural_moment_requested_norm_n_m",
+    "structural_moment_realized_norm_n_m",
+    "structural_moment_realization_ratio",
+    "structural_moment_balance_residual_ratio",
+    "structural_beam_closed_form_rotation_error_ratio",
+    "structural_beam_closed_form_displacement_error_ratio",
+    "structural_beam_closed_form_torsion_error_ratio",
+    "structural_beam_closed_form_coverage_ratio",
+}
+
 
 REQUIRED_FIXTURES = {
     "cantilever_gpu_provider": {
@@ -136,6 +155,9 @@ REQUIRED_FIXTURES = {
         "structural_von_mises_peak_pa",
         "structural_stress_tensor_peak_pa",
     },
+    "structural_beam_cantilever_end_moment_reference_cpu": STRUCTURAL_BEAM_MOMENT_REQUIRED_FIELDS,
+    "structural_beam_torsion_reference_cpu": STRUCTURAL_BEAM_MOMENT_REQUIRED_FIELDS,
+    "structural_beam_force_and_moment_reference_cpu": STRUCTURAL_BEAM_MOMENT_REQUIRED_FIELDS,
     "nonlinear_assembly_gpu_provider": {
         "nonlinear_total_increments",
         "nonlinear_failed_increments",
@@ -1387,6 +1409,11 @@ REQUIRED_ERROR_FIXTURES = {
         "validate_ok": True,
         "run_ok": False,
         "run_error_code": "RM.FEA.RUN_FSI.INVALID_OPTIONS",
+    },
+    "structural_invalid_moment_without_rotational_dofs": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID",
     },
 }
 

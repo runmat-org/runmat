@@ -1,4 +1,6 @@
-use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, LoadKind};
+use runmat_analysis_core::{
+    validate_model, AnalysisField, AnalysisModel, BoundaryConditionKind, LoadKind,
+};
 
 use crate::{
     assembly::assemble_linear_system,
@@ -245,6 +247,9 @@ pub fn run_linear_static_with_options(
     if let Some(moment_balance) = structural_moment_balance_diagnostic(model, &fields) {
         diagnostics.push(moment_balance);
     }
+    if let Some(beam_closed_form) = structural_beam_closed_form_diagnostic(model, &fields) {
+        diagnostics.push(beam_closed_form);
+    }
     extend_common_run_diagnostics(
         &mut diagnostics,
         CommonRunDiagnosticInputs {
@@ -412,6 +417,115 @@ fn structural_reference_kinematics_diagnostic(
     })
 }
 
+fn structural_beam_closed_form_diagnostic(
+    model: &AnalysisModel,
+    fields: &[AnalysisField],
+) -> Option<FeaDiagnostic> {
+    let case = match model.model_id.0.as_str() {
+        "structural_beam_cantilever_end_moment_reference" => "cantilever_end_moment",
+        "structural_beam_torsion_reference" => "cantilever_torsion",
+        "structural_beam_force_and_moment_reference" => "cantilever_force_and_moment",
+        _ => return None,
+    };
+    let structural = model.structural.as_ref()?;
+    if structural.nodes.len() != 2 {
+        return None;
+    }
+    let section = structural.beam_sections.first()?;
+    let material = model.materials.first()?;
+    let youngs_modulus_pa = material.mechanical.youngs_modulus_pa;
+    let shear_modulus_pa =
+        youngs_modulus_pa / (2.0 * (1.0 + material.mechanical.poisson_ratio)).max(1.0e-9);
+    let length_m = distance3(
+        structural.nodes[0].coordinates_m,
+        structural.nodes[1].coordinates_m,
+    );
+    if length_m <= 0.0 {
+        return None;
+    }
+
+    let mut tip_force_y_n = 0.0_f64;
+    let mut tip_torque_x_n_m = 0.0_f64;
+    let mut tip_moment_z_n_m = 0.0_f64;
+    for load in &model.loads {
+        if load.region_id != "node:2" {
+            continue;
+        }
+        match load.kind {
+            LoadKind::Force { fy, .. } => {
+                tip_force_y_n += fy;
+            }
+            LoadKind::Moment { mx, mz, .. } => {
+                tip_torque_x_n_m += mx;
+                tip_moment_z_n_m += mz;
+            }
+            _ => {}
+        }
+    }
+
+    let eiz = youngs_modulus_pa * section.iz_m4;
+    let gj = shear_modulus_pa * section.torsion_j_m4;
+    if eiz <= 0.0 || gj <= 0.0 {
+        return None;
+    }
+
+    let node_count = structural.nodes.len();
+    let mut expected_displacement = vec![0.0_f64; node_count * VECTOR_COMPONENT_COUNT];
+    let mut expected_rotation = vec![0.0_f64; node_count * VECTOR_COMPONENT_COUNT];
+    let tip_offset = VECTOR_COMPONENT_COUNT;
+    expected_displacement[tip_offset + 1] = tip_force_y_n * length_m.powi(3) / (3.0 * eiz)
+        + tip_moment_z_n_m * length_m.powi(2) / (2.0 * eiz);
+    expected_rotation[tip_offset] = tip_torque_x_n_m * length_m / gj;
+    expected_rotation[tip_offset + 2] =
+        tip_force_y_n * length_m.powi(2) / (2.0 * eiz) + tip_moment_z_n_m * length_m / eiz;
+
+    let displacement = field_values(fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT)?;
+    let rotation = field_values(fields, crate::contracts::FEA_FIELD_STRUCTURAL_ROTATION)?;
+    let displacement_error_ratio = vector_relative_error(displacement, &expected_displacement);
+    let rotation_error_ratio = vector_relative_error(rotation, &expected_rotation);
+    let torsion_error_ratio = if tip_torque_x_n_m.abs() > 0.0 {
+        let observed = rotation.get(tip_offset).copied().unwrap_or(0.0);
+        let expected = expected_rotation[tip_offset];
+        (observed - expected).abs() / expected.abs().max(1.0e-18)
+    } else {
+        0.0
+    };
+    let coverage_ratio = if displacement_error_ratio.is_finite()
+        && rotation_error_ratio.is_finite()
+        && torsion_error_ratio.is_finite()
+    {
+        1.0
+    } else {
+        0.0
+    };
+    let severity = if coverage_ratio >= 1.0
+        && displacement_error_ratio <= 1.0e-6
+        && rotation_error_ratio <= 1.0e-6
+        && torsion_error_ratio <= 1.0e-6
+    {
+        FeaDiagnosticSeverity::Info
+    } else {
+        FeaDiagnosticSeverity::Warning
+    };
+
+    Some(FeaDiagnostic {
+        code: "FEA_STRUCTURAL_BEAM_CLOSED_FORM".to_string(),
+        severity,
+        message: format!(
+            "case={} structural_beam_closed_form_rotation_error_ratio={} structural_beam_closed_form_displacement_error_ratio={} structural_beam_closed_form_torsion_error_ratio={} structural_beam_closed_form_coverage_ratio={} length_m={} tip_force_y_n={} tip_torque_x_n_m={} tip_moment_z_n_m={}",
+            case,
+            rotation_error_ratio,
+            displacement_error_ratio,
+            torsion_error_ratio,
+            coverage_ratio,
+            length_m,
+            tip_force_y_n,
+            tip_torque_x_n_m,
+            tip_moment_z_n_m
+        ),
+    })
+}
+
 fn structural_moment_balance_diagnostic(
     model: &AnalysisModel,
     fields: &[AnalysisField],
@@ -455,13 +569,68 @@ fn structural_moment_balance_diagnostic(
 fn requested_moment_vector(model: &AnalysisModel) -> [f64; 3] {
     let mut out = [0.0_f64; 3];
     for load in &model.loads {
-        if let LoadKind::Moment { mx, my, mz } = load.kind {
-            out[0] += mx;
-            out[1] += my;
-            out[2] += mz;
+        match load.kind {
+            LoadKind::Moment { mx, my, mz } => {
+                out[0] += mx;
+                out[1] += my;
+                out[2] += mz;
+            }
+            LoadKind::Force { fx, fy, fz } => {
+                if let Some(force_moment) = structural_force_moment_about_reaction_origin(
+                    model,
+                    &load.region_id,
+                    [fx, fy, fz],
+                ) {
+                    out[0] += force_moment[0];
+                    out[1] += force_moment[1];
+                    out[2] += force_moment[2];
+                }
+            }
+            _ => {}
         }
     }
     out
+}
+
+fn structural_force_moment_about_reaction_origin(
+    model: &AnalysisModel,
+    region_id: &str,
+    force: [f64; 3],
+) -> Option<[f64; 3]> {
+    let structural = model.structural.as_ref()?;
+    let origin = model
+        .boundary_conditions
+        .iter()
+        .find_map(|bc| {
+            if !matches!(bc.kind, BoundaryConditionKind::Fixed) {
+                return None;
+            }
+            structural_node_coordinates(structural, &bc.region_id)
+        })
+        .or_else(|| structural.nodes.first().map(|node| node.coordinates_m))?;
+    let target = structural_node_coordinates(structural, region_id)?;
+    let r = [
+        target[0] - origin[0],
+        target[1] - origin[1],
+        target[2] - origin[2],
+    ];
+    Some([
+        r[1] * force[2] - r[2] * force[1],
+        r[2] * force[0] - r[0] * force[2],
+        r[0] * force[1] - r[1] * force[0],
+    ])
+}
+
+fn structural_node_coordinates(
+    structural: &runmat_analysis_core::StructuralModel,
+    region_id: &str,
+) -> Option<[f64; 3]> {
+    let node_id = region_id.strip_prefix("node:")?.parse::<u32>().ok()?;
+    structural
+        .nodes
+        .iter()
+        .find(|node| node.node_id == node_id)
+        .map(|node| node.coordinates_m)
 }
 
 fn vector3_sum(values: &[f64]) -> [f64; 3] {
@@ -476,6 +645,10 @@ fn vector3_sum(values: &[f64]) -> [f64; 3] {
 
 fn vector3_norm(values: [f64; 3]) -> f64 {
     (values[0] * values[0] + values[1] * values[1] + values[2] * values[2]).sqrt()
+}
+
+fn distance3(a: [f64; 3], b: [f64; 3]) -> f64 {
+    ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt()
 }
 
 fn solve_tridiagonal_reference(summary: &crate::assembly::AssemblySummary) -> Option<Vec<f64>> {

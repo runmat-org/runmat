@@ -10,6 +10,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.fea.governance.validate_fea_conformance_report import (
     REQUIRED_FIXTURES as REPORT_REQUIRED_FIXTURES,
+    STRUCTURAL_BEAM_MOMENT_REQUIRED_FIELDS,
 )
 
 
@@ -152,6 +153,9 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "structural_von_mises_peak_pa",
         "structural_stress_tensor_peak_pa",
     },
+    "structural_beam_cantilever_end_moment_reference_cpu": STRUCTURAL_BEAM_MOMENT_REQUIRED_FIELDS,
+    "structural_beam_torsion_reference_cpu": STRUCTURAL_BEAM_MOMENT_REQUIRED_FIELDS,
+    "structural_beam_force_and_moment_reference_cpu": STRUCTURAL_BEAM_MOMENT_REQUIRED_FIELDS,
     "nonlinear_assembly_gpu_provider": {
         "nonlinear_total_increments",
         "nonlinear_failed_increments",

@@ -4009,6 +4009,139 @@ fn push_structural_reference_kinematics_threshold_assertions(
     );
 }
 
+fn push_structural_beam_moment_threshold_assertions(
+    fixture_id: &str,
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    run: &AnalysisRunResult,
+) {
+    for (name, diagnostic, metric, min, max) in [
+        (
+            "structural_rotational_dof_count",
+            "FEA_STRUCTURAL_ROTATIONAL_DOF",
+            "structural_rotational_dof_count",
+            Some(6.0),
+            Some(6.0),
+        ),
+        (
+            "structural_rotation_node_count",
+            "FEA_STRUCTURAL_ROTATIONAL_DOF",
+            "structural_rotation_node_count",
+            Some(2.0),
+            Some(2.0),
+        ),
+        (
+            "structural_moment_load_count",
+            "FEA_STRUCTURAL_ROTATIONAL_DOF",
+            "structural_moment_load_count",
+            Some(1.0),
+            Some(1.0),
+        ),
+        (
+            "structural_direct_rotational_moment_load_count",
+            "FEA_STRUCTURAL_ROTATIONAL_DOF",
+            "structural_direct_rotational_moment_load_count",
+            Some(1.0),
+            Some(1.0),
+        ),
+        (
+            "structural_beam_element_count",
+            "FEA_STRUCTURAL_ROTATIONAL_DOF",
+            "structural_beam_element_count",
+            Some(1.0),
+            Some(1.0),
+        ),
+        (
+            "structural_beam_local_frame_coverage_ratio",
+            "FEA_STRUCTURAL_ROTATIONAL_DOF",
+            "structural_beam_local_frame_coverage_ratio",
+            Some(1.0),
+            Some(1.0),
+        ),
+        (
+            "structural_beam_stiffness_matrix_symmetry_residual",
+            "FEA_STRUCTURAL_ROTATIONAL_DOF",
+            "structural_beam_stiffness_matrix_symmetry_residual",
+            Some(0.0),
+            Some(1.0e-10),
+        ),
+        (
+            "structural_reaction_moment_norm_n_m",
+            "FEA_STRUCTURAL_MOMENT_BALANCE",
+            "structural_reaction_moment_norm_n_m",
+            Some(1.0e-12),
+            None,
+        ),
+        (
+            "structural_moment_requested_norm_n_m",
+            "FEA_STRUCTURAL_MOMENT_BALANCE",
+            "structural_moment_requested_norm_n_m",
+            Some(1.0e-12),
+            None,
+        ),
+        (
+            "structural_moment_realized_norm_n_m",
+            "FEA_STRUCTURAL_MOMENT_BALANCE",
+            "structural_moment_realized_norm_n_m",
+            Some(1.0e-12),
+            None,
+        ),
+        (
+            "structural_moment_realization_ratio",
+            "FEA_STRUCTURAL_MOMENT_BALANCE",
+            "structural_moment_realization_ratio",
+            Some(0.999_999),
+            Some(1.000_001),
+        ),
+        (
+            "structural_moment_balance_residual_ratio",
+            "FEA_STRUCTURAL_MOMENT_BALANCE",
+            "structural_moment_balance_residual_ratio",
+            Some(0.0),
+            Some(1.0e-6),
+        ),
+        (
+            "structural_beam_closed_form_rotation_error_ratio",
+            "FEA_STRUCTURAL_BEAM_CLOSED_FORM",
+            "structural_beam_closed_form_rotation_error_ratio",
+            Some(0.0),
+            Some(1.0e-6),
+        ),
+        (
+            "structural_beam_closed_form_displacement_error_ratio",
+            "FEA_STRUCTURAL_BEAM_CLOSED_FORM",
+            "structural_beam_closed_form_displacement_error_ratio",
+            Some(0.0),
+            Some(1.0e-6),
+        ),
+        (
+            "structural_beam_closed_form_torsion_error_ratio",
+            "FEA_STRUCTURAL_BEAM_CLOSED_FORM",
+            "structural_beam_closed_form_torsion_error_ratio",
+            Some(0.0),
+            Some(1.0e-6),
+        ),
+        (
+            "structural_beam_closed_form_coverage_ratio",
+            "FEA_STRUCTURAL_BEAM_CLOSED_FORM",
+            "structural_beam_closed_form_coverage_ratio",
+            Some(1.0),
+            Some(1.0),
+        ),
+    ] {
+        push_threshold_assertion(
+            fixture_id,
+            assertions,
+            failures,
+            name,
+            diagnostic,
+            diagnostic_metric(run, diagnostic, metric),
+            min,
+            max,
+        );
+    }
+}
+
 fn validate_fallback_event_schema(event: &str) -> bool {
     let parts: Vec<&str> = event.splitn(3, ':').collect();
     if parts.len() != 3 {
@@ -4752,6 +4885,19 @@ pub(super) fn run_fixture(
                 | "structural_beam_bending_reference_gpu_provider"
         ) {
             push_structural_reference_kinematics_threshold_assertions(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                &cpu_envelope.data,
+            );
+        }
+        if matches!(
+            spec.id,
+            "structural_beam_cantilever_end_moment_reference_cpu"
+                | "structural_beam_torsion_reference_cpu"
+                | "structural_beam_force_and_moment_reference_cpu"
+        ) {
+            push_structural_beam_moment_threshold_assertions(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,

@@ -1,7 +1,8 @@
 use runmat_analysis_core::{
-    AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition,
-    BoundaryConditionKind, EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment,
-    MaterialMechanicalModel, MaterialModel, MaterialThermalModel, ReferenceFrame,
+    AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind, BeamElementModel,
+    BeamSectionModel, BoundaryCondition, BoundaryConditionKind, EvidenceConfidence, LoadCase,
+    LoadKind, MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
+    ReferenceFrame, StructuralElement, StructuralElementKind, StructuralModel, StructuralNode,
 };
 use runmat_geometry_core::UnitSystem;
 
@@ -12,6 +13,10 @@ pub enum FixtureId {
     CantileverLargeLoadSweep,
     StructuralAxialBarReference,
     StructuralBeamBendingReference,
+    StructuralBeamCantileverEndMomentReference,
+    StructuralBeamTorsionReference,
+    StructuralBeamForceAndMomentReference,
+    StructuralInvalidMomentWithoutRotationalDofs,
     ModalLarge,
     TransientLong,
     TransientShock,
@@ -42,6 +47,16 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::CantileverLargeLoadSweep => cantilever_large_load_sweep(),
         FixtureId::StructuralAxialBarReference => structural_axial_bar_reference(),
         FixtureId::StructuralBeamBendingReference => structural_beam_bending_reference(),
+        FixtureId::StructuralBeamCantileverEndMomentReference => {
+            structural_beam_cantilever_end_moment_reference()
+        }
+        FixtureId::StructuralBeamTorsionReference => structural_beam_torsion_reference(),
+        FixtureId::StructuralBeamForceAndMomentReference => {
+            structural_beam_force_and_moment_reference()
+        }
+        FixtureId::StructuralInvalidMomentWithoutRotationalDofs => {
+            structural_invalid_moment_without_rotational_dofs()
+        }
         FixtureId::ModalLarge => modal_large_fixture(),
         FixtureId::TransientLong => transient_long_fixture(),
         FixtureId::TransientShock => transient_shock_fixture(),
@@ -218,6 +233,132 @@ fn structural_beam_bending_reference() -> AnalysisModel {
         assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
     }];
+    model
+}
+
+fn structural_beam_cantilever_end_moment_reference() -> AnalysisModel {
+    structural_beam_reference_model(
+        "structural_beam_cantilever_end_moment_reference",
+        "geo:structural_beam_end_moment",
+        vec![LoadCase {
+            load_id: "tip_moment_z".to_string(),
+            region_id: "node:2".to_string(),
+            kind: LoadKind::Moment {
+                mx: 0.0,
+                my: 0.0,
+                mz: 125.0,
+            },
+        }],
+    )
+}
+
+fn structural_beam_torsion_reference() -> AnalysisModel {
+    structural_beam_reference_model(
+        "structural_beam_torsion_reference",
+        "geo:structural_beam_torsion",
+        vec![LoadCase {
+            load_id: "tip_torque_x".to_string(),
+            region_id: "node:2".to_string(),
+            kind: LoadKind::Moment {
+                mx: 80.0,
+                my: 0.0,
+                mz: 0.0,
+            },
+        }],
+    )
+}
+
+fn structural_beam_force_and_moment_reference() -> AnalysisModel {
+    structural_beam_reference_model(
+        "structural_beam_force_and_moment_reference",
+        "geo:structural_beam_force_and_moment",
+        vec![
+            LoadCase {
+                load_id: "tip_force_y".to_string(),
+                region_id: "node:2".to_string(),
+                kind: LoadKind::Force {
+                    fx: 0.0,
+                    fy: 500.0,
+                    fz: 0.0,
+                },
+            },
+            LoadCase {
+                load_id: "tip_moment_z".to_string(),
+                region_id: "node:2".to_string(),
+                kind: LoadKind::Moment {
+                    mx: 0.0,
+                    my: 0.0,
+                    mz: 90.0,
+                },
+            },
+        ],
+    )
+}
+
+fn structural_invalid_moment_without_rotational_dofs() -> AnalysisModel {
+    let mut model = cantilever_linear_static();
+    model.model_id = AnalysisModelId("structural_invalid_moment_without_rotational_dofs".into());
+    model.geometry_id = "geo:structural_invalid_moment_without_rotational_dofs".to_string();
+    model.loads = vec![LoadCase {
+        load_id: "solid_tip_moment".to_string(),
+        region_id: "tip".to_string(),
+        kind: LoadKind::Moment {
+            mx: 0.0,
+            my: 0.0,
+            mz: 125.0,
+        },
+    }];
+    model
+}
+
+fn structural_beam_reference_model(
+    model_id: &str,
+    geometry_id: &str,
+    loads: Vec<LoadCase>,
+) -> AnalysisModel {
+    let mut model = cantilever_linear_static();
+    model.model_id = AnalysisModelId(model_id.to_string());
+    model.geometry_id = geometry_id.to_string();
+    model.boundary_conditions = vec![BoundaryCondition {
+        bc_id: "fixed_root".to_string(),
+        region_id: "node:1".to_string(),
+        kind: BoundaryConditionKind::Fixed,
+    }];
+    model.loads = loads;
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "beam_span".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    model.structural = Some(StructuralModel {
+        nodes: vec![
+            StructuralNode {
+                node_id: 1,
+                coordinates_m: [0.0, 0.0, 0.0],
+            },
+            StructuralNode {
+                node_id: 2,
+                coordinates_m: [1.0, 0.0, 0.0],
+            },
+        ],
+        elements: vec![StructuralElement {
+            element_id: "beam_1".to_string(),
+            region_id: "beam_span".to_string(),
+            kind: StructuralElementKind::Beam(BeamElementModel {
+                node_ids: [1, 2],
+                section_id: "rect".to_string(),
+                reference_axis: [0.0, 1.0, 0.0],
+            }),
+        }],
+        beam_sections: vec![BeamSectionModel {
+            section_id: "rect".to_string(),
+            area_m2: 2.0e-4,
+            iy_m4: 1.6e-9,
+            iz_m4: 6.4e-9,
+            torsion_j_m4: 2.4e-9,
+        }],
+    });
     model
 }
 

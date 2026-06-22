@@ -1725,6 +1725,75 @@ fn structural_bar_and_beam_reference_fixtures_emit_known_answer_checks() {
 }
 
 #[test]
+fn structural_beam_moment_reference_fixtures_emit_closed_form_checks() {
+    for (fixture, case) in [
+        (
+            FixtureId::StructuralBeamCantileverEndMomentReference,
+            "cantilever_end_moment",
+        ),
+        (
+            FixtureId::StructuralBeamTorsionReference,
+            "cantilever_torsion",
+        ),
+        (
+            FixtureId::StructuralBeamForceAndMomentReference,
+            "cantilever_force_and_moment",
+        ),
+    ] {
+        let result = crate::run_linear_static(&fixture_model(fixture), ComputeBackend::Cpu)
+            .expect("beam moment reference should solve");
+        assert_eq!(
+            field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).shape,
+            vec![2, 3]
+        );
+        assert_eq!(
+            field(&result, FEA_FIELD_STRUCTURAL_ROTATION).shape,
+            vec![2, 3]
+        );
+        assert_eq!(
+            field(&result, FEA_FIELD_STRUCTURAL_REACTION_MOMENT).shape,
+            vec![2, 3]
+        );
+        assert!(result.diagnostics.iter().any(|diag| {
+            diag.code == "FEA_STRUCTURAL_ROTATIONAL_DOF"
+                && diag.message.contains("structural_rotational_dof_count=6")
+                && diag.message.contains("structural_beam_element_count=1")
+        }));
+        assert!(result.diagnostics.iter().any(|diag| {
+            diag.code == "FEA_STRUCTURAL_MOMENT_BALANCE"
+                && diag
+                    .message
+                    .contains("structural_moment_balance_residual_ratio=")
+        }));
+        assert!(result.diagnostics.iter().any(|diag| {
+            diag.code == "FEA_STRUCTURAL_BEAM_CLOSED_FORM"
+                && diag.message.contains(&format!("case={case}"))
+                && diag
+                    .message
+                    .contains("structural_beam_closed_form_rotation_error_ratio=0")
+                && diag
+                    .message
+                    .contains("structural_beam_closed_form_displacement_error_ratio=0")
+                && diag
+                    .message
+                    .contains("structural_beam_closed_form_coverage_ratio=1")
+        }));
+    }
+}
+
+#[test]
+fn structural_invalid_moment_without_rotational_dofs_fixture_is_typed() {
+    let err = crate::run_linear_static(
+        &fixture_model(FixtureId::StructuralInvalidMomentWithoutRotationalDofs),
+        ComputeBackend::Cpu,
+    )
+    .expect_err("moment on displacement-only fixture should fail");
+    assert!(err
+        .to_string()
+        .contains("moment loads require rotational-DOF structural elements"));
+}
+
+#[test]
 fn multi_material_fixture_has_distinct_response_profile() {
     let baseline = crate::run_linear_static(
         &fixture_model(FixtureId::CantileverLinearStatic),
