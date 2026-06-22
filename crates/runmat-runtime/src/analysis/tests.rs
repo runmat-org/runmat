@@ -6092,6 +6092,12 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
             && diag.message.contains("coupled_interface_residual_ratio=")
             && diag.message.contains("thermal_network_node_count=")
             && diag.message.contains("thermal_network_edge_count=")
+            && diag
+                .message
+                .contains("interface_connectivity_coverage_ratio=")
+            && diag
+                .message
+                .contains("mesh_backed_interface_connectivity_ratio=")
             && diag.message.contains("thermal_network_residual_ratio=")
     }));
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
@@ -6108,6 +6114,12 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
             && diag
                 .message
                 .contains("heat_flux_realization_residual_ratio=")
+            && diag
+                .message
+                .contains("interface_connectivity_coverage_ratio=")
+            && diag
+                .message
+                .contains("mesh_backed_interface_connectivity_ratio=")
             && diag.message.contains("thermal_network_residual_ratio=")
             && diag.message.contains("known_answer_coverage_ratio=")
     }));
@@ -6272,6 +6284,12 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
             .message
             .contains("interface_work_energy_residual_ratio=")
         && diag.message.contains("structural_coupling_edge_count=")
+        && diag
+            .message
+            .contains("interface_connectivity_coverage_ratio=")
+        && diag
+            .message
+            .contains("mesh_backed_interface_connectivity_ratio=")
         && diag.message.contains("interface_stiffness_pa_per_m=")));
     assert!(envelope
         .data
@@ -6299,6 +6317,12 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
             && diag
                 .message
                 .contains("interface_work_energy_residual_ratio=")
+            && diag
+                .message
+                .contains("interface_connectivity_coverage_ratio=")
+            && diag
+                .message
+                .contains("mesh_backed_interface_connectivity_ratio=")
             && diag.message.contains("known_answer_coverage_ratio=")));
     assert!(envelope
         .data
@@ -6418,6 +6442,8 @@ fn cht_prepared_topology_uses_boundary_faces_for_interface_fields() {
     assert_eq!(closure.interface_face_count, 8);
     assert_eq!(closure.thermal_network_node_count, 8);
     assert_eq!(closure.thermal_network_edge_count, 11);
+    assert_eq!(closure.interface_connectivity_coverage_ratio, 1.0);
+    assert_eq!(closure.mesh_backed_interface_connectivity_ratio, 1.0);
     assert_eq!(heat_flux.shape, vec![8]);
     assert_eq!(temperature_jump.shape, vec![8]);
 }
@@ -6474,6 +6500,8 @@ fn fsi_prepared_topology_uses_boundary_faces_for_interface_fields() {
     assert_eq!(fluid_interface_face_count(topology), 8);
     assert_eq!(closure.interface_face_count, 8);
     assert_eq!(closure.structural_coupling_edge_count, 11);
+    assert_eq!(closure.interface_connectivity_coverage_ratio, 1.0);
+    assert_eq!(closure.mesh_backed_interface_connectivity_ratio, 1.0);
     assert_eq!(pressure.shape, vec![8]);
     assert_eq!(traction.shape, vec![8, 3]);
 }

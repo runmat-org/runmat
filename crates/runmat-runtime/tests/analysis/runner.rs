@@ -683,6 +683,39 @@ fn electro_thermal_prep_artifact_id_for_fixture(
     Some(prep.data.prep_artifact_id)
 }
 
+fn coupled_flow_prep_artifact_id_for_fixture(
+    spec_id: &str,
+    model: &AnalysisModel,
+) -> Option<String> {
+    if !matches!(
+        spec_id,
+        "cht_coupled_gpu_provider"
+            | "cht_coupled_gpu_fallback"
+            | "fsi_coupled_gpu_provider"
+            | "fsi_coupled_gpu_fallback"
+    ) {
+        return None;
+    }
+
+    let mut geometry = geometry_load_op(
+        &format!("/synthetic/{spec_id}_prep.stl"),
+        SYNTHETIC_TRIANGLE_STL.as_bytes(),
+        OperationContext::new(Some(format!("trace-prep-geometry-{spec_id}")), None),
+    )
+    .expect("load synthetic prep geometry for coupled-flow fixture")
+    .data;
+    geometry.geometry_id = model.geometry_id.clone();
+    geometry.revision = model.geometry_revision;
+
+    let prep = geometry_prep_for_analysis_op(
+        &geometry,
+        GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(Some(format!("trace-prep-artifact-{spec_id}")), None),
+    )
+    .expect("prepare trusted coupled-flow fixture geometry");
+    Some(prep.data.prep_artifact_id)
+}
+
 fn transient_options_for_spec(
     spec: &FixtureSpec,
     model: &AnalysisModel,
@@ -2659,7 +2692,7 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
                 prep_context: None,
-                prep_artifact_id: None,
+                prep_artifact_id: coupled_flow_prep_artifact_id_for_fixture(spec.id, model),
                 prep_calibration_profile: None,
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
@@ -2679,7 +2712,7 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
                 prep_context: None,
-                prep_artifact_id: None,
+                prep_artifact_id: coupled_flow_prep_artifact_id_for_fixture(spec.id, model),
                 prep_calibration_profile: None,
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
@@ -2793,7 +2826,7 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
                 prep_context: None,
-                prep_artifact_id: None,
+                prep_artifact_id: coupled_flow_prep_artifact_id_for_fixture(spec.id, model),
                 prep_calibration_profile: None,
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
@@ -2813,7 +2846,7 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
                 prep_context: None,
-                prep_artifact_id: None,
+                prep_artifact_id: coupled_flow_prep_artifact_id_for_fixture(spec.id, model),
                 prep_calibration_profile: None,
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
@@ -5229,6 +5262,42 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
+                "cht_interface_connectivity_coverage_ratio",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "interface_connectivity_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
+            let cht_mesh_backed_min = if matches!(
+                spec.id,
+                "cht_coupled_gpu_provider" | "cht_coupled_gpu_fallback"
+            ) {
+                1.0
+            } else {
+                0.0
+            };
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_mesh_backed_interface_connectivity_ratio",
+                "FEA_CHT_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_INTERFACE_CLOSURE",
+                    "mesh_backed_interface_connectivity_ratio",
+                ),
+                Some(cht_mesh_backed_min),
+                Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
                 "cht_thermal_network_residual_ratio",
                 "FEA_CHT_INTERFACE_CLOSURE",
                 diagnostic_metric(
@@ -5308,6 +5377,20 @@ pub(super) fn run_fixture(
                 ),
                 Some(0.0),
                 Some(1.0e-9),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_known_answer_interface_connectivity_coverage_ratio",
+                "FEA_CHT_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_KNOWN_ANSWER",
+                    "interface_connectivity_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
             );
             push_threshold_assertion(
                 spec.id,
@@ -5602,6 +5685,42 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
+                "fsi_interface_connectivity_coverage_ratio",
+                "FEA_FSI_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_INTERFACE_CLOSURE",
+                    "interface_connectivity_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
+            let fsi_mesh_backed_min = if matches!(
+                spec.id,
+                "fsi_coupled_gpu_provider" | "fsi_coupled_gpu_fallback"
+            ) {
+                1.0
+            } else {
+                0.0
+            };
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_mesh_backed_interface_connectivity_ratio",
+                "FEA_FSI_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_INTERFACE_CLOSURE",
+                    "mesh_backed_interface_connectivity_ratio",
+                ),
+                Some(fsi_mesh_backed_min),
+                Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
                 "fsi_interface_stiffness_pa_per_m",
                 "FEA_FSI_INTERFACE_CLOSURE",
                 diagnostic_metric(
@@ -5709,6 +5828,20 @@ pub(super) fn run_fixture(
                 ),
                 Some(0.0),
                 Some(1.0e-8),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_known_answer_interface_connectivity_coverage_ratio",
+                "FEA_FSI_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_KNOWN_ANSWER",
+                    "interface_connectivity_coverage_ratio",
+                ),
+                Some(1.0),
+                Some(1.0),
             );
             push_threshold_assertion(
                 spec.id,

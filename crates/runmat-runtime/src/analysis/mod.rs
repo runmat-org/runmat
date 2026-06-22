@@ -4367,6 +4367,32 @@ fn coupled_interface_graph_edges_for_topology(
     edges
 }
 
+fn coupled_interface_connectivity_coverage_ratio(
+    topology: CfdDomainTopology,
+    interface_face_count: usize,
+    edge_count: usize,
+) -> f64 {
+    let target = coupled_interface_graph_edge_target(topology, interface_face_count);
+    if target == 0 {
+        return 1.0;
+    }
+    (edge_count as f64 / target as f64).clamp(0.0, 1.0)
+}
+
+fn coupled_interface_mesh_backed_connectivity_ratio(
+    topology: CfdDomainTopology,
+    edge_count: usize,
+) -> f64 {
+    if topology.basis == CfdDomainTopologyBasis::PrepControlVolumeConnectivity
+        && topology.control_volume_connectivity_coverage_ratio > 0.0
+        && edge_count > 0
+    {
+        1.0
+    } else {
+        0.0
+    }
+}
+
 fn solve_cfd_finite_volume_run(
     model: &AnalysisModel,
     domain: &runmat_analysis_core::CfdDomain,
@@ -4651,6 +4677,12 @@ fn build_cht_run_fields(
         closure.thermal_network_node_count = closure
             .thermal_network_node_count
             .max(interface_solution.thermal_network_node_count);
+        closure.interface_connectivity_coverage_ratio = closure
+            .interface_connectivity_coverage_ratio
+            .max(interface_solution.interface_connectivity_coverage_ratio);
+        closure.mesh_backed_interface_connectivity_ratio = closure
+            .mesh_backed_interface_connectivity_ratio
+            .max(interface_solution.mesh_backed_interface_connectivity_ratio);
         closure.max_thermal_network_residual_ratio = closure
             .max_thermal_network_residual_ratio
             .max(interface_solution.thermal_network_residual_ratio);
@@ -4724,6 +4756,8 @@ struct ChtConjugateInterfaceSolution {
     heat_flux_realization_residual_ratio: f64,
     thermal_network_edge_count: usize,
     thermal_network_node_count: usize,
+    interface_connectivity_coverage_ratio: f64,
+    mesh_backed_interface_connectivity_ratio: f64,
     thermal_network_residual_ratio: f64,
 }
 
@@ -4746,6 +4780,13 @@ fn solve_cht_conjugate_interface(
     let base_interface_temperature = resample_scalar_profile(base_temperature, interface_count);
     let thermal_network_edges =
         coupled_interface_graph_edges_for_topology(topology, interface_count);
+    let interface_connectivity_coverage_ratio = coupled_interface_connectivity_coverage_ratio(
+        topology,
+        interface_count,
+        thermal_network_edges.len(),
+    );
+    let mesh_backed_interface_connectivity_ratio =
+        coupled_interface_mesh_backed_connectivity_ratio(topology, thermal_network_edges.len());
     let mut operator = vec![vec![0.0; interface_count]; interface_count];
     for (row, diagonal) in operator.iter_mut().enumerate() {
         diagonal[row] = anchor_conductance;
@@ -4840,6 +4881,8 @@ fn solve_cht_conjugate_interface(
         heat_flux_realization_residual_ratio: max_heat_flux_realization_residual,
         thermal_network_edge_count: thermal_network_edges.len(),
         thermal_network_node_count: interface_count,
+        interface_connectivity_coverage_ratio,
+        mesh_backed_interface_connectivity_ratio,
         thermal_network_residual_ratio,
     }
 }
@@ -4906,6 +4949,8 @@ struct ChtInterfaceClosure {
     max_coupled_interface_residual_ratio: f64,
     thermal_network_edge_count: usize,
     thermal_network_node_count: usize,
+    interface_connectivity_coverage_ratio: f64,
+    mesh_backed_interface_connectivity_ratio: f64,
     max_thermal_network_residual_ratio: f64,
 }
 
@@ -4917,6 +4962,8 @@ struct ChtKnownAnswerMetrics {
     advection_shift_coverage_ratio: f64,
     coupled_interface_residual_ratio: f64,
     heat_flux_realization_residual_ratio: f64,
+    interface_connectivity_coverage_ratio: f64,
+    mesh_backed_interface_connectivity_ratio: f64,
     thermal_network_residual_ratio: f64,
     known_answer_coverage_ratio: f64,
 }
@@ -4944,6 +4991,9 @@ fn cht_known_answer_metrics(
         && closure.interface_temperature_continuity_ratio.is_finite()
         && closure.max_coupled_interface_residual_ratio.is_finite()
         && closure.thermal_network_node_count > 0
+        && closure.interface_connectivity_coverage_ratio.is_finite()
+        && closure.interface_connectivity_coverage_ratio >= 1.0
+        && closure.mesh_backed_interface_connectivity_ratio.is_finite()
         && closure.max_thermal_network_residual_ratio.is_finite()
         && advection_shift_coverage_ratio >= 1.0
     {
@@ -4959,6 +5009,8 @@ fn cht_known_answer_metrics(
         advection_shift_coverage_ratio,
         coupled_interface_residual_ratio: closure.max_coupled_interface_residual_ratio,
         heat_flux_realization_residual_ratio: closure.max_heat_flux_realization_residual_ratio,
+        interface_connectivity_coverage_ratio: closure.interface_connectivity_coverage_ratio,
+        mesh_backed_interface_connectivity_ratio: closure.mesh_backed_interface_connectivity_ratio,
         thermal_network_residual_ratio: closure.max_thermal_network_residual_ratio,
         known_answer_coverage_ratio,
     }
@@ -4974,6 +5026,7 @@ fn cht_known_answer_diagnostic(
         && metrics.advection_shift_coverage_ratio >= 1.0
         && metrics.coupled_interface_residual_ratio <= residual_threshold
         && metrics.heat_flux_realization_residual_ratio <= residual_threshold
+        && metrics.interface_connectivity_coverage_ratio >= 1.0
         && metrics.thermal_network_residual_ratio <= residual_threshold
         && metrics.known_answer_coverage_ratio >= 1.0
     {
@@ -4986,13 +5039,15 @@ fn cht_known_answer_diagnostic(
         code: "FEA_CHT_KNOWN_ANSWER".to_string(),
         severity,
         message: format!(
-            "basis=heated_channel_conjugate_slab heated_channel_energy_residual_ratio={} conjugate_slab_flux_law_residual_ratio={} interface_temperature_continuity_ratio={} advection_shift_coverage_ratio={} coupled_interface_residual_ratio={} heat_flux_realization_residual_ratio={} thermal_network_residual_ratio={} known_answer_coverage_ratio={}",
+            "basis=heated_channel_conjugate_slab heated_channel_energy_residual_ratio={} conjugate_slab_flux_law_residual_ratio={} interface_temperature_continuity_ratio={} advection_shift_coverage_ratio={} coupled_interface_residual_ratio={} heat_flux_realization_residual_ratio={} interface_connectivity_coverage_ratio={} mesh_backed_interface_connectivity_ratio={} thermal_network_residual_ratio={} known_answer_coverage_ratio={}",
             metrics.heated_channel_energy_residual_ratio,
             metrics.conjugate_slab_flux_law_residual_ratio,
             metrics.interface_temperature_continuity_ratio,
             metrics.advection_shift_coverage_ratio,
             metrics.coupled_interface_residual_ratio,
             metrics.heat_flux_realization_residual_ratio,
+            metrics.interface_connectivity_coverage_ratio,
+            metrics.mesh_backed_interface_connectivity_ratio,
             metrics.thermal_network_residual_ratio,
             metrics.known_answer_coverage_ratio,
         ),
@@ -5059,6 +5114,12 @@ fn build_fsi_run_fields(
         closure.structural_coupling_edge_count = closure
             .structural_coupling_edge_count
             .max(interface_step.structural_coupling_edge_count);
+        closure.interface_connectivity_coverage_ratio = closure
+            .interface_connectivity_coverage_ratio
+            .max(interface_step.interface_connectivity_coverage_ratio);
+        closure.mesh_backed_interface_connectivity_ratio = closure
+            .mesh_backed_interface_connectivity_ratio
+            .max(interface_step.mesh_backed_interface_connectivity_ratio);
         closure.interface_stiffness_pa_per_m = closure
             .interface_stiffness_pa_per_m
             .max(interface_step.interface_stiffness_pa_per_m);
@@ -5176,6 +5237,8 @@ struct FsiPartitionedInterfaceStep {
     structural_strain_energy_j_per_m2: f64,
     interface_work_energy_residual_ratio: f64,
     structural_coupling_edge_count: usize,
+    interface_connectivity_coverage_ratio: f64,
+    mesh_backed_interface_connectivity_ratio: f64,
     interface_stiffness_pa_per_m: f64,
 }
 
@@ -5214,6 +5277,13 @@ fn solve_fsi_partitioned_interface(
     let feedback_stiffness_pa_per_m = 0.25 * interface_stiffness_pa_per_m;
     let structural_coupling_edges =
         coupled_interface_graph_edges_for_topology(topology, interface_face_count);
+    let interface_connectivity_coverage_ratio = coupled_interface_connectivity_coverage_ratio(
+        topology,
+        interface_face_count,
+        structural_coupling_edges.len(),
+    );
+    let mesh_backed_interface_connectivity_ratio =
+        coupled_interface_mesh_backed_connectivity_ratio(topology, structural_coupling_edges.len());
     let mut interface_pressure = vec![0.0; face_pressure.len()];
     let mut structural_traction = vec![0.0; face_pressure.len()];
     let mut structural_face_displacement = vec![0.0; face_pressure.len() * 3];
@@ -5359,6 +5429,8 @@ fn solve_fsi_partitioned_interface(
         structural_strain_energy_j_per_m2,
         interface_work_energy_residual_ratio,
         structural_coupling_edge_count,
+        interface_connectivity_coverage_ratio,
+        mesh_backed_interface_connectivity_ratio,
         interface_stiffness_pa_per_m,
     }
 }
@@ -5520,6 +5592,8 @@ struct FsiInterfaceClosure {
     max_structural_strain_energy_j_per_m2: f64,
     max_interface_work_energy_residual_ratio: f64,
     structural_coupling_edge_count: usize,
+    interface_connectivity_coverage_ratio: f64,
+    mesh_backed_interface_connectivity_ratio: f64,
     interface_stiffness_pa_per_m: f64,
 }
 
@@ -5533,6 +5607,8 @@ struct FsiKnownAnswerMetrics {
     structural_traction_update_residual_ratio: f64,
     structural_solve_residual_ratio: f64,
     interface_work_energy_residual_ratio: f64,
+    interface_connectivity_coverage_ratio: f64,
+    mesh_backed_interface_connectivity_ratio: f64,
     known_answer_coverage_ratio: f64,
 }
 
@@ -5563,6 +5639,9 @@ fn fsi_known_answer_metrics(closure: &FsiInterfaceClosure) -> FsiKnownAnswerMetr
         && closure.max_structural_strain_energy_j_per_m2 > 0.0
         && closure.max_interface_work_energy_residual_ratio.is_finite()
         && closure.structural_coupling_edge_count > 0
+        && closure.interface_connectivity_coverage_ratio.is_finite()
+        && closure.interface_connectivity_coverage_ratio >= 1.0
+        && closure.mesh_backed_interface_connectivity_ratio.is_finite()
     {
         1.0
     } else {
@@ -5580,6 +5659,8 @@ fn fsi_known_answer_metrics(closure: &FsiInterfaceClosure) -> FsiKnownAnswerMetr
             .max_structural_traction_update_residual_ratio,
         structural_solve_residual_ratio: closure.max_structural_solve_residual_ratio,
         interface_work_energy_residual_ratio: closure.max_interface_work_energy_residual_ratio,
+        interface_connectivity_coverage_ratio: closure.interface_connectivity_coverage_ratio,
+        mesh_backed_interface_connectivity_ratio: closure.mesh_backed_interface_connectivity_ratio,
         known_answer_coverage_ratio,
     }
 }
@@ -5596,6 +5677,7 @@ fn fsi_known_answer_diagnostic(
         && metrics.structural_traction_update_residual_ratio <= tolerance
         && metrics.structural_solve_residual_ratio <= tolerance
         && metrics.interface_work_energy_residual_ratio <= tolerance
+        && metrics.interface_connectivity_coverage_ratio >= 1.0
         && metrics.known_answer_coverage_ratio >= 1.0
     {
         runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
@@ -5607,7 +5689,7 @@ fn fsi_known_answer_diagnostic(
         code: "FEA_FSI_KNOWN_ANSWER".to_string(),
         severity,
         message: format!(
-            "basis=pressure_loaded_wall_partitioned pressure_loaded_wall_displacement_law_residual_ratio={} interface_traction_balance_residual_ratio={} interface_displacement_transfer_residual_m={} partitioned_pressure_feedback_residual_ratio={} two_way_interface_residual_ratio={} structural_traction_update_residual_ratio={} structural_solve_residual_ratio={} interface_work_energy_residual_ratio={} known_answer_coverage_ratio={}",
+            "basis=pressure_loaded_wall_partitioned pressure_loaded_wall_displacement_law_residual_ratio={} interface_traction_balance_residual_ratio={} interface_displacement_transfer_residual_m={} partitioned_pressure_feedback_residual_ratio={} two_way_interface_residual_ratio={} structural_traction_update_residual_ratio={} structural_solve_residual_ratio={} interface_work_energy_residual_ratio={} interface_connectivity_coverage_ratio={} mesh_backed_interface_connectivity_ratio={} known_answer_coverage_ratio={}",
             metrics.pressure_loaded_wall_displacement_law_residual_ratio,
             metrics.interface_traction_balance_residual_ratio,
             metrics.interface_displacement_transfer_residual_m,
@@ -5616,6 +5698,8 @@ fn fsi_known_answer_diagnostic(
             metrics.structural_traction_update_residual_ratio,
             metrics.structural_solve_residual_ratio,
             metrics.interface_work_energy_residual_ratio,
+            metrics.interface_connectivity_coverage_ratio,
+            metrics.mesh_backed_interface_connectivity_ratio,
             metrics.known_answer_coverage_ratio,
         ),
     }
@@ -6562,6 +6646,7 @@ pub fn analysis_run_cht_with_options_op(
                 <= options.residual_warn_threshold
             && cht_interface_closure.max_coupled_interface_residual_ratio
                 <= options.residual_warn_threshold
+            && cht_interface_closure.interface_connectivity_coverage_ratio >= 1.0
             && cht_interface_closure.max_thermal_network_residual_ratio
                 <= options.residual_warn_threshold
         {
@@ -6570,7 +6655,7 @@ pub fn analysis_run_cht_with_options_op(
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "interface_face_count={} max_temperature_jump_k={} max_energy_residual={} heat_flux_balance_ratio={} mean_interface_heat_flux_w_per_m2={} thermal_transport_residual_ratio={} interface_temperature_continuity_ratio={} max_advection_temperature_shift_k={} interface_conductance_w_per_m2k={} flux_temperature_law_residual_ratio={} heat_flux_realization_residual_ratio={} coupled_interface_iteration_count={} coupled_interface_residual_ratio={} thermal_network_node_count={} thermal_network_edge_count={} thermal_network_residual_ratio={}",
+            "interface_face_count={} max_temperature_jump_k={} max_energy_residual={} heat_flux_balance_ratio={} mean_interface_heat_flux_w_per_m2={} thermal_transport_residual_ratio={} interface_temperature_continuity_ratio={} max_advection_temperature_shift_k={} interface_conductance_w_per_m2k={} flux_temperature_law_residual_ratio={} heat_flux_realization_residual_ratio={} coupled_interface_iteration_count={} coupled_interface_residual_ratio={} thermal_network_node_count={} thermal_network_edge_count={} interface_connectivity_coverage_ratio={} mesh_backed_interface_connectivity_ratio={} thermal_network_residual_ratio={}",
             cht_interface_closure.interface_face_count,
             cht_interface_closure.max_temperature_jump_k,
             cht_interface_closure.max_energy_residual,
@@ -6586,6 +6671,8 @@ pub fn analysis_run_cht_with_options_op(
             cht_interface_closure.max_coupled_interface_residual_ratio,
             cht_interface_closure.thermal_network_node_count,
             cht_interface_closure.thermal_network_edge_count,
+            cht_interface_closure.interface_connectivity_coverage_ratio,
+            cht_interface_closure.mesh_backed_interface_connectivity_ratio,
             cht_interface_closure.max_thermal_network_residual_ratio,
         ),
     });
@@ -7147,6 +7234,7 @@ pub fn analysis_run_fsi_with_options_op(
             && fsi_interface_closure.max_structural_solve_residual_ratio <= options.tolerance
             && fsi_interface_closure.max_interface_work_energy_residual_ratio <= options.tolerance
             && fsi_interface_closure.structural_coupling_edge_count > 0
+            && fsi_interface_closure.interface_connectivity_coverage_ratio >= 1.0
             && fsi_interface_closure.max_interface_residual <= options.residual_warn_threshold
         {
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
@@ -7154,7 +7242,7 @@ pub fn analysis_run_fsi_with_options_op(
             runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "interface_node_count={} interface_face_count={} max_interface_residual={} force_balance_ratio={} max_displacement_transfer_residual_m={} max_interface_displacement_m={} mean_interface_pressure_pa={} max_traction_magnitude_pa={} max_coupling_iteration_count={} pressure_feedback_residual_ratio={} two_way_interface_residual_ratio={} structural_traction_update_residual_ratio={} pressure_displacement_law_residual_ratio={} structural_solve_residual_ratio={} interface_work_j_per_m2={} structural_strain_energy_j_per_m2={} interface_work_energy_residual_ratio={} structural_coupling_edge_count={} interface_stiffness_pa_per_m={}",
+            "interface_node_count={} interface_face_count={} max_interface_residual={} force_balance_ratio={} max_displacement_transfer_residual_m={} max_interface_displacement_m={} mean_interface_pressure_pa={} max_traction_magnitude_pa={} max_coupling_iteration_count={} pressure_feedback_residual_ratio={} two_way_interface_residual_ratio={} structural_traction_update_residual_ratio={} pressure_displacement_law_residual_ratio={} structural_solve_residual_ratio={} interface_work_j_per_m2={} structural_strain_energy_j_per_m2={} interface_work_energy_residual_ratio={} structural_coupling_edge_count={} interface_connectivity_coverage_ratio={} mesh_backed_interface_connectivity_ratio={} interface_stiffness_pa_per_m={}",
             fsi_interface_closure.interface_node_count,
             fsi_interface_closure.interface_face_count,
             fsi_interface_closure.max_interface_residual,
@@ -7173,6 +7261,8 @@ pub fn analysis_run_fsi_with_options_op(
             fsi_interface_closure.max_structural_strain_energy_j_per_m2,
             fsi_interface_closure.max_interface_work_energy_residual_ratio,
             fsi_interface_closure.structural_coupling_edge_count,
+            fsi_interface_closure.interface_connectivity_coverage_ratio,
+            fsi_interface_closure.mesh_backed_interface_connectivity_ratio,
             fsi_interface_closure.interface_stiffness_pa_per_m,
         ),
     });
