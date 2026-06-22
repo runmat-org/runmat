@@ -6675,10 +6675,10 @@ class ValidateExternalReferenceBenchmarkTests(unittest.TestCase):
                 json.dumps(
                     {
                         "schema_version": "external-reference-benchmark/v1",
-                        "scenario_id": "m6_elastoplastic_contact_bracket_v1",
+                        "scenario_id": "fea_l2_conformance_reference_v1",
                         "reference_source": {
-                            "primary": "nafems_elastoplastic_case",
-                            "secondary": "calculix_cross_check",
+                            "primary": "runmat_fea_l2_conformance_suite",
+                            "secondary": "family_known_answer_and_external_cross_checks",
                         },
                         "generated_at": "2026-03-10T00:00:00Z",
                         "metrics": required_metrics_payload(),
@@ -6713,10 +6713,10 @@ class ValidateExternalReferenceBenchmarkTests(unittest.TestCase):
                 json.dumps(
                     {
                         "schema_version": "external-reference-benchmark/v1",
-                        "scenario_id": "m6_elastoplastic_contact_bracket_v1",
+                        "scenario_id": "fea_l2_conformance_reference_v1",
                         "reference_source": {
-                            "primary": "nafems_elastoplastic_case",
-                            "secondary": "calculix_cross_check",
+                            "primary": "runmat_fea_l2_conformance_suite",
+                            "secondary": "family_known_answer_and_external_cross_checks",
                         },
                         "generated_at": "2026-03-10T00:00:00Z",
                         "metrics": required_metrics_payload(cfd_density_pass=False),
@@ -6749,10 +6749,10 @@ class ValidateExternalReferenceBenchmarkTests(unittest.TestCase):
                 json.dumps(
                     {
                         "schema_version": "external-reference-benchmark/v1",
-                        "scenario_id": "m6_elastoplastic_contact_bracket_v1",
+                        "scenario_id": "fea_l2_conformance_reference_v1",
                         "reference_source": {
-                            "primary": "nafems_elastoplastic_case",
-                            "secondary": "calculix_cross_check",
+                            "primary": "runmat_fea_l2_conformance_suite",
+                            "secondary": "family_known_answer_and_external_cross_checks",
                         },
                         "generated_at": "2026-03-10T00:00:00Z",
                         "metrics": metrics,

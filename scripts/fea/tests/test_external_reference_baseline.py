@@ -9,7 +9,9 @@ from scripts.fea.governance.validate_external_reference_benchmark import (
 
 class ExternalReferenceBaselineTests(unittest.TestCase):
     def test_external_reference_baseline_covers_validator_required_metrics(self):
-        baseline_path = Path("scripts/fea/reference_data/m6_external_reference_baseline.json")
+        baseline_path = Path(
+            "scripts/fea/reference_data/fea_l2_external_reference_baseline.json"
+        )
         payload = json.loads(baseline_path.read_text())
         metrics = payload.get("metrics")
         self.assertIsInstance(metrics, list)

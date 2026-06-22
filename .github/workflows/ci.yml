@@ -458,7 +458,7 @@ jobs:
         if: always()
         env:
           RUNMAT_EXTERNAL_REFERENCE_REPORT_PATH: target/runmat-analysis-artifacts/analysis_benchmark_report.json
-          RUNMAT_EXTERNAL_REFERENCE_BASELINE_PATH: scripts/fea/reference_data/m6_external_reference_baseline.json
+          RUNMAT_EXTERNAL_REFERENCE_BASELINE_PATH: scripts/fea/reference_data/fea_l2_external_reference_baseline.json
           RUNMAT_EXTERNAL_REFERENCE_BENCHMARK_PATH: target/runmat-analysis-artifacts/external_reference_benchmark.json
         run: python3 scripts/fea/governance/generate_external_reference_benchmark.py
 

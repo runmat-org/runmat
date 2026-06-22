@@ -44,7 +44,7 @@ def main() -> int:
     baseline_path = Path(
         os.getenv(
             "RUNMAT_EXTERNAL_REFERENCE_BASELINE_PATH",
-            "scripts/fea/reference_data/m6_external_reference_baseline.json",
+            "scripts/fea/reference_data/fea_l2_external_reference_baseline.json",
         )
     )
     output_path = Path(
@@ -149,7 +149,7 @@ def main() -> int:
 
     payload = {
         "schema_version": "external-reference-benchmark/v1",
-        "scenario_id": baseline.get("scenario_id", "m6_elastoplastic_contact_bracket_v1"),
+        "scenario_id": baseline.get("scenario_id", "fea_l2_conformance_reference_v1"),
         "reference_source": baseline.get("reference_source", {}),
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "metrics": out_metrics,

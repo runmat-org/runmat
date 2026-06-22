@@ -1,9 +1,9 @@
 {
   "schema_version": "external-reference-baseline/v1",
-  "scenario_id": "m6_elastoplastic_contact_bracket_v1",
+  "scenario_id": "fea_l2_conformance_reference_v1",
   "reference_source": {
-    "primary": "nafems_elastoplastic_contact_reference_pack",
-    "secondary": "calculix_cross_check"
+    "primary": "runmat_fea_l2_conformance_suite",
+    "secondary": "family_known_answer_and_external_cross_checks"
   },
   "metrics": [
     {
