@@ -111,6 +111,11 @@ struct GeometryInspectWithAsset {
     asset: Option<runmat_geometry_core::GeometryAsset>,
 }
 
+struct GeometryInputFile {
+    byte_count: u64,
+    bytes: Option<Vec<u8>>,
+}
+
 impl RunMatWasm {
     pub(crate) fn new(
         session: RunMatSession,
@@ -154,12 +159,10 @@ async fn inspect_geometry_path_with_asset(
     let deadline = geometry_preview_deadline(budget.as_ref());
     ensure_runtime_not_cancelled("geometry inspection")?;
     ensure_geometry_preview_deadline(deadline, "geometry inspection")?;
-    let metadata = runmat_filesystem::metadata_async(std::path::PathBuf::from(&path))
-        .await
-        .map_err(|err| format!("failed to inspect geometry metadata {path}: {err}"))?;
+    let mut input_file = read_geometry_input_file(&path).await?;
     ensure_runtime_not_cancelled("geometry inspection")?;
     ensure_geometry_preview_deadline(deadline, "geometry inspection")?;
-    let byte_count = metadata.len();
+    let byte_count = input_file.byte_count;
     if let Some(max_bytes) = budget.as_ref().and_then(|item| item.max_bytes) {
         if byte_count > max_bytes {
             return Ok(GeometryInspectWithAsset {
@@ -181,9 +184,12 @@ async fn inspect_geometry_path_with_asset(
         }
     }
 
-    let bytes = runmat_filesystem::read_async(std::path::PathBuf::from(&path))
-        .await
-        .map_err(|err| format!("failed to read geometry file {path}: {err}"))?;
+    let bytes = match input_file.bytes.take() {
+        Some(bytes) => bytes,
+        None => runmat_filesystem::read_async(std::path::PathBuf::from(&path))
+            .await
+            .map_err(|err| format!("failed to read geometry file {path}: {err}"))?,
+    };
     ensure_runtime_not_cancelled("geometry inspection")?;
     ensure_geometry_preview_deadline(deadline, "geometry inspection")?;
     let inspect = runmat_runtime::geometry::geometry_inspect_op(
@@ -296,6 +302,29 @@ async fn inspect_geometry_path_with_asset(
         inspect: payload,
         asset: Some(asset),
     })
+}
+
+async fn read_geometry_input_file(path: &str) -> Result<GeometryInputFile, String> {
+    match runmat_filesystem::metadata_async(std::path::PathBuf::from(path)).await {
+        Ok(metadata) => Ok(GeometryInputFile {
+            byte_count: metadata.len(),
+            bytes: None,
+        }),
+        Err(metadata_err) => {
+            let bytes = runmat_filesystem::read_async(std::path::PathBuf::from(path))
+                .await
+                .map_err(|read_err| {
+                    format!(
+                        "failed to inspect geometry metadata {path}: {metadata_err}; \
+                         also failed to read geometry file through the active filesystem provider: {read_err}"
+                    )
+                })?;
+            Ok(GeometryInputFile {
+                byte_count: bytes.len() as u64,
+                bytes: Some(bytes),
+            })
+        }
+    }
 }
 
 async fn preview_geometry_path(
