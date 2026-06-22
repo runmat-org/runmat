@@ -38,8 +38,8 @@ pub fn recover_result_fields(
         displacement_values = vec![0.0; dof_count];
     }
 
-    let node_count = dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1);
-    displacement_values.resize(node_count * VECTOR_COMPONENT_COUNT, 0.0);
+    let node_count = structural_displacement_node_count(summary, dof_count);
+    displacement_values = recover_displacement(summary, &displacement_values, node_count);
 
     let strain_recovery = recover_structural_strain(summary, &displacement_values);
     let element_count = strain_recovery.element_count;
@@ -877,6 +877,42 @@ fn recover_rotation(summary: &AssemblySummary, solution: &[f64]) -> Vec<f64> {
     rotation
 }
 
+fn recover_displacement(
+    summary: &AssemblySummary,
+    solution: &[f64],
+    node_count: usize,
+) -> Vec<f64> {
+    if summary.structural_rotational_dof_count == 0 {
+        let mut displacement = solution.to_vec();
+        displacement.resize(node_count * VECTOR_COMPONENT_COUNT, 0.0);
+        return displacement;
+    }
+
+    let mut displacement = vec![0.0; node_count * VECTOR_COMPONENT_COUNT];
+    for row in 0..summary.structural_dof_layout.total_dof_count() {
+        let Some(address) = summary.structural_dof_layout.address(row) else {
+            continue;
+        };
+        let Some(component) = translational_component(address.kind) else {
+            continue;
+        };
+        let target = address.node_index * VECTOR_COMPONENT_COUNT + component;
+        if target < displacement.len() {
+            displacement[target] = solution.get(row).copied().unwrap_or(0.0);
+        }
+    }
+    displacement
+}
+
+fn translational_component(kind: StructuralDofKind) -> Option<usize> {
+    match kind {
+        StructuralDofKind::Ux => Some(0),
+        StructuralDofKind::Uy => Some(1),
+        StructuralDofKind::Uz => Some(2),
+        _ => None,
+    }
+}
+
 fn recover_reaction_moment(summary: &AssemblySummary, internal_force: &[f64]) -> Vec<f64> {
     let mut reactions = vec![0.0; rotation_shape(summary).iter().product()];
     if reactions.is_empty() {
@@ -919,6 +955,14 @@ fn rotation_shape(summary: &AssemblySummary) -> Vec<usize> {
         summary.structural_dof_layout.node_count(),
         VECTOR_COMPONENT_COUNT,
     ]
+}
+
+fn structural_displacement_node_count(summary: &AssemblySummary, dof_count: usize) -> usize {
+    if summary.structural_rotational_dof_count > 0 {
+        summary.structural_node_count.max(1)
+    } else {
+        dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1)
+    }
 }
 
 fn reaction_shape(summary: &AssemblySummary) -> Vec<usize> {

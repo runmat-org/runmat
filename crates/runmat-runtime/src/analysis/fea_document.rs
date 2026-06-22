@@ -891,6 +891,9 @@ fn resolve_region_ref(
     geometry: &GeometryAsset,
     aliases: &BTreeMap<String, FeaRegionDocument>,
 ) -> Result<String, String> {
+    if reference.strip_prefix("node:").is_some() || reference.parse::<u32>().is_ok() {
+        return Ok(reference.to_string());
+    }
     if let Some(alias) = aliases.get(reference) {
         return resolve_region_selector(&alias.selector, geometry);
     }

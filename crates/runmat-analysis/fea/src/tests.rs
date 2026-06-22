@@ -164,6 +164,100 @@ fn assembly_summary_reports_structural_dof_layout_metrics() {
 }
 
 #[test]
+fn beam_end_moment_solves_rotation_and_reaction_moment() {
+    let moment_n_m = 1.25;
+    let length_m = 1.0;
+    let youngs_modulus_pa = 200.0e9;
+    let iz_m4 = 6.4e-9;
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.model_id = runmat_analysis_core::AnalysisModelId("beam_end_moment".to_string());
+    model.structural = Some(runmat_analysis_core::StructuralModel {
+        nodes: vec![
+            runmat_analysis_core::StructuralNode {
+                node_id: 1,
+                coordinates_m: [0.0, 0.0, 0.0],
+            },
+            runmat_analysis_core::StructuralNode {
+                node_id: 2,
+                coordinates_m: [length_m, 0.0, 0.0],
+            },
+        ],
+        elements: vec![runmat_analysis_core::StructuralElement {
+            element_id: "beam_1".to_string(),
+            region_id: "beam_span".to_string(),
+            kind: runmat_analysis_core::StructuralElementKind::Beam(
+                runmat_analysis_core::BeamElementModel {
+                    node_ids: [1, 2],
+                    section_id: "rect".to_string(),
+                    reference_axis: [0.0, 1.0, 0.0],
+                },
+            ),
+        }],
+        beam_sections: vec![runmat_analysis_core::BeamSectionModel {
+            section_id: "rect".to_string(),
+            area_m2: 2.0e-4,
+            iy_m4: 1.6e-9,
+            iz_m4,
+            torsion_j_m4: 2.4e-9,
+        }],
+    });
+    model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
+        bc_id: "fixed_root".to_string(),
+        region_id: "node:1".to_string(),
+        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
+    }];
+    model.loads = vec![runmat_analysis_core::LoadCase {
+        load_id: "tip_moment".to_string(),
+        region_id: "node:2".to_string(),
+        kind: runmat_analysis_core::LoadKind::Moment {
+            mx: 0.0,
+            my: 0.0,
+            mz: moment_n_m,
+        },
+    }];
+
+    let result = crate::run_linear_static(&model, ComputeBackend::Cpu)
+        .expect("beam moment solve should run");
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).shape,
+        vec![2, 3]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_ROTATION).shape,
+        vec![2, 3]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_REACTION_MOMENT).shape,
+        vec![2, 3]
+    );
+
+    let expected_rotation = moment_n_m * length_m / (youngs_modulus_pa * iz_m4);
+    let expected_displacement = moment_n_m * length_m.powi(2) / (2.0 * youngs_modulus_pa * iz_m4);
+    let displacement = host_field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT);
+    let rotation = host_field(&result, FEA_FIELD_STRUCTURAL_ROTATION);
+    let reaction_moment = host_field(&result, FEA_FIELD_STRUCTURAL_REACTION_MOMENT);
+
+    assert!(
+        (rotation[5] - expected_rotation).abs() <= expected_rotation.abs() * 1.0e-6,
+        "rotation={} expected={}",
+        rotation[5],
+        expected_rotation
+    );
+    assert!(
+        (displacement[4] - expected_displacement).abs() <= expected_displacement.abs() * 1.0e-6,
+        "displacement={} expected={}",
+        displacement[4],
+        expected_displacement
+    );
+    assert!(
+        (reaction_moment[2] + moment_n_m).abs() <= moment_n_m.abs() * 1.0e-6,
+        "reaction_moment={} applied={}",
+        reaction_moment[2],
+        moment_n_m
+    );
+}
+
+#[test]
 fn thermo_mechanical_linear_static_emits_coupled_fields() {
     let model = fixture_model(FixtureId::ThermoMechanicalKickoff);
     let result = crate::run_linear_static_with_options(

@@ -1,10 +1,19 @@
 pub mod dofs;
 pub mod elements;
 
-use runmat_analysis_core::AnalysisModel;
+use runmat_analysis_core::{
+    AnalysisModel, BeamSectionModel, BoundaryConditionKind, LoadKind, StructuralElementKind,
+    StructuralModel,
+};
 use serde::{Deserialize, Serialize};
 
-use self::dofs::StructuralDofLayout;
+use self::{
+    dofs::{StructuralDofKind, StructuralDofLayout, StructuralNodeDofSet},
+    elements::beam::{
+        global_stiffness_matrix, BeamElementGeometry, BeamMaterial, BeamSection,
+        BEAM_ELEMENT_DOF_COUNT,
+    },
+};
 
 use crate::operator::OperatorSystem;
 use crate::physics::coupling::thermo_mechanical;
@@ -243,6 +252,10 @@ pub fn assemble_linear_system(
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
 ) -> AssemblySummary {
+    if let Some(summary) = assemble_beam_system(model) {
+        return summary;
+    }
+
     let base_dof_count = (model.loads.len() * 3).max(3);
     let prep_context_ref = prep_context.as_ref();
     let dof_count = if let Some(prep) = prep_context_ref {
@@ -954,6 +967,411 @@ fn topology_fingerprint(
 
 fn element_count_for_legacy_dofs(dof_count: usize) -> usize {
     dof_count.div_ceil(3).max(1)
+}
+
+fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
+    let structural = model.structural.as_ref()?;
+    let beam_elements = structural
+        .elements
+        .iter()
+        .filter(|element| matches!(element.kind, StructuralElementKind::Beam(_)))
+        .collect::<Vec<_>>();
+    if beam_elements.is_empty() || structural.nodes.is_empty() {
+        return None;
+    }
+
+    let structural_material = structural_material_summary(model);
+    let beam_material = BeamMaterial {
+        youngs_modulus_pa: structural_material.youngs_modulus_pa,
+        shear_modulus_pa: structural_material.shear_modulus_pa,
+    };
+    let node_count = structural.nodes.len();
+    let structural_dof_layout = StructuralDofLayout::from_node_sets(vec![
+        StructuralNodeDofSet::translational_rotational();
+        node_count
+    ]);
+    let dof_count = structural_dof_layout.total_dof_count();
+    let mut dense = vec![0.0_f64; dof_count * dof_count];
+    let mut rhs = vec![0.0_f64; dof_count];
+    let mut mass_diag = vec![1.0_f64; dof_count];
+    let mut damping_diag = vec![0.0_f64; dof_count];
+
+    for element in beam_elements {
+        let StructuralElementKind::Beam(beam) = &element.kind;
+        let node_i_index = structural_node_index(structural, beam.node_ids[0])?;
+        let node_j_index = structural_node_index(structural, beam.node_ids[1])?;
+        let section = structural_beam_section(structural, &beam.section_id)?;
+        let stiffness = global_stiffness_matrix(
+            section,
+            beam_material,
+            BeamElementGeometry {
+                node_i_m: structural.nodes[node_i_index].coordinates_m,
+                node_j_m: structural.nodes[node_j_index].coordinates_m,
+                reference_axis: beam.reference_axis,
+            },
+        )
+        .ok()?;
+        let element_dofs =
+            beam_element_dof_indices(&structural_dof_layout, node_i_index, node_j_index)?;
+        for local_row in 0..BEAM_ELEMENT_DOF_COUNT {
+            let global_row = element_dofs[local_row];
+            for local_col in 0..BEAM_ELEMENT_DOF_COUNT {
+                let global_col = element_dofs[local_col];
+                dense[global_row * dof_count + global_col] += stiffness[local_row][local_col];
+            }
+        }
+
+        let length = distance(
+            structural.nodes[node_i_index].coordinates_m,
+            structural.nodes[node_j_index].coordinates_m,
+        )
+        .max(1.0e-9);
+        let element_mass = section.area_m2 * length;
+        for dof in element_dofs {
+            mass_diag[dof] += element_mass / BEAM_ELEMENT_DOF_COUNT as f64;
+            damping_diag[dof] += 0.01;
+        }
+    }
+
+    let mut direct_rotational_moment_load_count = 0usize;
+    for load in &model.loads {
+        let target_nodes = structural_target_nodes(structural, &load.region_id);
+        if target_nodes.is_empty() {
+            continue;
+        }
+        let scale = 1.0 / target_nodes.len() as f64;
+        match load.kind {
+            LoadKind::Force { fx, fy, fz } => {
+                for node_index in target_nodes {
+                    add_rhs(
+                        &structural_dof_layout,
+                        &mut rhs,
+                        node_index,
+                        StructuralDofKind::Ux,
+                        fx * scale,
+                    );
+                    add_rhs(
+                        &structural_dof_layout,
+                        &mut rhs,
+                        node_index,
+                        StructuralDofKind::Uy,
+                        fy * scale,
+                    );
+                    add_rhs(
+                        &structural_dof_layout,
+                        &mut rhs,
+                        node_index,
+                        StructuralDofKind::Uz,
+                        fz * scale,
+                    );
+                }
+            }
+            LoadKind::Moment { mx, my, mz } => {
+                direct_rotational_moment_load_count += 1;
+                for node_index in target_nodes {
+                    add_rhs(
+                        &structural_dof_layout,
+                        &mut rhs,
+                        node_index,
+                        StructuralDofKind::Rx,
+                        mx * scale,
+                    );
+                    add_rhs(
+                        &structural_dof_layout,
+                        &mut rhs,
+                        node_index,
+                        StructuralDofKind::Ry,
+                        my * scale,
+                    );
+                    add_rhs(
+                        &structural_dof_layout,
+                        &mut rhs,
+                        node_index,
+                        StructuralDofKind::Rz,
+                        mz * scale,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut constrained = vec![false; dof_count];
+    for bc in &model.boundary_conditions {
+        let target_nodes = structural_target_nodes(structural, &bc.region_id);
+        for node_index in target_nodes {
+            match bc.kind {
+                BoundaryConditionKind::Fixed => {
+                    for kind in StructuralDofKind::ORDER {
+                        constrain_dof(
+                            &structural_dof_layout,
+                            &mut constrained,
+                            &mut rhs,
+                            node_index,
+                            kind,
+                            0.0,
+                        );
+                    }
+                }
+                BoundaryConditionKind::PrescribedDisplacement => {
+                    for kind in [
+                        StructuralDofKind::Ux,
+                        StructuralDofKind::Uy,
+                        StructuralDofKind::Uz,
+                    ] {
+                        constrain_dof(
+                            &structural_dof_layout,
+                            &mut constrained,
+                            &mut rhs,
+                            node_index,
+                            kind,
+                            0.0,
+                        );
+                    }
+                }
+                BoundaryConditionKind::PrescribedRotation { rx, ry, rz } => {
+                    constrain_dof(
+                        &structural_dof_layout,
+                        &mut constrained,
+                        &mut rhs,
+                        node_index,
+                        StructuralDofKind::Rx,
+                        rx,
+                    );
+                    constrain_dof(
+                        &structural_dof_layout,
+                        &mut constrained,
+                        &mut rhs,
+                        node_index,
+                        StructuralDofKind::Ry,
+                        ry,
+                    );
+                    constrain_dof(
+                        &structural_dof_layout,
+                        &mut constrained,
+                        &mut rhs,
+                        node_index,
+                        StructuralDofKind::Rz,
+                        rz,
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+    apply_dense_constraints(&dense, &constrained, &mut rhs, dof_count);
+
+    let stiffness_diag = (0..dof_count)
+        .map(|idx| {
+            if constrained[idx] {
+                1.0
+            } else {
+                dense[idx * dof_count + idx].abs().max(1.0e-12)
+            }
+        })
+        .collect::<Vec<_>>();
+    let stiffness_upper = vec![0.0; dof_count.saturating_sub(1)];
+    let constrained_dof_count = constrained.iter().filter(|value| **value).count();
+    let rotational_constraint_count = constrained
+        .iter()
+        .enumerate()
+        .filter(|(_, is_constrained)| **is_constrained)
+        .filter(|(row, _)| {
+            structural_dof_layout
+                .address(*row)
+                .is_some_and(|address| address.kind.is_rotational())
+        })
+        .count();
+
+    Some(AssemblySummary {
+        dof_count,
+        structural_node_count: structural_dof_layout.node_count(),
+        structural_translational_dof_count: structural_dof_layout.translational_dof_count(),
+        structural_rotational_dof_count: structural_dof_layout.rotational_dof_count(),
+        structural_rotation_node_count: structural_dof_layout.rotation_node_count(),
+        structural_moment_load_count: model
+            .loads
+            .iter()
+            .filter(|load| matches!(load.kind, LoadKind::Moment { .. }))
+            .count(),
+        structural_direct_rotational_moment_load_count: direct_rotational_moment_load_count,
+        structural_rotational_constraint_count: rotational_constraint_count,
+        structural_beam_element_count: structural.elements.len(),
+        structural_shell_element_count: 0,
+        structural_solid_element_count: 0,
+        structural_dof_layout,
+        constrained_dof_count,
+        load_count: model.loads.len(),
+        structural_material,
+        prep_assembly: None,
+        prep_operator_topology: None,
+        prep_region_topology: None,
+        prep_element_assembly: None,
+        prep_element_connectivity: None,
+        prep_graph_assembly: None,
+        prep_recovery_edges: Vec::new(),
+        prep_calibration: None,
+        prep_acceptance: None,
+        prep_coordinates: None,
+        thermo_mechanical: None,
+        electro_thermal: None,
+        operator: OperatorSystem {
+            dof_count,
+            constrained,
+            stiffness_dense: Some(dense),
+            stiffness_diag,
+            stiffness_upper,
+            mass_diag,
+            damping_diag,
+            rhs,
+        },
+    })
+}
+
+fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSummary {
+    let avg_youngs_modulus = if model.materials.is_empty() {
+        1.0e9
+    } else {
+        model
+            .materials
+            .iter()
+            .map(|material| material.mechanical.youngs_modulus_pa.max(1.0))
+            .sum::<f64>()
+            / model.materials.len() as f64
+    };
+    let avg_poisson_ratio = if model.materials.is_empty() {
+        0.3
+    } else {
+        model
+            .materials
+            .iter()
+            .map(|material| material.mechanical.poisson_ratio.clamp(0.0, 0.49))
+            .sum::<f64>()
+            / model.materials.len() as f64
+    };
+    let shear_modulus_pa = avg_youngs_modulus / (2.0 * (1.0 + avg_poisson_ratio)).max(1.0e-9);
+    let lame_lambda_pa = avg_youngs_modulus * avg_poisson_ratio
+        / ((1.0 + avg_poisson_ratio) * (1.0 - 2.0 * avg_poisson_ratio)).max(1.0e-9);
+    StructuralMaterialSummary {
+        youngs_modulus_pa: avg_youngs_modulus,
+        poisson_ratio: avg_poisson_ratio,
+        lame_lambda_pa,
+        shear_modulus_pa,
+    }
+}
+
+fn structural_node_index(structural: &StructuralModel, node_id: u32) -> Option<usize> {
+    structural
+        .nodes
+        .iter()
+        .position(|node| node.node_id == node_id)
+}
+
+fn structural_beam_section(structural: &StructuralModel, section_id: &str) -> Option<BeamSection> {
+    structural
+        .beam_sections
+        .iter()
+        .find(|section| section.section_id == section_id)
+        .map(section_from_model)
+}
+
+fn section_from_model(section: &BeamSectionModel) -> BeamSection {
+    BeamSection {
+        area_m2: section.area_m2,
+        iy_m4: section.iy_m4,
+        iz_m4: section.iz_m4,
+        torsion_j_m4: section.torsion_j_m4,
+    }
+}
+
+fn beam_element_dof_indices(
+    layout: &StructuralDofLayout,
+    node_i_index: usize,
+    node_j_index: usize,
+) -> Option<[usize; BEAM_ELEMENT_DOF_COUNT]> {
+    let mut indices = [0usize; BEAM_ELEMENT_DOF_COUNT];
+    for (local, kind) in StructuralDofKind::ORDER.iter().copied().enumerate() {
+        indices[local] = layout.index(node_i_index, kind)?;
+        indices[local + 6] = layout.index(node_j_index, kind)?;
+    }
+    Some(indices)
+}
+
+fn structural_target_nodes(structural: &StructuralModel, region_id: &str) -> Vec<usize> {
+    if let Some(node_id) = structural_node_selector(region_id) {
+        return structural_node_index(structural, node_id)
+            .into_iter()
+            .collect();
+    }
+    let mut nodes = Vec::new();
+    for element in &structural.elements {
+        if element.region_id != region_id {
+            continue;
+        }
+        match &element.kind {
+            StructuralElementKind::Beam(beam) => {
+                for node_id in beam.node_ids {
+                    if let Some(index) = structural_node_index(structural, node_id) {
+                        if !nodes.contains(&index) {
+                            nodes.push(index);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    nodes
+}
+
+fn structural_node_selector(region_id: &str) -> Option<u32> {
+    region_id
+        .strip_prefix("node:")
+        .unwrap_or(region_id)
+        .parse::<u32>()
+        .ok()
+}
+
+fn add_rhs(
+    layout: &StructuralDofLayout,
+    rhs: &mut [f64],
+    node_index: usize,
+    kind: StructuralDofKind,
+    value: f64,
+) {
+    if let Some(dof) = layout.index(node_index, kind) {
+        rhs[dof] += value;
+    }
+}
+
+fn constrain_dof(
+    layout: &StructuralDofLayout,
+    constrained: &mut [bool],
+    rhs: &mut [f64],
+    node_index: usize,
+    kind: StructuralDofKind,
+    value: f64,
+) {
+    if let Some(dof) = layout.index(node_index, kind) {
+        constrained[dof] = true;
+        rhs[dof] = value;
+    }
+}
+
+fn apply_dense_constraints(dense: &[f64], constrained: &[bool], rhs: &mut [f64], dof_count: usize) {
+    for dof in 0..dof_count {
+        if !constrained[dof] {
+            continue;
+        }
+        for row in 0..dof_count {
+            if !constrained[row] {
+                rhs[row] -= dense[row * dof_count + dof] * rhs[dof];
+            }
+        }
+    }
+}
+
+fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
 }
 
 fn apply_prep_native_element_assembly(
