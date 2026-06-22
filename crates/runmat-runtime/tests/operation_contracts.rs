@@ -1698,6 +1698,21 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
 fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.steps[0].kind = runmat_analysis_core::AnalysisStepKind::Electromagnetic;
+    model.materials[0].electrical = Some(MaterialElectricalModel::default());
+    model.boundary_conditions = vec![BoundaryCondition {
+        bc_id: "bc_em_snapshot_ground".to_string(),
+        region_id: model.boundary_conditions[0].region_id.clone(),
+        kind: BoundaryConditionKind::VectorPotentialGround,
+    }];
+    model.loads = vec![LoadCase {
+        load_id: "load_em_snapshot_coil".to_string(),
+        region_id: model.loads[0].region_id.clone(),
+        kind: LoadKind::CoilCurrent {
+            current_a: 120.0,
+            phase_rad: 0.0,
+            amplitude_scale: 1.0,
+        },
+    }];
     model.electromagnetic = Some(ElectromagneticDomain {
         enabled: true,
         reference_frequency_hz: 60.0,
@@ -1842,6 +1857,21 @@ fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
 fn electromagnetic_contract_snapshot_matches_expected_shape() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.steps[0].kind = runmat_analysis_core::AnalysisStepKind::Electromagnetic;
+    model.materials[0].electrical = Some(MaterialElectricalModel::default());
+    model.boundary_conditions = vec![BoundaryCondition {
+        bc_id: "bc_em_snapshot_ground".to_string(),
+        region_id: model.boundary_conditions[0].region_id.clone(),
+        kind: BoundaryConditionKind::VectorPotentialGround,
+    }];
+    model.loads = vec![LoadCase {
+        load_id: "load_em_snapshot_coil".to_string(),
+        region_id: model.loads[0].region_id.clone(),
+        kind: LoadKind::CoilCurrent {
+            current_a: 120.0,
+            phase_rad: 0.0,
+            amplitude_scale: 1.0,
+        },
+    }];
     model.electromagnetic = Some(ElectromagneticDomain {
         enabled: true,
         reference_frequency_hz: 60.0,

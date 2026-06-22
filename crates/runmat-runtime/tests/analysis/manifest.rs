@@ -1400,8 +1400,8 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_cache_misses: None,
         },
         FixtureSpec {
-            id: "electromagnetic_reference_fallback_heavy_gpu_provider",
-            description: "electromagnetic fallback-heavy reference fixture",
+            id: "electromagnetic_reference_multiregion_assignments_gpu_provider",
+            description: "electromagnetic multi-region assigned-material reference fixture",
             model: || fixture_model(FixtureId::MultiMaterialAssembly),
             run_kind: AnalysisRunKind::Electromagnetic,
             expect_validate_error: None,

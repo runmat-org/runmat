@@ -508,6 +508,14 @@ pub fn analysis_create_model_op(
             material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel::default());
         }
     }
+    if matches!(
+        intent.profile,
+        AnalysisCreateModelProfile::ElectromagneticStatic
+    ) {
+        for material in &mut inferred_materials {
+            material.electrical = Some(runmat_analysis_core::MaterialElectricalModel::default());
+        }
+    }
     let inferred_assignments = infer_material_assignments(
         geometry,
         &inferred_materials,
@@ -653,17 +661,17 @@ pub fn analysis_create_model_op(
         ),
         AnalysisCreateModelProfile::ElectromagneticStatic => (
             BoundaryCondition {
-                bc_id: "bc_default_fixed".to_string(),
+                bc_id: "bc_default_em_ground".to_string(),
                 region_id: fixed_region_id,
-                kind: BoundaryConditionKind::Fixed,
+                kind: BoundaryConditionKind::VectorPotentialGround,
             },
             LoadCase {
-                load_id: "load_default_em_seed".to_string(),
+                load_id: "load_default_em_coil_current".to_string(),
                 region_id: load_region_id,
-                kind: LoadKind::BodyForce {
-                    gx: 0.0,
-                    gy: 0.0,
-                    gz: 0.0,
+                kind: LoadKind::CoilCurrent {
+                    current_a: 100.0,
+                    phase_rad: 0.0,
+                    amplitude_scale: 1.0,
                 },
             },
             vec![AnalysisStep {
@@ -9304,6 +9312,11 @@ pub fn analysis_run_electromagnetic_with_options_op(
         "FEA_EM_STATIC",
         "assignment_coverage_ratio",
     );
+    let em_assigned_coefficient_coverage_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_STATIC",
+        "assigned_coefficient_coverage_ratio",
+    );
     let em_fallback_coefficient_ratio = diagnostic_metric(
         &run.diagnostics,
         "FEA_EM_STATIC",
@@ -9428,6 +9441,9 @@ pub fn analysis_run_electromagnetic_with_options_op(
     let em_coverage_breach = em_assignment_coverage_ratio
         .map(|value| value < em_coverage_min_threshold)
         .unwrap_or(false);
+    let em_assigned_coefficient_breach = em_assigned_coefficient_coverage_ratio
+        .map(|value| value < em_coverage_min_threshold)
+        .unwrap_or(false);
     let em_fallback_breach = em_fallback_coefficient_ratio
         .map(|value| value > em_fallback_max_threshold)
         .unwrap_or(false);
@@ -9497,6 +9513,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
     if (em_spread_breach
         || em_heterogeneity_breach
         || em_coverage_breach
+        || em_assigned_coefficient_breach
         || em_fallback_breach
         || em_contrast_breach
         || em_conditioning_breach
@@ -9560,6 +9577,16 @@ pub fn analysis_run_electromagnetic_with_options_op(
             detail: format!(
                 "electromagnetic assignment coverage ratio {} is below threshold {}",
                 em_assignment_coverage_ratio.unwrap_or(0.0),
+                em_coverage_min_threshold
+            ),
+        });
+    }
+    if em_assigned_coefficient_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticAssignmentCoverageLow,
+            detail: format!(
+                "electromagnetic assigned coefficient coverage ratio {} is below threshold {}",
+                em_assigned_coefficient_coverage_ratio.unwrap_or(0.0),
                 em_coverage_min_threshold
             ),
         });
@@ -9948,6 +9975,36 @@ fn validate_electromagnetic_run_model(
                 (
                     "material_count".to_string(),
                     model.materials.len().to_string(),
+                ),
+            ]),
+        ));
+    }
+    let electrical_material_by_id = model
+        .materials
+        .iter()
+        .filter(|material| material.electrical.is_some())
+        .map(|material| material.material_id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    if let Some(assignment) = model.material_assignments.iter().find(|assignment| {
+        !electrical_material_by_id.contains(assignment.assigned_material_id.as_str())
+    }) {
+        return Err(operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_MATERIAL",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_electromagnetic requires every material assignment to reference an assigned electrical material",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("region_id".to_string(), assignment.region_id.clone()),
+                (
+                    "assigned_material_id".to_string(),
+                    assignment.assigned_material_id.clone(),
                 ),
             ]),
         ));
@@ -10694,6 +10751,11 @@ pub fn analysis_results_op(
         "FEA_EM_STATIC",
         "assignment_coverage_ratio",
     );
+    let electromagnetic_assigned_coefficient_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "assigned_coefficient_coverage_ratio",
+    );
     let electromagnetic_fallback_coefficient_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_EM_STATIC",
@@ -10907,6 +10969,7 @@ pub fn analysis_results_op(
         electromagnetic_relative_permeability_spread_ratio,
         electromagnetic_material_heterogeneity_index,
         electromagnetic_assignment_coverage_ratio,
+        electromagnetic_assigned_coefficient_coverage_ratio,
         electromagnetic_fallback_coefficient_ratio,
         electromagnetic_region_coefficient_contrast_index,
         electromagnetic_condition_number_estimate,

@@ -4,7 +4,7 @@ const EM_READINESS_TARGET_FIXTURES: &[&str] = &[
     "electromagnetic_reference_homogeneous_gpu_provider",
     "electromagnetic_reference_heterogeneous_gpu_provider",
     "electromagnetic_reference_sparse_assignments_gpu_provider",
-    "electromagnetic_reference_fallback_heavy_gpu_provider",
+    "electromagnetic_reference_multiregion_assignments_gpu_provider",
     "electromagnetic_reference_overlap_interference_gpu_provider",
     "electromagnetic_reference_boundary_kernel_gpu_provider",
     "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
@@ -304,6 +304,15 @@ pub(super) fn check_rolling_baseline_drift(
             );
             check_rolling_metric_drift(
                 fixture_id,
+                "electromagnetic_assigned_coefficient_coverage_ratio",
+                history,
+                current_record.electromagnetic_assigned_coefficient_coverage_ratio,
+                |record| record.electromagnetic_assigned_coefficient_coverage_ratio,
+                EM_READINESS_DRIFT_BOUNDS,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
                 "electromagnetic_fallback_coefficient_ratio",
                 history,
                 current_record.electromagnetic_fallback_coefficient_ratio,
@@ -523,6 +532,14 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_assignment_coverage_ratio",
                 baseline_record.electromagnetic_assignment_coverage_ratio,
                 current_record.electromagnetic_assignment_coverage_ratio,
+                EM_READINESS_DRIFT_BOUNDS,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_assigned_coefficient_coverage_ratio",
+                baseline_record.electromagnetic_assigned_coefficient_coverage_ratio,
+                current_record.electromagnetic_assigned_coefficient_coverage_ratio,
                 EM_READINESS_DRIFT_BOUNDS,
                 failures,
             );

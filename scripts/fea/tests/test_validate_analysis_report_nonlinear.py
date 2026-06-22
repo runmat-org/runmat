@@ -95,7 +95,7 @@ def _record(fixture_id: str, assertion_names: set[str]) -> dict:
         record["electromagnetic_condition_number_estimate"] = 1.0
         record["electromagnetic_reference_frequency_hz"] = 1.0
         record["electromagnetic_assignment_coverage_ratio"] = 1.0
-        record["electromagnetic_fallback_coefficient_ratio"] = 0.0
+        record["electromagnetic_assigned_coefficient_coverage_ratio"] = 0.0
         record["electromagnetic_boundary_anchor_ratio"] = 1.0
         record["electromagnetic_conductivity_spread_ratio"] = 1.0
         record["electromagnetic_relative_permittivity_spread_ratio"] = 1.0
@@ -749,7 +749,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "em_homogeneous_relative_permittivity_spread_ratio",
                     "em_homogeneous_relative_permeability_spread_ratio",
                     "em_homogeneous_assignment_coverage_ratio",
-                    "em_homogeneous_fallback_coefficient_ratio",
+                    "em_homogeneous_assigned_coefficient_coverage_ratio",
                     "em_homogeneous_flux_phasor_coherence_ratio",
                     "em_homogeneous_flux_divergence_ratio",
                     "em_homogeneous_energy_imbalance_ratio",
@@ -781,7 +781,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electromagnetic_source_region_coverage_ratio": 1.0,
                 "electromagnetic_source_material_alignment_ratio": 1.0,
                 "electromagnetic_assignment_coverage_ratio": 1.0,
-                "electromagnetic_fallback_coefficient_ratio": 0.0,
+                "electromagnetic_assigned_coefficient_coverage_ratio": 0.0,
                 "electromagnetic_boundary_anchor_ratio": 1.0,
                 "electromagnetic_conductivity_spread_ratio": 1.0,
                 "electromagnetic_relative_permittivity_spread_ratio": 1.0,
@@ -851,7 +851,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electromagnetic_source_region_coverage_ratio": 1.0,
                 "electromagnetic_source_material_alignment_ratio": 1.0,
                 "electromagnetic_assignment_coverage_ratio": 1.0,
-                "electromagnetic_fallback_coefficient_ratio": 0.0,
+                "electromagnetic_assigned_coefficient_coverage_ratio": 0.0,
                 "electromagnetic_boundary_anchor_ratio": 0.75,
                 "electromagnetic_conductivity_spread_ratio": 2.56e8,
                 "electromagnetic_relative_permittivity_spread_ratio": 6.58,
@@ -900,7 +900,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electromagnetic_reference_sparse_assignments_gpu_provider",
                 {
                     "em_sparse_assignment_coverage_ratio",
-                    "em_sparse_fallback_coefficient_ratio",
+                    "em_sparse_assigned_coefficient_coverage_ratio",
                     "em_sparse_source_realization_ratio",
                     "em_sparse_source_region_coverage_ratio",
                     "em_sparse_source_material_alignment_ratio",
@@ -909,15 +909,15 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 },
             ),
             _record(
-                "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "electromagnetic_reference_multiregion_assignments_gpu_provider",
                 {
-                    "em_fallback_heavy_assignment_coverage_ratio",
-                    "em_fallback_heavy_fallback_coefficient_ratio",
-                    "em_fallback_heavy_source_realization_ratio",
-                    "em_fallback_heavy_source_region_coverage_ratio",
-                    "em_fallback_heavy_source_material_alignment_ratio",
-                    "em_fallback_heavy_boundary_anchor_ratio",
-                    "em_fallback_heavy_energy_imbalance_ratio",
+                    "em_multiregion_assignment_coverage_ratio",
+                    "em_multiregion_assigned_coefficient_coverage_ratio",
+                    "em_multiregion_source_realization_ratio",
+                    "em_multiregion_source_region_coverage_ratio",
+                    "em_multiregion_source_material_alignment_ratio",
+                    "em_multiregion_boundary_anchor_ratio",
+                    "em_multiregion_energy_imbalance_ratio",
                 },
             ),
             _record(

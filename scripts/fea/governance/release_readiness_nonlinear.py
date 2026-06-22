@@ -44,7 +44,7 @@ KEY_PERFORMANCE_FIXTURES = {
     "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
     "electromagnetic_reference_multi_region_phased_source_gpu_provider",
     "electromagnetic_reference_sparse_assignments_gpu_provider",
-    "electromagnetic_reference_fallback_heavy_gpu_provider",
+    "electromagnetic_reference_multiregion_assignments_gpu_provider",
     "electromagnetic_reference_overlap_interference_gpu_provider",
     "electromagnetic_reference_boundary_kernel_gpu_provider",
     "thermo_ramp_smooth_gpu_provider",
@@ -90,7 +90,7 @@ EM_FIXTURES = {
     "electromagnetic_reference_homogeneous_gpu_provider",
     "electromagnetic_reference_heterogeneous_gpu_provider",
     "electromagnetic_reference_sparse_assignments_gpu_provider",
-    "electromagnetic_reference_fallback_heavy_gpu_provider",
+    "electromagnetic_reference_multiregion_assignments_gpu_provider",
     "electromagnetic_reference_overlap_interference_gpu_provider",
     "electromagnetic_reference_boundary_kernel_gpu_provider",
     "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
@@ -308,7 +308,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOLVE_QUALITY": "0.6",
             "RUNMAT_RELEASE_READINESS_EM_MIN_FLUX_PHASOR_COHERENCE_RATIO": "0.5",
             "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNMENT_COVERAGE_RATIO": "0.95",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_RATIO": "0.05",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNED_COEFFICIENT_COVERAGE_RATIO": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.1",
@@ -338,7 +338,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVE_QUALITY_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_PHASOR_COHERENCE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.1",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_ASSIGNED_COEFFICIENT_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO": "1.1",
@@ -350,19 +350,19 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_ENERGY_CONSISTENCY_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.1",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNED_COEFFICIENT_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ENERGY_IMBALANCE_TREND_RATIO": "1.1",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.1",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_DROP_TREND_RATIO": "1.1",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.1",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.1",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.1",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO": "1.1",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ASSIGNED_COEFFICIENT_COVERAGE_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ENERGY_IMBALANCE_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_OVERLAP_DROP_TREND_RATIO": "1.1",
@@ -382,19 +382,19 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_PHASED_SOURCE_REGION_COVERAGE_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_ENERGY_CONSISTENCY_RATIO": "0.35",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO": "0.3",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNED_COEFFICIENT_COVERAGE_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REGION_COVERAGE_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_BOUNDARY_ANCHOR_RATIO": "0.2",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REALIZATION_RATIO": "0.22",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ENERGY_IMBALANCE_RATIO": "0.45",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO": "0.9",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO": "0.9",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO": "0.9",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO": "0.15",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REALIZATION_RATIO": "0.18",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO": "0.55",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.2",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_ASSIGNMENT_COVERAGE_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_ASSIGNED_COEFFICIENT_COVERAGE_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_SOURCE_REGION_COVERAGE_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_BOUNDARY_ANCHOR_RATIO": "0.15",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_SOURCE_REALIZATION_RATIO": "0.18",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ENERGY_IMBALANCE_RATIO": "0.55",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.2",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_OVERLAP_RATIO": "0.9",
@@ -639,7 +639,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOLVE_QUALITY": "0.5",
             "RUNMAT_RELEASE_READINESS_EM_MIN_FLUX_PHASOR_COHERENCE_RATIO": "0.4",
             "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNMENT_COVERAGE_RATIO": "0.9",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_RATIO": "0.1",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNED_COEFFICIENT_COVERAGE_RATIO": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.2",
@@ -669,7 +669,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVE_QUALITY_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_PHASOR_COHERENCE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.2",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_ASSIGNED_COEFFICIENT_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO": "1.2",
@@ -681,19 +681,19 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_ENERGY_CONSISTENCY_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.2",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNED_COEFFICIENT_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ENERGY_IMBALANCE_TREND_RATIO": "1.2",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.2",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_DROP_TREND_RATIO": "1.2",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.2",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.2",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.2",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO": "1.2",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ASSIGNED_COEFFICIENT_COVERAGE_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ENERGY_IMBALANCE_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_OVERLAP_DROP_TREND_RATIO": "1.2",
@@ -713,19 +713,19 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_PHASED_SOURCE_REGION_COVERAGE_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_ENERGY_CONSISTENCY_RATIO": "0.5",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO": "0.25",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNED_COEFFICIENT_COVERAGE_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REGION_COVERAGE_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_BOUNDARY_ANCHOR_RATIO": "0.18",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REALIZATION_RATIO": "0.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ENERGY_IMBALANCE_RATIO": "0.55",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO": "0.85",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO": "0.85",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO": "0.85",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO": "0.12",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REALIZATION_RATIO": "0.15",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO": "0.65",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.3",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_ASSIGNMENT_COVERAGE_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_ASSIGNED_COEFFICIENT_COVERAGE_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_SOURCE_REGION_COVERAGE_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_BOUNDARY_ANCHOR_RATIO": "0.12",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_SOURCE_REALIZATION_RATIO": "0.15",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ENERGY_IMBALANCE_RATIO": "0.65",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_OVERLAP_RATIO": "0.85",
@@ -994,19 +994,19 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_ENERGY_CONSISTENCY_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.35",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNED_COEFFICIENT_COVERAGE_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ENERGY_IMBALANCE_TREND_RATIO": "1.35",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.35",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_DROP_TREND_RATIO": "1.35",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.35",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.35",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.35",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO": "1.35",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ASSIGNED_COEFFICIENT_COVERAGE_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ENERGY_IMBALANCE_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_OVERLAP_DROP_TREND_RATIO": "1.35",
@@ -1026,19 +1026,19 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_PHASED_SOURCE_REGION_COVERAGE_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_ENERGY_CONSISTENCY_RATIO": "0.7",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO": "0.2",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO": "0.95",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNED_COEFFICIENT_COVERAGE_RATIO": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REGION_COVERAGE_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_BOUNDARY_ANCHOR_RATIO": "0.15",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REALIZATION_RATIO": "0.15",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ENERGY_IMBALANCE_RATIO": "0.7",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO": "0.8",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO": "0.8",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO": "0.8",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO": "0.1",
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REALIZATION_RATIO": "0.1",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO": "0.8",
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.45",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_ASSIGNMENT_COVERAGE_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_ASSIGNED_COEFFICIENT_COVERAGE_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_SOURCE_REGION_COVERAGE_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_BOUNDARY_ANCHOR_RATIO": "0.1",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_SOURCE_REALIZATION_RATIO": "0.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ENERGY_IMBALANCE_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.45",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_OVERLAP_RATIO": "0.8",
@@ -3678,10 +3678,13 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNMENT_COVERAGE_RATIO", "0.9"),
         )
     )
-    em_max_core_fallback_coefficient_ratio_threshold = float(
+    em_min_core_assigned_coefficient_coverage_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_RATIO",
-            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_RATIO", "0.1"),
+            "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNED_COEFFICIENT_COVERAGE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNED_COEFFICIENT_COVERAGE_RATIO",
+                "0.95",
+            ),
         )
     )
     em_min_boundary_anchor_ratio_threshold = float(
@@ -4213,11 +4216,11 @@ def evaluate_release_readiness(
             ),
         )
     )
-    em_max_core_fallback_coefficient_trend_ratio_threshold = float(
+    em_max_core_assigned_coefficient_coverage_drop_trend_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_ASSIGNED_COEFFICIENT_COVERAGE_DROP_TREND_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_TREND_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_ASSIGNED_COEFFICIENT_COVERAGE_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
@@ -4327,11 +4330,11 @@ def evaluate_release_readiness(
             ),
         )
     )
-    em_max_sparse_fallback_coefficient_trend_ratio_threshold = float(
+    em_max_sparse_assigned_coefficient_coverage_drop_trend_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNED_COEFFICIENT_COVERAGE_DROP_TREND_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_TREND_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNED_COEFFICIENT_COVERAGE_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
@@ -4381,65 +4384,65 @@ def evaluate_release_readiness(
             ),
         )
     )
-    em_max_fallback_heavy_assignment_coverage_drop_trend_ratio_threshold = float(
+    em_max_multiregion_assignment_coverage_drop_trend_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
     )
-    em_max_fallback_heavy_fallback_coefficient_drop_trend_ratio_threshold = float(
+    em_max_multiregion_assigned_coefficient_coverage_drop_trend_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ASSIGNED_COEFFICIENT_COVERAGE_DROP_TREND_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_DROP_TREND_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ASSIGNED_COEFFICIENT_COVERAGE_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
     )
-    em_max_fallback_heavy_source_region_coverage_drop_trend_ratio_threshold = float(
+    em_max_multiregion_source_region_coverage_drop_trend_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
     )
-    em_max_fallback_heavy_boundary_anchor_drop_trend_ratio_threshold = float(
+    em_max_multiregion_boundary_anchor_drop_trend_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_BOUNDARY_ANCHOR_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_BOUNDARY_ANCHOR_DROP_TREND_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_BOUNDARY_ANCHOR_DROP_TREND_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_BOUNDARY_ANCHOR_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
     )
-    em_max_fallback_heavy_source_realization_drop_trend_ratio_threshold = float(
+    em_max_multiregion_source_realization_drop_trend_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REALIZATION_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_REALIZATION_DROP_TREND_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REALIZATION_DROP_TREND_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_REALIZATION_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
     )
-    em_max_fallback_heavy_energy_imbalance_trend_ratio_threshold = float(
+    em_max_multiregion_energy_imbalance_trend_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ENERGY_IMBALANCE_TREND_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ENERGY_IMBALANCE_TREND_RATIO",
                 "1.2",
             ),
         )
     )
-    em_max_fallback_heavy_source_material_alignment_trend_ratio_threshold = float(
+    em_max_multiregion_source_material_alignment_trend_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO",
                 "1.2",
             ),
         )
@@ -4617,12 +4620,12 @@ def evaluate_release_readiness(
             ),
         )
     )
-    em_max_sparse_fallback_coefficient_ratio_threshold = float(
+    em_min_sparse_assigned_coefficient_coverage_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNED_COEFFICIENT_COVERAGE_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO",
-                "0.85",
+                "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNED_COEFFICIENT_COVERAGE_RATIO",
+                "0.95",
             ),
         )
     )
@@ -4662,65 +4665,65 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ENERGY_IMBALANCE_RATIO", "0.7"),
         )
     )
-    em_min_fallback_heavy_assignment_coverage_ratio_threshold = float(
+    em_min_multiregion_assignment_coverage_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_ASSIGNMENT_COVERAGE_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_ASSIGNMENT_COVERAGE_RATIO",
                 "0.85",
             ),
         )
     )
-    em_min_fallback_heavy_fallback_coefficient_ratio_threshold = float(
+    em_min_multiregion_assigned_coefficient_coverage_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_ASSIGNED_COEFFICIENT_COVERAGE_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_ASSIGNED_COEFFICIENT_COVERAGE_RATIO",
+                "0.95",
+            ),
+        )
+    )
+    em_min_multiregion_source_region_coverage_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_SOURCE_REGION_COVERAGE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_SOURCE_REGION_COVERAGE_RATIO",
                 "0.85",
             ),
         )
     )
-    em_min_fallback_heavy_source_region_coverage_ratio_threshold = float(
+    em_min_multiregion_boundary_anchor_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_BOUNDARY_ANCHOR_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO",
-                "0.85",
-            ),
-        )
-    )
-    em_min_fallback_heavy_boundary_anchor_ratio_threshold = float(
-        os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO",
-            profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_BOUNDARY_ANCHOR_RATIO",
                 "0.12",
             ),
         )
     )
-    em_min_fallback_heavy_source_realization_ratio_threshold = float(
+    em_min_multiregion_source_realization_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REALIZATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_SOURCE_REALIZATION_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REALIZATION_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MIN_MULTIREGION_SOURCE_REALIZATION_RATIO",
                 "0.1",
             ),
         )
     )
-    em_max_fallback_heavy_energy_imbalance_ratio_threshold = float(
+    em_max_multiregion_energy_imbalance_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ENERGY_IMBALANCE_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_ENERGY_IMBALANCE_RATIO",
                 "0.8",
             ),
         )
     )
-    em_max_fallback_heavy_source_material_alignment_ratio_threshold = float(
+    em_max_multiregion_source_material_alignment_ratio_threshold = float(
         os.getenv(
-            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_MATERIAL_ALIGNMENT_RATIO",
             profile_default(
-                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+                "RUNMAT_RELEASE_READINESS_EM_MAX_MULTIREGION_SOURCE_MATERIAL_ALIGNMENT_RATIO",
                 "0.3",
             ),
         )
@@ -5389,7 +5392,7 @@ def evaluate_release_readiness(
     em_min_solve_quality = None
     em_min_flux_phasor_coherence_ratio = None
     em_min_core_assignment_coverage_ratio = None
-    em_max_core_fallback_coefficient_ratio = None
+    em_min_core_assigned_coefficient_coverage_ratio = None
     em_min_boundary_anchor_ratio = None
     em_min_applied_current_a = None
     em_min_source_region_energy_consistency_ratio = None
@@ -5419,19 +5422,19 @@ def evaluate_release_readiness(
     em_min_phased_source_region_coverage_ratio = None
     em_max_phased_source_energy_consistency_ratio = None
     em_min_sparse_assignment_coverage_ratio = None
-    em_max_sparse_fallback_coefficient_ratio = None
+    em_min_sparse_assigned_coefficient_coverage_ratio = None
     em_min_sparse_source_region_coverage_ratio = None
     em_min_sparse_source_material_alignment_ratio = None
     em_min_sparse_boundary_anchor_ratio = None
     em_min_sparse_source_realization_ratio = None
     em_max_sparse_energy_imbalance_ratio = None
-    em_min_fallback_heavy_assignment_coverage_ratio = None
-    em_min_fallback_heavy_fallback_coefficient_ratio = None
-    em_min_fallback_heavy_source_region_coverage_ratio = None
-    em_min_fallback_heavy_boundary_anchor_ratio = None
-    em_min_fallback_heavy_source_realization_ratio = None
-    em_max_fallback_heavy_energy_imbalance_ratio = None
-    em_max_fallback_heavy_source_material_alignment_ratio = None
+    em_min_multiregion_assignment_coverage_ratio = None
+    em_min_multiregion_assigned_coefficient_coverage_ratio = None
+    em_min_multiregion_source_region_coverage_ratio = None
+    em_min_multiregion_boundary_anchor_ratio = None
+    em_min_multiregion_source_realization_ratio = None
+    em_max_multiregion_energy_imbalance_ratio = None
+    em_max_multiregion_source_material_alignment_ratio = None
     em_min_overlap_source_region_coverage_ratio = None
     em_min_overlap_source_material_alignment_ratio = None
     em_min_overlap_source_overlap_ratio = None
@@ -5489,7 +5492,7 @@ def evaluate_release_readiness(
     em_solve_quality_drop_trend_ratio = None
     em_flux_phasor_coherence_drop_trend_ratio = None
     em_core_assignment_coverage_drop_trend_ratio = None
-    em_core_fallback_coefficient_trend_ratio = None
+    em_core_assigned_coefficient_coverage_drop_trend_ratio = None
     em_dispersive_phase_attenuation_trend_ratio = None
     em_dispersive_phase_attenuation_spread_trend_ratio = None
     em_dispersive_phase_conductivity_attenuation_trend_ratio = None
@@ -5502,19 +5505,19 @@ def evaluate_release_readiness(
     em_phased_source_region_coverage_drop_trend_ratio = None
     em_phased_source_energy_consistency_trend_ratio = None
     em_sparse_assignment_coverage_drop_trend_ratio = None
-    em_sparse_fallback_coefficient_trend_ratio = None
+    em_sparse_assigned_coefficient_coverage_drop_trend_ratio = None
     em_sparse_source_region_coverage_drop_trend_ratio = None
     em_sparse_source_material_alignment_drop_trend_ratio = None
     em_sparse_boundary_anchor_drop_trend_ratio = None
     em_sparse_source_realization_drop_trend_ratio = None
     em_sparse_energy_imbalance_trend_ratio = None
-    em_fallback_heavy_assignment_coverage_drop_trend_ratio = None
-    em_fallback_heavy_fallback_coefficient_drop_trend_ratio = None
-    em_fallback_heavy_source_region_coverage_drop_trend_ratio = None
-    em_fallback_heavy_boundary_anchor_drop_trend_ratio = None
-    em_fallback_heavy_source_realization_drop_trend_ratio = None
-    em_fallback_heavy_energy_imbalance_trend_ratio = None
-    em_fallback_heavy_source_material_alignment_trend_ratio = None
+    em_multiregion_assignment_coverage_drop_trend_ratio = None
+    em_multiregion_assigned_coefficient_coverage_drop_trend_ratio = None
+    em_multiregion_source_region_coverage_drop_trend_ratio = None
+    em_multiregion_boundary_anchor_drop_trend_ratio = None
+    em_multiregion_source_realization_drop_trend_ratio = None
+    em_multiregion_energy_imbalance_trend_ratio = None
+    em_multiregion_source_material_alignment_trend_ratio = None
     em_overlap_source_region_coverage_drop_trend_ratio = None
     em_overlap_source_material_alignment_drop_trend_ratio = None
     em_overlap_source_overlap_drop_trend_ratio = None
@@ -8082,11 +8085,11 @@ def evaluate_release_readiness(
             ),
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
-                "em_homogeneous_fallback_coefficient_ratio",
-                "max",
-                "EM_CORE_FALLBACK_COEFFICIENT_RATIO_HIGH",
-                "EM homogeneous fallback coefficient ratio",
-                em_max_core_fallback_coefficient_ratio_threshold,
+                "em_homogeneous_assigned_coefficient_coverage_ratio",
+                "min",
+                "EM_CORE_ASSIGNED_COEFFICIENT_COVERAGE_RATIO_LOW",
+                "EM homogeneous assigned coefficient coverage ratio",
+                em_min_core_assigned_coefficient_coverage_ratio_threshold,
             ),
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
@@ -8290,11 +8293,11 @@ def evaluate_release_readiness(
             ),
             (
                 "electromagnetic_reference_sparse_assignments_gpu_provider",
-                "em_sparse_fallback_coefficient_ratio",
-                "max",
-                "EM_SPARSE_FALLBACK_COEFFICIENT_RATIO_HIGH",
-                "EM sparse fallback coefficient ratio",
-                em_max_sparse_fallback_coefficient_ratio_threshold,
+                "em_sparse_assigned_coefficient_coverage_ratio",
+                "min",
+                "EM_SPARSE_ASSIGNED_COEFFICIENT_COVERAGE_RATIO_LOW",
+                "EM sparse assigned coefficient coverage ratio",
+                em_min_sparse_assigned_coefficient_coverage_ratio_threshold,
             ),
             (
                 "electromagnetic_reference_sparse_assignments_gpu_provider",
@@ -8337,60 +8340,60 @@ def evaluate_release_readiness(
                 em_max_sparse_energy_imbalance_ratio_threshold,
             ),
             (
-                "electromagnetic_reference_fallback_heavy_gpu_provider",
-                "em_fallback_heavy_assignment_coverage_ratio",
+                "electromagnetic_reference_multiregion_assignments_gpu_provider",
+                "em_multiregion_assignment_coverage_ratio",
                 "min",
-                "EM_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO_LOW",
-                "EM fallback-heavy assignment coverage ratio",
-                em_min_fallback_heavy_assignment_coverage_ratio_threshold,
+                "EM_MULTIREGION_ASSIGNMENT_COVERAGE_RATIO_LOW",
+                "EM multi-region assignment coverage ratio",
+                em_min_multiregion_assignment_coverage_ratio_threshold,
             ),
             (
-                "electromagnetic_reference_fallback_heavy_gpu_provider",
-                "em_fallback_heavy_fallback_coefficient_ratio",
+                "electromagnetic_reference_multiregion_assignments_gpu_provider",
+                "em_multiregion_assigned_coefficient_coverage_ratio",
                 "min",
-                "EM_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO_LOW",
-                "EM fallback-heavy fallback coefficient ratio",
-                em_min_fallback_heavy_fallback_coefficient_ratio_threshold,
+                "EM_MULTIREGION_ASSIGNED_COEFFICIENT_COVERAGE_RATIO_LOW",
+                "EM multi-region assigned coefficient coverage ratio",
+                em_min_multiregion_assigned_coefficient_coverage_ratio_threshold,
             ),
             (
-                "electromagnetic_reference_fallback_heavy_gpu_provider",
-                "em_fallback_heavy_source_region_coverage_ratio",
+                "electromagnetic_reference_multiregion_assignments_gpu_provider",
+                "em_multiregion_source_region_coverage_ratio",
                 "min",
-                "EM_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO_LOW",
-                "EM fallback-heavy source-region coverage ratio",
-                em_min_fallback_heavy_source_region_coverage_ratio_threshold,
+                "EM_MULTIREGION_SOURCE_REGION_COVERAGE_RATIO_LOW",
+                "EM multi-region source-region coverage ratio",
+                em_min_multiregion_source_region_coverage_ratio_threshold,
             ),
             (
-                "electromagnetic_reference_fallback_heavy_gpu_provider",
-                "em_fallback_heavy_boundary_anchor_ratio",
+                "electromagnetic_reference_multiregion_assignments_gpu_provider",
+                "em_multiregion_boundary_anchor_ratio",
                 "min",
-                "EM_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO_LOW",
-                "EM fallback-heavy boundary-anchor ratio",
-                em_min_fallback_heavy_boundary_anchor_ratio_threshold,
+                "EM_MULTIREGION_BOUNDARY_ANCHOR_RATIO_LOW",
+                "EM multi-region boundary-anchor ratio",
+                em_min_multiregion_boundary_anchor_ratio_threshold,
             ),
             (
-                "electromagnetic_reference_fallback_heavy_gpu_provider",
-                "em_fallback_heavy_source_realization_ratio",
+                "electromagnetic_reference_multiregion_assignments_gpu_provider",
+                "em_multiregion_source_realization_ratio",
                 "min",
-                "EM_FALLBACK_HEAVY_SOURCE_REALIZATION_RATIO_LOW",
-                "EM fallback-heavy source realization ratio",
-                em_min_fallback_heavy_source_realization_ratio_threshold,
+                "EM_MULTIREGION_SOURCE_REALIZATION_RATIO_LOW",
+                "EM multi-region source realization ratio",
+                em_min_multiregion_source_realization_ratio_threshold,
             ),
             (
-                "electromagnetic_reference_fallback_heavy_gpu_provider",
-                "em_fallback_heavy_energy_imbalance_ratio",
+                "electromagnetic_reference_multiregion_assignments_gpu_provider",
+                "em_multiregion_energy_imbalance_ratio",
                 "max",
-                "EM_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO_HIGH",
-                "EM fallback-heavy energy-imbalance ratio",
-                em_max_fallback_heavy_energy_imbalance_ratio_threshold,
+                "EM_MULTIREGION_ENERGY_IMBALANCE_RATIO_HIGH",
+                "EM multi-region energy-imbalance ratio",
+                em_max_multiregion_energy_imbalance_ratio_threshold,
             ),
             (
-                "electromagnetic_reference_fallback_heavy_gpu_provider",
-                "em_fallback_heavy_source_material_alignment_ratio",
+                "electromagnetic_reference_multiregion_assignments_gpu_provider",
+                "em_multiregion_source_material_alignment_ratio",
                 "max",
-                "EM_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO_HIGH",
-                "EM fallback-heavy source-material alignment ratio",
-                em_max_fallback_heavy_source_material_alignment_ratio_threshold,
+                "EM_MULTIREGION_SOURCE_MATERIAL_ALIGNMENT_RATIO_HIGH",
+                "EM multi-region source-material alignment ratio",
+                em_max_multiregion_source_material_alignment_ratio_threshold,
             ),
             (
                 "electromagnetic_reference_overlap_interference_gpu_provider",
@@ -8503,6 +8506,20 @@ def evaluate_release_readiness(
                     "em_heterogeneous_source_material_alignment_ratio",
                 ),
             ],
+            "electromagnetic_assigned_coefficient_coverage_ratio": [
+                (
+                    "electromagnetic_reference_homogeneous_gpu_provider",
+                    "em_homogeneous_assigned_coefficient_coverage_ratio",
+                ),
+                (
+                    "electromagnetic_reference_sparse_assignments_gpu_provider",
+                    "em_sparse_assigned_coefficient_coverage_ratio",
+                ),
+                (
+                    "electromagnetic_reference_multiregion_assignments_gpu_provider",
+                    "em_multiregion_assigned_coefficient_coverage_ratio",
+                ),
+            ],
         }
         assertion_field_fallback_specs = {
             (
@@ -8539,8 +8556,8 @@ def evaluate_release_readiness(
             ): "electromagnetic_conductivity_spread_ratio",
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
-                "em_homogeneous_fallback_coefficient_ratio",
-            ): "electromagnetic_fallback_coefficient_ratio",
+                "em_homogeneous_assigned_coefficient_coverage_ratio",
+            ): "electromagnetic_assigned_coefficient_coverage_ratio",
             (
                 "electromagnetic_reference_boundary_kernel_gpu_provider",
                 "em_boundary_kernel_insulation_leakage_ratio",
@@ -8791,12 +8808,12 @@ def evaluate_release_readiness(
                     or observed < em_min_core_assignment_coverage_ratio
                 ):
                     em_min_core_assignment_coverage_ratio = observed
-            elif assertion_name.endswith("homogeneous_fallback_coefficient_ratio"):
+            elif assertion_name.endswith("homogeneous_assigned_coefficient_coverage_ratio"):
                 if (
-                    em_max_core_fallback_coefficient_ratio is None
-                    or observed > em_max_core_fallback_coefficient_ratio
+                    em_min_core_assigned_coefficient_coverage_ratio is None
+                    or observed < em_min_core_assigned_coefficient_coverage_ratio
                 ):
-                    em_max_core_fallback_coefficient_ratio = observed
+                    em_min_core_assigned_coefficient_coverage_ratio = observed
             elif assertion_name.endswith("dispersive_loss_scale_mean"):
                 if (
                     em_max_dispersive_loss_scale_mean is None
@@ -8910,12 +8927,12 @@ def evaluate_release_readiness(
                     or observed < em_min_sparse_assignment_coverage_ratio
                 ):
                     em_min_sparse_assignment_coverage_ratio = observed
-            elif assertion_name.endswith("sparse_fallback_coefficient_ratio"):
+            elif assertion_name.endswith("sparse_assigned_coefficient_coverage_ratio"):
                 if (
-                    em_max_sparse_fallback_coefficient_ratio is None
-                    or observed > em_max_sparse_fallback_coefficient_ratio
+                    em_min_sparse_assigned_coefficient_coverage_ratio is None
+                    or observed < em_min_sparse_assigned_coefficient_coverage_ratio
                 ):
-                    em_max_sparse_fallback_coefficient_ratio = observed
+                    em_min_sparse_assigned_coefficient_coverage_ratio = observed
             elif assertion_name.endswith("sparse_source_region_coverage_ratio"):
                 if (
                     em_min_sparse_source_region_coverage_ratio is None
@@ -8946,48 +8963,48 @@ def evaluate_release_readiness(
                     or observed > em_max_sparse_energy_imbalance_ratio
                 ):
                     em_max_sparse_energy_imbalance_ratio = observed
-            elif assertion_name.endswith("fallback_heavy_assignment_coverage_ratio"):
+            elif assertion_name.endswith("multiregion_assignment_coverage_ratio"):
                 if (
-                    em_min_fallback_heavy_assignment_coverage_ratio is None
-                    or observed < em_min_fallback_heavy_assignment_coverage_ratio
+                    em_min_multiregion_assignment_coverage_ratio is None
+                    or observed < em_min_multiregion_assignment_coverage_ratio
                 ):
-                    em_min_fallback_heavy_assignment_coverage_ratio = observed
-            elif assertion_name.endswith("fallback_heavy_fallback_coefficient_ratio"):
+                    em_min_multiregion_assignment_coverage_ratio = observed
+            elif assertion_name.endswith("multiregion_assigned_coefficient_coverage_ratio"):
                 if (
-                    em_min_fallback_heavy_fallback_coefficient_ratio is None
-                    or observed < em_min_fallback_heavy_fallback_coefficient_ratio
+                    em_min_multiregion_assigned_coefficient_coverage_ratio is None
+                    or observed < em_min_multiregion_assigned_coefficient_coverage_ratio
                 ):
-                    em_min_fallback_heavy_fallback_coefficient_ratio = observed
-            elif assertion_name.endswith("fallback_heavy_source_region_coverage_ratio"):
+                    em_min_multiregion_assigned_coefficient_coverage_ratio = observed
+            elif assertion_name.endswith("multiregion_source_region_coverage_ratio"):
                 if (
-                    em_min_fallback_heavy_source_region_coverage_ratio is None
-                    or observed < em_min_fallback_heavy_source_region_coverage_ratio
+                    em_min_multiregion_source_region_coverage_ratio is None
+                    or observed < em_min_multiregion_source_region_coverage_ratio
                 ):
-                    em_min_fallback_heavy_source_region_coverage_ratio = observed
-            elif assertion_name.endswith("fallback_heavy_boundary_anchor_ratio"):
+                    em_min_multiregion_source_region_coverage_ratio = observed
+            elif assertion_name.endswith("multiregion_boundary_anchor_ratio"):
                 if (
-                    em_min_fallback_heavy_boundary_anchor_ratio is None
-                    or observed < em_min_fallback_heavy_boundary_anchor_ratio
+                    em_min_multiregion_boundary_anchor_ratio is None
+                    or observed < em_min_multiregion_boundary_anchor_ratio
                 ):
-                    em_min_fallback_heavy_boundary_anchor_ratio = observed
-            elif assertion_name.endswith("fallback_heavy_source_realization_ratio"):
+                    em_min_multiregion_boundary_anchor_ratio = observed
+            elif assertion_name.endswith("multiregion_source_realization_ratio"):
                 if (
-                    em_min_fallback_heavy_source_realization_ratio is None
-                    or observed < em_min_fallback_heavy_source_realization_ratio
+                    em_min_multiregion_source_realization_ratio is None
+                    or observed < em_min_multiregion_source_realization_ratio
                 ):
-                    em_min_fallback_heavy_source_realization_ratio = observed
-            elif assertion_name.endswith("fallback_heavy_energy_imbalance_ratio"):
+                    em_min_multiregion_source_realization_ratio = observed
+            elif assertion_name.endswith("multiregion_energy_imbalance_ratio"):
                 if (
-                    em_max_fallback_heavy_energy_imbalance_ratio is None
-                    or observed > em_max_fallback_heavy_energy_imbalance_ratio
+                    em_max_multiregion_energy_imbalance_ratio is None
+                    or observed > em_max_multiregion_energy_imbalance_ratio
                 ):
-                    em_max_fallback_heavy_energy_imbalance_ratio = observed
-            elif assertion_name.endswith("fallback_heavy_source_material_alignment_ratio"):
+                    em_max_multiregion_energy_imbalance_ratio = observed
+            elif assertion_name.endswith("multiregion_source_material_alignment_ratio"):
                 if (
-                    em_max_fallback_heavy_source_material_alignment_ratio is None
-                    or observed > em_max_fallback_heavy_source_material_alignment_ratio
+                    em_max_multiregion_source_material_alignment_ratio is None
+                    or observed > em_max_multiregion_source_material_alignment_ratio
                 ):
-                    em_max_fallback_heavy_source_material_alignment_ratio = observed
+                    em_max_multiregion_source_material_alignment_ratio = observed
             elif assertion_name.endswith("overlap_source_region_coverage_ratio"):
                 if (
                     em_min_overlap_source_region_coverage_ratio is None
@@ -9365,6 +9382,29 @@ def evaluate_release_readiness(
                         detail=f"{label} {observed:.3f} below threshold {threshold:.3f}",
                     )
                 )
+
+        additional_required_em_fields = (
+            "electromagnetic_formulation_coverage_ratio",
+            "electromagnetic_magnetostatic_curl_curl_coverage_ratio",
+            "electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio",
+            "electromagnetic_full_wave_displacement_current_coverage_ratio",
+            "electromagnetic_displacement_to_conduction_ratio",
+            "electromagnetic_material_frequency_response_coverage_ratio",
+            "electromagnetic_source_energy_diagnostic_coverage_ratio",
+            "electromagnetic_source_energy_consistency_ratio",
+            "electromagnetic_source_energy_imbalance_ratio",
+            "electromagnetic_sweep_known_reference_coverage_ratio",
+            "electromagnetic_sweep_known_peak_frequency_error_ratio",
+            "electromagnetic_sweep_known_quality_factor",
+            "electromagnetic_sweep_known_answer_coverage_ratio",
+        )
+        for field in additional_required_em_fields:
+            if not any(
+                isinstance(rec.get(field), (int, float))
+                and math.isfinite(float(rec[field]))
+                for rec in em_records
+            ):
+                missing_metric_fields.append(field)
 
         if missing_metric_fields and (protected or em_require_metrics):
             reasons.append(
@@ -13558,23 +13598,22 @@ def evaluate_release_readiness(
                     )
                 )
 
-        em_core_fallback_coefficient_trend_ratio = fixture_assertion_trend_ratio(
-            "em_homogeneous_fallback_coefficient_ratio",
-            ratio_mode="increase",
+        em_core_assigned_coefficient_coverage_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_homogeneous_assigned_coefficient_coverage_ratio"
         )
         if (
-            em_core_fallback_coefficient_trend_ratio is not None
-            and em_core_fallback_coefficient_trend_ratio
-            > em_max_core_fallback_coefficient_trend_ratio_threshold
+            em_core_assigned_coefficient_coverage_drop_trend_ratio is not None
+            and em_core_assigned_coefficient_coverage_drop_trend_ratio
+            > em_max_core_assigned_coefficient_coverage_drop_trend_ratio_threshold
         ):
             reasons.append(
                 Reason(
-                    code="EM_CORE_FALLBACK_COEFFICIENT_TREND_WORSENING",
+                    code="EM_CORE_ASSIGNED_COEFFICIENT_COVERAGE_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
-                        "EM core fallback-coefficient trend ratio "
-                        f"{em_core_fallback_coefficient_trend_ratio:.3f} exceeds threshold "
-                        f"{em_max_core_fallback_coefficient_trend_ratio_threshold:.3f}"
+                        "EM core assigned-coefficient-coverage trend ratio "
+                        f"{em_core_assigned_coefficient_coverage_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_core_assigned_coefficient_coverage_drop_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
@@ -13861,23 +13900,22 @@ def evaluate_release_readiness(
                 )
             )
 
-        em_sparse_fallback_coefficient_trend_ratio = fixture_assertion_trend_ratio(
-            "em_sparse_fallback_coefficient_ratio",
-            ratio_mode="increase",
+        em_sparse_assigned_coefficient_coverage_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_sparse_assigned_coefficient_coverage_ratio"
         )
         if (
-            em_sparse_fallback_coefficient_trend_ratio is not None
-            and em_sparse_fallback_coefficient_trend_ratio
-            > em_max_sparse_fallback_coefficient_trend_ratio_threshold
+            em_sparse_assigned_coefficient_coverage_drop_trend_ratio is not None
+            and em_sparse_assigned_coefficient_coverage_drop_trend_ratio
+            > em_max_sparse_assigned_coefficient_coverage_drop_trend_ratio_threshold
         ):
             reasons.append(
                 Reason(
-                    code="EM_SPARSE_FALLBACK_COEFFICIENT_TREND_WORSENING",
+                    code="EM_SPARSE_ASSIGNED_COEFFICIENT_COVERAGE_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
-                        "EM sparse fallback coefficient trend ratio "
-                        f"{em_sparse_fallback_coefficient_trend_ratio:.3f} exceeds threshold "
-                        f"{em_max_sparse_fallback_coefficient_trend_ratio_threshold:.3f}"
+                        "EM sparse assigned coefficient coverage trend ratio "
+                        f"{em_sparse_assigned_coefficient_coverage_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_sparse_assigned_coefficient_coverage_drop_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
@@ -13983,146 +14021,146 @@ def evaluate_release_readiness(
                 )
             )
 
-        em_fallback_heavy_assignment_coverage_drop_trend_ratio = fixture_assertion_trend_ratio(
-            "em_fallback_heavy_assignment_coverage_ratio"
+        em_multiregion_assignment_coverage_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_multiregion_assignment_coverage_ratio"
         )
         if (
-            em_fallback_heavy_assignment_coverage_drop_trend_ratio is not None
-            and em_fallback_heavy_assignment_coverage_drop_trend_ratio
-            > em_max_fallback_heavy_assignment_coverage_drop_trend_ratio_threshold
+            em_multiregion_assignment_coverage_drop_trend_ratio is not None
+            and em_multiregion_assignment_coverage_drop_trend_ratio
+            > em_max_multiregion_assignment_coverage_drop_trend_ratio_threshold
         ):
             reasons.append(
                 Reason(
-                    code="EM_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_TREND_WORSENING",
+                    code="EM_MULTIREGION_ASSIGNMENT_COVERAGE_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
-                        "EM fallback-heavy assignment coverage drop trend ratio "
-                        f"{em_fallback_heavy_assignment_coverage_drop_trend_ratio:.3f} exceeds threshold "
-                        f"{em_max_fallback_heavy_assignment_coverage_drop_trend_ratio_threshold:.3f}"
+                        "EM multi-region assignment coverage drop trend ratio "
+                        f"{em_multiregion_assignment_coverage_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_multiregion_assignment_coverage_drop_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
 
-        em_fallback_heavy_fallback_coefficient_drop_trend_ratio = fixture_assertion_trend_ratio(
-            "em_fallback_heavy_fallback_coefficient_ratio"
+        em_multiregion_assigned_coefficient_coverage_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_multiregion_assigned_coefficient_coverage_ratio"
         )
         if (
-            em_fallback_heavy_fallback_coefficient_drop_trend_ratio is not None
-            and em_fallback_heavy_fallback_coefficient_drop_trend_ratio
-            > em_max_fallback_heavy_fallback_coefficient_drop_trend_ratio_threshold
+            em_multiregion_assigned_coefficient_coverage_drop_trend_ratio is not None
+            and em_multiregion_assigned_coefficient_coverage_drop_trend_ratio
+            > em_max_multiregion_assigned_coefficient_coverage_drop_trend_ratio_threshold
         ):
             reasons.append(
                 Reason(
-                    code="EM_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_TREND_WORSENING",
+                    code="EM_MULTIREGION_ASSIGNED_COEFFICIENT_COVERAGE_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
-                        "EM fallback-heavy fallback coefficient drop trend ratio "
-                        f"{em_fallback_heavy_fallback_coefficient_drop_trend_ratio:.3f} exceeds threshold "
-                        f"{em_max_fallback_heavy_fallback_coefficient_drop_trend_ratio_threshold:.3f}"
+                        "EM multi-region assigned coefficient coverage drop trend ratio "
+                        f"{em_multiregion_assigned_coefficient_coverage_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_multiregion_assigned_coefficient_coverage_drop_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
 
-        em_fallback_heavy_source_region_coverage_drop_trend_ratio = fixture_assertion_trend_ratio(
-            "em_fallback_heavy_source_region_coverage_ratio"
+        em_multiregion_source_region_coverage_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_multiregion_source_region_coverage_ratio"
         )
         if (
-            em_fallback_heavy_source_region_coverage_drop_trend_ratio is not None
-            and em_fallback_heavy_source_region_coverage_drop_trend_ratio
-            > em_max_fallback_heavy_source_region_coverage_drop_trend_ratio_threshold
+            em_multiregion_source_region_coverage_drop_trend_ratio is not None
+            and em_multiregion_source_region_coverage_drop_trend_ratio
+            > em_max_multiregion_source_region_coverage_drop_trend_ratio_threshold
         ):
             reasons.append(
                 Reason(
-                    code="EM_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_TREND_WORSENING",
+                    code="EM_MULTIREGION_SOURCE_REGION_COVERAGE_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
-                        "EM fallback-heavy source-region coverage drop trend ratio "
-                        f"{em_fallback_heavy_source_region_coverage_drop_trend_ratio:.3f} exceeds threshold "
-                        f"{em_max_fallback_heavy_source_region_coverage_drop_trend_ratio_threshold:.3f}"
+                        "EM multi-region source-region coverage drop trend ratio "
+                        f"{em_multiregion_source_region_coverage_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_multiregion_source_region_coverage_drop_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
 
-        em_fallback_heavy_boundary_anchor_drop_trend_ratio = fixture_assertion_trend_ratio(
-            "em_fallback_heavy_boundary_anchor_ratio"
+        em_multiregion_boundary_anchor_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_multiregion_boundary_anchor_ratio"
         )
         if (
-            em_fallback_heavy_boundary_anchor_drop_trend_ratio is not None
-            and em_fallback_heavy_boundary_anchor_drop_trend_ratio
-            > em_max_fallback_heavy_boundary_anchor_drop_trend_ratio_threshold
+            em_multiregion_boundary_anchor_drop_trend_ratio is not None
+            and em_multiregion_boundary_anchor_drop_trend_ratio
+            > em_max_multiregion_boundary_anchor_drop_trend_ratio_threshold
         ):
             reasons.append(
                 Reason(
-                    code="EM_FALLBACK_HEAVY_BOUNDARY_ANCHOR_TREND_WORSENING",
+                    code="EM_MULTIREGION_BOUNDARY_ANCHOR_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
-                        "EM fallback-heavy boundary-anchor drop trend ratio "
-                        f"{em_fallback_heavy_boundary_anchor_drop_trend_ratio:.3f} exceeds threshold "
-                        f"{em_max_fallback_heavy_boundary_anchor_drop_trend_ratio_threshold:.3f}"
+                        "EM multi-region boundary-anchor drop trend ratio "
+                        f"{em_multiregion_boundary_anchor_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_multiregion_boundary_anchor_drop_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
 
-        em_fallback_heavy_source_realization_drop_trend_ratio = fixture_assertion_trend_ratio(
-            "em_fallback_heavy_source_realization_ratio"
+        em_multiregion_source_realization_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_multiregion_source_realization_ratio"
         )
         if (
-            em_fallback_heavy_source_realization_drop_trend_ratio is not None
-            and em_fallback_heavy_source_realization_drop_trend_ratio
-            > em_max_fallback_heavy_source_realization_drop_trend_ratio_threshold
+            em_multiregion_source_realization_drop_trend_ratio is not None
+            and em_multiregion_source_realization_drop_trend_ratio
+            > em_max_multiregion_source_realization_drop_trend_ratio_threshold
         ):
             reasons.append(
                 Reason(
-                    code="EM_FALLBACK_HEAVY_SOURCE_REALIZATION_TREND_WORSENING",
+                    code="EM_MULTIREGION_SOURCE_REALIZATION_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
-                        "EM fallback-heavy source realization drop trend ratio "
-                        f"{em_fallback_heavy_source_realization_drop_trend_ratio:.3f} exceeds threshold "
-                        f"{em_max_fallback_heavy_source_realization_drop_trend_ratio_threshold:.3f}"
+                        "EM multi-region source realization drop trend ratio "
+                        f"{em_multiregion_source_realization_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_multiregion_source_realization_drop_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
 
-        em_fallback_heavy_energy_imbalance_trend_ratio = fixture_assertion_trend_ratio(
-            "em_fallback_heavy_energy_imbalance_ratio",
+        em_multiregion_energy_imbalance_trend_ratio = fixture_assertion_trend_ratio(
+            "em_multiregion_energy_imbalance_ratio",
             ratio_mode="increase",
         )
         if (
-            em_fallback_heavy_energy_imbalance_trend_ratio is not None
-            and em_fallback_heavy_energy_imbalance_trend_ratio
-            > em_max_fallback_heavy_energy_imbalance_trend_ratio_threshold
+            em_multiregion_energy_imbalance_trend_ratio is not None
+            and em_multiregion_energy_imbalance_trend_ratio
+            > em_max_multiregion_energy_imbalance_trend_ratio_threshold
         ):
             reasons.append(
                 Reason(
-                    code="EM_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_WORSENING",
+                    code="EM_MULTIREGION_ENERGY_IMBALANCE_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
-                        "EM fallback-heavy energy-imbalance trend ratio "
-                        f"{em_fallback_heavy_energy_imbalance_trend_ratio:.3f} exceeds threshold "
-                        f"{em_max_fallback_heavy_energy_imbalance_trend_ratio_threshold:.3f}"
+                        "EM multi-region energy-imbalance trend ratio "
+                        f"{em_multiregion_energy_imbalance_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_multiregion_energy_imbalance_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
 
-        em_fallback_heavy_source_material_alignment_trend_ratio = (
+        em_multiregion_source_material_alignment_trend_ratio = (
             fixture_assertion_trend_ratio(
-                "em_fallback_heavy_source_material_alignment_ratio",
+                "em_multiregion_source_material_alignment_ratio",
                 ratio_mode="increase",
             )
         )
         if (
-            em_fallback_heavy_source_material_alignment_trend_ratio is not None
-            and em_fallback_heavy_source_material_alignment_trend_ratio
-            > em_max_fallback_heavy_source_material_alignment_trend_ratio_threshold
+            em_multiregion_source_material_alignment_trend_ratio is not None
+            and em_multiregion_source_material_alignment_trend_ratio
+            > em_max_multiregion_source_material_alignment_trend_ratio_threshold
         ):
             reasons.append(
                 Reason(
-                    code="EM_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_WORSENING",
+                    code="EM_MULTIREGION_SOURCE_MATERIAL_ALIGNMENT_TREND_WORSENING",
                     severity="fail" if protected else "warn",
                     detail=(
-                        "EM fallback-heavy source-material alignment trend ratio "
-                        f"{em_fallback_heavy_source_material_alignment_trend_ratio:.3f} exceeds threshold "
-                        f"{em_max_fallback_heavy_source_material_alignment_trend_ratio_threshold:.3f}"
+                        "EM multi-region source-material alignment trend ratio "
+                        f"{em_multiregion_source_material_alignment_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_multiregion_source_material_alignment_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
@@ -15234,8 +15272,8 @@ def evaluate_release_readiness(
         "em_min_flux_phasor_coherence_ratio_threshold": em_min_flux_phasor_coherence_ratio_threshold,
         "em_min_core_assignment_coverage_ratio": em_min_core_assignment_coverage_ratio,
         "em_min_core_assignment_coverage_ratio_threshold": em_min_core_assignment_coverage_ratio_threshold,
-        "em_max_core_fallback_coefficient_ratio": em_max_core_fallback_coefficient_ratio,
-        "em_max_core_fallback_coefficient_ratio_threshold": em_max_core_fallback_coefficient_ratio_threshold,
+        "em_min_core_assigned_coefficient_coverage_ratio": em_min_core_assigned_coefficient_coverage_ratio,
+        "em_min_core_assigned_coefficient_coverage_ratio_threshold": em_min_core_assigned_coefficient_coverage_ratio_threshold,
         "em_min_boundary_anchor_ratio": em_min_boundary_anchor_ratio,
         "em_min_boundary_anchor_ratio_threshold": em_min_boundary_anchor_ratio_threshold,
         "em_min_applied_current_a": em_min_applied_current_a,
@@ -15294,8 +15332,8 @@ def evaluate_release_readiness(
         "em_max_phased_source_energy_consistency_ratio_threshold": em_max_phased_source_energy_consistency_ratio_threshold,
         "em_min_sparse_assignment_coverage_ratio": em_min_sparse_assignment_coverage_ratio,
         "em_min_sparse_assignment_coverage_ratio_threshold": em_min_sparse_assignment_coverage_ratio_threshold,
-        "em_max_sparse_fallback_coefficient_ratio": em_max_sparse_fallback_coefficient_ratio,
-        "em_max_sparse_fallback_coefficient_ratio_threshold": em_max_sparse_fallback_coefficient_ratio_threshold,
+        "em_min_sparse_assigned_coefficient_coverage_ratio": em_min_sparse_assigned_coefficient_coverage_ratio,
+        "em_min_sparse_assigned_coefficient_coverage_ratio_threshold": em_min_sparse_assigned_coefficient_coverage_ratio_threshold,
         "em_min_sparse_source_region_coverage_ratio": em_min_sparse_source_region_coverage_ratio,
         "em_min_sparse_source_region_coverage_ratio_threshold": em_min_sparse_source_region_coverage_ratio_threshold,
         "em_min_sparse_source_material_alignment_ratio": em_min_sparse_source_material_alignment_ratio,
@@ -15306,20 +15344,20 @@ def evaluate_release_readiness(
         "em_min_sparse_source_realization_ratio_threshold": em_min_sparse_source_realization_ratio_threshold,
         "em_max_sparse_energy_imbalance_ratio": em_max_sparse_energy_imbalance_ratio,
         "em_max_sparse_energy_imbalance_ratio_threshold": em_max_sparse_energy_imbalance_ratio_threshold,
-        "em_min_fallback_heavy_assignment_coverage_ratio": em_min_fallback_heavy_assignment_coverage_ratio,
-        "em_min_fallback_heavy_assignment_coverage_ratio_threshold": em_min_fallback_heavy_assignment_coverage_ratio_threshold,
-        "em_min_fallback_heavy_fallback_coefficient_ratio": em_min_fallback_heavy_fallback_coefficient_ratio,
-        "em_min_fallback_heavy_fallback_coefficient_ratio_threshold": em_min_fallback_heavy_fallback_coefficient_ratio_threshold,
-        "em_min_fallback_heavy_source_region_coverage_ratio": em_min_fallback_heavy_source_region_coverage_ratio,
-        "em_min_fallback_heavy_source_region_coverage_ratio_threshold": em_min_fallback_heavy_source_region_coverage_ratio_threshold,
-        "em_min_fallback_heavy_boundary_anchor_ratio": em_min_fallback_heavy_boundary_anchor_ratio,
-        "em_min_fallback_heavy_boundary_anchor_ratio_threshold": em_min_fallback_heavy_boundary_anchor_ratio_threshold,
-        "em_min_fallback_heavy_source_realization_ratio": em_min_fallback_heavy_source_realization_ratio,
-        "em_min_fallback_heavy_source_realization_ratio_threshold": em_min_fallback_heavy_source_realization_ratio_threshold,
-        "em_max_fallback_heavy_energy_imbalance_ratio": em_max_fallback_heavy_energy_imbalance_ratio,
-        "em_max_fallback_heavy_energy_imbalance_ratio_threshold": em_max_fallback_heavy_energy_imbalance_ratio_threshold,
-        "em_max_fallback_heavy_source_material_alignment_ratio": em_max_fallback_heavy_source_material_alignment_ratio,
-        "em_max_fallback_heavy_source_material_alignment_ratio_threshold": em_max_fallback_heavy_source_material_alignment_ratio_threshold,
+        "em_min_multiregion_assignment_coverage_ratio": em_min_multiregion_assignment_coverage_ratio,
+        "em_min_multiregion_assignment_coverage_ratio_threshold": em_min_multiregion_assignment_coverage_ratio_threshold,
+        "em_min_multiregion_assigned_coefficient_coverage_ratio": em_min_multiregion_assigned_coefficient_coverage_ratio,
+        "em_min_multiregion_assigned_coefficient_coverage_ratio_threshold": em_min_multiregion_assigned_coefficient_coverage_ratio_threshold,
+        "em_min_multiregion_source_region_coverage_ratio": em_min_multiregion_source_region_coverage_ratio,
+        "em_min_multiregion_source_region_coverage_ratio_threshold": em_min_multiregion_source_region_coverage_ratio_threshold,
+        "em_min_multiregion_boundary_anchor_ratio": em_min_multiregion_boundary_anchor_ratio,
+        "em_min_multiregion_boundary_anchor_ratio_threshold": em_min_multiregion_boundary_anchor_ratio_threshold,
+        "em_min_multiregion_source_realization_ratio": em_min_multiregion_source_realization_ratio,
+        "em_min_multiregion_source_realization_ratio_threshold": em_min_multiregion_source_realization_ratio_threshold,
+        "em_max_multiregion_energy_imbalance_ratio": em_max_multiregion_energy_imbalance_ratio,
+        "em_max_multiregion_energy_imbalance_ratio_threshold": em_max_multiregion_energy_imbalance_ratio_threshold,
+        "em_max_multiregion_source_material_alignment_ratio": em_max_multiregion_source_material_alignment_ratio,
+        "em_max_multiregion_source_material_alignment_ratio_threshold": em_max_multiregion_source_material_alignment_ratio_threshold,
         "em_min_overlap_source_region_coverage_ratio": em_min_overlap_source_region_coverage_ratio,
         "em_min_overlap_source_region_coverage_ratio_threshold": em_min_overlap_source_region_coverage_ratio_threshold,
         "em_min_overlap_source_material_alignment_ratio": em_min_overlap_source_material_alignment_ratio,
@@ -15434,8 +15472,8 @@ def evaluate_release_readiness(
         "em_max_core_source_material_alignment_drop_trend_ratio_threshold": em_max_core_source_material_alignment_drop_trend_ratio_threshold,
         "em_core_assignment_coverage_drop_trend_ratio": em_core_assignment_coverage_drop_trend_ratio,
         "em_max_core_assignment_coverage_drop_trend_ratio_threshold": em_max_core_assignment_coverage_drop_trend_ratio_threshold,
-        "em_core_fallback_coefficient_trend_ratio": em_core_fallback_coefficient_trend_ratio,
-        "em_max_core_fallback_coefficient_trend_ratio_threshold": em_max_core_fallback_coefficient_trend_ratio_threshold,
+        "em_core_assigned_coefficient_coverage_drop_trend_ratio": em_core_assigned_coefficient_coverage_drop_trend_ratio,
+        "em_max_core_assigned_coefficient_coverage_drop_trend_ratio_threshold": em_max_core_assigned_coefficient_coverage_drop_trend_ratio_threshold,
         "em_dispersive_phase_attenuation_trend_ratio": em_dispersive_phase_attenuation_trend_ratio,
         "em_max_dispersive_phase_attenuation_trend_ratio_threshold": em_max_dispersive_phase_attenuation_trend_ratio_threshold,
         "em_dispersive_phase_attenuation_spread_trend_ratio": em_dispersive_phase_attenuation_spread_trend_ratio,
@@ -15460,8 +15498,8 @@ def evaluate_release_readiness(
         "em_max_phased_source_energy_consistency_trend_ratio_threshold": em_max_phased_source_energy_consistency_trend_ratio_threshold,
         "em_sparse_assignment_coverage_drop_trend_ratio": em_sparse_assignment_coverage_drop_trend_ratio,
         "em_max_sparse_assignment_coverage_drop_trend_ratio_threshold": em_max_sparse_assignment_coverage_drop_trend_ratio_threshold,
-        "em_sparse_fallback_coefficient_trend_ratio": em_sparse_fallback_coefficient_trend_ratio,
-        "em_max_sparse_fallback_coefficient_trend_ratio_threshold": em_max_sparse_fallback_coefficient_trend_ratio_threshold,
+        "em_sparse_assigned_coefficient_coverage_drop_trend_ratio": em_sparse_assigned_coefficient_coverage_drop_trend_ratio,
+        "em_max_sparse_assigned_coefficient_coverage_drop_trend_ratio_threshold": em_max_sparse_assigned_coefficient_coverage_drop_trend_ratio_threshold,
         "em_sparse_source_region_coverage_drop_trend_ratio": em_sparse_source_region_coverage_drop_trend_ratio,
         "em_max_sparse_source_region_coverage_drop_trend_ratio_threshold": em_max_sparse_source_region_coverage_drop_trend_ratio_threshold,
         "em_sparse_source_material_alignment_drop_trend_ratio": em_sparse_source_material_alignment_drop_trend_ratio,
@@ -15472,20 +15510,20 @@ def evaluate_release_readiness(
         "em_max_sparse_source_realization_drop_trend_ratio_threshold": em_max_sparse_source_realization_drop_trend_ratio_threshold,
         "em_sparse_energy_imbalance_trend_ratio": em_sparse_energy_imbalance_trend_ratio,
         "em_max_sparse_energy_imbalance_trend_ratio_threshold": em_max_sparse_energy_imbalance_trend_ratio_threshold,
-        "em_fallback_heavy_assignment_coverage_drop_trend_ratio": em_fallback_heavy_assignment_coverage_drop_trend_ratio,
-        "em_max_fallback_heavy_assignment_coverage_drop_trend_ratio_threshold": em_max_fallback_heavy_assignment_coverage_drop_trend_ratio_threshold,
-        "em_fallback_heavy_fallback_coefficient_drop_trend_ratio": em_fallback_heavy_fallback_coefficient_drop_trend_ratio,
-        "em_max_fallback_heavy_fallback_coefficient_drop_trend_ratio_threshold": em_max_fallback_heavy_fallback_coefficient_drop_trend_ratio_threshold,
-        "em_fallback_heavy_source_region_coverage_drop_trend_ratio": em_fallback_heavy_source_region_coverage_drop_trend_ratio,
-        "em_max_fallback_heavy_source_region_coverage_drop_trend_ratio_threshold": em_max_fallback_heavy_source_region_coverage_drop_trend_ratio_threshold,
-        "em_fallback_heavy_boundary_anchor_drop_trend_ratio": em_fallback_heavy_boundary_anchor_drop_trend_ratio,
-        "em_max_fallback_heavy_boundary_anchor_drop_trend_ratio_threshold": em_max_fallback_heavy_boundary_anchor_drop_trend_ratio_threshold,
-        "em_fallback_heavy_source_realization_drop_trend_ratio": em_fallback_heavy_source_realization_drop_trend_ratio,
-        "em_max_fallback_heavy_source_realization_drop_trend_ratio_threshold": em_max_fallback_heavy_source_realization_drop_trend_ratio_threshold,
-        "em_fallback_heavy_energy_imbalance_trend_ratio": em_fallback_heavy_energy_imbalance_trend_ratio,
-        "em_max_fallback_heavy_energy_imbalance_trend_ratio_threshold": em_max_fallback_heavy_energy_imbalance_trend_ratio_threshold,
-        "em_fallback_heavy_source_material_alignment_trend_ratio": em_fallback_heavy_source_material_alignment_trend_ratio,
-        "em_max_fallback_heavy_source_material_alignment_trend_ratio_threshold": em_max_fallback_heavy_source_material_alignment_trend_ratio_threshold,
+        "em_multiregion_assignment_coverage_drop_trend_ratio": em_multiregion_assignment_coverage_drop_trend_ratio,
+        "em_max_multiregion_assignment_coverage_drop_trend_ratio_threshold": em_max_multiregion_assignment_coverage_drop_trend_ratio_threshold,
+        "em_multiregion_assigned_coefficient_coverage_drop_trend_ratio": em_multiregion_assigned_coefficient_coverage_drop_trend_ratio,
+        "em_max_multiregion_assigned_coefficient_coverage_drop_trend_ratio_threshold": em_max_multiregion_assigned_coefficient_coverage_drop_trend_ratio_threshold,
+        "em_multiregion_source_region_coverage_drop_trend_ratio": em_multiregion_source_region_coverage_drop_trend_ratio,
+        "em_max_multiregion_source_region_coverage_drop_trend_ratio_threshold": em_max_multiregion_source_region_coverage_drop_trend_ratio_threshold,
+        "em_multiregion_boundary_anchor_drop_trend_ratio": em_multiregion_boundary_anchor_drop_trend_ratio,
+        "em_max_multiregion_boundary_anchor_drop_trend_ratio_threshold": em_max_multiregion_boundary_anchor_drop_trend_ratio_threshold,
+        "em_multiregion_source_realization_drop_trend_ratio": em_multiregion_source_realization_drop_trend_ratio,
+        "em_max_multiregion_source_realization_drop_trend_ratio_threshold": em_max_multiregion_source_realization_drop_trend_ratio_threshold,
+        "em_multiregion_energy_imbalance_trend_ratio": em_multiregion_energy_imbalance_trend_ratio,
+        "em_max_multiregion_energy_imbalance_trend_ratio_threshold": em_max_multiregion_energy_imbalance_trend_ratio_threshold,
+        "em_multiregion_source_material_alignment_trend_ratio": em_multiregion_source_material_alignment_trend_ratio,
+        "em_max_multiregion_source_material_alignment_trend_ratio_threshold": em_max_multiregion_source_material_alignment_trend_ratio_threshold,
         "em_overlap_source_region_coverage_drop_trend_ratio": em_overlap_source_region_coverage_drop_trend_ratio,
         "em_max_overlap_source_region_coverage_drop_trend_ratio_threshold": em_max_overlap_source_region_coverage_drop_trend_ratio_threshold,
         "em_overlap_source_material_alignment_drop_trend_ratio": em_overlap_source_material_alignment_drop_trend_ratio,
@@ -16203,8 +16241,8 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_min_core_assignment_coverage_ratio') if result.get('em_min_core_assignment_coverage_ratio') is not None else '-'}`/`{result.get('em_min_core_assignment_coverage_ratio_threshold') if result.get('em_min_core_assignment_coverage_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
-        "- EM core fallback coefficient ratio/threshold: "
-        f"`{result.get('em_max_core_fallback_coefficient_ratio') if result.get('em_max_core_fallback_coefficient_ratio') is not None else '-'}`/`{result.get('em_max_core_fallback_coefficient_ratio_threshold') if result.get('em_max_core_fallback_coefficient_ratio_threshold') is not None else '-'}`"
+        "- EM core assigned coefficient coverage ratio/threshold: "
+        f"`{result.get('em_min_core_assigned_coefficient_coverage_ratio') if result.get('em_min_core_assigned_coefficient_coverage_ratio') is not None else '-'}`/`{result.get('em_min_core_assigned_coefficient_coverage_ratio_threshold') if result.get('em_min_core_assigned_coefficient_coverage_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
         "- Max EM boundary-penalty residual norms (real/imag): "
@@ -16248,11 +16286,11 @@ def markdown_summary(result: dict) -> str:
     )
     lines.append(
         "- EM sparse assignment/fallback: "
-        f"`{result.get('em_min_sparse_assignment_coverage_ratio') if result.get('em_min_sparse_assignment_coverage_ratio') is not None else '-'}`/`{result.get('em_max_sparse_fallback_coefficient_ratio') if result.get('em_max_sparse_fallback_coefficient_ratio') is not None else '-'}`"
+        f"`{result.get('em_min_sparse_assignment_coverage_ratio') if result.get('em_min_sparse_assignment_coverage_ratio') is not None else '-'}`/`{result.get('em_min_sparse_assigned_coefficient_coverage_ratio') if result.get('em_min_sparse_assigned_coefficient_coverage_ratio') is not None else '-'}`"
     )
     lines.append(
         "- EM sparse assignment/fallback thresholds: "
-        f"`{result.get('em_min_sparse_assignment_coverage_ratio_threshold') if result.get('em_min_sparse_assignment_coverage_ratio_threshold') is not None else '-'}`/`{result.get('em_max_sparse_fallback_coefficient_ratio_threshold') if result.get('em_max_sparse_fallback_coefficient_ratio_threshold') is not None else '-'}`"
+        f"`{result.get('em_min_sparse_assignment_coverage_ratio_threshold') if result.get('em_min_sparse_assignment_coverage_ratio_threshold') is not None else '-'}`/`{result.get('em_min_sparse_assigned_coefficient_coverage_ratio_threshold') if result.get('em_min_sparse_assigned_coefficient_coverage_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
         "- EM sparse source-realization/energy-imbalance: "
@@ -16263,24 +16301,24 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_min_sparse_source_realization_ratio_threshold') if result.get('em_min_sparse_source_realization_ratio_threshold') is not None else '-'}`/`{result.get('em_max_sparse_energy_imbalance_ratio_threshold') if result.get('em_max_sparse_energy_imbalance_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
-        "- EM fallback-heavy assignment/fallback: "
-        f"`{result.get('em_min_fallback_heavy_assignment_coverage_ratio') if result.get('em_min_fallback_heavy_assignment_coverage_ratio') is not None else '-'}`/`{result.get('em_min_fallback_heavy_fallback_coefficient_ratio') if result.get('em_min_fallback_heavy_fallback_coefficient_ratio') is not None else '-'}`"
+        "- EM multi-region assignment/fallback: "
+        f"`{result.get('em_min_multiregion_assignment_coverage_ratio') if result.get('em_min_multiregion_assignment_coverage_ratio') is not None else '-'}`/`{result.get('em_min_multiregion_assigned_coefficient_coverage_ratio') if result.get('em_min_multiregion_assigned_coefficient_coverage_ratio') is not None else '-'}`"
     )
     lines.append(
-        "- EM fallback-heavy assignment/fallback thresholds: "
-        f"`{result.get('em_min_fallback_heavy_assignment_coverage_ratio_threshold') if result.get('em_min_fallback_heavy_assignment_coverage_ratio_threshold') is not None else '-'}`/`{result.get('em_min_fallback_heavy_fallback_coefficient_ratio_threshold') if result.get('em_min_fallback_heavy_fallback_coefficient_ratio_threshold') is not None else '-'}`"
+        "- EM multi-region assignment/fallback thresholds: "
+        f"`{result.get('em_min_multiregion_assignment_coverage_ratio_threshold') if result.get('em_min_multiregion_assignment_coverage_ratio_threshold') is not None else '-'}`/`{result.get('em_min_multiregion_assigned_coefficient_coverage_ratio_threshold') if result.get('em_min_multiregion_assigned_coefficient_coverage_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
-        "- EM fallback-heavy source-realization/energy-imbalance: "
-        f"`{result.get('em_min_fallback_heavy_source_realization_ratio') if result.get('em_min_fallback_heavy_source_realization_ratio') is not None else '-'}`/`{result.get('em_max_fallback_heavy_energy_imbalance_ratio') if result.get('em_max_fallback_heavy_energy_imbalance_ratio') is not None else '-'}`"
+        "- EM multi-region source-realization/energy-imbalance: "
+        f"`{result.get('em_min_multiregion_source_realization_ratio') if result.get('em_min_multiregion_source_realization_ratio') is not None else '-'}`/`{result.get('em_max_multiregion_energy_imbalance_ratio') if result.get('em_max_multiregion_energy_imbalance_ratio') is not None else '-'}`"
     )
     lines.append(
-        "- EM fallback-heavy source-realization/energy-imbalance thresholds: "
-        f"`{result.get('em_min_fallback_heavy_source_realization_ratio_threshold') if result.get('em_min_fallback_heavy_source_realization_ratio_threshold') is not None else '-'}`/`{result.get('em_max_fallback_heavy_energy_imbalance_ratio_threshold') if result.get('em_max_fallback_heavy_energy_imbalance_ratio_threshold') is not None else '-'}`"
+        "- EM multi-region source-realization/energy-imbalance thresholds: "
+        f"`{result.get('em_min_multiregion_source_realization_ratio_threshold') if result.get('em_min_multiregion_source_realization_ratio_threshold') is not None else '-'}`/`{result.get('em_max_multiregion_energy_imbalance_ratio_threshold') if result.get('em_max_multiregion_energy_imbalance_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
-        "- EM fallback-heavy source-material alignment ratio/threshold: "
-        f"`{result.get('em_max_fallback_heavy_source_material_alignment_ratio') if result.get('em_max_fallback_heavy_source_material_alignment_ratio') is not None else '-'}`/`{result.get('em_max_fallback_heavy_source_material_alignment_ratio_threshold') if result.get('em_max_fallback_heavy_source_material_alignment_ratio_threshold') is not None else '-'}`"
+        "- EM multi-region source-material alignment ratio/threshold: "
+        f"`{result.get('em_max_multiregion_source_material_alignment_ratio') if result.get('em_max_multiregion_source_material_alignment_ratio') is not None else '-'}`/`{result.get('em_max_multiregion_source_material_alignment_ratio_threshold') if result.get('em_max_multiregion_source_material_alignment_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
         "- EM overlap region/material/overlap ratios: "
@@ -16400,8 +16438,8 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_reference_frequency_drop_trend_ratio') if result.get('em_reference_frequency_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sweep_count_drop_trend_ratio') if result.get('em_sweep_count_drop_trend_ratio') is not None else '-'}`/`{result.get('em_resonance_peak_frequency_trend_ratio') if result.get('em_resonance_peak_frequency_trend_ratio') is not None else '-'}`/`{result.get('em_resonance_peak_flux_density_trend_ratio') if result.get('em_resonance_peak_flux_density_trend_ratio') is not None else '-'}`/`{result.get('em_resonance_bandwidth_trend_ratio') if result.get('em_resonance_bandwidth_trend_ratio') is not None else '-'}`/`{result.get('em_resonance_quality_factor_drop_trend_ratio') if result.get('em_resonance_quality_factor_drop_trend_ratio') is not None else '-'}`/`{result.get('em_resonance_flux_gain_drop_trend_ratio') if result.get('em_resonance_flux_gain_drop_trend_ratio') is not None else '-'}`"
     )
     lines.append(
-        "- EM core trend ratios (energy, flux, sigma mean, sigma coverage, heterogeneous sigma spread, homogeneous sigma spread, homogeneous conductivity spread, heterogeneous conductivity spread drop, homogeneous relative permittivity spread, heterogeneous relative permittivity spread drop, homogeneous relative permeability spread, heterogeneous relative permeability spread drop, relative permittivity frequency-scale mean drop, relative permittivity frequency-scale spread, relative permittivity frequency-response coverage drop, relative permeability frequency-scale mean drop, relative permeability frequency-scale spread, relative permeability frequency-response coverage drop, homogeneous material heterogeneity, heterogeneous material heterogeneity drop, loss scale, loss scale spread, boundary energy, region contrast, core boundary anchor, core dispersive coupling, core source realization, core source coverage, core source material, core assignment coverage, core fallback coefficient, phase attenuation, phase attenuation spread, phase conductivity attenuation): "
-        f"`{result.get('em_energy_imbalance_trend_ratio') if result.get('em_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_flux_divergence_trend_ratio') if result.get('em_flux_divergence_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_scale_mean_drop_trend_ratio') if result.get('em_sigma_omega_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_response_coverage_drop_trend_ratio') if result.get('em_sigma_omega_response_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_scale_spread_trend_ratio') if result.get('em_sigma_omega_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_sigma_omega_scale_spread_trend_ratio') if result.get('em_homogeneous_sigma_omega_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_conductivity_spread_trend_ratio') if result.get('em_homogeneous_conductivity_spread_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_conductivity_spread_drop_trend_ratio') if result.get('em_heterogeneous_conductivity_spread_drop_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_relative_permittivity_spread_trend_ratio') if result.get('em_homogeneous_relative_permittivity_spread_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_relative_permittivity_spread_drop_trend_ratio') if result.get('em_heterogeneous_relative_permittivity_spread_drop_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_relative_permeability_spread_trend_ratio') if result.get('em_homogeneous_relative_permeability_spread_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_relative_permeability_spread_drop_trend_ratio') if result.get('em_heterogeneous_relative_permeability_spread_drop_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permittivity_frequency_scale_mean_drop_trend_ratio') if result.get('em_relative_permittivity_frequency_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permittivity_frequency_scale_spread_trend_ratio') if result.get('em_relative_permittivity_frequency_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permittivity_frequency_response_coverage_drop_trend_ratio') if result.get('em_relative_permittivity_frequency_response_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permeability_frequency_scale_mean_drop_trend_ratio') if result.get('em_relative_permeability_frequency_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permeability_frequency_scale_spread_trend_ratio') if result.get('em_relative_permeability_frequency_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permeability_frequency_response_coverage_drop_trend_ratio') if result.get('em_relative_permeability_frequency_response_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_material_heterogeneity_trend_ratio') if result.get('em_homogeneous_material_heterogeneity_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_material_heterogeneity_drop_trend_ratio') if result.get('em_heterogeneous_material_heterogeneity_drop_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_loss_scale_trend_ratio') if result.get('em_dispersive_loss_scale_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_loss_scale_spread_trend_ratio') if result.get('em_dispersive_loss_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_energy_drop_trend_ratio') if result.get('em_boundary_energy_drop_trend_ratio') is not None else '-'}`/`{result.get('em_region_contrast_drop_trend_ratio') if result.get('em_region_contrast_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_boundary_anchor_drop_trend_ratio') if result.get('em_core_boundary_anchor_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_dispersive_coupling_trend_ratio') if result.get('em_core_dispersive_coupling_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_realization_drop_trend_ratio') if result.get('em_core_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_region_coverage_drop_trend_ratio') if result.get('em_core_source_region_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_material_alignment_drop_trend_ratio') if result.get('em_core_source_material_alignment_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_assignment_coverage_drop_trend_ratio') if result.get('em_core_assignment_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_fallback_coefficient_trend_ratio') if result.get('em_core_fallback_coefficient_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_attenuation_trend_ratio') if result.get('em_dispersive_phase_attenuation_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_attenuation_spread_trend_ratio') if result.get('em_dispersive_phase_attenuation_spread_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_conductivity_attenuation_trend_ratio') if result.get('em_dispersive_phase_conductivity_attenuation_trend_ratio') is not None else '-'}`"
+        "- EM core trend ratios (energy, flux, sigma mean, sigma coverage, heterogeneous sigma spread, homogeneous sigma spread, homogeneous conductivity spread, heterogeneous conductivity spread drop, homogeneous relative permittivity spread, heterogeneous relative permittivity spread drop, homogeneous relative permeability spread, heterogeneous relative permeability spread drop, relative permittivity frequency-scale mean drop, relative permittivity frequency-scale spread, relative permittivity frequency-response coverage drop, relative permeability frequency-scale mean drop, relative permeability frequency-scale spread, relative permeability frequency-response coverage drop, homogeneous material heterogeneity, heterogeneous material heterogeneity drop, loss scale, loss scale spread, boundary energy, region contrast, core boundary anchor, core dispersive coupling, core source realization, core source coverage, core source material, core assignment coverage, core assigned coefficient coverage, phase attenuation, phase attenuation spread, phase conductivity attenuation): "
+        f"`{result.get('em_energy_imbalance_trend_ratio') if result.get('em_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_flux_divergence_trend_ratio') if result.get('em_flux_divergence_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_scale_mean_drop_trend_ratio') if result.get('em_sigma_omega_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_response_coverage_drop_trend_ratio') if result.get('em_sigma_omega_response_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_scale_spread_trend_ratio') if result.get('em_sigma_omega_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_sigma_omega_scale_spread_trend_ratio') if result.get('em_homogeneous_sigma_omega_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_conductivity_spread_trend_ratio') if result.get('em_homogeneous_conductivity_spread_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_conductivity_spread_drop_trend_ratio') if result.get('em_heterogeneous_conductivity_spread_drop_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_relative_permittivity_spread_trend_ratio') if result.get('em_homogeneous_relative_permittivity_spread_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_relative_permittivity_spread_drop_trend_ratio') if result.get('em_heterogeneous_relative_permittivity_spread_drop_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_relative_permeability_spread_trend_ratio') if result.get('em_homogeneous_relative_permeability_spread_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_relative_permeability_spread_drop_trend_ratio') if result.get('em_heterogeneous_relative_permeability_spread_drop_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permittivity_frequency_scale_mean_drop_trend_ratio') if result.get('em_relative_permittivity_frequency_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permittivity_frequency_scale_spread_trend_ratio') if result.get('em_relative_permittivity_frequency_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permittivity_frequency_response_coverage_drop_trend_ratio') if result.get('em_relative_permittivity_frequency_response_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permeability_frequency_scale_mean_drop_trend_ratio') if result.get('em_relative_permeability_frequency_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permeability_frequency_scale_spread_trend_ratio') if result.get('em_relative_permeability_frequency_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permeability_frequency_response_coverage_drop_trend_ratio') if result.get('em_relative_permeability_frequency_response_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_material_heterogeneity_trend_ratio') if result.get('em_homogeneous_material_heterogeneity_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_material_heterogeneity_drop_trend_ratio') if result.get('em_heterogeneous_material_heterogeneity_drop_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_loss_scale_trend_ratio') if result.get('em_dispersive_loss_scale_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_loss_scale_spread_trend_ratio') if result.get('em_dispersive_loss_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_energy_drop_trend_ratio') if result.get('em_boundary_energy_drop_trend_ratio') is not None else '-'}`/`{result.get('em_region_contrast_drop_trend_ratio') if result.get('em_region_contrast_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_boundary_anchor_drop_trend_ratio') if result.get('em_core_boundary_anchor_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_dispersive_coupling_trend_ratio') if result.get('em_core_dispersive_coupling_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_realization_drop_trend_ratio') if result.get('em_core_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_region_coverage_drop_trend_ratio') if result.get('em_core_source_region_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_material_alignment_drop_trend_ratio') if result.get('em_core_source_material_alignment_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_assignment_coverage_drop_trend_ratio') if result.get('em_core_assignment_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_assigned_coefficient_coverage_drop_trend_ratio') if result.get('em_core_assigned_coefficient_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_attenuation_trend_ratio') if result.get('em_dispersive_phase_attenuation_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_attenuation_spread_trend_ratio') if result.get('em_dispersive_phase_attenuation_spread_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_conductivity_attenuation_trend_ratio') if result.get('em_dispersive_phase_conductivity_attenuation_trend_ratio') is not None else '-'}`"
     )
     lines.append(
         "- EM boundary/phased trend ratios (penalty real, penalty imag, penalty anchor, penalty conditioning, phased overlap, phased interference, phased region coverage, phased energy consistency): "
@@ -16409,7 +16447,7 @@ def markdown_summary(result: dict) -> str:
     )
     lines.append(
         "- EM non-core trend ratios (sparse assignment, sparse fallback, sparse source realization, sparse energy imbalance, fallback source realization, fallback energy imbalance, fallback material alignment, overlap ratio, overlap interference, boundary-kernel leakage): "
-        f"`{result.get('em_sparse_assignment_coverage_drop_trend_ratio') if result.get('em_sparse_assignment_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_fallback_coefficient_trend_ratio') if result.get('em_sparse_fallback_coefficient_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_source_realization_drop_trend_ratio') if result.get('em_sparse_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_energy_imbalance_trend_ratio') if result.get('em_sparse_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_fallback_heavy_source_realization_drop_trend_ratio') if result.get('em_fallback_heavy_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_fallback_heavy_energy_imbalance_trend_ratio') if result.get('em_fallback_heavy_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_fallback_heavy_source_material_alignment_trend_ratio') if result.get('em_fallback_heavy_source_material_alignment_trend_ratio') is not None else '-'}`/`{result.get('em_overlap_source_overlap_drop_trend_ratio') if result.get('em_overlap_source_overlap_drop_trend_ratio') is not None else '-'}`/`{result.get('em_overlap_source_interference_trend_ratio') if result.get('em_overlap_source_interference_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_kernel_insulation_leakage_trend_ratio') if result.get('em_boundary_kernel_insulation_leakage_trend_ratio') is not None else '-'}`"
+        f"`{result.get('em_sparse_assignment_coverage_drop_trend_ratio') if result.get('em_sparse_assignment_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_assigned_coefficient_coverage_drop_trend_ratio') if result.get('em_sparse_assigned_coefficient_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_source_realization_drop_trend_ratio') if result.get('em_sparse_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_energy_imbalance_trend_ratio') if result.get('em_sparse_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_multiregion_source_realization_drop_trend_ratio') if result.get('em_multiregion_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_multiregion_energy_imbalance_trend_ratio') if result.get('em_multiregion_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_multiregion_source_material_alignment_trend_ratio') if result.get('em_multiregion_source_material_alignment_trend_ratio') is not None else '-'}`/`{result.get('em_overlap_source_overlap_drop_trend_ratio') if result.get('em_overlap_source_overlap_drop_trend_ratio') is not None else '-'}`/`{result.get('em_overlap_source_interference_trend_ratio') if result.get('em_overlap_source_interference_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_kernel_insulation_leakage_trend_ratio') if result.get('em_boundary_kernel_insulation_leakage_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### Plasticity Posture")

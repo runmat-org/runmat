@@ -479,7 +479,7 @@ REQUIRED_FIXTURES = {
         "em_homogeneous_relative_permittivity_spread_ratio",
         "em_homogeneous_relative_permeability_spread_ratio",
         "em_homogeneous_assignment_coverage_ratio",
-        "em_homogeneous_fallback_coefficient_ratio",
+        "em_homogeneous_assigned_coefficient_coverage_ratio",
         "em_homogeneous_source_realization_ratio",
         "em_homogeneous_flux_phasor_coherence_ratio",
         "em_homogeneous_flux_divergence_ratio",
@@ -572,14 +572,14 @@ REQUIRED_FIXTURES = {
         "electromagnetic_sweep_known_quality_factor",
         "electromagnetic_sweep_known_answer_coverage_ratio",
         "em_sparse_assignment_coverage_ratio",
-        "em_sparse_fallback_coefficient_ratio",
+        "em_sparse_assigned_coefficient_coverage_ratio",
         "em_sparse_source_realization_ratio",
         "em_sparse_source_region_coverage_ratio",
         "em_sparse_source_material_alignment_ratio",
         "em_sparse_boundary_anchor_ratio",
         "em_sparse_energy_imbalance_ratio",
     },
-    "electromagnetic_reference_fallback_heavy_gpu_provider": {
+    "electromagnetic_reference_multiregion_assignments_gpu_provider": {
         "electromagnetic_source_energy_diagnostic_coverage_ratio",
         "electromagnetic_source_energy_consistency_ratio",
         "electromagnetic_source_energy_imbalance_ratio",
@@ -587,13 +587,13 @@ REQUIRED_FIXTURES = {
         "electromagnetic_sweep_known_peak_frequency_error_ratio",
         "electromagnetic_sweep_known_quality_factor",
         "electromagnetic_sweep_known_answer_coverage_ratio",
-        "em_fallback_heavy_assignment_coverage_ratio",
-        "em_fallback_heavy_fallback_coefficient_ratio",
-        "em_fallback_heavy_source_realization_ratio",
-        "em_fallback_heavy_source_region_coverage_ratio",
-        "em_fallback_heavy_source_material_alignment_ratio",
-        "em_fallback_heavy_boundary_anchor_ratio",
-        "em_fallback_heavy_energy_imbalance_ratio",
+        "em_multiregion_assignment_coverage_ratio",
+        "em_multiregion_assigned_coefficient_coverage_ratio",
+        "em_multiregion_source_realization_ratio",
+        "em_multiregion_source_region_coverage_ratio",
+        "em_multiregion_source_material_alignment_ratio",
+        "em_multiregion_boundary_anchor_ratio",
+        "em_multiregion_energy_imbalance_ratio",
     },
     "electromagnetic_reference_overlap_interference_gpu_provider": {
         "electromagnetic_source_energy_diagnostic_coverage_ratio",
@@ -1383,7 +1383,7 @@ EM_SOURCE_FIDELITY_REQUIRED_FIELDS = {
 
 EM_CORE_ASSIGNMENT_REQUIRED_FIELDS = {
     "electromagnetic_assignment_coverage_ratio",
-    "electromagnetic_fallback_coefficient_ratio",
+    "electromagnetic_assigned_coefficient_coverage_ratio",
     "electromagnetic_boundary_anchor_ratio",
 }
 
@@ -1526,7 +1526,7 @@ PERFORMANCE_REQUIRED_FIELDS = {
         "gpu_solver_solve_ms",
         "gpu_solver_fallback_apply_count",
     },
-    "electromagnetic_reference_fallback_heavy_gpu_provider": {
+    "electromagnetic_reference_multiregion_assignments_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
         "gpu_solver_fallback_apply_count",
