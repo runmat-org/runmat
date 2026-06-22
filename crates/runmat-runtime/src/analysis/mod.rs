@@ -3754,12 +3754,12 @@ fn recover_cfd_vorticity(velocity: &[f64], node_count: usize) -> Vec<f64> {
 fn recover_cfd_wall_shear_stress(
     domain: &runmat_analysis_core::CfdDomain,
     velocity: &[f64],
-    node_count: usize,
+    field_count: usize,
 ) -> Vec<f64> {
-    let mut shear = vec![0.0; node_count * 3];
+    let mut shear = vec![0.0; field_count * 3];
     let viscosity = domain.dynamic_viscosity_pa_s;
-    for node in 0..node_count {
-        let base = node * 3;
+    for index in 0..field_count {
+        let base = index * 3;
         shear[base] = viscosity * velocity.get(base).copied().unwrap_or(0.0);
         shear[base + 1] = viscosity * velocity.get(base + 1).copied().unwrap_or(0.0);
     }
@@ -3838,19 +3838,20 @@ fn build_cfd_run_fields(
     solution: &CfdVelocityPressureSolution,
 ) -> Vec<AnalysisField> {
     let node_count = solution.pressure.len();
-    let velocity = solution.velocity.clone();
-    let pressure = solution.pressure.clone();
-    let vorticity = recover_cfd_vorticity(&velocity, node_count);
-    let wall_shear_stress = recover_cfd_wall_shear_stress(domain, &velocity, node_count);
+    let velocity = cell_centered_vector_from_nodal(&solution.velocity, node_count);
+    let pressure = cell_centered_scalar_from_nodal(&solution.pressure);
+    let cell_count = pressure.len().max(1);
+    let vorticity = recover_cfd_vorticity(&velocity, cell_count);
+    let wall_shear_stress = recover_cfd_wall_shear_stress(domain, &velocity, cell_count);
     let residual_count = solution.residual_momentum.len();
 
     vec![
-        AnalysisField::host_f64(FEA_FIELD_CFD_VELOCITY, vec![node_count, 3], velocity),
-        AnalysisField::host_f64(FEA_FIELD_CFD_PRESSURE, vec![node_count], pressure),
-        AnalysisField::host_f64(FEA_FIELD_CFD_VORTICITY, vec![node_count, 3], vorticity),
+        AnalysisField::host_f64(FEA_FIELD_CFD_VELOCITY, vec![cell_count, 3], velocity),
+        AnalysisField::host_f64(FEA_FIELD_CFD_PRESSURE, vec![cell_count], pressure),
+        AnalysisField::host_f64(FEA_FIELD_CFD_VORTICITY, vec![cell_count, 3], vorticity),
         AnalysisField::host_f64(
             FEA_FIELD_CFD_WALL_SHEAR_STRESS,
-            vec![node_count, 3],
+            vec![cell_count, 3],
             wall_shear_stress,
         ),
         AnalysisField::host_f64(
@@ -3869,6 +3870,38 @@ fn build_cfd_run_fields(
             vec![cfd_reynolds_number(domain)],
         ),
     ]
+}
+
+fn cell_centered_vector_from_nodal(nodal: &[f64], node_count: usize) -> Vec<f64> {
+    let cell_count = node_count.saturating_sub(1).max(1);
+    let mut cell_values = Vec::with_capacity(cell_count * 3);
+    for cell in 0..cell_count {
+        let left = cell.min(node_count.saturating_sub(1));
+        let right = (cell + 1).min(node_count.saturating_sub(1));
+        for component in 0..3 {
+            let left_value = nodal.get(left * 3 + component).copied().unwrap_or(0.0);
+            let right_value = nodal
+                .get(right * 3 + component)
+                .copied()
+                .unwrap_or(left_value);
+            cell_values.push(0.5 * (left_value + right_value));
+        }
+    }
+    cell_values
+}
+
+fn cell_centered_scalar_from_nodal(nodal: &[f64]) -> Vec<f64> {
+    let node_count = nodal.len();
+    let cell_count = node_count.saturating_sub(1).max(1);
+    let mut cell_values = Vec::with_capacity(cell_count);
+    for cell in 0..cell_count {
+        let left = cell.min(node_count.saturating_sub(1));
+        let right = (cell + 1).min(node_count.saturating_sub(1));
+        let left_value = nodal.get(left).copied().unwrap_or(0.0);
+        let right_value = nodal.get(right).copied().unwrap_or(left_value);
+        cell_values.push(0.5 * (left_value + right_value));
+    }
+    cell_values
 }
 
 fn solve_cfd_baseline(
