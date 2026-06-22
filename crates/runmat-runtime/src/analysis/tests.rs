@@ -2778,11 +2778,14 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
         transient.electro_thermal_thermal_residual_snapshots[0].field_id,
         fea_electro_thermal_thermal_residual_field_id(0)
     );
-    assert!(results
-        .data
-        .field_descriptors
-        .iter()
-        .any(|descriptor| { descriptor.field_id == fea_electro_thermal_temperature_field_id(0) }));
+    for field_id in [
+        fea_electro_thermal_temperature_field_id(0),
+        fea_electro_thermal_thermal_residual_field_id(0),
+    ] {
+        let descriptor = descriptor(&field_id);
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
+        assert_eq!(descriptor.component_count, None);
+    }
 }
 
 #[test]
@@ -5502,11 +5505,32 @@ fn analysis_run_transient_returns_native_transient_result() {
         OperationContext::new(None, None),
     )
     .expect("transient results should be queryable");
-    assert!(results
-        .data
-        .field_descriptors
-        .iter()
-        .any(|descriptor| descriptor.field_id == fea_transient_residual_norm_field_id(1)));
+    let descriptor = |field_id: &str| {
+        results
+            .data
+            .field_descriptors
+            .iter()
+            .find(|descriptor| descriptor.field_id == field_id)
+            .expect("transient descriptor should be present")
+    };
+    for field_id in [
+        fea_transient_velocity_field_id(1),
+        fea_transient_acceleration_field_id(1),
+    ] {
+        let descriptor = descriptor(&field_id);
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
+        assert_eq!(descriptor.component_count, Some(3));
+    }
+    for field_id in [
+        fea_transient_von_mises_field_id(1),
+        fea_transient_kinetic_energy_field_id(1),
+        fea_transient_strain_energy_field_id(1),
+        fea_transient_residual_norm_field_id(1),
+    ] {
+        let descriptor = descriptor(&field_id);
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
+        assert_eq!(descriptor.component_count, None);
+    }
 }
 
 #[test]

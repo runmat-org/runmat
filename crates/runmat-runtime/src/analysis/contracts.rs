@@ -1051,6 +1051,17 @@ fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
                 .unwrap_or(3),
         );
     }
+    if normalized.contains("von_mises")
+        || normalized.contains("equivalent_plastic_strain")
+        || normalized.contains("pressure")
+        || normalized.contains("phase")
+        || normalized.contains("reynolds_number")
+        || normalized.contains("temperature")
+        || normalized.contains("energy")
+        || normalized.contains("residual")
+    {
+        return None;
+    }
     if normalized.contains("displacement")
         || normalized.contains("mode_shape")
         || normalized.contains("reaction_force")
