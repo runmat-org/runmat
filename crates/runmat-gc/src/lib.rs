@@ -12,7 +12,6 @@ pub mod allocator;
 pub mod barriers;
 pub mod collector;
 pub mod config;
-pub mod gc_ptr;
 pub use runmat_gc_api::GcPtr;
 pub mod generations;
 pub mod roots;
