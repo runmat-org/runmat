@@ -1163,7 +1163,16 @@ fn apply_prep_element_connectivity_scatter(
 }
 
 fn prep_recovery_edge_length_m(prep: FeaPrepContext, hop: usize) -> f64 {
-    let characteristic = prep.coordinate_characteristic_length_m;
+    let measured_edge_length = if prep.element_geometry_coverage_ratio > 0.0 {
+        prep.mean_element_edge_length_m
+    } else {
+        0.0
+    };
+    let characteristic = if measured_edge_length.is_finite() && measured_edge_length > 0.0 {
+        measured_edge_length
+    } else {
+        prep.coordinate_characteristic_length_m
+    };
     let length = characteristic * hop.max(1) as f64;
     if length.is_finite() && length > 0.0 {
         length
