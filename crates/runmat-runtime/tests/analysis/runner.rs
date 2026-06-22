@@ -5501,6 +5501,48 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
+                "fsi_interface_work_j_per_m2",
+                "FEA_FSI_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_INTERFACE_CLOSURE",
+                    "interface_work_j_per_m2",
+                ),
+                Some(1.0e-18),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_structural_strain_energy_j_per_m2",
+                "FEA_FSI_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_INTERFACE_CLOSURE",
+                    "structural_strain_energy_j_per_m2",
+                ),
+                Some(1.0e-18),
+                None,
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_interface_work_energy_residual_ratio",
+                "FEA_FSI_INTERFACE_CLOSURE",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_INTERFACE_CLOSURE",
+                    "interface_work_energy_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-8),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
                 "fsi_structural_coupling_edge_count",
                 "FEA_FSI_INTERFACE_CLOSURE",
                 diagnostic_metric(
@@ -5619,6 +5661,20 @@ pub(super) fn run_fixture(
                     &cpu_envelope.data,
                     "FEA_FSI_KNOWN_ANSWER",
                     "structural_solve_residual_ratio",
+                ),
+                Some(0.0),
+                Some(1.0e-8),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_known_answer_interface_work_energy_residual_ratio",
+                "FEA_FSI_KNOWN_ANSWER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_KNOWN_ANSWER",
+                    "interface_work_energy_residual_ratio",
                 ),
                 Some(0.0),
                 Some(1.0e-8),
