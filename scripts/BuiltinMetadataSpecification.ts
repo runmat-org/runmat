@@ -52,7 +52,6 @@ export interface BuiltinMetadata {
   category: string;
   keywords: string[];
   summary: string;
-  references: string[];
   gpu_support: GpuSupport;
   fusion: FusionSpec;
   requires_feature: string | null;
