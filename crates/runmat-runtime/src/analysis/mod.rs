@@ -4086,7 +4086,10 @@ fn build_cht_run_fields(
             .get(step_index)
             .map(|field| field_scalar_magnitudes(field, fallback_len))
             .unwrap_or_else(|| vec![0.0; fallback_len]);
-        heat_flux.resize(base_temperature.len(), 0.0);
+        if heat_flux.is_empty() {
+            heat_flux.push(0.0);
+        }
+        let interface_count = heat_flux.len();
         let max_heat_flux = heat_flux
             .iter()
             .copied()
@@ -4103,16 +4106,21 @@ fn build_cht_run_fields(
 
         let mut fluid_temperature = Vec::with_capacity(base_temperature.len());
         let mut solid_temperature = Vec::with_capacity(base_temperature.len());
-        let mut temperature_jump = Vec::with_capacity(base_temperature.len());
-        let denom = base_temperature.len().saturating_sub(1).max(1) as f64;
+        let mut temperature_jump = Vec::with_capacity(interface_count);
+        let temperature_denom = base_temperature.len().saturating_sub(1).max(1) as f64;
+        let interface_denom = interface_count.saturating_sub(1).max(1) as f64;
         for (index, base) in base_temperature.iter().enumerate() {
-            let xi = index as f64 / denom;
-            let jump = heat_flux.get(index).copied().unwrap_or(0.0)
+            let xi = index as f64 / temperature_denom;
+            let flux_index =
+                ((xi * interface_denom).round() as usize).min(interface_count.saturating_sub(1));
+            let jump = heat_flux.get(flux_index).copied().unwrap_or(0.0)
                 / interface_conductance_w_per_m2k.max(1.0e-12);
             let center_temperature = *base + advection_shift_k * xi;
             fluid_temperature.push(center_temperature + 0.5 * jump);
             solid_temperature.push(center_temperature - 0.5 * jump);
-            temperature_jump.push(jump);
+        }
+        for flux in &heat_flux {
+            temperature_jump.push(*flux / interface_conductance_w_per_m2k.max(1.0e-12));
         }
         fields.push(AnalysisField::host_f64(
             fea_cht_fluid_temperature_field_id(step_index),
@@ -4125,7 +4133,6 @@ fn build_cht_run_fields(
             solid_temperature,
         ));
 
-        let interface_count = heat_flux.len().max(1);
         closure.interface_face_count = closure.interface_face_count.max(interface_count);
         closure.max_temperature_jump_k = closure.max_temperature_jump_k.max(
             temperature_jump

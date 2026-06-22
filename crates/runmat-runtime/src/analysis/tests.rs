@@ -19,34 +19,36 @@ use runmat_analysis_core::{
 };
 use runmat_analysis_fea::{
     fea_acoustic_frequency_response_field_id, fea_cht_energy_residual_field_id,
-    fea_cht_fluid_temperature_field_id, fea_electro_thermal_temperature_field_id,
-    fea_electro_thermal_thermal_residual_field_id, fea_fsi_coupling_iteration_count_field_id,
-    fea_fsi_fluid_velocity_field_id, fea_fsi_interface_displacement_field_id,
-    fea_fsi_interface_pressure_field_id, fea_fsi_interface_traction_field_id,
-    fea_modal_mode_shape_field_id, fea_nonlinear_contact_gap_field_id,
-    fea_nonlinear_contact_pressure_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
-    fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
-    fea_nonlinear_residual_norm_field_id, fea_nonlinear_von_mises_field_id,
-    fea_thermal_boundary_heat_flux_field_id, fea_thermal_heat_flux_field_id,
-    fea_thermal_heat_source_field_id, fea_thermal_temperature_gradient_field_id,
-    fea_thermo_mechanical_coupling_residual_field_id, fea_thermo_mechanical_displacement_field_id,
-    fea_thermo_mechanical_temperature_field_id, fea_thermo_mechanical_thermal_strain_field_id,
-    fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
-    fea_transient_acceleration_field_id, fea_transient_kinetic_energy_field_id,
-    fea_transient_residual_norm_field_id, fea_transient_strain_energy_field_id,
-    fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
-    FeaProgressPhase, FeaProgressStatus, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
-    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY,
-    FEA_FIELD_CFD_VORTICITY, FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE,
-    FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
-    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL,
-    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_EM_CURRENT_DENSITY_REAL,
-    FEA_FIELD_EM_ELECTRIC_FIELD_REAL, FEA_FIELD_EM_ENERGY_DENSITY,
-    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
-    FEA_FIELD_EM_RESIDUAL_REAL, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    fea_cht_fluid_temperature_field_id, fea_cht_interface_heat_flux_field_id,
+    fea_cht_interface_temperature_jump_field_id, fea_cht_solid_temperature_field_id,
+    fea_electro_thermal_temperature_field_id, fea_electro_thermal_thermal_residual_field_id,
+    fea_fsi_coupling_iteration_count_field_id, fea_fsi_fluid_velocity_field_id,
+    fea_fsi_interface_displacement_field_id, fea_fsi_interface_pressure_field_id,
+    fea_fsi_interface_traction_field_id, fea_modal_mode_shape_field_id,
+    fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
+    fea_nonlinear_equivalent_plastic_strain_field_id, fea_nonlinear_load_factor_field_id,
+    fea_nonlinear_plastic_strain_field_id, fea_nonlinear_residual_norm_field_id,
+    fea_nonlinear_von_mises_field_id, fea_thermal_boundary_heat_flux_field_id,
+    fea_thermal_heat_flux_field_id, fea_thermal_heat_source_field_id,
+    fea_thermal_temperature_gradient_field_id, fea_thermo_mechanical_coupling_residual_field_id,
+    fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
+    fea_thermo_mechanical_thermal_strain_field_id, fea_thermo_mechanical_thermal_stress_field_id,
+    fea_thermo_mechanical_von_mises_field_id, fea_transient_acceleration_field_id,
+    fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
+    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
+    fea_transient_von_mises_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
+    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_REYNOLDS_NUMBER,
+    FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY, FEA_FIELD_CFD_WALL_SHEAR_STRESS,
+    FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
+    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
+    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
+    FEA_FIELD_EM_CURRENT_DENSITY_REAL, FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
+    FEA_FIELD_EM_ENERGY_DENSITY, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
+    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_RESIDUAL_REAL,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
+    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
+    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
@@ -5613,6 +5615,34 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         .as_ref()
         .expect("thermal payload should exist");
     assert_eq!(thermal.time_points_s.len(), 4);
+    let fluid_temperature = envelope
+        .data
+        .run
+        .field(&fea_cht_fluid_temperature_field_id(0))
+        .expect("cht fluid temperature field should be present");
+    let solid_temperature = envelope
+        .data
+        .run
+        .field(&fea_cht_solid_temperature_field_id(0))
+        .expect("cht solid temperature field should be present");
+    let interface_heat_flux = envelope
+        .data
+        .run
+        .field(&fea_cht_interface_heat_flux_field_id(0))
+        .expect("cht interface heat-flux field should be present");
+    let interface_temperature_jump = envelope
+        .data
+        .run
+        .field(&fea_cht_interface_temperature_jump_field_id(0))
+        .expect("cht interface temperature jump field should be present");
+    let thermal_flux_face_count = thermal
+        .heat_flux_snapshots
+        .first()
+        .and_then(|field| field.shape.first().copied())
+        .expect("thermal heat-flux snapshot should carry a recovery domain");
+    assert_eq!(solid_temperature.shape, fluid_temperature.shape);
+    assert_eq!(interface_heat_flux.shape, vec![thermal_flux_face_count]);
+    assert_eq!(interface_temperature_jump.shape, interface_heat_flux.shape);
     let results = analysis_results_op(
         &envelope.data,
         AnalysisResultsQuery::default(),
