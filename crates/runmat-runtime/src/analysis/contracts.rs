@@ -970,8 +970,13 @@ fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
     if normalized.contains("magnitude") {
         return AnalysisFieldKind::Scalar;
     }
+    if normalized.contains("heat_flux") {
+        return match shape {
+            [_, components] if (2..=3).contains(components) => AnalysisFieldKind::Vector,
+            _ => AnalysisFieldKind::Scalar,
+        };
+    }
     if normalized.contains("temperature_gradient")
-        || normalized.contains("heat_flux")
         || normalized.contains("wall_shear_stress")
         || normalized.contains("vorticity")
         || normalized.contains("velocity")
@@ -1023,8 +1028,13 @@ fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
     if normalized.contains("equivalent_plastic_strain") {
         return None;
     }
+    if normalized.contains("heat_flux") {
+        return match shape {
+            [_, components] if (2..=3).contains(components) => Some(*components),
+            _ => None,
+        };
+    }
     if normalized.contains("temperature_gradient")
-        || normalized.contains("heat_flux")
         || normalized.contains("wall_shear_stress")
         || normalized.contains("vorticity")
         || normalized.contains("velocity")

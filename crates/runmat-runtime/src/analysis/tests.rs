@@ -4586,6 +4586,30 @@ fn analysis_run_thermal_returns_temperature_payload() {
     assert!(field_ids.contains(&fea_thermal_heat_flux_field_id(0).as_str()));
     assert!(field_ids.contains(&fea_thermal_heat_source_field_id(0).as_str()));
     assert!(field_ids.contains(&fea_thermal_boundary_heat_flux_field_id(0).as_str()));
+    let descriptor = |field_id: &str| {
+        results
+            .data
+            .field_descriptors
+            .iter()
+            .find(|descriptor| descriptor.field_id == field_id)
+            .expect("thermal field descriptor should be present")
+    };
+    assert_eq!(
+        descriptor(&fea_thermal_heat_flux_field_id(0)).kind,
+        AnalysisFieldKind::Vector
+    );
+    assert_eq!(
+        descriptor(&fea_thermal_heat_flux_field_id(0)).component_count,
+        Some(3)
+    );
+    assert_eq!(
+        descriptor(&fea_thermal_boundary_heat_flux_field_id(0)).kind,
+        AnalysisFieldKind::Scalar
+    );
+    assert_eq!(
+        descriptor(&fea_thermal_boundary_heat_flux_field_id(0)).component_count,
+        None
+    );
     assert_eq!(results.data.summary.snapshot_count, 6);
 }
 
@@ -5669,6 +5693,17 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         .field_descriptors
         .iter()
         .any(|descriptor| descriptor.field_id == fea_cht_energy_residual_field_id(0)));
+    let interface_heat_flux_descriptor = results
+        .data
+        .field_descriptors
+        .iter()
+        .find(|descriptor| descriptor.field_id == fea_cht_interface_heat_flux_field_id(0))
+        .expect("cht interface heat-flux descriptor should be present");
+    assert_eq!(
+        interface_heat_flux_descriptor.kind,
+        AnalysisFieldKind::Scalar
+    );
+    assert_eq!(interface_heat_flux_descriptor.component_count, None);
 }
 
 #[test]
