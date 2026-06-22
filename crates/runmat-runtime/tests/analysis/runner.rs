@@ -17,6 +17,9 @@ use runmat_runtime::analysis::{
 use runmat_runtime::geometry::{geometry_prep_for_analysis_op, GeometryPrepForAnalysisSpec};
 use sha2::{Digest, Sha256};
 
+const SYNTHETIC_THERMAL_PREP_OBJ: &str =
+    "o thermal_prep\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3\nf 1 3 4\n";
+
 fn thermo_field_payload_hash_for_value(payload: &serde_json::Value) -> String {
     let schema = payload
         .get("schema_version")
@@ -683,6 +686,35 @@ fn electro_thermal_prep_artifact_id_for_fixture(
     Some(prep.data.prep_artifact_id)
 }
 
+fn thermal_prep_artifact_id_for_fixture(spec_id: &str, model: &AnalysisModel) -> Option<String> {
+    if !matches!(
+        spec_id,
+        "thermal_standalone_ramp_cpu"
+            | "thermal_standalone_ramp_gpu_provider"
+            | "thermal_standalone_ramp_gpu_fallback"
+    ) {
+        return None;
+    }
+
+    let mut geometry = geometry_load_op(
+        &format!("/synthetic/{spec_id}_prep.obj"),
+        SYNTHETIC_THERMAL_PREP_OBJ.as_bytes(),
+        OperationContext::new(Some(format!("trace-prep-geometry-{spec_id}")), None),
+    )
+    .expect("load synthetic prep geometry for thermal fixture")
+    .data;
+    geometry.geometry_id = model.geometry_id.clone();
+    geometry.revision = model.geometry_revision;
+
+    let prep = geometry_prep_for_analysis_op(
+        &geometry,
+        GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(Some(format!("trace-prep-artifact-{spec_id}")), None),
+    )
+    .expect("prepare trusted thermal fixture geometry");
+    Some(prep.data.prep_artifact_id)
+}
+
 fn coupled_flow_prep_artifact_id_for_fixture(
     spec_id: &str,
     model: &AnalysisModel,
@@ -714,6 +746,19 @@ fn coupled_flow_prep_artifact_id_for_fixture(
     )
     .expect("prepare trusted coupled-flow fixture geometry");
     Some(prep.data.prep_artifact_id)
+}
+
+fn thermal_options_for_spec(
+    spec: &FixtureSpec,
+    model: &AnalysisModel,
+) -> AnalysisThermalRunOptions {
+    AnalysisThermalRunOptions {
+        step_count: spec
+            .transient_step_count
+            .unwrap_or(AnalysisThermalRunOptions::default().step_count),
+        prep_artifact_id: thermal_prep_artifact_id_for_fixture(spec.id, model),
+        ..AnalysisThermalRunOptions::default()
+    }
 }
 
 fn transient_options_for_spec(
@@ -2649,12 +2694,7 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
         AnalysisRunKind::Thermal => analysis_run_thermal_with_options_op(
             model,
             ComputeBackend::Cpu,
-            AnalysisThermalRunOptions {
-                step_count: spec
-                    .transient_step_count
-                    .unwrap_or(AnalysisThermalRunOptions::default().step_count),
-                ..AnalysisThermalRunOptions::default()
-            },
+            thermal_options_for_spec(spec, model),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Cfd => analysis_run_cfd_with_options_op(
@@ -2783,12 +2823,7 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
         AnalysisRunKind::Thermal => analysis_run_thermal_with_options_op(
             model,
             ComputeBackend::Gpu,
-            AnalysisThermalRunOptions {
-                step_count: spec
-                    .transient_step_count
-                    .unwrap_or(AnalysisThermalRunOptions::default().step_count),
-                ..AnalysisThermalRunOptions::default()
-            },
+            thermal_options_for_spec(spec, model),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisRunKind::Cfd => analysis_run_cfd_with_options_op(
@@ -3340,6 +3375,34 @@ fn push_thermal_standalone_threshold_assertions(
         ),
         Some(0.6),
         Some(1.2),
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_prep_recovery_edge_count",
+        "FEA_THERMAL_FIELD_RECOVERY",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_FIELD_RECOVERY",
+            "prep_recovery_edge_count",
+        ),
+        Some(1.0),
+        None,
+    );
+    push_threshold_assertion(
+        fixture_id,
+        assertions,
+        failures,
+        "thermal_standalone_prep_active_dimension_count",
+        "FEA_THERMAL_FIELD_RECOVERY",
+        diagnostic_metric(
+            run,
+            "FEA_THERMAL_FIELD_RECOVERY",
+            "coordinate_active_dimension_count",
+        ),
+        Some(2.0),
+        Some(3.0),
     );
     push_threshold_assertion(
         fixture_id,
