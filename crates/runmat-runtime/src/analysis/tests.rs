@@ -4231,6 +4231,27 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         em_payload.vector_potential_imag.field_id,
         FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG
     );
+    assert_eq!(em_payload.vector_potential_real.shape.len(), 2);
+    assert_eq!(em_payload.vector_potential_real.shape[1], 3);
+    assert_eq!(
+        em_payload.vector_potential_imag.shape,
+        em_payload.vector_potential_real.shape
+    );
+    match &em_payload.vector_potential_real.values {
+        AnalysisFieldValues::HostF64(values) => {
+            assert_eq!(
+                values.len(),
+                em_payload
+                    .vector_potential_real
+                    .shape
+                    .iter()
+                    .product::<usize>()
+            );
+        }
+        AnalysisFieldValues::DeviceRef(_) => {
+            panic!("CPU EM vector potential should be returned as host values")
+        }
+    }
     assert_eq!(
         em_payload.magnetic_flux_density_real.field_id,
         FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL

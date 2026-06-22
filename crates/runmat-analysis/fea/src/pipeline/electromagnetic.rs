@@ -1002,13 +1002,13 @@ pub fn run_electromagnetic_with_options(
 
     let vector_potential_real_field = AnalysisField::host_f64(
         FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
-        vec![element_count],
-        edge_vector_potential_real.clone(),
+        vec![element_count, 3],
+        edge_tangential_vector_field_values(&maxwell_topology.edges, &edge_vector_potential_real),
     );
     let vector_potential_imag_field = AnalysisField::host_f64(
         FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
-        vec![element_count],
-        edge_vector_potential_imag.clone(),
+        vec![element_count, 3],
+        edge_tangential_vector_field_values(&maxwell_topology.edges, &edge_vector_potential_imag),
     );
     let magnetic_flux_density_real_field = AnalysisField::host_f64(
         FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
@@ -2229,6 +2229,14 @@ fn axial_vector_field_values(values: &[f64]) -> Vec<f64> {
     let mut vector_values = Vec::with_capacity(values.len() * 3);
     for value in values {
         vector_values.extend_from_slice(&[*value, 0.0, 0.0]);
+    }
+    vector_values
+}
+
+fn edge_tangential_vector_field_values(edges: &[MaxwellEdge], line_integrals: &[f64]) -> Vec<f64> {
+    let mut vector_values = Vec::with_capacity(line_integrals.len() * 3);
+    for (edge, value) in edges.iter().zip(line_integrals.iter().copied()) {
+        vector_values.extend_from_slice(&[edge.tangential_component(value), 0.0, 0.0]);
     }
     vector_values
 }

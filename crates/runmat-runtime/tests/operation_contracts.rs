@@ -7,6 +7,7 @@ use runmat_analysis_fea::{
     fea_modal_mode_shape_field_id, fea_nonlinear_load_factor_field_id,
     fea_nonlinear_residual_norm_field_id, fea_transient_residual_norm_field_id, ComputeBackend,
     FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
     FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
     FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
@@ -1569,6 +1570,35 @@ fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
     assert_eq!(em_payload.sweep_solve_quality.len(), 1);
     assert!(em_payload.resonance_peak_frequency_hz.is_some());
     assert!(em_payload.resonance_quality_factor.is_none());
+    assert_eq!(
+        em_payload.vector_potential_real.field_id,
+        FEA_FIELD_EM_VECTOR_POTENTIAL_REAL
+    );
+    assert_eq!(
+        em_payload.vector_potential_imag.field_id,
+        FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG
+    );
+    assert_eq!(em_payload.vector_potential_real.shape.len(), 2);
+    assert_eq!(em_payload.vector_potential_real.shape[1], 3);
+    assert_eq!(
+        em_payload.vector_potential_imag.shape,
+        em_payload.vector_potential_real.shape
+    );
+    match &em_payload.vector_potential_real.values {
+        AnalysisFieldValues::HostF64(values) => {
+            assert_eq!(
+                values.len(),
+                em_payload
+                    .vector_potential_real
+                    .shape
+                    .iter()
+                    .product::<usize>()
+            );
+        }
+        AnalysisFieldValues::DeviceRef(_) => {
+            panic!("CPU EM vector potential should be returned as host values")
+        }
+    }
 }
 
 #[test]
