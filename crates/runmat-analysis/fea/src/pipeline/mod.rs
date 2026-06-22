@@ -9,15 +9,14 @@ pub mod transient;
 
 use runmat_analysis_core::AnalysisModel;
 
-use crate::{
-    assembly::{dofs::StructuralDofLayout, AssemblySummary},
-    contracts::FeaRunError,
-};
+use crate::{assembly::AssemblySummary, contracts::FeaRunError};
 
 pub(crate) fn reject_moment_loads_without_rotational_dofs(
     model: &AnalysisModel,
     summary: &AssemblySummary,
 ) -> Result<(), FeaRunError> {
-    let layout = StructuralDofLayout::legacy_translational_rows(summary.dof_count);
-    crate::assembly::dofs::validate_moment_loads_against_layout(model, &layout)
+    crate::assembly::dofs::validate_moment_loads_against_layout(
+        model,
+        &summary.structural_dof_layout,
+    )
 }

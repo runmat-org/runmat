@@ -382,7 +382,7 @@ pub async fn fea_material_assignment_builtin(args: Vec<Value>) -> BuiltinResult<
     name = "fea.boundaryCondition",
     category = "fea",
     summary = "Create a typed FEA boundary condition.",
-    keywords = "fea,boundary,condition,region",
+    keywords = "fea,boundary,condition,region,prescribed,rotation",
     descriptor(crate::builtins::fea::FEA_COMPONENT_DESCRIPTOR),
     builtin_path = "crate::builtins::fea"
 )]
@@ -1158,6 +1158,11 @@ fn create_boundary_condition_object_from_args(args: Vec<Value>) -> BuiltinResult
     let kind_text = scalar_string(&args[2], BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
     let mut fields = json_fields_from_name_values(BOUNDARY_CONDITION_NAME, &args[3..])?;
     let kind = match normalize_token(&kind_text).as_str() {
+        "prescribedrotation" => BoundaryConditionKind::PrescribedRotation {
+            rx: remove_required_f64(&mut fields, BOUNDARY_CONDITION_NAME, "rx")?,
+            ry: remove_required_f64(&mut fields, BOUNDARY_CONDITION_NAME, "ry")?,
+            rz: remove_required_f64(&mut fields, BOUNDARY_CONDITION_NAME, "rz")?,
+        },
         "acousticimpedance" => BoundaryConditionKind::AcousticImpedance {
             specific_impedance_pa_s_per_m: remove_required_f64(
                 &mut fields,
@@ -3131,6 +3136,42 @@ run:
                 }
             ));
         }
+    }
+
+    #[test]
+    fn fea_boundary_condition_accepts_prescribed_rotation() {
+        let boundary = block_on(fea_boundary_condition_builtin(vec![
+            Value::String("tip_rotation".to_string()),
+            Value::String("tip_node".to_string()),
+            Value::String("prescribedRotation".to_string()),
+            Value::String("rx".to_string()),
+            Value::Num(0.1),
+            Value::String("ry".to_string()),
+            Value::Num(0.2),
+            Value::String("rz".to_string()),
+            Value::Num(0.3),
+        ]))
+        .expect("prescribed rotation boundary condition should build");
+        assert_object_class(&boundary, FEA_BOUNDARY_CONDITION_CLASS);
+
+        let Value::Object(object) = boundary else {
+            panic!("expected boundary condition object");
+        };
+        let Some(Value::String(payload)) = object.properties.get(FEA_PAYLOAD_JSON_PROPERTY) else {
+            panic!("expected boundary condition JSON payload");
+        };
+        let decoded: BoundaryCondition =
+            serde_json::from_str(payload).expect("boundary condition payload should decode");
+        assert_eq!(decoded.bc_id, "tip_rotation");
+        assert_eq!(decoded.region_id, "tip_node");
+        assert!(matches!(
+            decoded.kind,
+            BoundaryConditionKind::PrescribedRotation {
+                rx: 0.1,
+                ry: 0.2,
+                rz: 0.3
+            }
+        ));
     }
 
     #[test]

@@ -34,6 +34,8 @@ pub struct AssemblySummary {
     pub structural_shell_element_count: usize,
     #[serde(default)]
     pub structural_solid_element_count: usize,
+    #[serde(default)]
+    pub structural_dof_layout: StructuralDofLayout,
     pub constrained_dof_count: usize,
     pub load_count: usize,
     pub structural_material: StructuralMaterialSummary,
@@ -862,6 +864,7 @@ pub fn assemble_linear_system(
         structural_solid_element_count: prep_context_ref
             .map(|prep| prep.prepared_element_count.max(prep.prepared_mesh_count))
             .unwrap_or_else(|| element_count_for_legacy_dofs(dof_count)),
+        structural_dof_layout,
         constrained_dof_count,
         load_count: model.loads.len().saturating_add(prep_load_bonus),
         structural_material,

@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 pub enum BoundaryConditionKind {
     Fixed,
     PrescribedDisplacement,
+    PrescribedRotation {
+        rx: f64,
+        ry: f64,
+        rz: f64,
+    },
     MagneticInsulation,
     VectorPotentialGround,
     AcousticRigidWall,

@@ -1217,6 +1217,12 @@ fn infer_field_unit(field_id: &str) -> Option<&'static str> {
     if normalized.contains("reaction_force") {
         return Some("N");
     }
+    if normalized.contains("reaction_moment") {
+        return Some("N*m");
+    }
+    if normalized.contains("rotation") {
+        return Some("rad");
+    }
     if normalized.contains("contact_gap")
         || normalized.contains("displacement")
         || normalized.contains("mode_shape")
@@ -1346,8 +1352,10 @@ fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
         return AnalysisFieldKind::Tensor;
     }
     if normalized.contains("displacement")
+        || normalized.contains("rotation")
         || normalized.contains("mode_shape")
         || normalized.contains("reaction_force")
+        || normalized.contains("reaction_moment")
         || normalized.contains("vector")
         || normalized.contains("flux")
     {
@@ -1404,8 +1412,10 @@ fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
         return None;
     }
     if normalized.contains("displacement")
+        || normalized.contains("rotation")
         || normalized.contains("mode_shape")
         || normalized.contains("reaction_force")
+        || normalized.contains("reaction_moment")
         || normalized.contains("particle_velocity")
         || normalized.contains("vector")
         || normalized.contains("flux")

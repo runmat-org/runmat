@@ -91,6 +91,12 @@ pub struct StructuralDofLayout {
     rows: Vec<StructuralDofAddress>,
 }
 
+impl Default for StructuralDofLayout {
+    fn default() -> Self {
+        Self::from_node_sets(Vec::new())
+    }
+}
+
 impl StructuralDofLayout {
     pub fn from_node_sets(node_sets: Vec<StructuralNodeDofSet>) -> Self {
         let rows = node_sets
@@ -172,6 +178,10 @@ impl StructuralDofLayout {
 
     pub fn address(&self, row: usize) -> Option<StructuralDofAddress> {
         self.rows.get(row).copied()
+    }
+
+    pub fn node_set(&self, node_index: usize) -> Option<&StructuralNodeDofSet> {
+        self.node_sets.get(node_index)
     }
 
     pub fn has_rotational_dofs(&self) -> bool {

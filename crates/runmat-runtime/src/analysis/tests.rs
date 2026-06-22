@@ -799,6 +799,71 @@ run:
 }
 
 #[test]
+fn fea_document_resolves_prescribed_rotation_boundary_conditions() {
+    let tmp = tempfile::tempdir().expect("tempdir should be created");
+    let geometry_path = tmp.path().join("part.step");
+    std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
+
+    let input = r#"
+version: 1
+kind: study
+id: rotation_bc_static
+geometry:
+  path: part.step
+  units: meter
+model:
+  id: rotation_bc_model
+  profile: linear_static_structural
+  defaults: none
+regions:
+  tip:
+    selector: "name:Bracket_A"
+materials:
+  steel:
+    mechanical:
+      youngs_modulus_pa: 200000000000.0
+      poisson_ratio: 0.30
+material_assignments:
+  - region: tip
+    material: steel
+boundary_conditions:
+  - id: tip_rotation
+    region: tip
+    type: prescribed_rotation
+    rx: 0.1
+    ry: 0.2
+    rz: 0.3
+loads:
+  - id: tip_force
+    region: tip
+    type: force
+    vector: [0.0, -1000.0, 0.0]
+steps:
+  - id: static_step
+    kind: static
+run:
+  backend: cpu
+"#;
+
+    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
+        .expect("FEA study document should resolve");
+
+    let FeaResolvedDocument::Study(study) = resolved else {
+        panic!("expected resolved study");
+    };
+    let model = study.model.as_ref().expect("explicit model should resolve");
+    assert_eq!(model.boundary_conditions.len(), 1);
+    assert!(matches!(
+        model.boundary_conditions[0].kind,
+        BoundaryConditionKind::PrescribedRotation {
+            rx: 0.1,
+            ry: 0.2,
+            rz: 0.3
+        }
+    ));
+}
+
+#[test]
 fn analysis_create_model_returns_v1_envelope() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();

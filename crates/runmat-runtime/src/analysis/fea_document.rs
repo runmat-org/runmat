@@ -150,7 +150,55 @@ struct FeaBoundaryConditionDocument {
     id: String,
     region: String,
     #[serde(alias = "type")]
-    kind: BoundaryConditionKind,
+    kind: FeaBoundaryConditionKindDocument,
+    #[serde(default)]
+    rx: Option<f64>,
+    #[serde(default)]
+    ry: Option<f64>,
+    #[serde(default)]
+    rz: Option<f64>,
+    #[serde(default)]
+    specific_impedance_pa_s_per_m: Option<f64>,
+    #[serde(default)]
+    temperature_k: Option<f64>,
+    #[serde(default)]
+    heat_flux_w_per_m2: Option<f64>,
+    #[serde(default)]
+    ambient_temperature_k: Option<f64>,
+    #[serde(default)]
+    coefficient_w_per_m2k: Option<f64>,
+    #[serde(default)]
+    velocity_m_per_s: Option<f64>,
+    #[serde(default)]
+    pressure_pa: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum FeaBoundaryConditionKindDocument {
+    Native(BoundaryConditionKind),
+    Named(FeaBoundaryConditionType),
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FeaBoundaryConditionType {
+    Fixed,
+    PrescribedDisplacement,
+    PrescribedRotation,
+    MagneticInsulation,
+    VectorPotentialGround,
+    AcousticRigidWall,
+    AcousticRadiation,
+    AcousticImpedance,
+    ThermalPrescribedTemperature,
+    ThermalHeatFlux,
+    ThermalConvection,
+    CfdInletVelocity,
+    CfdOutletPressure,
+    CfdNoSlipWall,
+    CfdSlipWall,
+    CfdSymmetry,
 }
 
 #[derive(Debug, Deserialize)]
@@ -466,10 +514,81 @@ fn resolve_boundary_condition(
     geometry: &GeometryAsset,
     aliases: &BTreeMap<String, FeaRegionDocument>,
 ) -> Result<BoundaryCondition, String> {
+    let kind = match &bc.kind {
+        FeaBoundaryConditionKindDocument::Native(kind) => kind.clone(),
+        FeaBoundaryConditionKindDocument::Named(kind) => {
+            resolve_boundary_condition_kind(bc, *kind)?
+        }
+    };
     Ok(BoundaryCondition {
         bc_id: bc.id.clone(),
         region_id: resolve_region_ref(&bc.region, geometry, aliases)?,
-        kind: bc.kind.clone(),
+        kind,
+    })
+}
+
+fn resolve_boundary_condition_kind(
+    bc: &FeaBoundaryConditionDocument,
+    kind: FeaBoundaryConditionType,
+) -> Result<BoundaryConditionKind, String> {
+    Ok(match kind {
+        FeaBoundaryConditionType::Fixed => BoundaryConditionKind::Fixed,
+        FeaBoundaryConditionType::PrescribedDisplacement => {
+            BoundaryConditionKind::PrescribedDisplacement
+        }
+        FeaBoundaryConditionType::PrescribedRotation => BoundaryConditionKind::PrescribedRotation {
+            rx: required_f64(bc.rx, "boundary.prescribed_rotation.rx")?,
+            ry: required_f64(bc.ry, "boundary.prescribed_rotation.ry")?,
+            rz: required_f64(bc.rz, "boundary.prescribed_rotation.rz")?,
+        },
+        FeaBoundaryConditionType::MagneticInsulation => BoundaryConditionKind::MagneticInsulation,
+        FeaBoundaryConditionType::VectorPotentialGround => {
+            BoundaryConditionKind::VectorPotentialGround
+        }
+        FeaBoundaryConditionType::AcousticRigidWall => BoundaryConditionKind::AcousticRigidWall,
+        FeaBoundaryConditionType::AcousticRadiation => BoundaryConditionKind::AcousticRadiation,
+        FeaBoundaryConditionType::AcousticImpedance => BoundaryConditionKind::AcousticImpedance {
+            specific_impedance_pa_s_per_m: required_f64(
+                bc.specific_impedance_pa_s_per_m,
+                "boundary.acoustic_impedance.specific_impedance_pa_s_per_m",
+            )?,
+        },
+        FeaBoundaryConditionType::ThermalPrescribedTemperature => {
+            BoundaryConditionKind::ThermalPrescribedTemperature {
+                temperature_k: required_f64(
+                    bc.temperature_k,
+                    "boundary.thermal_prescribed_temperature.temperature_k",
+                )?,
+            }
+        }
+        FeaBoundaryConditionType::ThermalHeatFlux => BoundaryConditionKind::ThermalHeatFlux {
+            heat_flux_w_per_m2: required_f64(
+                bc.heat_flux_w_per_m2,
+                "boundary.thermal_heat_flux.heat_flux_w_per_m2",
+            )?,
+        },
+        FeaBoundaryConditionType::ThermalConvection => BoundaryConditionKind::ThermalConvection {
+            ambient_temperature_k: required_f64(
+                bc.ambient_temperature_k,
+                "boundary.thermal_convection.ambient_temperature_k",
+            )?,
+            coefficient_w_per_m2k: required_f64(
+                bc.coefficient_w_per_m2k,
+                "boundary.thermal_convection.coefficient_w_per_m2k",
+            )?,
+        },
+        FeaBoundaryConditionType::CfdInletVelocity => BoundaryConditionKind::CfdInletVelocity {
+            velocity_m_per_s: required_f64(
+                bc.velocity_m_per_s,
+                "boundary.cfd_inlet_velocity.velocity_m_per_s",
+            )?,
+        },
+        FeaBoundaryConditionType::CfdOutletPressure => BoundaryConditionKind::CfdOutletPressure {
+            pressure_pa: required_f64(bc.pressure_pa, "boundary.cfd_outlet_pressure.pressure_pa")?,
+        },
+        FeaBoundaryConditionType::CfdNoSlipWall => BoundaryConditionKind::CfdNoSlipWall,
+        FeaBoundaryConditionType::CfdSlipWall => BoundaryConditionKind::CfdSlipWall,
+        FeaBoundaryConditionType::CfdSymmetry => BoundaryConditionKind::CfdSymmetry,
     })
 }
 

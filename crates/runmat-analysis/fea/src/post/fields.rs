@@ -2,13 +2,17 @@ use runmat_analysis_core::AnalysisField;
 
 use crate::contracts::{
     FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
-    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
-    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
-    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_STRAIN,
+    FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use crate::operator::{apply_k, apply_k_unconstrained};
 use crate::{
-    assembly::{AssemblySummary, PrepRecoveryEdgeSummary, StructuralMaterialSummary},
+    assembly::{
+        dofs::StructuralDofKind, AssemblySummary, PrepRecoveryEdgeSummary,
+        StructuralMaterialSummary,
+    },
     solve::linear::LinearSolveResult,
 };
 
@@ -44,6 +48,8 @@ pub fn recover_result_fields(
     let von_mises_values = recover_von_mises(&stress_values);
     let internal_force = apply_k_unconstrained(&summary.operator, &solve_result.solution);
     let reaction_values = recover_reaction_force(summary, &internal_force);
+    let rotation_values = recover_rotation(summary, &solve_result.solution);
+    let reaction_moment_values = recover_reaction_moment(summary, &internal_force);
     let strain_energy = recover_total_strain_energy(&solve_result.solution, &internal_force);
     let residual_metrics = recover_residual_metrics(summary, &solve_result.solution);
 
@@ -52,6 +58,11 @@ pub fn recover_result_fields(
             FEA_FIELD_STRUCTURAL_DISPLACEMENT,
             vec![node_count, VECTOR_COMPONENT_COUNT],
             displacement_values,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_ROTATION,
+            rotation_shape(summary),
+            rotation_values,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_VON_MISES,
@@ -72,6 +83,11 @@ pub fn recover_result_fields(
             FEA_FIELD_STRUCTURAL_REACTION_FORCE,
             reaction_shape(summary),
             reaction_values,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+            rotation_shape(summary),
+            reaction_moment_values,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
@@ -212,10 +228,12 @@ struct StructuralStrainRecovery {
 fn empty_structural_fields() -> Vec<AnalysisField> {
     vec![
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_DISPLACEMENT, vec![0, 3], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_ROTATION, vec![0, 3], Vec::new()),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![0], Vec::new()),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRAIN, vec![0, 6], Vec::new()),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, vec![0, 6], Vec::new()),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_REACTION_FORCE, vec![0, 3], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_REACTION_MOMENT, vec![0, 3], Vec::new()),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
             vec![0],
@@ -837,6 +855,70 @@ fn recover_reaction_force(summary: &AssemblySummary, internal_force: &[f64]) -> 
         constrained_ordinal += 1;
     }
     reactions
+}
+
+fn recover_rotation(summary: &AssemblySummary, solution: &[f64]) -> Vec<f64> {
+    let mut rotation = vec![0.0; rotation_shape(summary).iter().product()];
+    if rotation.is_empty() {
+        return rotation;
+    }
+    for row in 0..summary.structural_dof_layout.total_dof_count() {
+        let Some(address) = summary.structural_dof_layout.address(row) else {
+            continue;
+        };
+        let Some(component) = rotational_component(address.kind) else {
+            continue;
+        };
+        let target = address.node_index * VECTOR_COMPONENT_COUNT + component;
+        if target < rotation.len() {
+            rotation[target] = solution.get(row).copied().unwrap_or(0.0);
+        }
+    }
+    rotation
+}
+
+fn recover_reaction_moment(summary: &AssemblySummary, internal_force: &[f64]) -> Vec<f64> {
+    let mut reactions = vec![0.0; rotation_shape(summary).iter().product()];
+    if reactions.is_empty() {
+        return reactions;
+    }
+    for (dof, is_constrained) in summary.operator.constrained.iter().enumerate() {
+        if !*is_constrained {
+            continue;
+        }
+        let Some(address) = summary.structural_dof_layout.address(dof) else {
+            continue;
+        };
+        let Some(component) = rotational_component(address.kind) else {
+            continue;
+        };
+        let target = address.node_index * VECTOR_COMPONENT_COUNT + component;
+        if target < reactions.len() {
+            let rhs = summary.operator.rhs.get(dof).copied().unwrap_or(0.0);
+            let internal = internal_force.get(dof).copied().unwrap_or(0.0);
+            reactions[target] = internal - rhs;
+        }
+    }
+    reactions
+}
+
+fn rotational_component(kind: StructuralDofKind) -> Option<usize> {
+    match kind {
+        StructuralDofKind::Rx => Some(0),
+        StructuralDofKind::Ry => Some(1),
+        StructuralDofKind::Rz => Some(2),
+        _ => None,
+    }
+}
+
+fn rotation_shape(summary: &AssemblySummary) -> Vec<usize> {
+    if summary.structural_rotational_dof_count == 0 {
+        return vec![0, VECTOR_COMPONENT_COUNT];
+    }
+    vec![
+        summary.structural_dof_layout.node_count(),
+        VECTOR_COMPONENT_COUNT,
+    ]
 }
 
 fn reaction_shape(summary: &AssemblySummary) -> Vec<usize> {

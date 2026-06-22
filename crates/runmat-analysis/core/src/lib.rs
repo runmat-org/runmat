@@ -170,6 +170,28 @@ mod tests {
     }
 
     #[test]
+    fn prescribed_rotation_bc_serializes_as_snake_case() {
+        let bc = BoundaryCondition {
+            bc_id: "root_rotation".to_string(),
+            region_id: "root".to_string(),
+            kind: BoundaryConditionKind::PrescribedRotation {
+                rx: 0.0,
+                ry: 0.0,
+                rz: 0.125,
+            },
+        };
+
+        let json = serde_json::to_value(&bc).expect("bc should serialize");
+        assert_eq!(json["kind"]["prescribed_rotation"]["rx"], 0.0);
+        assert_eq!(json["kind"]["prescribed_rotation"]["ry"], 0.0);
+        assert_eq!(json["kind"]["prescribed_rotation"]["rz"], 0.125);
+
+        let decoded: BoundaryCondition =
+            serde_json::from_value(json).expect("bc should deserialize");
+        assert_eq!(decoded, bc);
+    }
+
+    #[test]
     fn electrical_model_defaults_frequency_response() {
         let electrical = MaterialElectricalModel::default();
         assert!(electrical.conductivity_frequency_response.is_empty());
