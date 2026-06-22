@@ -4524,6 +4524,16 @@ fn analysis_run_thermal_returns_temperature_payload() {
     assert_eq!(thermal.heat_flux_snapshots.len(), 6);
     assert_eq!(thermal.heat_source_snapshots.len(), 6);
     assert_eq!(thermal.boundary_heat_flux_snapshots.len(), 6);
+    assert_eq!(thermal.temperature_gradient_snapshots[0].shape.len(), 2);
+    assert_eq!(thermal.temperature_gradient_snapshots[0].shape[1], 3);
+    assert_eq!(
+        thermal.heat_flux_snapshots[0].shape,
+        thermal.temperature_gradient_snapshots[0].shape
+    );
+    assert_eq!(
+        thermal.heat_source_snapshots[0].shape,
+        vec![thermal.temperature_gradient_snapshots[0].shape[0]]
+    );
     assert_eq!(thermal.boundary_heat_flux_snapshots[0].shape, vec![6]);
     let field_ids = results
         .data

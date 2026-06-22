@@ -510,6 +510,17 @@ fn thermal_solver_emits_heat_transfer_fields() {
         result.heat_source_snapshots[1].field_id,
         fea_thermal_heat_source_field_id(1)
     );
+    assert_eq!(result.temperature_gradient_snapshots[1].shape.len(), 2);
+    assert_eq!(result.temperature_gradient_snapshots[1].shape[1], 3);
+    assert_eq!(
+        result.heat_flux_snapshots[1].shape, result.temperature_gradient_snapshots[1].shape,
+        "thermal heat flux should share the element-vector shape"
+    );
+    assert_eq!(
+        result.heat_source_snapshots[1].shape,
+        vec![result.temperature_gradient_snapshots[1].shape[0]],
+        "thermal heat source should be an element scalar field"
+    );
     assert_eq!(
         result.boundary_heat_flux_snapshots[1].field_id,
         fea_thermal_boundary_heat_flux_field_id(1)

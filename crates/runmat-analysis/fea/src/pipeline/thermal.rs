@@ -253,39 +253,46 @@ pub fn run_thermal_with_options(
         constitutive.heat_capacity_mean,
         thermo_context.reference_temperature_k,
     );
-    let temperature_gradient_snapshots = temperature_gradient_raw
-        .into_iter()
-        .enumerate()
-        .map(|(step, values)| {
-            AnalysisField::host_f64(
-                fea_thermal_temperature_gradient_field_id(step),
-                vec![node_count, VECTOR_COMPONENT_COUNT],
-                values,
-            )
-        })
-        .collect::<Vec<_>>();
-    let heat_flux_snapshots = heat_flux_raw
-        .into_iter()
-        .enumerate()
-        .map(|(step, values)| {
-            AnalysisField::host_f64(
-                fea_thermal_heat_flux_field_id(step),
-                vec![node_count, VECTOR_COMPONENT_COUNT],
-                values,
-            )
-        })
-        .collect::<Vec<_>>();
-    let heat_source_snapshots = heat_source_raw
-        .into_iter()
-        .enumerate()
-        .map(|(step, values)| {
-            AnalysisField::host_f64(
-                fea_thermal_heat_source_field_id(step),
-                vec![node_count],
-                values,
-            )
-        })
-        .collect::<Vec<_>>();
+    let thermal_elements = thermal_element_node_sets(recovery_topology);
+    let element_count = thermal_elements.len().max(1);
+    let temperature_gradient_snapshots = project_nodal_vector_snapshots_to_thermal_elements(
+        &temperature_gradient_raw,
+        &thermal_elements,
+    )
+    .into_iter()
+    .enumerate()
+    .map(|(step, values)| {
+        AnalysisField::host_f64(
+            fea_thermal_temperature_gradient_field_id(step),
+            vec![element_count, VECTOR_COMPONENT_COUNT],
+            values,
+        )
+    })
+    .collect::<Vec<_>>();
+    let heat_flux_snapshots =
+        project_nodal_vector_snapshots_to_thermal_elements(&heat_flux_raw, &thermal_elements)
+            .into_iter()
+            .enumerate()
+            .map(|(step, values)| {
+                AnalysisField::host_f64(
+                    fea_thermal_heat_flux_field_id(step),
+                    vec![element_count, VECTOR_COMPONENT_COUNT],
+                    values,
+                )
+            })
+            .collect::<Vec<_>>();
+    let heat_source_snapshots =
+        project_nodal_scalar_snapshots_to_thermal_elements(&heat_source_raw, &thermal_elements)
+            .into_iter()
+            .enumerate()
+            .map(|(step, values)| {
+                AnalysisField::host_f64(
+                    fea_thermal_heat_source_field_id(step),
+                    vec![element_count],
+                    values,
+                )
+            })
+            .collect::<Vec<_>>();
     let boundary_heat_flux_snapshots = boundary_heat_flux_raw
         .into_iter()
         .enumerate()
@@ -713,6 +720,114 @@ fn recover_heat_source_snapshots(
                 .collect()
         })
         .collect()
+}
+
+fn project_nodal_vector_snapshots_to_thermal_elements(
+    snapshots: &[Vec<f64>],
+    elements: &[Vec<usize>],
+) -> Vec<Vec<f64>> {
+    snapshots
+        .iter()
+        .map(|snapshot| {
+            let mut values = Vec::with_capacity(elements.len() * VECTOR_COMPONENT_COUNT);
+            for element_nodes in elements {
+                for axis in 0..VECTOR_COMPONENT_COUNT {
+                    values.push(average_nodal_component(snapshot, element_nodes, axis));
+                }
+            }
+            values
+        })
+        .collect()
+}
+
+fn project_nodal_scalar_snapshots_to_thermal_elements(
+    snapshots: &[Vec<f64>],
+    elements: &[Vec<usize>],
+) -> Vec<Vec<f64>> {
+    snapshots
+        .iter()
+        .map(|snapshot| {
+            elements
+                .iter()
+                .map(|element_nodes| average_nodal_scalar(snapshot, element_nodes))
+                .collect()
+        })
+        .collect()
+}
+
+fn average_nodal_component(snapshot: &[f64], element_nodes: &[usize], axis: usize) -> f64 {
+    if element_nodes.is_empty() {
+        return 0.0;
+    }
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    for node in element_nodes {
+        if let Some(value) = snapshot.get(node * VECTOR_COMPONENT_COUNT + axis) {
+            sum += *value;
+            count += 1;
+        }
+    }
+    if count == 0 {
+        0.0
+    } else {
+        sum / count as f64
+    }
+}
+
+fn average_nodal_scalar(snapshot: &[f64], element_nodes: &[usize]) -> f64 {
+    if element_nodes.is_empty() {
+        return 0.0;
+    }
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    for node in element_nodes {
+        if let Some(value) = snapshot.get(*node) {
+            sum += *value;
+            count += 1;
+        }
+    }
+    if count == 0 {
+        0.0
+    } else {
+        sum / count as f64
+    }
+}
+
+fn thermal_element_node_sets(topology: ThermalRecoveryTopology) -> Vec<Vec<usize>> {
+    let x_cells = topology.dims[0].saturating_sub(1).max(1);
+    let y_cells = topology.dims[1].saturating_sub(1).max(1);
+    let z_cells = topology.dims[2].saturating_sub(1).max(1);
+    let mut elements = Vec::with_capacity(x_cells * y_cells * z_cells);
+    for z in 0..z_cells {
+        for y in 0..y_cells {
+            for x in 0..x_cells {
+                let mut nodes = Vec::with_capacity(8);
+                for dz in thermal_axis_offsets(topology.dims[2]) {
+                    for dy in thermal_axis_offsets(topology.dims[1]) {
+                        for dx in thermal_axis_offsets(topology.dims[0]) {
+                            let coords = [x + dx, y + dy, z + dz];
+                            if let Some(index) = topology.index(coords) {
+                                if !nodes.contains(&index) {
+                                    nodes.push(index);
+                                }
+                            }
+                        }
+                    }
+                }
+                if !nodes.is_empty() {
+                    elements.push(nodes);
+                }
+            }
+        }
+    }
+    if elements.is_empty() {
+        elements.push(vec![0]);
+    }
+    elements
+}
+
+fn thermal_axis_offsets(dim: usize) -> std::ops::RangeInclusive<usize> {
+    0..=usize::from(dim > 1)
 }
 
 fn recover_boundary_heat_flux_snapshots(
