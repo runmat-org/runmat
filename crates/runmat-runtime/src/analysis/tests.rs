@@ -3057,16 +3057,32 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
         nonlinear.electro_thermal_thermal_residual_snapshots[0].field_id,
         fea_electro_thermal_thermal_residual_field_id(0)
     );
-    assert!(results
-        .data
-        .field_descriptors
-        .iter()
-        .any(|descriptor| descriptor.field_id == FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL));
-    assert!(results
-        .data
-        .field_descriptors
-        .iter()
-        .any(|descriptor| { descriptor.field_id == fea_electro_thermal_temperature_field_id(0) }));
+    let descriptor = |field_id: &str| {
+        results
+            .data
+            .field_descriptors
+            .iter()
+            .find(|descriptor| descriptor.field_id == field_id)
+            .expect("nonlinear electro-thermal descriptor should be present")
+    };
+    for field_id in [
+        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL.to_string(),
+        FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT.to_string(),
+        fea_electro_thermal_temperature_field_id(0),
+        fea_electro_thermal_thermal_residual_field_id(0),
+    ] {
+        let descriptor = descriptor(&field_id);
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
+        assert_eq!(descriptor.component_count, None);
+    }
+    for field_id in [
+        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
+        FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
+    ] {
+        let descriptor = descriptor(field_id);
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
+        assert_eq!(descriptor.component_count, Some(3));
+    }
 }
 
 #[test]
@@ -5207,14 +5223,34 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         OperationContext::new(None, None),
     )
     .expect("thermo-mechanical nonlinear results should be queryable");
-    assert!(results
-        .data
-        .field_descriptors
-        .iter()
-        .any(|descriptor| descriptor.field_id == fea_thermo_mechanical_temperature_field_id(0)));
-    assert!(results.data.field_descriptors.iter().any(|descriptor| {
-        descriptor.field_id == fea_thermo_mechanical_coupling_residual_field_id(0)
-    }));
+    let descriptor = |field_id: &str| {
+        results
+            .data
+            .field_descriptors
+            .iter()
+            .find(|descriptor| descriptor.field_id == field_id)
+            .expect("nonlinear thermo-mechanical descriptor should be present")
+    };
+    for field_id in [
+        fea_thermo_mechanical_temperature_field_id(0),
+        fea_thermo_mechanical_von_mises_field_id(0),
+        fea_thermo_mechanical_coupling_residual_field_id(0),
+    ] {
+        let descriptor = descriptor(&field_id);
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
+        assert_eq!(descriptor.component_count, None);
+    }
+    let displacement_descriptor = descriptor(&fea_thermo_mechanical_displacement_field_id(0));
+    assert_eq!(displacement_descriptor.kind, AnalysisFieldKind::Vector);
+    assert_eq!(displacement_descriptor.component_count, Some(3));
+    for field_id in [
+        fea_thermo_mechanical_thermal_strain_field_id(0),
+        fea_thermo_mechanical_thermal_stress_field_id(0),
+    ] {
+        let descriptor = descriptor(&field_id);
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Tensor);
+        assert_eq!(descriptor.component_count, Some(6));
+    }
 }
 
 #[test]
@@ -6512,14 +6548,34 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         OperationContext::new(None, None),
     )
     .expect("thermo-mechanical transient results should be queryable");
-    assert!(results
-        .data
-        .field_descriptors
-        .iter()
-        .any(|descriptor| descriptor.field_id == fea_thermo_mechanical_temperature_field_id(0)));
-    assert!(results.data.field_descriptors.iter().any(|descriptor| {
-        descriptor.field_id == fea_thermo_mechanical_coupling_residual_field_id(0)
-    }));
+    let descriptor = |field_id: &str| {
+        results
+            .data
+            .field_descriptors
+            .iter()
+            .find(|descriptor| descriptor.field_id == field_id)
+            .expect("transient thermo-mechanical descriptor should be present")
+    };
+    for field_id in [
+        fea_thermo_mechanical_temperature_field_id(0),
+        fea_thermo_mechanical_von_mises_field_id(0),
+        fea_thermo_mechanical_coupling_residual_field_id(0),
+    ] {
+        let descriptor = descriptor(&field_id);
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
+        assert_eq!(descriptor.component_count, None);
+    }
+    let displacement_descriptor = descriptor(&fea_thermo_mechanical_displacement_field_id(0));
+    assert_eq!(displacement_descriptor.kind, AnalysisFieldKind::Vector);
+    assert_eq!(displacement_descriptor.component_count, Some(3));
+    for field_id in [
+        fea_thermo_mechanical_thermal_strain_field_id(0),
+        fea_thermo_mechanical_thermal_stress_field_id(0),
+    ] {
+        let descriptor = descriptor(&field_id);
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Tensor);
+        assert_eq!(descriptor.component_count, Some(6));
+    }
 }
 
 #[test]
