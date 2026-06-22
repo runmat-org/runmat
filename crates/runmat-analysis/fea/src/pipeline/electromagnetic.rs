@@ -699,6 +699,13 @@ pub fn run_electromagnetic_with_options(
             (harmonic_residual_tolerance / (max_residual_norm + harmonic_residual_tolerance))
                 .clamp(0.0, 1.0)
         };
+    let edge_residual = maxwell_topology.edge_curl_curl_residual_metrics(
+        &vector_potential_real,
+        &vector_potential_imag,
+        &base_rhs_real,
+        &base_rhs_imag,
+        &conductivity_coupling_terms,
+    );
     let field_energy_integral = flux_density.iter().map(|v| v * v).sum::<f64>();
     let element_count = maxwell_topology.element_count();
     let max_flux_density = flux_density
@@ -917,6 +924,23 @@ pub fn run_electromagnetic_with_options(
             max_residual_norm,
             solve_quality,
             field_energy_integral,
+        ),
+    });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_EM_EDGE_RESIDUAL".to_string(),
+        severity: if edge_residual.active_edge_count > 0 {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "basis={} active_edge_count={} edge_real_residual_norm={} edge_imag_residual_norm={} edge_coupled_residual_norm={} edge_equation_scale={}",
+            maxwell_topology.basis.as_str(),
+            edge_residual.active_edge_count,
+            edge_residual.real_norm,
+            edge_residual.imag_norm,
+            edge_residual.coupled_norm,
+            edge_residual.equation_scale,
         ),
     });
     diagnostics.push(FeaDiagnostic {
@@ -2230,6 +2254,68 @@ impl MaxwellEdgeTopology {
             (anchor_energy / total_energy).sqrt()
         }
     }
+
+    fn edge_curl_curl_residual_metrics(
+        &self,
+        real: &[f64],
+        imag: &[f64],
+        rhs_real: &[f64],
+        rhs_imag: &[f64],
+        coupling_terms: &[f64],
+    ) -> MaxwellEdgeResidualMetrics {
+        let mut active_edge_count = 0usize;
+        let mut real_residual_sq_sum = 0.0_f64;
+        let mut imag_residual_sq_sum = 0.0_f64;
+        let mut equation_scale_sq_sum = 0.0_f64;
+        let mut real_equation_scale_sq_sum = 0.0_f64;
+        let mut imag_equation_scale_sq_sum = 0.0_f64;
+        for edge in &self.edges {
+            if edge.constrained {
+                continue;
+            }
+            active_edge_count = active_edge_count.saturating_add(1);
+            let real_curl_curl = edge.oriented_difference(real) * edge.curl_weight();
+            let imag_curl_curl = edge.oriented_difference(imag) * edge.curl_weight();
+            let coupling = edge.average(coupling_terms);
+            let real_mass = coupling * edge.average(real);
+            let imag_mass = coupling * edge.average(imag);
+            let real_source = edge.average(rhs_real);
+            let imag_source = edge.average(rhs_imag);
+            let real_residual = real_curl_curl - imag_mass - real_source;
+            let imag_residual = imag_curl_curl + real_mass - imag_source;
+            real_residual_sq_sum += real_residual * real_residual;
+            imag_residual_sq_sum += imag_residual * imag_residual;
+            real_equation_scale_sq_sum +=
+                real_curl_curl * real_curl_curl + imag_mass * imag_mass + real_source * real_source;
+            imag_equation_scale_sq_sum +=
+                imag_curl_curl * imag_curl_curl + real_mass * real_mass + imag_source * imag_source;
+            equation_scale_sq_sum += real_curl_curl * real_curl_curl
+                + imag_curl_curl * imag_curl_curl
+                + real_mass * real_mass
+                + imag_mass * imag_mass
+                + real_source * real_source
+                + imag_source * imag_source;
+        }
+        let real_scale = real_equation_scale_sq_sum.sqrt().max(1.0e-9);
+        let imag_scale = imag_equation_scale_sq_sum.sqrt().max(1.0e-9);
+        let coupled_scale = equation_scale_sq_sum.sqrt().max(1.0e-9);
+        MaxwellEdgeResidualMetrics {
+            active_edge_count,
+            real_norm: real_residual_sq_sum.sqrt() / real_scale,
+            imag_norm: imag_residual_sq_sum.sqrt() / imag_scale,
+            coupled_norm: (real_residual_sq_sum + imag_residual_sq_sum).sqrt() / coupled_scale,
+            equation_scale: coupled_scale,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MaxwellEdgeResidualMetrics {
+    active_edge_count: usize,
+    real_norm: f64,
+    imag_norm: f64,
+    coupled_norm: f64,
+    equation_scale: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2732,6 +2818,25 @@ mod tests {
         let residual = topology.gauge_anchor_residual_ratio(&real, &imag);
 
         assert!(residual <= 1.0e-12);
+    }
+
+    #[test]
+    fn maxwell_edge_topology_reports_edge_curl_curl_residual() {
+        let topology = MaxwellEdgeTopology::line_graph(5, 0.25, &[true, false, false, false, true]);
+        let real = vec![0.0, 0.2, 0.5, 0.7, 0.9];
+        let imag = vec![0.0, 0.1, 0.15, 0.1, 0.0];
+        let rhs_real = vec![0.0, 0.05, 0.08, 0.05, 0.0];
+        let rhs_imag = vec![0.0, 0.01, 0.02, 0.01, 0.0];
+        let coupling = vec![0.0, 0.2, 0.25, 0.2, 0.0];
+
+        let residual =
+            topology.edge_curl_curl_residual_metrics(&real, &imag, &rhs_real, &rhs_imag, &coupling);
+
+        assert_eq!(residual.active_edge_count, 2);
+        assert!(residual.equation_scale > 0.0);
+        assert!(residual.real_norm.is_finite());
+        assert!(residual.imag_norm.is_finite());
+        assert!(residual.coupled_norm.is_finite());
     }
 
     #[test]
