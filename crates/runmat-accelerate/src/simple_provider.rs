@@ -261,6 +261,26 @@ fn poly_integral_real(coeffs: &[f64], constant: f64) -> Vec<f64> {
     out
 }
 
+fn poly_integral_complex_interleaved(coeffs: &[f64], constant: f64) -> Result<Vec<f64>> {
+    ensure!(
+        coeffs.len().is_multiple_of(2),
+        "polyint: complex-interleaved buffer has odd length"
+    );
+    let logical_len = coeffs.len() / 2;
+    if logical_len == 0 {
+        return Ok(vec![constant, 0.0]);
+    }
+    let mut out = Vec::with_capacity((logical_len + 1) * 2);
+    for idx in 0..logical_len {
+        let power = (logical_len - idx) as f64;
+        out.push(coeffs[idx * 2] / power);
+        out.push(coeffs[idx * 2 + 1] / power);
+    }
+    out.push(constant);
+    out.push(0.0);
+    Ok(out)
+}
+
 fn poly_convolve_real(a: &[f64], b: &[f64]) -> Vec<f64> {
     if a.is_empty() || b.is_empty() {
         return Vec::new();
@@ -1660,8 +1680,27 @@ impl AccelProvider for InProcessProvider {
                 .cloned()
                 .ok_or_else(|| anyhow!("polyint: unknown tensor handle {}", polynomial.buffer_id))?
         };
-        let integrated = poly_integral_real(&coeffs, constant);
-        Ok(self.allocate_polynomial(integrated, orientation))
+        let storage = runmat_accelerate_api::handle_storage(polynomial);
+        match storage {
+            GpuTensorStorage::Real => {
+                let integrated = poly_integral_real(&coeffs, constant);
+                Ok(self.allocate_polynomial(integrated, orientation))
+            }
+            GpuTensorStorage::ComplexInterleaved => {
+                let integrated = poly_integral_complex_interleaved(&coeffs, constant)?;
+                let logical_len = integrated.len() / 2;
+                let shape = match orientation {
+                    PolyOrientation::Row => vec![1, logical_len],
+                    PolyOrientation::Column => vec![logical_len, 1],
+                    PolyOrientation::Scalar => vec![1, logical_len],
+                };
+                Ok(self.allocate_tensor_with_storage(
+                    integrated,
+                    shape,
+                    GpuTensorStorage::ComplexInterleaved,
+                ))
+            }
+        }
     }
 
     fn diag_from_vector(&self, vector: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {

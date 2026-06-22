@@ -6,6 +6,8 @@ struct Tensor {
 struct Params {
     input_len: u32,
     output_len: u32,
+    storage_factor: u32,
+    _pad0: u32,
     constant: f64,
 };
 
@@ -19,18 +21,28 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (idx >= params.output_len) {
         return;
     }
+    let logical_idx = idx / params.storage_factor;
+    let lane = idx - logical_idx * params.storage_factor;
     if (params.input_len == 0u) {
-        if (idx == 0u) {
-            Output.data[0u] = params.constant;
+        if (logical_idx == 0u) {
+            if (lane == 0u) {
+                Output.data[idx] = params.constant;
+            } else {
+                Output.data[idx] = 0.0;
+            }
         }
         return;
     }
-    let last = params.output_len - 1u;
-    if (idx == last) {
-        Output.data[idx] = params.constant;
+    let last = params.input_len;
+    if (logical_idx == last) {
+        if (lane == 0u) {
+            Output.data[idx] = params.constant;
+        } else {
+            Output.data[idx] = 0.0;
+        }
         return;
     }
-    let power = params.input_len - idx;
+    let power = params.input_len - logical_idx;
     Output.data[idx] = Input.data[idx] / f64(power);
 }
 "#;
@@ -43,8 +55,12 @@ struct Tensor {
 struct Params {
     input_len: u32,
     output_len: u32,
+    storage_factor: u32,
+    _pad0: u32,
     constant: f32,
-    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
+    _pad3: f32,
 };
 
 @group(0) @binding(0) var<storage, read> Input: Tensor;
@@ -57,18 +73,28 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (idx >= params.output_len) {
         return;
     }
+    let logical_idx = idx / params.storage_factor;
+    let lane = idx - logical_idx * params.storage_factor;
     if (params.input_len == 0u) {
-        if (idx == 0u) {
-            Output.data[0u] = params.constant;
+        if (logical_idx == 0u) {
+            if (lane == 0u) {
+                Output.data[idx] = params.constant;
+            } else {
+                Output.data[idx] = 0.0;
+            }
         }
         return;
     }
-    let last = params.output_len - 1u;
-    if (idx == last) {
-        Output.data[idx] = params.constant;
+    let last = params.input_len;
+    if (logical_idx == last) {
+        if (lane == 0u) {
+            Output.data[idx] = params.constant;
+        } else {
+            Output.data[idx] = 0.0;
+        }
         return;
     }
-    let power = params.input_len - idx;
+    let power = params.input_len - logical_idx;
     Output.data[idx] = Input.data[idx] / f32(power);
 }
 "#;
