@@ -4873,16 +4873,29 @@ fn analysis_run_nonlinear_returns_native_nonlinear_result() {
         OperationContext::new(None, None),
     )
     .expect("nonlinear results should be queryable");
-    assert!(results
-        .data
-        .field_descriptors
-        .iter()
-        .any(|descriptor| descriptor.field_id == fea_nonlinear_load_factor_field_id(0)));
-    assert!(results
-        .data
-        .field_descriptors
-        .iter()
-        .any(|descriptor| descriptor.field_id == fea_nonlinear_residual_norm_field_id(0)));
+    let descriptor = |field_id: &str| {
+        results
+            .data
+            .field_descriptors
+            .iter()
+            .find(|descriptor| descriptor.field_id == field_id)
+            .expect("nonlinear descriptor should be present")
+    };
+    for field_id in [
+        fea_nonlinear_von_mises_field_id(0),
+        fea_nonlinear_equivalent_plastic_strain_field_id(0),
+        fea_nonlinear_contact_pressure_field_id(0),
+        fea_nonlinear_contact_gap_field_id(0),
+        fea_nonlinear_load_factor_field_id(0),
+        fea_nonlinear_residual_norm_field_id(0),
+    ] {
+        let descriptor = descriptor(&field_id);
+        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
+        assert_eq!(descriptor.component_count, None);
+    }
+    let plastic_strain_descriptor = descriptor(&fea_nonlinear_plastic_strain_field_id(0));
+    assert_eq!(plastic_strain_descriptor.kind, AnalysisFieldKind::Tensor);
+    assert_eq!(plastic_strain_descriptor.component_count, Some(6));
     assert!(nonlinear.tangent_rebuild_count > 0);
     assert!(nonlinear.iteration_spike_count <= nonlinear.load_factors.len());
     assert!(nonlinear.max_line_search_backtracks_per_increment > 0);
