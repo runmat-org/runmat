@@ -2684,6 +2684,25 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
         .run
         .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
         .is_some());
+    let electric_field = run
+        .data
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD)
+        .expect("electro-thermal electric field should be present");
+    let current_density = run
+        .data
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY)
+        .expect("electro-thermal current density should be present");
+    let joule_heat = run
+        .data
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
+        .expect("electro-thermal Joule heat should be present");
+    assert_eq!(electric_field.shape.len(), 2);
+    assert_eq!(electric_field.shape[1], 3);
+    assert_eq!(current_density.shape, electric_field.shape);
+    assert_eq!(joule_heat.shape, vec![electric_field.shape[0]]);
     let transient = run
         .data
         .transient_results
@@ -2949,6 +2968,25 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
         .run
         .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
         .is_some());
+    let electric_field = run
+        .data
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD)
+        .expect("electro-thermal electric field should be present");
+    let current_density = run
+        .data
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY)
+        .expect("electro-thermal current density should be present");
+    let joule_heat = run
+        .data
+        .run
+        .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
+        .expect("electro-thermal Joule heat should be present");
+    assert_eq!(electric_field.shape.len(), 2);
+    assert_eq!(electric_field.shape[1], 3);
+    assert_eq!(current_density.shape, electric_field.shape);
+    assert_eq!(joule_heat.shape, vec![electric_field.shape[0]]);
     let nonlinear = run
         .data
         .nonlinear_results

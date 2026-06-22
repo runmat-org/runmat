@@ -24,7 +24,6 @@ struct ConductanceEdge {
 struct ConductanceDomainGraph {
     edges: Vec<ConductanceEdge>,
     topology: ElectroThermalDomainTopology,
-    node_degrees: Vec<usize>,
     boundary_node_count: usize,
     max_node_degree: usize,
     mean_node_degree: f64,
@@ -80,10 +79,6 @@ pub(crate) fn recover_electro_thermal_fields(
 
     let node_count = dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1);
     let solve = solve_conductance_domain_graph(summary, node_count);
-    let mut electric_field = Vec::with_capacity(node_count * VECTOR_COMPONENT_COUNT);
-    let mut current_density = Vec::with_capacity(node_count * VECTOR_COMPONENT_COUNT);
-    let mut nodal_field_sum = vec![0.0_f64; node_count];
-    let mut nodal_current_sum = vec![0.0_f64; node_count];
     let signed_span = solve
         .potential
         .first()
@@ -91,42 +86,30 @@ pub(crate) fn recover_electro_thermal_fields(
         .map(|(first, last)| first - last)
         .unwrap_or(0.0)
         .signum();
-    for (edge, current) in solve.graph.edges.iter().zip(solve.edge_current.iter()) {
-        let voltage_drop = solve.potential[edge.from] - solve.potential[edge.to];
-        let local_field = voltage_drop;
-        let oriented_current = current.abs() * signed_span;
-        nodal_field_sum[edge.from] += local_field;
-        nodal_field_sum[edge.to] += local_field;
-        nodal_current_sum[edge.from] += oriented_current;
-        nodal_current_sum[edge.to] += oriented_current;
-    }
-    for index in 0..node_count {
-        let degree = solve
-            .graph
-            .node_degrees
-            .get(index)
-            .copied()
-            .unwrap_or_default()
-            .max(1) as f64;
-        electric_field.extend_from_slice(&[nodal_field_sum[index] / degree, 0.0, 0.0]);
-        current_density.extend_from_slice(&[nodal_current_sum[index] / degree, 0.0, 0.0]);
-    }
-    let unscaled_joule_integral = solve.nodal_unscaled_joule_heat.iter().sum::<f64>();
+    let edge_electric_field = edge_electric_field_values(&solve);
+    let edge_current_density = edge_current_density_values(&solve, signed_span);
+    let edge_unscaled_joule_heat = edge_unscaled_joule_heat_values(&solve);
+    let unscaled_joule_integral = edge_unscaled_joule_heat.iter().sum::<f64>();
     let heating_scale = if unscaled_joule_integral > 1.0e-12 {
         summary.joule_heating_scale.max(0.0) / unscaled_joule_integral
     } else {
         0.0
     };
-    let joule_heat = solve
+    let edge_joule_heat = edge_unscaled_joule_heat
+        .iter()
+        .map(|value| value * heating_scale)
+        .collect::<Vec<_>>();
+    let nodal_joule_heat = solve
         .nodal_unscaled_joule_heat
         .iter()
         .map(|value| value * heating_scale)
         .collect::<Vec<_>>();
-    let mean_joule_heat = if joule_heat.is_empty() {
+    let mean_joule_heat = if nodal_joule_heat.is_empty() {
         0.0
     } else {
-        joule_heat.iter().sum::<f64>() / joule_heat.len() as f64
+        nodal_joule_heat.iter().sum::<f64>() / nodal_joule_heat.len() as f64
     };
+    let edge_count = edge_joule_heat.len().max(1);
 
     let diagnostics = vec![
         electro_thermal_domain_topology_diagnostic(&solve),
@@ -142,18 +125,18 @@ pub(crate) fn recover_electro_thermal_fields(
         ),
         AnalysisField::host_f64(
             FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
-            vec![node_count, VECTOR_COMPONENT_COUNT],
-            electric_field,
+            vec![edge_count, VECTOR_COMPONENT_COUNT],
+            edge_electric_field,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
-            vec![node_count, VECTOR_COMPONENT_COUNT],
-            current_density,
+            vec![edge_count, VECTOR_COMPONENT_COUNT],
+            edge_current_density,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
-            vec![node_count],
-            joule_heat.clone(),
+            vec![edge_count],
+            edge_joule_heat,
         ),
     ];
 
@@ -165,7 +148,7 @@ pub(crate) fn recover_electro_thermal_fields(
         let mean_temperature_rise = summary.joule_heating_scale.max(0.0)
             * current_factor
             * (1.0 + summary.temporal_profile_variation);
-        let temperature = joule_heat
+        let temperature = nodal_joule_heat
             .iter()
             .map(|source| {
                 let source_scale = if mean_joule_heat > 1.0e-12 {
@@ -198,7 +181,7 @@ pub(crate) fn recover_electro_thermal_fields(
     let mut diagnostics = diagnostics;
     diagnostics.push(electro_thermal_source_coupling_diagnostic(
         summary,
-        &joule_heat,
+        &nodal_joule_heat,
         &final_temperature,
     ));
 
@@ -208,6 +191,42 @@ pub(crate) fn recover_electro_thermal_fields(
         thermal_residual_snapshots,
         diagnostics,
     }
+}
+
+fn edge_electric_field_values(solve: &ElectroThermalPotentialSolve) -> Vec<f64> {
+    if solve.graph.edges.is_empty() {
+        return vec![0.0; VECTOR_COMPONENT_COUNT];
+    }
+    let mut values = Vec::with_capacity(solve.graph.edges.len() * VECTOR_COMPONENT_COUNT);
+    for edge in &solve.graph.edges {
+        let voltage_drop = solve.potential[edge.from] - solve.potential[edge.to];
+        values.extend_from_slice(&[voltage_drop, 0.0, 0.0]);
+    }
+    values
+}
+
+fn edge_current_density_values(solve: &ElectroThermalPotentialSolve, signed_span: f64) -> Vec<f64> {
+    if solve.graph.edges.is_empty() {
+        return vec![0.0; VECTOR_COMPONENT_COUNT];
+    }
+    let mut values = Vec::with_capacity(solve.edge_current.len() * VECTOR_COMPONENT_COUNT);
+    for current in &solve.edge_current {
+        values.extend_from_slice(&[current.abs() * signed_span, 0.0, 0.0]);
+    }
+    values
+}
+
+fn edge_unscaled_joule_heat_values(solve: &ElectroThermalPotentialSolve) -> Vec<f64> {
+    if solve.graph.edges.is_empty() {
+        return vec![0.0];
+    }
+    solve
+        .graph
+        .edges
+        .iter()
+        .zip(solve.edge_current.iter())
+        .map(|(edge, current)| current * current / edge.conductance.max(MIN_CONDUCTIVITY))
+        .collect()
 }
 
 fn solve_conductance_domain_graph(
@@ -375,7 +394,6 @@ fn build_conductance_domain_graph(
     ConductanceDomainGraph {
         edges,
         topology,
-        node_degrees,
         boundary_node_count: node_count.min(2),
         max_node_degree,
         mean_node_degree,
@@ -891,19 +909,39 @@ mod tests {
         assert!(fields.diagnostics[3]
             .message
             .contains("thermal_temperature_source_alignment="));
+        assert_eq!(
+            fields.static_fields[1].shape,
+            vec![15, VECTOR_COMPONENT_COUNT]
+        );
+        assert_eq!(
+            fields.static_fields[2].shape,
+            vec![15, VECTOR_COMPONENT_COUNT]
+        );
+        assert_eq!(fields.static_fields[3].shape, vec![15]);
     }
 
     #[test]
     fn recovered_temperature_snapshots_follow_joule_heat_field() {
         let fields = recover_electro_thermal_fields(Some(&summary()), &[1.0], &[0.01], 48);
-        let joule_heat = fields.static_fields[3]
+        let edge_joule_heat = fields.static_fields[3]
             .as_host_f64()
-            .expect("joule heat should be a host field");
+            .expect("edge joule heat should be a host field");
         let temperature = fields.temperature_snapshots[0]
             .as_host_f64()
             .expect("temperature should be a host field");
+        let solve = solve_conductance_domain_graph(&summary(), 16);
+        let heating_scale = summary().joule_heating_scale
+            / edge_unscaled_joule_heat_values(&solve)
+                .iter()
+                .sum::<f64>()
+                .max(1.0e-12);
+        let nodal_joule_heat = solve
+            .nodal_unscaled_joule_heat
+            .iter()
+            .map(|value| value * heating_scale)
+            .collect::<Vec<_>>();
         let source_residual = normalized_profile_residual(
-            joule_heat,
+            &nodal_joule_heat,
             &temperature
                 .iter()
                 .map(|value| value - summary().reference_temperature_k)
@@ -911,6 +949,8 @@ mod tests {
         );
 
         assert!(source_residual <= 1.0e-12);
-        assert!((joule_heat.iter().sum::<f64>() - summary().joule_heating_scale).abs() <= 1.0e-10);
+        assert!(
+            (edge_joule_heat.iter().sum::<f64>() - summary().joule_heating_scale).abs() <= 1.0e-10
+        );
     }
 }

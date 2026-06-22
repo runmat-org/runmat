@@ -761,6 +761,13 @@ fn electro_thermal_transient_emits_coupled_fields() {
         .run
         .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
         .is_some());
+    let electric_field = field(&result.run, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD);
+    let current_density = field(&result.run, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY);
+    let joule_heat = field(&result.run, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT);
+    assert_eq!(electric_field.shape.len(), 2);
+    assert_eq!(electric_field.shape[1], 3);
+    assert_eq!(current_density.shape, electric_field.shape);
+    assert_eq!(joule_heat.shape, vec![electric_field.shape[0]]);
     assert_eq!(
         result.electro_thermal_temperature_snapshots.len(),
         result.time_points_s.len()
