@@ -624,7 +624,7 @@ pub(super) async fn discover_companion_source_statements_async(
                 private_owner_scope.as_deref(),
                 private_aliases,
                 Some((
-                    crate::diagnostic_path::display_path_from_base(&path, cwd),
+                    crate::diagnostic_path::display_path_from_base(&path, &cwd),
                     contents,
                 )),
             );
