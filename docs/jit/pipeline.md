@@ -90,7 +90,7 @@ flowchart TD
 | `Num` | Raw `f64::to_bits()`. |
 | `Bool` | `0` or `1`. |
 | `Int` | Signed integer bits. |
-| `GcHandle` | Opaque identity token for a GC-managed `Value`; compiled and bridge code must use checked GC access APIs to inspect the value. |
+| `GcHandle` | Opaque identity token for a GC-managed `Value` registered in Turbine's thread-local ABI root table; compiled and bridge code must use checked GC access APIs to inspect the value, and unregistered raw-address tokens are rejected. |
 
 `TurbineArgSpec` mirrors VM argument expansion metadata with `is_expand`, `num_indices`, and `expand_all`. Expanded and multi-output calls use this layout so compiled code can call the same semantic dispatch paths as the interpreter without falling back to legacy name-only resolution.
 
