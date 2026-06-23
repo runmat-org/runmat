@@ -3143,6 +3143,24 @@ run:
     }
 
     #[test]
+    fn fea_load_case_doc_keywords_include_moment_and_torque() {
+        let doc = runmat_builtins::builtin_docs()
+            .into_iter()
+            .find(|doc| doc.name == "fea.loadCase")
+            .expect("fea.loadCase doc metadata should be registered");
+        let keywords = doc
+            .keywords
+            .expect("fea.loadCase should advertise keywords");
+        let keyword_set = keywords
+            .split(',')
+            .map(str::trim)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert!(keyword_set.contains("moment"));
+        assert!(keyword_set.contains("torque"));
+    }
+
+    #[test]
     fn fea_boundary_condition_accepts_prescribed_rotation() {
         let boundary = block_on(fea_boundary_condition_builtin(vec![
             Value::String("tip_rotation".to_string()),
