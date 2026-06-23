@@ -1,8 +1,11 @@
 //! MATLAB-compatible `writecell` builtin for heterogeneous cell-array export.
 
+use std::collections::HashMap;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
+use futures::lock::Mutex as AsyncMutex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -21,6 +24,8 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 const BUILTIN_NAME: &str = "writecell";
 const MAX_EXCEL_ROW_INDEX: usize = 1_048_575;
 const MAX_EXCEL_COLUMN_INDEX: usize = 16_383;
+type AppendLock = Arc<AsyncMutex<()>>;
+static APPEND_LOCKS: OnceLock<StdMutex<HashMap<String, AppendLock>>> = OnceLock::new();
 
 const WRITECELL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "bytesWritten",
@@ -711,6 +716,9 @@ async fn write_delimited_cells(
         return Ok(payload.len());
     }
 
+    let append_lock = append_lock_for_path(path);
+    let _append_guard = append_lock.lock().await;
+
     let mut open_options = OpenOptions::new();
     open_options.create(true).write(true).append(true);
 
@@ -752,6 +760,39 @@ async fn write_delimited_cells(
         )
     })?;
     Ok(bytes_written)
+}
+
+fn append_lock_for_path(path: &Path) -> AppendLock {
+    let key = append_lock_key(path);
+    let locks = APPEND_LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
+    let mut locks = locks
+        .lock()
+        .expect("writecell append lock registry poisoned");
+    locks
+        .entry(key)
+        .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+        .clone()
+}
+
+fn append_lock_key(path: &Path) -> String {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized.to_string_lossy().into_owned()
 }
 
 fn build_delimited_payload(
@@ -1270,6 +1311,10 @@ mod tests {
     use runmat_time::unix_timestamp_ms;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::sync::Barrier;
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::thread;
 
     use runmat_builtins::{CharArray, LogicalArray, Tensor};
 
@@ -1391,6 +1436,56 @@ mod tests {
 
         let contents = fs::read_to_string(&path).expect("read contents");
         assert_eq!(contents, "existing\ntail|3\n");
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn writecell_concurrent_appends_share_one_boundary_insertion() {
+        let path = temp_path("txt");
+        fs::write(&path, "existing").expect("seed");
+        let filename = path.to_string_lossy().into_owned();
+        let writers = 8usize;
+        let barrier = Arc::new(Barrier::new(writers));
+        let mut handles = Vec::new();
+        for idx in 0..writers {
+            let barrier = Arc::clone(&barrier);
+            let filename = filename.clone();
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                let values = cell(
+                    vec![Value::from(format!("row{idx}")), Value::Num(idx as f64)],
+                    1,
+                    2,
+                );
+                block_on(writecell_builtin(
+                    values,
+                    vec![
+                        Value::from(filename),
+                        Value::from("Delimiter"),
+                        Value::from("|"),
+                        Value::from("QuoteStrings"),
+                        Value::Bool(false),
+                        Value::from("WriteMode"),
+                        Value::from("append"),
+                    ],
+                ))
+                .expect("append write");
+            }));
+        }
+        for handle in handles {
+            handle.join().expect("writer thread");
+        }
+
+        let contents = fs::read_to_string(&path).expect("read contents");
+        let lines = contents.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), writers + 1);
+        assert_eq!(lines[0], "existing");
+        assert!(lines.iter().all(|line| !line.is_empty()));
+        for idx in 0..writers {
+            let expected = format!("row{idx}|{idx}");
+            assert!(lines.iter().any(|line| *line == expected));
+        }
         let _ = fs::remove_file(path);
     }
 

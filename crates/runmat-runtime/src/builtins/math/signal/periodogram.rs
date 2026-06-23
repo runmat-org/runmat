@@ -1194,6 +1194,58 @@ mod tests {
         provider.free(&handle).ok();
     }
 
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn periodogram_wgpu_centered_even_nfft_matches_host_order() {
+        let Some(provider) = runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider()
+            .expect("wgpu provider")
+        else {
+            return;
+        };
+        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let data = vec![1.0, -2.0, 3.0, -4.0];
+        let shape = [1usize, 4usize];
+        let handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &data,
+                shape: &shape,
+            })
+            .expect("upload");
+        let args = [
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+            Value::Num(4.0),
+            Value::Num(4.0),
+            Value::from("centered"),
+        ];
+        let host = call(
+            Value::Tensor(Tensor::new(data.clone(), vec![1, 4]).unwrap()),
+            &args,
+            Some(2),
+        )
+        .expect("periodogram host");
+        let (host_pxx, host_f) = output_pair(host);
+
+        let gpu = call(Value::GpuTensor(handle.clone()), &args, Some(2))
+            .expect("periodogram gpu centered");
+        let Value::OutputList(values) = gpu else {
+            panic!("expected output list");
+        };
+        let gpu_pxx =
+            crate::builtins::common::test_support::gather(values[0].clone()).expect("gather pxx");
+        let gpu_f =
+            crate::builtins::common::test_support::gather(values[1].clone()).expect("gather f");
+
+        assert_eq!(gpu_f.data, host_f);
+        assert_eq!(gpu_pxx.data.len(), host_pxx.len());
+        for (idx, (actual, expected)) in gpu_pxx.data.iter().zip(host_pxx.iter()).enumerate() {
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "centered bin {idx}: gpu {actual}, host {expected}"
+            );
+        }
+        provider.free(&handle).ok();
+    }
+
     #[test]
     fn periodogram_explicit_empty_fs_uses_one_hz_units() {
         let x = Tensor::new(vec![1.0; 4], vec![1, 4]).unwrap();

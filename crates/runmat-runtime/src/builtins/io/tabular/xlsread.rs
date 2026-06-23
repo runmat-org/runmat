@@ -24,6 +24,8 @@ const MAX_EXCEL_ROW_INDEX: usize = 1_048_575;
 const MAX_EXCEL_COLUMN_INDEX: usize = 16_383;
 const MAX_XLSREAD_SELECTED_CELLS: usize = 5_000_000;
 const MAX_XLSREAD_WORKBOOK_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_XLSREAD_ZIP_TOTAL_UNCOMPRESSED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 const XLSREAD_OUTPUT_NUM: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "num",
@@ -484,6 +486,7 @@ fn normalize_spreadsheet_path(text: &str) -> BuiltinResult<String> {
 async fn read_spreadsheet(path: &Path, request: &XlsReadRequest) -> BuiltinResult<XlsReadResult> {
     let outputs = XlsReadOutputs::requested()?;
     let bytes = read_file_bytes(path).await?;
+    preflight_zip_workbook(&bytes)?;
     let cursor = Cursor::new(bytes);
     let mut workbook = open_workbook_auto_from_rs(cursor).map_err(|err| {
         xlsread_error_with(
@@ -555,6 +558,68 @@ async fn read_file_bytes(path: &Path) -> BuiltinResult<Vec<u8>> {
         ));
     }
     Ok(bytes)
+}
+
+fn preflight_zip_workbook(bytes: &[u8]) -> BuiltinResult<()> {
+    if !looks_like_zip(bytes) {
+        return Ok(());
+    }
+    let cursor = Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|err| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            format!("xlsread: invalid ZIP workbook: {err}"),
+        )
+    })?;
+    let mut sizes = Vec::with_capacity(archive.len());
+    for idx in 0..archive.len() {
+        let entry = archive.by_index(idx).map_err(|err| {
+            xlsread_error_with(
+                &XLSREAD_ERROR_IO,
+                format!("xlsread: unable to inspect ZIP workbook entry {idx}: {err}"),
+            )
+        })?;
+        sizes.push(entry.size());
+    }
+    validate_zip_uncompressed_limits(sizes)
+}
+
+fn looks_like_zip(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"PK\x03\x04")
+        || bytes.starts_with(b"PK\x05\x06")
+        || bytes.starts_with(b"PK\x07\x08")
+}
+
+fn validate_zip_uncompressed_limits<I>(sizes: I) -> BuiltinResult<()>
+where
+    I: IntoIterator<Item = u64>,
+{
+    let mut total = 0u64;
+    for size in sizes {
+        if size > MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES {
+            return Err(xlsread_error_with(
+                &XLSREAD_ERROR_IO,
+                format!(
+                    "xlsread: ZIP workbook entry exceeds maximum expanded size of {MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES} bytes"
+                ),
+            ));
+        }
+        total = total.checked_add(size).ok_or_else(|| {
+            xlsread_error_with(
+                &XLSREAD_ERROR_IO,
+                "xlsread: ZIP workbook expanded size overflows supported bounds",
+            )
+        })?;
+        if total > MAX_XLSREAD_ZIP_TOTAL_UNCOMPRESSED_BYTES {
+            return Err(xlsread_error_with(
+                &XLSREAD_ERROR_IO,
+                format!(
+                    "xlsread: ZIP workbook expanded size exceeds maximum of {MAX_XLSREAD_ZIP_TOTAL_UNCOMPRESSED_BYTES} bytes"
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -797,23 +862,24 @@ fn parse_cell_reference(token: &str) -> BuiltinResult<CellReference> {
 }
 
 fn parse_r1c1_reference(token: &str) -> BuiltinResult<Option<CellReference>> {
-    let Some(rest) = token.strip_prefix('R').or_else(|| token.strip_prefix('r')) else {
+    let upper = token.to_ascii_uppercase();
+    let Some(rest) = upper.strip_prefix('R') else {
         return Ok(None);
     };
-    let Some(split) = rest.find(['C', 'c']) else {
+    let Some(split) = rest.find('C') else {
         return Ok(None);
     };
     let (row_text, col_with_marker) = rest.split_at(split);
     let col_text = &col_with_marker[1..];
+    if rest[split + 1..].contains('C') {
+        return Ok(None);
+    }
     if row_text.is_empty()
         || col_text.is_empty()
         || !row_text.chars().all(|ch| ch.is_ascii_digit())
         || !col_text.chars().all(|ch| ch.is_ascii_digit())
     {
-        return Err(xlsread_error_with(
-            &XLSREAD_ERROR_RANGE,
-            format!("xlsread: invalid range component '{token}'"),
-        ));
+        return Ok(None);
     }
     let row = parse_one_based_r1c1_index(row_text, "row", token)?;
     let col = parse_one_based_r1c1_index(col_text, "column", token)?;
@@ -1435,9 +1501,42 @@ mod tests {
     }
 
     #[test]
+    fn a1_columns_starting_with_r_and_c_do_not_parse_as_r1c1() {
+        let spec = parse_range_string("RC1:RBC10").expect("a1 range");
+        assert_eq!(spec.start_row, 0);
+        assert_eq!(spec.start_col, column_index_from_letters("RC").unwrap());
+        assert_eq!(spec.end_row, Some(9));
+        assert_eq!(
+            spec.end_col,
+            Some(column_index_from_letters("RBC").unwrap())
+        );
+    }
+
+    #[test]
+    fn invalid_strict_r1c1_indices_are_rejected() {
+        let err = parse_range_string("R0C1").expect_err("zero r1c1 row");
+        assert!(err.message().contains("must be one-based"));
+    }
+
+    #[test]
     fn interleaved_a1_tokens_are_rejected() {
         let err = parse_range_string("A1B2").expect_err("invalid token");
         assert!(err.message().contains("invalid range component"));
+    }
+
+    #[test]
+    fn xlsread_zip_preflight_rejects_oversized_entry() {
+        let err = validate_zip_uncompressed_limits([MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES + 1])
+            .expect_err("oversized entry");
+        assert!(err.message().contains("entry exceeds"));
+    }
+
+    #[test]
+    fn xlsread_zip_preflight_rejects_oversized_total() {
+        let part = MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES;
+        let err = validate_zip_uncompressed_limits([part, part, part, part, 1])
+            .expect_err("oversized total");
+        assert!(err.message().contains("expanded size exceeds"));
     }
 
     #[test]

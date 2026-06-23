@@ -1,6 +1,6 @@
 //! Audio file metadata builtins.
 
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
@@ -19,7 +19,8 @@ use crate::builtins::common::spec::{
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "audioinfo";
-const MAX_AUDIOINFO_SCAN_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_AUDIOINFO_PREFIX_BYTES: u64 = 1024 * 1024;
+const MAX_AUDIOINFO_TAIL_BYTES: u64 = 64 * 1024;
 
 const AUDIOINFO_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "info",
@@ -158,14 +159,22 @@ async fn audioinfo_builtin(filename: Value) -> BuiltinResult<Value> {
         .await
         .map_err(map_control_flow)?;
     let path = resolve_path(&filename)?;
-    let (bytes, file_size) = read_audioinfo_prefix(&path).await?;
-    let metadata = AudioMetadata::parse(&bytes).map_err(|message| {
+    let scan = read_audioinfo_scan(&path).await?;
+    let metadata = AudioMetadata::parse(&scan).map_err(|message| {
         audioinfo_error_with(&AUDIOINFO_ERROR_FORMAT, format!("audioinfo: {message}"))
     })?;
-    Ok(Value::Struct(metadata.into_struct(&path, file_size as f64)))
+    Ok(Value::Struct(
+        metadata.into_struct(&path, scan.file_size as f64),
+    ))
 }
 
-async fn read_audioinfo_prefix(path: &Path) -> BuiltinResult<(Vec<u8>, u64)> {
+struct AudioInfoScan {
+    prefix: Vec<u8>,
+    tail: Option<Vec<u8>>,
+    file_size: u64,
+}
+
+async fn read_audioinfo_scan(path: &Path) -> BuiltinResult<AudioInfoScan> {
     let metadata = fs::metadata_async(path).await.map_err(|err| {
         audioinfo_error_with_source(
             &AUDIOINFO_ERROR_IO,
@@ -176,23 +185,53 @@ async fn read_audioinfo_prefix(path: &Path) -> BuiltinResult<(Vec<u8>, u64)> {
             err,
         )
     })?;
-    let file = fs::File::open_async(path).await.map_err(|err| {
+    let mut file = fs::File::open_async(path).await.map_err(|err| {
         audioinfo_error_with_source(
             &AUDIOINFO_ERROR_IO,
             format!("audioinfo: unable to read \"{}\" ({err})", path.display()),
             err,
         )
     })?;
-    let mut limited = file.take(MAX_AUDIOINFO_SCAN_BYTES);
+    let file_size = metadata.len();
+    let prefix_len = file_size.min(MAX_AUDIOINFO_PREFIX_BYTES);
     let mut bytes = Vec::new();
-    limited.read_to_end(&mut bytes).map_err(|err| {
-        audioinfo_error_with_source(
-            &AUDIOINFO_ERROR_IO,
-            format!("audioinfo: unable to read \"{}\" ({err})", path.display()),
-            err,
-        )
-    })?;
-    Ok((bytes, metadata.len()))
+    file.by_ref()
+        .take(prefix_len)
+        .read_to_end(&mut bytes)
+        .map_err(|err| {
+            audioinfo_error_with_source(
+                &AUDIOINFO_ERROR_IO,
+                format!("audioinfo: unable to read \"{}\" ({err})", path.display()),
+                err,
+            )
+        })?;
+    let tail = if file_size > prefix_len {
+        let tail_len = file_size.min(MAX_AUDIOINFO_TAIL_BYTES);
+        let tail_start = file_size.saturating_sub(tail_len);
+        file.seek(SeekFrom::Start(tail_start)).map_err(|err| {
+            audioinfo_error_with_source(
+                &AUDIOINFO_ERROR_IO,
+                format!("audioinfo: unable to seek \"{}\" ({err})", path.display()),
+                err,
+            )
+        })?;
+        let mut tail = Vec::new();
+        file.take(tail_len).read_to_end(&mut tail).map_err(|err| {
+            audioinfo_error_with_source(
+                &AUDIOINFO_ERROR_IO,
+                format!("audioinfo: unable to read \"{}\" ({err})", path.display()),
+                err,
+            )
+        })?;
+        Some(tail)
+    } else {
+        None
+    };
+    Ok(AudioInfoScan {
+        prefix: bytes,
+        tail,
+        file_size,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -207,7 +246,8 @@ struct AudioMetadata {
 }
 
 impl AudioMetadata {
-    fn parse(bytes: &[u8]) -> Result<Self, String> {
+    fn parse(scan: &AudioInfoScan) -> Result<Self, String> {
+        let bytes = scan.prefix.as_slice();
         if bytes.len() < 4 {
             return Err("file is too small to contain audio metadata".to_string());
         }
@@ -221,9 +261,9 @@ impl AudioMetadata {
             return parse_aiff(bytes);
         }
         if bytes.starts_with(b"OggS") {
-            return parse_ogg_vorbis(bytes);
+            return parse_ogg_vorbis(bytes, scan.tail.as_deref());
         }
-        if let Some(mp3) = parse_mp3(bytes) {
+        if let Some(mp3) = parse_mp3(bytes, scan.file_size) {
             return Ok(mp3);
         }
         Err("unsupported audio format".to_string())
@@ -277,15 +317,14 @@ fn parse_wave(bytes: &[u8]) -> Result<AudioMetadata, String> {
         let id = &bytes[pos..pos + 4];
         let declared_size = read_u32_le(bytes, pos + 4)?;
         pos += 8;
-        let size = if is_rf64 && id == b"data" && declared_size == u32::MAX {
+        if is_rf64 && id == b"data" && declared_size == u32::MAX {
             let data_size = rf64_data_size.ok_or_else(|| {
                 "RF64 data chunk uses sentinel size without ds64 metadata".to_string()
             })?;
-            usize::try_from(data_size)
-                .map_err(|_| "RF64 data chunk is too large for this platform".to_string())?
-        } else {
-            declared_size as usize
-        };
+            data_bytes = Some(data_size);
+            break;
+        }
+        let size = declared_size as usize;
         match id {
             b"ds64" if is_rf64 => {
                 let end = pos
@@ -500,8 +539,8 @@ fn parse_aiff(bytes: &[u8]) -> Result<AudioMetadata, String> {
     Err("AIFF file is missing COMM metadata".to_string())
 }
 
-fn parse_ogg_vorbis(bytes: &[u8]) -> Result<AudioMetadata, String> {
-    let first = parse_ogg_page(bytes, 0)?;
+fn parse_ogg_vorbis(prefix: &[u8], tail: Option<&[u8]>) -> Result<AudioMetadata, String> {
+    let first = parse_ogg_page(prefix, 0)?;
     if first.body.len() < 30 || &first.body[1..7] != b"vorbis" || first.body[0] != 1 {
         return Err("Ogg container is not Vorbis audio".to_string());
     }
@@ -523,7 +562,10 @@ fn parse_ogg_vorbis(bytes: &[u8]) -> Result<AudioMetadata, String> {
         first.body[22],
         first.body[23],
     ]);
-    let total_samples = find_last_ogg_granule(bytes);
+    let total_samples = match tail {
+        Some(bytes) => find_last_ogg_granule(bytes),
+        None => find_last_ogg_granule(prefix),
+    };
     Ok(AudioMetadata {
         format: "OGG",
         compression_method: "Vorbis".to_string(),
@@ -599,12 +641,12 @@ fn find_last_ogg_granule(bytes: &[u8]) -> Option<u64> {
     last
 }
 
-fn parse_mp3(bytes: &[u8]) -> Option<AudioMetadata> {
+fn parse_mp3(bytes: &[u8], file_size: u64) -> Option<AudioMetadata> {
     let mut pos = skip_id3v2(bytes);
     while pos + 4 <= bytes.len() {
         if bytes[pos] == 0xFF && (bytes[pos + 1] & 0xE0) == 0xE0 {
             if let Some(frame) = parse_mpeg_audio_header(&bytes[pos..pos + 4]) {
-                let payload_bytes = bytes.len().saturating_sub(pos) as f64;
+                let payload_bytes = file_size.saturating_sub(pos as u64) as f64;
                 let duration = if frame.bit_rate > 0 {
                     Some(payload_bytes * 8.0 / frame.bit_rate as f64)
                 } else {
@@ -926,6 +968,44 @@ mod tests {
         bytes
     }
 
+    fn ogg_vorbis_identification_fixture(granule: u64) -> Vec<u8> {
+        let mut body = vec![0u8; 30];
+        body[0] = 1;
+        body[1..7].copy_from_slice(b"vorbis");
+        body[11] = 2;
+        body[12..16].copy_from_slice(&44_100u32.to_le_bytes());
+        body[20..24].copy_from_slice(&128_000i32.to_le_bytes());
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"OggS");
+        bytes.push(0);
+        bytes.push(0);
+        bytes.extend_from_slice(&granule.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.push(1);
+        bytes.push(body.len() as u8);
+        bytes.extend_from_slice(&body);
+        bytes
+    }
+
+    fn audio_scan(prefix: Vec<u8>) -> AudioInfoScan {
+        AudioInfoScan {
+            file_size: prefix.len() as u64,
+            prefix,
+            tail: None,
+        }
+    }
+
+    fn audio_scan_with_file_size(prefix: Vec<u8>, file_size: u64) -> AudioInfoScan {
+        AudioInfoScan {
+            prefix,
+            tail: None,
+            file_size,
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn audioinfo_descriptor_covers_core_form() {
@@ -961,10 +1041,21 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn audioinfo_reads_rf64_data_size_from_ds64() {
-        let metadata = AudioMetadata::parse(&rf64_fixture(48_000, 2, 16, 5)).expect("rf64");
+        let metadata =
+            AudioMetadata::parse(&audio_scan(rf64_fixture(48_000, 2, 16, 5))).expect("rf64");
         assert_eq!(metadata.format, "WAV");
         assert_eq!(metadata.total_samples, Some(5));
         assert_eq!(metadata.num_channels, 2);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioinfo_keeps_rf64_sample_count_in_u64_space() {
+        let block_align = 2u64 * (16u64 / 8);
+        let frames = (u32::MAX as u64 / block_align) + 10;
+        let metadata =
+            AudioMetadata::parse(&audio_scan(rf64_fixture(48_000, 2, 16, frames))).expect("rf64");
+        assert_eq!(metadata.total_samples, Some(frames));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1006,11 +1097,30 @@ mod tests {
     fn audioinfo_parses_mp3_frame_header() {
         let mut bytes = vec![0xFF, 0xFB, 0x90, 0x64];
         bytes.resize(417, 0);
-        let metadata = AudioMetadata::parse(&bytes).expect("mp3 metadata");
+        let metadata = AudioMetadata::parse(&audio_scan(bytes)).expect("mp3 metadata");
         assert_eq!(metadata.format, "MP3");
         assert_eq!(metadata.compression_method, "MPEG Layer III");
         assert_eq!(metadata.num_channels, 2);
         assert_eq!(metadata.sample_rate, 44_100.0);
         assert_eq!(metadata.bit_rate, Some(128_000.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioinfo_mp3_duration_uses_actual_file_size() {
+        let bytes = vec![0xFF, 0xFB, 0x90, 0x64];
+        let metadata =
+            AudioMetadata::parse(&audio_scan_with_file_size(bytes, 16_000)).expect("mp3 metadata");
+        assert_eq!(metadata.total_samples, Some(44_100));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioinfo_ogg_large_file_without_tail_granule_reports_unknown_samples() {
+        let mut scan = audio_scan_with_file_size(ogg_vorbis_identification_fixture(0), 1_000_000);
+        scan.tail = Some(b"tail window without complete ogg page".to_vec());
+        let metadata = AudioMetadata::parse(&scan).expect("ogg metadata");
+        assert_eq!(metadata.format, "OGG");
+        assert_eq!(metadata.total_samples, None);
     }
 }

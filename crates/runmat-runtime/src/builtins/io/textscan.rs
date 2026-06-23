@@ -335,6 +335,9 @@ struct DecodedFileText {
 
 impl DecodedFileText {
     fn decode(bytes: &[u8], encoding: &str) -> BuiltinResult<Self> {
+        if is_shift_jis_encoding(encoding) {
+            return decode_shift_jis_with_offsets(bytes, encoding);
+        }
         let chars = decode_bytes(bytes, encoding, BUILTIN_NAME)
             .map_err(|err| textscan_error_with(&TEXTSCAN_ERROR_FILE, err.message()))?;
         let byte_width = byte_preserving_encoding_width(encoding)?;
@@ -369,6 +372,63 @@ impl DecodedFileText {
             )),
         }
     }
+}
+
+fn decode_shift_jis_with_offsets(bytes: &[u8], encoding: &str) -> BuiltinResult<DecodedFileText> {
+    let mut text = String::new();
+    let mut text_offsets = Vec::new();
+    let mut byte_offsets = Vec::new();
+    let mut byte_offset = 0usize;
+    while byte_offset < bytes.len() {
+        let width = shift_jis_unit_width(bytes, byte_offset)?;
+        let decoded = decode_bytes(
+            &bytes[byte_offset..byte_offset + width],
+            encoding,
+            BUILTIN_NAME,
+        )
+        .map_err(|err| textscan_error_with(&TEXTSCAN_ERROR_FILE, err.message()))?;
+        for ch in decoded {
+            text_offsets.push(text.len());
+            byte_offsets.push(byte_offset);
+            text.push(ch);
+        }
+        byte_offset += width;
+    }
+    Ok(DecodedFileText {
+        text,
+        text_offsets,
+        byte_offsets,
+        byte_len: bytes.len(),
+    })
+}
+
+fn shift_jis_unit_width(bytes: &[u8], offset: usize) -> BuiltinResult<usize> {
+    let first = bytes[offset];
+    if first <= 0x7F || (0xA1..=0xDF).contains(&first) {
+        return Ok(1);
+    }
+    if (0x81..=0x9F).contains(&first) || (0xE0..=0xFC).contains(&first) {
+        let Some(&second) = bytes.get(offset + 1) else {
+            return Err(textscan_error_with(
+                &TEXTSCAN_ERROR_FILE,
+                "textscan: incomplete Shift_JIS character at end of file",
+            ));
+        };
+        if (0x40..=0x7E).contains(&second) || (0x80..=0xFC).contains(&second) {
+            return Ok(2);
+        }
+    }
+    Err(textscan_error_with(
+        &TEXTSCAN_ERROR_FILE,
+        "textscan: invalid Shift_JIS byte sequence",
+    ))
+}
+
+fn is_shift_jis_encoding(encoding: &str) -> bool {
+    let label = encoding.trim();
+    label.eq_ignore_ascii_case("shift_jis")
+        || label.eq_ignore_ascii_case("shift-jis")
+        || label.eq_ignore_ascii_case("sjis")
 }
 
 fn byte_preserving_encoding_width(encoding: &str) -> BuiltinResult<Option<usize>> {
@@ -1665,6 +1725,53 @@ mod tests {
         let file = guard.as_mut().expect("file");
         std::io::Read::read_to_string(file, &mut remaining).expect("read remaining");
         assert_eq!(remaining, "20 twenty\n");
+
+        let _ = registry::close(fid);
+        let _ = std::fs::remove_file(path);
+        registry::reset_for_tests();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn textscan_shift_jis_registered_file_restores_source_byte_position() {
+        let _guard = registry::test_guard();
+        registry::reset_for_tests();
+        let mut path = std::env::temp_dir();
+        path.push("runmat_textscan_shift_jis_position.txt");
+        std::fs::write(
+            &path,
+            [
+                b'1', b' ', 0x82, 0xA0, b'\n', b'2', b' ', b'n', b'e', b'x', b't', b'\n',
+            ],
+        )
+        .expect("write fixture");
+
+        let mut options = OpenOptions::new();
+        options.read(true);
+        let file = block_on(options.open_async(&path)).expect("open file");
+        let handle = Arc::new(StdMutex::new(Some(file)));
+        let fid = registry::register_file(RegisteredFile {
+            path: path.clone(),
+            permission: "r".to_string(),
+            machinefmt: "native".to_string(),
+            encoding: "shift_jis".to_string(),
+            handle: handle.clone(),
+        });
+
+        let out = block_on(textscan_builtin(
+            Value::Num(fid as f64),
+            Value::from("%f %s"),
+            vec![Value::Num(1.0)],
+        ))
+        .expect("textscan");
+        assert_eq!(numeric_column(&out, 0), vec![1.0]);
+        assert_eq!(text_column(&out, 1), vec!["あ".to_string()]);
+
+        let mut remaining = Vec::new();
+        let mut guard = handle.lock().expect("lock");
+        let file = guard.as_mut().expect("file");
+        std::io::Read::read_to_end(file, &mut remaining).expect("read remaining");
+        assert_eq!(remaining, b"2 next\n");
 
         let _ = registry::close(fid);
         let _ = std::fs::remove_file(path);
