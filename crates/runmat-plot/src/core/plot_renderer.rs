@@ -3393,14 +3393,22 @@ impl PlotRenderer {
                     render_data.pipeline_type,
                     crate::core::PipelineType::Triangles
                 ) {
-                    render_data.material.albedo.w = render_data.material.albedo.w.min(alpha);
+                    render_data.material.albedo.w = if self.geometry_xray_enabled {
+                        render_data.material.albedo.w.min(alpha)
+                    } else {
+                        render_data.material.albedo.w.max(alpha)
+                    };
                     render_data.material.alpha_mode = if render_data.material.albedo.w < 0.98 {
                         crate::core::AlphaMode::Blend
                     } else {
                         crate::core::AlphaMode::Opaque
                     };
                     for vertex in &mut render_data.vertices {
-                        vertex.color[3] = vertex.color[3].min(alpha);
+                        vertex.color[3] = if self.geometry_xray_enabled {
+                            vertex.color[3].min(alpha)
+                        } else {
+                            vertex.color[3].max(alpha)
+                        };
                     }
                 }
             }
