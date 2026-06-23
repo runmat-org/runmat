@@ -93,7 +93,7 @@ impl WgpuProvider {
             },
         ));
 
-        let workgroup_size = crate::backend::wgpu::config::WORKGROUP_SIZE;
+        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
         let shader = modulate_constellation_shader(self.precision, order, workgroup_size);
         let bgl = crate::backend::wgpu::bindings::build_bgl_for_layout_tag(
             self.device_ref(),
@@ -346,7 +346,7 @@ impl WgpuProvider {
             },
         ));
 
-        let workgroup_size = crate::backend::wgpu::config::WORKGROUP_SIZE;
+        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
         let shader = modulate_bits_constellation_shader(self.precision, order, workgroup_size);
         let bgl = crate::backend::wgpu::bindings::build_bgl_for_layout_tag(
             self.device_ref(),
