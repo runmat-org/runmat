@@ -2089,14 +2089,6 @@ pub struct HandleRef {
     pub valid: bool,
 }
 
-pub fn is_handle_valid(handle: &HandleRef) -> bool {
-    handle.valid
-}
-
-pub fn set_handle_valid(_handle: &HandleRef, _valid: bool) -> bool {
-    false
-}
-
 impl PartialEq for HandleRef {
     fn eq(&self, other: &Self) -> bool {
         self.target == other.target
