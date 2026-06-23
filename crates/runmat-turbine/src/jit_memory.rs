@@ -6,10 +6,28 @@
 
 use cranelift::prelude::*;
 use runmat_builtins::{CellArray, Value};
-use runmat_gc::{gc_allocate, ExplicitRoot};
+use runmat_gc::{gc_allocate_rooted, ExplicitRoot};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
+
+fn gc_with_value_retry<R>(
+    handle: &runmat_gc::GcHandle,
+    f: impl Fn(&Value) -> R,
+) -> Result<R, String> {
+    for _ in 0..1_000 {
+        match runmat_gc::gc_with_value(handle, |value| f(value)) {
+            Ok(result) => return Ok(result),
+            Err(runmat_gc::GcError::CollectionFailed(_)) => {
+                std::thread::yield_now();
+                std::thread::sleep(std::time::Duration::from_micros(50));
+            }
+            Err(err) => return Err(err.to_string()),
+        }
+    }
+
+    runmat_gc::gc_with_value(handle, |value| f(value)).map_err(|err| err.to_string())
+}
 
 /// JIT memory manager for marshaling data between Cranelift and RunMat runtime
 pub struct JitMemoryManager {
@@ -39,7 +57,7 @@ impl JitMemoryManager {
             let pool = self.string_pool.read().unwrap();
             if let Some(root) = pool.get(s) {
                 let handle = root.handle();
-                if let Some(result) = runmat_gc::gc_with_value(&handle, |value| match value {
+                if let Some(result) = gc_with_value_retry(&handle, |value| match value {
                     Value::String(stored_str) => Some((stored_str.as_ptr(), stored_str.len())),
                     _ => None,
                 })
@@ -52,10 +70,8 @@ impl JitMemoryManager {
 
         // Allocate new string in GC
         let string_value = Value::String(s.to_string());
-        let gc_ptr = gc_allocate(string_value)
-            .map_err(|e| format!("Failed to allocate string in GC: {e}"))?;
-        let root =
-            runmat_gc::gc_root(gc_ptr).map_err(|e| format!("Failed to root string in GC: {e}"))?;
+        let root = gc_allocate_rooted(string_value)
+            .map_err(|e| format!("Failed to allocate rooted string in GC: {e}"))?;
         let handle = root.handle();
 
         // Store in pool for reuse
@@ -65,7 +81,7 @@ impl JitMemoryManager {
         }
 
         // Return pointer and length
-        if let Some(result) = runmat_gc::gc_with_value(&handle, |value| match value {
+        if let Some(result) = gc_with_value_retry(&handle, |value| match value {
             Value::String(stored_str) => Some((stored_str.as_ptr(), stored_str.len())),
             _ => None,
         })
@@ -98,10 +114,8 @@ impl JitMemoryManager {
         let cell_array = CellArray::new(cell_values, 1, values.len())
             .map_err(|e| format!("Failed to build cell array: {e}"))?;
         let cell_value = Value::Cell(cell_array);
-        let gc_ptr =
-            gc_allocate(cell_value).map_err(|e| format!("Failed to allocate array in GC: {e}"))?;
-        let root =
-            runmat_gc::gc_root(gc_ptr).map_err(|e| format!("Failed to root array in GC: {e}"))?;
+        let root = gc_allocate_rooted(cell_value)
+            .map_err(|e| format!("Failed to allocate rooted array in GC: {e}"))?;
 
         // Store in pool for reuse
         {

@@ -556,6 +556,42 @@ pub fn gc_root(handle: GcHandle) -> Result<ExplicitRoot> {
     ExplicitRoot::new(handle)
 }
 
+struct CollectionGate<'a> {
+    active: &'a AtomicBool,
+}
+
+impl<'a> CollectionGate<'a> {
+    fn enter(gc: &'a GarbageCollector) -> Self {
+        while gc
+            .collection_in_progress
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            std::thread::yield_now();
+        }
+
+        Self {
+            active: &gc.collection_in_progress,
+        }
+    }
+}
+
+impl Drop for CollectionGate<'_> {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::Release);
+    }
+}
+
+/// Allocate a GC value and register it as an explicit root before collection can run.
+pub fn gc_allocate_rooted(value: Value) -> Result<ExplicitRoot> {
+    let _gate = CollectionGate::enter(&GC);
+    let handle = GC.allocate(value)?;
+    GC.add_root(handle)?;
+    Ok(ExplicitRoot {
+        handle: Some(handle),
+    })
+}
+
 pub fn gc_with_value<R>(ptr: &GcHandle, f: impl FnOnce(&Value) -> R) -> Result<R> {
     GC.with_value(ptr, f)
 }
@@ -800,6 +836,26 @@ mod tests {
 
             let handle = root.unroot().expect("explicit unroot failed");
             assert_eq!(handle.addr(), addr);
+            assert!(!GC.root_ptrs.lock().contains(&addr));
+        });
+    }
+
+    #[test]
+    fn rooted_allocation_registers_before_collection() {
+        gc_test_context(|| {
+            let root =
+                gc_allocate_rooted(Value::String("rooted".to_string())).expect("rooted alloc");
+            let handle = root.handle();
+            let addr = handle.addr();
+
+            assert!(GC.root_ptrs.lock().contains(&addr));
+            gc_collect_minor().expect("minor collection failed");
+            assert_eq!(
+                gc_clone_value(&handle).expect("rooted handle should remain live"),
+                Value::String("rooted".to_string())
+            );
+
+            drop(root);
             assert!(!GC.root_ptrs.lock().contains(&addr));
         });
     }
