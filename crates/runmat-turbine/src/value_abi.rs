@@ -112,18 +112,9 @@ impl TurbineValue {
                     return Err(crate::execution_error("null Turbine GC value handle"));
                 }
                 let addr = self.payload as usize;
-                let rooted =
-                    ABI_GC_ROOTS.with(|roots| roots.borrow().get(&addr).map(|root| root.handle()));
-                let ptr = if let Some(handle) = rooted {
-                    handle
-                } else {
-                    // SAFETY: this fallback only exists for ABI tokens that
-                    // predate the local root table or are supplied by legacy JIT
-                    // entrypoints. The GC validates that the address currently
-                    // names a live GC Value before any clone occurs below.
-                    unsafe { runmat_gc::gc_handle_from_addr(addr) }
-                        .map_err(|err| crate::execution_error(err.to_string()))?
-                };
+                let ptr = ABI_GC_ROOTS
+                    .with(|roots| roots.borrow().get(&addr).map(|root| root.handle()))
+                    .ok_or_else(|| crate::execution_error("unknown Turbine GC value handle"))?;
                 runmat_gc::gc_clone_value(&ptr)
                     .map_err(|err| crate::execution_error(err.to_string()))
             }
@@ -187,6 +178,27 @@ mod tests {
             super::clear_abi_gc_roots_for_test();
             runmat_gc::gc_collect_minor().unwrap();
             assert!(turbine_value.to_runtime_value().is_err());
+        });
+    }
+
+    #[test]
+    fn unknown_gc_handle_payload_is_rejected_without_raw_address_fallback() {
+        runmat_gc::gc_test_context(|| {
+            super::clear_abi_gc_roots_for_test();
+
+            let value = Value::String("unregistered-token".to_string());
+            let root = runmat_gc::gc_allocate_rooted(value).expect("rooted allocation");
+            let turbine_value = TurbineValue {
+                tag: TurbineValueTag::GcHandle,
+                reserved: 0,
+                payload: runmat_gc::gc_handle_addr(&root.handle()) as u64,
+            };
+
+            let err = turbine_value.to_runtime_value().unwrap_err();
+            assert!(
+                err.to_string().contains("unknown Turbine GC value handle"),
+                "unexpected error: {err}"
+            );
         });
     }
 }

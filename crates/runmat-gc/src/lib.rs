@@ -668,22 +668,6 @@ pub fn gc_handle_addr(handle: &GcHandle) -> usize {
     handle.addr()
 }
 
-/// Reconstruct a GC handle from an exposed address.
-///
-/// # Safety
-///
-/// `addr` must have been produced from a live RunMat `GcHandle` for the
-/// current GC heap, and the caller must preserve the provenance requirements of
-/// any later access. Prefer carrying `GcHandle` values directly instead of
-/// round-tripping through integer addresses.
-pub unsafe fn gc_handle_from_addr(addr: usize) -> Result<GcHandle> {
-    let raw = NonNull::new(addr as *mut ())
-        .ok_or_else(|| GcError::InvalidPointer("null GC value handle address".to_string()))?;
-    GC.validate_value_ptr(addr as *const Value)?;
-    // SAFETY: the address was validated against the current RunMat GC heap.
-    Ok(unsafe { GcHandle::from_ptr_unchecked(raw) })
-}
-
 pub fn gc_stats() -> GcStats {
     GC.stats()
 }
