@@ -1187,12 +1187,18 @@ impl WgpuProvider {
             .iter()
             .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
             .ok_or_else(|| anyhow!("complex broadcast rhs length overflow"))?;
+        let expected_a_len = a_logical_len
+            .checked_mul(if lhs_complex { 2 } else { 1 })
+            .ok_or_else(|| anyhow!("complex broadcast lhs length overflow"))?;
+        let expected_b_len = b_logical_len
+            .checked_mul(if rhs_complex { 2 } else { 1 })
+            .ok_or_else(|| anyhow!("complex broadcast rhs length overflow"))?;
         ensure!(
-            entry_a.len == a_logical_len * if lhs_complex { 2 } else { 1 },
+            entry_a.len == expected_a_len,
             "complex broadcast lhs storage length does not match logical shape"
         );
         ensure!(
-            entry_b.len == b_logical_len * if rhs_complex { 2 } else { 1 },
+            entry_b.len == expected_b_len,
             "complex broadcast rhs storage length does not match logical shape"
         );
 

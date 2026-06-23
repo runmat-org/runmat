@@ -64,11 +64,9 @@ fn main() {
             println!("cargo:rustc-link-lib={lib}");
         }
         println!("cargo:rerun-if-env-changed=LAPACK_LIBS");
-    } else {
-        if target_os == "windows" {
-            // vcpkg's OpenBLAS package supplies the LAPACK symbols we use.
-            println!("cargo:rustc-link-lib=openblas");
-        }
+    } else if target_os == "windows" {
+        // vcpkg's OpenBLAS package supplies the LAPACK symbols we use.
+        println!("cargo:rustc-link-lib=openblas");
     }
 
     // Explicit BLAS hints

@@ -416,4 +416,25 @@ pub(crate) mod tests {
         assert!((gathered.data[0] - 5.0).abs() < tol);
         assert!((gathered.data[1] - (2f64).sqrt()).abs() < tol);
     }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn abs_wgpu_complex_preserves_infinity_with_nan_lane() {
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let complex = ComplexTensor::new(
+            vec![(f64::INFINITY, f64::NAN), (f64::NAN, f64::NEG_INFINITY)],
+            vec![2, 1],
+        )
+        .unwrap();
+        let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+        let gpu = block_on(abs_gpu(handle)).unwrap();
+        let gathered = test_support::gather(gpu).expect("gather");
+        assert_eq!(gathered.shape, vec![2, 1]);
+        assert!(gathered.data[0].is_infinite() && gathered.data[0].is_sign_positive());
+        assert!(gathered.data[1].is_infinite() && gathered.data[1].is_sign_positive());
+    }
 }

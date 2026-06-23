@@ -501,9 +501,12 @@ async fn nan_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Built
             let len = tensor::element_count(shape);
             let tensor = ComplexTensor::new(vec![(f64::NAN, 0.0); len], shape.to_vec())
                 .map_err(|e| builtin_error(format!("nan: {e}")))?;
-            if let Ok(gpu) = gpu_helpers::upload_complex_tensor(provider, &tensor) {
-                runmat_accelerate_api::set_handle_precision(&gpu, precision);
-                return Ok(Value::GpuTensor(gpu));
+            match gpu_helpers::upload_complex_tensor(provider, &tensor) {
+                Ok(gpu) => {
+                    runmat_accelerate_api::set_handle_precision(&gpu, precision);
+                    return Ok(Value::GpuTensor(gpu));
+                }
+                Err(_) => return Ok(complex_tensor_into_value(tensor)),
             }
         }
         let attempt = if handle.shape == shape {

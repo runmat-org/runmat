@@ -66,9 +66,18 @@ fn isinf_complex_unary(x: {ty}) -> bool {{
 fn complex_abs_lane(out_idx: u32) -> {ty} {{
     let re = abs(A.data[out_idx * 2u]);
     let im = abs(A.data[out_idx * 2u + 1u]);
+    if re > {ty}({max_finite}) {{
+        return re;
+    }}
+    if im > {ty}({max_finite}) {{
+        return im;
+    }}
     let scale = max(re, im);
     if scale == {ty}(0.0) {{
         return {ty}(0.0);
+    }}
+    if scale > {ty}({max_finite}) {{
+        return scale;
     }}
     let sr = re / scale;
     let si = im / scale;
@@ -76,6 +85,7 @@ fn complex_abs_lane(out_idx: u32) -> {ty} {{
 }}
 "#,
             ty = ty,
+            max_finite = max_finite,
         ),
         ComplexUnaryOp::Sinc => format!(
             r#"

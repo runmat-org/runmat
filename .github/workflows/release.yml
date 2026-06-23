@@ -271,8 +271,13 @@ jobs:
 
           Write-Host "Cloning vcpkg and installing OpenBLAS"
           $vcpkgRoot = Join-Path $pwd "vcpkg"
+          $vcpkgRevision = "a7eda31dc16994fcaa8587982eb833a8695f1b6f"
           git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
+          if ($LASTEXITCODE -ne 0) { throw "git clone of vcpkg failed with exit code $LASTEXITCODE" }
+          git -C $vcpkgRoot checkout $vcpkgRevision
+          if ($LASTEXITCODE -ne 0) { throw "git checkout of vcpkg revision $vcpkgRevision failed with exit code $LASTEXITCODE" }
           & "$vcpkgRoot\bootstrap-vcpkg.bat"
+          if ($LASTEXITCODE -ne 0) { throw "bootstrap-vcpkg.bat failed with exit code $LASTEXITCODE" }
 
           # Compute vcpkg triplet based on target
           $target = "${{ matrix.platform.target }}"
@@ -289,6 +294,7 @@ jobs:
 
           # OpenBLAS provides the BLAS and LAPACK symbols used by the Rust bindings.
           & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet"
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install openblas failed with exit code $LASTEXITCODE" }
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
           Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\$triplet\bin"
 

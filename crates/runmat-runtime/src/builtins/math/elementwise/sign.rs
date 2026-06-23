@@ -150,6 +150,8 @@ async fn sign_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 "GPU provider unavailable for complex input",
             ));
         };
+        let precision = runmat_accelerate_api::handle_precision(&handle)
+            .unwrap_or_else(|| provider.precision());
         let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
             .await
             .map_err(|err| sign_error_with_detail(&SIGN_ERROR_INTERNAL, err))?;
@@ -170,6 +172,7 @@ async fn sign_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         };
         let out = gpu_helpers::upload_complex_tensor(provider, &tensor)
             .map_err(|err| sign_error_with_detail(&SIGN_ERROR_INTERNAL, err))?;
+        runmat_accelerate_api::set_handle_precision(&out, precision);
         return Ok(gpu_helpers::complex_gpu_value(out));
     }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {

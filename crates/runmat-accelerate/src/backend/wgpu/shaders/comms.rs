@@ -45,7 +45,7 @@ fn isfinite_scalar(x: {ty}) -> bool {{
 }}
 
 fn set_error(code: u32, index: u32) {{
-    let packed_index = min(index, 0x3fffffffu);
+    let packed_index = min(index, 0x3ffffffeu);
     let packed = (code << 30u) | packed_index;
     atomicMin(&Error.state, packed);
 }}
@@ -63,7 +63,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         Out.data[idx * 2u + 1u] = {ty}(0.0);
         return;
     }}
-    if raw < {ty}(0.0) || raw > {ty}(ORDER - 1u) + {ty}(0.5) {{
+    if raw < {ty}(0.0) {{
+        set_error(3u, idx);
+        Out.data[idx * 2u] = {ty}(0.0);
+        Out.data[idx * 2u + 1u] = {ty}(0.0);
+        return;
+    }}
+    if raw > {ty}(ORDER - 1u) + {ty}(0.5) {{
         set_error(2u, idx);
         Out.data[idx * 2u] = {ty}(0.0);
         Out.data[idx * 2u + 1u] = {ty}(0.0);
@@ -154,7 +160,7 @@ fn isfinite_scalar(x: {ty}) -> bool {{
 }}
 
 fn set_error(code: u32, index: u32) {{
-    let packed_index = min(index, 0x3fffffffu);
+    let packed_index = min(index, 0x3ffffffeu);
     let packed = (code << 30u) | packed_index;
     atomicMin(&Error.state, packed);
 }}
