@@ -1,4 +1,11 @@
 use runmat_builtins::{IntValue, Value};
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+thread_local! {
+    static ABI_GC_ROOTS: RefCell<HashMap<usize, runmat_gc::ExplicitRoot>> =
+        RefCell::new(HashMap::new());
+}
 
 /// Stable value tag used by the Turbine host ABI.
 ///
@@ -23,7 +30,7 @@ pub enum TurbineValueTag {
 /// - `Num`: raw `f64::to_bits()`
 /// - `Bool`: `0` or `1`
 /// - `Int`: signed `i64` bits
-/// - `GcHandle`: raw pointer to a GC-managed `Value`
+/// - `GcHandle`: opaque identity token for a rooted GC-managed `Value`
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TurbineValue {
@@ -79,12 +86,16 @@ impl TurbineValue {
                 payload: value.to_i64() as u64,
             }),
             value => {
-                let ptr = runmat_gc::gc_allocate(value)
+                let root = runmat_gc::gc_allocate_rooted(value)
                     .map_err(|err| crate::execution_error(err.to_string()))?;
+                let payload = runmat_gc::gc_handle_addr(&root.handle());
+                ABI_GC_ROOTS.with(|roots| {
+                    roots.borrow_mut().insert(payload, root);
+                });
                 Ok(Self {
                     tag: TurbineValueTag::GcHandle,
                     reserved: 0,
-                    payload: runmat_gc::gc_handle_addr(&ptr) as u64,
+                    payload: payload as u64,
                 })
             }
         }
@@ -100,13 +111,29 @@ impl TurbineValue {
                 if self.payload == 0 {
                     return Err(crate::execution_error("null Turbine GC value handle"));
                 }
-                let ptr = runmat_gc::gc_handle_from_addr(self.payload as usize)
-                    .map_err(|err| crate::execution_error(err.to_string()))?;
+                let addr = self.payload as usize;
+                let rooted =
+                    ABI_GC_ROOTS.with(|roots| roots.borrow().get(&addr).map(|root| root.handle()));
+                let ptr = if let Some(handle) = rooted {
+                    handle
+                } else {
+                    // SAFETY: this fallback only exists for ABI tokens that
+                    // predate the local root table or are supplied by legacy JIT
+                    // entrypoints. The GC validates that the address currently
+                    // names a live GC Value before any clone occurs below.
+                    unsafe { runmat_gc::gc_handle_from_addr(addr) }
+                        .map_err(|err| crate::execution_error(err.to_string()))?
+                };
                 runmat_gc::gc_clone_value(&ptr)
                     .map_err(|err| crate::execution_error(err.to_string()))
             }
         }
     }
+}
+
+#[cfg(test)]
+fn clear_abi_gc_roots_for_test() {
+    ABI_GC_ROOTS.with(|roots| roots.borrow_mut().clear());
 }
 
 #[cfg(test)]
@@ -134,11 +161,32 @@ mod tests {
 
     #[test]
     fn non_scalar_values_round_trip_through_gc_handle() {
-        let value = Value::String("semantic-handle".to_string());
-        let turbine_value = TurbineValue::from_runtime_value(value.clone()).unwrap();
+        runmat_gc::gc_test_context(|| {
+            super::clear_abi_gc_roots_for_test();
+            let value = Value::String("semantic-handle".to_string());
+            let turbine_value = TurbineValue::from_runtime_value(value.clone()).unwrap();
 
-        assert_eq!(turbine_value.tag, TurbineValueTag::GcHandle);
-        assert_ne!(turbine_value.payload, 0);
-        assert_eq!(turbine_value.to_runtime_value().unwrap(), value);
+            assert_eq!(turbine_value.tag, TurbineValueTag::GcHandle);
+            assert_ne!(turbine_value.payload, 0);
+            assert_eq!(turbine_value.to_runtime_value().unwrap(), value);
+            super::clear_abi_gc_roots_for_test();
+        });
+    }
+
+    #[test]
+    fn gc_handle_payload_is_rooted_until_abi_roots_are_cleared() {
+        runmat_gc::gc_test_context(|| {
+            super::clear_abi_gc_roots_for_test();
+
+            let value = Value::String("rooted-token".to_string());
+            let turbine_value = TurbineValue::from_runtime_value(value.clone()).unwrap();
+
+            runmat_gc::gc_collect_minor().unwrap();
+            assert_eq!(turbine_value.to_runtime_value().unwrap(), value);
+
+            super::clear_abi_gc_roots_for_test();
+            runmat_gc::gc_collect_minor().unwrap();
+            assert!(turbine_value.to_runtime_value().is_err());
+        });
     }
 }
