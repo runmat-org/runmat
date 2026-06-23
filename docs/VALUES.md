@@ -87,9 +87,9 @@ Text has three representations:
 
 Most `Value` payloads are ordinary Rust-owned data. They are cloned, moved through the VM stack, stored in workspace maps, and dropped by normal Rust ownership.
 
-Values that need stable identity, cycle reachability, finalizers, or bridge identity use `GcHandle<Value>`. The main cases are handle-object targets, listener targets/callbacks, selected object/struct payloads, provider-owned resources that need finalizers, and bridge values that must remain address-stable while runtime code holds references. Cell arrays own their elements as ordinary `Value`s; a cell element may contain a handle, but cells do not GC-allocate every element.
+Values that need stable identity, cycle reachability, finalizers, or bridge identity use opaque `GcHandle` tokens. The main cases are handle-object targets, listener targets/callbacks, selected object/struct payloads, provider-owned resources that need finalizers, and bridge values that must remain address-stable while runtime code holds references. Cell arrays own their elements as ordinary `Value`s; a cell element may contain a handle, but cells do not GC-allocate every element.
 
-The GC owns the outer `Value` allocation. Nested buffers such as tensor data, strings, vectors, and maps remain owned by Rust values inside that allocation. The collector is non-moving, so surviving `GcHandle<Value>` identities stay stable.
+The GC owns the outer `Value` allocation. Nested buffers such as tensor data, strings, vectors, and maps remain owned by Rust values inside that allocation. The collector is non-moving, so surviving `GcHandle` identities stay stable. A `GcHandle` is not a Rust reference; value access goes through checked GC APIs and guarded `GcValueRef` / `GcValueMut` borrows.
 
 For details on allocation, roots, barriers, and finalizers, see [Memory Management](/docs/runtime/gc).
 
@@ -152,7 +152,7 @@ flowchart TD
   VM["VM stack and variables<br/>Vec<Value>"]
   Builtins["runtime builtins<br/>Value inputs and outputs"]
   Workspace["session workspace<br/>workspace_values"]
-  GC["GC-managed identity<br/>GcHandle<Value>"]
+  GC["GC-managed identity<br/>GcHandle"]
   GPU["Accelerate provider<br/>Value::GpuTensor"]
   Host["host ABI<br/>ExecutionOutcome / WASM wire"]
 

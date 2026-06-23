@@ -11,7 +11,7 @@ last_updated: "June 22, 2026"
 
 For the broader runtime value model, see [Runtime Values & Type Model](/docs/runtime/values). This page focuses on the subset of values that need GC-managed identity or reachability.
 
-The collector is non-moving. A `GcHandle<Value>` is an opaque, address-stable token for a `Value` allocated by the GC. Collection marks reachable values from registered roots, drops unreachable values in place, and keeps the outer handle identity stable for surviving objects.
+The collector is non-moving. A `GcHandle` is an opaque, address-stable token for a `Value` allocated by the GC. It does not dereference directly and does not carry a Rust type parameter; value access must go through checked GC APIs such as `gc_with_value`, `gc_with_value_mut`, `gc_read_value`, or `gc_write_value`. Collection marks reachable values from registered roots, drops unreachable values in place, and keeps the outer handle identity stable for surviving objects.
 
 ## Runtime Shape
 
@@ -20,7 +20,7 @@ flowchart TD
   Runtime["runtime / VM allocation site"]
   Allocate["gc_allocate(Value)"]
   Young["young generation blocks"]
-  Ptr["GcHandle<Value>"]
+  Ptr["GcHandle"]
   Roots["registered roots<br/>stack, vars, globals, explicit roots"]
   Barriers["remembered-set barriers"]
   Minor["minor collection"]
@@ -43,8 +43,8 @@ The GC manages the outer `Value` allocation. Nested payloads such as `Vec`, `Str
 | Value shape | GC role |
 | --- | --- |
 | `CellArray` | Stores owned `Vec<Value>` elements. A cell element can contain a handle, but the cell itself does not allocate every element in the GC. |
-| `HandleObject` | Stores a `GcHandle<Value>` target to preserve handle identity. |
-| `Listener` | Stores `GcHandle<Value>` references to the target and callback. |
+| `HandleObject` | Stores a `GcHandle` target to preserve handle identity. |
+| `Listener` | Stores `GcHandle` references to the target and callback. |
 | `Object` and `Struct` payloads | Can be placed behind a GC handle when identity or sharing is required. |
 | `GpuTensor` | Registers a finalizer so provider-owned GPU buffers are freed when the GC value is collected. |
 
@@ -72,7 +72,7 @@ flowchart TD
   Start["collection requested"]
   Guard["collection_in_progress guard"]
   Roots["combine roots<br/>explicit + root scanner + barrier roots"]
-  Mark["mark reachable GcHandle<Value>"]
+  Mark["mark reachable GcHandle"]
   Trace["trace nested GC references<br/>cells, handles, listeners, closures, objects, structs"]
   Sweep["drop unmarked young values"]
   Survivors["record survivors and logical promotions"]
@@ -93,14 +93,29 @@ Roots are the entry points that keep GC values alive.
 
 | Root source | Code entity | Purpose |
 | --- | --- | --- |
-| Explicit roots | `gc_add_root` / `gc_remove_root` | Protect a specific `GcHandle<Value>` by address. |
+| Explicit roots | `gc_add_root` / `gc_remove_root` | Protect a specific `GcHandle` by address. Prefer `gc_root` / `ExplicitRoot` for lexical root lifetimes. |
 | VM stack | `StackRoot` | Scans the interpreter stack for nested GC handles. |
 | VM variables | `VariableArrayRoot` | Scans the interpreter variable array. |
 | Global values | `GlobalRoot` | Keeps runtime/global values reachable during execution. |
 | Registered roots | `RootScanner` | Stores root objects by `RootId` and removes inactive roots. |
 | Remembered set | `WriteBarrierManager` | Adds old-to-young references as minor-GC roots. |
 
-`runmat-vm` wraps interpretation in an `InterpretContext`. The context registers stack and variable-array roots on creation and unregisters them on drop. Additional global roots can be registered for values that must stay live during an interpreter call.
+`runmat-vm` wraps interpretation in an `InterpretContext`. The context registers stack and variable-array roots on creation and unregisters them on drop, with a lifetime witness tying the registered root adapters to the interpreter stack and variable vectors. Additional global roots can be registered for values that must stay live during an interpreter call.
+
+Code that allocates and immediately needs a root can use `gc_allocate_rooted`, which registers the explicit root before collection can run. Cached JIT bridge values use this path so pooled handles are not left unrooted.
+
+## Access
+
+`GcHandle` is an identity token, not a Rust reference. Safe code cannot dereference it and cannot obtain `&Value` or `&mut Value` without a GC access guard.
+
+| Access API | Purpose |
+| --- | --- |
+| `gc_with_value` | Checked immutable access for the duration of a callback. |
+| `gc_with_value_mut` | Checked exclusive mutable access for the duration of a callback. |
+| `gc_read_value` / `GcValueRef` | Explicit immutable guard that implements `Deref` while collection is blocked. |
+| `gc_write_value` / `GcValueMut` | Explicit mutable guard that implements `DerefMut` while mutable access is exclusive. |
+
+The guard APIs validate that the handle belongs to the RunMat GC heap, block collection while the borrow is active, and reject conflicting mutable access.
 
 ## Write Barriers
 
@@ -161,6 +176,6 @@ The CLI and session APIs use the same stats object. `summary_report()` formats a
 
 ## Boundaries
 
-The GC is responsible for `GcHandle<Value>` lifetimes, not every byte used by the runtime. It does not replace Rust ownership for ordinary tensors, strings, cell elements, vectors, or host-side buffers. GPU buffers are provider-owned and are released through registered finalizers when a GC-managed `Value::GpuTensor` is collected.
+The GC is responsible for `GcHandle` lifetimes, not every byte used by the runtime. It does not replace Rust ownership for ordinary tensors, strings, cell elements, vectors, or host-side buffers. GPU buffers are provider-owned and are released through registered finalizers when a GC-managed `Value::GpuTensor` is collected.
 
 This design keeps MATLAB identity-bearing values stable while letting Rust continue to own the bulk storage for ordinary value payloads.
