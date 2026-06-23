@@ -38,7 +38,7 @@ impl MarkSweepCollector {
     pub fn collect_young_generation(
         &mut self,
         allocator: &mut GenerationalAllocator,
-        roots: &[GcHandle<Value>],
+        roots: &[GcHandle],
         stats: &GcStats,
     ) -> Result<usize> {
         let _ = stats; // currently unused in this path
@@ -99,7 +99,7 @@ impl MarkSweepCollector {
     pub fn collect_all_generations(
         &mut self,
         allocator: &mut GenerationalAllocator,
-        roots: &[GcHandle<Value>],
+        roots: &[GcHandle],
         stats: &GcStats,
     ) -> Result<usize> {
         log::debug!("Starting full heap collection");
@@ -129,7 +129,7 @@ impl MarkSweepCollector {
     }
 
     /// Mark phase: traverse from roots and mark all reachable objects
-    fn mark_phase(&mut self, roots: &[GcHandle<Value>], max_generation: usize) -> Result<()> {
+    fn mark_phase(&mut self, roots: &[GcHandle], max_generation: usize) -> Result<()> {
         log::trace!("Starting mark phase with {} roots", roots.len());
 
         self.marked_objects.lock().clear();
@@ -147,8 +147,8 @@ impl MarkSweepCollector {
     }
 
     /// Mark an object and recursively mark all objects it references
-    fn mark_object(&mut self, obj: GcHandle<Value>, max_generation: usize) -> Result<()> {
-        let ptr = unsafe { obj.as_raw() } as *const u8;
+    fn mark_object(&mut self, obj: GcHandle, max_generation: usize) -> Result<()> {
+        let ptr = obj.addr() as *const u8;
         let ptr_addr = ptr as usize;
 
         // Skip if already marked
@@ -162,7 +162,10 @@ impl MarkSweepCollector {
         self.marked_objects.lock().insert(ptr_addr);
 
         let mut child_roots = Vec::new();
-        collect_value_roots(unsafe { &*obj.as_raw() }, &mut child_roots);
+        // SAFETY: mark traversal is limited to roots collected from GC-owned
+        // handles, and `ptr` is only borrowed during the stop-the-world mark
+        // phase before any sweep can reclaim the object.
+        collect_value_roots(unsafe { &*(obj.addr() as *const Value) }, &mut child_roots);
         for child in child_roots {
             self.mark_object(child, max_generation)?;
         }
@@ -310,10 +313,7 @@ impl ConcurrentCollector {
     }
 
     /// Start a concurrent collection in the background
-    pub fn start_concurrent_collection(
-        &mut self,
-        _roots: &[GcHandle<Value>],
-    ) -> Result<CollectionHandle> {
+    pub fn start_concurrent_collection(&mut self, _roots: &[GcHandle]) -> Result<CollectionHandle> {
         // Use the base collector for actual collection work
         // For simplicity, return a basic result since MarkSweepCollector methods need more context
         let objects_collected = 0; // Would be computed from actual collection

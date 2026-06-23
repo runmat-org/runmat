@@ -126,7 +126,7 @@ pub(crate) mod tests {
         MException, ObjectInstance, StringArray, StructValue, SymbolicExpr, Tensor,
     };
 
-    fn test_handle_target() -> runmat_gc::GcHandle<Value> {
+    fn test_handle_target() -> runmat_gc::GcHandle {
         runmat_gc::gc_allocate(Value::Num(0.0)).expect("gc allocation")
     }
 

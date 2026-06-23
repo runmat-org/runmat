@@ -16,13 +16,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// This helper deliberately does not dereference collected `GcHandle`s. Root
 /// scanning should discover handles reachable from ordinary Rust-owned values;
 /// the collector is responsible for tracing each discovered GC object.
-pub(crate) fn collect_value_roots(value: &Value, roots: &mut Vec<GcHandle<Value>>) {
+pub(crate) fn collect_value_roots(value: &Value, roots: &mut Vec<GcHandle>) {
     struct RootCollector<'a> {
-        roots: &'a mut Vec<GcHandle<Value>>,
+        roots: &'a mut Vec<GcHandle>,
     }
 
-    impl Tracer<Value> for RootCollector<'_> {
-        fn mark(&mut self, handle: GcHandle<Value>) {
+    impl Tracer for RootCollector<'_> {
+        fn mark(&mut self, handle: GcHandle) {
             self.roots.push(handle);
         }
     }
@@ -37,7 +37,7 @@ pub struct RootId(pub usize);
 /// Trait for objects that can serve as GC roots
 pub trait GcRoot {
     /// Scan this root and return all reachable GC handles.
-    fn scan(&self) -> Vec<GcHandle<Value>>;
+    fn scan(&self) -> Vec<GcHandle>;
 
     /// Get a human-readable description of this root
     fn description(&self) -> String;
@@ -75,7 +75,7 @@ impl StackRoot {
 }
 
 impl GcRoot for StackRoot {
-    fn scan(&self) -> Vec<GcHandle<Value>> {
+    fn scan(&self) -> Vec<GcHandle> {
         unsafe {
             if self.stack_ptr.is_null() {
                 return Vec::new();
@@ -134,7 +134,7 @@ impl VariableArrayRoot {
 }
 
 impl GcRoot for VariableArrayRoot {
-    fn scan(&self) -> Vec<GcHandle<Value>> {
+    fn scan(&self) -> Vec<GcHandle> {
         unsafe {
             if self.vars_ptr.is_null() {
                 return Vec::new();
@@ -200,7 +200,7 @@ impl GlobalRoot {
 }
 
 impl GcRoot for GlobalRoot {
-    fn scan(&self) -> Vec<GcHandle<Value>> {
+    fn scan(&self) -> Vec<GcHandle> {
         let mut roots = Vec::new();
         for value in &self.values {
             collect_value_roots(value, &mut roots);
@@ -267,7 +267,7 @@ impl RootScanner {
     }
 
     /// Scan all roots and return reachable objects
-    pub fn scan_roots(&self) -> Result<Vec<GcHandle<Value>>> {
+    pub fn scan_roots(&self) -> Result<Vec<GcHandle>> {
         log::trace!("Starting root scan");
         let scan_start = Instant::now();
 
@@ -393,7 +393,7 @@ mod tests {
     use super::*;
     use runmat_builtins::{Closure, HandleRef, Listener, ObjectInstance, StructValue};
 
-    fn ptr_addr(ptr: GcHandle<Value>) -> usize {
+    fn ptr_addr(ptr: GcHandle) -> usize {
         ptr.addr()
     }
 

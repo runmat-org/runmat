@@ -4,6 +4,7 @@ use parking_lot::{Mutex, RwLock};
 use runmat_builtins::Value;
 use runmat_time::Instant;
 use std::collections::HashSet;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
@@ -32,10 +33,7 @@ static FINALIZERS: once_cell::sync::Lazy<
 > = once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(HashMap::new()));
 
 /// Register a finalizer for the provided GC handle.
-pub fn gc_register_finalizer(
-    ptr: GcHandle<Value>,
-    f: std::sync::Arc<dyn GcFinalizer>,
-) -> Result<()> {
+pub fn gc_register_finalizer(ptr: GcHandle, f: std::sync::Arc<dyn GcFinalizer>) -> Result<()> {
     let addr = ptr.addr();
     if addr == 0 {
         return Ok(());
@@ -45,7 +43,7 @@ pub fn gc_register_finalizer(
 }
 
 /// Remove any registered finalizer for the provided GC handle.
-pub fn gc_unregister_finalizer(ptr: GcHandle<Value>) -> Result<()> {
+pub fn gc_unregister_finalizer(ptr: GcHandle) -> Result<()> {
     let addr = ptr.addr();
     if addr == 0 {
         return Ok(());
@@ -169,7 +167,7 @@ impl GarbageCollector {
     }
 
     /// Allocate a new Value object
-    pub fn allocate(&self, value: Value) -> Result<GcHandle<Value>> {
+    pub fn allocate(&self, value: Value) -> Result<GcHandle> {
         // Check if collection is needed
         if self.should_collect() {
             let _ = self.collect_minor();
@@ -218,12 +216,8 @@ impl GarbageCollector {
         Ok(ptr)
     }
 
-    fn non_null_value_ptr(ptr: &GcHandle<Value>) -> Result<*const Value> {
-        let raw = unsafe { ptr.as_raw() };
-        if raw.is_null() {
-            return Err(GcError::InvalidPointer("null GC value handle".to_string()));
-        }
-        Ok(raw)
+    fn non_null_value_ptr(ptr: &GcHandle) -> Result<*const Value> {
+        Ok(ptr.addr() as *const Value)
     }
 
     fn validate_value_ptr(&self, raw: *const Value) -> Result<()> {
@@ -279,7 +273,7 @@ impl GarbageCollector {
     /// Access a GC-managed value after validating that the pointer belongs to the GC heap.
     ///
     /// Collection is blocked for the duration of the callback.
-    pub fn with_value<R>(&self, ptr: &GcHandle<Value>, f: impl FnOnce(&Value) -> R) -> Result<R> {
+    pub fn with_value<R>(&self, ptr: &GcHandle, f: impl FnOnce(&Value) -> R) -> Result<R> {
         let _borrow = self.begin_value_borrow(false)?;
         let raw = Self::non_null_value_ptr(ptr)?;
         self.validate_value_ptr(raw)?;
@@ -289,11 +283,7 @@ impl GarbageCollector {
     /// Mutably access a GC-managed value after validating that the pointer belongs to the GC heap.
     ///
     /// Collection is blocked for the duration of the callback and mutable access is exclusive.
-    pub fn with_value_mut<R>(
-        &self,
-        ptr: &GcHandle<Value>,
-        f: impl FnOnce(&mut Value) -> R,
-    ) -> Result<R> {
+    pub fn with_value_mut<R>(&self, ptr: &GcHandle, f: impl FnOnce(&mut Value) -> R) -> Result<R> {
         let _borrow = self.begin_value_borrow(true)?;
         let raw = Self::non_null_value_ptr(ptr)? as *mut Value;
         self.validate_value_ptr(raw)?;
@@ -301,7 +291,7 @@ impl GarbageCollector {
     }
 
     /// Clone a GC-managed value through the guarded access path.
-    pub fn clone_value(&self, ptr: &GcHandle<Value>) -> Result<Value> {
+    pub fn clone_value(&self, ptr: &GcHandle) -> Result<Value> {
         self.with_value(ptr, Clone::clone)
     }
 
@@ -337,13 +327,16 @@ impl GarbageCollector {
         let start_time = Instant::now();
 
         // Build combined roots: explicit + external (root scanner + barriers)
-        let mut combined_roots: Vec<GcHandle<Value>> = Vec::new();
+        let mut combined_roots: Vec<GcHandle> = Vec::new();
         {
             let roots = self.root_ptrs.lock();
             combined_roots.extend(
                 roots
                     .iter()
-                    .map(|&addr| unsafe { GcHandle::from_raw(addr as *const Value) }),
+                    .filter_map(|&addr| NonZeroUsize::new(addr))
+                    // SAFETY: explicit roots are recorded from live GC handles
+                    // via `GcHandle::addr` in `add_root`.
+                    .map(|addr| unsafe { GcHandle::from_addr_unchecked(addr) }),
             );
         }
         // External roots
@@ -398,13 +391,16 @@ impl GarbageCollector {
         let start_time = Instant::now();
 
         // Build combined roots: explicit + external
-        let mut combined_roots: Vec<GcHandle<Value>> = Vec::new();
+        let mut combined_roots: Vec<GcHandle> = Vec::new();
         {
             let roots = self.root_ptrs.lock();
             combined_roots.extend(
                 roots
                     .iter()
-                    .map(|&addr| unsafe { GcHandle::from_raw(addr as *const Value) }),
+                    .filter_map(|&addr| NonZeroUsize::new(addr))
+                    // SAFETY: explicit roots are recorded from live GC handles
+                    // via `GcHandle::addr` in `add_root`.
+                    .map(|addr| unsafe { GcHandle::from_addr_unchecked(addr) }),
             );
         }
         if let Ok(mut ext) = ROOT_SCANNER.with(|scanner| scanner.scan_roots()) {
@@ -433,7 +429,7 @@ impl GarbageCollector {
     }
 
     /// Add a root to protect an object from collection
-    pub fn add_root(&self, root: GcHandle<Value>) -> Result<()> {
+    pub fn add_root(&self, root: GcHandle) -> Result<()> {
         let value_ptr = root.addr();
         if value_ptr == 0 {
             return Ok(());
@@ -443,7 +439,7 @@ impl GarbageCollector {
     }
 
     /// Remove a root
-    pub fn remove_root(&self, root: GcHandle<Value>) -> Result<()> {
+    pub fn remove_root(&self, root: GcHandle) -> Result<()> {
         let value_ptr = root.addr();
         if value_ptr == 0 {
             return Ok(());
@@ -497,7 +493,7 @@ static WRITE_BARRIERS: once_cell::sync::Lazy<Arc<WriteBarrierManager>> =
     once_cell::sync::Lazy::new(|| Arc::new(WriteBarrierManager::new(true, false)));
 
 /// Global GC functions for easy access
-pub fn gc_allocate(value: Value) -> Result<GcHandle<Value>> {
+pub fn gc_allocate(value: Value) -> Result<GcHandle> {
     GC.allocate(value)
 }
 
@@ -510,37 +506,36 @@ pub fn gc_collect_major() -> Result<usize> {
     GC.collect_major()
 }
 
-pub fn gc_add_root(root: GcHandle<Value>) -> Result<()> {
+pub fn gc_add_root(root: GcHandle) -> Result<()> {
     GC.add_root(root)
 }
 
-pub fn gc_remove_root(root: GcHandle<Value>) -> Result<()> {
+pub fn gc_remove_root(root: GcHandle) -> Result<()> {
     GC.remove_root(root)
 }
 
-pub fn gc_with_value<R>(ptr: &GcHandle<Value>, f: impl FnOnce(&Value) -> R) -> Result<R> {
+pub fn gc_with_value<R>(ptr: &GcHandle, f: impl FnOnce(&Value) -> R) -> Result<R> {
     GC.with_value(ptr, f)
 }
 
-pub fn gc_with_value_mut<R>(ptr: &GcHandle<Value>, f: impl FnOnce(&mut Value) -> R) -> Result<R> {
+pub fn gc_with_value_mut<R>(ptr: &GcHandle, f: impl FnOnce(&mut Value) -> R) -> Result<R> {
     GC.with_value_mut(ptr, f)
 }
 
-pub fn gc_clone_value(ptr: &GcHandle<Value>) -> Result<Value> {
+pub fn gc_clone_value(ptr: &GcHandle) -> Result<Value> {
     GC.clone_value(ptr)
 }
 
-pub fn gc_handle_addr(handle: &GcHandle<Value>) -> usize {
+pub fn gc_handle_addr(handle: &GcHandle) -> usize {
     handle.addr()
 }
 
-pub fn gc_handle_from_addr(addr: usize) -> Result<GcHandle<Value>> {
-    if addr == 0 {
-        return Err(GcError::InvalidPointer(
-            "null GC value handle address".to_string(),
-        ));
-    }
-    Ok(unsafe { GcHandle::from_raw(addr as *const Value) })
+pub fn gc_handle_from_addr(addr: usize) -> Result<GcHandle> {
+    let raw = NonZeroUsize::new(addr)
+        .ok_or_else(|| GcError::InvalidPointer("null GC value handle address".to_string()))?;
+    GC.validate_value_ptr(addr as *const Value)?;
+    // SAFETY: the address was validated against the current RunMat GC heap.
+    Ok(unsafe { GcHandle::from_addr_unchecked(raw) })
 }
 
 pub fn gc_stats() -> GcStats {
@@ -580,11 +575,14 @@ pub fn gc_record_write(old: &Value, new: &Value) {
 }
 
 /// Get barrier-derived roots for minor GC
-pub fn gc_barrier_minor_roots() -> Vec<GcHandle<Value>> {
+pub fn gc_barrier_minor_roots() -> Vec<GcHandle> {
     WRITE_BARRIERS
         .get_minor_gc_roots()
         .into_iter()
-        .map(|p| unsafe { GcHandle::from_raw(p as *const Value) })
+        .filter_map(|p| NonZeroUsize::new(p as usize))
+        // SAFETY: barrier roots are recorded from GC-owned pointer addresses by
+        // the write-barrier manager.
+        .map(|addr| unsafe { GcHandle::from_addr_unchecked(addr) })
         .collect()
 }
 
@@ -755,7 +753,11 @@ mod tests {
     fn guarded_access_rejects_non_gc_pointer() {
         gc_test_context(|| {
             let raw = Box::into_raw(Box::new(Value::Num(1.0)));
-            let ptr = unsafe { GcHandle::from_raw(raw) };
+            let ptr = unsafe {
+                GcHandle::from_addr_unchecked(
+                    NonZeroUsize::new(raw as usize).expect("non-null test pointer"),
+                )
+            };
 
             let err = gc_clone_value(&ptr).expect_err("non-GC handle should be rejected");
             assert!(matches!(err, GcError::InvalidPointer(_)));

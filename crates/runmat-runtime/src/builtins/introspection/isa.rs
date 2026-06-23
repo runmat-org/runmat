@@ -258,7 +258,7 @@ pub(crate) mod tests {
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-    fn test_handle_target() -> runmat_gc::GcHandle<Value> {
+    fn test_handle_target() -> runmat_gc::GcHandle {
         runmat_gc::gc_allocate(Value::Num(0.0)).expect("gc allocation")
     }
 

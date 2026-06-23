@@ -2085,7 +2085,7 @@ impl MException {
 #[derive(Debug, Clone)]
 pub struct HandleRef {
     pub class_name: String,
-    pub target: GcHandle<Value>,
+    pub target: GcHandle,
     pub valid: bool,
 }
 
@@ -2107,9 +2107,9 @@ impl PartialEq for HandleRef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Listener {
     pub id: u64,
-    pub target: GcHandle<Value>,
+    pub target: GcHandle,
     pub event_name: String,
-    pub callback: GcHandle<Value>,
+    pub callback: GcHandle,
     pub enabled: bool,
     pub valid: bool,
 }
@@ -2120,53 +2120,53 @@ impl Listener {
     }
 }
 
-impl Trace<Value> for CellArray {
-    fn trace(&self, tracer: &mut dyn Tracer<Value>) {
+impl Trace for CellArray {
+    fn trace(&self, tracer: &mut dyn Tracer) {
         for value in &self.data {
             value.trace(tracer);
         }
     }
 }
 
-impl Trace<Value> for StructValue {
-    fn trace(&self, tracer: &mut dyn Tracer<Value>) {
+impl Trace for StructValue {
+    fn trace(&self, tracer: &mut dyn Tracer) {
         for value in self.fields.values() {
             value.trace(tracer);
         }
     }
 }
 
-impl Trace<Value> for Closure {
-    fn trace(&self, tracer: &mut dyn Tracer<Value>) {
+impl Trace for Closure {
+    fn trace(&self, tracer: &mut dyn Tracer) {
         for value in &self.captures {
             value.trace(tracer);
         }
     }
 }
 
-impl Trace<Value> for ObjectInstance {
-    fn trace(&self, tracer: &mut dyn Tracer<Value>) {
+impl Trace for ObjectInstance {
+    fn trace(&self, tracer: &mut dyn Tracer) {
         for value in self.properties.values() {
             value.trace(tracer);
         }
     }
 }
 
-impl Trace<Value> for HandleRef {
-    fn trace(&self, tracer: &mut dyn Tracer<Value>) {
+impl Trace for HandleRef {
+    fn trace(&self, tracer: &mut dyn Tracer) {
         tracer.mark(self.target.clone());
     }
 }
 
-impl Trace<Value> for Listener {
-    fn trace(&self, tracer: &mut dyn Tracer<Value>) {
+impl Trace for Listener {
+    fn trace(&self, tracer: &mut dyn Tracer) {
         tracer.mark(self.target.clone());
         tracer.mark(self.callback.clone());
     }
 }
 
-impl Trace<Value> for Value {
-    fn trace(&self, tracer: &mut dyn Tracer<Value>) {
+impl Trace for Value {
+    fn trace(&self, tracer: &mut dyn Tracer) {
         match self {
             Value::Cell(cells) => cells.trace(tracer),
             Value::Struct(struct_value) => struct_value.trace(tracer),

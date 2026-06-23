@@ -10,29 +10,27 @@ use std::num::NonZeroUsize;
 ///
 /// ```compile_fail
 /// fn assert_send<T: Send>() {}
-/// assert_send::<runmat_gc_api::GcHandle<u8>>();
+/// assert_send::<runmat_gc_api::GcHandle>();
 /// ```
 ///
 /// ```compile_fail
 /// fn assert_sync<T: Sync>() {}
-/// assert_sync::<runmat_gc_api::GcHandle<u8>>();
+/// assert_sync::<runmat_gc_api::GcHandle>();
 /// ```
 #[derive(Copy, Clone)]
-pub struct GcHandle<T> {
+pub struct GcHandle {
     raw: NonZeroUsize,
-    _not_send_sync: PhantomData<*const T>,
+    _not_send_sync: PhantomData<*const ()>,
 }
 
-impl<T> GcHandle<T> {
+impl GcHandle {
     /// # Safety
     ///
-    /// - `ptr` must be non-null and correctly aligned for `T`.
-    /// - `ptr` must point to a valid instance of `T` allocated by RunMat's GC and
-    ///   remain alive for the duration of all uses of the returned `GcHandle`.
-    /// - The caller is responsible for upholding aliasing and lifetime invariants
-    ///   when accessing the pointer through raw pointer APIs.
-    pub unsafe fn from_raw(ptr: *const T) -> Self {
-        let raw = NonZeroUsize::new(ptr as usize).expect("GC handle pointer must be non-null");
+    /// `raw` must be the non-zero address of a live RunMat GC allocation. This is
+    /// an unchecked bridge for `runmat-gc`; callers must not fabricate handles
+    /// from ordinary Rust allocations or stale addresses.
+    #[doc(hidden)]
+    pub unsafe fn from_addr_unchecked(raw: NonZeroUsize) -> Self {
         Self {
             raw,
             _not_send_sync: PhantomData,
@@ -42,41 +40,31 @@ impl<T> GcHandle<T> {
     pub fn addr(&self) -> usize {
         self.raw.get()
     }
-
-    /// # Safety
-    ///
-    /// The returned raw pointer may become invalid if the underlying object is
-    /// collected by the GC. The caller must ensure the object is kept alive
-    /// (e.g., via rooting) for any dereference, and must respect aliasing and
-    /// lifetime rules when using the pointer.
-    pub unsafe fn as_raw(&self) -> *const T {
-        self.raw.get() as *const T
-    }
 }
 
-impl<T> PartialEq for GcHandle<T> {
+impl PartialEq for GcHandle {
     fn eq(&self, other: &Self) -> bool {
         self.raw == other.raw
     }
 }
 
-impl<T> Eq for GcHandle<T> {}
+impl Eq for GcHandle {}
 
-impl<T> Hash for GcHandle<T> {
+impl Hash for GcHandle {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.raw.hash(state)
     }
 }
 
-impl<T> fmt::Debug for GcHandle<T> {
+impl fmt::Debug for GcHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "GcHandle({:p})", self.raw.get() as *const T)
+        write!(f, "GcHandle({:p})", self.raw.get() as *const ())
     }
 }
 
-impl<T> fmt::Display for GcHandle<T> {
+impl fmt::Display for GcHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:p}", self.raw.get() as *const T)
+        write!(f, "{:p}", self.raw.get() as *const ())
     }
 }
 
@@ -90,8 +78,16 @@ mod tests {
     fn equality_is_pointer_identity_not_pointee_value() {
         let raw_a = Box::into_raw(Box::new(7_u64));
         let raw_b = Box::into_raw(Box::new(7_u64));
-        let ptr_a = unsafe { GcHandle::from_raw(raw_a) };
-        let ptr_b = unsafe { GcHandle::from_raw(raw_b) };
+        let ptr_a = unsafe {
+            GcHandle::from_addr_unchecked(
+                std::num::NonZeroUsize::new(raw_a as usize).expect("non-null test pointer"),
+            )
+        };
+        let ptr_b = unsafe {
+            GcHandle::from_addr_unchecked(
+                std::num::NonZeroUsize::new(raw_b as usize).expect("non-null test pointer"),
+            )
+        };
 
         assert_eq!(ptr_a, ptr_a);
         assert_ne!(ptr_a, ptr_b);
@@ -106,8 +102,16 @@ mod tests {
     fn hash_is_pointer_identity() {
         let raw_a = Box::into_raw(Box::new(7_u64));
         let raw_b = Box::into_raw(Box::new(7_u64));
-        let ptr_a = unsafe { GcHandle::from_raw(raw_a) };
-        let ptr_b = unsafe { GcHandle::from_raw(raw_b) };
+        let ptr_a = unsafe {
+            GcHandle::from_addr_unchecked(
+                std::num::NonZeroUsize::new(raw_a as usize).expect("non-null test pointer"),
+            )
+        };
+        let ptr_b = unsafe {
+            GcHandle::from_addr_unchecked(
+                std::num::NonZeroUsize::new(raw_b as usize).expect("non-null test pointer"),
+            )
+        };
 
         let mut ptr_hash = DefaultHasher::new();
         ptr_a.hash(&mut ptr_hash);
@@ -126,7 +130,11 @@ mod tests {
     #[test]
     fn debug_and_display_do_not_dereference_pointee() {
         let raw = Box::into_raw(Box::new(7_u64));
-        let ptr = unsafe { GcHandle::from_raw(raw) };
+        let ptr = unsafe {
+            GcHandle::from_addr_unchecked(
+                std::num::NonZeroUsize::new(raw as usize).expect("non-null test pointer"),
+            )
+        };
 
         assert!(format!("{ptr:?}").starts_with("GcHandle(0x"));
         assert!(ptr.to_string().starts_with("0x"));

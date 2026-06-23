@@ -7,6 +7,7 @@ use crate::Value;
 use crate::{GcConfig, GcError, GcHandle, GcStats, Result};
 use std::collections::{HashMap, HashSet};
 use std::mem::MaybeUninit;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Size classes for object allocation
@@ -268,7 +269,7 @@ impl GenerationalAllocator {
     }
 
     /// Allocate a Value object
-    pub fn allocate(&mut self, value: Value, stats: &GcStats) -> Result<GcHandle<Value>> {
+    pub fn allocate(&mut self, value: Value, stats: &GcStats) -> Result<GcHandle> {
         let size = self.estimate_value_size(&value);
 
         // Always allocate in young generation first
@@ -282,7 +283,7 @@ impl GenerationalAllocator {
         // Update statistics
         stats.record_allocation(size);
 
-        Ok(unsafe { GcHandle::from_raw(ptr as *const Value) })
+        value_handle_from_ptr(ptr.cast::<Value>())
     }
 
     /// Drain allocated object pointers from the young generation
@@ -307,11 +308,11 @@ impl GenerationalAllocator {
 
     /// Promote an object to the next generation
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn promote(&mut self, ptr: *const Value, _from_gen: usize) -> Result<GcHandle<Value>> {
+    pub fn promote(&mut self, ptr: *const Value, _from_gen: usize) -> Result<GcHandle> {
         // Non-moving logical promotion: mark pointer as promoted for barrier/collection logic
         let raw = ptr as *const u8;
         self.promoted_ptrs.insert(raw);
-        Ok(unsafe { GcHandle::from_raw(ptr) })
+        value_handle_from_ptr(ptr)
     }
 
     /// Check if young generation currently tracks any survivors
@@ -429,6 +430,14 @@ impl GenerationalAllocator {
     }
 }
 
+fn value_handle_from_ptr(ptr: *const Value) -> Result<GcHandle> {
+    let raw = NonZeroUsize::new(ptr as usize)
+        .ok_or_else(|| GcError::InvalidPointer("null GC allocation pointer".to_string()))?;
+    // SAFETY: allocator callers only pass addresses returned by generation
+    // allocation or promotion of existing generation-owned Value slots.
+    Ok(unsafe { GcHandle::from_addr_unchecked(raw) })
+}
+
 /// Statistics for the allocator
 #[derive(Debug, Clone)]
 pub struct AllocatorStats {
@@ -471,7 +480,9 @@ mod tests {
             .allocate(value, &stats)
             .expect("allocation should succeed");
 
-        assert_eq!(unsafe { &*ptr.as_raw() }, &Value::Num(42.0));
+        // SAFETY: this handle was returned by the allocator under test and no
+        // collection or mutation runs before this read.
+        assert_eq!(unsafe { &*(ptr.addr() as *const Value) }, &Value::Num(42.0));
     }
 
     #[test]
