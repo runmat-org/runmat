@@ -352,6 +352,11 @@ pub async fn signal_envelope(
         || request.output_shape.is_empty()
         || output_len != expected_len
         || input_len != expected_len
+        || !provider_envelope_input_shape_matches(
+            &request.input.shape,
+            request.channel_len,
+            request.channel_count,
+        )
     {
         return Err(anyhow!("signal_envelope: invalid request"));
     }
@@ -367,6 +372,24 @@ pub async fn signal_envelope(
     let provider =
         provider().ok_or_else(|| anyhow!("signal_envelope: GPU provider unavailable"))?;
     provider.signal_envelope(&request).await
+}
+
+fn provider_envelope_input_shape_matches(
+    shape: &[usize],
+    channel_len: usize,
+    channel_count: usize,
+) -> bool {
+    if channel_count == 1 {
+        return match shape {
+            [len] => *len == channel_len,
+            [rows, cols] => {
+                (*rows == channel_len && *cols == 1) || (*rows == 1 && *cols == channel_len)
+            }
+            _ => false,
+        };
+    }
+
+    matches!(shape, [rows, cols] if *rows == channel_len && *cols == channel_count)
 }
 
 pub async fn signal_hilbert(
@@ -3137,6 +3160,18 @@ mod tests {
             device_id,
             buffer_id: 42,
         }
+    }
+
+    #[test]
+    fn provider_envelope_shape_guard_rejects_equal_len_layout_spoofing() {
+        assert!(provider_envelope_input_shape_matches(&[2, 3], 2, 3));
+        assert!(provider_envelope_input_shape_matches(&[6, 1], 6, 1));
+        assert!(provider_envelope_input_shape_matches(&[1, 6], 6, 1));
+        assert!(provider_envelope_input_shape_matches(&[6], 6, 1));
+
+        assert!(!provider_envelope_input_shape_matches(&[3, 2], 2, 3));
+        assert!(!provider_envelope_input_shape_matches(&[6], 2, 3));
+        assert!(!provider_envelope_input_shape_matches(&[2, 1, 3], 2, 3));
     }
 
     #[test]

@@ -163,6 +163,15 @@ impl WgpuProvider {
             entry.len == input_len,
             "signal_envelope: input length mismatch"
         );
+        ensure!(
+            envelope_input_shape_matches(&entry.shape, request.channel_len, request.channel_count)
+                && envelope_input_shape_matches(
+                    &request.input.shape,
+                    request.channel_len,
+                    request.channel_count
+                ),
+            "signal_envelope: input shape mismatch"
+        );
 
         match request.method {
             ProviderEnvelopeMethod::Analytic => self.signal_envelope_analytic_exec(request).await,
@@ -1784,6 +1793,20 @@ fn envelope_hilbert_fir_kernel(filter_len: usize) -> Vec<f64> {
         .collect()
 }
 
+fn envelope_input_shape_matches(shape: &[usize], channel_len: usize, channel_count: usize) -> bool {
+    if channel_count == 1 {
+        return match shape {
+            [len] => *len == channel_len,
+            [rows, cols] => {
+                (*rows == channel_len && *cols == 1) || (*rows == 1 && *cols == channel_len)
+            }
+            _ => false,
+        };
+    }
+
+    matches!(shape, [rows, cols] if *rows == channel_len && *cols == channel_count)
+}
+
 fn envelope_kaiser_window(idx: usize, len: usize, denominator: f64) -> f64 {
     if len <= 1 {
         return 1.0;
@@ -2055,6 +2078,36 @@ mod tests {
             return;
         }
         assert!((upper[1] - (25.0f64 / 3.0).sqrt()).abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn signal_envelope_provider_rejects_layout_mismatch_with_same_len() {
+        let values = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let Some(()) = with_wgpu_provider(|provider| {
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &values,
+                    shape: &[3, 2],
+                })
+                .expect("upload");
+            let output_shape = [2, 3];
+            let err = pollster::block_on(provider.signal_envelope(&ProviderEnvelopeRequest {
+                input: &input,
+                channel_len: 2,
+                channel_count: 3,
+                output_shape: &output_shape,
+                method: ProviderEnvelopeMethod::Rms { window_len: 3 },
+            }))
+            .expect_err("layout mismatch should be rejected");
+
+            provider.free(&input).ok();
+            assert!(
+                err.to_string().contains("input shape mismatch"),
+                "unexpected error: {err:#}"
+            );
+        }) else {
+            return;
+        };
     }
 
     #[test]
