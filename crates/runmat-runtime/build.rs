@@ -65,10 +65,8 @@ fn main() {
         }
         println!("cargo:rerun-if-env-changed=LAPACK_LIBS");
     } else {
-        // Reasonable defaults on Windows with vcpkg
         if target_os == "windows" {
-            // Try lapack first, then openblas
-            println!("cargo:rustc-link-lib=lapack");
+            // vcpkg's OpenBLAS package supplies the LAPACK symbols we use.
             println!("cargo:rustc-link-lib=openblas");
         }
     }

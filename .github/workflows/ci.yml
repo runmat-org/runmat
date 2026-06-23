@@ -292,7 +292,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_PATH=$($zmq)"
           Add-Content -Path $env:GITHUB_ENV -Value "PKG_CONFIG_PATH=$($zmq)\lib\pkgconfig"
 
-          Write-Host "Cloning vcpkg and installing OpenBLAS/LAPACK"
+          Write-Host "Cloning vcpkg and installing OpenBLAS"
           $vcpkgRoot = Join-Path $pwd "vcpkg"
           git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
           & "$vcpkgRoot\bootstrap-vcpkg.bat"
@@ -307,13 +307,8 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
 
-          # Install OpenBLAS and LAPACK provider; on arm64-windows use --allow-unsupported for gfortran
+          # OpenBLAS provides the BLAS and LAPACK symbols used by the Rust bindings.
           & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet"
-          if ($triplet -eq "arm64-windows") {
-            & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet" --allow-unsupported
-          } else {
-            & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet"
-          }
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
           Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\$triplet\bin"
 
@@ -321,7 +316,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
           Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIBS=openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
-          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
+          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
 
       - name: Cross build (linux-x86_64)
