@@ -60,7 +60,8 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE, FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT,
     FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+    FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
     FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
     FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
@@ -524,6 +525,19 @@ fn sample_geometry_asset() -> GeometryAsset {
         )],
         diagnostics: Vec::new(),
     }
+}
+
+fn sample_prep_artifact_id_for_model(model: &AnalysisModel) -> String {
+    let mut geometry = sample_geometry_asset();
+    geometry.geometry_id = model.geometry_id.clone();
+    geometry.revision = model.geometry_revision;
+    let prep = crate::geometry::geometry_prep_for_analysis_op(
+        &geometry,
+        crate::geometry::GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("prep should succeed");
+    prep.data.prep_artifact_id
 }
 
 fn sample_step_like_geometry_asset() -> GeometryAsset {
@@ -2151,7 +2165,10 @@ fn analysis_validate_maps_invalid_moment_error_code() {
 #[test]
 fn analysis_run_linear_static_returns_typed_envelope() {
     let _guard = analysis_test_guard();
+    let _prep_guard = crate::geometry::prep_artifact_test_guard();
+    crate::geometry::reset_prep_artifact_store_for_tests();
     let model = sample_model();
+    let prep_artifact_id = sample_prep_artifact_id_for_model(&model);
     let context =
         OperationContext::new(Some("trace-a2".to_string()), Some("request-a2".to_string()));
     let envelope = analysis_run_linear_static_with_options(
@@ -2163,7 +2180,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
             prep_context: Some(sample_analysis_run_prep_context()),
-            prep_artifact_id: None,
+            prep_artifact_id: Some(prep_artifact_id),
             prep_calibration_profile: None,
         },
         context,
@@ -2186,7 +2203,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     assert!(envelope.data.provenance.deterministic_mode);
     assert_eq!(envelope.data.provenance.precision_mode, "fp64");
     assert_eq!(envelope.data.provenance.solver_method, "matrix_free_pcg");
-    assert_eq!(envelope.data.provenance.preconditioner, "jacobi");
+    assert_eq!(envelope.data.provenance.preconditioner, "ilu0");
     assert_eq!(envelope.data.provenance.quality_policy, "balanced");
     assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
     assert_eq!(envelope.data.provenance.solver_host_sync_count, 0);
@@ -3012,8 +3029,8 @@ fn analysis_results_by_run_id_roundtrip_works() {
 
     assert_eq!(fetched.operation, "fea.results");
     assert_eq!(fetched.op_version, "fea.results/v1");
-    assert_eq!(fetched.data.summary.field_count, 8);
-    assert_eq!(fetched.data.field_descriptors.len(), 8);
+    assert_eq!(fetched.data.summary.field_count, 10);
+    assert_eq!(fetched.data.field_descriptors.len(), 10);
     let displacement_descriptor = fetched
         .data
         .field_descriptors
@@ -3025,6 +3042,20 @@ fn analysis_results_by_run_id_roundtrip_works() {
         displacement_descriptor.location,
         AnalysisFieldLocation::Node
     );
+    let rotation_descriptor = fetched
+        .data
+        .field_descriptors
+        .iter()
+        .find(|descriptor| descriptor.field_id == FEA_FIELD_STRUCTURAL_ROTATION)
+        .expect("structural rotation descriptor should replay");
+    assert_eq!(rotation_descriptor.unit.as_deref(), Some("rad"));
+    let reaction_moment_descriptor = fetched
+        .data
+        .field_descriptors
+        .iter()
+        .find(|descriptor| descriptor.field_id == FEA_FIELD_STRUCTURAL_REACTION_MOMENT)
+        .expect("structural reaction moment descriptor should replay");
+    assert_eq!(reaction_moment_descriptor.unit.as_deref(), Some("N*m"));
     assert_eq!(fetched.data.summary.mode_count, 0);
     assert!(fetched.data.summary.available_mode_indices.is_empty());
     assert_eq!(fetched.data.summary.min_frequency_hz, None);

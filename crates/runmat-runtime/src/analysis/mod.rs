@@ -2296,6 +2296,7 @@ pub fn analysis_run_acoustic_with_options_op(
         &context,
     )?;
 
+    let solve_start = Instant::now();
     let mut run = solve_acoustic_harmonic(
         model,
         backend,
@@ -2303,6 +2304,16 @@ pub fn analysis_run_acoustic_with_options_op(
         prep_context,
         options.residual_warn_threshold,
     );
+    let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
+    run.diagnostics
+        .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+            code: "FEA_ACOUSTIC_COST".to_string(),
+            severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
+            message: format!(
+                "solve_ms={} mode_count={} residual_warn_threshold={}",
+                solve_ms, options.mode_count, options.residual_warn_threshold,
+            ),
+        });
     let acoustic_residual_norm = diagnostic_metric(
         &run.diagnostics,
         "FEA_ACOUSTIC_HELMHOLTZ_RESIDUAL",
@@ -14717,6 +14728,7 @@ fn run_solve_ms(run: &AnalysisRunResult) -> Option<f64> {
         "FEA_NONLINEAR_COST",
         "FEA_TRANSIENT_COST",
         "FEA_MODAL_COST",
+        "FEA_ACOUSTIC_COST",
         "FEA_CFD_COST",
         "FEA_CHT_COST",
         "FEA_FSI_COST",

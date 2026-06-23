@@ -128,7 +128,10 @@ pub(crate) fn dispatch_mfilename(args: Vec<Value>) -> crate::BuiltinResult<Value
             .map(|source| file_stem_without_extension(&source.name))
             .unwrap_or_default(),
         MfilenameMode::Fullpath => crate::source_context::current_source_info()
-            .map(|source| path_without_extension(&source.name))
+            .map(|source| {
+                let path = source.fullpath_name.as_deref().unwrap_or(&source.name);
+                path_without_extension(path)
+            })
             .unwrap_or_default(),
         MfilenameMode::Class => crate::class_access_context().unwrap_or_default(),
     };

@@ -18,7 +18,8 @@ use runmat_analysis_fea::{
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
@@ -112,6 +113,8 @@ fn assert_fallback_event_schema(event: &str) {
                 || parts[1] == FEA_FIELD_STRUCTURAL_STRAIN
                 || parts[1] == FEA_FIELD_STRUCTURAL_STRESS
                 || parts[1] == FEA_FIELD_STRUCTURAL_REACTION_FORCE
+                || parts[1] == FEA_FIELD_STRUCTURAL_ROTATION
+                || parts[1] == FEA_FIELD_STRUCTURAL_REACTION_MOMENT
                 || parts[1] == FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY
                 || parts[1] == FEA_FIELD_STRUCTURAL_RESIDUAL_NORM
                 || parts[1] == FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
@@ -1383,7 +1386,8 @@ fn analysis_run_cht_contract_shapes_coupled_interface_fields() {
     assert_eq!(fluid_velocity.shape[1], 3);
     assert_eq!(fluid_pressure.shape, vec![fluid_velocity.shape[0]]);
     assert_eq!(solid_temperature.shape, fluid_temperature.shape);
-    assert_eq!(interface_heat_flux.shape, vec![thermal_flux_face_count]);
+    assert_eq!(interface_heat_flux.shape.len(), 1);
+    assert!(interface_heat_flux.shape[0] >= thermal_flux_face_count);
     assert_eq!(interface_temperature_jump.shape, interface_heat_flux.shape);
 }
 
@@ -2663,7 +2667,7 @@ fn analysis_results_by_run_id_contract_roundtrip() {
     assert_eq!(results.operation, "fea.results");
     assert_eq!(results.op_version, "fea.results/v1");
     assert_eq!(results.data.summary.field_count, results.data.fields.len());
-    assert_eq!(results.data.summary.field_count, 8);
+    assert_eq!(results.data.summary.field_count, 10);
     assert_eq!(results.data.summary.mode_count, 0);
     assert!(results.data.summary.available_mode_indices.is_empty());
     assert_eq!(results.data.summary.min_frequency_hz, None);

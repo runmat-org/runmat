@@ -4,6 +4,7 @@
     "load_factors": [],
     "load_factor_snapshots": [],
     "displacement_snapshots": [],
+    "rotation_snapshots": [],
     "von_mises_snapshots": [],
     "residual_norm_snapshots": [],
     "equivalent_plastic_strain_snapshots": [],

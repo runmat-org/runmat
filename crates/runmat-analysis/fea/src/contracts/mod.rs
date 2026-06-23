@@ -293,7 +293,7 @@ impl FeaRunResult {
     }
 
     pub fn fields_are_empty(&self) -> bool {
-        self.fields.is_empty() || self.fields.iter().any(AnalysisField::is_empty)
+        self.fields.is_empty() || self.fields.iter().all(AnalysisField::is_empty)
     }
 
     pub fn field_ids(&self) -> Vec<String> {

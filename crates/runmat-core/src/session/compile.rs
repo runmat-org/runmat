@@ -74,6 +74,10 @@ fn resolved_source_path(source_name: &str, cwd: &Path) -> PathBuf {
     crate::diagnostic_path::resolve_against_base(source_name, cwd)
 }
 
+fn path_to_source_name(path: &Path) -> String {
+    path.to_string_lossy().to_string()
+}
+
 fn is_class_source_body(stmts: &[runmat_parser::Stmt]) -> bool {
     let has_classdef = stmts
         .iter()
@@ -300,8 +304,15 @@ pub(super) struct CompanionSourceDiscovery {
     pub private_function_names: HashSet<String>,
     pub private_function_owners: HashMap<String, String>,
     pub private_function_aliases: HashMap<String, HashMap<String, String>>,
-    pub function_source_contexts: HashMap<String, (String, String)>,
+    pub function_source_contexts: HashMap<String, SourceContextData>,
     private_statement_flags: Vec<bool>,
+}
+
+#[derive(Clone)]
+pub(super) struct SourceContextData {
+    pub display_name: String,
+    pub fullpath_name: Option<String>,
+    pub text: String,
 }
 
 fn function_names_in_statements(stmts: &[runmat_parser::Stmt]) -> impl Iterator<Item = &str> {
@@ -351,12 +362,12 @@ impl CompanionSourceDiscovery {
         body: Vec<runmat_parser::Stmt>,
         private_owner_scope: Option<&str>,
         private_aliases: HashMap<String, String>,
-        source_context: Option<(String, String)>,
+        source_context: Option<SourceContextData>,
     ) {
-        if let Some((source_name, source_text)) = source_context {
+        if let Some(source_context) = source_context {
             for function_name in source_context_function_names_in_statements(&body) {
                 self.function_source_contexts
-                    .insert(function_name, (source_name.clone(), source_text.clone()));
+                    .insert(function_name, source_context.clone());
             }
         }
         let is_private = private_owner_scope.is_some();
@@ -520,10 +531,13 @@ async fn discover_companion_from_composition_graph_async(
                         body,
                         private_owner_scope.as_deref(),
                         private_aliases,
-                        Some((
-                            crate::diagnostic_path::display_path_from_base(&file_path, cwd),
-                            contents,
-                        )),
+                        Some(SourceContextData {
+                            display_name: crate::diagnostic_path::display_path_from_base(
+                                &file_path, cwd,
+                            ),
+                            fullpath_name: Some(path_to_source_name(&file_path)),
+                            text: contents,
+                        }),
                     );
                 }
             }
@@ -623,10 +637,11 @@ pub(super) async fn discover_companion_source_statements_async(
                 body,
                 private_owner_scope.as_deref(),
                 private_aliases,
-                Some((
-                    crate::diagnostic_path::display_path_from_base(&path, &cwd),
-                    contents,
-                )),
+                Some(SourceContextData {
+                    display_name: crate::diagnostic_path::display_path_from_base(&path, &cwd),
+                    fullpath_name: Some(path_to_source_name(&path)),
+                    text: contents,
+                }),
             );
         }
     }
@@ -641,9 +656,12 @@ impl RunMatSession {
         input: &str,
     ) -> std::result::Result<PreparedExecution, RunError> {
         let previous_source_name = self.active_source_name.clone();
+        let previous_source_fullpath_name = self.active_source_fullpath_name.clone();
         self.active_source_name = source_name.to_string();
+        self.active_source_fullpath_name = None;
         let result = self.compile_input(input);
         self.active_source_name = previous_source_name;
+        self.active_source_fullpath_name = previous_source_fullpath_name;
         result
     }
 
@@ -652,7 +670,12 @@ impl RunMatSession {
         input: &str,
     ) -> std::result::Result<PreparedExecution, RunError> {
         let source_name = self.current_source_name().to_string();
-        let source_id = self.source_pool.intern(&source_name, input);
+        let source_fullpath_name = self.current_source_fullpath_name().map(ToString::to_string);
+        let source_id = self.source_pool.intern_with_fullpath(
+            &source_name,
+            source_fullpath_name.as_deref(),
+            input,
+        );
         let (
             ast,
             private_companion_function_names,
@@ -679,10 +702,14 @@ impl RunMatSession {
             let companion_function_source_ids =
                 std::mem::take(&mut companion.function_source_contexts)
                     .into_iter()
-                    .map(|(function_name, (source_name, source_text))| {
+                    .map(|(function_name, source_context)| {
                         (
                             function_name,
-                            self.source_pool.intern(&source_name, &source_text),
+                            self.source_pool.intern_with_fullpath(
+                                &source_context.display_name,
+                                source_context.fullpath_name.as_deref(),
+                                &source_context.text,
+                            ),
                         )
                     })
                     .collect::<HashMap<_, _>>();
@@ -702,7 +729,8 @@ impl RunMatSession {
             let function_names = self.function_registry.names.clone();
             let function_output_arities = function_output_arities(&self.function_registry);
             let workspace_bindings = self.lowering_workspace_bindings();
-            let known_project_symbols = discover_known_project_symbols(&source_name);
+            let source_lookup_name = source_fullpath_name.as_deref().unwrap_or(&source_name);
+            let known_project_symbols = discover_known_project_symbols(source_lookup_name);
             runmat_hir::lower(
                 &ast,
                 &LoweringContext::new(&workspace_bindings)
