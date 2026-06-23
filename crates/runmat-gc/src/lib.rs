@@ -514,6 +514,46 @@ pub fn gc_remove_root(root: GcHandle) -> Result<()> {
     GC.remove_root(root)
 }
 
+/// RAII guard for an explicitly registered GC root.
+///
+/// Prefer this over manually pairing `gc_add_root` and `gc_remove_root` when a
+/// handle must stay alive for a lexical scope.
+#[derive(Debug)]
+pub struct ExplicitRoot {
+    handle: Option<GcHandle>,
+}
+
+impl ExplicitRoot {
+    pub fn new(handle: GcHandle) -> Result<Self> {
+        gc_add_root(handle)?;
+        Ok(Self {
+            handle: Some(handle),
+        })
+    }
+
+    pub fn handle(&self) -> GcHandle {
+        self.handle.expect("explicit root already removed")
+    }
+
+    pub fn unroot(mut self) -> Result<GcHandle> {
+        let handle = self.handle.take().expect("explicit root already removed");
+        gc_remove_root(handle)?;
+        Ok(handle)
+    }
+}
+
+impl Drop for ExplicitRoot {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            let _ = gc_remove_root(handle);
+        }
+    }
+}
+
+pub fn gc_root(handle: GcHandle) -> Result<ExplicitRoot> {
+    ExplicitRoot::new(handle)
+}
+
 pub fn gc_with_value<R>(ptr: &GcHandle, f: impl FnOnce(&Value) -> R) -> Result<R> {
     GC.with_value(ptr, f)
 }
@@ -726,6 +766,39 @@ mod tests {
             );
 
             gc_remove_root(protected).expect("root removal failed");
+        });
+    }
+
+    #[test]
+    fn explicit_root_unregisters_on_drop() {
+        gc_test_context(|| {
+            let protected =
+                gc_allocate(Value::String("protected".to_string())).expect("allocation failed");
+            let addr = protected.addr();
+
+            {
+                let root = gc_root(protected).expect("root guard creation failed");
+                assert_eq!(root.handle().addr(), addr);
+                assert!(GC.root_ptrs.lock().contains(&addr));
+            }
+
+            assert!(!GC.root_ptrs.lock().contains(&addr));
+        });
+    }
+
+    #[test]
+    fn explicit_root_unroot_removes_registration() {
+        gc_test_context(|| {
+            let protected =
+                gc_allocate(Value::String("protected".to_string())).expect("allocation failed");
+            let addr = protected.addr();
+
+            let root = gc_root(protected).expect("root guard creation failed");
+            assert!(GC.root_ptrs.lock().contains(&addr));
+
+            let handle = root.unroot().expect("explicit unroot failed");
+            assert_eq!(handle.addr(), addr);
+            assert!(!GC.root_ptrs.lock().contains(&addr));
         });
     }
 
