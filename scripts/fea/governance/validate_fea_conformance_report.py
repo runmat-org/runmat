@@ -69,6 +69,23 @@ STRUCTURAL_BEAM_MOMENT_REQUIRED_FIELDS = {
     "structural_beam_closed_form_coverage_ratio",
 }
 
+STRUCTURAL_SHELL_MOMENT_REQUIRED_FIELDS = {
+    "structural_rotational_dof_count",
+    "structural_rotation_node_count",
+    "structural_moment_load_count",
+    "structural_direct_rotational_moment_load_count",
+    "structural_shell_element_count",
+    "structural_reaction_moment_norm_n_m",
+    "structural_moment_requested_norm_n_m",
+    "structural_moment_realized_norm_n_m",
+    "structural_moment_realization_ratio",
+    "structural_moment_balance_residual_ratio",
+    "structural_shell_membrane_force_max_abs",
+    "structural_shell_bending_moment_max_abs",
+    "structural_shell_transverse_shear_max_abs",
+    "structural_shell_von_mises_max_abs",
+}
+
 
 REQUIRED_FIXTURES = {
     "cantilever_gpu_provider": {
@@ -158,6 +175,7 @@ REQUIRED_FIXTURES = {
     "structural_beam_cantilever_end_moment_reference_cpu": STRUCTURAL_BEAM_MOMENT_REQUIRED_FIELDS,
     "structural_beam_torsion_reference_cpu": STRUCTURAL_BEAM_MOMENT_REQUIRED_FIELDS,
     "structural_beam_force_and_moment_reference_cpu": STRUCTURAL_BEAM_MOMENT_REQUIRED_FIELDS,
+    "structural_shell_plate_moment_reference_cpu": STRUCTURAL_SHELL_MOMENT_REQUIRED_FIELDS,
     "nonlinear_assembly_gpu_provider": {
         "nonlinear_total_increments",
         "nonlinear_failed_increments",

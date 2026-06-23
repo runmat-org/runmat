@@ -6,6 +6,8 @@ use runmat_analysis_fea::{
     fea_fsi_fluid_velocity_field_id, fea_thermal_temperature_field_id,
     FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_VELOCITY,
     FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+    FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
     FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
@@ -4144,6 +4146,131 @@ fn push_structural_beam_moment_threshold_assertions(
     }
 }
 
+fn push_structural_shell_moment_threshold_assertions(
+    fixture_id: &str,
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    run: &AnalysisRunResult,
+) {
+    for (name, diagnostic, metric, min, max) in [
+        (
+            "structural_rotational_dof_count",
+            "FEA_STRUCTURAL_ROTATIONAL_DOF",
+            "structural_rotational_dof_count",
+            Some(9.0),
+            Some(9.0),
+        ),
+        (
+            "structural_rotation_node_count",
+            "FEA_STRUCTURAL_ROTATIONAL_DOF",
+            "structural_rotation_node_count",
+            Some(3.0),
+            Some(3.0),
+        ),
+        (
+            "structural_moment_load_count",
+            "FEA_STRUCTURAL_ROTATIONAL_DOF",
+            "structural_moment_load_count",
+            Some(1.0),
+            Some(1.0),
+        ),
+        (
+            "structural_direct_rotational_moment_load_count",
+            "FEA_STRUCTURAL_ROTATIONAL_DOF",
+            "structural_direct_rotational_moment_load_count",
+            Some(1.0),
+            Some(1.0),
+        ),
+        (
+            "structural_shell_element_count",
+            "FEA_STRUCTURAL_ROTATIONAL_DOF",
+            "structural_shell_element_count",
+            Some(1.0),
+            Some(1.0),
+        ),
+        (
+            "structural_reaction_moment_norm_n_m",
+            "FEA_STRUCTURAL_MOMENT_BALANCE",
+            "structural_reaction_moment_norm_n_m",
+            Some(1.0e-12),
+            None,
+        ),
+        (
+            "structural_moment_requested_norm_n_m",
+            "FEA_STRUCTURAL_MOMENT_BALANCE",
+            "structural_moment_requested_norm_n_m",
+            Some(1.0e-12),
+            None,
+        ),
+        (
+            "structural_moment_realized_norm_n_m",
+            "FEA_STRUCTURAL_MOMENT_BALANCE",
+            "structural_moment_realized_norm_n_m",
+            Some(1.0e-12),
+            None,
+        ),
+        (
+            "structural_moment_realization_ratio",
+            "FEA_STRUCTURAL_MOMENT_BALANCE",
+            "structural_moment_realization_ratio",
+            Some(0.999_99),
+            Some(1.000_01),
+        ),
+        (
+            "structural_moment_balance_residual_ratio",
+            "FEA_STRUCTURAL_MOMENT_BALANCE",
+            "structural_moment_balance_residual_ratio",
+            Some(0.0),
+            Some(1.0e-5),
+        ),
+    ] {
+        push_threshold_assertion(
+            fixture_id,
+            assertions,
+            failures,
+            name,
+            diagnostic,
+            diagnostic_metric(run, diagnostic, metric),
+            min,
+            max,
+        );
+    }
+
+    for (name, field_id) in [
+        (
+            "structural_shell_membrane_force_max_abs",
+            FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+        ),
+        (
+            "structural_shell_bending_moment_max_abs",
+            FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+        ),
+        (
+            "structural_shell_transverse_shear_max_abs",
+            FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+        ),
+        (
+            "structural_shell_von_mises_max_abs",
+            FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
+        ),
+    ] {
+        push_threshold_assertion(
+            fixture_id,
+            assertions,
+            failures,
+            name,
+            field_id,
+            analysis_result_field_max_abs(run, field_id),
+            if name == "structural_shell_membrane_force_max_abs" {
+                Some(0.0)
+            } else {
+                Some(1.0e-12)
+            },
+            None,
+        );
+    }
+}
+
 fn validate_fallback_event_schema(event: &str) -> bool {
     let parts: Vec<&str> = event.splitn(3, ':').collect();
     if parts.len() != 3 {
@@ -4900,6 +5027,14 @@ pub(super) fn run_fixture(
                 | "structural_beam_force_and_moment_reference_cpu"
         ) {
             push_structural_beam_moment_threshold_assertions(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                &cpu_envelope.data,
+            );
+        }
+        if spec.id == "structural_shell_plate_moment_reference_cpu" {
+            push_structural_shell_moment_threshold_assertions(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,

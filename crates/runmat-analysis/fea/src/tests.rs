@@ -229,56 +229,7 @@ fn beam_assembly_uses_lumped_rotational_inertia() {
 
 #[test]
 fn shell_moment_solves_rotation_and_reaction_moment() {
-    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.model_id = runmat_analysis_core::AnalysisModelId("shell_panel_moment".to_string());
-    model.structural = Some(runmat_analysis_core::StructuralModel {
-        nodes: vec![
-            runmat_analysis_core::StructuralNode {
-                node_id: 1,
-                coordinates_m: [0.0, 0.0, 0.0],
-            },
-            runmat_analysis_core::StructuralNode {
-                node_id: 2,
-                coordinates_m: [1.0, 0.0, 0.0],
-            },
-            runmat_analysis_core::StructuralNode {
-                node_id: 3,
-                coordinates_m: [0.0, 1.0, 0.0],
-            },
-        ],
-        elements: vec![runmat_analysis_core::StructuralElement {
-            element_id: "shell_1".to_string(),
-            region_id: "shell_panel".to_string(),
-            kind: runmat_analysis_core::StructuralElementKind::Shell(
-                runmat_analysis_core::ShellElementModel {
-                    node_ids: [1, 2, 3],
-                    section_id: "panel_2mm".to_string(),
-                    reference_axis: [1.0, 0.0, 0.0],
-                },
-            ),
-        }],
-        beam_sections: Vec::new(),
-        shell_sections: vec![runmat_analysis_core::ShellSectionModel {
-            section_id: "panel_2mm".to_string(),
-            thickness_m: 0.002,
-            shear_correction: 5.0 / 6.0,
-            drilling_stiffness_scale: 1.0e-4,
-        }],
-    });
-    model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
-        bc_id: "fixed_root".to_string(),
-        region_id: "node:1".to_string(),
-        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-    }];
-    model.loads = vec![runmat_analysis_core::LoadCase {
-        load_id: "tip_moment_y".to_string(),
-        region_id: "node:3".to_string(),
-        kind: runmat_analysis_core::LoadKind::Moment {
-            mx: 0.0,
-            my: 10.0,
-            mz: 0.0,
-        },
-    }];
+    let model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
 
     let result = crate::run_linear_static(&model, ComputeBackend::Cpu)
         .expect("shell moment solve should run");

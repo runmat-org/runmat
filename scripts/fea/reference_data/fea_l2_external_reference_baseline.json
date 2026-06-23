@@ -14655,6 +14655,626 @@
       "reference": 0.8628353297723921,
       "tolerance_abs": 0.21570883244309802,
       "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_rotational_dof_count",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_rotational_dof_count",
+      "reference": 6,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_rotation_node_count",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_rotation_node_count",
+      "reference": 2,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_moment_load_count",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_load_count",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_direct_rotational_moment_load_count",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_direct_rotational_moment_load_count",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_element_count",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_element_count",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_local_frame_coverage_ratio",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_local_frame_coverage_ratio",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_stiffness_matrix_symmetry_residual",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_stiffness_matrix_symmetry_residual",
+      "reference": 0,
+      "tolerance_abs": 0.000001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_reaction_moment_norm_n_m",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_reaction_moment_norm_n_m",
+      "reference": 125,
+      "tolerance_abs": 31.25,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_moment_requested_norm_n_m",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_requested_norm_n_m",
+      "reference": 125,
+      "tolerance_abs": 31.25,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_moment_realized_norm_n_m",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_realized_norm_n_m",
+      "reference": 125,
+      "tolerance_abs": 31.25,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_moment_realization_ratio",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_realization_ratio",
+      "reference": 1,
+      "tolerance_abs": 0.00001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_moment_balance_residual_ratio",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_balance_residual_ratio",
+      "reference": 0,
+      "tolerance_abs": 0.00001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_closed_form_rotation_error_ratio",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_closed_form_rotation_error_ratio",
+      "reference": 0,
+      "tolerance_abs": 0.000001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_closed_form_displacement_error_ratio",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_closed_form_displacement_error_ratio",
+      "reference": 0,
+      "tolerance_abs": 0.000001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_closed_form_torsion_error_ratio",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_closed_form_torsion_error_ratio",
+      "reference": 0,
+      "tolerance_abs": 0.000001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_closed_form_coverage_ratio",
+      "fixture_id": "structural_beam_cantilever_end_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_closed_form_coverage_ratio",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_rotational_dof_count",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_rotational_dof_count",
+      "reference": 6,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_rotation_node_count",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_rotation_node_count",
+      "reference": 2,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_moment_load_count",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_load_count",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_direct_rotational_moment_load_count",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_direct_rotational_moment_load_count",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_element_count",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_element_count",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_local_frame_coverage_ratio",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_local_frame_coverage_ratio",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_stiffness_matrix_symmetry_residual",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_stiffness_matrix_symmetry_residual",
+      "reference": 0,
+      "tolerance_abs": 0.000001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_reaction_moment_norm_n_m",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_reaction_moment_norm_n_m",
+      "reference": 80,
+      "tolerance_abs": 20,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_moment_requested_norm_n_m",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_requested_norm_n_m",
+      "reference": 80,
+      "tolerance_abs": 20,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_moment_realized_norm_n_m",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_realized_norm_n_m",
+      "reference": 80,
+      "tolerance_abs": 20,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_moment_realization_ratio",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_realization_ratio",
+      "reference": 1,
+      "tolerance_abs": 0.00001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_moment_balance_residual_ratio",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_balance_residual_ratio",
+      "reference": 0,
+      "tolerance_abs": 0.00001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_closed_form_rotation_error_ratio",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_closed_form_rotation_error_ratio",
+      "reference": 0,
+      "tolerance_abs": 0.000001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_closed_form_displacement_error_ratio",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_closed_form_displacement_error_ratio",
+      "reference": 0,
+      "tolerance_abs": 0.000001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_closed_form_torsion_error_ratio",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_closed_form_torsion_error_ratio",
+      "reference": 0,
+      "tolerance_abs": 0.000001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_closed_form_coverage_ratio",
+      "fixture_id": "structural_beam_torsion_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_closed_form_coverage_ratio",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_rotational_dof_count",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_rotational_dof_count",
+      "reference": 6,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_rotation_node_count",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_rotation_node_count",
+      "reference": 2,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_moment_load_count",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_load_count",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_direct_rotational_moment_load_count",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_direct_rotational_moment_load_count",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_element_count",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_element_count",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_local_frame_coverage_ratio",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_local_frame_coverage_ratio",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_stiffness_matrix_symmetry_residual",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_stiffness_matrix_symmetry_residual",
+      "reference": 0,
+      "tolerance_abs": 0.000001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_reaction_moment_norm_n_m",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_reaction_moment_norm_n_m",
+      "reference": 590.0000000000002,
+      "tolerance_abs": 147.50000000000006,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_moment_requested_norm_n_m",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_requested_norm_n_m",
+      "reference": 590,
+      "tolerance_abs": 147.5,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_moment_realized_norm_n_m",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_realized_norm_n_m",
+      "reference": 590.0000000000002,
+      "tolerance_abs": 147.50000000000006,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_moment_realization_ratio",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_realization_ratio",
+      "reference": 1.0000000000000004,
+      "tolerance_abs": 0.00001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_moment_balance_residual_ratio",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_balance_residual_ratio",
+      "reference": 3.853791109207323e-16,
+      "tolerance_abs": 0.00001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_closed_form_rotation_error_ratio",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_closed_form_rotation_error_ratio",
+      "reference": 0,
+      "tolerance_abs": 0.000001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_closed_form_displacement_error_ratio",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_closed_form_displacement_error_ratio",
+      "reference": 1.6784474073073233e-16,
+      "tolerance_abs": 0.000001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_closed_form_torsion_error_ratio",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_closed_form_torsion_error_ratio",
+      "reference": 0,
+      "tolerance_abs": 0.000001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_beam_closed_form_coverage_ratio",
+      "fixture_id": "structural_beam_force_and_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_beam_closed_form_coverage_ratio",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_rotational_dof_count",
+      "fixture_id": "structural_shell_plate_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_rotational_dof_count",
+      "reference": 9,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_rotation_node_count",
+      "fixture_id": "structural_shell_plate_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_rotation_node_count",
+      "reference": 3,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_moment_load_count",
+      "fixture_id": "structural_shell_plate_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_load_count",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_direct_rotational_moment_load_count",
+      "fixture_id": "structural_shell_plate_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_direct_rotational_moment_load_count",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_shell_element_count",
+      "fixture_id": "structural_shell_plate_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_shell_element_count",
+      "reference": 1,
+      "tolerance_abs": 0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_reaction_moment_norm_n_m",
+      "fixture_id": "structural_shell_plate_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_reaction_moment_norm_n_m",
+      "reference": 9.999963947389979,
+      "tolerance_abs": 2.4999909868474948,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_moment_requested_norm_n_m",
+      "fixture_id": "structural_shell_plate_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_requested_norm_n_m",
+      "reference": 10,
+      "tolerance_abs": 2.5,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_moment_realized_norm_n_m",
+      "fixture_id": "structural_shell_plate_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_realized_norm_n_m",
+      "reference": 9.999963947389979,
+      "tolerance_abs": 2.4999909868474948,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_moment_realization_ratio",
+      "fixture_id": "structural_shell_plate_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_realization_ratio",
+      "reference": 0.9999963947389979,
+      "tolerance_abs": 0.00001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_moment_balance_residual_ratio",
+      "fixture_id": "structural_shell_plate_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_moment_balance_residual_ratio",
+      "reference": 0.00000360526100209313,
+      "tolerance_abs": 0.00001,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_shell_membrane_force_max_abs",
+      "fixture_id": "structural_shell_plate_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_shell_membrane_force_max_abs",
+      "reference": 0,
+      "tolerance_abs": 1e-8,
+      "tolerance_rel": null
+    },
+    {
+      "name": "structural_shell_bending_moment_max_abs",
+      "fixture_id": "structural_shell_plate_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_shell_bending_moment_max_abs",
+      "reference": 21.213139702960888,
+      "tolerance_abs": 5.303284925740222,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_shell_transverse_shear_max_abs",
+      "fixture_id": "structural_shell_plate_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_shell_transverse_shear_max_abs",
+      "reference": 5833312.302644156,
+      "tolerance_abs": 1458328.075661039,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "structural_shell_von_mises_max_abs",
+      "fixture_id": "structural_shell_plate_moment_reference_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "structural_shell_von_mises_max_abs",
+      "reference": 28281976.48223889,
+      "tolerance_abs": 7070494.120559722,
+      "tolerance_rel": 0.25
     }
   ]
 }

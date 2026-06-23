@@ -2,7 +2,8 @@ use runmat_analysis_core::{
     AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind, BeamElementModel,
     BeamSectionModel, BoundaryCondition, BoundaryConditionKind, EvidenceConfidence, LoadCase,
     LoadKind, MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
-    ReferenceFrame, StructuralElement, StructuralElementKind, StructuralModel, StructuralNode,
+    ReferenceFrame, ShellElementModel, ShellSectionModel, StructuralElement, StructuralElementKind,
+    StructuralModel, StructuralNode,
 };
 use runmat_geometry_core::UnitSystem;
 
@@ -16,6 +17,7 @@ pub enum FixtureId {
     StructuralBeamCantileverEndMomentReference,
     StructuralBeamTorsionReference,
     StructuralBeamForceAndMomentReference,
+    StructuralShellPlateMomentReference,
     StructuralInvalidMomentWithoutRotationalDofs,
     ModalLarge,
     TransientLong,
@@ -54,6 +56,7 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::StructuralBeamForceAndMomentReference => {
             structural_beam_force_and_moment_reference()
         }
+        FixtureId::StructuralShellPlateMomentReference => structural_shell_plate_moment_reference(),
         FixtureId::StructuralInvalidMomentWithoutRotationalDofs => {
             structural_invalid_moment_without_rotational_dofs()
         }
@@ -309,6 +312,65 @@ fn structural_invalid_moment_without_rotational_dofs() -> AnalysisModel {
             mz: 125.0,
         },
     }];
+    model
+}
+
+fn structural_shell_plate_moment_reference() -> AnalysisModel {
+    let mut model = cantilever_linear_static();
+    model.model_id = AnalysisModelId("structural_shell_plate_moment_reference".to_string());
+    model.geometry_id = "geo:structural_shell_plate_moment".to_string();
+    model.boundary_conditions = vec![BoundaryCondition {
+        bc_id: "fixed_corner".to_string(),
+        region_id: "node:1".to_string(),
+        kind: BoundaryConditionKind::Fixed,
+    }];
+    model.loads = vec![LoadCase {
+        load_id: "free_corner_moment_y".to_string(),
+        region_id: "node:3".to_string(),
+        kind: LoadKind::Moment {
+            mx: 0.0,
+            my: 10.0,
+            mz: 0.0,
+        },
+    }];
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "shell_panel".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    model.structural = Some(StructuralModel {
+        nodes: vec![
+            StructuralNode {
+                node_id: 1,
+                coordinates_m: [0.0, 0.0, 0.0],
+            },
+            StructuralNode {
+                node_id: 2,
+                coordinates_m: [1.0, 0.0, 0.0],
+            },
+            StructuralNode {
+                node_id: 3,
+                coordinates_m: [0.0, 1.0, 0.0],
+            },
+        ],
+        elements: vec![StructuralElement {
+            element_id: "shell_1".to_string(),
+            region_id: "shell_panel".to_string(),
+            kind: StructuralElementKind::Shell(ShellElementModel {
+                node_ids: [1, 2, 3],
+                section_id: "panel_2mm".to_string(),
+                reference_axis: [1.0, 0.0, 0.0],
+            }),
+        }],
+        beam_sections: Vec::new(),
+        shell_sections: vec![ShellSectionModel {
+            section_id: "panel_2mm".to_string(),
+            thickness_m: 0.002,
+            shear_correction: 5.0 / 6.0,
+            drilling_stiffness_scale: 1.0e-4,
+        }],
+    });
     model
 }
 
