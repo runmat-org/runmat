@@ -1076,3 +1076,114 @@ fn default_fail_fast() -> bool {
 fn default_assignment_confidence() -> EvidenceConfidence {
     EvidenceConfidence::Verified
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_geometry_core::{
+        GeometrySource, MeshDescriptor, MeshKind, Region, SourceGeometry, SourceGeometryKind,
+        SurfaceMesh, TessellationProfile,
+    };
+
+    fn sample_geometry() -> GeometryAsset {
+        GeometryAsset {
+            geometry_id: "geo:fea_document_test".to_string(),
+            source: GeometrySource {
+                path: "fixture.step".to_string(),
+                sha256: "fixture".to_string(),
+                importer_version: "test".to_string(),
+            },
+            source_geometry: SourceGeometry {
+                kind: SourceGeometryKind::Cad,
+                assembly: None,
+                material_evidence: Vec::new(),
+            },
+            tessellation_profile: TessellationProfile::default(),
+            units: UnitSystem::Meter,
+            revision: 1,
+            meshes: vec![MeshDescriptor {
+                mesh_id: "mesh_1".to_string(),
+                kind: MeshKind::Surface,
+                vertex_count: 3,
+                element_count: 1,
+            }],
+            surface_meshes: vec![SurfaceMesh::new(
+                "mesh_1",
+                vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                vec![[0, 1, 2]],
+            )],
+            regions: vec![Region {
+                region_id: "tip".to_string(),
+                name: "Tip".to_string(),
+                tag: Some("tip".to_string()),
+                cad_ownership: None,
+            }],
+            region_entity_mappings: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn fea_document_resolves_moment_and_torque_loads() {
+        let geometry = sample_geometry();
+        for (load_type, expected_id) in [("moment", "tip_moment"), ("torque", "tip_torque")] {
+            let load: FeaLoadDocument = serde_yaml::from_str(&format!(
+                r#"
+id: {expected_id}
+region: tag:tip
+type: {load_type}
+vector: [1.0, 2.0, 3.0]
+"#
+            ))
+            .expect("load document should parse");
+
+            let resolved = resolve_load(&load, &geometry, &BTreeMap::new())
+                .expect("load should resolve against geometry");
+
+            assert_eq!(resolved.load_id, expected_id);
+            assert_eq!(resolved.region_id, "tip");
+            assert!(matches!(
+                resolved.kind,
+                LoadKind::Moment {
+                    mx: 1.0,
+                    my: 2.0,
+                    mz: 3.0
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn fea_document_moment_requires_vector() {
+        let geometry = sample_geometry();
+        let load: FeaLoadDocument = serde_yaml::from_str(
+            r#"
+id: tip_moment
+region: tip
+type: moment
+"#,
+        )
+        .expect("load document should parse");
+
+        let err = resolve_load(&load, &geometry, &BTreeMap::new())
+            .expect_err("moment without vector should fail");
+
+        assert!(err.contains("moment load requires vector: [x, y, z]"));
+    }
+
+    #[test]
+    fn fea_document_moment_rejects_unknown_fields() {
+        let err = serde_yaml::from_str::<FeaLoadDocument>(
+            r#"
+id: tip_moment
+region: tip
+type: moment
+vector: [1.0, 2.0, 3.0]
+units: n_m
+"#,
+        )
+        .expect_err("unknown moment load fields should be rejected");
+
+        assert!(err.to_string().contains("unknown field"));
+    }
+}
