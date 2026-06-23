@@ -94,6 +94,20 @@ fn mutable_guard_is_exclusive_and_updates_value() {
 }
 
 #[test]
+fn mutable_guard_is_rejected_while_read_guard_is_active() {
+    gc_test_context(|| {
+        let handle = gc_allocate(Value::Num(1.0)).expect("allocation should succeed");
+        let read_guard = gc_read_value(&handle).expect("read guard should succeed");
+
+        assert!(matches!(
+            gc_write_value(&handle),
+            Err(GcError::SyncError(_))
+        ));
+        assert_eq!(*read_guard, Value::Num(1.0));
+    });
+}
+
+#[test]
 fn root_traversal_keeps_handle_targets_alive() {
     gc_test_context(|| {
         let target = gc_allocate(Value::String("target".to_string()))

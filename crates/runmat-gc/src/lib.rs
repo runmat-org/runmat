@@ -1,6 +1,6 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 
-use parking_lot::{Mutex, RwLock};
+use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 // Use a local trait-alias shim to avoid compile-time dependency ordering issues.
 // Downstream crates in the workspace provide runmat_builtins; during GC unit tests, we provide a minimal Value.
 use runmat_builtins::Value;
@@ -129,13 +129,22 @@ pub struct GarbageCollector {
     /// Active mutable guarded value borrow. Mutable access is exclusive.
     active_value_mut_borrow: AtomicBool,
 
+    /// Runtime borrow gate for guarded `Value` references.
+    value_access: RwLock<()>,
+
     /// Statistics
     stats: Arc<GcStats>,
+}
+
+enum GcValueAccessGuard<'gc> {
+    Shared { _guard: RwLockReadGuard<'gc, ()> },
+    Exclusive { _guard: RwLockWriteGuard<'gc, ()> },
 }
 
 struct GcValueBorrowGuard<'gc> {
     gc: &'gc GarbageCollector,
     mutable: bool,
+    _access: GcValueAccessGuard<'gc>,
 }
 
 impl Drop for GcValueBorrowGuard<'_> {
@@ -213,6 +222,7 @@ impl GarbageCollector {
             collection_in_progress: AtomicBool::new(false),
             active_value_borrows: AtomicUsize::new(0),
             active_value_mut_borrow: AtomicBool::new(false),
+            value_access: RwLock::new(()),
             stats: Arc::new(GcStats::new()),
         })
     }
@@ -297,23 +307,26 @@ impl GarbageCollector {
             ));
         }
 
-        if mutable {
-            self.active_value_mut_borrow
-                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-                .map_err(|_| {
-                    GcError::SyncError("mutable GC value borrow already active".to_string())
-                })?;
-            if self.active_value_borrows.load(Ordering::Acquire) != 0 {
-                self.active_value_mut_borrow.store(false, Ordering::Release);
-                return Err(GcError::SyncError(
+        let access = if mutable {
+            let guard = self.value_access.try_write().ok_or_else(|| {
+                GcError::SyncError(
                     "cannot mutably borrow GC value while another borrow is active".to_string(),
-                ));
-            }
+                )
+            })?;
+            self.active_value_mut_borrow.store(true, Ordering::Release);
+            GcValueAccessGuard::Exclusive { _guard: guard }
         } else if self.active_value_mut_borrow.load(Ordering::Acquire) {
             return Err(GcError::SyncError(
                 "cannot immutably borrow GC value during mutable borrow".to_string(),
             ));
-        }
+        } else {
+            let guard = self.value_access.try_read().ok_or_else(|| {
+                GcError::SyncError(
+                    "cannot immutably borrow GC value during mutable borrow".to_string(),
+                )
+            })?;
+            GcValueAccessGuard::Shared { _guard: guard }
+        };
 
         self.active_value_borrows.fetch_add(1, Ordering::AcqRel);
         if self.collection_in_progress.load(Ordering::Acquire) {
@@ -326,7 +339,11 @@ impl GarbageCollector {
             ));
         }
 
-        Ok(GcValueBorrowGuard { gc: self, mutable })
+        Ok(GcValueBorrowGuard {
+            gc: self,
+            mutable,
+            _access: access,
+        })
     }
 
     /// Access a GC-managed value after validating that the pointer belongs to the GC heap.
