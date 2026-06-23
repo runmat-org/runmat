@@ -100,13 +100,16 @@ jobs:
             ca-certificates
             cmake
             curl
+            autoconf
+            autoconf-archive
+            automake
             gdb
             git
+            libtool
             libdbus-1-dev
             libegl1-mesa-dev
             libgl1-mesa-dev
             liblapack-dev
-            libocct-data-exchange-dev
             libopenblas-dev
             libssl-dev
             libudev-dev
@@ -119,8 +122,10 @@ jobs:
             libxkbcommon-x11-0
             libxrandr-dev
             libzmq3-dev
+            ninja-build
             pkg-config
             unzip
+            zip
           )
 
           missing=()
@@ -146,6 +151,12 @@ jobs:
           if ! command -v unzip >/dev/null 2>&1; then
             missing+=('unzip(binary)')
           fi
+          if ! command -v zip >/dev/null 2>&1; then
+            missing+=('zip(binary)')
+          fi
+          if ! command -v ninja >/dev/null 2>&1; then
+            missing+=('ninja(binary)')
+          fi
           if ! pkg-config --exists libzmq; then
             missing+=('libzmq(pkg-config)')
           fi
@@ -157,15 +168,6 @@ jobs:
           if [[ -n "${ldconfig_bin}" ]] && ! "${ldconfig_bin}" -p | grep -q 'liblapack\.so'; then
             missing+=('liblapack(runtime)')
           fi
-          if [[ ! -d /usr/include/opencascade ]]; then
-            missing+=('opencascade(headers)')
-          fi
-          if [[ ! -e /usr/lib/x86_64-linux-gnu/libTKSTEP.so && ! -e /usr/lib/x86_64-linux-gnu/libTKDESTEP.so ]]; then
-            missing+=('opencascade(step-libs)')
-          fi
-          if [[ ! -e /usr/lib/x86_64-linux-gnu/libTKIGES.so && ! -e /usr/lib/x86_64-linux-gnu/libTKDEIGES.so && ! -e /usr/lib/x86_64-linux-gnu/libTKXDEIGES.so ]]; then
-            missing+=('opencascade(iges-libs)')
-          fi
 
           if ((${#missing[@]} > 0)); then
             printf 'Missing Linux runner prerequisites:\n' >&2
@@ -174,11 +176,13 @@ jobs:
             exit 1
           fi
 
-          {
-            echo "RUNMAT_OCCT_INCLUDE_DIR=/usr/include/opencascade"
-            echo "RUNMAT_OCCT_LIB_DIR=/usr/lib/x86_64-linux-gnu"
-            echo "RUNMAT_OCCT_LINK_MODE=dylib"
-          } >> "${GITHUB_ENV}"
+      - name: Ensure pinned Linux OpenCASCADE (vcpkg)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          RUNMAT_VCPKG_REF: 2026.06.01
+          RUNMAT_VCPKG_TRIPLET: x64-linux-runmat-dynamic-release
+        run: infra/scripts/ensure-linux-vcpkg-occt.sh
 
       - name: Install macOS dependencies (ZMQ)
         if: runner.os == 'macOS'
