@@ -86,6 +86,15 @@ fn structural_target_nodes(structural: &StructuralModel, region_id: &str) -> Vec
                     }
                 }
             }
+            StructuralElementKind::Shell(shell) => {
+                for node_id in shell.node_ids {
+                    if let Some(index) = structural_node_index(structural, node_id) {
+                        if !nodes.contains(&index) {
+                            nodes.push(index);
+                        }
+                    }
+                }
+            }
         }
     }
     nodes

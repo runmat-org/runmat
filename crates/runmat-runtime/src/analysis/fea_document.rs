@@ -6,8 +6,9 @@ use runmat_analysis_core::{
     BeamSectionModel, BoundaryCondition, BoundaryConditionKind, CfdDomain, ElectroThermalDomain,
     ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind, MaterialAcousticModel,
     MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialPlasticModel, MaterialThermalModel, ReferenceFrame, StructuralElement,
-    StructuralElementKind, StructuralModel, StructuralNode, ThermoMechanicalDomain,
+    MaterialPlasticModel, MaterialThermalModel, ReferenceFrame, ShellElementModel,
+    ShellSectionModel, StructuralElement, StructuralElementKind, StructuralModel, StructuralNode,
+    ThermoMechanicalDomain,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{GeometryAsset, UnitSystem};
@@ -70,7 +71,7 @@ struct FeaStudyDocument {
     #[serde(default)]
     elements: Vec<FeaStructuralElementDocument>,
     #[serde(default)]
-    sections: Vec<FeaBeamSectionDocument>,
+    sections: Vec<FeaStructuralSectionDocument>,
     #[serde(default)]
     boundary_conditions: Vec<FeaBoundaryConditionDocument>,
     #[serde(default)]
@@ -161,7 +162,7 @@ struct FeaStructuralDocument {
     #[serde(default)]
     elements: Vec<FeaStructuralElementDocument>,
     #[serde(default)]
-    sections: Vec<FeaBeamSectionDocument>,
+    sections: Vec<FeaStructuralSectionDocument>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -178,7 +179,7 @@ struct FeaStructuralElementDocument {
     region: String,
     #[serde(rename = "type", alias = "kind")]
     element_type: FeaStructuralElementType,
-    nodes: [u32; 2],
+    nodes: Vec<u32>,
     section: String,
     #[serde(default)]
     reference_axis: Option<[f64; 3]>,
@@ -188,22 +189,55 @@ struct FeaStructuralElementDocument {
 #[serde(rename_all = "snake_case")]
 enum FeaStructuralElementType {
     Beam,
+    Shell,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FeaBeamSectionDocument {
+struct FeaStructuralSectionDocument {
     id: String,
-    area_m2: f64,
-    iy_m4: f64,
-    iz_m4: f64,
-    torsion_j_m4: f64,
+    #[serde(rename = "type", alias = "kind", default)]
+    section_type: FeaStructuralSectionType,
+    #[serde(default)]
+    area_m2: Option<f64>,
+    #[serde(default)]
+    iy_m4: Option<f64>,
+    #[serde(default)]
+    iz_m4: Option<f64>,
+    #[serde(default)]
+    torsion_j_m4: Option<f64>,
+    #[serde(default)]
+    thickness_m: Option<f64>,
+    #[serde(default)]
+    shear_correction: Option<f64>,
+    #[serde(default)]
+    drilling_stiffness_scale: Option<f64>,
     #[serde(default)]
     outer_fiber_y_m: f64,
     #[serde(default)]
     outer_fiber_z_m: f64,
     #[serde(default)]
     torsion_outer_radius_m: f64,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum FeaStructuralSectionType {
+    #[default]
+    Beam,
+    BeamSection,
+    Shell,
+    ShellSection,
+}
+
+impl FeaStructuralSectionType {
+    fn is_beam(self) -> bool {
+        matches!(self, Self::Beam | Self::BeamSection)
+    }
+
+    fn is_shell(self) -> bool {
+        matches!(self, Self::Shell | Self::ShellSection)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -603,17 +637,14 @@ fn resolve_structural_model(
             .collect::<Result<Vec<_>, _>>()?,
         beam_sections: section_docs
             .iter()
-            .map(|section| BeamSectionModel {
-                section_id: section.id.clone(),
-                area_m2: section.area_m2,
-                iy_m4: section.iy_m4,
-                iz_m4: section.iz_m4,
-                torsion_j_m4: section.torsion_j_m4,
-                outer_fiber_y_m: section.outer_fiber_y_m,
-                outer_fiber_z_m: section.outer_fiber_z_m,
-                torsion_outer_radius_m: section.torsion_outer_radius_m,
-            })
-            .collect(),
+            .filter(|section| section.section_type.is_beam())
+            .map(resolve_beam_section)
+            .collect::<Result<Vec<_>, _>>()?,
+        shell_sections: section_docs
+            .iter()
+            .filter(|section| section.section_type.is_shell())
+            .map(resolve_shell_section)
+            .collect::<Result<Vec<_>, _>>()?,
     })
 }
 
@@ -623,16 +654,63 @@ fn resolve_structural_element(
     aliases: &BTreeMap<String, FeaRegionDocument>,
 ) -> Result<StructuralElement, String> {
     let kind = match element.element_type {
-        FeaStructuralElementType::Beam => StructuralElementKind::Beam(BeamElementModel {
-            node_ids: element.nodes,
-            section_id: element.section.clone(),
-            reference_axis: element.reference_axis.unwrap_or([0.0, 0.0, 1.0]),
-        }),
+        FeaStructuralElementType::Beam => {
+            let node_ids: [u32; 2] = element.nodes.as_slice().try_into().map_err(|_| {
+                format!(
+                    "beam element {} must specify exactly two node ids",
+                    element.id
+                )
+            })?;
+            StructuralElementKind::Beam(BeamElementModel {
+                node_ids,
+                section_id: element.section.clone(),
+                reference_axis: element.reference_axis.unwrap_or([0.0, 0.0, 1.0]),
+            })
+        }
+        FeaStructuralElementType::Shell => {
+            let node_ids: [u32; 3] = element.nodes.as_slice().try_into().map_err(|_| {
+                format!(
+                    "shell element {} must specify exactly three node ids",
+                    element.id
+                )
+            })?;
+            StructuralElementKind::Shell(ShellElementModel {
+                node_ids,
+                section_id: element.section.clone(),
+                reference_axis: element.reference_axis.unwrap_or([1.0, 0.0, 0.0]),
+            })
+        }
     };
     Ok(StructuralElement {
         element_id: element.id.clone(),
         region_id: resolve_region_ref(&element.region, geometry, aliases)?,
         kind,
+    })
+}
+
+fn resolve_beam_section(
+    section: &FeaStructuralSectionDocument,
+) -> Result<BeamSectionModel, String> {
+    Ok(BeamSectionModel {
+        section_id: section.id.clone(),
+        area_m2: required_f64(section.area_m2, "beam_section.area_m2")?,
+        iy_m4: required_f64(section.iy_m4, "beam_section.iy_m4")?,
+        iz_m4: required_f64(section.iz_m4, "beam_section.iz_m4")?,
+        torsion_j_m4: required_f64(section.torsion_j_m4, "beam_section.torsion_j_m4")?,
+        outer_fiber_y_m: section.outer_fiber_y_m,
+        outer_fiber_z_m: section.outer_fiber_z_m,
+        torsion_outer_radius_m: section.torsion_outer_radius_m,
+    })
+}
+
+fn resolve_shell_section(
+    section: &FeaStructuralSectionDocument,
+) -> Result<ShellSectionModel, String> {
+    Ok(ShellSectionModel {
+        section_id: section.id.clone(),
+        thickness_m: required_f64(section.thickness_m, "shell_section.thickness_m")?,
+        shear_correction: section.shear_correction.unwrap_or(5.0 / 6.0),
+        drilling_stiffness_scale: section.drilling_stiffness_scale.unwrap_or(1.0e-4),
     })
 }
 

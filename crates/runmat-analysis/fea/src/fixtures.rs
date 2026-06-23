@@ -362,6 +362,7 @@ fn structural_beam_reference_model(
             outer_fiber_z_m: 0.005,
             torsion_outer_radius_m: 0.011_180_339_887_498_949,
         }],
+        shell_sections: Vec::new(),
     });
     model
 }

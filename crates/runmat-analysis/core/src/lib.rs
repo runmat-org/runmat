@@ -35,8 +35,8 @@ pub use problem::materials::{
 pub use problem::model::{AnalysisModel, AnalysisModelId, ReferenceFrame};
 pub use problem::steps::{AnalysisStep, AnalysisStepKind};
 pub use problem::structure::{
-    BeamElementModel, BeamSectionModel, StructuralElement, StructuralElementKind, StructuralModel,
-    StructuralNode,
+    BeamElementModel, BeamSectionModel, ShellElementModel, ShellSectionModel, StructuralElement,
+    StructuralElementKind, StructuralModel, StructuralNode,
 };
 pub use validate::{validate_model, validate_model_against_geometry, AnalysisValidationError};
 
@@ -260,12 +260,60 @@ mod tests {
                 outer_fiber_z_m: 0.005,
                 torsion_outer_radius_m: 0.011_180_339_887_498_949,
             }],
+            shell_sections: Vec::new(),
         });
 
         let json = serde_json::to_value(&model).expect("model should serialize");
         assert_eq!(
             json["structural"]["elements"][0]["kind"]["beam"]["node_ids"][1],
             2
+        );
+
+        let decoded: AnalysisModel =
+            serde_json::from_value(json).expect("model should deserialize");
+        assert_eq!(decoded, model);
+    }
+
+    #[test]
+    fn structural_shell_model_round_trips() {
+        let mut model = valid_model();
+        model.structural = Some(StructuralModel {
+            nodes: vec![
+                StructuralNode {
+                    node_id: 1,
+                    coordinates_m: [0.0, 0.0, 0.0],
+                },
+                StructuralNode {
+                    node_id: 2,
+                    coordinates_m: [1.0, 0.0, 0.0],
+                },
+                StructuralNode {
+                    node_id: 3,
+                    coordinates_m: [0.0, 1.0, 0.0],
+                },
+            ],
+            elements: vec![StructuralElement {
+                element_id: "shell_1".to_string(),
+                region_id: "shell_panel".to_string(),
+                kind: StructuralElementKind::Shell(ShellElementModel {
+                    node_ids: [1, 2, 3],
+                    section_id: "panel_2mm".to_string(),
+                    reference_axis: [1.0, 0.0, 0.0],
+                }),
+            }],
+            beam_sections: Vec::new(),
+            shell_sections: vec![ShellSectionModel {
+                section_id: "panel_2mm".to_string(),
+                thickness_m: 0.002,
+                shear_correction: 5.0 / 6.0,
+                drilling_stiffness_scale: 1.0e-4,
+            }],
+        });
+
+        let json = serde_json::to_value(&model).expect("model should serialize");
+        assert_eq!(
+            json["structural"]["elements"][0]["kind"]["shell"]["node_ids"][2],
+            3
         );
 
         let decoded: AnalysisModel =

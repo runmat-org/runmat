@@ -1026,7 +1026,9 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
     let mut structural_beam_recovery = Vec::new();
 
     for element in beam_elements {
-        let StructuralElementKind::Beam(beam) = &element.kind;
+        let StructuralElementKind::Beam(beam) = &element.kind else {
+            continue;
+        };
         let node_i_index = structural_node_index(structural, beam.node_ids[0])?;
         let node_j_index = structural_node_index(structural, beam.node_ids[1])?;
         let section = structural_beam_section(structural, &beam.section_id)?;
@@ -1401,6 +1403,15 @@ fn structural_target_nodes(structural: &StructuralModel, region_id: &str) -> Vec
         match &element.kind {
             StructuralElementKind::Beam(beam) => {
                 for node_id in beam.node_ids {
+                    if let Some(index) = structural_node_index(structural, node_id) {
+                        if !nodes.contains(&index) {
+                            nodes.push(index);
+                        }
+                    }
+                }
+            }
+            StructuralElementKind::Shell(shell) => {
+                for node_id in shell.node_ids {
                     if let Some(index) = structural_node_index(structural, node_id) {
                         if !nodes.contains(&index) {
                             nodes.push(index);

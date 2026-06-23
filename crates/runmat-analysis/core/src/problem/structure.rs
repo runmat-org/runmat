@@ -8,6 +8,8 @@ pub struct StructuralModel {
     pub elements: Vec<StructuralElement>,
     #[serde(default)]
     pub beam_sections: Vec<BeamSectionModel>,
+    #[serde(default)]
+    pub shell_sections: Vec<ShellSectionModel>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -27,6 +29,7 @@ pub struct StructuralElement {
 #[serde(rename_all = "snake_case")]
 pub enum StructuralElementKind {
     Beam(BeamElementModel),
+    Shell(ShellElementModel),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -34,6 +37,14 @@ pub struct BeamElementModel {
     pub node_ids: [u32; 2],
     pub section_id: String,
     #[serde(default = "default_beam_reference_axis")]
+    pub reference_axis: [f64; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShellElementModel {
+    pub node_ids: [u32; 3],
+    pub section_id: String,
+    #[serde(default = "default_shell_reference_axis")]
     pub reference_axis: [f64; 3],
 }
 
@@ -52,6 +63,28 @@ pub struct BeamSectionModel {
     pub torsion_outer_radius_m: f64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShellSectionModel {
+    pub section_id: String,
+    pub thickness_m: f64,
+    #[serde(default = "default_shell_shear_correction")]
+    pub shear_correction: f64,
+    #[serde(default = "default_shell_drilling_stiffness_scale")]
+    pub drilling_stiffness_scale: f64,
+}
+
 fn default_beam_reference_axis() -> [f64; 3] {
     [0.0, 0.0, 1.0]
+}
+
+fn default_shell_reference_axis() -> [f64; 3] {
+    [1.0, 0.0, 0.0]
+}
+
+fn default_shell_shear_correction() -> f64 {
+    5.0 / 6.0
+}
+
+fn default_shell_drilling_stiffness_scale() -> f64 {
+    1.0e-4
 }

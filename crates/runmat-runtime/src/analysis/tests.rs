@@ -950,7 +950,10 @@ run:
     assert_eq!(structural.elements.len(), 1);
     assert_eq!(structural.beam_sections.len(), 1);
     assert_eq!(structural.elements[0].region_id, "region_1");
-    let StructuralElementKind::Beam(beam) = &structural.elements[0].kind;
+    let beam = match &structural.elements[0].kind {
+        StructuralElementKind::Beam(beam) => beam,
+        StructuralElementKind::Shell(_) => panic!("expected beam element"),
+    };
     assert_eq!(beam.node_ids, [1, 2]);
     assert_eq!(beam.section_id, "rect_20x10");
     assert_eq!(beam.reference_axis, [0.0, 0.0, 1.0]);
@@ -959,6 +962,100 @@ run:
     assert_eq!(
         structural.beam_sections[0].torsion_outer_radius_m,
         0.011_180_339_887_498_949
+    );
+}
+
+#[test]
+fn fea_document_resolves_shell_structural_model_data() {
+    let tmp = tempfile::tempdir().expect("tempdir should be created");
+    std::fs::write(tmp.path().join("assembly.step"), SIMPLE_STEP)
+        .expect("fixture geometry should write");
+    let input = r#"
+version: 1
+kind: study
+id: shell_static
+geometry:
+  path: assembly.step
+  units: meter
+model:
+  id: shell_model
+  profile: linear_static_structural
+  defaults: none
+regions:
+  shell_panel:
+    selector: "name:Bracket_A"
+materials:
+  steel:
+    mechanical:
+      youngs_modulus_pa: 200000000000.0
+      poisson_ratio: 0.30
+      density_kg_per_m3: 7850.0
+material_assignments:
+  - region: shell_panel
+    material: steel
+nodes:
+  - id: 1
+    coordinates_m: [0.0, 0.0, 0.0]
+  - id: 2
+    coordinates_m: [1.0, 0.0, 0.0]
+  - id: 3
+    coordinates_m: [0.0, 1.0, 0.0]
+elements:
+  - id: shell_1
+    region: shell_panel
+    type: shell
+    nodes: [1, 2, 3]
+    section: panel_2mm
+    reference_axis: [1.0, 0.0, 0.0]
+sections:
+  - id: panel_2mm
+    type: shell
+    thickness_m: 0.002
+    shear_correction: 0.8333333333333334
+    drilling_stiffness_scale: 0.0001
+boundary_conditions:
+  - id: fixed_edge
+    region: shell_panel
+    kind: fixed
+loads:
+  - id: edge_moment
+    region: shell_panel
+    type: moment
+    vector: [0.0, 5.0, 0.0]
+steps:
+  - id: static_step
+    kind: static
+run:
+  backend: cpu
+"#;
+
+    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
+        .expect("FEA shell study document should resolve");
+
+    let FeaResolvedDocument::Study(study) = resolved else {
+        panic!("expected resolved study");
+    };
+    let structural = study
+        .model
+        .as_ref()
+        .and_then(|model| model.structural.as_ref())
+        .expect("structural model should resolve");
+    assert_eq!(structural.nodes.len(), 3);
+    assert_eq!(structural.elements.len(), 1);
+    assert_eq!(structural.beam_sections.len(), 0);
+    assert_eq!(structural.shell_sections.len(), 1);
+    let shell = match &structural.elements[0].kind {
+        StructuralElementKind::Shell(shell) => shell,
+        StructuralElementKind::Beam(_) => panic!("expected shell element"),
+    };
+    assert_eq!(shell.node_ids, [1, 2, 3]);
+    assert_eq!(shell.section_id, "panel_2mm");
+    assert_eq!(shell.reference_axis, [1.0, 0.0, 0.0]);
+    assert_eq!(structural.shell_sections[0].thickness_m, 0.002);
+    assert_eq!(structural.shell_sections[0].shear_correction, 5.0 / 6.0);
+    assert_eq!(
+        structural.shell_sections[0].drilling_stiffness_scale,
+        1.0e-4
     );
 }
 

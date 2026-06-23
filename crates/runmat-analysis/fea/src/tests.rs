@@ -265,6 +265,7 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
             outer_fiber_z_m: 0.005,
             torsion_outer_radius_m: 0.011_180_339_887_498_949,
         }],
+        shell_sections: Vec::new(),
     });
     model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
         bc_id: "fixed_root".to_string(),
