@@ -13,7 +13,7 @@ pub mod allocator;
 pub mod barriers;
 pub mod collector;
 pub mod config;
-pub use runmat_gc_api::GcHandle;
+pub use runmat_gc_api::{GcHandle, GcRoot, RootId, RootInfo, RootScannerStats};
 pub mod generations;
 pub mod roots;
 pub mod stats;
@@ -70,7 +70,7 @@ pub use collector::MarkSweepCollector;
 pub use config::{GcConfig, GcConfigBuilder};
 // Re-export unified handle from API crate
 pub use generations::{Generation, GenerationStats, GenerationalHeap, GenerationalHeapStats};
-pub use roots::{GcRoot, GlobalRoot, RootId, RootScanner, StackRoot, VariableArrayRoot};
+pub use roots::{GlobalRoot, RootScanner, StackRoot, VariableArrayRoot};
 pub use stats::{CollectionEvent, CollectionType, GcStats};
 
 #[cfg(feature = "pointer-compression")]

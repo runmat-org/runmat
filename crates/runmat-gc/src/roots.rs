@@ -6,7 +6,7 @@
 
 use crate::Value;
 use crate::{GcError, GcHandle, Result};
-use runmat_gc_api::{Trace, Tracer};
+use runmat_gc_api::{GcRoot, RootId, RootInfo, RootScannerStats, Trace, Tracer};
 use runmat_time::Instant;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -28,29 +28,6 @@ pub(crate) fn collect_value_roots(value: &Value, roots: &mut Vec<GcHandle>) {
     }
 
     value.trace(&mut RootCollector { roots });
-}
-
-/// Unique identifier for a GC root
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct RootId(pub usize);
-
-/// Trait for objects that can serve as GC roots
-pub trait GcRoot {
-    /// Scan this root and return all reachable GC handles.
-    fn scan(&self) -> Vec<GcHandle>;
-
-    /// Get a human-readable description of this root
-    fn description(&self) -> String;
-
-    /// Get the estimated size of objects reachable from this root
-    fn estimated_size(&self) -> usize {
-        0 // Default implementation
-    }
-
-    /// Check if this root is still active
-    fn is_active(&self) -> bool {
-        true // Most roots are always active
-    }
 }
 
 /// A root representing an interpreter's value stack
@@ -368,24 +345,6 @@ impl Default for RootScanner {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Information about a registered root
-#[derive(Debug, Clone)]
-pub struct RootInfo {
-    pub id: RootId,
-    pub description: String,
-    pub estimated_size: usize,
-    pub is_active: bool,
-}
-
-/// Statistics for the root scanner
-#[derive(Debug, Clone)]
-pub struct RootScannerStats {
-    pub registered_roots: usize,
-    pub scans_performed: usize,
-    pub total_roots_found: usize,
-    pub average_roots_per_scan: f64,
 }
 
 #[cfg(test)]
