@@ -52,7 +52,7 @@ impl MarkSweepCollector {
         let mut collected = 0usize;
         let mut any_survivor = false;
         // Walk allocations recorded by the young generation and free the unmarked ones
-        let allocated_ptrs = allocator.young_take_allocations();
+        let allocated_ptrs = allocator.young_take_collection_candidates();
         let mut promoted_this_cycle = 0usize;
         for &ptr in &allocated_ptrs {
             let addr = ptr as usize;
@@ -60,6 +60,7 @@ impl MarkSweepCollector {
                 collected += 1;
                 // Run finalizer if registered for this object address
                 crate::gc_run_finalizer_for_addr(addr);
+                allocator.note_value_dropped(ptr);
                 // Drop the value in place to run destructors if any
                 unsafe {
                     std::ptr::drop_in_place(ptr as *mut Value);

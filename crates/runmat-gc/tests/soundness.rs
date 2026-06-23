@@ -185,3 +185,27 @@ fn root_traversal_scans_nested_trace_variants() {
         );
     });
 }
+
+#[test]
+fn stale_survivor_handle_is_rejected_after_unrooted_collection() {
+    gc_test_context(|| {
+        let root = gc_allocate_rooted(Value::String("temporary".to_string()))
+            .expect("rooted allocation should succeed");
+        let handle = root.handle();
+
+        gc_collect_minor().expect("first collection should keep rooted value live");
+        assert_eq!(
+            gc_clone_value(&handle).expect("rooted handle should remain live"),
+            Value::String("temporary".to_string())
+        );
+
+        drop(root);
+
+        let collected = gc_collect_minor().expect("unrooted survivor should be collectable");
+        assert_eq!(collected, 1);
+        assert!(matches!(
+            gc_clone_value(&handle),
+            Err(GcError::InvalidPointer(_))
+        ));
+    });
+}

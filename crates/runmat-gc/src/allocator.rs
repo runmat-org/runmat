@@ -255,6 +255,9 @@ pub struct GenerationalAllocator {
 
     /// Set of pointers logically promoted to older generation
     promoted_ptrs: HashSet<*const u8>,
+
+    /// Pointers whose `Value` payload is currently initialized and live.
+    live_ptrs: HashSet<*const u8>,
 }
 
 impl GenerationalAllocator {
@@ -274,6 +277,7 @@ impl GenerationalAllocator {
             total_allocations: AtomicUsize::new(0),
             survival_counts: HashMap::new(),
             promoted_ptrs: HashSet::new(),
+            live_ptrs: HashSet::new(),
         }
     }
 
@@ -288,6 +292,7 @@ impl GenerationalAllocator {
         unsafe {
             std::ptr::write(ptr as *mut Value, value);
         }
+        self.live_ptrs.insert(ptr.cast_const());
 
         // Update statistics
         stats.record_allocation(size);
@@ -295,9 +300,16 @@ impl GenerationalAllocator {
         value_handle_from_ptr(ptr.cast::<Value>())
     }
 
-    /// Drain allocated object pointers from the young generation
-    pub fn young_take_allocations(&mut self) -> Vec<*const u8> {
-        self.generations[0].take_allocated_ptrs()
+    /// Drain young-generation pointers that must be considered during the next
+    /// collection. This includes new allocations and survivors from earlier
+    /// minor collections.
+    pub fn young_take_collection_candidates(&mut self) -> Vec<*const u8> {
+        let mut seen = HashSet::new();
+        self.generations[0]
+            .take_tracked_ptrs_for_reset()
+            .into_iter()
+            .filter(|ptr| self.live_ptrs.contains(ptr) && seen.insert(*ptr))
+            .collect()
     }
 
     /// Drain all pointers the allocator still believes may contain initialized
@@ -327,6 +339,7 @@ impl GenerationalAllocator {
         }
 
         self.survival_counts.clear();
+        self.live_ptrs.clear();
         ptrs
     }
 
@@ -354,6 +367,15 @@ impl GenerationalAllocator {
         value_handle_from_ptr(ptr)
     }
 
+    /// Mark an initialized Value slot as no longer live after sweep/reset drops
+    /// it. Later validation must reject handles to this slot until it is reused
+    /// by a fresh allocation.
+    pub fn note_value_dropped(&mut self, ptr: *const u8) {
+        self.live_ptrs.remove(&ptr);
+        self.survival_counts.remove(&ptr);
+        self.promoted_ptrs.remove(&ptr);
+    }
+
     /// Check if young generation currently tracks any survivors
     pub fn young_has_survivors(&self) -> bool {
         !self.generations[0].survivor_objects.is_empty()
@@ -371,6 +393,11 @@ impl GenerationalAllocator {
             }
         }
         None
+    }
+
+    /// Return whether a pointer names a currently initialized GC Value.
+    pub fn is_live_value_ptr(&self, ptr: *const Value) -> bool {
+        self.live_ptrs.contains(&ptr.cast::<u8>())
     }
 
     /// Get young generation usage as a percentage

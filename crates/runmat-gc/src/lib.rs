@@ -274,9 +274,11 @@ impl GarbageCollector {
 
     fn validate_value_ptr(&self, raw: *const Value) -> Result<()> {
         let allocator = self.allocator.lock();
-        if allocator.find_generation(raw.cast::<u8>()).is_none() {
+        if allocator.find_generation(raw.cast::<u8>()).is_none()
+            || !allocator.is_live_value_ptr(raw)
+        {
             return Err(GcError::InvalidPointer(format!(
-                "GC value handle {:p} is not owned by the RunMat GC heap",
+                "GC value handle {:p} is not live in the RunMat GC heap",
                 raw
             )));
         }
