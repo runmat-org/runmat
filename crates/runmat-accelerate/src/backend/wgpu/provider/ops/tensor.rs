@@ -142,6 +142,67 @@ impl WgpuProvider {
             product_checked(new_shape)
                 .ok_or_else(|| anyhow!("reshape: dimension product exceeds GPU limits"))?
         };
+        if let Some(info) = runmat_accelerate_api::handle_transpose_info(handle) {
+            let entry = self.get_entry(handle)?;
+            ensure!(
+                entry.shape.len() == 2
+                    && entry.shape[0] == info.base_cols
+                    && entry.shape[1] == info.base_rows,
+                "reshape: transpose metadata mismatch for buffer {}",
+                handle.buffer_id
+            );
+            let storage = if runmat_accelerate_api::handle_storage(handle)
+                == GpuTensorStorage::ComplexInterleaved
+            {
+                GpuTensorStorage::ComplexInterleaved
+            } else {
+                entry.storage.clone()
+            };
+            let lane_factor = match storage {
+                GpuTensorStorage::Real => 1usize,
+                GpuTensorStorage::ComplexInterleaved => 2usize,
+            };
+            let expected_len = new_len
+                .checked_mul(lane_factor)
+                .ok_or_else(|| anyhow!("reshape: dimension product exceeds GPU limits"))?;
+            ensure!(
+                entry.len == expected_len,
+                "reshape: product of dimensions ({}) must equal original tensor length ({})",
+                new_len,
+                entry.len / lane_factor
+            );
+            ensure!(
+                info.base_rows
+                    .checked_mul(info.base_cols)
+                    .and_then(|len| len.checked_mul(lane_factor))
+                    == Some(entry.len),
+                "reshape: transpose metadata product mismatch for buffer {}",
+                handle.buffer_id
+            );
+
+            let canonical = self.register_existing_buffer_with_storage(
+                entry.buffer.clone(),
+                vec![info.base_rows, info.base_cols],
+                entry.len,
+                storage,
+            );
+            let materialized = match self.permute_exec(&canonical, &[1, 0]) {
+                Ok(handle) => handle,
+                Err(err) => {
+                    self.free_exec(&canonical).ok();
+                    return Err(err);
+                }
+            };
+            self.free_exec(&canonical).ok();
+            let reshaped = match self.reshape_exec(&materialized, new_shape) {
+                Ok(handle) => handle,
+                Err(err) => {
+                    self.free_exec(&materialized).ok();
+                    return Err(err);
+                }
+            };
+            return Ok(reshaped);
+        }
         let mut buffers = self.buffers.lock().expect("buffer mutex poisoned");
         let entry = buffers
             .get_mut(&handle.buffer_id)
@@ -1731,6 +1792,39 @@ mod tests {
                 "magnitude mismatch at {idx}: actual={actual} expected={expected}"
             );
         }
+    }
+
+    #[test]
+    fn reshape_materializes_lazy_transpose_before_metadata_update() {
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let handle = provider
+            .upload_exec(&HostTensorView {
+                data: &data,
+                shape: &[2, 3],
+            })
+            .expect("upload");
+
+        let transposed = provider.transpose_exec(&handle).expect("transpose");
+        assert_eq!(transposed.shape, vec![3, 2]);
+        assert!(runmat_accelerate_api::handle_transpose_info(&transposed).is_some());
+
+        let reshaped = provider
+            .reshape_exec(&transposed, &[2, 3])
+            .expect("reshape lazy transpose");
+        assert_eq!(reshaped.shape, vec![2, 3]);
+        assert!(runmat_accelerate_api::handle_transpose_info(&reshaped).is_none());
+        let reshaped_host = block_on(provider.download_exec(&reshaped)).expect("download reshape");
+        assert_eq!(reshaped_host.shape, vec![2, 3]);
+        assert_eq!(reshaped_host.storage, GpuTensorStorage::Real);
+        assert_eq!(reshaped_host.data, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
+
+        let transposed_host =
+            block_on(provider.download_exec(&transposed)).expect("download original transpose");
+        assert_eq!(transposed_host.shape, vec![3, 2]);
+        assert_eq!(transposed_host.data, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
     }
 
     #[test]
