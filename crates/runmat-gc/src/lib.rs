@@ -1,3 +1,5 @@
+#![forbid(unsafe_op_in_unsafe_fn)]
+
 use parking_lot::{Mutex, RwLock};
 // Use a local trait-alias shim to avoid compile-time dependency ordering issues.
 // Downstream crates in the workspace provide runmat_builtins; during GC unit tests, we provide a minimal Value.
