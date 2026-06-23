@@ -2,7 +2,7 @@
 title: "Using FEA"
 category: "FEA"
 section: "13.1"
-last_updated: "June 10, 2026"
+last_updated: "June 22, 2026"
 ---
 
 # Using FEA
@@ -214,7 +214,7 @@ The typed constructors are:
 | `fea.material(...)` | Mechanical, thermal, electrical, and plastic material data. |
 | `fea.materialAssignment(...)` | Region-to-material assignment. |
 | `fea.boundaryCondition(...)` | Constraints such as `fixed` or EM boundary kinds. |
-| `fea.loadCase(...)` | Force, pressure, body force, current density, or coil current. |
+| `fea.loadCase(...)` | Force, moment/torque, pressure, body force, current density, or coil current. |
 | `fea.step(...)` | Analysis step. |
 | `fea.domain(...)` | Thermo-mechanical, electro-thermal, electromagnetic, or CFD domain data. |
 | `fea.interface(...)` | Contact, conjugate heat-transfer, or fluid-structure interfaces. |
@@ -224,6 +224,13 @@ The typed constructors are:
 | `fea.sweep(...)` | Study sweep assembled from `fea.Study` objects. |
 
 Region strings in these constructors use the same selector grammar as `.fea`: direct region id, `id:<region-id>`, `region:<region-id>`, `name:<region-name>`, or `tag:<tag>`.
+
+Moment loads are structural load resultants in N*m. Use `"moment"` as the canonical load kind; `"torque"` is accepted as an alias and resolves to the same model load kind. Direct moment loads require structural elements with rotational DOFs, such as beams or shells. Solid-only displacement regions reject direct moment loads because continuum solids do not own nodal rotations.
+
+```matlab
+tipMoment = fea.loadCase("tip_moment", "node:2", "moment", ...
+    "Vector", [0 0 125]);
+```
 
 ## Project Entrypoints
 

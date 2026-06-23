@@ -2,7 +2,7 @@
 title: "Operation Reference"
 category: "FEA"
 section: "13.10"
-last_updated: "June 10, 2026"
+last_updated: "June 22, 2026"
 ---
 
 # Operation Reference
@@ -121,7 +121,7 @@ Top-level study fields:
 | `materials` | No | Material definitions keyed by material id. |
 | `material_assignments` | No | Region-to-material assignments. |
 | `boundary_conditions` | No | Constraints and boundary data. |
-| `loads` | No | Forces, pressures, body forces, current densities, or coil currents. |
+| `loads` | No | Forces, moments/torques, pressures, body forces, current densities, or coil currents. |
 | `steps` | No | Analysis steps. |
 | `domains` | No | Thermo-mechanical, electro-thermal, electromagnetic, or CFD domain data. |
 | `interfaces` | No | Contact or coupling interfaces. |
@@ -135,6 +135,10 @@ Top-level sweep fields:
 | `id` | Yes | Stable sweep id. |
 | `fail_fast` | No | Defaults to `true`. |
 | `studies` | Yes | List of nested study documents. Nested studies omit `kind`. |
+
+Load documents use `type` or `kind`. Structural moment loads use `type: moment` with `vector: [mx, my, mz]` in N*m. `type: torque` is accepted as an alias and resolves to the canonical moment load. Direct moment loads are valid only for structural regions whose elements provide rotational DOFs; non-structural run families and solid-only displacement regions reject them during validation or assembly.
+
+Rotational structural runs may return `structural.rotation` and `structural.reaction_moment` fields. Beam-specific moment resultants use `structural.beam_torsion_moment` and `structural.beam_bending_moment`; shell-specific resultants use `structural.shell_bending_moment`.
 
 ## Runtime Config
 

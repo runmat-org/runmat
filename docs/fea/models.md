@@ -2,7 +2,7 @@
 title: "Models"
 category: "FEA"
 section: "13.3"
-last_updated: "June 10, 2026"
+last_updated: "June 22, 2026"
 ---
 
 # Models
@@ -17,7 +17,7 @@ A model attaches physics data to geometry. It defines what material exists where
 | Materials | Mechanical, thermal, electrical, and plastic material properties. |
 | Material assignments | Which regions use which materials, with optional confidence evidence. |
 | Boundary conditions | Constraints, prescribed displacements, electromagnetic anchors, and related boundary data. |
-| Loads and sources | Forces, pressures, body forces, current density, coil currents, and similar inputs. |
+| Loads and sources | Forces, moments/torques, pressures, body forces, current density, coil currents, and similar inputs. |
 | Domains | Thermo-mechanical, electro-thermal, electromagnetic, or CFD domain data. |
 | Interfaces | Contact and coupling interfaces between regions. |
 | Steps | The analysis steps the model supports, such as static, modal, thermal, transient, nonlinear, electromagnetic, or CFD. |
@@ -81,6 +81,18 @@ steps:
 
 Region references can point directly at geometry region ids or use named aliases from the `regions` block.
 
+`type: moment` uses a global-frame vector in N*m. `type: torque` is accepted as an alias but resolves to the canonical `moment` load kind. Direct moment loads require rotational-DOF structural elements. Beam nodes and shell/plate nodes can own `rx`, `ry`, and `rz`; displacement-only solid regions reject moment loads with an invalid-model error instead of silently converting them to forces.
+
+```yaml
+loads:
+  - id: tip_moment
+    region: node:2
+    type: moment
+    vector: [0.0, 0.0, 125.0]
+```
+
+When rotational DOFs are present, structural results include `structural.rotation` and `structural.reaction_moment`. Beam results can also include `structural.beam_torsion_moment`, `structural.beam_bending_moment`, `structural.beam_bending_stress`, and `structural.beam_torsion_stress`; shell results can include `structural.shell_membrane_force`, `structural.shell_bending_moment`, `structural.shell_transverse_shear`, and `structural.shell_von_mises`.
+
 ## Validate Before Solving
 
 Validation checks the model and study shape before a run starts. It catches problems such as:
@@ -92,6 +104,7 @@ Validation checks the model and study shape before a run starts. It catches prob
 - missing required steps,
 - invalid family-specific options,
 - missing or incompatible domain data.
+- direct moment loads on non-structural families or displacement-only structural regions.
 
 `runmat check model.fea` is the usual CLI path. Host integrations can call `fea.validate_study/v1` or lower-level model validation operations.
 
