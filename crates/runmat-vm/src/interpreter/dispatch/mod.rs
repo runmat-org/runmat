@@ -689,44 +689,29 @@ fn spawn_task_id_still_live(
     context: &crate::bytecode::program::ExecutionContext,
     excluded_var: Option<usize>,
     excluded_local: Option<usize>,
-) -> bool {
+) -> VmResult<bool> {
     for value in stack {
-        match value_contains_spawn_task_id(value, task_id) {
-            Ok(true) => return true,
-            Ok(false) => {}
-            Err(err) => {
-                log::warn!("failed to traverse stack spawn task refs: {err}");
-                return true;
-            }
+        if value_contains_spawn_task_id(value, task_id)? {
+            return Ok(true);
         }
     }
     for (index, value) in vars.iter().enumerate() {
         if excluded_var == Some(index) {
             continue;
         }
-        match value_contains_spawn_task_id(value, task_id) {
-            Ok(true) => return true,
-            Ok(false) => {}
-            Err(err) => {
-                log::warn!("failed to traverse workspace spawn task refs: {err}");
-                return true;
-            }
+        if value_contains_spawn_task_id(value, task_id)? {
+            return Ok(true);
         }
     }
     for (index, value) in context.locals.iter().enumerate() {
         if excluded_local == Some(index) {
             continue;
         }
-        match value_contains_spawn_task_id(value, task_id) {
-            Ok(true) => return true,
-            Ok(false) => {}
-            Err(err) => {
-                log::warn!("failed to traverse local spawn task refs: {err}");
-                return true;
-            }
+        if value_contains_spawn_task_id(value, task_id)? {
+            return Ok(true);
         }
     }
-    false
+    Ok(false)
 }
 
 fn retire_spawn_task_id_if_dropped(
@@ -736,17 +721,15 @@ fn retire_spawn_task_id_if_dropped(
     vars: &[Value],
     excluded_var: Option<usize>,
     excluded_local: Option<usize>,
-) {
+) -> VmResult<()> {
     let mut task_ids = HashSet::new();
-    if let Err(err) = collect_spawn_task_ids_in_value(value, &mut task_ids) {
-        log::warn!("failed to collect dropped spawn task refs: {err}");
-        return;
-    }
+    collect_spawn_task_ids_in_value(value, &mut task_ids)?;
     for id in task_ids {
-        if !spawn_task_id_still_live(id, stack, vars, context, excluded_var, excluded_local) {
+        if !spawn_task_id_still_live(id, stack, vars, context, excluded_var, excluded_local)? {
             context.spawned_task_ids.remove(&id);
         }
     }
+    Ok(())
 }
 
 fn retire_spawn_task_id_if_replaced(
@@ -757,20 +740,14 @@ fn retire_spawn_task_id_if_replaced(
     vars: &[Value],
     excluded_var: Option<usize>,
     excluded_local: Option<usize>,
-) {
+) -> VmResult<()> {
     let mut current_ids = HashSet::new();
-    if let Err(err) = collect_spawn_task_ids_in_value(current, &mut current_ids) {
-        log::warn!("failed to collect current spawn task refs: {err}");
-        return;
-    }
+    collect_spawn_task_ids_in_value(current, &mut current_ids)?;
     if current_ids.is_empty() {
-        return;
+        return Ok(());
     }
     let mut incoming_ids = HashSet::new();
-    if let Err(err) = collect_spawn_task_ids_in_value(incoming, &mut incoming_ids) {
-        log::warn!("failed to collect incoming spawn task refs: {err}");
-        return;
-    }
+    collect_spawn_task_ids_in_value(incoming, &mut incoming_ids)?;
     for current_id in current_ids {
         if incoming_ids.contains(&current_id) {
             continue;
@@ -782,10 +759,11 @@ fn retire_spawn_task_id_if_replaced(
             context,
             excluded_var,
             excluded_local,
-        ) {
+        )? {
             context.spawned_task_ids.remove(&current_id);
         }
     }
+    Ok(())
 }
 
 #[cfg(feature = "native-accel")]
@@ -1080,7 +1058,7 @@ pub async fn dispatch_instruction(
                     vars,
                     Some(*index),
                     None,
-                );
+                )?;
                 #[cfg(feature = "native-accel")]
                 clear_overwritten_var_residency_excluding_live_values(
                     &vars[*index],
@@ -1117,7 +1095,7 @@ pub async fn dispatch_instruction(
                             vars,
                             None,
                             Some(local_index),
-                        );
+                        )?;
                         #[cfg(feature = "native-accel")]
                         clear_overwritten_local_residency_excluding_live_values(
                             &current_value,
@@ -1136,7 +1114,7 @@ pub async fn dispatch_instruction(
                         vars,
                         Some(*offset),
                         None,
-                    );
+                    )?;
                     #[cfg(feature = "native-accel")]
                     clear_overwritten_var_residency_excluding_live_values(
                         &vars[*offset],
@@ -1183,7 +1161,7 @@ pub async fn dispatch_instruction(
         }
         Instr::Pop => {
             if let Some(value) = stack.pop() {
-                retire_spawn_task_id_if_dropped(context, &value, stack, vars, None, None);
+                retire_spawn_task_id_if_dropped(context, &value, stack, vars, None, None)?;
                 #[cfg(feature = "native-accel")]
                 clear_popped_value_residency_excluding_live_values(&value, stack, vars, context);
             }
@@ -1254,7 +1232,7 @@ pub async fn dispatch_instruction(
             for _ in 0..*local_count {
                 if let Some(value) = context.locals.pop() {
                     if let Some(id) = spawn_task_id_from_value(&value) {
-                        if !spawn_task_id_still_live(id, stack, vars, context, None, None) {
+                        if !spawn_task_id_still_live(id, stack, vars, context, None, None)? {
                             context.spawned_task_ids.remove(&id);
                         }
                     }
@@ -2623,7 +2601,8 @@ mod tests {
             context.spawned_task_ids.contains(&0),
             "spawn should register task id before drop"
         );
-        super::retire_spawn_task_id_if_dropped(&mut context, &wrapped, &[], &[], None, None);
+        super::retire_spawn_task_id_if_dropped(&mut context, &wrapped, &[], &[], None, None)
+            .expect("retire dropped task id");
         assert!(
             !context.spawned_task_ids.contains(&0),
             "dropping a spawn task handle should retire its task id"
@@ -2664,7 +2643,8 @@ mod tests {
             &[],
             None,
             None,
-        );
+        )
+        .expect("retire replaced task id");
         assert!(
             !context.spawned_task_ids.contains(&0),
             "replacing task handle with a non-task value should retire its task id"
@@ -2693,7 +2673,8 @@ mod tests {
             &[],
             None,
             None,
-        );
+        )
+        .expect("keep replaced task id");
         assert!(
             context.spawned_task_ids.contains(&0),
             "replacing a task handle with itself should keep the task id live"
@@ -2715,7 +2696,8 @@ mod tests {
             "spawn should register task id before alias drop"
         );
         let vars = vec![wrapped.clone()];
-        super::retire_spawn_task_id_if_dropped(&mut context, &wrapped, &[], &vars, None, None);
+        super::retire_spawn_task_id_if_dropped(&mut context, &wrapped, &[], &vars, None, None)
+            .expect("keep aliased dropped task id");
         assert!(
             context.spawned_task_ids.contains(&0),
             "dropping one alias should keep task id when another alias remains live"
@@ -2744,7 +2726,8 @@ mod tests {
             context.spawned_task_ids.contains(&0),
             "spawn should register task id before nested drop"
         );
-        super::retire_spawn_task_id_if_dropped(&mut context, &nested, &[], &[], None, None);
+        super::retire_spawn_task_id_if_dropped(&mut context, &nested, &[], &[], None, None)
+            .expect("retire nested dropped task id");
         assert!(
             !context.spawned_task_ids.contains(&0),
             "dropping nested spawn task handle should retire its task id"
@@ -2770,7 +2753,8 @@ mod tests {
             valid: true,
         });
         let vars = vec![wrapped.clone()];
-        super::retire_spawn_task_id_if_dropped(&mut context, &nested, &[], &vars, None, None);
+        super::retire_spawn_task_id_if_dropped(&mut context, &nested, &[], &vars, None, None)
+            .expect("keep aliased nested dropped task id");
         assert!(
             context.spawned_task_ids.contains(&0),
             "dropping nested alias should keep task id when direct alias remains live"
@@ -2807,7 +2791,8 @@ mod tests {
             &[],
             None,
             None,
-        );
+        )
+        .expect("retire nested replaced task id");
         assert!(
             !context.spawned_task_ids.contains(&0),
             "replacing nested task handle with non-task value should retire its task id"
@@ -2841,7 +2826,8 @@ mod tests {
             &vars,
             None,
             None,
-        );
+        )
+        .expect("keep aliased nested replaced task id");
         assert!(
             context.spawned_task_ids.contains(&0),
             "replacing nested alias should keep task id when a live alias remains"
@@ -2875,7 +2861,8 @@ mod tests {
             &[],
             None,
             Some(0),
-        );
+        )
+        .expect("retire excluded local task id");
         assert!(
             !context.spawned_task_ids.contains(&0),
             "local-slot replacement should retire nested task id when excluded local is the only alias"
@@ -2910,7 +2897,8 @@ mod tests {
             &[],
             None,
             Some(0),
-        );
+        )
+        .expect("keep other local alias task id");
         assert!(
             context.spawned_task_ids.contains(&0),
             "local-slot replacement should keep nested task id when another local alias remains live"

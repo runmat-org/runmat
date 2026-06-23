@@ -4,7 +4,7 @@
 //! with optimizations for RunMat's value types and usage patterns.
 
 use crate::{
-    roots::collect_value_roots, GcConfig, GcHandle, GcStats, GenerationalAllocator, Result,
+    roots::collect_value_roots, GcConfig, GcError, GcHandle, GcStats, GenerationalAllocator, Result,
 };
 use runmat_builtins::Value;
 use runmat_time::Instant;
@@ -46,7 +46,7 @@ impl MarkSweepCollector {
         let start_time = Instant::now();
 
         // Phase 1: Mark reachable objects
-        self.mark_phase(roots, 0)?; // Only mark in generation 0
+        self.mark_phase(allocator, roots, 0)?; // Only mark in generation 0
 
         // Phase 2: Sweep unmarked objects in young generation (in-place sweep)
         let mut collected = 0usize;
@@ -107,7 +107,7 @@ impl MarkSweepCollector {
         let start_time = Instant::now();
 
         // Phase 1: Mark reachable objects in all generations
-        self.mark_phase(roots, usize::MAX)?;
+        self.mark_phase(allocator, roots, usize::MAX)?;
 
         // Phase 2: Sweep unmarked objects (reuse young sweep and then clear marks)
         // Do not call collect_young_generation to avoid double incrementing stats/marks; inline minimal work
@@ -130,14 +130,19 @@ impl MarkSweepCollector {
     }
 
     /// Mark phase: traverse from roots and mark all reachable objects
-    fn mark_phase(&mut self, roots: &[GcHandle], _max_generation: usize) -> Result<()> {
+    fn mark_phase(
+        &mut self,
+        allocator: &GenerationalAllocator,
+        roots: &[GcHandle],
+        _max_generation: usize,
+    ) -> Result<()> {
         log::trace!("Starting mark phase with {} roots", roots.len());
 
         self.marked_objects.lock().clear();
 
         // Mark all objects reachable from roots
         for root in roots.iter().cloned() {
-            self.mark_object(root)?;
+            self.mark_object(allocator, root)?;
         }
 
         log::trace!(
@@ -148,12 +153,18 @@ impl MarkSweepCollector {
     }
 
     /// Mark an object and recursively mark all objects it references
-    fn mark_object(&mut self, obj: GcHandle) -> Result<()> {
+    fn mark_object(&mut self, allocator: &GenerationalAllocator, obj: GcHandle) -> Result<()> {
         // SAFETY: this exposes the handle's preserved pointer token for
         // address-keyed mark bookkeeping. Ownership/liveness is established by
         // the root set and allocator before sweep.
         let value_ptr = unsafe { obj.as_ptr_unchecked().cast::<Value>() };
         let ptr = value_ptr.as_ptr().cast::<u8>();
+        if allocator.find_generation(ptr).is_none() || !allocator.is_live_handle(&obj) {
+            return Err(GcError::InvalidPointer(format!(
+                "GC mark traversal found stale handle {:p}",
+                value_ptr.as_ptr()
+            )));
+        }
         let ptr_addr = ptr as usize;
 
         // Skip if already marked
@@ -168,11 +179,12 @@ impl MarkSweepCollector {
 
         let mut child_roots = Vec::new();
         // SAFETY: mark traversal is limited to roots collected from GC-owned
-        // handles, and `ptr` is only borrowed during the stop-the-world mark
-        // phase before any sweep can reclaim the object.
+        // handles validated against allocator liveness above, and `ptr` is only
+        // borrowed during the stop-the-world mark phase before any sweep can
+        // reclaim the object.
         collect_value_roots(unsafe { value_ptr.as_ref() }, &mut child_roots);
         for child in child_roots {
-            self.mark_object(child)?;
+            self.mark_object(allocator, child)?;
         }
 
         Ok(())
@@ -514,11 +526,12 @@ mod tests {
     #[test]
     fn test_mark_phase_with_empty_roots() {
         let config = GcConfig::default();
+        let allocator = GenerationalAllocator::new(&config);
         let mut collector = MarkSweepCollector::new(&config);
 
         let roots = Vec::new();
 
-        let result = collector.mark_phase(&roots, 0);
+        let result = collector.mark_phase(&allocator, &roots, 0);
         assert!(result.is_ok());
 
         assert_eq!(collector.marked_objects.lock().len(), 0);
@@ -546,7 +559,7 @@ mod tests {
             .expect("cell allocation");
 
         collector
-            .mark_phase(&[cell_root], 0)
+            .mark_phase(&allocator, &[cell_root], 0)
             .expect("mark phase should succeed");
 
         assert!(collector.marked_objects.lock().contains(&target_addr));

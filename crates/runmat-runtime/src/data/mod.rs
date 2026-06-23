@@ -127,8 +127,13 @@ thread_local! {
     static TX_REGISTRY: RefCell<HashMap<String, PendingTxn>> = RefCell::new(HashMap::new());
 }
 
-fn with_tx_registry<T>(f: impl FnOnce(&mut HashMap<String, PendingTxn>) -> T) -> T {
-    TX_REGISTRY.with(|registry| f(&mut registry.borrow_mut()))
+fn with_tx_registry<T>(f: impl FnOnce(&mut HashMap<String, PendingTxn>) -> T) -> BuiltinResult<T> {
+    TX_REGISTRY.with(|registry| {
+        let mut registry = registry
+            .try_borrow_mut()
+            .map_err(|_| data_error("data transaction registry is already mutably borrowed"))?;
+        Ok(f(&mut registry))
+    })
 }
 
 pub fn data_error(message: impl Into<String>) -> RuntimeError {
@@ -990,7 +995,7 @@ pub fn new_tx_id() -> String {
     format!("tx_{}_{}", Utc::now().timestamp_millis(), seq)
 }
 
-pub fn start_tx(dataset_path: String, base_sequence: u64) -> String {
+pub fn start_tx(dataset_path: String, base_sequence: u64) -> BuiltinResult<String> {
     let tx_id = new_tx_id();
     let pending = PendingTxn {
         dataset_path,
@@ -1005,8 +1010,8 @@ pub fn start_tx(dataset_path: String, base_sequence: u64) -> String {
     };
     with_tx_registry(|registry| {
         registry.insert(tx_id.clone(), pending);
-    });
-    tx_id
+    })?;
+    Ok(tx_id)
 }
 
 pub fn with_tx_mut<T>(
@@ -1021,7 +1026,7 @@ pub fn with_tx_mut<T>(
             )
         })?;
         f(tx)
-    })
+    })?
 }
 
 pub fn with_tx<T>(
@@ -1029,7 +1034,9 @@ pub fn with_tx<T>(
     f: impl FnOnce(&PendingTxn) -> BuiltinResult<T>,
 ) -> BuiltinResult<T> {
     TX_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
+        let registry = registry
+            .try_borrow()
+            .map_err(|_| data_error("data transaction registry is already borrowed"))?;
         let tx = registry.get(tx_id).ok_or_else(|| {
             data_error_with_identifier(
                 format!("transaction '{tx_id}' not found"),
@@ -1040,10 +1047,10 @@ pub fn with_tx<T>(
     })
 }
 
-pub fn remove_tx(tx_id: &str) {
+pub fn remove_tx(tx_id: &str) -> BuiltinResult<()> {
     with_tx_registry(|registry| {
         let _ = registry.remove(tx_id);
-    });
+    })
 }
 
 #[cfg(test)]
@@ -1089,10 +1096,10 @@ mod tests {
 
     #[test]
     fn transaction_registry_roundtrip() {
-        let tx_id = start_tx("/datasets/test.data".to_string(), 7);
+        let tx_id = start_tx("/datasets/test.data".to_string(), 7).expect("start tx");
         let status = with_tx(&tx_id, |tx| Ok(tx.status.clone())).expect("tx lookup");
         assert_eq!(status, TxnStatus::Open);
-        remove_tx(&tx_id);
+        remove_tx(&tx_id).expect("remove tx");
         let err = with_tx(&tx_id, |_| Ok(())).expect_err("expected missing tx");
         assert_eq!(
             err.identifier(),

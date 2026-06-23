@@ -59,6 +59,9 @@ pub struct Generation {
 
     /// Addresses of allocated objects (object starts) in this generation
     allocated_ptrs: Vec<*const u8>,
+
+    /// Value-sized slots reclaimed by collection and available for reuse.
+    free_value_slots: Vec<*mut u8>,
 }
 
 impl Generation {
@@ -83,6 +86,7 @@ impl Generation {
             max_size,
             survivor_objects: Vec::new(),
             allocated_ptrs: Vec::new(),
+            free_value_slots: Vec::new(),
         }
     }
 
@@ -90,6 +94,15 @@ impl Generation {
     fn allocate(&mut self, size: usize) -> Result<*mut u8> {
         let size_class = SizeClass::from_size(size);
         let aligned_size = self.align_size(size);
+
+        if aligned_size <= std::mem::size_of::<Value>() {
+            if let Some(ptr) = self.free_value_slots.pop() {
+                self.allocated_bytes
+                    .fetch_add(aligned_size, Ordering::Relaxed);
+                self.allocated_ptrs.push(ptr as *const u8);
+                return Ok(ptr);
+            }
+        }
 
         // Check if we have space
         if self.allocated_bytes.load(Ordering::Relaxed) + aligned_size > self.max_size {
@@ -166,6 +179,18 @@ impl Generation {
         std::mem::take(&mut self.allocated_ptrs)
     }
 
+    pub fn note_value_slot_freed(&mut self, ptr: *const u8) {
+        if self.find_block_containing(ptr).is_some() {
+            let value_size = std::mem::size_of::<Value>();
+            self.allocated_bytes
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    Some(current.saturating_sub(value_size))
+                })
+                .ok();
+            self.free_value_slots.push(ptr as *mut u8);
+        }
+    }
+
     fn take_tracked_ptrs_for_reset(&mut self) -> Vec<*const u8> {
         let mut ptrs = std::mem::take(&mut self.allocated_ptrs);
         ptrs.extend(std::mem::take(&mut self.survivor_objects));
@@ -185,6 +210,14 @@ impl Generation {
         self.allocated_bytes.store(0, Ordering::Relaxed);
         self.survivor_objects.clear();
         self.allocated_ptrs.clear();
+        self.free_value_slots.clear();
+    }
+
+    fn find_block_containing(&self, ptr: *const u8) -> Option<&MemoryBlock> {
+        self.blocks
+            .values()
+            .flat_map(|blocks| blocks.iter())
+            .find(|block| block.contains(ptr))
     }
 }
 
@@ -258,6 +291,13 @@ pub struct GenerationalAllocator {
 
     /// Pointers whose `Value` payload is currently initialized and live.
     live_ptrs: HashSet<*const u8>,
+
+    /// Allocation epoch for each live pointer. Incremented before each new
+    /// allocation so stale handles to reused slots do not validate.
+    live_epochs: HashMap<*const u8, usize>,
+
+    /// Monotonic allocation epoch source.
+    next_epoch: usize,
 }
 
 impl GenerationalAllocator {
@@ -278,6 +318,8 @@ impl GenerationalAllocator {
             survival_counts: HashMap::new(),
             promoted_ptrs: HashSet::new(),
             live_ptrs: HashSet::new(),
+            live_epochs: HashMap::new(),
+            next_epoch: 1,
         }
     }
 
@@ -292,12 +334,16 @@ impl GenerationalAllocator {
         unsafe {
             std::ptr::write(ptr as *mut Value, value);
         }
-        self.live_ptrs.insert(ptr.cast_const());
+        let raw = ptr.cast_const();
+        let epoch = self.next_epoch;
+        self.next_epoch = self.next_epoch.wrapping_add(1).max(1);
+        self.live_ptrs.insert(raw);
+        self.live_epochs.insert(raw, epoch);
 
         // Update statistics
         stats.record_allocation(size);
 
-        value_handle_from_ptr(ptr.cast::<Value>())
+        value_handle_from_ptr(ptr.cast::<Value>(), epoch)
     }
 
     /// Drain young-generation pointers that must be considered during the next
@@ -340,6 +386,7 @@ impl GenerationalAllocator {
 
         self.survival_counts.clear();
         self.live_ptrs.clear();
+        self.live_epochs.clear();
         ptrs
     }
 
@@ -363,8 +410,14 @@ impl GenerationalAllocator {
     pub fn promote(&mut self, ptr: *const Value, _from_gen: usize) -> Result<GcHandle> {
         // Non-moving logical promotion: mark pointer as promoted for barrier/collection logic
         let raw = ptr as *const u8;
+        let Some(epoch) = self.live_epochs.get(&raw).copied() else {
+            return Err(GcError::InvalidPointer(format!(
+                "cannot promote non-live GC value pointer {:p}",
+                ptr
+            )));
+        };
         self.promoted_ptrs.insert(raw);
-        value_handle_from_ptr(ptr)
+        value_handle_from_ptr(ptr, epoch)
     }
 
     /// Mark an initialized Value slot as no longer live after sweep/reset drops
@@ -372,8 +425,12 @@ impl GenerationalAllocator {
     /// by a fresh allocation.
     pub fn note_value_dropped(&mut self, ptr: *const u8) {
         self.live_ptrs.remove(&ptr);
+        self.live_epochs.remove(&ptr);
         self.survival_counts.remove(&ptr);
         self.promoted_ptrs.remove(&ptr);
+        if let Some(generation) = self.generations.get_mut(0) {
+            generation.note_value_slot_freed(ptr);
+        }
     }
 
     /// Check if young generation currently tracks any survivors
@@ -398,6 +455,18 @@ impl GenerationalAllocator {
     /// Return whether a pointer names a currently initialized GC Value.
     pub fn is_live_value_ptr(&self, ptr: *const Value) -> bool {
         self.live_ptrs.contains(&ptr.cast::<u8>())
+    }
+
+    pub fn is_live_handle(&self, handle: &GcHandle) -> bool {
+        let ptr = handle.addr() as *const u8;
+        self.live_epochs
+            .get(&ptr)
+            .is_some_and(|epoch| *epoch == handle.epoch())
+    }
+
+    pub fn handle_for_live_ptr(&self, ptr: *const u8) -> Option<GcHandle> {
+        let epoch = self.live_epochs.get(&ptr).copied()?;
+        value_handle_from_ptr(ptr.cast::<Value>(), epoch).ok()
     }
 
     /// Get young generation usage as a percentage
@@ -496,12 +565,13 @@ impl GenerationalAllocator {
     }
 }
 
-fn value_handle_from_ptr(ptr: *const Value) -> Result<GcHandle> {
+fn value_handle_from_ptr(ptr: *const Value, epoch: usize) -> Result<GcHandle> {
     let raw = NonNull::new(ptr as *mut ())
         .ok_or_else(|| GcError::InvalidPointer("null GC allocation pointer".to_string()))?;
     // SAFETY: allocator callers only pass addresses returned by generation
-    // allocation or promotion of existing generation-owned Value slots.
-    Ok(unsafe { GcHandle::from_ptr_unchecked(raw) })
+    // allocation or promotion of existing generation-owned Value slots, paired
+    // with the allocator-issued live allocation epoch for that slot.
+    Ok(unsafe { GcHandle::from_parts_unchecked(raw, epoch) })
 }
 
 /// Statistics for the allocator
@@ -568,5 +638,36 @@ mod tests {
             let addr = ptr.addr();
             assert_eq!(addr % align, 0, "GC allocation was not Value-aligned");
         }
+    }
+
+    #[test]
+    fn young_generation_reuses_dropped_value_slots() {
+        let config = GcConfig {
+            young_generation_size: std::mem::size_of::<Value>() * 2,
+            ..GcConfig::default()
+        };
+        let mut allocator = GenerationalAllocator::new(&config);
+        let stats = GcStats::new();
+
+        let first = allocator
+            .allocate(Value::String("first".to_string()), &stats)
+            .expect("first allocation");
+        let _survivor = allocator
+            .allocate(Value::String("survivor".to_string()), &stats)
+            .expect("survivor allocation");
+
+        let first_ptr = first.addr() as *const u8;
+        allocator.note_value_dropped(first_ptr);
+        unsafe {
+            std::ptr::drop_in_place(first_ptr as *mut Value);
+        }
+
+        let reused = allocator
+            .allocate(Value::String("reused".to_string()), &stats)
+            .expect("dropped young slot should be reusable");
+        assert_eq!(reused.addr(), first.addr());
+        assert_ne!(reused.epoch(), first.epoch());
+        assert!(!allocator.is_live_handle(&first));
+        assert!(allocator.is_live_handle(&reused));
     }
 }

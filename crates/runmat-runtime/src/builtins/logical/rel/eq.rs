@@ -264,17 +264,17 @@ fn scalar_eq_value(lhs: &Value, rhs: &Value) -> Option<crate::BuiltinResult<Valu
 }
 
 fn eq_identity(lhs: &Value, rhs: &Value) -> Option<Value> {
-    match (handle_ptr(lhs), handle_ptr(rhs)) {
+    match (handle_identity(lhs), handle_identity(rhs)) {
         (Some(a), Some(b)) => Some(Value::Bool(a == b)),
         (Some(_), None) | (None, Some(_)) => Some(Value::Bool(false)),
         (None, None) => None,
     }
 }
 
-fn handle_ptr(value: &Value) -> Option<usize> {
+fn handle_identity(value: &Value) -> Option<(u8, usize)> {
     match value {
-        Value::HandleObject(handle) => Some(runmat_gc::gc_handle_addr(&handle.target)),
-        Value::Listener(listener) => Some(runmat_gc::gc_handle_addr(&listener.target)),
+        Value::HandleObject(handle) => Some((0, runmat_gc::gc_handle_addr(&handle.target))),
+        Value::Listener(listener) => Some((1, listener.id as usize)),
         _ => None,
     }
 }
@@ -560,7 +560,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{HandleRef, SymbolicExpr};
+    use runmat_builtins::{HandleRef, Listener, SymbolicExpr};
 
     fn run_eq(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         block_on(super::eq_builtin(lhs, rhs))
@@ -658,6 +658,50 @@ pub(crate) mod tests {
         };
         let other = Value::HandleObject(other_handle);
         assert_eq!(run_eq(a, other).unwrap(), Value::Bool(false));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn eq_listener_identity_is_disjoint_from_target_identity() {
+        let target = runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc target");
+        let callback =
+            runmat_gc::gc_allocate(Value::FunctionHandle("cb".to_string())).expect("gc callback");
+        let handle = HandleRef {
+            class_name: "EventTarget".to_string(),
+            target,
+            valid: true,
+        };
+        let listener_a = Listener {
+            id: 101,
+            target,
+            target_class_name: "EventTarget".to_string(),
+            event_name: "Changed".to_string(),
+            callback,
+            enabled: true,
+            valid: true,
+        };
+        let listener_b = Listener {
+            id: 102,
+            target,
+            target_class_name: "EventTarget".to_string(),
+            event_name: "Changed".to_string(),
+            callback,
+            enabled: true,
+            valid: true,
+        };
+
+        assert_eq!(
+            run_eq(
+                Value::Listener(listener_a.clone()),
+                Value::Listener(listener_b)
+            )
+            .unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            run_eq(Value::Listener(listener_a), Value::HandleObject(handle)).unwrap(),
+            Value::Bool(false)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

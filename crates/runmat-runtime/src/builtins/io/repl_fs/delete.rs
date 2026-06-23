@@ -476,7 +476,15 @@ async fn process_handle_value(
                     ));
                 }
             }
-            let _ = crate::set_handle_valid(handle, false);
+            if !crate::set_handle_valid(handle, false) {
+                return Err(delete_error_with(
+                    &DELETE_ERROR_INVALID_HANDLE,
+                    format!(
+                        "delete: failed to invalidate handle object '{}'",
+                        handle.class_name
+                    ),
+                ));
+            }
             let mut invalid = handle.clone();
             invalid.valid = false;
             *mutated_last = Some(Value::HandleObject(invalid));

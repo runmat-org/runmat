@@ -233,11 +233,8 @@ impl RootScanner {
 
         let roots = self.roots.read();
         let mut all_roots = Vec::new();
-        let mut inactive_roots = Vec::new();
-
         for (&root_id, root) in roots.iter() {
             if !root.is_active() {
-                inactive_roots.push(root_id);
                 continue;
             }
 
@@ -250,17 +247,6 @@ impl RootScanner {
             );
 
             all_roots.extend(root_objects);
-        }
-
-        drop(roots);
-
-        // Clean up inactive roots
-        if !inactive_roots.is_empty() {
-            let mut roots = self.roots.write();
-            for root_id in inactive_roots {
-                log::debug!("Removing inactive root {}", root_id.0);
-                roots.remove(&root_id);
-            }
         }
 
         // Update statistics
@@ -308,19 +294,16 @@ impl RootScanner {
         }
     }
 
-    /// Remove all inactive roots
-    pub fn cleanup_inactive_roots(&self) -> usize {
-        let mut roots = self.roots.write();
-        let initial_count = roots.len();
-
-        roots.retain(|_, root| root.is_active());
-
-        let removed_count = initial_count - roots.len();
-        if removed_count > 0 {
-            log::debug!("Cleaned up {removed_count} inactive roots");
-        }
-
-        removed_count
+    /// Clear roots registered in this scanner.
+    ///
+    /// This is intended for whole-context teardown and test reset. Normal root
+    /// lifetimes should unregister through `unregister_root` so external
+    /// accounting remains paired with registration.
+    pub fn clear(&self) {
+        self.roots.write().clear();
+        self.next_id.store(1, Ordering::Relaxed);
+        self.scans_performed.store(0, Ordering::Relaxed);
+        self.total_roots_found.store(0, Ordering::Relaxed);
     }
 }
 

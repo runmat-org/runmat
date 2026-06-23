@@ -268,7 +268,7 @@ impl WhosRecord {
         let dims = value_dimensions(value).await?;
         let size_tensor = dims_to_tensor(&dims)?;
         let mut seen = HashSet::new();
-        let bytes = value_memory_bytes(value, &mut seen);
+        let bytes = value_memory_bytes(value, &mut seen)?;
         let class_name = class_name_for_value(value);
         let is_complex = matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_));
         Ok(Self {
@@ -554,8 +554,8 @@ fn dims_to_tensor(dims: &[usize]) -> BuiltinResult<runmat_builtins::Tensor> {
     })
 }
 
-fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
-    match value {
+fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult<usize> {
+    let bytes = match value {
         Value::Num(_) => 8,
         Value::Int(i) => match i {
             runmat_builtins::IntValue::I8(_) | runmat_builtins::IntValue::U8(_) => 1,
@@ -596,14 +596,18 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
                 let ptr = handle as *const Value as usize;
                 if seen.insert(ptr) {
                     let value = handle;
-                    total = total.saturating_add(value_memory_bytes(value, seen));
+                    total = total.saturating_add(value_memory_bytes(value, seen)?);
                 }
             }
             total
         }
-        Value::Struct(st) => st.fields.values().fold(0usize, |acc, v| {
-            acc.saturating_add(value_memory_bytes(v, seen))
-        }),
+        Value::Struct(st) => {
+            let mut total = 0usize;
+            for value in st.fields.values() {
+                total = total.saturating_add(value_memory_bytes(value, seen)?);
+            }
+            total
+        }
         Value::GpuTensor(handle) => {
             #[cfg(all(test, feature = "wgpu"))]
             {
@@ -624,14 +628,20 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
                 .fold(1usize, |acc, dim| acc.saturating_mul(*dim));
             count.saturating_mul(elem_size)
         }
-        Value::Object(obj) => obj.properties.values().fold(0usize, |acc, v| {
-            acc.saturating_add(value_memory_bytes(v, seen))
-        }),
+        Value::Object(obj) => {
+            let mut total = 0usize;
+            for value in obj.properties.values() {
+                total = total.saturating_add(value_memory_bytes(value, seen)?);
+            }
+            total
+        }
         Value::HandleObject(handle) => {
             let ptr = runmat_gc::gc_handle_addr(&handle.target);
             if seen.insert(ptr) {
                 runmat_gc::gc_with_value(&handle.target, |inner| value_memory_bytes(inner, seen))
-                    .unwrap_or(0)
+                    .map_err(|err| {
+                        whos_error(format!("whos: invalid handle object target: {err}"))
+                    })??
             } else {
                 0
             }
@@ -644,7 +654,7 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
                     runmat_gc::gc_with_value(&listener.target, |value| {
                         value_memory_bytes(value, seen)
                     })
-                    .unwrap_or(0),
+                    .map_err(|err| whos_error(format!("whos: invalid listener target: {err}")))??,
                 );
             }
             let callback_ptr = runmat_gc::gc_handle_addr(&listener.callback);
@@ -653,14 +663,20 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
                     runmat_gc::gc_with_value(&listener.callback, |value| {
                         value_memory_bytes(value, seen)
                     })
-                    .unwrap_or(0),
+                    .map_err(|err| {
+                        whos_error(format!("whos: invalid listener callback: {err}"))
+                    })??,
                 );
             }
             total
         }
-        Value::Closure(closure) => closure.captures.iter().fold(0usize, |acc, v| {
-            acc.saturating_add(value_memory_bytes(v, seen))
-        }),
+        Value::Closure(closure) => {
+            let mut total = 0usize;
+            for value in closure.captures.iter() {
+                total = total.saturating_add(value_memory_bytes(value, seen)?);
+            }
+            total
+        }
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
@@ -676,10 +692,15 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
                 acc.saturating_add(frame.len().saturating_mul(2))
             })
         }
-        Value::OutputList(values) => values.iter().fold(0usize, |acc, v| {
-            acc.saturating_add(value_memory_bytes(v, seen))
-        }),
-    }
+        Value::OutputList(values) => {
+            let mut total = 0usize;
+            for value in values {
+                total = total.saturating_add(value_memory_bytes(value, seen)?);
+            }
+            total
+        }
+    };
+    Ok(bytes)
 }
 
 fn gpu_element_size_bytes() -> usize {

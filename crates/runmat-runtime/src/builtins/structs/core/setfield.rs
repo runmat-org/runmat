@@ -1047,8 +1047,29 @@ async fn assign_into_handle(
     let current = runmat_gc::gc_clone_value(&handle.target)
         .map_err(|e| setfield_flow(format!("setfield: invalid handle target: {e}")))?;
     let updated = assign_into_value(current, steps, rhs).await?;
-    runmat_gc::gc_with_value_mut(&handle.target, |target| *target = updated)
-        .map_err(|e| setfield_flow(format!("setfield: invalid handle target: {e}")))?;
+    runmat_gc::gc_with_value_mut(&handle.target, |target| -> BuiltinResult<()> {
+        let target_valid = match target {
+            Value::Object(obj) => !matches!(
+                obj.properties.get(crate::HANDLE_VALID_FLAG_PROPERTY),
+                Some(Value::Bool(false))
+            ),
+            _ => {
+                return Err(setfield_flow(format!(
+                    "Invalid or deleted handle object '{}'.",
+                    handle.class_name
+                )));
+            }
+        };
+        if !target_valid {
+            return Err(setfield_flow(format!(
+                "Invalid or deleted handle object '{}'.",
+                handle.class_name
+            )));
+        }
+        *target = updated;
+        Ok(())
+    })
+    .map_err(|e| setfield_flow(format!("setfield: invalid handle target: {e}")))??;
     Ok(Value::HandleObject(handle))
 }
 
@@ -1744,9 +1765,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setfield_updates_handle_target() {
-        let mut inner = StructValue::new();
-        inner.fields.insert("x".to_string(), Value::Num(0.0));
-        let gc_ptr = gc_allocate(Value::Struct(inner)).expect("gc allocation");
+        let mut inner = ObjectInstance::new("PointHandle".to_string());
+        inner.properties.insert("x".to_string(), Value::Num(0.0));
+        let gc_ptr = gc_allocate(Value::Object(inner)).expect("gc allocation");
         let handle_ptr = gc_ptr;
         let handle = HandleRef {
             class_name: "PointHandle".to_string(),
@@ -1767,10 +1788,10 @@ pub(crate) mod tests {
 
         let pointee = runmat_gc::gc_clone_value(&gc_ptr).expect("valid handle target");
         match pointee {
-            Value::Struct(st) => {
-                assert_eq!(st.fields.get("x"), Some(&Value::Num(7.0)));
+            Value::Object(obj) => {
+                assert_eq!(obj.properties.get("x"), Some(&Value::Num(7.0)));
             }
-            other => panic!("expected struct pointee, got {other:?}"),
+            other => panic!("expected object pointee, got {other:?}"),
         }
     }
 

@@ -34,6 +34,7 @@ pub struct JitMemoryManager {
     /// Thread-local memory pools for rooted JIT constants.
     string_pool: RefCell<HashMap<String, ExplicitRoot>>,
     array_pool: RefCell<HashMap<String, ExplicitRoot>>, // Use string hash of f64 vector
+    array_data_pool: RefCell<HashMap<String, Box<[f64]>>>,
 
     /// Statistics
     allocated_strings: AtomicUsize,
@@ -45,6 +46,7 @@ impl JitMemoryManager {
         Self {
             string_pool: RefCell::new(HashMap::new()),
             array_pool: RefCell::new(HashMap::new()),
+            array_data_pool: RefCell::new(HashMap::new()),
             allocated_strings: AtomicUsize::new(0),
             allocated_arrays: AtomicUsize::new(0),
         }
@@ -118,9 +120,11 @@ impl JitMemoryManager {
         {
             let pool = self.array_pool.borrow();
             if pool.contains_key(&array_key) {
-                // For simplicity, return a pointer to the raw f64 data
-                // In a complete implementation, we'd need more sophisticated marshaling
-                return Ok((values.as_ptr(), values.len()));
+                let data_pool = self.array_data_pool.borrow();
+                let data = data_pool
+                    .get(&array_key)
+                    .ok_or_else(|| "array data pool missing cached buffer".to_string())?;
+                return Ok((data.as_ptr(), data.len()));
             }
         }
 
@@ -135,14 +139,17 @@ impl JitMemoryManager {
         // Store in pool for reuse
         {
             let mut pool = self.array_pool.borrow_mut();
-            pool.insert(array_key, root);
+            pool.insert(array_key.clone(), root);
         }
+
+        let data = values.to_vec().into_boxed_slice();
+        let ptr = data.as_ptr();
+        let len = data.len();
+        self.array_data_pool.borrow_mut().insert(array_key, data);
 
         self.allocated_arrays.fetch_add(1, Ordering::Relaxed);
 
-        // Return pointer to original data (this is simplified)
-        // In a complete implementation, we'd extract the data from the GC-allocated Cell
-        Ok((values.as_ptr(), values.len()))
+        Ok((ptr, len))
     }
 
     /// Create a string constant in JIT memory
@@ -200,6 +207,7 @@ impl JitMemoryManager {
     pub fn clear_pools(&self) {
         self.string_pool.borrow_mut().clear();
         self.array_pool.borrow_mut().clear();
+        self.array_data_pool.borrow_mut().clear();
     }
 }
 
@@ -350,6 +358,31 @@ mod tests {
             let stats = manager.stats();
             assert_eq!(stats.allocated_arrays, 1);
             assert_eq!(stats.array_pool_size, 1);
+        });
+    }
+
+    #[test]
+    fn test_f64_array_pool_returns_owned_cached_buffer() {
+        runmat_gc::gc_test_context(|| {
+            let manager = JitMemoryManager::new();
+
+            let (ptr1, len1) = manager
+                .allocate_f64_array(&[1.0, 2.0])
+                .expect("array allocation should succeed");
+            let (ptr2, len2) = {
+                let temporary_values = vec![1.0, 2.0];
+                manager
+                    .allocate_f64_array(&temporary_values)
+                    .expect("cached array allocation should succeed")
+            };
+
+            assert_eq!(ptr1, ptr2);
+            assert_eq!(len1, len2);
+            assert_eq!(len2, 2);
+            unsafe {
+                assert_eq!(*ptr2.add(0), 1.0);
+                assert_eq!(*ptr2.add(1), 2.0);
+            }
         });
     }
 

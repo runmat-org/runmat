@@ -1463,7 +1463,7 @@ async fn dataset_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<V
 async fn dataset_begin_builtin(base: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
     let path = dataset_path_from_object(&base, "Dataset.begin")?;
     let manifest = read_manifest_async(&dataset_root(&path)).await?;
-    let tx_id = start_tx(path.clone(), manifest.txn_sequence);
+    let tx_id = start_tx(path.clone(), manifest.txn_sequence)?;
     tracing::info!(
         target: "runmat.data",
         dataset = path,
@@ -2068,7 +2068,7 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
         next_sequence = manifest.txn_sequence,
         "data transaction commit"
     );
-    remove_tx(&tx_id);
+    remove_tx(&tx_id)?;
     Ok(Value::Bool(true))
 }
 
@@ -2113,7 +2113,7 @@ async fn data_tx_abort_builtin(base: Value) -> BuiltinResult<Value> {
         tx_id = tx_id,
         "data transaction abort"
     );
-    remove_tx(&tx_id);
+    remove_tx(&tx_id)?;
     Ok(Value::Bool(true))
 }
 

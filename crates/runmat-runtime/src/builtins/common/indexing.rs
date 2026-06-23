@@ -16,6 +16,16 @@ fn indexing_error_with_identifier(message: impl Into<String>, identifier: &str) 
         .build()
 }
 
+fn positive_integer_cell_index(value: f64, identifier: &str) -> Result<usize, RuntimeError> {
+    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
+        return Err(indexing_error_with_identifier(
+            format!("Cell index {value} must be a positive integer"),
+            identifier,
+        ));
+    }
+    Ok(value as usize)
+}
+
 /// Get a single element from a tensor (1-based indexing like language)
 pub fn matrix_get_element(tensor: &Tensor, row: usize, col: usize) -> Result<f64, RuntimeError> {
     if row == 0 || col == 0 {
@@ -277,7 +287,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 return Err(indexing_error("At least one index is required"));
             }
             if indices.len() == 1 {
-                let idx = indices[0] as usize;
+                let idx = positive_integer_cell_index(indices[0], "RunMat:CellIndexOutOfBounds")?;
                 if idx < 1 || idx > ca.data.len() {
                     return Err(indexing_error_with_identifier(
                         format!("Cell index {} out of bounds (1 to {})", idx, ca.data.len()),
@@ -286,8 +296,10 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 }
                 Ok(ca.data[idx - 1].clone())
             } else if indices.len() == 2 {
-                let row = indices[0] as usize;
-                let col = indices[1] as usize;
+                let row =
+                    positive_integer_cell_index(indices[0], "RunMat:CellSubscriptOutOfBounds")?;
+                let col =
+                    positive_integer_cell_index(indices[1], "RunMat:CellSubscriptOutOfBounds")?;
                 if row < 1 || row > ca.rows || col < 1 || col > ca.cols {
                     return Err(indexing_error_with_identifier(
                         "Cell subscript out of bounds",
@@ -344,5 +356,38 @@ async fn gpu_index_scalar(
         provider
             .read_scalar(handle, lin0)
             .map_err(|e| indexing_error(format!("gpu index: {e}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::perform_indexing;
+    use futures::executor::block_on;
+    use runmat_builtins::{CellArray, Value};
+
+    #[test]
+    fn cell_index_rejects_fractional_before_cast() {
+        let cell = CellArray::new(
+            vec![
+                Value::Num(1.0),
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::Num(4.0),
+            ],
+            1,
+            4,
+        )
+        .expect("cell");
+        let err = block_on(perform_indexing(&Value::Cell(cell), &[3.7]))
+            .expect_err("fractional cell index should fail");
+        assert_eq!(err.identifier(), Some("RunMat:CellIndexOutOfBounds"));
+    }
+
+    #[test]
+    fn cell_subscript_rejects_nan_before_cast() {
+        let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell");
+        let err = block_on(perform_indexing(&Value::Cell(cell), &[f64::NAN, 1.0]))
+            .expect_err("NaN cell subscript should fail");
+        assert_eq!(err.identifier(), Some("RunMat:CellSubscriptOutOfBounds"));
     }
 }

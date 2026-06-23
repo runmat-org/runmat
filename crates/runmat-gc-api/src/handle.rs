@@ -40,6 +40,7 @@ use std::ptr::NonNull;
 #[derive(Copy, Clone)]
 pub struct GcHandle {
     raw: NonNull<()>,
+    epoch: usize,
     _not_send_sync: PhantomData<*const ()>,
 }
 
@@ -53,12 +54,32 @@ impl GcHandle {
     pub unsafe fn from_ptr_unchecked(raw: NonNull<()>) -> Self {
         Self {
             raw,
+            epoch: 0,
+            _not_send_sync: PhantomData,
+        }
+    }
+
+    /// # Safety
+    ///
+    /// `raw` and `epoch` must identify a currently live RunMat GC allocation.
+    /// This is an unchecked bridge for `runmat-gc`; callers must not fabricate
+    /// handles from ordinary Rust allocations or stale allocation epochs.
+    #[doc(hidden)]
+    pub unsafe fn from_parts_unchecked(raw: NonNull<()>, epoch: usize) -> Self {
+        Self {
+            raw,
+            epoch,
             _not_send_sync: PhantomData,
         }
     }
 
     pub fn addr(&self) -> usize {
         self.raw.as_ptr() as usize
+    }
+
+    #[doc(hidden)]
+    pub fn epoch(&self) -> usize {
+        self.epoch
     }
 
     /// # Safety
@@ -74,7 +95,7 @@ impl GcHandle {
 
 impl PartialEq for GcHandle {
     fn eq(&self, other: &Self) -> bool {
-        self.raw == other.raw
+        self.raw == other.raw && self.epoch == other.epoch
     }
 }
 
@@ -82,13 +103,14 @@ impl Eq for GcHandle {}
 
 impl Hash for GcHandle {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.raw.hash(state)
+        self.raw.hash(state);
+        self.epoch.hash(state)
     }
 }
 
 impl fmt::Debug for GcHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "GcHandle({:p})", self.raw.as_ptr())
+        write!(f, "GcHandle({:p}@{})", self.raw.as_ptr(), self.epoch)
     }
 }
 
@@ -126,24 +148,38 @@ mod tests {
     }
 
     #[test]
-    fn hash_is_pointer_identity() {
+    fn hash_includes_pointer_and_epoch_identity() {
         let raw_a = Box::into_raw(Box::new(7_u64));
         let raw_b = Box::into_raw(Box::new(7_u64));
         let ptr_a = unsafe {
-            GcHandle::from_ptr_unchecked(NonNull::new(raw_a.cast()).expect("non-null test pointer"))
+            GcHandle::from_parts_unchecked(
+                NonNull::new(raw_a.cast()).expect("non-null test pointer"),
+                1,
+            )
+        };
+        let ptr_a_next_epoch = unsafe {
+            GcHandle::from_parts_unchecked(
+                NonNull::new(raw_a.cast()).expect("non-null test pointer"),
+                2,
+            )
         };
         let ptr_b = unsafe {
-            GcHandle::from_ptr_unchecked(NonNull::new(raw_b.cast()).expect("non-null test pointer"))
+            GcHandle::from_parts_unchecked(
+                NonNull::new(raw_b.cast()).expect("non-null test pointer"),
+                1,
+            )
         };
 
         let mut ptr_hash = DefaultHasher::new();
         ptr_a.hash(&mut ptr_hash);
-        let mut raw_hash = DefaultHasher::new();
-        NonNull::new(raw_a.cast::<()>())
-            .expect("non-null test pointer")
-            .hash(&mut raw_hash);
+        let mut same_hash = DefaultHasher::new();
+        ptr_a.hash(&mut same_hash);
+        let mut next_epoch_hash = DefaultHasher::new();
+        ptr_a_next_epoch.hash(&mut next_epoch_hash);
 
-        assert_eq!(ptr_hash.finish(), raw_hash.finish());
+        assert_eq!(ptr_hash.finish(), same_hash.finish());
+        assert_ne!(ptr_hash.finish(), next_epoch_hash.finish());
+        assert_ne!(ptr_a, ptr_a_next_epoch);
         assert_ne!(ptr_a, ptr_b);
 
         unsafe {

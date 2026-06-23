@@ -5,9 +5,7 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 // Downstream crates in the workspace provide runmat_builtins; during GC unit tests, we provide a minimal Value.
 use runmat_builtins::Value;
 use runmat_time::Instant;
-use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
-use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::ThreadId;
@@ -117,8 +115,8 @@ pub struct GarbageCollector {
     /// Mark-and-sweep collector
     collector: Mutex<MarkSweepCollector>,
 
-    /// Explicit roots stored as identity handles.
-    root_ptrs: Mutex<HashSet<GcHandle>>,
+    /// Explicit roots stored as identity handles with registration counts.
+    root_ptrs: Mutex<HashMap<GcHandle, usize>>,
 
     /// Collection state
     collection_in_progress: AtomicBool,
@@ -218,7 +216,7 @@ impl GarbageCollector {
             config: Arc::new(RwLock::new(config)),
             allocator: Mutex::new(allocator),
             collector: Mutex::new(collector),
-            root_ptrs: Mutex::new(HashSet::new()),
+            root_ptrs: Mutex::new(HashMap::new()),
             collection_in_progress: AtomicBool::new(false),
             active_value_borrows: AtomicUsize::new(0),
             active_value_mut_borrow: AtomicBool::new(false),
@@ -287,10 +285,10 @@ impl GarbageCollector {
         Ok(unsafe { ptr.as_ptr_unchecked().cast::<Value>().as_ptr() })
     }
 
-    fn validate_value_ptr(&self, raw: *const Value) -> Result<()> {
+    fn validate_value_handle(&self, handle: &GcHandle, raw: *const Value) -> Result<()> {
         let allocator = self.allocator.lock();
         if allocator.find_generation(raw.cast::<u8>()).is_none()
-            || !allocator.is_live_value_ptr(raw)
+            || !allocator.is_live_handle(handle)
         {
             return Err(GcError::InvalidPointer(format!(
                 "GC value handle {:p} is not live in the RunMat GC heap",
@@ -366,7 +364,7 @@ impl GarbageCollector {
     pub fn read_value(&self, ptr: &GcHandle) -> Result<GcValueRef<'_>> {
         let borrow = self.begin_value_borrow(false)?;
         let raw = Self::non_null_value_ptr(ptr)?;
-        self.validate_value_ptr(raw)?;
+        self.validate_value_handle(ptr, raw)?;
         Ok(GcValueRef {
             raw,
             _borrow: borrow,
@@ -377,7 +375,7 @@ impl GarbageCollector {
     pub fn write_value(&self, ptr: &GcHandle) -> Result<GcValueMut<'_>> {
         let borrow = self.begin_value_borrow(true)?;
         let raw = Self::non_null_value_ptr(ptr)? as *mut Value;
-        self.validate_value_ptr(raw)?;
+        self.validate_value_handle(ptr, raw)?;
         Ok(GcValueMut {
             raw,
             _borrow: borrow,
@@ -413,8 +411,8 @@ impl GarbageCollector {
         {
             return Ok(0);
         }
+        let _collection_guard = CollectionInProgressGuard::new(&self.collection_in_progress);
         if self.active_value_borrows.load(Ordering::Acquire) != 0 {
-            self.collection_in_progress.store(false, Ordering::Release);
             return Ok(0);
         }
         // Registered VM stack/vars roots live in a thread-local scanner. Until
@@ -424,7 +422,6 @@ impl GarbageCollector {
         if registered_roots_exist_on_other_threads()
             || runmat_builtins::static_property_values_exist_on_other_threads()
         {
-            self.collection_in_progress.store(false, Ordering::Release);
             return Ok(0);
         }
 
@@ -434,7 +431,7 @@ impl GarbageCollector {
         let mut combined_roots: Vec<GcHandle> = Vec::new();
         {
             let roots = self.root_ptrs.lock();
-            combined_roots.extend(roots.iter().cloned());
+            combined_roots.extend(roots.keys().cloned());
         }
         // External roots
         if let Ok(mut ext) = ROOT_SCANNER.with(|scanner| scanner.scan_roots()) {
@@ -455,8 +452,6 @@ impl GarbageCollector {
         let duration = start_time.elapsed();
         self.stats
             .record_minor_collection(collected_count, duration);
-
-        self.collection_in_progress.store(false, Ordering::Release);
 
         log::info!("Minor GC: collected {collected_count} objects in {duration:?}");
 
@@ -481,15 +476,14 @@ impl GarbageCollector {
         {
             return Ok(0);
         }
+        let _collection_guard = CollectionInProgressGuard::new(&self.collection_in_progress);
         if self.active_value_borrows.load(Ordering::Acquire) != 0 {
-            self.collection_in_progress.store(false, Ordering::Release);
             return Ok(0);
         }
         // Same thread-local root visibility rule as minor collection.
         if registered_roots_exist_on_other_threads()
             || runmat_builtins::static_property_values_exist_on_other_threads()
         {
-            self.collection_in_progress.store(false, Ordering::Release);
             return Ok(0);
         }
 
@@ -499,7 +493,7 @@ impl GarbageCollector {
         let mut combined_roots: Vec<GcHandle> = Vec::new();
         {
             let roots = self.root_ptrs.lock();
-            combined_roots.extend(roots.iter().cloned());
+            combined_roots.extend(roots.keys().cloned());
         }
         if let Ok(mut ext) = ROOT_SCANNER.with(|scanner| scanner.scan_roots()) {
             combined_roots.append(&mut ext);
@@ -520,8 +514,6 @@ impl GarbageCollector {
         self.stats
             .record_major_collection(collected_count, duration);
 
-        self.collection_in_progress.store(false, Ordering::Release);
-
         log::info!("Major GC: collected {collected_count} objects in {duration:?}");
 
         Ok(collected_count)
@@ -529,13 +521,23 @@ impl GarbageCollector {
 
     /// Add a root to protect an object from collection
     pub fn add_root(&self, root: GcHandle) -> Result<()> {
-        self.root_ptrs.lock().insert(root);
+        let mut roots = self.root_ptrs.lock();
+        *roots.entry(root).or_insert(0) += 1;
         Ok(())
     }
 
     /// Remove a root
     pub fn remove_root(&self, root: GcHandle) -> Result<()> {
-        self.root_ptrs.lock().remove(&root);
+        let mut roots = self.root_ptrs.lock();
+        match roots.get_mut(&root) {
+            Some(count) if *count > 1 => {
+                *count -= 1;
+            }
+            Some(_) => {
+                roots.remove(&root);
+            }
+            None => {}
+        }
         Ok(())
     }
 
@@ -577,6 +579,7 @@ static GC: once_cell::sync::Lazy<Arc<GarbageCollector>> =
 
 thread_local! {
     static ROOT_SCANNER: RootScanner = RootScanner::new();
+    static ACTIVE_ROOT_THREAD_GUARD: ActiveRootThreadGuard = const { ActiveRootThreadGuard };
 }
 
 static ACTIVE_ROOT_THREADS: once_cell::sync::Lazy<Mutex<HashMap<ThreadId, usize>>> =
@@ -586,7 +589,18 @@ static ACTIVE_ROOT_THREADS: once_cell::sync::Lazy<Mutex<HashMap<ThreadId, usize>
 static WRITE_BARRIERS: once_cell::sync::Lazy<Arc<WriteBarrierManager>> =
     once_cell::sync::Lazy::new(|| Arc::new(WriteBarrierManager::new(true, false)));
 
+struct ActiveRootThreadGuard;
+
+impl Drop for ActiveRootThreadGuard {
+    fn drop(&mut self) {
+        ACTIVE_ROOT_THREADS
+            .lock()
+            .remove(&std::thread::current().id());
+    }
+}
+
 fn register_active_root_thread() {
+    ACTIVE_ROOT_THREAD_GUARD.with(|_| {});
     let thread_id = std::thread::current().id();
     let mut roots = ACTIVE_ROOT_THREADS.lock();
     *roots.entry(thread_id).or_insert(0) += 1;
@@ -671,6 +685,22 @@ impl Drop for ExplicitRoot {
 
 pub fn gc_root(handle: GcHandle) -> Result<ExplicitRoot> {
     ExplicitRoot::new(handle)
+}
+
+struct CollectionInProgressGuard<'a> {
+    active: &'a AtomicBool,
+}
+
+impl<'a> CollectionInProgressGuard<'a> {
+    fn new(active: &'a AtomicBool) -> Self {
+        Self { active }
+    }
+}
+
+impl Drop for CollectionInProgressGuard<'_> {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::Release);
+    }
 }
 
 struct CollectionGate<'a> {
@@ -775,13 +805,11 @@ pub fn gc_record_write(old: &Value, new: &Value) {
 
 /// Get barrier-derived roots for minor GC
 pub fn gc_barrier_minor_roots() -> Vec<GcHandle> {
+    let alloc = GC.allocator.lock();
     WRITE_BARRIERS
         .get_minor_gc_roots()
         .into_iter()
-        .filter_map(|p| NonNull::new(p as *mut ()))
-        // SAFETY: barrier roots are recorded from GC-owned pointer addresses by
-        // the write-barrier manager.
-        .map(|ptr| unsafe { GcHandle::from_ptr_unchecked(ptr) })
+        .filter_map(|p| alloc.handle_for_live_ptr(p))
         .collect()
 }
 
@@ -793,6 +821,8 @@ pub fn gc_force_collect() -> Result<usize> {
 
 /// Reset GC for testing - always available
 pub fn gc_reset_for_test() -> Result<()> {
+    ROOT_SCANNER.with(|scanner| scanner.clear());
+
     // Reset statistics
     GC.stats.reset();
 
@@ -866,6 +896,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ptr::NonNull;
 
     #[test]
     fn test_basic_allocation() {
@@ -890,6 +921,26 @@ mod tests {
 
             let _collected = gc_collect_minor().expect("collection failed");
             drop(_ptrs);
+        });
+    }
+
+    #[test]
+    fn gc_reset_for_test_clears_current_thread_root_scanner() {
+        gc_test_context(|| {
+            let root = Box::new(crate::roots::GlobalRoot::new(
+                vec![Value::Num(1.0)],
+                "test root".to_string(),
+            ));
+            let _root_id = gc_register_root(root).expect("register root");
+            ROOT_SCANNER.with(|scanner| {
+                assert_eq!(scanner.stats().registered_roots, 1);
+            });
+
+            gc_reset_for_test().expect("reset should clear thread scanner");
+
+            ROOT_SCANNER.with(|scanner| {
+                assert_eq!(scanner.stats().registered_roots, 0);
+            });
         });
     }
 
@@ -995,10 +1046,10 @@ mod tests {
             {
                 let root = gc_root(protected).expect("root guard creation failed");
                 assert_eq!(root.handle().addr(), addr);
-                assert!(GC.root_ptrs.lock().contains(&protected));
+                assert!(GC.root_ptrs.lock().contains_key(&protected));
             }
 
-            assert!(!GC.root_ptrs.lock().contains(&protected));
+            assert!(!GC.root_ptrs.lock().contains_key(&protected));
         });
     }
 
@@ -1010,11 +1061,34 @@ mod tests {
             let addr = protected.addr();
 
             let root = gc_root(protected).expect("root guard creation failed");
-            assert!(GC.root_ptrs.lock().contains(&protected));
+            assert!(GC.root_ptrs.lock().contains_key(&protected));
 
             let handle = root.unroot().expect("explicit unroot failed");
             assert_eq!(handle.addr(), addr);
-            assert!(!GC.root_ptrs.lock().contains(&protected));
+            assert!(!GC.root_ptrs.lock().contains_key(&protected));
+        });
+    }
+
+    #[test]
+    fn duplicate_explicit_roots_are_counted_independently() {
+        gc_test_context(|| {
+            let protected =
+                gc_allocate(Value::String("protected".to_string())).expect("allocation failed");
+            let first = gc_root(protected).expect("first root");
+            let second = gc_root(protected).expect("second root");
+
+            assert_eq!(GC.root_ptrs.lock().get(&protected).copied(), Some(2));
+            drop(first);
+            assert_eq!(GC.root_ptrs.lock().get(&protected).copied(), Some(1));
+
+            gc_collect_minor().expect("minor collection failed");
+            assert_eq!(
+                gc_clone_value(&protected).expect("second root should keep value alive"),
+                Value::String("protected".to_string())
+            );
+
+            drop(second);
+            assert!(!GC.root_ptrs.lock().contains_key(&protected));
         });
     }
 
@@ -1025,7 +1099,7 @@ mod tests {
                 gc_allocate_rooted(Value::String("rooted".to_string())).expect("rooted alloc");
             let handle = root.handle();
 
-            assert!(GC.root_ptrs.lock().contains(&handle));
+            assert!(GC.root_ptrs.lock().contains_key(&handle));
             gc_collect_minor().expect("minor collection failed");
             assert_eq!(
                 gc_clone_value(&handle).expect("rooted handle should remain live"),
@@ -1033,7 +1107,7 @@ mod tests {
             );
 
             drop(root);
-            assert!(!GC.root_ptrs.lock().contains(&handle));
+            assert!(!GC.root_ptrs.lock().contains_key(&handle));
         });
     }
 

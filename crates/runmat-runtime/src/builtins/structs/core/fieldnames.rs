@@ -489,11 +489,11 @@ pub(crate) mod tests {
         );
         runmat_builtins::register_class(def);
 
-        let mut payload = StructValue::new();
+        let mut payload = ObjectInstance::new(class_name.to_string());
         payload
-            .fields
+            .properties
             .insert("Status".to_string(), Value::from("ready"));
-        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate target");
+        let target = runmat_gc::gc_allocate(Value::Object(payload)).expect("gc allocate target");
 
         let handle = HandleRef {
             class_name: class_name.to_string(),
@@ -556,11 +556,11 @@ pub(crate) mod tests {
         );
         runmat_builtins::register_class(child);
 
-        let mut payload = StructValue::new();
+        let mut payload = ObjectInstance::new(child_name.to_string());
         payload
-            .fields
+            .properties
             .insert("Status".to_string(), Value::from("ready"));
-        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate target");
+        let target = runmat_gc::gc_allocate(Value::Object(payload)).expect("gc allocate target");
 
         let handle = HandleRef {
             class_name: child_name.to_string(),

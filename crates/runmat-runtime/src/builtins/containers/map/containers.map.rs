@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ClassDef, HandleRef, IntValue, LogicalArray, MethodDef, PropertyDef, StructValue,
-    Tensor, Value,
+    CharArray, ClassDef, HandleRef, IntValue, LogicalArray, MethodDef, ObjectInstance, PropertyDef,
+    StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -1161,14 +1161,17 @@ fn allocate_handle(store: MapStore, builtin: &'static str) -> BuiltinResult<Valu
 
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     MAP_REGISTRY.with(|registry| {
-        registry.borrow_mut().insert(id, store);
-    });
-    let mut struct_value = StructValue::new();
-    struct_value
-        .fields
+        registry
+            .try_borrow_mut()
+            .map_err(|_| map_internal("containers.Map: registry is already borrowed", builtin))?
+            .insert(id, store);
+        Ok::<(), RuntimeError>(())
+    })?;
+    let mut storage = ObjectInstance::new(CLASS_NAME.to_string());
+    storage
+        .properties
         .insert("id".to_string(), Value::Int(IntValue::U64(id)));
-    let storage = Value::Struct(struct_value);
-    let gc = runmat_gc::gc_allocate(storage)
+    let gc = runmat_gc::gc_allocate(Value::Object(storage))
         .map_err(|e| map_error(format!("containers.Map: {e}"), builtin))?;
     Ok(Value::HandleObject(HandleRef {
         class_name: CLASS_NAME.to_string(),
@@ -1246,28 +1249,32 @@ fn map_id(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<u64> {
             builtin,
         )
     })?;
-    match storage {
-        Value::Struct(StructValue { fields }) => match fields.get("id") {
-            Some(Value::Int(IntValue::U64(id))) => Ok(*id),
-            Some(Value::Int(other)) => {
-                let id = other.to_i64();
-                if id < 0 {
-                    Err(map_internal(
-                        "containers.Map: negative map identifier",
-                        builtin,
-                    ))
-                } else {
-                    Ok(id as u64)
-                }
-            }
-            Some(Value::Num(n)) if *n >= 0.0 => Ok(*n as u64),
-            _ => Err(map_internal(
-                "containers.Map: corrupted storage identifier",
+    let id_value = match &storage {
+        Value::Object(object) if object.class_name == CLASS_NAME => object.properties.get("id"),
+        Value::Struct(StructValue { fields }) => fields.get("id"),
+        other => {
+            return Err(map_internal(
+                format!("containers.Map: internal storage has unexpected shape {other:?}"),
                 builtin,
-            )),
-        },
-        other => Err(map_internal(
-            format!("containers.Map: internal storage has unexpected shape {other:?}"),
+            ));
+        }
+    };
+    match id_value {
+        Some(Value::Int(IntValue::U64(id))) => Ok(*id),
+        Some(Value::Int(other)) => {
+            let id = other.to_i64();
+            if id < 0 {
+                Err(map_internal(
+                    "containers.Map: negative map identifier",
+                    builtin,
+                ))
+            } else {
+                Ok(id as u64)
+            }
+        }
+        Some(Value::Num(n)) if *n >= 0.0 => Ok(*n as u64),
+        _ => Err(map_internal(
+            "containers.Map: corrupted storage identifier",
             builtin,
         )),
     }

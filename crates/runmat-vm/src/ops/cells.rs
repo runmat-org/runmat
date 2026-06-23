@@ -398,10 +398,8 @@ where
                 }
             }
             let pos = row_major_pos_from_linear(&ca, i)?;
-            if i <= old_len {
-                if let Some(oldv) = ca.data.get(pos) {
-                    on_write(oldv, &rhs);
-                }
+            if let Some(oldv) = ca.data.get(pos) {
+                on_write(oldv, &rhs);
             }
             ca.data[pos] = rhs;
             Ok(Value::Cell(ca))
@@ -711,6 +709,24 @@ mod tests {
     fn cell_shape_error_mapping_reports_identifier() {
         let err = map_cell_shape_error("cell creation", "invalid shape");
         assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn assign_cell_value_linear_growth_records_write_barrier() {
+        let cell = CellArray::new(Vec::new(), 0, 0).expect("empty cell");
+        let mut writes = Vec::new();
+        let result = super::assign_cell_value(cell, &[3], Value::Num(42.0), |old, new| {
+            writes.push((old.clone(), new.clone()));
+        })
+        .expect("linear growth assignment");
+
+        assert_eq!(writes.len(), 1);
+        let empty_filler = Tensor::new(Vec::new(), vec![0, 0]).expect("empty filler");
+        assert_eq!(writes[0], (Value::Tensor(empty_filler), Value::Num(42.0)));
+        let Value::Cell(cell) = result else {
+            panic!("expected cell result");
+        };
+        assert_eq!(cell.data[2], Value::Num(42.0));
     }
 
     #[test]

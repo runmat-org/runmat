@@ -1057,6 +1057,12 @@ fn get_listener_field(listener: &Listener, name: &str) -> BuiltinResult<Value> {
         "Valid" | "valid" => Ok(Value::Bool(listener.valid)),
         "EventName" | "event_name" => Ok(Value::String(listener.event_name.clone())),
         "Callback" | "callback" => {
+            if !listener.valid {
+                return Err(getfield_error_with_message(
+                    "getfield: listener is invalid or deleted",
+                    &GETFIELD_ERROR_INVALID_HANDLE,
+                ));
+            }
             let value = runmat_gc::gc_clone_value(&listener.callback).map_err(|e| {
                 getfield_error_with_message(
                     format!("getfield: invalid listener callback: {e}"),
@@ -1066,6 +1072,12 @@ fn get_listener_field(listener: &Listener, name: &str) -> BuiltinResult<Value> {
             Ok(value)
         }
         "Target" | "target" => {
+            if !listener.valid {
+                return Err(getfield_error_with_message(
+                    "getfield: listener is invalid or deleted",
+                    &GETFIELD_ERROR_INVALID_HANDLE,
+                ));
+            }
             let value = runmat_gc::gc_clone_value(&listener.target).map_err(|e| {
                 getfield_error_with_message(
                     format!("getfield: invalid listener target: {e}"),
@@ -1441,6 +1453,37 @@ pub(crate) mod tests {
         let callback = run_getfield(Value::Listener(listener), vec![Value::from("Callback")])
             .expect("callback");
         assert!(matches!(callback, Value::FunctionHandle(_)));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn getfield_invalid_listener_rejects_rooted_fields() {
+        let target = runmat_gc::gc_allocate(Value::Num(7.0)).expect("gc allocate target");
+        let callback = runmat_gc::gc_allocate(Value::FunctionHandle("cb".to_string()))
+            .expect("gc allocate callback");
+        let listener = Listener {
+            id: 10,
+            target,
+            target_class_name: "EventTarget".to_string(),
+            event_name: "tick".to_string(),
+            callback,
+            enabled: false,
+            valid: false,
+        };
+
+        let err = error_message(
+            run_getfield(
+                Value::Listener(listener.clone()),
+                vec![Value::from("Callback")],
+            )
+            .unwrap_err(),
+        );
+        assert!(err.contains("listener is invalid or deleted"));
+
+        let err = error_message(
+            run_getfield(Value::Listener(listener), vec![Value::from("Target")]).unwrap_err(),
+        );
+        assert!(err.contains("listener is invalid or deleted"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

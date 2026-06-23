@@ -465,26 +465,32 @@ async fn call_registered_class_constructor(
         .with_identifier("RunMat:MethodPrivate")
         .build());
     }
-    let _constructor_receiver_guard = crate::push_constructor_receiver(default_object.clone());
-    let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
-        &ctor.function_name,
-        args,
-        requested_outputs,
-    )
-    .await
-    else {
-        let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
+    let constructor_result = crate::with_constructor_receiver(default_object.clone(), async {
+        if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
+            &ctor.function_name,
+            args,
+            requested_outputs,
+        )
+        .await
+        {
+            return Ok::<Option<Value>, RuntimeError>(Some(result?));
+        }
+        if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
             &owner_qualified,
             args,
             requested_outputs,
         )
         .await
-        else {
-            return Ok(default_object);
-        };
-        return normalize_constructor_result(default_object, result?, requested_outputs);
+        {
+            return Ok::<Option<Value>, RuntimeError>(Some(result?));
+        }
+        Ok::<Option<Value>, RuntimeError>(None)
+    })
+    .await?;
+    let Some(result) = constructor_result else {
+        return Ok(default_object);
     };
-    normalize_constructor_result(default_object, result?, requested_outputs)
+    normalize_constructor_result(default_object, result, requested_outputs)
 }
 
 fn normalize_constructor_result(
@@ -504,13 +510,26 @@ fn normalize_constructor_result(
                 Ok(Value::Object(object))
             }
             Value::HandleObject(handle) => {
-                let _ = runmat_gc::gc_with_value_mut(&handle.target, |target| {
+                let merged = runmat_gc::gc_with_value_mut(&handle.target, |target| {
                     if let Value::Object(object) = target {
                         for (field, value) in struct_value.fields {
                             object.properties.insert(field, value);
                         }
+                        true
+                    } else {
+                        false
                     }
-                });
+                })
+                .map_err(|e| {
+                    build_runtime_error(format!("constructor result handle target invalid: {e}"))
+                        .build()
+                })?;
+                if !merged {
+                    return Err(build_runtime_error(
+                        "constructor result handle target is not an object",
+                    )
+                    .build());
+                }
                 Ok(Value::HandleObject(handle))
             }
             _ => Ok(Value::Struct(struct_value)),
