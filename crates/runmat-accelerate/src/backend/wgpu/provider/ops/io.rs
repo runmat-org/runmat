@@ -128,11 +128,18 @@ impl WgpuProvider {
                 handle.buffer_id
             );
         }
+        let storage = if runmat_accelerate_api::handle_storage(handle)
+            == GpuTensorStorage::ComplexInterleaved
+        {
+            GpuTensorStorage::ComplexInterleaved
+        } else {
+            entry.storage.clone()
+        };
         if entry.len == 0 {
             return Ok(HostTensorOwned {
                 data: Vec::new(),
                 shape: handle.shape.clone(),
-                storage: runmat_accelerate_api::handle_storage(handle),
+                storage,
             });
         }
 
@@ -162,13 +169,6 @@ impl WgpuProvider {
             log::trace!("wgpu download finished copy id={}", handle.buffer_id);
             self.telemetry.record_download_bytes(size_bytes);
 
-            let storage = if runmat_accelerate_api::handle_storage(handle)
-                == GpuTensorStorage::ComplexInterleaved
-            {
-                GpuTensorStorage::ComplexInterleaved
-            } else {
-                entry.storage.clone()
-            };
             let lane_factor = match storage {
                 GpuTensorStorage::Real => 1usize,
                 GpuTensorStorage::ComplexInterleaved => 2usize,
@@ -178,7 +178,9 @@ impl WgpuProvider {
                 let base_rows = info.base_rows;
                 let base_cols = info.base_cols;
                 let logical_len = out.len() / lane_factor;
-                if out.len() % lane_factor != 0 || base_rows * base_cols != logical_len {
+                if out.len() % lane_factor != 0
+                    || base_rows.checked_mul(base_cols) != Some(logical_len)
+                {
                     return Err(anyhow!(
                         "download: transpose metadata mismatch for buffer {}",
                         handle.buffer_id

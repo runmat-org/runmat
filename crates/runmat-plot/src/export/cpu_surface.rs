@@ -817,6 +817,7 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
             frame_color,
             text_color,
         );
+        draw_axes_titles_and_labels(canvas, axes, text_color);
         return;
     }
 
@@ -961,6 +962,10 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
         );
     }
 
+    draw_axes_titles_and_labels(canvas, axes, text_color);
+}
+
+fn draw_axes_titles_and_labels(canvas: &mut Canvas, axes: &AxesView, text_color: [u8; 4]) {
     if let Some(title) = &axes.title {
         draw_text_centered(
             canvas,

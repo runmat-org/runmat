@@ -707,7 +707,7 @@ async fn axis_from_value(
                 == GpuTensorStorage::ComplexInterleaved;
             // Fast path: if the gpuArray is vector-like, keep it on-device and avoid a download.
             // We'll validate any non-vector shapes by gathering below.
-            if is_vector_shape(&handle.shape) {
+            if is_vector_shape(&handle.shape) && !is_complex {
                 *prefer_gpu = true;
                 return Ok(AxisData {
                     values: Vec::new(),
@@ -718,6 +718,7 @@ async fn axis_from_value(
             }
 
             // Fallback: gather to validate / recover axes from meshgrid matrices.
+            *prefer_gpu = true;
             let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
             match gathered {
                 Value::Tensor(tensor) => {
@@ -1020,11 +1021,17 @@ fn try_meshgrid_gpu_from_vector_axes(
     let Some(provider) = runmat_accelerate_api::provider_for_handle(x_handle) else {
         return Ok(None);
     };
-    if runmat_accelerate_api::provider_for_handle(y_handle).is_none() {
+    let Some(y_provider) = runmat_accelerate_api::provider_for_handle(y_handle) else {
+        return Ok(None);
+    };
+    if y_provider.device_id() != provider.device_id() {
         return Ok(None);
     }
     if let Some(z) = z_handle {
-        if runmat_accelerate_api::provider_for_handle(z).is_none() {
+        let Some(z_provider) = runmat_accelerate_api::provider_for_handle(z) else {
+            return Ok(None);
+        };
+        if z_provider.device_id() != provider.device_id() {
             return Ok(None);
         }
     }

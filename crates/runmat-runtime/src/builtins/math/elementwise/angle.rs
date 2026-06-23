@@ -197,6 +197,15 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+
+    #[cfg(feature = "wgpu")]
+    fn register_wgpu_provider_available() -> bool {
+        runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_ok()
+            && runmat_accelerate_api::provider().is_some()
+    }
     use runmat_builtins::{IntValue, LogicalArray, ResolveContext, StringArray, Type};
     use std::f64::consts::PI;
 
@@ -412,9 +421,10 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn angle_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
         let tensor = Tensor::new(vec![1.0, -1.0, 0.5, -0.5], vec![2, 2]).unwrap();
         let cpu = angle_tensor(tensor.clone()).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
@@ -446,10 +456,11 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn angle_wgpu_complex_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().unwrap();
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let complex = ComplexTensor::new(
             vec![(3.0, 4.0), (-2.0, 5.0), (-1.5, -0.5), (2.5, -6.0)],
             vec![2, 2],

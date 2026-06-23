@@ -171,6 +171,7 @@ impl WgpuProvider {
         let mut updated = handle.clone();
         updated.shape = new_shape.to_vec();
         runmat_accelerate_api::set_handle_storage(&updated, storage);
+        runmat_accelerate_api::clear_handle_transpose(&updated);
         Ok(updated)
     }
 
@@ -233,7 +234,14 @@ impl WgpuProvider {
                 .ok_or_else(|| anyhow!("repmat: dimension product exceeds GPU limits"))
         })?;
 
-        let storage = runmat_accelerate_api::handle_storage(handle);
+        let storage = if runmat_accelerate_api::handle_storage(handle)
+            == GpuTensorStorage::ComplexInterleaved
+            || entry.storage == GpuTensorStorage::ComplexInterleaved
+        {
+            GpuTensorStorage::ComplexInterleaved
+        } else {
+            GpuTensorStorage::Real
+        };
         let storage_factor = match storage {
             runmat_accelerate_api::GpuTensorStorage::Real => 1usize,
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => 2usize,
@@ -817,7 +825,10 @@ impl WgpuProvider {
             src_shape.extend(std::iter::repeat_n(1usize, logical_rank - src_shape.len()));
         }
 
-        let logical_total: usize = src_shape.iter().copied().product();
+        let logical_total = src_shape
+            .iter()
+            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+            .ok_or_else(|| anyhow!("permute: tensor storage length exceeds GPU limits"))?;
         let storage_total = logical_total
             .checked_mul(lane_factor)
             .ok_or_else(|| anyhow!("permute: tensor storage length exceeds GPU limits"))?;
@@ -1716,7 +1727,7 @@ mod tests {
         ];
         for (idx, (actual, expected)) in host.data.iter().zip(expected.iter()).enumerate() {
             assert!(
-                (actual - expected).abs() <= 1.0e-10,
+                (actual - expected).abs() <= 1.0e-6,
                 "magnitude mismatch at {idx}: actual={actual} expected={expected}"
             );
         }

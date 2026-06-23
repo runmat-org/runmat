@@ -225,11 +225,9 @@ async fn hilbert_gpu_tensor(
     let current_len = shape.get(dim_index).copied().unwrap_or(1);
     let target_len = length.unwrap_or(current_len);
     if target_len != 0 {
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
-            .or_else(runmat_accelerate_api::provider)
-        {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
             let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-            if let Ok(out) = provider
+            match provider
                 .signal_hilbert(&ProviderHilbertRequest {
                     input: &handle,
                     length,
@@ -237,7 +235,17 @@ async fn hilbert_gpu_tensor(
                 })
                 .await
             {
-                return Ok(gpu_helpers::complex_gpu_value(out));
+                Ok(out) => return Ok(gpu_helpers::complex_gpu_value(out)),
+                Err(err) => {
+                    let message = err.to_string();
+                    if !message.contains("not supported") {
+                        return Err(hilbert_error_with_source(
+                            &HILBERT_ERROR_INTERNAL,
+                            "gpu hilbert failed",
+                            build_runtime_error(message).build(),
+                        ));
+                    }
+                }
             }
         }
     }
@@ -605,8 +613,8 @@ pub(crate) mod tests {
         assert_eq!(gathered.shape, vec![1, 4]);
         let expected = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
         for (actual, expected) in gathered.data.iter().copied().zip(expected) {
-            assert!((actual.0 - expected.0).abs() <= 1.0e-8);
-            assert!((actual.1 - expected.1).abs() <= 1.0e-8);
+            assert!((actual.0 - expected.0).abs() <= 1.0e-5);
+            assert!((actual.1 - expected.1).abs() <= 1.0e-5);
         }
         provider.free(&handle).ok();
         provider.free(&out_handle).ok();

@@ -365,7 +365,10 @@ async fn output_gpu(
         .checked_mul(cols)
         .ok_or_else(|| pwelch_error(&PWELCH_ERROR_INTERNAL))?;
     let range = gpu_range(options.range);
-    let estimate = runmat_accelerate_api::uniform_spectral_estimate(ProviderSpectralRequest {
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
+        return Err(pwelch_error(&PWELCH_ERROR_INTERNAL));
+    };
+    let request = ProviderSpectralRequest {
         input: handle,
         input_len,
         input_complex: runmat_accelerate_api::handle_storage(handle)
@@ -380,45 +383,85 @@ async fn output_gpu(
         },
         range,
         denominator,
-    })
-    .await
-    .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, err.to_string()))?;
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(pwelch_error(&PWELCH_ERROR_INTERNAL));
     };
-
-    let ps_frames = provider
-        .reshape(&estimate.ps, &[estimate.rows, segment_count, cols])
-        .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, err.to_string()))?;
-    let ps_mean = provider
-        .reduce_mean_nd(&ps_frames, &[1])
+    let estimate = provider
+        .uniform_spectral_estimate(&request)
         .await
         .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, err.to_string()))?;
-    let pxx = provider
-        .reshape(&ps_mean, &[estimate.rows, cols])
-        .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, err.to_string()))?;
 
-    let f_values = frequency_vector(nfft, options.fs, options.range);
-    let f_shape = [estimate.rows, 1usize];
-    let f = provider
-        .upload(&runmat_accelerate_api::HostTensorView {
-            data: &f_values,
-            shape: &f_shape,
-        })
-        .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, err.to_string()))?;
+    let ps_frames = match provider.reshape(&estimate.ps, &[estimate.rows, segment_count, cols]) {
+        Ok(ps_frames) => ps_frames,
+        Err(err) => {
+            provider.free(&estimate.s).ok();
+            provider.free(&estimate.ps).ok();
+            return Err(pwelch_error_with_detail(
+                &PWELCH_ERROR_INTERNAL,
+                err.to_string(),
+            ));
+        }
+    };
+    let ps_mean = match provider.reduce_mean_nd(&ps_frames, &[1]).await {
+        Ok(ps_mean) => ps_mean,
+        Err(err) => {
+            provider.free(&estimate.s).ok();
+            provider.free(&estimate.ps).ok();
+            provider.free(&ps_frames).ok();
+            return Err(pwelch_error_with_detail(
+                &PWELCH_ERROR_INTERNAL,
+                err.to_string(),
+            ));
+        }
+    };
+    let pxx = match provider.reshape(&ps_mean, &[estimate.rows, cols]) {
+        Ok(pxx) => pxx,
+        Err(err) => {
+            provider.free(&estimate.s).ok();
+            provider.free(&estimate.ps).ok();
+            provider.free(&ps_frames).ok();
+            provider.free(&ps_mean).ok();
+            return Err(pwelch_error_with_detail(
+                &PWELCH_ERROR_INTERNAL,
+                err.to_string(),
+            ));
+        }
+    };
 
     provider.free(&estimate.s).ok();
+    provider.free(&estimate.ps).ok();
     provider.free(&ps_frames).ok();
+    if ps_mean.buffer_id != pxx.buffer_id {
+        provider.free(&ps_mean).ok();
+    }
 
     let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(pxx);
-    let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f);
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
+            if let Value::GpuTensor(handle) = &pxx {
+                provider.free(handle).ok();
+            }
             return Ok(Value::OutputList(Vec::new()));
         }
         if out_count == 1 {
             return Ok(Value::OutputList(vec![pxx]));
         }
+        let f_values = frequency_vector(nfft, options.fs, options.range);
+        let f_shape = [estimate.rows, 1usize];
+        let f = match provider.upload(&runmat_accelerate_api::HostTensorView {
+            data: &f_values,
+            shape: &f_shape,
+        }) {
+            Ok(f) => f,
+            Err(err) => {
+                if let Value::GpuTensor(handle) = &pxx {
+                    provider.free(handle).ok();
+                }
+                return Err(pwelch_error_with_detail(
+                    &PWELCH_ERROR_INTERNAL,
+                    err.to_string(),
+                ));
+            }
+        };
+        let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f);
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
             vec![pxx, f],
@@ -1271,6 +1314,7 @@ mod tests {
     #[cfg(feature = "wgpu")]
     #[test]
     fn pwelch_wgpu_keeps_uniform_outputs_resident_and_matches_cpu() {
+        let _guard = crate::builtins::common::test_support::accel_test_lock();
         let Some(provider) = runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider()
             .expect("wgpu provider")
         else {

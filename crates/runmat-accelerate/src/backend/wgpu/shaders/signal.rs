@@ -678,7 +678,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 
 fn spectral_centered_shift(nfft: usize) -> usize {
     if nfft.is_multiple_of(2) {
-        nfft / 2 + 1
+        nfft / 2
     } else {
         nfft.div_ceil(2)
     }

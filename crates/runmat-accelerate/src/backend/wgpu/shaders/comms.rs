@@ -20,10 +20,10 @@ struct Tensor {{
 }};
 
 struct ErrorState {{
-    code: u32,
-    index: u32,
+    state: atomic<u32>,
     _pad0: u32,
     _pad1: u32,
+    _pad2: u32,
 }};
 
 struct Params {{
@@ -45,11 +45,9 @@ fn isfinite_scalar(x: {ty}) -> bool {{
 }}
 
 fn set_error(code: u32, index: u32) {{
-    if Error.code != 0u {{
-        return;
-    }}
-    Error.code = code;
-    Error.index = index;
+    let packed_index = min(index, 0x3fffffffu);
+    let packed = (code << 30u) | packed_index;
+    atomicMin(&Error.state, packed);
 }}
 
 @compute @workgroup_size({workgroup_size}, 1, 1)
@@ -58,10 +56,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     if idx >= params.len {{
         return;
     }}
-    if Error.code != 0u {{
-        return;
-    }}
-
     let raw = Symbols.data[idx];
     if !isfinite_scalar(raw) {{
         set_error(1u, idx);
@@ -101,7 +95,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         order = order,
         epsilon = match precision {
             NumericPrecision::F64 => "1.0e-9",
-            NumericPrecision::F32 => "0.0",
+            NumericPrecision::F32 => "1.0e-5",
         },
         max_val = max_val,
         workgroup_size = workgroup_size,
@@ -132,10 +126,10 @@ struct Tensor {{
 }};
 
 struct ErrorState {{
-    code: u32,
-    index: u32,
+    state: atomic<u32>,
     _pad0: u32,
     _pad1: u32,
+    _pad2: u32,
 }};
 
 struct Params {{
@@ -160,11 +154,9 @@ fn isfinite_scalar(x: {ty}) -> bool {{
 }}
 
 fn set_error(code: u32, index: u32) {{
-    if Error.code != 0u {{
-        return;
-    }}
-    Error.code = code;
-    Error.index = index;
+    let packed_index = min(index, 0x3fffffffu);
+    let packed = (code << 30u) | packed_index;
+    atomicMin(&Error.state, packed);
 }}
 
 @compute @workgroup_size({workgroup_size}, 1, 1)
@@ -173,10 +165,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     if out_idx >= params.output_len {{
         return;
     }}
-    if Error.code != 0u {{
-        return;
-    }}
-
     let channel = out_idx / params.output_rows;
     let group = out_idx - channel * params.output_rows;
     let base = channel * params.input_rows + group * params.bits_per_symbol;

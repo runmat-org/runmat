@@ -689,7 +689,7 @@ fn decode_wave_samples(bytes: &[u8], options: AudioreadOptions) -> Result<Decode
 }
 
 fn native_wave_dtype(fmt: WaveFormat) -> NumericDType {
-    match (fmt.effective_format_tag(), fmt.bits_per_sample) {
+    match (fmt.effective_format_tag(), fmt.effective_bits_per_sample()) {
         (0x0001, 8) => NumericDType::U8,
         (0x0003, 32) => NumericDType::F32,
         _ => NumericDType::F64,
@@ -697,7 +697,7 @@ fn native_wave_dtype(fmt: WaveFormat) -> NumericDType {
 }
 
 fn decode_wave_sample(bytes: &[u8], fmt: WaveFormat, native: bool) -> Result<f64, String> {
-    match (fmt.effective_format_tag(), fmt.bits_per_sample) {
+    match (fmt.effective_format_tag(), fmt.effective_bits_per_sample()) {
         (0x0001, 8) => {
             let raw = bytes[0] as f64;
             Ok(if native { raw } else { (raw - 128.0) / 128.0 })
@@ -760,10 +760,18 @@ fn parse_wave_container(bytes: &[u8]) -> Result<WaveContainer, String> {
     let mut fmt: Option<WaveFormat> = None;
     let mut data: Option<(usize, usize)> = None;
     let mut rf64_data_size: Option<u64> = None;
-    while pos + 8 <= bytes.len() {
-        let id = &bytes[pos..pos + 4];
-        let declared_size = read_u32_le(bytes, pos + 4)?;
-        pos += 8;
+    while pos.checked_add(8).is_some_and(|end| end <= bytes.len()) {
+        let id_end = pos
+            .checked_add(4)
+            .ok_or_else(|| "WAVE chunk offset overflows platform limits".to_string())?;
+        let size_offset = pos
+            .checked_add(4)
+            .ok_or_else(|| "WAVE chunk offset overflows platform limits".to_string())?;
+        let id = &bytes[pos..id_end];
+        let declared_size = read_u32_le(bytes, size_offset)?;
+        pos = pos
+            .checked_add(8)
+            .ok_or_else(|| "WAVE chunk offset overflows platform limits".to_string())?;
         let size = if is_rf64 && id == b"data" && declared_size == u32::MAX {
             let actual = rf64_data_size.ok_or_else(|| {
                 "RF64 data chunk uses sentinel size without ds64 metadata".to_string()
@@ -773,7 +781,10 @@ fn parse_wave_container(bytes: &[u8]) -> Result<WaveContainer, String> {
         } else {
             declared_size as usize
         };
-        if pos + size > bytes.len() {
+        let chunk_end = pos
+            .checked_add(size)
+            .ok_or_else(|| "WAVE chunk size overflows platform limits".to_string())?;
+        if chunk_end > bytes.len() {
             return Err("WAVE chunk extends past end of file".to_string());
         }
         match id {
@@ -783,11 +794,16 @@ fn parse_wave_container(bytes: &[u8]) -> Result<WaveContainer, String> {
                 }
                 rf64_data_size = Some(read_u64_le(bytes, pos + 8)?);
             }
-            b"fmt " => fmt = Some(parse_wave_fmt(&bytes[pos..pos + size])?),
+            b"fmt " => fmt = Some(parse_wave_fmt(&bytes[pos..chunk_end])?),
             b"data" => data = Some((pos, size)),
             _ => {}
         }
-        pos += size + (size % 2);
+        let padded_size = size
+            .checked_add(size % 2)
+            .ok_or_else(|| "WAVE padded chunk size overflows platform limits".to_string())?;
+        pos = pos
+            .checked_add(padded_size)
+            .ok_or_else(|| "WAVE chunk offset overflows platform limits".to_string())?;
     }
 
     let fmt = fmt.ok_or_else(|| "WAVE file is missing a fmt chunk".to_string())?;
@@ -815,6 +831,10 @@ struct WaveFormat {
 impl WaveFormat {
     fn effective_format_tag(self) -> u16 {
         self.subformat_tag.unwrap_or(self.format_tag)
+    }
+
+    fn effective_bits_per_sample(self) -> u16 {
+        self.valid_bits_per_sample.unwrap_or(self.bits_per_sample)
     }
 }
 

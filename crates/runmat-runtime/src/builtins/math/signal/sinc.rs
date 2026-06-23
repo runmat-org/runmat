@@ -818,6 +818,7 @@ mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn sinc_wgpu_complex_matches_cpu() {
+        let _guard = test_support::accel_test_lock();
         if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         )
@@ -826,6 +827,7 @@ mod tests {
             return;
         }
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
         let complex =
             ComplexTensor::new(vec![(0.0, 0.0), (0.5, 0.25), (1.0, -0.5)], vec![3, 1]).unwrap();
         let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");

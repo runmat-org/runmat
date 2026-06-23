@@ -141,10 +141,44 @@ async fn sign_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn sign_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) =
-        runmat_accelerate_api::provider_for_handle(&handle).or_else(runmat_accelerate_api::provider)
+    if runmat_accelerate_api::handle_storage(&handle)
+        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
     {
+        let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) else {
+            return Err(sign_error_with_detail(
+                &SIGN_ERROR_INTERNAL,
+                "GPU provider unavailable for complex input",
+            ));
+        };
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+            .await
+            .map_err(|err| sign_error_with_detail(&SIGN_ERROR_INTERNAL, err))?;
+        let Value::ComplexTensor(tensor) = sign_complex_tensor(match gathered {
+            Value::ComplexTensor(tensor) => tensor,
+            other => {
+                return Err(sign_error_with_detail(
+                    &SIGN_ERROR_INTERNAL,
+                    format!("expected complex GPU input, got {other:?}"),
+                ));
+            }
+        })?
+        else {
+            return Err(sign_error_with_detail(
+                &SIGN_ERROR_INTERNAL,
+                "complex sign returned non-complex output",
+            ));
+        };
+        let out = gpu_helpers::upload_complex_tensor(provider, &tensor)
+            .map_err(|err| sign_error_with_detail(&SIGN_ERROR_INTERNAL, err))?;
+        return Ok(gpu_helpers::complex_gpu_value(out));
+    }
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_sign(&handle).await {
+            if runmat_accelerate_api::handle_storage(&out)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                return Ok(gpu_helpers::complex_gpu_value(out));
+            }
             return Ok(gpu_helpers::resident_gpu_value(out));
         }
     }

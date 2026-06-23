@@ -77,6 +77,11 @@ async fn qammod_gpu(
         .or_else(runmat_accelerate_api::provider)
         .ok_or_else(|| qammod_error("qammod: no acceleration provider registered"))?;
     let constellation = constellation_table(order, &options)?;
+    if runmat_accelerate_api::handle_is_logical(&handle)
+        && !matches!(options.input_type, InputType::Bit)
+    {
+        return Err(qammod_error("qammod: logical X requires InputType='bit'"));
+    }
     match options.input_type {
         InputType::Integer => {
             let request = ProviderModulationRequest {
@@ -230,14 +235,25 @@ impl SymbolInput {
         match value {
             Value::Tensor(tensor) => Self::from_tensor(tensor, order, input_type),
             Value::LogicalArray(logical) => Self::from_logical(logical, order, input_type),
-            Value::Num(n) => Ok(Self {
-                data: vec![number_to_symbol_for_input(n, input_type)?],
-                shape: vec![1, 1],
-            }),
-            Value::Int(i) => Ok(Self {
-                data: vec![number_to_symbol_for_input(i.to_f64(), input_type)?],
-                shape: vec![1, 1],
-            }),
+            Value::Num(n) => match input_type {
+                InputType::Integer => Ok(Self {
+                    data: vec![number_to_symbol(n)?],
+                    shape: vec![1, 1],
+                }),
+                InputType::Bit => bits_to_symbols(vec![number_to_bit(n, "X")?], vec![1, 1], order),
+            },
+            Value::Int(i) => {
+                let n = i.to_f64();
+                match input_type {
+                    InputType::Integer => Ok(Self {
+                        data: vec![number_to_symbol(n)?],
+                        shape: vec![1, 1],
+                    }),
+                    InputType::Bit => {
+                        bits_to_symbols(vec![number_to_bit(n, "X")?], vec![1, 1], order)
+                    }
+                }
+            }
             Value::Bool(b) => Ok(Self {
                 data: vec![usize::from(b)],
                 shape: vec![1, 1],
@@ -548,13 +564,6 @@ fn scalar_number(value: &Value, name: &str) -> BuiltinResult<f64> {
 
 fn number_to_symbol(value: f64) -> BuiltinResult<usize> {
     number_to_symbol_with_name(value, "X")
-}
-
-fn number_to_symbol_for_input(value: f64, input_type: InputType) -> BuiltinResult<usize> {
-    match input_type {
-        InputType::Integer => number_to_symbol(value),
-        InputType::Bit => Ok(usize::from(number_to_bit(value, "X")?)),
-    }
 }
 
 fn bits_per_symbol(order: usize) -> BuiltinResult<usize> {

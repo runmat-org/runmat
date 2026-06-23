@@ -235,10 +235,7 @@ async fn cos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         Value::ComplexTensor(ct) => cos_complex_tensor(ct),
         Value::Tensor(tensor) => cos_tensor(tensor).map(tensor::tensor_into_value),
         Value::Num(n) => Ok(Value::Num(n.cos())),
-        other => Err(cos_error_with_detail(
-            &COS_ERROR_INVALID_INPUT,
-            format!("unsupported gathered gpuArray value {other:?}"),
-        )),
+        other => cos_real(other),
     }
 }
 
@@ -393,12 +390,6 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
 
 #[async_recursion::async_recursion(?Send)]
 async fn convert_to_gpu_complex(value: Value) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        cos_error_with_detail(
-            &COS_ERROR_GPU_UNAVAILABLE,
-            "complex GPU output requested via 'like' but no acceleration provider is active",
-        )
-    })?;
     match value {
         Value::GpuTensor(handle) => {
             if runmat_accelerate_api::handle_storage(&handle)
@@ -425,6 +416,12 @@ async fn convert_to_gpu_complex(value: Value) -> BuiltinResult<Value> {
             }
         }
         Value::Complex(re, im) => {
+            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                cos_error_with_detail(
+                    &COS_ERROR_GPU_UNAVAILABLE,
+                    "complex GPU output requested via 'like' but no acceleration provider is active",
+                )
+            })?;
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
@@ -432,6 +429,12 @@ async fn convert_to_gpu_complex(value: Value) -> BuiltinResult<Value> {
             Ok(Value::GpuTensor(handle))
         }
         Value::ComplexTensor(tensor) => {
+            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                cos_error_with_detail(
+                    &COS_ERROR_GPU_UNAVAILABLE,
+                    "complex GPU output requested via 'like' but no acceleration provider is active",
+                )
+            })?;
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
                 .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
             Ok(Value::GpuTensor(handle))

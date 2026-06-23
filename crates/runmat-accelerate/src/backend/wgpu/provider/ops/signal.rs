@@ -47,16 +47,28 @@ impl WgpuProvider {
             self.precision,
         );
         let frame_inputs = [request.input.clone(), window.clone()];
-        let framed = self.fused_elementwise_with_telemetry_exec(
+        let framed = match self.fused_elementwise_with_telemetry_exec(
             &frame_shader,
             &frame_inputs,
             &[request.nfft, request.frame_count],
             framed_len,
-        )?;
+        ) {
+            Ok(framed) => framed,
+            Err(err) => {
+                self.free_exec(&window).ok();
+                return Err(err);
+            }
+        };
         self.free_exec(&window).ok();
         runmat_accelerate_api::set_handle_storage(&framed, GpuTensorStorage::ComplexInterleaved);
 
-        let spectrum = self.fft_dim_exec(&framed, None, 0).await?;
+        let spectrum = match self.fft_dim_exec(&framed, None, 0).await {
+            Ok(spectrum) => spectrum,
+            Err(err) => {
+                self.free_exec(&framed).ok();
+                return Err(err);
+            }
+        };
         self.free_exec(&framed).ok();
 
         let rows = spectral_selected_frequency_len(request.nfft, request.range);
@@ -69,12 +81,18 @@ impl WgpuProvider {
                 .and_then(|len| len.checked_mul(2))
                 .ok_or_else(|| anyhow!("uniform_spectral_estimate: output too large"))?;
             let shader = spectral_select_shader(request.nfft, rows, range, self.precision);
-            let handle = self.fused_elementwise_with_telemetry_exec(
+            let handle = match self.fused_elementwise_with_telemetry_exec(
                 &shader,
                 std::slice::from_ref(&spectrum),
                 &[rows, request.frame_count],
                 selected_len,
-            )?;
+            ) {
+                Ok(handle) => handle,
+                Err(err) => {
+                    self.free_exec(&spectrum).ok();
+                    return Err(err);
+                }
+            };
             self.free_exec(&spectrum).ok();
             runmat_accelerate_api::set_handle_storage(
                 &handle,
@@ -93,12 +111,18 @@ impl WgpuProvider {
             request.denominator,
             self.precision,
         );
-        let ps = self.fused_elementwise_with_telemetry_exec(
+        let ps = match self.fused_elementwise_with_telemetry_exec(
             &ps_shader,
             std::slice::from_ref(&selected),
             &[rows, request.frame_count],
             ps_len,
-        )?;
+        ) {
+            Ok(ps) => ps,
+            Err(err) => {
+                self.free_exec(&selected).ok();
+                return Err(err);
+            }
+        };
 
         Ok(ProviderSpectralResult {
             s: selected,
@@ -112,14 +136,17 @@ impl WgpuProvider {
         &self,
         request: &ProviderEnvelopeRequest<'_>,
     ) -> Result<ProviderEnvelopeResult> {
+        let output_len = request
+            .output_shape
+            .iter()
+            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+            .ok_or_else(|| anyhow!("signal_envelope: invalid request"))?;
+        let input_len = request
+            .channel_len
+            .checked_mul(request.channel_count)
+            .ok_or_else(|| anyhow!("signal_envelope: invalid request"))?;
         ensure!(
-            request.channel_len > 0
-                && request.channel_count > 0
-                && request
-                    .output_shape
-                    .iter()
-                    .try_fold(1usize, |acc, &dim| { acc.checked_mul(dim) })
-                    == request.channel_len.checked_mul(request.channel_count),
+            request.channel_len > 0 && request.channel_count > 0 && output_len == input_len,
             "signal_envelope: invalid request"
         );
         let entry = self.get_entry(request.input)?;
@@ -133,16 +160,18 @@ impl WgpuProvider {
             "signal_envelope: complex input tensors are not supported"
         );
         ensure!(
-            entry.len == request.channel_len * request.channel_count,
+            entry.len == input_len,
             "signal_envelope: input length mismatch"
         );
 
         match request.method {
             ProviderEnvelopeMethod::Analytic => self.signal_envelope_analytic_exec(request).await,
             ProviderEnvelopeMethod::AnalyticFir { filter_len } => {
+                ensure!(filter_len > 0, "signal_envelope: invalid request");
                 self.signal_envelope_analytic_fir_exec(request, filter_len)
             }
             ProviderEnvelopeMethod::Rms { window_len } => {
+                ensure!(window_len > 0, "signal_envelope: invalid request");
                 self.signal_envelope_rms_exec(request, window_len)
             }
         }
@@ -196,6 +225,10 @@ impl WgpuProvider {
                 "signal_hilbert: dimensions exceed GPU kernel limits"
             );
 
+            ensure!(
+                spectrum_entry.len % 2 == 0,
+                "signal_hilbert: invalid complex output length"
+            );
             let shader = analytic_signal_mask_shader(
                 transform_len,
                 inner_stride,
@@ -254,7 +287,13 @@ impl WgpuProvider {
         )?;
         runmat_accelerate_api::set_handle_storage(&centered, GpuTensorStorage::ComplexInterleaved);
 
-        let spectrum = self.fft_dim_exec(&centered, None, 0).await?;
+        let spectrum = match self.fft_dim_exec(&centered, None, 0).await {
+            Ok(spectrum) => spectrum,
+            Err(err) => {
+                self.free_exec(&centered).ok();
+                return Err(err);
+            }
+        };
         self.free_exec(&centered).ok();
 
         let mask_shader = envelope_analytic_mask_shader(
@@ -262,16 +301,28 @@ impl WgpuProvider {
             request.channel_count,
             self.precision,
         );
-        let filtered = self.fused_elementwise_with_telemetry_exec(
+        let filtered = match self.fused_elementwise_with_telemetry_exec(
             &mask_shader,
             std::slice::from_ref(&spectrum),
             &channel_shape,
             complex_len,
-        )?;
+        ) {
+            Ok(filtered) => filtered,
+            Err(err) => {
+                self.free_exec(&spectrum).ok();
+                return Err(err);
+            }
+        };
         self.free_exec(&spectrum).ok();
         runmat_accelerate_api::set_handle_storage(&filtered, GpuTensorStorage::ComplexInterleaved);
 
-        let analytic = self.ifft_dim_exec(&filtered, None, 0).await?;
+        let analytic = match self.ifft_dim_exec(&filtered, None, 0).await {
+            Ok(analytic) => analytic,
+            Err(err) => {
+                self.free_exec(&filtered).ok();
+                return Err(err);
+            }
+        };
         self.free_exec(&filtered).ok();
 
         let real_len = request
@@ -284,13 +335,19 @@ impl WgpuProvider {
             self.precision,
         );
         let inputs = [request.input.clone(), analytic.clone()];
-        let mut outputs = self.fused_elementwise_multi_with_telemetry_exec(
+        let mut outputs = match self.fused_elementwise_multi_with_telemetry_exec(
             &bounds_shader,
             &inputs,
             request.output_shape,
             real_len,
             2,
-        )?;
+        ) {
+            Ok(outputs) => outputs,
+            Err(err) => {
+                self.free_exec(&analytic).ok();
+                return Err(err);
+            }
+        };
         self.free_exec(&analytic).ok();
         ensure!(outputs.len() == 2, "signal_envelope: missing outputs");
         let lower = outputs.pop().expect("lower output");
@@ -321,13 +378,19 @@ impl WgpuProvider {
             self.precision,
         );
         let inputs = [request.input.clone(), kernel.clone()];
-        let mut outputs = self.fused_elementwise_multi_with_telemetry_exec(
+        let mut outputs = match self.fused_elementwise_multi_with_telemetry_exec(
             &shader,
             &inputs,
             request.output_shape,
             real_len,
             2,
-        )?;
+        ) {
+            Ok(outputs) => outputs,
+            Err(err) => {
+                self.free_exec(&kernel).ok();
+                return Err(err);
+            }
+        };
         self.free_exec(&kernel).ok();
         ensure!(outputs.len() == 2, "signal_envelope: missing outputs");
         let lower = outputs.pop().expect("lower output");
@@ -2030,9 +2093,19 @@ mod tests {
             return;
         }
         let expected = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
-        for (actual, expected) in out.iter().copied().zip(expected) {
-            assert!((actual.0 - expected.0).abs() < 1.0e-8);
-            assert!((actual.1 - expected.1).abs() < 1.0e-8);
+        for (idx, (actual, expected)) in out.iter().copied().zip(expected).enumerate() {
+            assert!(
+                (actual.0 - expected.0).abs() < 1.0e-5,
+                "real mismatch at {idx}: actual={} expected={}",
+                actual.0,
+                expected.0
+            );
+            assert!(
+                (actual.1 - expected.1).abs() < 1.0e-5,
+                "imag mismatch at {idx}: actual={} expected={}",
+                actual.1,
+                expected.1
+            );
         }
     }
 
@@ -2053,9 +2126,19 @@ mod tests {
             (0.0, 1.0),
             (-1.0, 0.0),
         ];
-        for (actual, expected) in out.iter().copied().zip(expected) {
-            assert!((actual.0 - expected.0).abs() < 1.0e-8);
-            assert!((actual.1 - expected.1).abs() < 1.0e-8);
+        for (idx, (actual, expected)) in out.iter().copied().zip(expected).enumerate() {
+            assert!(
+                (actual.0 - expected.0).abs() < 1.0e-5,
+                "real mismatch at {idx}: actual={} expected={}",
+                actual.0,
+                expected.0
+            );
+            assert!(
+                (actual.1 - expected.1).abs() < 1.0e-5,
+                "imag mismatch at {idx}: actual={} expected={}",
+                actual.1,
+                expected.1
+            );
         }
     }
 

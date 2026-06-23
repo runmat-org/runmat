@@ -7,7 +7,6 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
-use runmat_thread_local::runmat_thread_local;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -18,7 +17,7 @@ pub(crate) const DEFAULT_DIGITS: usize = 32;
 pub(crate) const MIN_DIGITS: usize = 1;
 pub(crate) const MAX_DIGITS: usize = 4096;
 
-runmat_thread_local! {
+thread_local! {
     static CURRENT_DIGITS: Cell<usize> = const { Cell::new(DEFAULT_DIGITS) };
 }
 
@@ -93,7 +92,7 @@ async fn digits_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     let old = current_digits();
     if let Some(value) = rest.first() {
         let new_digits = parse_digits(value)?;
-        CURRENT_DIGITS.with(|slot| slot.set(new_digits));
+        CURRENT_DIGITS.with(|digits| digits.set(new_digits));
     }
     Ok(Value::Num(old as f64))
 }
@@ -104,7 +103,7 @@ pub(crate) fn current_digits() -> usize {
 
 #[cfg(test)]
 pub(crate) fn set_current_digits_for_test(digits: usize) {
-    CURRENT_DIGITS.with(|slot| slot.set(digits));
+    CURRENT_DIGITS.with(|current| current.set(digits));
 }
 
 fn parse_digits(value: &Value) -> BuiltinResult<usize> {
@@ -179,7 +178,7 @@ mod tests {
 
     fn lock_digits() -> MutexGuard<'static, ()> {
         let guard = DIGITS_TEST_LOCK.lock().expect("digits lock");
-        CURRENT_DIGITS.with(|slot| slot.set(DEFAULT_DIGITS));
+        set_current_digits_for_test(DEFAULT_DIGITS);
         guard
     }
 

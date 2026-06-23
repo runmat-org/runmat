@@ -35,7 +35,7 @@ const POLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescri
     inputs: &POLE_INPUTS,
     outputs: &POLE_OUTPUT,
 }];
-const POLE_ERRORS: [BuiltinErrorDescriptor; 3] = [
+const POLE_ERRORS: [BuiltinErrorDescriptor; 4] = [
     BuiltinErrorDescriptor {
         code: "RM.POLE.INVALID_MODEL",
         identifier: Some("RunMat:pole:InvalidModel"),
@@ -47,6 +47,12 @@ const POLE_ERRORS: [BuiltinErrorDescriptor; 3] = [
         identifier: Some("RunMat:pole:UnsupportedModel"),
         when: "Model form is unsupported.",
         message: "pole: unsupported model",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.POLE.INVALID_ARGUMENT",
+        identifier: Some("RunMat:pole:InvalidArgument"),
+        when: "Model metadata or arguments are malformed.",
+        message: "pole: invalid argument",
     },
     BuiltinErrorDescriptor {
         code: "RM.POLE.INTERNAL",

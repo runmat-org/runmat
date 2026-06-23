@@ -365,8 +365,18 @@ fn round_to_significant_digits(text: &mut String, significant_positions: &[usize
     let insert_at = if text.starts_with('-') { 1 } else { 0 };
     let unsigned = &text[insert_at..];
     if unsigned.starts_with("0.") {
+        let decimal = insert_at + 1;
+        let first_significant = significant_positions[0];
         text.truncate(insert_at);
-        text.push('1');
+        if first_significant == decimal + 1 {
+            text.push('1');
+        } else {
+            text.push_str("0.");
+            for _ in 0..first_significant.saturating_sub(decimal + 2) {
+                text.push('0');
+            }
+            text.push('1');
+        }
         return;
     }
     text.insert(insert_at, '1');
@@ -440,6 +450,9 @@ fn vpa_error_with_message(
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use std::sync::Mutex;
+
+    static DIGITS_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -457,11 +470,21 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn vpa_uses_current_digits_when_precision_is_omitted() {
+        let _guard = DIGITS_TEST_LOCK.lock().expect("digits lock");
+        struct DigitsReset;
+        impl Drop for DigitsReset {
+            fn drop(&mut self) {
+                super::super::digits::set_current_digits_for_test(
+                    super::super::digits::DEFAULT_DIGITS,
+                );
+            }
+        }
+
+        let _reset = DigitsReset;
         super::super::digits::set_current_digits_for_test(12);
         let value =
             block_on(vpa_builtin(Value::Num(std::f64::consts::PI), Vec::new())).expect("vpa");
         assert_eq!(value.to_string(), "3.14159265359");
-        super::super::digits::set_current_digits_for_test(super::super::digits::DEFAULT_DIGITS);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -494,6 +517,14 @@ mod tests {
         ))
         .expect("vpa");
         assert_eq!(value.to_string(), "1");
+
+        let rational = SymbolicExpr::rational(999, 10000).expect("rational");
+        let value = block_on(vpa_builtin(
+            Value::Symbolic(rational),
+            vec![Value::Num(1.0)],
+        ))
+        .expect("vpa");
+        assert_eq!(value.to_string(), "0.1");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

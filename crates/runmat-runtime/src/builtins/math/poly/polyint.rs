@@ -174,14 +174,17 @@ async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResul
         }
     }
 
-    let was_gpu = matches!(coeffs, Value::GpuTensor(_));
-    polyint_host_value(coeffs, constant, was_gpu).await
+    let source_gpu = match &coeffs {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
+    };
+    polyint_host_value(coeffs, constant, source_gpu).await
 }
 
 async fn polyint_host_value(
     coeffs: Value,
     constant: Complex64,
-    was_gpu: bool,
+    source_gpu: Option<runmat_accelerate_api::GpuTensorHandle>,
 ) -> BuiltinResult<Value> {
     let polynomial = parse_polynomial(coeffs).await?;
     let mut integrated = integrate_coeffs(&polynomial.coeffs);
@@ -191,7 +194,7 @@ async fn polyint_host_value(
         *last += constant;
     }
     let value = coeffs_to_value(&integrated, polynomial.orientation)?;
-    maybe_return_gpu(value, was_gpu)
+    maybe_return_gpu(value, source_gpu.as_ref())
 }
 
 fn try_polyint_gpu(
@@ -233,13 +236,17 @@ fn integrate_coeffs(coeffs: &[Complex64]) -> Vec<Complex64> {
     result
 }
 
-fn maybe_return_gpu(value: Value, was_gpu: bool) -> BuiltinResult<Value> {
-    if !was_gpu {
+fn maybe_return_gpu(
+    value: Value,
+    source_gpu: Option<&runmat_accelerate_api::GpuTensorHandle>,
+) -> BuiltinResult<Value> {
+    let Some(source_gpu) = source_gpu else {
         return Ok(value);
-    }
+    };
+    let provider = runmat_accelerate_api::provider_for_handle(source_gpu);
     match value {
         Value::Tensor(tensor) => {
-            if let Some(provider) = runmat_accelerate_api::provider() {
+            if let Some(provider) = provider {
                 let view = HostTensorView {
                     data: &tensor.data,
                     shape: &tensor.shape,
@@ -256,7 +263,7 @@ fn maybe_return_gpu(value: Value, was_gpu: bool) -> BuiltinResult<Value> {
             Ok(Value::Tensor(tensor))
         }
         Value::ComplexTensor(tensor) => {
-            if let Some(provider) = runmat_accelerate_api::provider() {
+            if let Some(provider) = provider {
                 match gpu_helpers::upload_complex_tensor(provider, &tensor) {
                     Ok(handle) => return Ok(gpu_helpers::complex_gpu_value(handle)),
                     Err(err) => {

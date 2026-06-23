@@ -2232,7 +2232,14 @@ impl PlotRenderer {
         let show_major_grid = self.overlay_show_grid_for_axes(axes_index);
         let show_minor_grid = self.overlay_show_minor_grid_for_axes(axes_index);
         if is_2d && (show_major_grid || show_minor_grid) {
-            if let Some((l, r, b, t)) = self.view_bounds_for_axes(axes_index) {
+            if let Some((mut l, mut r, mut b, mut t)) = self.view_bounds_for_axes(axes_index) {
+                if self.overlay_axes_kind_for_axes(axes_index) == AxesKind::Polar {
+                    let radius = l.abs().max(r.abs()).max(b.abs()).max(t.abs()).max(1e-6);
+                    l = -radius;
+                    r = radius;
+                    b = -radius;
+                    t = radius;
+                }
                 // Update direct uniforms mapping for viewport
                 self.wgpu_renderer.update_direct_uniforms_for_axes(
                     axes_index,

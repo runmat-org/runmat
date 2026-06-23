@@ -412,6 +412,11 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                             info.base_cols,
                         );
                     }
+                    let aliases_transposed = conjugated.device_id == transposed_handle.device_id
+                        && conjugated.buffer_id == transposed_handle.buffer_id;
+                    if !aliases_transposed {
+                        provider.free(&transposed_handle).ok();
+                    }
                     if input_complex
                         || runmat_accelerate_api::handle_storage(&conjugated)
                             == GpuTensorStorage::ComplexInterleaved
@@ -421,6 +426,7 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     return Ok(gpu_helpers::resident_gpu_value(conjugated));
                 }
                 Err(err) => {
+                    provider.free(&transposed_handle).ok();
                     let info = provider.device_info_struct();
                     warn!(
                         "ctranspose: provider {} (backend: {}) missing unary_conj hook; falling back ({err})",

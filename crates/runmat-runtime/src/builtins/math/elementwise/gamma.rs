@@ -508,12 +508,6 @@ async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
 
 #[async_recursion::async_recursion(?Send)]
 async fn convert_to_gpu_complex(value: Value) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        gamma_error_with_detail(
-            &GAMMA_ERROR_GPU_UNSUPPORTED,
-            "complex GPU output requested via 'like' but no acceleration provider is active",
-        )
-    })?;
     match value {
         Value::GpuTensor(handle) => {
             if runmat_accelerate_api::handle_storage(&handle)
@@ -540,12 +534,24 @@ async fn convert_to_gpu_complex(value: Value) -> BuiltinResult<Value> {
             }
         }
         Value::Complex(re, im) => {
+            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                gamma_error_with_detail(
+                    &GAMMA_ERROR_GPU_UNSUPPORTED,
+                    "complex GPU output requested via 'like' but no acceleration provider is active",
+                )
+            })?;
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| builtin_error(format!("gamma: {e}")))?;
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
             Ok(Value::GpuTensor(handle))
         }
         Value::ComplexTensor(tensor) => {
+            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                gamma_error_with_detail(
+                    &GAMMA_ERROR_GPU_UNSUPPORTED,
+                    "complex GPU output requested via 'like' but no acceleration provider is active",
+                )
+            })?;
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
             Ok(Value::GpuTensor(handle))
         }

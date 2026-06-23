@@ -784,6 +784,15 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+
+    #[cfg(feature = "wgpu")]
+    fn register_wgpu_provider_available() -> bool {
+        runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_ok()
+            && runmat_accelerate_api::provider().is_some()
+    }
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
         CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
@@ -1142,9 +1151,10 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn plus_wgpu_matches_cpu_elementwise() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
         let lhs = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![4.0, 3.0, 2.0, 1.0], vec![2, 2]).unwrap();
         let cpu = plus_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
@@ -1177,9 +1187,10 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn plus_wgpu_complex_gpu_stays_resident() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
         let provider = runmat_accelerate_api::provider().expect("provider");
         let shape = [2, 1];
         let real = provider
@@ -1234,9 +1245,10 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn plus_wgpu_complex_scalar_implicit_expansion_stays_resident() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
         let provider = runmat_accelerate_api::provider().expect("provider");
         let scalar_shape = [1, 1];
         let real = provider
@@ -1293,9 +1305,10 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn plus_wgpu_complex_gpu_host_complex_scalar_falls_back() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
         let provider = runmat_accelerate_api::provider().expect("provider");
         let shape = [2, 1];
         let real = provider

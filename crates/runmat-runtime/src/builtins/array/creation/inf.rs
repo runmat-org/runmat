@@ -1,6 +1,6 @@
 //! MATLAB-compatible `inf` array constructor with GPU-aware semantics.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView, ProviderPrecision};
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -17,7 +17,7 @@ use crate::builtins::common::spec::{
     FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::builtins::common::{shape::normalize_scalar_shape, tensor};
+use crate::builtins::common::{gpu_helpers, shape::normalize_scalar_shape, tensor};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::inf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -492,9 +492,21 @@ fn inf_complex(shape: &[usize]) -> crate::BuiltinResult<Value> {
 
 #[async_recursion::async_recursion(?Send)]
 async fn inf_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) =
+        runmat_accelerate_api::provider_for_handle(handle).or_else(runmat_accelerate_api::provider)
+    {
         let precision =
             runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
+        let storage = runmat_accelerate_api::handle_storage(handle);
+        if handle.shape != shape && storage == GpuTensorStorage::ComplexInterleaved {
+            let len = tensor::element_count(shape);
+            let tensor = ComplexTensor::new(vec![(f64::INFINITY, 0.0); len], shape.to_vec())
+                .map_err(|e| builtin_error(format!("inf: {e}")))?;
+            if let Ok(gpu) = gpu_helpers::upload_complex_tensor(provider, &tensor) {
+                runmat_accelerate_api::set_handle_precision(&gpu, precision);
+                return Ok(Value::GpuTensor(gpu));
+            }
+        }
         let attempt = if handle.shape == shape {
             provider.fill_like(handle, f64::INFINITY)
         } else {

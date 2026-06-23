@@ -79,6 +79,11 @@ async fn pskmod_gpu(
         .or_else(runmat_accelerate_api::provider)
         .ok_or_else(|| pskmod_error("pskmod: no acceleration provider registered"))?;
     let constellation = constellation_table(order, &options)?;
+    if runmat_accelerate_api::handle_is_logical(&handle)
+        && !matches!(options.input_type, InputType::Bit)
+    {
+        return Err(pskmod_error("pskmod: logical X requires InputType='bit'"));
+    }
     match options.input_type {
         InputType::Integer => {
             let request = ProviderModulationRequest {

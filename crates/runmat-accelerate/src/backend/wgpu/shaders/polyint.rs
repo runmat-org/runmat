@@ -21,8 +21,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (idx >= params.output_len) {
         return;
     }
-    let logical_idx = idx / params.storage_factor;
-    let lane = idx - logical_idx * params.storage_factor;
+    let storage_factor = max(params.storage_factor, 1u);
+    let logical_idx = idx / storage_factor;
+    let lane = idx - logical_idx * storage_factor;
     if (params.input_len == 0u) {
         if (logical_idx == 0u) {
             if (lane == 0u) {
@@ -73,8 +74,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (idx >= params.output_len) {
         return;
     }
-    let logical_idx = idx / params.storage_factor;
-    let lane = idx - logical_idx * params.storage_factor;
+    let storage_factor = max(params.storage_factor, 1u);
+    let logical_idx = idx / storage_factor;
+    let lane = idx - logical_idx * storage_factor;
     if (params.input_len == 0u) {
         if (logical_idx == 0u) {
             if (lane == 0u) {

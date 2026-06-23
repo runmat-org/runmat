@@ -692,6 +692,12 @@ fn upload_complex_host_value(
     let handle = gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|err| {
         gpu_array_error_with_message(err.to_string(), &GPUARRAY_ERROR_PROVIDER_IO)
     })?;
+    let precision = match dtype {
+        DataClass::Double => runmat_accelerate_api::ProviderPrecision::F64,
+        DataClass::Single => runmat_accelerate_api::ProviderPrecision::F32,
+        _ => unreachable!("complex dtype was validated above"),
+    };
+    runmat_accelerate_api::set_handle_precision(&handle, precision);
     Ok(PreparedHandle {
         handle,
         logical: false,
@@ -705,12 +711,17 @@ async fn convert_device_value(
     let was_logical = runmat_accelerate_api::handle_is_logical(&handle);
     let was_complex = runmat_accelerate_api::handle_storage(&handle)
         == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
+    let current_precision = runmat_accelerate_api::handle_precision(&handle);
     match dtype {
         DataClass::Double => {
-            return Ok(PreparedHandle {
-                handle,
-                logical: false,
-            });
+            if !(was_complex
+                && current_precision == Some(runmat_accelerate_api::ProviderPrecision::F32))
+            {
+                return Ok(PreparedHandle {
+                    handle,
+                    logical: false,
+                });
+            }
         }
         DataClass::Logical => {
             if was_logical {

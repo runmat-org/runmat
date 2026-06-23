@@ -369,13 +369,7 @@ fn elementwise_binary_data(
                 ElementwiseBinaryOp::Add => lhs[idx] + rhs[idx],
                 ElementwiseBinaryOp::Sub => lhs[idx] - rhs[idx],
                 ElementwiseBinaryOp::Mul => lhs[idx] * rhs[idx],
-                ElementwiseBinaryOp::Div => {
-                    if rhs[idx] == 0.0 {
-                        f64::INFINITY * lhs[idx].signum()
-                    } else {
-                        lhs[idx] / rhs[idx]
-                    }
-                }
+                ElementwiseBinaryOp::Div => lhs[idx] / rhs[idx],
             };
             out.push(value);
         }
@@ -554,6 +548,10 @@ impl InProcessProvider {
         };
         runmat_accelerate_api::set_handle_storage(&handle, storage);
         runmat_accelerate_api::set_handle_logical(&handle, false);
+        runmat_accelerate_api::set_handle_precision(
+            &handle,
+            runmat_accelerate_api::ProviderPrecision::F64,
+        );
         handle
     }
 
@@ -2630,14 +2628,32 @@ impl AccelProvider for InProcessProvider {
                     .clone();
                 (real_data, imag_data)
             };
+            let real_logical_len = real
+                .shape
+                .iter()
+                .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+                .ok_or_else(|| anyhow!("complex_from_real_imag: real input shape overflow"))?;
+            let imag_logical_len = imag
+                .shape
+                .iter()
+                .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+                .ok_or_else(|| anyhow!("complex_from_real_imag: imaginary input shape overflow"))?;
+            ensure!(
+                real_data.len() == real_logical_len,
+                "complex_from_real_imag: real input data length does not match shape"
+            );
+            ensure!(
+                imag_data.len() == imag_logical_len,
+                "complex_from_real_imag: imaginary input data length does not match shape"
+            );
             let out_shape =
-                self.complex_constructor_shape(real, real_data.len(), imag, imag_data.len())?;
+                self.complex_constructor_shape(real, real_logical_len, imag, imag_logical_len)?;
             let logical_len = out_shape
                 .iter()
                 .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
                 .ok_or_else(|| anyhow!("complex_from_real_imag: output shape overflow"))?;
-            let real_scalar = real_data.len() == 1;
-            let imag_scalar = imag_data.len() == 1;
+            let real_scalar = real_logical_len == 1;
+            let imag_scalar = imag_logical_len == 1;
             ensure!(
                 real_scalar || real_data.len() == logical_len,
                 "complex_from_real_imag: real input data length does not match output shape"
@@ -3475,13 +3491,12 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            let storage = runmat_accelerate_api::handle_storage(a);
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out: Vec<f64> = if runmat_accelerate_api::handle_storage(a)
-                == GpuTensorStorage::ComplexInterleaved
-            {
+            let out: Vec<f64> = if storage == GpuTensorStorage::ComplexInterleaved {
                 ensure!(
                     abuf.len() % 2 == 0,
                     "unary_sinc: complex-interleaved buffer has odd length"
@@ -3497,11 +3512,7 @@ impl AccelProvider for InProcessProvider {
                 abuf.iter().copied().map(sinc_scalar_host).collect()
             };
             drop(guard);
-            Ok(self.allocate_tensor_with_storage(
-                out,
-                a.shape.clone(),
-                runmat_accelerate_api::handle_storage(a),
-            ))
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
         })
     }
     fn unary_gamma<'a>(
@@ -3696,14 +3707,7 @@ impl AccelProvider for InProcessProvider {
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.tanh()).collect();
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: 0,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -3980,13 +3984,12 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            let storage = runmat_accelerate_api::handle_storage(a);
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out: Vec<f64> = if runmat_accelerate_api::handle_storage(a)
-                == GpuTensorStorage::ComplexInterleaved
-            {
+            let out: Vec<f64> = if storage == GpuTensorStorage::ComplexInterleaved {
                 ensure!(
                     abuf.len() % 2 == 0,
                     "unary_sign: complex-interleaved buffer has odd length"
@@ -4002,11 +4005,7 @@ impl AccelProvider for InProcessProvider {
                 abuf.iter().copied().map(sign_scalar_host).collect()
             };
             drop(guard);
-            Ok(self.allocate_tensor_with_storage(
-                out,
-                a.shape.clone(),
-                runmat_accelerate_api::handle_storage(a),
-            ))
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
         })
     }
 
@@ -6681,6 +6680,7 @@ mod tests {
         provider: &InProcessProvider,
         handle: &GpuTensorHandle,
         expected: &[(f64, f64)],
+        expected_shape: &[usize],
     ) {
         assert_eq!(
             runmat_accelerate_api::handle_storage(handle),
@@ -6688,6 +6688,7 @@ mod tests {
         );
         let host = block_on(provider.download(handle)).expect("download complex");
         assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
+        assert_eq!(host.shape, expected_shape);
         assert_eq!(host.data.len(), expected.len() * 2);
         for (idx, &(re, im)) in expected.iter().enumerate() {
             assert!(
@@ -6757,13 +6758,14 @@ mod tests {
         let mul = block_on(provider.elem_mul(&a, &b)).expect("mul");
         let div = block_on(provider.elem_div(&a, &b)).expect("div");
 
-        assert_complex_close(&provider, &add, &[(5.0, 1.0), (-1.0, 3.5)]);
-        assert_complex_close(&provider, &sub, &[(-3.0, 3.0), (-5.0, -2.5)]);
-        assert_complex_close(&provider, &mul, &[(6.0, 7.0), (-7.5, -8.0)]);
+        assert_complex_close(&provider, &add, &[(5.0, 1.0), (-1.0, 3.5)], &shape);
+        assert_complex_close(&provider, &sub, &[(-3.0, 3.0), (-5.0, -2.5)], &shape);
+        assert_complex_close(&provider, &mul, &[(6.0, 7.0), (-7.5, -8.0)], &shape);
         assert_complex_close(
             &provider,
             &div,
             &[(2.0 / 17.0, 9.0 / 17.0), (-4.5 / 13.0, 10.0 / 13.0)],
+            &shape,
         );
     }
 
@@ -6779,9 +6781,14 @@ mod tests {
         let mul = block_on(provider.elem_mul(&real, &complex)).expect("mul");
         let div = block_on(provider.elem_div(&real, &complex)).expect("div");
 
-        assert_complex_close(&provider, &add, &[(3.0, 3.0), (-6.0, 0.5)]);
-        assert_complex_close(&provider, &mul, &[(2.0, 6.0), (8.0, -2.0)]);
-        assert_complex_close(&provider, &div, &[(0.2, -0.6), (32.0 / 17.0, 8.0 / 17.0)]);
+        assert_complex_close(&provider, &add, &[(3.0, 3.0), (-6.0, 0.5)], &shape);
+        assert_complex_close(&provider, &mul, &[(2.0, 6.0), (8.0, -2.0)], &shape);
+        assert_complex_close(
+            &provider,
+            &div,
+            &[(0.2, -0.6), (32.0 / 17.0, 8.0 / 17.0)],
+            &shape,
+        );
     }
 
     #[test]
@@ -6797,15 +6804,16 @@ mod tests {
         let div = provider.scalar_div(&handle, 2.0).expect("scalar div");
         let rdiv = provider.scalar_rdiv(&handle, 2.0).expect("scalar rdiv");
 
-        assert_complex_close(&provider, &add, &[(4.0, 2.0), (-1.0, 0.5)]);
-        assert_complex_close(&provider, &sub, &[(-2.0, 2.0), (-7.0, 0.5)]);
-        assert_complex_close(&provider, &rsub, &[(2.0, -2.0), (7.0, -0.5)]);
-        assert_complex_close(&provider, &mul, &[(2.0, 4.0), (-8.0, 1.0)]);
-        assert_complex_close(&provider, &div, &[(0.5, 1.0), (-2.0, 0.25)]);
+        assert_complex_close(&provider, &add, &[(4.0, 2.0), (-1.0, 0.5)], &[1, 2]);
+        assert_complex_close(&provider, &sub, &[(-2.0, 2.0), (-7.0, 0.5)], &[1, 2]);
+        assert_complex_close(&provider, &rsub, &[(2.0, -2.0), (7.0, -0.5)], &[1, 2]);
+        assert_complex_close(&provider, &mul, &[(2.0, 4.0), (-8.0, 1.0)], &[1, 2]);
+        assert_complex_close(&provider, &div, &[(0.5, 1.0), (-2.0, 0.25)], &[1, 2]);
         assert_complex_close(
             &provider,
             &rdiv,
             &[(0.4, -0.8), (-32.0 / 65.0, -4.0 / 65.0)],
+            &[1, 2],
         );
     }
 
@@ -6824,16 +6832,19 @@ mod tests {
             &provider,
             &sin,
             &values.map(|(re, im)| sin_complex_host(re, im)),
+            &[1, 2],
         );
         assert_complex_close(
             &provider,
             &cos,
             &values.map(|(re, im)| cos_complex_host(re, im)),
+            &[1, 2],
         );
         assert_complex_close(
             &provider,
             &tan,
             &values.map(|(re, im)| tan_complex_host(re, im)),
+            &[1, 2],
         );
     }
 }

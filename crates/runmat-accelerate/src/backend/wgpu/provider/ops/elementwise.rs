@@ -11,8 +11,8 @@ use super::backend_types::WgpuProvider;
 use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::resources::UniformBufferKey;
 use crate::backend::wgpu::shaders::elementwise::{
-    complex_binary_shader, complex_from_real_imag_shader, complex_from_real_shader,
-    complex_unary_shader, ComplexBinaryOp, ComplexUnaryOp,
+    complex_binary_broadcast_shader, complex_binary_shader, complex_from_real_imag_shader,
+    complex_from_real_shader, complex_unary_shader, ComplexBinaryOp, ComplexUnaryOp,
 };
 use crate::backend::wgpu::shaders::logical::{
     ELEM_EQ_SHADER_F32, ELEM_EQ_SHADER_F64, ELEM_GE_SHADER_F32, ELEM_GE_SHADER_F64,
@@ -27,14 +27,29 @@ use crate::backend::wgpu::shaders::logical::{
 use crate::backend::wgpu::types::NumericPrecision;
 
 impl WgpuProvider {
+    fn effective_storage_for_entry(
+        &self,
+        handle: &GpuTensorHandle,
+        entry: &super::backend_types::BufferEntry,
+    ) -> runmat_accelerate_api::GpuTensorStorage {
+        if runmat_accelerate_api::handle_storage(handle)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            || entry.storage == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        } else {
+            runmat_accelerate_api::GpuTensorStorage::Real
+        }
+    }
+
     pub(crate) fn logical_islogical_exec(&self, a: &GpuTensorHandle) -> Result<bool> {
         let _ = self.get_entry(a)?;
         Ok(runmat_accelerate_api::handle_is_logical(a))
     }
 
     pub(crate) fn logical_isreal_exec(&self, a: &GpuTensorHandle) -> Result<bool> {
-        let _ = self.get_entry(a)?;
-        Ok(runmat_accelerate_api::handle_storage(a)
+        let entry = self.get_entry(a)?;
+        Ok(self.effective_storage_for_entry(a, &entry)
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)
     }
 
@@ -145,7 +160,8 @@ impl WgpuProvider {
     }
 
     pub(crate) fn unary_sin_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        if runmat_accelerate_api::handle_storage(a)
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
             return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sin, a);
@@ -154,7 +170,8 @@ impl WgpuProvider {
     }
 
     pub(crate) fn unary_sinc_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        if runmat_accelerate_api::handle_storage(a)
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
             return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sinc, a);
@@ -163,7 +180,8 @@ impl WgpuProvider {
     }
 
     pub(crate) fn unary_cos_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        if runmat_accelerate_api::handle_storage(a)
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
             return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Cos, a);
@@ -172,7 +190,8 @@ impl WgpuProvider {
     }
 
     pub(crate) fn unary_tan_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        if runmat_accelerate_api::handle_storage(a)
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
             return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Tan, a);
@@ -181,7 +200,8 @@ impl WgpuProvider {
     }
 
     pub(crate) fn unary_sign_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        if runmat_accelerate_api::handle_storage(a)
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
             return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sign, a);
@@ -191,7 +211,7 @@ impl WgpuProvider {
 
     pub(crate) fn unary_real_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(a)?;
-        if runmat_accelerate_api::handle_storage(a)
+        if self.effective_storage_for_entry(a, &entry)
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
             return Ok(self.register_existing_buffer(entry.buffer, entry.shape, entry.len));
@@ -201,7 +221,7 @@ impl WgpuProvider {
 
     pub(crate) fn unary_imag_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(a)?;
-        if runmat_accelerate_api::handle_storage(a)
+        if self.effective_storage_for_entry(a, &entry)
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
             return self.fill_exec(&entry.shape, 0.0);
@@ -210,7 +230,8 @@ impl WgpuProvider {
     }
 
     pub(crate) fn unary_abs_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        if runmat_accelerate_api::handle_storage(a)
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
             return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Abs, a);
@@ -219,7 +240,8 @@ impl WgpuProvider {
     }
 
     pub(crate) fn unary_conj_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        if runmat_accelerate_api::handle_storage(a)
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
             return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Conj, a);
@@ -228,7 +250,8 @@ impl WgpuProvider {
     }
 
     pub(crate) fn unary_angle_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        if runmat_accelerate_api::handle_storage(a)
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
             return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Angle, a);
@@ -244,7 +267,7 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(a)?;
         ensure!(
-            runmat_accelerate_api::handle_storage(a)
+            self.effective_storage_for_entry(a, &entry)
                 == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
             "complex unary operation requires complex-interleaved input"
         );
@@ -269,6 +292,9 @@ impl WgpuProvider {
                 &out,
                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
             );
+        }
+        if let Some(info) = runmat_accelerate_api::handle_transpose_info(a) {
+            runmat_accelerate_api::record_handle_transpose(&out, info.base_rows, info.base_cols);
         }
         Ok(out)
     }
@@ -917,11 +943,14 @@ impl WgpuProvider {
         }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
-        let storage_a = runmat_accelerate_api::handle_storage(a);
-        let storage_b = runmat_accelerate_api::handle_storage(b);
+        let storage_a = self.effective_storage_for_entry(a, &entry_a);
+        let storage_b = self.effective_storage_for_entry(b, &entry_b);
         if storage_a == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
             || storage_b == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
+            if entry_a.shape != entry_b.shape {
+                return self.complex_binary_broadcast_exec(op, a, b, &entry_a, &entry_b);
+            }
             return self.complex_binary_op_exec(op, a, b, &entry_a, &entry_b);
         }
         if entry_a.shape != entry_b.shape {
@@ -1041,9 +1070,9 @@ impl WgpuProvider {
         );
         let complex_op = ComplexBinaryOp::try_from_binary_op(op)
             .ok_or_else(|| anyhow!("binary operation is not supported for complex GPU tensors"))?;
-        let lhs_complex = runmat_accelerate_api::handle_storage(a)
+        let lhs_complex = self.effective_storage_for_entry(a, entry_a)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
-        let rhs_complex = runmat_accelerate_api::handle_storage(b)
+        let rhs_complex = self.effective_storage_for_entry(b, entry_b)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
         let logical_len = entry_a
             .shape
@@ -1094,6 +1123,126 @@ impl WgpuProvider {
         };
         Ok(handle)
     }
+
+    fn complex_binary_broadcast_exec(
+        &self,
+        op: crate::backend::wgpu::types::BinaryOpCode,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        entry_a: &super::backend_types::BufferEntry,
+        entry_b: &super::backend_types::BufferEntry,
+    ) -> Result<GpuTensorHandle> {
+        use crate::backend::wgpu::params::BCAST_MAX_RANK;
+
+        let complex_op = ComplexBinaryOp::try_from_binary_op(op)
+            .ok_or_else(|| anyhow!("binary operation is not supported for complex GPU tensors"))?;
+        let lhs_complex = self.effective_storage_for_entry(a, entry_a)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
+        let rhs_complex = self.effective_storage_for_entry(b, entry_b)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
+
+        let mut shape_a = entry_a.shape.clone();
+        let mut shape_b = entry_b.shape.clone();
+        let rank = shape_a.len().max(shape_b.len());
+        if rank > BCAST_MAX_RANK {
+            return Err(anyhow!("complex broadcast rank exceeds limit"));
+        }
+        if shape_a.len() < rank {
+            let pad = rank - shape_a.len();
+            let mut v = vec![1usize; pad];
+            v.extend_from_slice(&shape_a);
+            shape_a = v;
+        }
+        if shape_b.len() < rank {
+            let pad = rank - shape_b.len();
+            let mut v = vec![1usize; pad];
+            v.extend_from_slice(&shape_b);
+            shape_b = v;
+        }
+
+        let mut out_shape = vec![1usize; rank];
+        for i in 0..rank {
+            let da = shape_a[i];
+            let db = shape_b[i];
+            if da == db {
+                out_shape[i] = da;
+            } else if da == 1 {
+                out_shape[i] = db;
+            } else if db == 1 {
+                out_shape[i] = da;
+            } else {
+                return Err(anyhow!("shape mismatch for complex broadcast"));
+            }
+        }
+
+        let logical_len = out_shape
+            .iter()
+            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+            .ok_or_else(|| anyhow!("complex broadcast output length overflow"))?;
+        let a_logical_len = shape_a
+            .iter()
+            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+            .ok_or_else(|| anyhow!("complex broadcast lhs length overflow"))?;
+        let b_logical_len = shape_b
+            .iter()
+            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+            .ok_or_else(|| anyhow!("complex broadcast rhs length overflow"))?;
+        ensure!(
+            entry_a.len == a_logical_len * if lhs_complex { 2 } else { 1 },
+            "complex broadcast lhs storage length does not match logical shape"
+        );
+        ensure!(
+            entry_b.len == b_logical_len * if rhs_complex { 2 } else { 1 },
+            "complex broadcast rhs storage length does not match logical shape"
+        );
+
+        let out_len = logical_len
+            .checked_mul(2)
+            .ok_or_else(|| anyhow!("complex broadcast output length overflow"))?;
+        if out_len == 0 {
+            let out_buffer = self.create_storage_buffer(0, "runmat-complex-bcast-out");
+            return Ok(self.register_existing_buffer_with_storage(
+                out_buffer,
+                out_shape,
+                0,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            ));
+        }
+        if out_len > u32::MAX as usize {
+            return Err(gpu_dispatch_length_limit_error(
+                "complex_binary_broadcast",
+                out_len,
+            ));
+        }
+
+        let mut stride_a = vec![0u32; rank];
+        let mut stride_b = vec![0u32; rank];
+        let mut s = 1u64;
+        for i in 0..rank {
+            stride_a[i] = if shape_a[i] == 1 { 0 } else { s as u32 };
+            s = s
+                .checked_mul(shape_a[i] as u64)
+                .ok_or_else(|| anyhow!("complex broadcast lhs stride overflow"))?;
+        }
+        s = 1;
+        for i in 0..rank {
+            stride_b[i] = if shape_b[i] == 1 { 0 } else { s as u32 };
+            s = s
+                .checked_mul(shape_b[i] as u64)
+                .ok_or_else(|| anyhow!("complex broadcast rhs stride overflow"))?;
+        }
+
+        let shader =
+            complex_binary_broadcast_shader(complex_op, self.precision, lhs_complex, rhs_complex);
+        let handle =
+            self.fused_elementwise_exec(&shader, &[a.clone(), b.clone()], &out_shape, out_len)?;
+        runmat_accelerate_api::set_handle_storage(
+            &handle,
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+        );
+        Ok(handle)
+    }
+
     fn binary_op_broadcast_exec(
         &self,
         op: crate::backend::wgpu::types::BinaryOpCode,

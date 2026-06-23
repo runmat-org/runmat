@@ -33,7 +33,7 @@ const ZERO_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescri
     inputs: &ZERO_INPUTS,
     outputs: &ZERO_OUTPUT,
 }];
-const ZERO_ERRORS: [BuiltinErrorDescriptor; 3] = [
+const ZERO_ERRORS: [BuiltinErrorDescriptor; 4] = [
     BuiltinErrorDescriptor {
         code: "RM.ZERO.INVALID_MODEL",
         identifier: Some("RunMat:zero:InvalidModel"),
@@ -45,6 +45,12 @@ const ZERO_ERRORS: [BuiltinErrorDescriptor; 3] = [
         identifier: Some("RunMat:zero:UnsupportedModel"),
         when: "Model form is unsupported.",
         message: "zero: unsupported model",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.ZERO.INVALID_ARGUMENT",
+        identifier: Some("RunMat:zero:InvalidArgument"),
+        when: "Model metadata or arguments are malformed.",
+        message: "zero: invalid argument",
     },
     BuiltinErrorDescriptor {
         code: "RM.ZERO.INTERNAL",

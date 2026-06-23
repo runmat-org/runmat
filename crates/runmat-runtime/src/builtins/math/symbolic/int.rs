@@ -1,5 +1,6 @@
 //! MATLAB-compatible scalar symbolic `int` builtin.
 
+use num_traits::Zero;
 use runmat_builtins::{
     symbolic::SymbolicFunction, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
@@ -233,17 +234,24 @@ fn parse_int_args(expr: &SymbolicExpr, rest: &[Value]) -> BuiltinResult<IntArgs>
 }
 
 fn strip_name_value_options(rest: &[Value]) -> BuiltinResult<usize> {
-    let mut len = rest.len();
-    while len >= 2 {
+    let len = rest.len();
+    if len >= 2 {
         let Some(name) = text_scalar(&rest[len - 2]) else {
-            break;
+            return validate_remaining_int_args(rest, len);
         };
         if !is_known_option(name.trim()) {
-            break;
+            return validate_remaining_int_args(rest, len);
         }
         validate_option_value(&rest[len - 1])?;
-        len -= 2;
+        return Err(int_error_with_detail(
+            &INT_ERRORS[3],
+            format!("option '{}' is not yet supported", name.trim()),
+        ));
     }
+    validate_remaining_int_args(rest, len)
+}
+
+fn validate_remaining_int_args(rest: &[Value], len: usize) -> BuiltinResult<usize> {
     if len > 3 {
         return Err(int_error(&INT_ERRORS[4]));
     }
@@ -417,8 +425,12 @@ fn linear_inner_scale(inner: &SymbolicExpr, variable: &str) -> Option<SymbolicEx
 }
 
 fn power_integral(base: SymbolicExpr, exponent: SymbolicExpr) -> SymbolicExpr {
+    if exact_rational_is_minus_one(&exponent) {
+        return SymbolicExpr::function(SymbolicFunction::Log, base);
+    }
     if let Some(power) = exponent.numeric_constant_value() {
-        if (power + 1.0).abs() <= ZERO_EPSILON {
+        if !matches!(exponent, SymbolicExpr::Rational { .. }) && (power + 1.0).abs() <= ZERO_EPSILON
+        {
             return SymbolicExpr::function(SymbolicFunction::Log, base);
         }
         let next_power = exact_or_float_power(power + 1.0);
@@ -435,6 +447,16 @@ fn power_integral(base: SymbolicExpr, exponent: SymbolicExpr) -> SymbolicExpr {
         ),
         SymbolicExpr::add_expr(exponent, SymbolicExpr::constant(1.0)),
     )
+}
+
+fn exact_rational_is_minus_one(expr: &SymbolicExpr) -> bool {
+    match expr {
+        SymbolicExpr::Rational {
+            numerator,
+            denominator,
+        } => !denominator.is_zero() && numerator == &(-denominator.clone()),
+        _ => false,
+    }
 }
 
 fn exact_or_float_power(value: f64) -> SymbolicExpr {
@@ -476,7 +498,14 @@ fn formal_int(
 }
 
 fn int_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    int_error_with_detail(error, error.message)
+}
+
+fn int_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(detail).with_builtin(BUILTIN_NAME);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -563,15 +592,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn accepts_supported_name_value_options() {
+    async fn rejects_unsupported_name_value_options() {
         let expr = SymbolicExpr::function(SymbolicFunction::Cos, x());
-        let result = int_builtin(
+        let err = int_builtin(
             Value::Symbolic(expr),
             vec![Value::String("PrincipalValue".into()), Value::Bool(true)],
         )
         .await
-        .unwrap();
-        assert_eq!(value_text(result), "sin(x)");
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:int:InvalidOption"));
     }
 
     #[tokio::test]

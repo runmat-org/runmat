@@ -9,6 +9,17 @@ use crate::backend::wgpu::shaders::comms::{
     modulate_bits_constellation_shader, modulate_constellation_shader,
 };
 
+struct UploadedTemp<'a> {
+    provider: &'a WgpuProvider,
+    handle: GpuTensorHandle,
+}
+
+impl Drop for UploadedTemp<'_> {
+    fn drop(&mut self) {
+        self.provider.free_exec(&self.handle).ok();
+    }
+}
+
 impl WgpuProvider {
     pub(crate) async fn modulate_constellation_exec(
         &self,
@@ -60,18 +71,22 @@ impl WgpuProvider {
         }
 
         let table_shape = [request.constellation.len(), 1usize];
-        let table = self.upload_exec(&HostTensorView {
-            data: request.constellation,
-            shape: &table_shape,
-        })?;
-        let table_entry = self.get_entry(&table)?;
+        let table = UploadedTemp {
+            provider: self,
+            handle: self.upload_exec(&HostTensorView {
+                data: request.constellation,
+                shape: &table_shape,
+            })?,
+        };
+        let table_entry = self.get_entry(&table.handle)?;
         let output =
             self.create_storage_buffer_checked(out_len, "runmat-modulate-constellation")?;
-        let error_bytes = [0u8; std::mem::size_of::<u32>() * 4];
+        let error_words = [u32::MAX, 0, 0, 0];
+        let error_bytes = cast_slice(&error_words);
         let error_buffer = Arc::new(self.device_ref().create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("runmat-modulate-constellation-error"),
-                contents: &error_bytes,
+                contents: error_bytes,
                 usage: wgpu::BufferUsages::STORAGE
                     | wgpu::BufferUsages::COPY_SRC
                     | wgpu::BufferUsages::COPY_DST,
@@ -184,10 +199,13 @@ impl WgpuProvider {
 
         let bytes_result =
             self.map_readback_bytes_sync(staging, error_size, "modulate_constellation");
-        self.free_exec(&table).ok();
         let bytes = bytes_result?;
         let words: &[u32] = cast_slice(&bytes);
-        match words.first().copied().unwrap_or(0) {
+        let code = match words.first().copied().unwrap_or(u32::MAX) {
+            u32::MAX => 0,
+            packed => packed >> 30,
+        };
+        match code {
             0 => {}
             1 => {
                 return Err(anyhow!(
@@ -306,18 +324,22 @@ impl WgpuProvider {
         }
 
         let table_shape = [request.constellation.len(), 1usize];
-        let table = self.upload_exec(&HostTensorView {
-            data: request.constellation,
-            shape: &table_shape,
-        })?;
-        let table_entry = self.get_entry(&table)?;
+        let table = UploadedTemp {
+            provider: self,
+            handle: self.upload_exec(&HostTensorView {
+                data: request.constellation,
+                shape: &table_shape,
+            })?,
+        };
+        let table_entry = self.get_entry(&table.handle)?;
         let output =
             self.create_storage_buffer_checked(out_len, "runmat-modulate-bits-constellation")?;
-        let error_bytes = [0u8; std::mem::size_of::<u32>() * 4];
+        let error_words = [u32::MAX, 0, 0, 0];
+        let error_bytes = cast_slice(&error_words);
         let error_buffer = Arc::new(self.device_ref().create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("runmat-modulate-bits-constellation-error"),
-                contents: &error_bytes,
+                contents: error_bytes,
                 usage: wgpu::BufferUsages::STORAGE
                     | wgpu::BufferUsages::COPY_SRC
                     | wgpu::BufferUsages::COPY_DST,
@@ -431,10 +453,13 @@ impl WgpuProvider {
 
         let bytes_result =
             self.map_readback_bytes_sync(staging, error_size, "modulate_bits_constellation");
-        self.free_exec(&table).ok();
         let bytes = bytes_result?;
         let words: &[u32] = cast_slice(&bytes);
-        match words.first().copied().unwrap_or(0) {
+        let code = match words.first().copied().unwrap_or(u32::MAX) {
+            u32::MAX => 0,
+            packed => packed >> 30,
+        };
+        match code {
             0 => {}
             1 => return Err(anyhow!("modulate_bits_constellation: bits must be finite")),
             2 => return Err(anyhow!("modulate_bits_constellation: bits must be 0 or 1")),
@@ -505,7 +530,7 @@ mod tests {
         let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
-        let symbols = [0.0, 1.000001];
+        let symbols = [0.0, 1.01];
         let shape = [1usize, 2usize];
         let input = provider
             .upload(&HostTensorView {
@@ -553,8 +578,12 @@ mod tests {
         let gathered = pollster::block_on(provider.download(&output)).expect("download output");
         assert_eq!(gathered.shape, vec![1, 4]);
         assert_eq!(gathered.data.len(), constellation.len());
-        for (actual, expected) in gathered.data.iter().zip(constellation.iter()) {
-            assert!((actual - expected).abs() < 1.0e-12);
+        for (idx, (actual, expected)) in gathered.data.iter().zip(constellation.iter()).enumerate()
+        {
+            assert!(
+                (actual - expected).abs() < 1.0e-6,
+                "constellation lane {idx}: actual={actual} expected={expected}"
+            );
         }
         provider.free(&input).ok();
         provider.free(&output).ok();

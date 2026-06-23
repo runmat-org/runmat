@@ -49,25 +49,34 @@ pub(crate) fn complex_unary_shader(op: ComplexUnaryOp, precision: NumericPrecisi
         NumericPrecision::F64 => "8.988465674311579e307",
         NumericPrecision::F32 => "1.7014117331926443e38",
     };
-    let sign_inf_helper = match precision {
-        NumericPrecision::F64 => {
-            r#"
-fn isinf_complex_unary(x: f64) -> bool {
-    let bits = bitcast<u64>(x) & 0x7fffffffffffffffu;
-    return bits == 0x7ff0000000000000u;
-}
-"#
-        }
-        NumericPrecision::F32 => {
-            r#"
-fn isinf_complex_unary(x: f32) -> bool {
-    let bits = bitcast<u32>(x) & 0x7fffffffu;
-    return bits == 0x7f800000u;
-}
-"#
-        }
-    };
+    let sign_inf_helper = format!(
+        r#"
+const MAX_FINITE_SIGN_COMPLEX_UNARY: {ty} = {ty}({max_finite});
+
+fn isinf_complex_unary(x: {ty}) -> bool {{
+    return abs(x) > MAX_FINITE_SIGN_COMPLEX_UNARY;
+}}
+"#,
+        ty = ty,
+        max_finite = max_finite,
+    );
     let extra_helpers = match op {
+        ComplexUnaryOp::Abs => format!(
+            r#"
+fn complex_abs_lane(out_idx: u32) -> {ty} {{
+    let re = abs(A.data[out_idx * 2u]);
+    let im = abs(A.data[out_idx * 2u + 1u]);
+    let scale = max(re, im);
+    if scale == {ty}(0.0) {{
+        return {ty}(0.0);
+    }}
+    let sr = re / scale;
+    let si = im / scale;
+    return scale * sqrt((sr * sr) + (si * si));
+}}
+"#,
+            ty = ty,
+        ),
         ComplexUnaryOp::Sinc => format!(
             r#"
 const PI_COMPLEX_UNARY: {ty} = {ty}(3.141592653589793);
@@ -146,6 +155,9 @@ fn tan_complex_lane(out_idx: u32) -> {ty} {{
     let im = A.data[elem * 2u + 1u];
     let two_re = {ty}(2.0) * re;
     let two_im = {ty}(2.0) * im;
+    if abs(two_im) > {ty}(80.0) {{
+        return select({ty}(0.0), select(-{ty}(1.0), {ty}(1.0), im > {ty}(0.0)), (out_idx % 2u) == 1u);
+    }}
     let inv_cosh = {ty}(1.0) / cosh(two_im);
     let denom = {ty}(1.0) + (cos(two_re) * inv_cosh);
     let out_re = (sin(two_re) * inv_cosh) / denom;
@@ -244,12 +256,8 @@ fn sign_complex_lane(out_idx: u32) -> {ty} {{
     let expression = match op {
         ComplexUnaryOp::Real => "A.data[idx * 2u]",
         ComplexUnaryOp::Imag => "A.data[idx * 2u + 1u]",
-        ComplexUnaryOp::Abs => {
-            "sqrt((A.data[idx * 2u] * A.data[idx * 2u]) + (A.data[idx * 2u + 1u] * A.data[idx * 2u + 1u]))"
-        }
-        ComplexUnaryOp::Conj => {
-            "select(A.data[idx], -A.data[idx], (idx % 2u) == 1u)"
-        }
+        ComplexUnaryOp::Abs => "complex_abs_lane(idx)",
+        ComplexUnaryOp::Conj => "select(A.data[idx], -A.data[idx], (idx % 2u) == 1u)",
         ComplexUnaryOp::Angle => "atan2(A.data[idx * 2u + 1u], A.data[idx * 2u])",
         ComplexUnaryOp::Sin => "sin_complex_lane(idx)",
         ComplexUnaryOp::Sinc => "sinc_complex_lane(idx)",
@@ -429,7 +437,7 @@ pub(crate) fn complex_binary_shader(
             "let out_re = (ar * br) - (ai * bi);\n    let out_im = (ar * bi) + (ai * br);"
         }
         ComplexBinaryOp::Div => {
-            "let denom = (br * br) + (bi * bi);\n    let out_re = ((ar * br) + (ai * bi)) / denom;\n    let out_im = ((ai * br) - (ar * bi)) / denom;"
+            "let scale = max(abs(br), abs(bi));\n    let sr = br / scale;\n    let si = bi / scale;\n    let denom = scale * ((sr * sr) + (si * si));\n    let out_re = ((ar * sr) + (ai * si)) / denom;\n    let out_im = ((ai * sr) - (ar * si)) / denom;"
         }
     };
     format!(
@@ -461,6 +469,126 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         return;
     }}
     let elem = idx / 2u;
+    let ar = {lhs_real};
+    let ai = {lhs_imag};
+    let br = {rhs_real};
+    let bi = {rhs_imag};
+    {body}
+    Out.data[idx] = select(out_re, out_im, (idx % 2u) == 1u);
+}}
+"#,
+        ty = ty,
+        lhs_real = lhs_real,
+        lhs_imag = lhs_imag,
+        rhs_real = rhs_real,
+        rhs_imag = rhs_imag,
+        body = body,
+    )
+}
+
+pub(crate) fn complex_binary_broadcast_shader(
+    op: ComplexBinaryOp,
+    precision: NumericPrecision,
+    lhs_complex: bool,
+    rhs_complex: bool,
+) -> String {
+    let ty = match precision {
+        NumericPrecision::F64 => "f64",
+        NumericPrecision::F32 => "f32",
+    };
+    let lhs_real = if lhs_complex {
+        "A.data[ia * 2u]"
+    } else {
+        "A.data[ia]"
+    };
+    let lhs_imag = if lhs_complex {
+        "A.data[ia * 2u + 1u]"
+    } else {
+        "0.0"
+    };
+    let rhs_real = if rhs_complex {
+        "B.data[ib * 2u]"
+    } else {
+        "B.data[ib]"
+    };
+    let rhs_imag = if rhs_complex {
+        "B.data[ib * 2u + 1u]"
+    } else {
+        "0.0"
+    };
+    let body = match op {
+        ComplexBinaryOp::Add => "let out_re = ar + br;\n    let out_im = ai + bi;",
+        ComplexBinaryOp::Sub => "let out_re = ar - br;\n    let out_im = ai - bi;",
+        ComplexBinaryOp::Mul => {
+            "let out_re = (ar * br) - (ai * bi);\n    let out_im = (ar * bi) + (ai * br);"
+        }
+        ComplexBinaryOp::Div => {
+            "let scale = max(abs(br), abs(bi));\n    let sr = br / scale;\n    let si = bi / scale;\n    let denom = scale * ((sr * sr) + (si * si));\n    let out_re = ((ar * sr) + (ai * si)) / denom;\n    let out_im = ((ai * sr) - (ar * si)) / denom;"
+        }
+    };
+    format!(
+        r#"
+const MAX_RANK: u32 = 128u;
+
+struct PackedValue {{
+    value: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}};
+
+alias PackedArray = array<PackedValue, MAX_RANK>;
+struct Tensor {{ data: array<{ty}>, }};
+
+struct Params {{
+    len: u32,
+    offset: u32,
+    rank: u32,
+    op: u32,
+    out_shape: PackedArray,
+    a_shape: PackedArray,
+    a_stride: PackedArray,
+    b_shape: PackedArray,
+    b_stride: PackedArray,
+}};
+
+@group(0) @binding(0) var<storage, read> A: Tensor;
+@group(0) @binding(1) var<storage, read> B: Tensor;
+@group(0) @binding(2) var<storage, read_write> Out: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+    let local = gid.x;
+    if local >= params.len {{ return; }}
+    let idx = params.offset + local;
+    let elem = idx / 2u;
+
+    var coord: array<u32, MAX_RANK>;
+    var tmp: u32 = elem;
+    var d: u32 = 0u;
+    loop {{
+        if d >= params.rank {{ break; }}
+        let dim = params.out_shape[d].value;
+        if dim == 0u {{ coord[d] = 0u; }}
+        else {{ coord[d] = tmp % dim; tmp = tmp / dim; }}
+        d = d + 1u;
+    }}
+
+    var ia: u32 = 0u;
+    var ib: u32 = 0u;
+    d = 0u;
+    loop {{
+        if d >= params.rank {{ break; }}
+        let ad = params.a_shape[d].value;
+        let bd = params.b_shape[d].value;
+        let ca = select(coord[d], 0u, ad == 1u);
+        let cb = select(coord[d], 0u, bd == 1u);
+        ia = ia + ca * params.a_stride[d].value;
+        ib = ib + cb * params.b_stride[d].value;
+        d = d + 1u;
+    }}
+
     let ar = {lhs_real};
     let ai = {lhs_imag};
     let br = {rhs_real};

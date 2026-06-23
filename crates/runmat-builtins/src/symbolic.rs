@@ -491,7 +491,13 @@ impl SymbolicExpr {
             SymbolicExpr::Rational {
                 numerator,
                 denominator,
-            } => Some(numerator.to_f64()? / denominator.to_f64()?),
+            } => {
+                if denominator.is_zero() {
+                    None
+                } else {
+                    Some(numerator.to_f64()? / denominator.to_f64()?)
+                }
+            }
             SymbolicExpr::DecimalLiteral { value, .. } => (!value.is_nan()).then_some(*value),
             SymbolicExpr::Variable(_) => None,
             SymbolicExpr::FunctionReference(_, _)
@@ -539,7 +545,7 @@ impl SymbolicExpr {
     pub fn has_undefined_constant_subexpression(&self) -> bool {
         match self {
             SymbolicExpr::Constant(value) => value.is_nan(),
-            SymbolicExpr::Rational { .. } => false,
+            SymbolicExpr::Rational { denominator, .. } => denominator.is_zero(),
             SymbolicExpr::DecimalLiteral { value, .. } => value.is_nan(),
             SymbolicExpr::Variable(_) => false,
             SymbolicExpr::FunctionReference(_, _) => false,
@@ -584,7 +590,7 @@ impl SymbolicExpr {
     pub fn has_nonfinite_constant(&self) -> bool {
         match self {
             SymbolicExpr::Constant(value) => !value.is_finite(),
-            SymbolicExpr::Rational { .. } => false,
+            SymbolicExpr::Rational { denominator, .. } => denominator.is_zero(),
             SymbolicExpr::DecimalLiteral { value, .. } => !value.is_finite(),
             SymbolicExpr::Variable(_) => false,
             SymbolicExpr::FunctionReference(_, _) => false,

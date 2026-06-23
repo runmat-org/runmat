@@ -147,10 +147,15 @@ async fn real_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
         .await
         .map_err(|err| builtin_error_with_detail(&REAL_ERROR_INTERNAL, err.to_string()))?;
-    Ok(tensor::tensor_into_value(real_tensor(tensor)?))
+    match gathered {
+        Value::Complex(re, _) => Ok(Value::Num(re)),
+        Value::ComplexTensor(ct) => real_complex_tensor(ct),
+        Value::Tensor(tensor) => Ok(tensor::tensor_into_value(real_tensor(tensor)?)),
+        other => real_real(other),
+    }
 }
 
 fn real_real(value: Value) -> BuiltinResult<Value> {

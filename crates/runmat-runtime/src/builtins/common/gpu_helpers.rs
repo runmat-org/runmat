@@ -64,6 +64,7 @@ pub fn upload_complex_tensor(
     let handle = provider
         .upload(&view)
         .map_err(|e| build_runtime_error(format!("gpu upload: {e}")).build())?;
+    runmat_accelerate_api::set_handle_logical(&handle, false);
     runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
     runmat_accelerate_api::set_handle_precision(&handle, provider.precision());
     Ok(handle)

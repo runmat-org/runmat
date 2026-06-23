@@ -452,6 +452,12 @@ fn bounded_option_usize(
             format!("option {field} must be no greater than {maximum}"),
         ));
     }
+    if value.fract() != 0.0 {
+        return Err(fminunc_error_with_detail(
+            &FMINUNC_ERROR_INVALID_ARGUMENT,
+            format!("option {field} must be an integer"),
+        ));
+    }
     Ok(value.floor() as usize)
 }
 
@@ -742,11 +748,17 @@ async fn minimize(
             direction = state.grad.iter().map(|value| -value).collect();
         }
 
-        let search = line_search(&mut evaluator, &state, &direction).await?;
-        let Some(next) = search else {
-            line_search_failed = true;
-            exitflag = -3;
-            break;
+        let next = match line_search(&mut evaluator, &state, &direction).await? {
+            LineSearchResult::Step(next) => next,
+            LineSearchResult::BudgetExhausted => {
+                exitflag = 0;
+                break;
+            }
+            LineSearchResult::Failed => {
+                line_search_failed = true;
+                exitflag = -3;
+                break;
+            }
         };
 
         let s = subtract(&next.x, &state.x);
@@ -802,10 +814,10 @@ async fn line_search(
     evaluator: &mut ObjectiveEvaluator<'_>,
     state: &ObjectiveState,
     direction: &[f64],
-) -> BuiltinResult<Option<ObjectiveState>> {
+) -> BuiltinResult<LineSearchResult> {
     let dphi0 = dot(&state.grad, direction);
     if dphi0 >= 0.0 || !dphi0.is_finite() {
-        return Ok(None);
+        return Ok(LineSearchResult::Failed);
     }
 
     let mut alpha_prev = 0.0;
@@ -813,7 +825,7 @@ async fn line_search(
     let mut alpha = 1.0;
     for iter in 0..MAX_LINE_SEARCH_ITERS {
         if !evaluator.can_evaluate_state(state.x.len()) {
-            return Ok(None);
+            return Ok(LineSearchResult::BudgetExhausted);
         }
         let trial_x = add_scaled(&state.x, direction, alpha);
         let trial = evaluator.evaluate(&trial_x).await?;
@@ -822,7 +834,7 @@ async fn line_search(
         }
         let dphi = dot(&trial.grad, direction);
         if dphi.abs() <= -C2 * dphi0 {
-            return Ok(Some(trial));
+            return Ok(LineSearchResult::Step(trial));
         }
         if dphi >= 0.0 {
             return zoom(evaluator, state, direction, alpha, alpha_prev).await;
@@ -831,7 +843,13 @@ async fn line_search(
         f_prev = trial.f;
         alpha = (alpha * 2.0).min(64.0);
     }
-    Ok(None)
+    Ok(LineSearchResult::Failed)
+}
+
+enum LineSearchResult {
+    Step(ObjectiveState),
+    BudgetExhausted,
+    Failed,
 }
 
 async fn zoom(
@@ -840,20 +858,20 @@ async fn zoom(
     direction: &[f64],
     mut lo: f64,
     mut hi: f64,
-) -> BuiltinResult<Option<ObjectiveState>> {
+) -> BuiltinResult<LineSearchResult> {
     let dphi0 = dot(&state.grad, direction);
     let mut f_lo = if lo == 0.0 {
         state.f
     } else {
         if !evaluator.can_evaluate_value() {
-            return Ok(None);
+            return Ok(LineSearchResult::BudgetExhausted);
         }
         let x_lo = add_scaled(&state.x, direction, lo);
         evaluator.evaluate_value(&x_lo).await?
     };
     for _ in 0..MAX_LINE_SEARCH_ITERS {
         if !evaluator.can_evaluate_state(state.x.len()) {
-            return Ok(None);
+            return Ok(LineSearchResult::BudgetExhausted);
         }
         let alpha = 0.5 * (lo + hi);
         let trial_x = add_scaled(&state.x, direction, alpha);
@@ -863,7 +881,7 @@ async fn zoom(
         } else {
             let dphi = dot(&trial.grad, direction);
             if dphi.abs() <= -C2 * dphi0 {
-                return Ok(Some(trial));
+                return Ok(LineSearchResult::Step(trial));
             }
             if dphi * (hi - lo) >= 0.0 {
                 hi = lo;
@@ -872,10 +890,13 @@ async fn zoom(
             f_lo = trial.f;
         }
         if (hi - lo).abs() <= 1.0e-12 * (1.0 + lo.abs() + hi.abs()) {
-            return Ok(Some(trial));
+            if trial.f <= state.f + C1 * alpha * dphi0 {
+                return Ok(LineSearchResult::Step(trial));
+            }
+            return Ok(LineSearchResult::Failed);
         }
     }
-    Ok(None)
+    Ok(LineSearchResult::Failed)
 }
 
 fn update_inverse_hessian(h: &mut [f64], s: &[f64], y: &[f64], n: usize) {

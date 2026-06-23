@@ -332,15 +332,26 @@ pub async fn uniform_spectral_estimate(
 pub async fn signal_envelope(
     request: ProviderEnvelopeRequest<'_>,
 ) -> anyhow::Result<ProviderEnvelopeResult> {
-    let expected_len = request.channel_len.checked_mul(request.channel_count);
+    let expected_len = request
+        .channel_len
+        .checked_mul(request.channel_count)
+        .ok_or_else(|| anyhow!("signal_envelope: invalid request"))?;
+    let output_len = request
+        .output_shape
+        .iter()
+        .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+        .ok_or_else(|| anyhow!("signal_envelope: invalid request"))?;
+    let input_len = request
+        .input
+        .shape
+        .iter()
+        .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+        .ok_or_else(|| anyhow!("signal_envelope: invalid request"))?;
     if request.channel_len == 0
         || request.channel_count == 0
         || request.output_shape.is_empty()
-        || request
-            .output_shape
-            .iter()
-            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
-            != expected_len
+        || output_len != expected_len
+        || input_len != expected_len
     {
         return Err(anyhow!("signal_envelope: invalid request"));
     }
@@ -362,6 +373,9 @@ pub async fn signal_hilbert(
     request: ProviderHilbertRequest<'_>,
 ) -> anyhow::Result<GpuTensorHandle> {
     if request.length == Some(0) {
+        return Err(anyhow!("signal_hilbert: invalid request"));
+    }
+    if request.dim >= request.input.shape.len() {
         return Err(anyhow!("signal_hilbert: invalid request"));
     }
 

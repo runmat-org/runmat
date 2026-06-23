@@ -297,19 +297,54 @@ async fn try_binary_complex_gpu(lhs: &Value, rhs: &Value) -> BuiltinResult<Optio
     };
 
     let real = value_to_real_gpu_handle(lhs, provider).await?;
-    let imag = value_to_real_gpu_handle(rhs, provider).await?;
-    match provider.complex_from_real_imag(&real, &imag).await {
+    let imag = match value_to_real_gpu_handle(rhs, provider).await {
+        Ok(imag) => imag,
+        Err(err) => {
+            if real.owned {
+                provider.free(&real.handle).ok();
+            }
+            return Err(err);
+        }
+    };
+    let result = match provider
+        .complex_from_real_imag(&real.handle, &imag.handle)
+        .await
+    {
         Ok(out) => Ok(Some(gpu_helpers::complex_gpu_value(out))),
         Err(_) => Ok(None),
+    };
+    if real.owned {
+        provider.free(&real.handle).ok();
     }
+    if imag.owned {
+        provider.free(&imag.handle).ok();
+    }
+    result
+}
+
+struct RealGpuOperand {
+    handle: runmat_accelerate_api::GpuTensorHandle,
+    owned: bool,
 }
 
 async fn value_to_real_gpu_handle(
     value: &Value,
     provider: &dyn runmat_accelerate_api::AccelProvider,
-) -> BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
+) -> BuiltinResult<RealGpuOperand> {
     match value {
         Value::GpuTensor(handle) => {
+            let Some(owner) = runmat_accelerate_api::provider_for_handle(handle) else {
+                return Err(complex_error_with_detail(
+                    &COMPLEX_ERROR_INVALID_INPUT,
+                    "GPU input provider is unavailable",
+                ));
+            };
+            if owner.device_id() != provider.device_id() {
+                return Err(complex_error_with_detail(
+                    &COMPLEX_ERROR_INVALID_INPUT,
+                    "GPU inputs must belong to the same provider",
+                ));
+            }
             if runmat_accelerate_api::handle_storage(handle)
                 == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
             {
@@ -318,11 +353,17 @@ async fn value_to_real_gpu_handle(
                     "inputs must be real",
                 ));
             }
-            Ok(handle.clone())
+            Ok(RealGpuOperand {
+                handle: handle.clone(),
+                owned: false,
+            })
         }
         other => {
             let tensor = value_into_real_tensor(other.clone())?;
-            upload_real_tensor(provider, &tensor)
+            upload_real_tensor(provider, &tensor).map(|handle| RealGpuOperand {
+                handle,
+                owned: true,
+            })
         }
     }
 }
