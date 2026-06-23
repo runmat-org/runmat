@@ -6,7 +6,7 @@
 
 use cranelift::prelude::*;
 use runmat_builtins::{CellArray, Value};
-use runmat_gc::{gc_allocate, GcHandle};
+use runmat_gc::{gc_allocate, ExplicitRoot};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
@@ -14,8 +14,8 @@ use std::sync::{Arc, RwLock};
 /// JIT memory manager for marshaling data between Cranelift and RunMat runtime
 pub struct JitMemoryManager {
     /// Global memory pools for different data types
-    string_pool: Arc<RwLock<HashMap<String, GcHandle>>>,
-    array_pool: Arc<RwLock<HashMap<String, GcHandle>>>, // Use string hash of f64 vector
+    string_pool: Arc<RwLock<HashMap<String, ExplicitRoot>>>,
+    array_pool: Arc<RwLock<HashMap<String, ExplicitRoot>>>, // Use string hash of f64 vector
 
     /// Statistics
     allocated_strings: AtomicUsize,
@@ -37,8 +37,9 @@ impl JitMemoryManager {
         // Check if we already have this string in the pool
         {
             let pool = self.string_pool.read().unwrap();
-            if let Some(gc_ptr) = pool.get(s) {
-                if let Some(result) = runmat_gc::gc_with_value(gc_ptr, |value| match value {
+            if let Some(root) = pool.get(s) {
+                let handle = root.handle();
+                if let Some(result) = runmat_gc::gc_with_value(&handle, |value| match value {
                     Value::String(stored_str) => Some((stored_str.as_ptr(), stored_str.len())),
                     _ => None,
                 })
@@ -53,15 +54,18 @@ impl JitMemoryManager {
         let string_value = Value::String(s.to_string());
         let gc_ptr = gc_allocate(string_value)
             .map_err(|e| format!("Failed to allocate string in GC: {e}"))?;
+        let root =
+            runmat_gc::gc_root(gc_ptr).map_err(|e| format!("Failed to root string in GC: {e}"))?;
+        let handle = root.handle();
 
         // Store in pool for reuse
         {
             let mut pool = self.string_pool.write().unwrap();
-            pool.insert(s.to_string(), gc_ptr.clone());
+            pool.insert(s.to_string(), root);
         }
 
         // Return pointer and length
-        if let Some(result) = runmat_gc::gc_with_value(&gc_ptr, |value| match value {
+        if let Some(result) = runmat_gc::gc_with_value(&handle, |value| match value {
             Value::String(stored_str) => Some((stored_str.as_ptr(), stored_str.len())),
             _ => None,
         })
@@ -82,7 +86,7 @@ impl JitMemoryManager {
         // Check if we already have this array in the pool
         {
             let pool = self.array_pool.read().unwrap();
-            if let Some(_gc_ptr) = pool.get(&array_key) {
+            if pool.contains_key(&array_key) {
                 // For simplicity, return a pointer to the raw f64 data
                 // In a complete implementation, we'd need more sophisticated marshaling
                 return Ok((values.as_ptr(), values.len()));
@@ -96,11 +100,13 @@ impl JitMemoryManager {
         let cell_value = Value::Cell(cell_array);
         let gc_ptr =
             gc_allocate(cell_value).map_err(|e| format!("Failed to allocate array in GC: {e}"))?;
+        let root =
+            runmat_gc::gc_root(gc_ptr).map_err(|e| format!("Failed to root array in GC: {e}"))?;
 
         // Store in pool for reuse
         {
             let mut pool = self.array_pool.write().unwrap();
-            pool.insert(array_key, gc_ptr);
+            pool.insert(array_key, root);
         }
 
         self.allocated_arrays.fetch_add(1, Ordering::Relaxed);
@@ -276,6 +282,23 @@ mod tests {
 
         let stats = manager.stats();
         assert_eq!(stats.string_pool_size, 1);
+    }
+
+    #[test]
+    fn test_string_pool_uses_rooted_cache() {
+        let manager = JitMemoryManager::new();
+
+        let (ptr1, len1) = manager
+            .allocate_string("rooted_reuse_test")
+            .expect("string allocation should succeed");
+
+        let (ptr2, len2) = manager
+            .allocate_string("rooted_reuse_test")
+            .expect("pooled string should use rooted cache");
+
+        assert_eq!(ptr1, ptr2);
+        assert_eq!(len1, len2);
+        assert_eq!(manager.stats().string_pool_size, 1);
     }
 
     #[test]
