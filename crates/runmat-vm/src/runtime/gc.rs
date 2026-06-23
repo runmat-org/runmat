@@ -3,6 +3,7 @@ use runmat_gc::{
     gc_register_root, gc_unregister_root, GlobalRoot, RootId, StackRoot, VariableArrayRoot,
 };
 use std::marker::PhantomData;
+use std::ptr::NonNull;
 
 /// RAII wrapper for GC root management during interpretation.
 pub struct InterpretContext<'roots> {
@@ -15,10 +16,10 @@ pub struct InterpretContext<'roots> {
 impl<'roots> InterpretContext<'roots> {
     pub fn new(stack: &'roots Vec<Value>, vars: &'roots Vec<Value>) -> Result<Self, String> {
         let stack_root = Box::new(unsafe {
-            StackRoot::new(stack as *const Vec<Value>, "interpreter_stack".to_string())
+            StackRoot::new(NonNull::from(stack), "interpreter_stack".to_string())
         });
         let vars_root = Box::new(unsafe {
-            VariableArrayRoot::new(vars as *const Vec<Value>, "interpreter_vars".to_string())
+            VariableArrayRoot::new(NonNull::from(vars), "interpreter_vars".to_string())
         });
 
         let stack_root_id = gc_register_root(stack_root)

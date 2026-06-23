@@ -9,6 +9,7 @@ use crate::{GcError, GcHandle, Result};
 use runmat_gc_api::{GcRoot, RootId, RootInfo, RootScannerStats, Trace, Tracer};
 use runmat_time::Instant;
 use std::collections::HashMap;
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Recursively collect immediate GC roots from an owned Value tree.
@@ -33,7 +34,7 @@ pub(crate) fn collect_value_roots(value: &Value, roots: &mut Vec<GcHandle>) {
 /// A root representing an interpreter's value stack
 pub struct StackRoot {
     /// Reference to the stack (non-owning)
-    stack_ptr: *const Vec<Value>,
+    stack: NonNull<Vec<Value>>,
     description: String,
 }
 
@@ -42,31 +43,27 @@ impl StackRoot {
     ///
     /// # Safety
     ///
-    /// The stack pointer must remain valid for the lifetime of this root
-    pub unsafe fn new(stack: *const Vec<Value>, description: String) -> Self {
-        Self {
-            stack_ptr: stack,
-            description,
-        }
+    /// The stack must remain valid and allocated for the whole period this root
+    /// is registered with a `RootScanner`. Collection must not scan this root
+    /// concurrently with mutation of the referenced vector.
+    pub unsafe fn new(stack: NonNull<Vec<Value>>, description: String) -> Self {
+        Self { stack, description }
     }
 }
 
 impl GcRoot for StackRoot {
     fn scan(&self) -> Vec<GcHandle> {
-        unsafe {
-            if self.stack_ptr.is_null() {
-                return Vec::new();
-            }
+        // SAFETY: `StackRoot::new` requires the vector to remain valid while the
+        // root is registered. The VM registration guard unregisters before the
+        // stack vector is dropped.
+        let stack = unsafe { self.stack.as_ref() };
+        let mut roots = Vec::new();
 
-            let stack = &*self.stack_ptr;
-            let mut roots = Vec::new();
-
-            for value in stack {
-                collect_value_roots(value, &mut roots);
-            }
-
-            roots
+        for value in stack {
+            collect_value_roots(value, &mut roots);
         }
+
+        roots
     }
 
     fn description(&self) -> String {
@@ -74,25 +71,20 @@ impl GcRoot for StackRoot {
     }
 
     fn estimated_size(&self) -> usize {
-        unsafe {
-            if self.stack_ptr.is_null() {
-                return 0;
-            }
-
-            let stack = &*self.stack_ptr;
-            stack.len() * std::mem::size_of::<Value>()
-        }
+        // SAFETY: same invariant as `scan`.
+        let stack = unsafe { self.stack.as_ref() };
+        stack.len() * std::mem::size_of::<Value>()
     }
 
     fn is_active(&self) -> bool {
-        !self.stack_ptr.is_null()
+        true
     }
 }
 
 /// A root representing an array of variables
 pub struct VariableArrayRoot {
     /// Reference to the variable array (non-owning)  
-    vars_ptr: *const Vec<Value>,
+    vars: NonNull<Vec<Value>>,
     description: String,
 }
 
@@ -101,31 +93,27 @@ impl VariableArrayRoot {
     ///
     /// # Safety
     ///
-    /// The variables pointer must remain valid for the lifetime of this root
-    pub unsafe fn new(vars: *const Vec<Value>, description: String) -> Self {
-        Self {
-            vars_ptr: vars,
-            description,
-        }
+    /// The variables vector must remain valid and allocated for the whole period
+    /// this root is registered with a `RootScanner`. Collection must not scan
+    /// this root concurrently with mutation of the referenced vector.
+    pub unsafe fn new(vars: NonNull<Vec<Value>>, description: String) -> Self {
+        Self { vars, description }
     }
 }
 
 impl GcRoot for VariableArrayRoot {
     fn scan(&self) -> Vec<GcHandle> {
-        unsafe {
-            if self.vars_ptr.is_null() {
-                return Vec::new();
-            }
+        // SAFETY: `VariableArrayRoot::new` requires the vector to remain valid
+        // while the root is registered. The VM registration guard unregisters
+        // before the variables vector is dropped.
+        let vars = unsafe { self.vars.as_ref() };
+        let mut roots = Vec::new();
 
-            let vars = &*self.vars_ptr;
-            let mut roots = Vec::new();
-
-            for value in vars {
-                collect_value_roots(value, &mut roots);
-            }
-
-            roots
+        for value in vars {
+            collect_value_roots(value, &mut roots);
         }
+
+        roots
     }
 
     fn description(&self) -> String {
@@ -133,18 +121,13 @@ impl GcRoot for VariableArrayRoot {
     }
 
     fn estimated_size(&self) -> usize {
-        unsafe {
-            if self.vars_ptr.is_null() {
-                return 0;
-            }
-
-            let vars = &*self.vars_ptr;
-            vars.len() * std::mem::size_of::<Value>()
-        }
+        // SAFETY: same invariant as `scan`.
+        let vars = unsafe { self.vars.as_ref() };
+        vars.len() * std::mem::size_of::<Value>()
     }
 
     fn is_active(&self) -> bool {
-        !self.vars_ptr.is_null()
+        true
     }
 }
 
@@ -472,7 +455,7 @@ mod tests {
     fn test_stack_root() {
         let stack = vec![Value::Num(1.0), Value::Bool(true)];
 
-        let root = unsafe { StackRoot::new(&stack as *const _, "test stack".to_string()) };
+        let root = unsafe { StackRoot::new(NonNull::from(&stack), "test stack".to_string()) };
 
         assert_eq!(root.description(), "test stack");
         assert!(root.is_active());
@@ -486,7 +469,7 @@ mod tests {
     fn test_variable_array_root() {
         let vars = vec![Value::Num(42.0), Value::String("test".to_string())];
 
-        let root = unsafe { VariableArrayRoot::new(&vars as *const _, "test vars".to_string()) };
+        let root = unsafe { VariableArrayRoot::new(NonNull::from(&vars), "test vars".to_string()) };
 
         assert_eq!(root.description(), "test vars");
         assert!(root.is_active());
