@@ -417,6 +417,10 @@ impl GarbageCollector {
             self.collection_in_progress.store(false, Ordering::Release);
             return Ok(0);
         }
+        // Registered VM stack/vars roots live in a thread-local scanner. Until
+        // RunMat has stop-the-world safepoints or synchronized root snapshots,
+        // cross-thread collection must defer rather than miss another thread's
+        // interpreter roots.
         if registered_roots_exist_on_other_threads() {
             self.collection_in_progress.store(false, Ordering::Release);
             return Ok(0);
@@ -478,6 +482,7 @@ impl GarbageCollector {
             self.collection_in_progress.store(false, Ordering::Release);
             return Ok(0);
         }
+        // Same thread-local root visibility rule as minor collection.
         if registered_roots_exist_on_other_threads() {
             self.collection_in_progress.store(false, Ordering::Release);
             return Ok(0);

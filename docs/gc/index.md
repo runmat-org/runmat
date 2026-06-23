@@ -104,6 +104,16 @@ Roots are the entry points that keep GC values alive.
 
 Code that allocates and immediately needs a root can use `gc_allocate_rooted`, which registers the explicit root before collection can run. Cached JIT bridge values use this path so pooled handles are not left unrooted.
 
+## Thread Model
+
+`GcHandle` is not `Send` or `Sync`; the handle token does not prove that the target can be safely accessed from another thread. Ordinary Rust-owned `Value`s may still move through normal Rust APIs when their contained payloads allow it, but GC identity access must go through checked GC APIs on the thread that owns the relevant runtime state.
+
+Interpreter stack and variable roots are registered in a thread-local root scanner. A collection can scan the current thread's registered roots, explicit global roots, and remembered-set roots. It cannot safely inspect another thread's live interpreter stack or variable vector without a stop-the-world safepoint or a synchronized root snapshot protocol.
+
+Because the heap is global, RunMat takes the conservative rule: if another thread currently has registered thread-local roots, collection from this thread is deferred and reports that it collected zero objects. This prevents a collector on one thread from reclaiming values that are still live through another thread's interpreter roots. It is a soundness rule, not a parallel-GC optimization.
+
+Future concurrent collection work should replace this deferral with an explicit root-publication design, such as stop-the-world safepoints or a synchronized global root snapshot. Until then, cross-thread runtime activity remains correct by deferring collection rather than by scanning roots it cannot see.
+
 ## Access
 
 `GcHandle` is an identity token, not a Rust reference. Safe code cannot dereference it and cannot obtain `&Value` or `&mut Value` without a GC access guard.
