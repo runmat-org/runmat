@@ -264,6 +264,18 @@ fn sample_cfd_domain(
     }
 }
 
+fn sample_moment_load(load_id: &str) -> LoadCase {
+    LoadCase {
+        load_id: load_id.to_string(),
+        region_id: "tip".to_string(),
+        kind: LoadKind::Moment {
+            mx: 1.0,
+            my: 2.0,
+            mz: 3.0,
+        },
+    }
+}
+
 fn sample_cfd_boundary_conditions(inlet_velocity_m_per_s: f64) -> Vec<BoundaryCondition> {
     vec![
         BoundaryCondition {
@@ -4470,6 +4482,36 @@ fn analysis_run_acoustic_rejects_models_without_acoustic_source() {
 }
 
 #[test]
+fn analysis_run_acoustic_rejects_moment_loads() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let mut acoustic_model = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "acoustic_model_with_moment".to_string(),
+            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            prep_context: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("acoustic model should be created")
+    .data;
+    acoustic_model.loads = vec![sample_moment_load("acoustic_moment")];
+
+    let err = analysis_run_acoustic_op(
+        &acoustic_model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("acoustic run should reject structural moment loads");
+
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_ACOUSTIC.INVALID_ACOUSTIC_SOURCE"
+    );
+}
+
+#[test]
 fn analysis_run_acoustic_rejects_models_without_acoustic_boundary() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
@@ -4571,6 +4613,26 @@ fn analysis_run_cfd_rejects_disabled_cfd_domain() {
 }
 
 #[test]
+fn analysis_run_cfd_rejects_moment_loads() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps[0].kind = AnalysisStepKind::Cfd;
+    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
+    model.loads = vec![sample_moment_load("cfd_moment")];
+
+    let err = analysis_run_cfd_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("cfd run should reject structural moment loads");
+
+    assert_eq!(err.operation, "fea.run_cfd");
+    assert_eq!(err.op_version, "fea.run_cfd/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_LOAD");
+}
+
+#[test]
 fn analysis_run_thermal_rejects_models_without_thermal_step() {
     let _guard = analysis_test_guard();
     let model = sample_model();
@@ -4631,6 +4693,26 @@ fn analysis_run_thermal_rejects_invalid_heat_source_values() {
         OperationContext::new(None, None),
     )
     .expect_err("thermal run should reject non-finite heat source values");
+
+    assert_eq!(err.error_code, "RM.FEA.RUN_THERMAL.INVALID_THERMAL_SOURCE");
+}
+
+#[test]
+fn analysis_run_thermal_rejects_moment_loads() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "thermal_moment".to_string(),
+        kind: AnalysisStepKind::Thermal,
+    }];
+    model.loads = vec![sample_moment_load("thermal_moment")];
+
+    let err = analysis_run_thermal_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("thermal run should reject structural moment loads");
 
     assert_eq!(err.error_code, "RM.FEA.RUN_THERMAL.INVALID_THERMAL_SOURCE");
 }
@@ -4738,6 +4820,24 @@ fn analysis_run_cht_rejects_invalid_cfd_domain_parameters() {
     assert_eq!(err.operation, "fea.run_cht");
     assert_eq!(err.op_version, "fea.run_cht/v1");
     assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_OPTIONS");
+}
+
+#[test]
+fn analysis_run_cht_rejects_moment_loads() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_cht_model();
+    model.loads = vec![sample_moment_load("cht_moment")];
+
+    let err = analysis_run_cht_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("cht run should reject structural moment loads");
+
+    assert_eq!(err.operation, "fea.run_cht");
+    assert_eq!(err.op_version, "fea.run_cht/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_LOAD");
 }
 
 #[test]
@@ -4855,6 +4955,24 @@ fn analysis_run_fsi_rejects_invalid_cfd_domain_parameters() {
     assert_eq!(err.operation, "fea.run_fsi");
     assert_eq!(err.op_version, "fea.run_fsi/v1");
     assert_eq!(err.error_code, "RM.FEA.RUN_FSI.INVALID_OPTIONS");
+}
+
+#[test]
+fn analysis_run_fsi_rejects_moment_loads() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_fsi_model();
+    model.loads = vec![sample_moment_load("fsi_moment")];
+
+    let err = analysis_run_fsi_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("fsi run should reject structural moment loads");
+
+    assert_eq!(err.operation, "fea.run_fsi");
+    assert_eq!(err.op_version, "fea.run_fsi/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_FSI.INVALID_LOAD");
 }
 
 #[test]
@@ -5027,6 +5145,25 @@ fn analysis_run_electromagnetic_rejects_missing_current_source() {
     assert_eq!(
         err.error_code,
         "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE"
+    );
+}
+
+#[test]
+fn analysis_run_electromagnetic_rejects_moment_loads() {
+    let mut model = sample_model();
+    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    configure_valid_em_authoring(&mut model);
+    model.loads = vec![sample_moment_load("em_moment")];
+
+    let err = analysis_run_electromagnetic_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-em-run-moment-load".to_string()), None),
+    )
+    .expect_err("electromagnetic run should reject structural moment loads");
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_ELECTROMAGNETIC_SOURCE"
     );
 }
 

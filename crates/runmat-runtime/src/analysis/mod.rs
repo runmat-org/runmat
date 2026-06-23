@@ -268,6 +268,40 @@ fn map_fea_run_error(
     }
 }
 
+fn reject_moment_loads_for_run_family(
+    model: &AnalysisModel,
+    operation: &'static str,
+    op_version: &'static str,
+    error_code: &'static str,
+    family: &'static str,
+    context: &OperationContext,
+) -> Result<(), OperationErrorEnvelope> {
+    if let Some(load) = model
+        .loads
+        .iter()
+        .find(|load| matches!(load.kind, LoadKind::Moment { .. }))
+    {
+        return Err(operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code,
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("moment loads are structural loads and cannot be used as {family} loads"),
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("load_id".to_string(), load.load_id.clone()),
+                ("region_id".to_string(), load.region_id.clone()),
+            ]),
+        ));
+    }
+    Ok(())
+}
+
 fn persist_fea_run_result_with_progress(
     operation: &str,
     op_version: &str,
@@ -2134,6 +2168,14 @@ pub fn analysis_run_acoustic_with_options_op(
             ]),
         ));
     }
+    reject_moment_loads_for_run_family(
+        model,
+        ANALYSIS_RUN_ACOUSTIC_OPERATION,
+        ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+        "RM.FEA.RUN_ACOUSTIC.INVALID_ACOUSTIC_SOURCE",
+        "acoustic",
+        &context,
+    )?;
     if !model.loads.iter().any(|load| match &load.kind {
         LoadKind::Pressure { magnitude_pa } => magnitude_pa.is_finite() && magnitude_pa.abs() > 0.0,
         _ => false,
@@ -5978,6 +6020,14 @@ pub fn analysis_run_cfd_with_options_op(
             )]),
         ));
     }
+    reject_moment_loads_for_run_family(
+        model,
+        ANALYSIS_RUN_CFD_OPERATION,
+        ANALYSIS_RUN_CFD_OP_VERSION,
+        "RM.FEA.RUN_CFD.INVALID_LOAD",
+        "CFD",
+        &context,
+    )?;
     if let Err(detail) = validate_authored_cfd_boundary_conditions(model) {
         return Err(operation_error(
             ANALYSIS_RUN_CFD_OPERATION,
@@ -6455,6 +6505,14 @@ pub fn analysis_run_cht_with_options_op(
             )]),
         ));
     }
+    reject_moment_loads_for_run_family(
+        model,
+        ANALYSIS_RUN_CHT_OPERATION,
+        ANALYSIS_RUN_CHT_OP_VERSION,
+        "RM.FEA.RUN_CHT.INVALID_LOAD",
+        "CHT",
+        &context,
+    )?;
     if !options.time_step_s.is_finite() || options.time_step_s <= 0.0 {
         return Err(operation_error(
             ANALYSIS_RUN_CHT_OPERATION,
@@ -7104,6 +7162,14 @@ pub fn analysis_run_fsi_with_options_op(
             )]),
         ));
     }
+    reject_moment_loads_for_run_family(
+        model,
+        ANALYSIS_RUN_FSI_OPERATION,
+        ANALYSIS_RUN_FSI_OP_VERSION,
+        "RM.FEA.RUN_FSI.INVALID_LOAD",
+        "FSI",
+        &context,
+    )?;
     if !options.time_step_s.is_finite() || options.time_step_s <= 0.0 {
         return Err(operation_error(
             ANALYSIS_RUN_FSI_OPERATION,
@@ -7787,6 +7853,15 @@ fn validate_thermal_run_model(
             ]),
         ));
     }
+
+    reject_moment_loads_for_run_family(
+        model,
+        ANALYSIS_RUN_THERMAL_OPERATION,
+        ANALYSIS_RUN_THERMAL_OP_VERSION,
+        "RM.FEA.RUN_THERMAL.INVALID_THERMAL_SOURCE",
+        "thermal",
+        context,
+    )?;
 
     if let Some(load) = model.loads.iter().find(|load| {
         matches!(
@@ -10176,6 +10251,15 @@ fn validate_electromagnetic_run_model(
             ]),
         ));
     }
+
+    reject_moment_loads_for_run_family(
+        model,
+        ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+        ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+        "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_ELECTROMAGNETIC_SOURCE",
+        "electromagnetic",
+        context,
+    )?;
 
     let has_electromagnetic_source = model.loads.iter().any(|load| match &load.kind {
         LoadKind::CurrentDensity {
