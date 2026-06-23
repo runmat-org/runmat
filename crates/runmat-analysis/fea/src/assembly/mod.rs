@@ -70,6 +70,8 @@ pub struct AssemblySummary {
 pub struct StructuralMaterialSummary {
     pub youngs_modulus_pa: f64,
     pub poisson_ratio: f64,
+    #[serde(default)]
+    pub density_kg_per_m3: f64,
     pub lame_lambda_pa: f64,
     pub shear_modulus_pa: f64,
 }
@@ -312,11 +314,22 @@ pub fn assemble_linear_system(
             / model.materials.len() as f64
     };
     let shear_modulus_pa = avg_youngs_modulus / (2.0 * (1.0 + avg_poisson_ratio)).max(1.0e-9);
+    let avg_density_kg_per_m3 = if model.materials.is_empty() {
+        7850.0
+    } else {
+        model
+            .materials
+            .iter()
+            .map(|material| material.mechanical.density_kg_per_m3.max(1.0))
+            .sum::<f64>()
+            / model.materials.len() as f64
+    };
     let lame_lambda_pa = avg_youngs_modulus * avg_poisson_ratio
         / ((1.0 + avg_poisson_ratio) * (1.0 - 2.0 * avg_poisson_ratio)).max(1.0e-9);
     let structural_material = StructuralMaterialSummary {
         youngs_modulus_pa: avg_youngs_modulus,
         poisson_ratio: avg_poisson_ratio,
+        density_kg_per_m3: avg_density_kg_per_m3,
         lame_lambda_pa,
         shear_modulus_pa,
     };
@@ -1008,7 +1021,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
     let dof_count = structural_dof_layout.total_dof_count();
     let mut dense = vec![0.0_f64; dof_count * dof_count];
     let mut rhs = vec![0.0_f64; dof_count];
-    let mut mass_diag = vec![1.0_f64; dof_count];
+    let mut mass_diag = vec![0.0_f64; dof_count];
     let mut damping_diag = vec![0.0_f64; dof_count];
     let mut structural_beam_recovery = Vec::new();
 
@@ -1043,16 +1056,15 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
             transform_global_to_local,
         });
 
-        let length = distance(
-            structural.nodes[node_i_index].coordinates_m,
-            structural.nodes[node_j_index].coordinates_m,
-        )
-        .max(1.0e-9);
-        let element_mass = section.area_m2 * length;
-        for dof in element_dofs {
-            mass_diag[dof] += element_mass / BEAM_ELEMENT_DOF_COUNT as f64;
-            damping_diag[dof] += 0.01;
-        }
+        add_lumped_beam_mass_and_damping(
+            &mut mass_diag,
+            &mut damping_diag,
+            &element_dofs,
+            section,
+            structural_material.density_kg_per_m3,
+            frame.length_m,
+            &transform_global_to_local,
+        );
     }
 
     let mut direct_rotational_moment_load_count = 0usize;
@@ -1273,11 +1285,22 @@ fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSumma
             / model.materials.len() as f64
     };
     let shear_modulus_pa = avg_youngs_modulus / (2.0 * (1.0 + avg_poisson_ratio)).max(1.0e-9);
+    let avg_density_kg_per_m3 = if model.materials.is_empty() {
+        7850.0
+    } else {
+        model
+            .materials
+            .iter()
+            .map(|material| material.mechanical.density_kg_per_m3.max(1.0))
+            .sum::<f64>()
+            / model.materials.len() as f64
+    };
     let lame_lambda_pa = avg_youngs_modulus * avg_poisson_ratio
         / ((1.0 + avg_poisson_ratio) * (1.0 - 2.0 * avg_poisson_ratio)).max(1.0e-9);
     StructuralMaterialSummary {
         youngs_modulus_pa: avg_youngs_modulus,
         poisson_ratio: avg_poisson_ratio,
+        density_kg_per_m3: avg_density_kg_per_m3,
         lame_lambda_pa,
         shear_modulus_pa,
     }
@@ -1321,6 +1344,47 @@ fn beam_element_dof_indices(
         indices[local + 6] = layout.index(node_j_index, kind)?;
     }
     Some(indices)
+}
+
+fn add_lumped_beam_mass_and_damping(
+    mass_diag: &mut [f64],
+    damping_diag: &mut [f64],
+    element_dofs: &[usize; BEAM_ELEMENT_DOF_COUNT],
+    section: BeamSection,
+    density_kg_per_m3: f64,
+    length_m: f64,
+    transform_global_to_local: &BeamTransform12,
+) {
+    let density = density_kg_per_m3.max(1.0);
+    let length = length_m.max(1.0e-12);
+    let nodal_mass = density * section.area_m2.max(1.0e-18) * length / 2.0;
+    let local_rotational_inertia = [
+        density * section.torsion_j_m4.max(1.0e-24) * length / 2.0,
+        density * section.iy_m4.max(1.0e-24) * length / 2.0,
+        density * section.iz_m4.max(1.0e-24) * length / 2.0,
+    ];
+
+    for node_offset in [0usize, 6] {
+        for component in 0..3 {
+            let dof = element_dofs[node_offset + component];
+            mass_diag[dof] += nodal_mass;
+            damping_diag[dof] += 0.01;
+        }
+        for global_component in 0..3 {
+            let local_col = node_offset + 3 + global_component;
+            let inertia = local_rotational_inertia
+                .iter()
+                .enumerate()
+                .map(|(local_component, local_inertia)| {
+                    let row = node_offset + 3 + local_component;
+                    local_inertia * transform_global_to_local[row][local_col].powi(2)
+                })
+                .sum::<f64>();
+            let dof = element_dofs[node_offset + 3 + global_component];
+            mass_diag[dof] += inertia.max(1.0e-18);
+            damping_diag[dof] += 0.01;
+        }
+    }
 }
 
 fn structural_target_nodes(structural: &StructuralModel, region_id: &str) -> Vec<usize> {
@@ -1394,10 +1458,6 @@ fn apply_dense_constraints(dense: &[f64], constrained: &[bool], rhs: &mut [f64],
             }
         }
     }
-}
-
-fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
-    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
 }
 
 fn apply_prep_native_element_assembly(

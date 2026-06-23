@@ -982,9 +982,11 @@ fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     } else {
         let youngs = remove_required_f64(&mut fields, MATERIAL_NAME, "youngs_modulus_pa")?;
         let poisson = remove_required_f64(&mut fields, MATERIAL_NAME, "poisson_ratio")?;
+        let density = remove_optional_f64(&mut fields, "density_kg_per_m3")?.unwrap_or(7850.0);
         MaterialMechanicalModel {
             youngs_modulus_pa: youngs,
             poisson_ratio: poisson,
+            density_kg_per_m3: density,
         }
     };
     let thermal = if let Some(value) = fields.remove("thermal") {
@@ -2331,6 +2333,7 @@ fn canonical_field_name(text: &str) -> String {
     match normalize_token(&out).as_str() {
         "youngsmoduluspa" => "youngs_modulus_pa".to_string(),
         "poissonratio" => "poisson_ratio".to_string(),
+        "density" | "densitykgperm3" => "density_kg_per_m3".to_string(),
         "magnitude" | "magnitudepa" => "magnitude_pa".to_string(),
         "current" | "currenta" => "current_a".to_string(),
         "phase" | "phaserad" => "phase_rad".to_string(),

@@ -39,6 +39,9 @@ fn default_relative_permeability() -> f64 {
 fn default_acoustic_density_kg_per_m3() -> f64 {
     1.225
 }
+fn default_mechanical_density_kg_per_m3() -> f64 {
+    7850.0
+}
 
 fn default_speed_of_sound_m_per_s() -> f64 {
     343.0
@@ -64,6 +67,8 @@ pub struct ConductivityFrequencyPoint {
 pub struct MaterialMechanicalModel {
     pub youngs_modulus_pa: f64,
     pub poisson_ratio: f64,
+    #[serde(default = "default_mechanical_density_kg_per_m3")]
+    pub density_kg_per_m3: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

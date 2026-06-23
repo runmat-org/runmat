@@ -44,6 +44,13 @@ fn host_field<'a>(result: &'a FeaRunResult, field_id: &str) -> &'a [f64] {
         .expect("field should be host-backed")
 }
 
+fn assert_close(actual: f64, expected: f64, tolerance: f64) {
+    assert!(
+        (actual - expected).abs() <= tolerance,
+        "actual={actual} expected={expected} tolerance={tolerance}",
+    );
+}
+
 fn assert_thermo_mechanical_consistency_diagnostic(
     diagnostics: &[crate::diagnostics::FeaDiagnostic],
 ) {
@@ -166,6 +173,56 @@ fn assembly_summary_reports_structural_dof_layout_metrics() {
     assert_eq!(summary.structural_beam_element_count, 0);
     assert_eq!(summary.structural_shell_element_count, 0);
     assert_eq!(summary.structural_solid_element_count, 1);
+}
+
+#[test]
+fn beam_assembly_uses_lumped_rotational_inertia() {
+    let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let summary = crate::assembly::assemble_linear_system(&model, None, None, None);
+    let layout = &summary.structural_dof_layout;
+    let node = 0usize;
+    let mass = &summary.operator.mass_diag;
+
+    let translational_mass = 7850.0 * 2.0e-4 / 2.0;
+    let torsion_inertia = 7850.0 * 2.4e-9 / 2.0;
+    let bending_y_inertia = 7850.0 * 1.6e-9 / 2.0;
+    let bending_z_inertia = 7850.0 * 6.4e-9 / 2.0;
+
+    let dof = |kind| {
+        layout
+            .index(node, kind)
+            .expect("beam node should expose requested DOF")
+    };
+    assert_close(
+        mass[dof(crate::assembly::dofs::StructuralDofKind::Ux)],
+        translational_mass,
+        1.0e-12,
+    );
+    assert_close(
+        mass[dof(crate::assembly::dofs::StructuralDofKind::Uy)],
+        translational_mass,
+        1.0e-12,
+    );
+    assert_close(
+        mass[dof(crate::assembly::dofs::StructuralDofKind::Uz)],
+        translational_mass,
+        1.0e-12,
+    );
+    assert_close(
+        mass[dof(crate::assembly::dofs::StructuralDofKind::Rx)],
+        torsion_inertia,
+        1.0e-15,
+    );
+    assert_close(
+        mass[dof(crate::assembly::dofs::StructuralDofKind::Ry)],
+        bending_y_inertia,
+        1.0e-15,
+    );
+    assert_close(
+        mass[dof(crate::assembly::dofs::StructuralDofKind::Rz)],
+        bending_z_inertia,
+        1.0e-15,
+    );
 }
 
 #[test]
@@ -797,14 +854,16 @@ fn transient_beam_moment_emits_rotational_snapshots() {
         .last()
         .and_then(runmat_analysis_core::AnalysisField::as_host_f64)
         .expect("rotation snapshot should be host-backed");
-    let final_angular_velocity = result
+    let max_angular_velocity = result
         .angular_velocity_snapshots
-        .last()
-        .and_then(runmat_analysis_core::AnalysisField::as_host_f64)
-        .expect("angular velocity snapshot should be host-backed");
+        .iter()
+        .filter_map(runmat_analysis_core::AnalysisField::as_host_f64)
+        .flat_map(|values| values.iter())
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
 
     assert!(final_rotation.iter().any(|value| value.abs() > 0.0));
-    assert!(final_angular_velocity.iter().any(|value| value.abs() > 0.0));
+    assert!(max_angular_velocity > 0.0);
 }
 
 #[test]
