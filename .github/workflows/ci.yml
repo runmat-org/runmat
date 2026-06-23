@@ -54,11 +54,11 @@ jobs:
           cargo="${cargo_bin}/cargo"
 
           if [[ ! -x "${rustup}" ]]; then
-            echo "Missing rustup at ${rustup}. Provision the runner with scripts/bootstrap-linux-runner.sh." >&2
+            echo "Missing rustup at ${rustup}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
             exit 1
           fi
           if [[ ! -x "${cargo}" ]]; then
-            echo "Missing cargo at ${cargo}. Provision the runner with scripts/bootstrap-linux-runner.sh." >&2
+            echo "Missing cargo at ${cargo}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
             exit 1
           fi
 
@@ -73,7 +73,7 @@ jobs:
           installed_components="$("${rustup}" component list --toolchain "${toolchain}" --installed)"
           for component in ${RUST_COMPONENTS}; do
             if ! grep -q "^${component}-" <<<"${installed_components}"; then
-              echo "Missing Rust component '${component}' for toolchain ${toolchain}. Provision the runner with scripts/bootstrap-linux-runner.sh." >&2
+              echo "Missing Rust component '${component}' for toolchain ${toolchain}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
               exit 1
             fi
           done
@@ -170,7 +170,7 @@ jobs:
           if ((${#missing[@]} > 0)); then
             printf 'Missing Linux runner prerequisites:\n' >&2
             printf '  %s\n' "${missing[@]}" >&2
-            echo "Provision the runner with scripts/bootstrap-linux-runner.sh." >&2
+            echo "Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
             exit 1
           fi
 

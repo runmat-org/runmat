@@ -28,6 +28,7 @@ PACKAGES=(
   libegl1-mesa-dev
   libgl1-mesa-dev
   liblapack-dev
+  libocct-data-exchange-dev
   libopenblas-dev
   libssl-dev
   nodejs
@@ -96,6 +97,18 @@ if [[ -z "${LDCONFIG_BIN}" ]]; then
 fi
 "${LDCONFIG_BIN}" -p | grep -q 'libopenblas\.so'
 "${LDCONFIG_BIN}" -p | grep -q 'liblapack\.so'
+if [[ ! -d /usr/include/opencascade ]]; then
+  echo "OpenCASCADE headers were not found at /usr/include/opencascade" >&2
+  exit 1
+fi
+if [[ ! -e /usr/lib/x86_64-linux-gnu/libTKSTEP.so && ! -e /usr/lib/x86_64-linux-gnu/libTKDESTEP.so ]]; then
+  echo "OpenCASCADE STEP libraries were not found under /usr/lib/x86_64-linux-gnu" >&2
+  exit 1
+fi
+if [[ ! -e /usr/lib/x86_64-linux-gnu/libTKIGES.so && ! -e /usr/lib/x86_64-linux-gnu/libTKDEIGES.so && ! -e /usr/lib/x86_64-linux-gnu/libTKXDEIGES.so ]]; then
+  echo "OpenCASCADE IGES libraries were not found under /usr/lib/x86_64-linux-gnu" >&2
+  exit 1
+fi
 gdb --version >/dev/null
 node --version >/dev/null
 npm --version >/dev/null

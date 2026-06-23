@@ -49,10 +49,10 @@ jobs:
           $cargo = Join-Path $cargoBin 'cargo.exe'
 
           if (-not (Test-Path $rustup)) {
-            throw "Missing rustup at $rustup. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            throw "Missing rustup at $rustup. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
           if (-not (Test-Path $cargo)) {
-            throw "Missing cargo at $cargo. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            throw "Missing cargo at $cargo. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
           $unexpectedCargoHome = [Environment]::GetEnvironmentVariable('CARGO_HOME', 'Machine')
           if ($unexpectedCargoHome -and $unexpectedCargoHome -ne $cargoHome) {
@@ -75,7 +75,7 @@ jobs:
           foreach ($component in $components) {
             $componentPattern = '^{0}-' -f [regex]::Escape($component)
             if (-not ($installedComponents | Select-String -Pattern $componentPattern -Quiet)) {
-              throw "Missing Rust component '$component' for toolchain $toolchain. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+              throw "Missing Rust component '$component' for toolchain $toolchain. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
             }
           }
           & $cargo -V
@@ -103,7 +103,7 @@ jobs:
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 
           if (-not (Test-Path $vswhere)) {
-            throw "vswhere.exe was not found. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            throw "vswhere.exe was not found. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
           $vsInstall = & $vswhere `
             -latest `
@@ -111,13 +111,13 @@ jobs:
             -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
             -property installationPath
           if (-not $vsInstall) {
-            throw "Visual Studio C++ Build Tools were not detected. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            throw "Visual Studio C++ Build Tools were not detected. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
           if (-not (Get-Command pkg-config -ErrorAction SilentlyContinue)) {
-            throw "pkg-config was not found on PATH. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            throw "pkg-config was not found on PATH. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
           if (-not (Get-Command perl -ErrorAction SilentlyContinue)) {
-            throw "Perl was not found on PATH. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            throw "Perl was not found on PATH. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
 
           $required = @(
@@ -131,12 +131,12 @@ jobs:
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) {
-              throw "Missing required Windows dependency artifact: $path. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+              throw "Missing required Windows dependency artifact: $path. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
             }
           }
           $zmqImportLibs = Get-ChildItem -Path (Join-Path $prefix 'lib') -Filter '*zmq*.lib' -ErrorAction SilentlyContinue
           if (-not $zmqImportLibs) {
-            throw "Missing required ZeroMQ import library under $prefix\lib. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            throw "Missing required ZeroMQ import library under $prefix\lib. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
 
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot"
