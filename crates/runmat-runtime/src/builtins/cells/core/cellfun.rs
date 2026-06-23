@@ -502,7 +502,7 @@ async fn execute_cell(
 fn deref_cell_value(cell: &CellArray, index: usize) -> Value {
     cell.data
         .get(index)
-        .map(|ptr| (ptr).clone())
+        .cloned()
         .unwrap_or(Value::Num(f64::NAN))
 }
 

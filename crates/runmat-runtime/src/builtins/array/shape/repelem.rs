@@ -588,7 +588,7 @@ fn repelem_cell_row_major(
             let src_coord = idx_tables[k][coord];
             src_index += src_coord * src_strides[k];
         }
-        values.push((&cell.data[src_index]).clone());
+        values.push(cell.data[src_index].clone());
     }
     Ok((values, output_shape))
 }

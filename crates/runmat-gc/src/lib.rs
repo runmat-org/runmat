@@ -118,7 +118,7 @@ pub struct GarbageCollector {
     collector: Mutex<MarkSweepCollector>,
 
     /// Explicit roots stored as identity handles.
-    root_ptrs: Arc<Mutex<HashSet<GcHandle>>>,
+    root_ptrs: Mutex<HashSet<GcHandle>>,
 
     /// Collection state
     collection_in_progress: AtomicBool,
@@ -218,7 +218,7 @@ impl GarbageCollector {
             config: Arc::new(RwLock::new(config)),
             allocator: Mutex::new(allocator),
             collector: Mutex::new(collector),
-            root_ptrs: Arc::new(Mutex::new(HashSet::new())),
+            root_ptrs: Mutex::new(HashSet::new()),
             collection_in_progress: AtomicBool::new(false),
             active_value_borrows: AtomicUsize::new(0),
             active_value_mut_borrow: AtomicBool::new(false),
@@ -263,7 +263,7 @@ impl GarbageCollector {
                 }
             }
             let fin = std::sync::Arc::new(GpuTensorFinalizer { handle });
-            let _ = gc_register_finalizer(ptr.clone(), fin);
+            let _ = gc_register_finalizer(ptr, fin);
         }
 
         // Heuristic triggers:
@@ -963,7 +963,7 @@ mod tests {
     fn test_root_protection() {
         gc_test_context(|| {
             let protected = gc_allocate(Value::Num(42.0)).expect("allocation failed");
-            gc_add_root(protected.clone()).expect("root registration failed");
+            gc_add_root(protected).expect("root registration failed");
 
             for i in 0..60 {
                 let _ = gc_allocate(Value::String(format!("garbage_{i}")));
@@ -1040,7 +1040,7 @@ mod tests {
                 Value::Num(7.0)
             );
 
-            gc_add_root(v.clone()).expect("root add failed");
+            gc_add_root(v).expect("root add failed");
             let _ = gc_collect_minor().expect("collection failed");
             assert_eq!(
                 gc_clone_value(&v).expect("valid GC handle"),

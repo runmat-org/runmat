@@ -231,8 +231,8 @@ fn test_allocation_with_roots() {
         let ptr2 = gc_allocate(Value::Num(2.0)).expect("allocation should succeed");
 
         // Register as roots to protect from collection
-        gc_add_root(ptr1.clone()).expect("root registration should succeed");
-        gc_add_root(ptr2.clone()).expect("root registration should succeed");
+        gc_add_root(ptr1).expect("root registration should succeed");
+        gc_add_root(ptr2).expect("root registration should succeed");
 
         assert_eq!(
             gc_clone_value(&ptr1).expect("valid GC handle"),

@@ -1747,7 +1747,7 @@ pub(crate) mod tests {
         let mut inner = StructValue::new();
         inner.fields.insert("x".to_string(), Value::Num(0.0));
         let gc_ptr = gc_allocate(Value::Struct(inner)).expect("gc allocation");
-        let handle_ptr = gc_ptr.clone();
+        let handle_ptr = gc_ptr;
         let handle = HandleRef {
             class_name: "PointHandle".to_string(),
             target: handle_ptr,

@@ -465,6 +465,7 @@ async fn call_registered_class_constructor(
         .with_identifier("RunMat:MethodPrivate")
         .build());
     }
+    let _constructor_receiver_guard = crate::push_constructor_receiver(default_object.clone());
     let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
         &ctor.function_name,
         args,

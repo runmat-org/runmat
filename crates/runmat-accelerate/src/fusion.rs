@@ -1,11 +1,8 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-use std::sync::Mutex;
-use std::sync::{Arc, OnceLock, Weak};
+use std::rc::{Rc, Weak};
+use std::sync::OnceLock;
 
-#[cfg(target_arch = "wasm32")]
-use once_cell::sync::Lazy;
 use runmat_accelerate_api::ReductionFlavor;
 use runmat_builtins::Value;
 use serde::{Deserialize, Serialize};
@@ -16,6 +13,10 @@ use crate::graph::{
 };
 use crate::reduction_meta::{detect_reduction_signature, ReductionAxes, ReductionBehavior};
 use runmat_accelerate_api::CovNormalization;
+
+/// Fusion plans can contain `Value` constants, including GC handles. Keep them
+/// thread-confined so the type system does not imply cross-thread GC safety.
+pub type FusionPlanRef = Rc<FusionPlan>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FusionKind {
@@ -668,37 +669,24 @@ pub struct ActiveFusion {
 }
 
 struct ActiveContext {
-    plan: Arc<FusionPlan>,
+    plan: FusionPlanRef,
     active_group: Option<usize>,
 }
 
 thread_local! {
     static PLAN_CACHE: RefCell<HashMap<usize, Weak<FusionPlan>>> = RefCell::new(HashMap::new());
+    static ACTIVE_PLAN: RefCell<Option<ActiveContext>> = const { RefCell::new(None) };
 }
 
 fn with_plan_cache<R>(f: impl FnOnce(&mut HashMap<usize, Weak<FusionPlan>>) -> R) -> R {
     PLAN_CACHE.with(|cache| f(&mut cache.borrow_mut()))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-thread_local! {
-    static ACTIVE_PLAN: RefCell<Option<ActiveContext>> = const { RefCell::new(None) };
-}
-#[cfg(target_arch = "wasm32")]
-static ACTIVE_PLAN: Lazy<Mutex<Option<ActiveContext>>> = Lazy::new(|| Mutex::new(None));
-
-#[cfg(not(target_arch = "wasm32"))]
 fn with_active_context<R>(f: impl FnOnce(&mut Option<ActiveContext>) -> R) -> R {
     ACTIVE_PLAN.with(|ctx| {
         let mut slot = ctx.borrow_mut();
         f(&mut slot)
     })
-}
-
-#[cfg(target_arch = "wasm32")]
-fn with_active_context<R>(f: impl FnOnce(&mut Option<ActiveContext>) -> R) -> R {
-    let mut slot = ACTIVE_PLAN.lock().expect("active plan mutex poisoned");
-    f(&mut slot)
 }
 
 fn fusion_debug_enabled() -> bool {
@@ -713,7 +701,7 @@ pub fn prepare_fusion_plan(
     graph: Option<&AccelGraph>,
     groups: &[FusionGroup],
     candidate_group_count: usize,
-) -> Option<Arc<FusionPlan>> {
+) -> Option<FusionPlanRef> {
     let graph = graph?;
     if candidate_group_count == 0 {
         if !groups.is_empty() && fusion_debug_enabled() {
@@ -748,9 +736,9 @@ pub fn prepare_fusion_plan(
     }
 
     let plan = FusionPlan::from_graph(graph, &groups);
-    let plan = Arc::new(plan);
+    let plan = Rc::new(plan);
     with_plan_cache(|cache| {
-        cache.insert(key, Arc::downgrade(&plan));
+        cache.insert(key, Rc::downgrade(&plan));
     });
     Some(plan)
 }
@@ -825,7 +813,7 @@ fn node_within_group_span(node: &AccelNode, span: &InstrSpan) -> bool {
     node.span.start >= span.start && node.span.end <= span.end
 }
 
-pub fn activate_fusion_plan(plan: Option<Arc<FusionPlan>>) {
+pub fn activate_fusion_plan(plan: Option<FusionPlanRef>) {
     with_active_context(|slot| {
         *slot = plan.map(|plan| ActiveContext {
             plan,
@@ -3576,6 +3564,20 @@ mod tests {
         assert!(
             plan.is_some(),
             "semantic candidate evidence should allow executable fusion plan preparation"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_cache_is_thread_local_rc() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+
+        let first = prepare_fusion_plan(Some(&graph), &groups, 1).expect("first plan");
+        let second = prepare_fusion_plan(Some(&graph), &groups, 1).expect("cached plan");
+
+        assert!(
+            std::rc::Rc::ptr_eq(&first, &second),
+            "fusion plans should be reused within the current thread without implying Send/Sync ownership"
         );
     }
 

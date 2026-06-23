@@ -1,9 +1,8 @@
+use crate::TEST_PROCESS_LOCK as CWD_LOCK;
 use crate::*;
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
-static CWD_LOCK: Mutex<()> = Mutex::new(());
 const DEEP_SEMANTIC_TEST_STACK_BYTES: usize = 32 * 1024 * 1024;
 
 struct CwdGuard {
@@ -2915,6 +2914,7 @@ amt = c.amount;
             let outcome =
                 execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
                     .expect("execute script");
+            eprintln!("multilevel super outcome: {outcome:#?}");
 
             assert!(outcome_has_named_upsert(
                 &outcome,
@@ -5465,11 +5465,12 @@ fn execute_path_request_supports_multilevel_super_constructor_chain_for_handle_c
     let handle = std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(move || {
-            let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-            let tmp = tempfile::TempDir::new().expect("tempdir");
-            std::fs::write(
-                tmp.path().join("A.m"),
-                r#"
+            runmat_gc::gc_test_context(|| {
+                let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+                let tmp = tempfile::TempDir::new().expect("tempdir");
+                std::fs::write(
+                    tmp.path().join("A.m"),
+                    r#"
 classdef A < handle
   properties
     x
@@ -5481,11 +5482,11 @@ classdef A < handle
   end
 end
 "#,
-            )
-            .expect("write class source");
-            std::fs::write(
-                tmp.path().join("B.m"),
-                r#"
+                )
+                .expect("write class source");
+                std::fs::write(
+                    tmp.path().join("B.m"),
+                    r#"
 classdef B < A
   methods
     function obj = B(v)
@@ -5494,11 +5495,11 @@ classdef B < A
   end
 end
 "#,
-            )
-            .expect("write class source");
-            std::fs::write(
-                tmp.path().join("C.m"),
-                r#"
+                )
+                .expect("write class source");
+                std::fs::write(
+                    tmp.path().join("C.m"),
+                    r#"
 classdef C < B
   methods
     function obj = C(v)
@@ -5507,36 +5508,37 @@ classdef C < B
   end
 end
 "#,
-            )
-            .expect("write class source");
-            std::fs::write(
-                tmp.path().join("main.m"),
-                "c = C(1); cls = class(c); isaA = isa(c,'A'); y = c.x;",
-            )
-            .expect("write script source");
+                )
+                .expect("write class source");
+                std::fs::write(
+                    tmp.path().join("main.m"),
+                    "c = C(1); cls = class(c); isaA = isa(c,'A'); y = c.x;",
+                )
+                .expect("write script source");
 
-            let mut session =
-                RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-            let source_path = tmp.path().join("main.m");
-            let outcome =
-                execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
-                    .expect("execute script");
+                let mut session =
+                    RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+                let source_path = tmp.path().join("main.m");
+                let outcome =
+                    execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+                        .expect("execute script");
 
-            assert!(outcome_has_named_upsert(
-                &outcome,
-                "cls",
-                &runmat_builtins::Value::String("C".into())
-            ));
-            assert!(outcome_has_named_upsert(
-                &outcome,
-                "isaA",
-                &runmat_builtins::Value::Bool(true)
-            ));
-            assert!(outcome_has_named_upsert(
-                &outcome,
-                "y",
-                &runmat_builtins::Value::Num(4.0)
-            ));
+                assert!(outcome_has_named_upsert(
+                    &outcome,
+                    "cls",
+                    &runmat_builtins::Value::String("C".into())
+                ));
+                assert!(outcome_has_named_upsert(
+                    &outcome,
+                    "isaA",
+                    &runmat_builtins::Value::Bool(true)
+                ));
+                assert!(outcome_has_named_upsert(
+                    &outcome,
+                    "y",
+                    &runmat_builtins::Value::Num(4.0)
+                ));
+            });
         })
         .expect("spawn multilevel super ctor e2e thread");
     handle
@@ -9710,27 +9712,30 @@ fn dynamic_workspace_evalin_caller_from_function_targets_script_workspace() {
 
 #[test]
 fn dynamic_workspace_evalin_caller_from_nested_function_targets_parent_function_workspace() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let source = r#"
-        outer_y = outer();
+    run_deep_semantic_test(|| {
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let source = r#"
+            outer_y = outer();
 
-        function y = outer()
-            local_x = 6;
-            y = nested();
-            y = y + eval('nested_assigned');
+            function y = outer()
+                local_x = 6;
+                y = nested();
+                y = y + eval('nested_assigned');
 
-            function out = nested()
-                out = evalin('caller', 'local_x + 3');
-                assignin('caller', 'nested_assigned', 14);
+                function out = nested()
+                    out = evalin('caller', 'local_x + 3');
+                    assignin('caller', 'nested_assigned', 14);
+                end
             end
-        end
-    "#;
-    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "outer_y",
-        &runmat_builtins::Value::Num(23.0)
-    ));
+        "#;
+        let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+        assert!(outcome_has_named_upsert(
+            &outcome,
+            "outer_y",
+            &runmat_builtins::Value::Num(23.0)
+        ));
+    });
 }
 
 #[test]
@@ -12002,21 +12007,24 @@ fn dynamic_eval_persisted_function_call_survives_eval_local_function_id_collisio
 
 #[test]
 fn dynamic_eval_persisted_function_handle_survives_eval_local_function_id_collision() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    execute_text_request(&mut session, "function y = inc(x)\n  y = x + 1;\nend")
-        .expect("define session function");
+    run_deep_semantic_test(|| {
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        execute_text_request(&mut session, "function y = inc(x)\n  y = x + 1;\nend")
+            .expect("define session function");
 
-    let outcome = execute_text_request(
-        &mut session,
-        "eval('function local_zero(); end; f = @inc; y = f(2);');",
-    )
-    .expect("dynamic eval succeeds");
-    assert!(outcome.diagnostics.is_empty());
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "y",
-        &runmat_builtins::Value::Num(3.0)
-    ));
+        let outcome = execute_text_request(
+            &mut session,
+            "eval('function local_zero(); end; f = @inc; y = f(2);');",
+        )
+        .expect("dynamic eval succeeds");
+        assert!(outcome.diagnostics.is_empty());
+        assert!(outcome_has_named_upsert(
+            &outcome,
+            "y",
+            &runmat_builtins::Value::Num(3.0)
+        ));
+    });
 }
 
 #[test]

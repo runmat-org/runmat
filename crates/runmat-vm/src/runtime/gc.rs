@@ -5,12 +5,14 @@ use runmat_gc::{
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
+type RootLifetime<'roots> = fn(&'roots Vec<Value>, &'roots Vec<Value>);
+
 /// RAII wrapper for GC root management during interpretation.
 pub struct InterpretContext<'roots> {
     pub(crate) stack_root_id: Option<RootId>,
     pub(crate) vars_root_id: Option<RootId>,
     pub(crate) extra_root_ids: Vec<RootId>,
-    _roots: PhantomData<fn(&'roots Vec<Value>, &'roots Vec<Value>)>,
+    _roots: PhantomData<RootLifetime<'roots>>,
 }
 
 impl<'roots> InterpretContext<'roots> {

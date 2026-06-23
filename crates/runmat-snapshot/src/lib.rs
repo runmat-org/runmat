@@ -23,8 +23,10 @@
 //! └─────────────────┘    └──────────────────┘    └─────────────────┘
 //! ```
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 
 /// Type alias for builtin function dispatch table to reduce complexity
@@ -419,8 +421,8 @@ impl Default for SnapshotConfig {
 /// Main snapshot interface
 pub struct SnapshotManager {
     config: SnapshotConfig,
-    cache: Arc<RwLock<HashMap<PathBuf, Arc<Snapshot>>>>,
-    stats: Arc<RwLock<HashMap<PathBuf, LoadingStats>>>,
+    cache: RefCell<HashMap<PathBuf, Rc<Snapshot>>>,
+    stats: RefCell<HashMap<PathBuf, LoadingStats>>,
 }
 
 impl SnapshotManager {
@@ -428,8 +430,8 @@ impl SnapshotManager {
     pub fn new(config: SnapshotConfig) -> Self {
         Self {
             config,
-            cache: Arc::new(RwLock::new(HashMap::new())),
-            stats: Arc::new(RwLock::new(HashMap::new())),
+            cache: RefCell::new(HashMap::new()),
+            stats: RefCell::new(HashMap::new()),
         }
     }
 
@@ -440,29 +442,29 @@ impl SnapshotManager {
     }
 
     /// Load a snapshot from disk
-    pub fn load_snapshot<P: AsRef<Path>>(&self, snapshot_path: P) -> SnapshotResult<Arc<Snapshot>> {
+    pub fn load_snapshot<P: AsRef<Path>>(&self, snapshot_path: P) -> SnapshotResult<Rc<Snapshot>> {
         let path = snapshot_path.as_ref().to_path_buf();
 
         // Check cache first
         {
-            let cache = self.cache.read();
+            let cache = self.cache.borrow();
             if let Some(snapshot) = cache.get(&path) {
-                return Ok(Arc::clone(snapshot));
+                return Ok(Rc::clone(snapshot));
             }
         }
 
         // Load from disk
         let mut loader = SnapshotLoader::new(self.config.clone());
         let (snapshot, stats) = loader.load(&path)?;
-        let snapshot = Arc::new(snapshot);
+        let snapshot = Rc::new(snapshot);
 
         // Update cache and stats
         {
-            let mut cache = self.cache.write();
-            cache.insert(path.clone(), Arc::clone(&snapshot));
+            let mut cache = self.cache.borrow_mut();
+            cache.insert(path.clone(), Rc::clone(&snapshot));
         }
         {
-            let mut stats_map = self.stats.write();
+            let mut stats_map = self.stats.borrow_mut();
             stats_map.insert(path, stats);
         }
 
@@ -471,21 +473,21 @@ impl SnapshotManager {
 
     /// Get loading statistics for a snapshot
     pub fn get_stats<P: AsRef<Path>>(&self, snapshot_path: P) -> Option<LoadingStats> {
-        let stats = self.stats.read();
+        let stats = self.stats.borrow();
         stats.get(snapshot_path.as_ref()).cloned()
     }
 
     /// Clear snapshot cache
     pub fn clear_cache(&self) {
-        let mut cache = self.cache.write();
+        let mut cache = self.cache.borrow_mut();
         cache.clear();
-        let mut stats = self.stats.write();
+        let mut stats = self.stats.borrow_mut();
         stats.clear();
     }
 
     /// Get cache statistics
     pub fn cache_stats(&self) -> (usize, usize) {
-        let cache = self.cache.read();
+        let cache = self.cache.borrow();
         let total_size = cache
             .values()
             .map(|snapshot| bincode::serialized_size(&**snapshot).unwrap_or(0) as usize)

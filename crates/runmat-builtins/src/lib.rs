@@ -2146,14 +2146,14 @@ impl Trace for ObjectInstance {
 
 impl Trace for HandleRef {
     fn trace(&self, tracer: &mut dyn Tracer) {
-        tracer.mark(self.target.clone());
+        tracer.mark(self.target);
     }
 }
 
 impl Trace for Listener {
     fn trace(&self, tracer: &mut dyn Tracer) {
-        tracer.mark(self.target.clone());
-        tracer.mark(self.callback.clone());
+        tracer.mark(self.target);
+        tracer.mark(self.callback);
     }
 }
 

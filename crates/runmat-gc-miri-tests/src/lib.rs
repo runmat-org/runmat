@@ -30,10 +30,12 @@ mod tests {
     #[test]
     fn allocation_triggered_collection_preserves_returned_handle() {
         gc_test_context(|| {
-            let mut config = GcConfig::default();
-            config.young_generation_size = 64 * 1024 * 1024;
-            config.minor_gc_threshold = 0.35;
-            config.major_gc_threshold = 0.9;
+            let config = GcConfig {
+                young_generation_size: 64 * 1024 * 1024,
+                minor_gc_threshold: 0.35,
+                major_gc_threshold: 0.9,
+                ..GcConfig::default()
+            };
             gc_configure(config).expect("configure aggressive periodic minor collection");
 
             let mut returned = None;

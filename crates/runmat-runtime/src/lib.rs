@@ -84,6 +84,52 @@ pub(crate) fn current_requested_outputs() -> usize {
     crate::output_count::current_output_count().unwrap_or(1)
 }
 
+thread_local! {
+    static CONSTRUCTOR_RECEIVER_STACK: std::cell::RefCell<Vec<Value>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+pub struct ConstructorReceiverGuard;
+
+impl Drop for ConstructorReceiverGuard {
+    fn drop(&mut self) {
+        CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+}
+
+pub(crate) fn push_constructor_receiver(receiver: Value) -> ConstructorReceiverGuard {
+    CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
+        stack.borrow_mut().push(receiver);
+    });
+    ConstructorReceiverGuard
+}
+
+fn constructor_receiver_class_name(receiver: &Value) -> Option<&str> {
+    match receiver {
+        Value::Object(obj) => Some(obj.class_name.as_str()),
+        Value::HandleObject(handle) => Some(handle.class_name.as_str()),
+        _ => None,
+    }
+}
+
+fn active_constructor_receiver_for(class_name: &str) -> Option<Value> {
+    CONSTRUCTOR_RECEIVER_STACK.with(|stack| {
+        stack
+            .borrow()
+            .iter()
+            .rev()
+            .find(|receiver| {
+                constructor_receiver_class_name(receiver).is_some_and(|receiver_class| {
+                    receiver_class == class_name
+                        || runmat_builtins::is_class_or_subclass(receiver_class, class_name)
+                })
+            })
+            .cloned()
+    })
+}
+
 fn undefined_callable_error(identity: &runmat_hir::CallableIdentity) -> RuntimeError {
     let detail = format!("Undefined function for callable identity {identity:?}");
     build_runtime_error(detail)
@@ -431,10 +477,23 @@ use std::cell::RefCell;
 struct EventRegistry {
     next_id: u64,
     listeners: std::collections::HashMap<(usize, String), Vec<runmat_builtins::Listener>>,
+    listener_roots: std::collections::HashMap<u64, ListenerRoots>,
+}
+
+struct ListenerRoots {
+    _target: runmat_gc::ExplicitRoot,
+    _callback: runmat_gc::ExplicitRoot,
 }
 
 thread_local! {
     static EVENT_REGISTRY: RefCell<EventRegistry> = RefCell::new(EventRegistry::default());
+}
+
+#[cfg(test)]
+fn reset_event_registry_for_test() {
+    EVENT_REGISTRY.with(|registry| {
+        *registry.borrow_mut() = EventRegistry::default();
+    });
 }
 
 pub(crate) fn invalidate_listener_registration(listener_id: u64) {
@@ -448,6 +507,7 @@ pub(crate) fn invalidate_listener_registration(listener_id: u64) {
                 }
             }
         }
+        registry.listener_roots.remove(&listener_id);
     });
 }
 
@@ -573,12 +633,19 @@ pub(crate) async fn addlistener_builtin(
         valid: true,
     };
     EVENT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
         registry
-            .borrow_mut()
             .listeners
             .entry((key_ptr, event_name))
             .or_default()
             .push(listener.clone());
+        registry.listener_roots.insert(
+            id,
+            ListenerRoots {
+                _target: target_root,
+                _callback: callback_root,
+            },
+        );
     });
     Ok(Value::Listener(listener))
 }
@@ -760,7 +827,12 @@ pub async fn call_super_constructor(
     super_class_name: String,
     args: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let receiver = create_class_object(class_name).await?;
+    let receiver = if let Some(active) = active_constructor_receiver_for(&class_name) {
+        active
+    } else {
+        create_class_object(class_name).await?
+    };
+    let _receiver_guard = push_constructor_receiver(receiver.clone());
     let ctor_name = super_class_name
         .rsplit('.')
         .next()
@@ -2859,10 +2931,13 @@ mod tests {
     #[test]
     fn addlistener_preserves_object_target_when_callback_allocation_collects() {
         runmat_gc::gc_test_context(|| {
-            let mut config = runmat_gc::GcConfig::default();
-            config.young_generation_size = 64 * 1024 * 1024;
-            config.minor_gc_threshold = 0.35;
-            config.major_gc_threshold = 0.9;
+            reset_event_registry_for_test();
+            let config = runmat_gc::GcConfig {
+                young_generation_size: 64 * 1024 * 1024,
+                minor_gc_threshold: 0.35,
+                major_gc_threshold: 0.9,
+                ..runmat_gc::GcConfig::default()
+            };
             runmat_gc::gc_configure(config).expect("configure aggressive periodic minor GC");
 
             for i in 0..30 {
@@ -2893,6 +2968,7 @@ mod tests {
                     .expect("listener callback should survive construction"),
                 Value::FunctionHandle("sin".to_string())
             );
+            reset_event_registry_for_test();
         });
     }
 

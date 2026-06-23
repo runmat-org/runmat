@@ -322,55 +322,12 @@ impl RunMatSession {
                             })
                     }
 
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        // On WASM: await the inner interpret() directly. The JS async
-                        // runtime handles both futures as cooperative state-machines and
-                        // the WASM linear stack is large enough for the extra frames.
-                        Box::pin(eval_expr(
-                            expr,
-                            compat,
-                            top_level_await_enabled,
-                            Arc::clone(&known_project_symbols_for_eval_hook),
-                        ))
-                    }
-
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        // On native: run interpret() on a dedicated thread so it gets
-                        // its own 16 MB stack, fully isolated from the outer interpret()
-                        // call stack. The result is sent back via a tokio oneshot channel
-                        // and awaited asynchronously so the tokio worker thread is never
-                        // blocked by a synchronous recv().
-                        let (tx, rx) = tokio::sync::oneshot::channel();
-                        let known_project_symbols =
-                            Arc::clone(&known_project_symbols_for_eval_hook);
-                        let spawn_result = std::thread::Builder::new()
-                            .stack_size(16 * 1024 * 1024)
-                            .spawn(move || {
-                                let result = futures::executor::block_on(eval_expr(
-                                    expr,
-                                    compat,
-                                    top_level_await_enabled,
-                                    known_project_symbols,
-                                ));
-                                let _ = tx.send(result);
-                            });
-                        Box::pin(async move {
-                            spawn_result.map_err(|err| {
-                                build_runtime_error(format!(
-                                    "input: failed to spawn eval thread: {err}"
-                                ))
-                                .with_identifier("RunMat:input:EvalThreadSpawnFailed")
-                                .build()
-                            })?;
-                            rx.await.unwrap_or_else(|_| {
-                                Err(build_runtime_error("input: eval thread panicked")
-                                    .with_identifier("RunMat:input:EvalThreadPanic")
-                                    .build())
-                            })
-                        })
-                    }
+                    Box::pin(eval_expr(
+                        expr,
+                        compat,
+                        top_level_await_enabled,
+                        Arc::clone(&known_project_symbols_for_eval_hook),
+                    ))
                 },
             )));
 
@@ -1443,14 +1400,11 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use crate::RunError;
     #[cfg(not(target_arch = "wasm32"))]
+    use crate::TEST_PROCESS_LOCK as CWD_LOCK;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::fs;
     #[cfg(not(target_arch = "wasm32"))]
     use std::path::{Path, PathBuf};
-    #[cfg(not(target_arch = "wasm32"))]
-    use std::sync::Mutex;
-
-    #[cfg(not(target_arch = "wasm32"))]
-    static CWD_LOCK: Mutex<()> = Mutex::new(());
 
     #[cfg(not(target_arch = "wasm32"))]
     struct CwdGuard {

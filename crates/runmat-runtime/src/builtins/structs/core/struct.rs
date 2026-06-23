@@ -377,7 +377,7 @@ fn build_struct_array(entries: Vec<FieldEntry>, shape: Vec<usize>) -> BuiltinRes
 fn clone_cell_element(cell: &CellArray, index: usize) -> BuiltinResult<Value> {
     cell.data
         .get(index)
-        .map(|ptr| ptr.clone())
+        .cloned()
         .ok_or_else(|| struct_error(&STRUCT_ERROR_CELL_SIZE_MISMATCH))
 }
 
@@ -794,8 +794,7 @@ pub(crate) mod tests {
         match value {
             Value::Cell(cell) => cell
                 .data
-                .iter()
-                .map(|ptr| ptr.clone())
+                .into_iter()
                 .map(|value| match value {
                     Value::Struct(st) => st,
                     other => panic!("expected struct element, got {other:?}"),

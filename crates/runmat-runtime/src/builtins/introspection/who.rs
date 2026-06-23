@@ -510,7 +510,6 @@ pub(crate) mod tests {
             Value::Cell(cell) => cell
                 .data
                 .iter()
-                .map(|ptr| ptr)
                 .map(|value| match value {
                     Value::String(s) => s.clone(),
                     Value::CharArray(ca) if ca.rows == 1 => ca

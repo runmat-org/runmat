@@ -32,6 +32,9 @@ pub use workspace::*;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub(crate) static TEST_PROCESS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Test-only helper that executes a text source via `ExecutionRequest`.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn execute_text_request_for_testing(

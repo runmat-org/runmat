@@ -1057,8 +1057,8 @@ pub(crate) mod tests {
         assert_eq!(cpu_cell.shape, gpu_cell.shape);
         assert_eq!(cpu_cell.data.len(), gpu_cell.data.len());
         for (cpu, gpu) in cpu_cell.data.iter().zip(gpu_cell.data.iter()) {
-            let cpu_val = (**cpu).clone();
-            let gpu_val = (**gpu).clone();
+            let cpu_val = cpu.clone();
+            let gpu_val = gpu.clone();
             let cpu_tensor = test_support::gather(cpu_val).expect("cpu gather");
             let gpu_tensor = test_support::gather(gpu_val).expect("gpu gather");
             assert_eq!(cpu_tensor.shape, gpu_tensor.shape);

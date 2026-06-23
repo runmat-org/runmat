@@ -550,7 +550,7 @@ fn repmat_cell_array(cell: &CellArray, reps: &[usize]) -> crate::BuiltinResult<C
             for _ in 0..col_factor {
                 for c in 0..cell.cols {
                     let idx = r * cell.cols + c;
-                    values.push((&cell.data[idx]).clone());
+                    values.push(cell.data[idx].clone());
                 }
             }
         }

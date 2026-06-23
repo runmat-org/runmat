@@ -130,14 +130,14 @@ impl MarkSweepCollector {
     }
 
     /// Mark phase: traverse from roots and mark all reachable objects
-    fn mark_phase(&mut self, roots: &[GcHandle], max_generation: usize) -> Result<()> {
+    fn mark_phase(&mut self, roots: &[GcHandle], _max_generation: usize) -> Result<()> {
         log::trace!("Starting mark phase with {} roots", roots.len());
 
         self.marked_objects.lock().clear();
 
         // Mark all objects reachable from roots
         for root in roots.iter().cloned() {
-            self.mark_object(root, max_generation)?;
+            self.mark_object(root)?;
         }
 
         log::trace!(
@@ -148,7 +148,7 @@ impl MarkSweepCollector {
     }
 
     /// Mark an object and recursively mark all objects it references
-    fn mark_object(&mut self, obj: GcHandle, max_generation: usize) -> Result<()> {
+    fn mark_object(&mut self, obj: GcHandle) -> Result<()> {
         // SAFETY: this exposes the handle's preserved pointer token for
         // address-keyed mark bookkeeping. Ownership/liveness is established by
         // the root set and allocator before sweep.
@@ -172,7 +172,7 @@ impl MarkSweepCollector {
         // phase before any sweep can reclaim the object.
         collect_value_roots(unsafe { value_ptr.as_ref() }, &mut child_roots);
         for child in child_roots {
-            self.mark_object(child, max_generation)?;
+            self.mark_object(child)?;
         }
 
         Ok(())

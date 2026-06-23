@@ -362,14 +362,14 @@ mod tests {
         let values = vec![
             Value::HandleObject(HandleRef {
                 class_name: "widget".to_string(),
-                target: target.clone(),
+                target,
                 valid: true,
             }),
             Value::Listener(Listener {
                 id: 1,
-                target: target.clone(),
+                target,
                 event_name: "Changed".to_string(),
-                callback: callback.clone(),
+                callback,
                 enabled: true,
                 valid: true,
             }),
@@ -394,14 +394,14 @@ mod tests {
 
         let handle = Value::HandleObject(HandleRef {
             class_name: "nested".to_string(),
-            target: handle_target.clone(),
+            target: handle_target,
             valid: true,
         });
         let listener = Value::Listener(Listener {
             id: 7,
-            target: handle_target.clone(),
+            target: handle_target,
             event_name: "Changed".to_string(),
-            callback: callback.clone(),
+            callback,
             enabled: true,
             valid: true,
         });

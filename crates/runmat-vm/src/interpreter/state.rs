@@ -4,11 +4,9 @@ use log::debug;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::graph::AccelGraph;
 #[cfg(feature = "native-accel")]
-use runmat_accelerate::{prepare_fusion_plan, FusionPlan};
+use runmat_accelerate::{prepare_fusion_plan, FusionPlanRef};
 use runmat_builtins::Value;
 use std::collections::{HashMap, HashSet};
-#[cfg(feature = "native-accel")]
-use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum InterpreterOutcome {
@@ -32,7 +30,7 @@ pub struct InterpreterState {
     pub call_counts: Vec<(usize, usize)>,
     pub initial_assigned_var_count: usize,
     #[cfg(feature = "native-accel")]
-    pub fusion_plan: Option<Arc<FusionPlan>>,
+    pub fusion_plan: Option<FusionPlanRef>,
     #[cfg(feature = "native-accel")]
     pub fusion_accel_graph: Option<AccelGraph>,
 }
