@@ -257,23 +257,46 @@ pub struct ProviderSpectralResult {
 pub async fn uniform_spectral_estimate(
     request: ProviderSpectralRequest<'_>,
 ) -> anyhow::Result<ProviderSpectralResult> {
+    validate_uniform_spectral_request(&request)?;
+
+    let provider =
+        provider().ok_or_else(|| anyhow!("uniform_spectral_estimate: GPU provider unavailable"))?;
+    provider.uniform_spectral_estimate(&request).await
+}
+
+fn validate_uniform_spectral_request(request: &ProviderSpectralRequest<'_>) -> anyhow::Result<()> {
     let invalid_frame_mode = matches!(
         request.frame_mode,
         ProviderSpectralFrameMode::Sliding { hop: 0 }
     );
+    let invalid_input_coverage = match request.frame_mode {
+        ProviderSpectralFrameMode::Sliding { hop } => {
+            let required = request
+                .frame_count
+                .checked_sub(1)
+                .and_then(|frames| frames.checked_mul(hop))
+                .and_then(|offset| offset.checked_add(request.window.len()));
+            required.is_none_or(|required| required > request.input_len)
+        }
+        ProviderSpectralFrameMode::FoldedColumns { input_rows } => {
+            input_rows == 0
+                || input_rows
+                    .checked_mul(request.frame_count)
+                    .is_none_or(|required| required > request.input_len)
+        }
+    };
     if request.window.is_empty()
         || request.nfft == 0
         || request.frame_count == 0
         || invalid_frame_mode
+        || invalid_input_coverage
         || !request.denominator.is_finite()
         || request.denominator <= 0.0
     {
         return Err(anyhow!("uniform_spectral_estimate: invalid request"));
     }
 
-    let provider =
-        provider().ok_or_else(|| anyhow!("uniform_spectral_estimate: GPU provider unavailable"))?;
-    provider.uniform_spectral_estimate(&request).await
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2981,6 +3004,24 @@ mod tests {
         }
     }
 
+    fn spectral_request<'a>(
+        input: &'a GpuTensorHandle,
+        frame_mode: ProviderSpectralFrameMode,
+    ) -> ProviderSpectralRequest<'a> {
+        static WINDOW: [f64; 4] = [1.0, 1.0, 1.0, 1.0];
+        ProviderSpectralRequest {
+            input,
+            input_len: 16,
+            input_complex: false,
+            window: &WINDOW,
+            nfft: 8,
+            frame_count: 3,
+            frame_mode,
+            range: ProviderSpectralRange::Onesided,
+            denominator: 1.0,
+        }
+    }
+
     #[test]
     fn provider_for_device_prefers_registered_device_over_thread_provider() {
         let _lock = PROVIDER_TEST_LOCK
@@ -3056,6 +3097,54 @@ mod tests {
         assert_eq!(own_device.device_info(), PROVIDER_C.name);
         assert_eq!(fallback.device_info(), PROVIDER_A.name);
         clear_provider();
+    }
+
+    #[test]
+    fn uniform_spectral_request_validates_sliding_input_coverage() {
+        let input = test_handle(PROVIDER_A.device_id());
+        let mut request = spectral_request(&input, ProviderSpectralFrameMode::Sliding { hop: 6 });
+        assert!(validate_uniform_spectral_request(&request).is_ok());
+
+        request.input_len = 15;
+        assert!(validate_uniform_spectral_request(&request).is_err());
+    }
+
+    #[test]
+    fn uniform_spectral_request_rejects_sliding_coverage_overflow() {
+        let input = test_handle(PROVIDER_A.device_id());
+        let mut request = spectral_request(&input, ProviderSpectralFrameMode::Sliding { hop: 2 });
+        request.frame_count = usize::MAX;
+
+        assert!(validate_uniform_spectral_request(&request).is_err());
+    }
+
+    #[test]
+    fn uniform_spectral_request_validates_folded_input_coverage() {
+        let input = test_handle(PROVIDER_A.device_id());
+        let mut request = spectral_request(
+            &input,
+            ProviderSpectralFrameMode::FoldedColumns { input_rows: 5 },
+        );
+        assert!(validate_uniform_spectral_request(&request).is_ok());
+
+        request.frame_mode = ProviderSpectralFrameMode::FoldedColumns { input_rows: 0 };
+        assert!(validate_uniform_spectral_request(&request).is_err());
+
+        request.frame_mode = ProviderSpectralFrameMode::FoldedColumns { input_rows: 6 };
+        assert!(validate_uniform_spectral_request(&request).is_err());
+    }
+
+    #[test]
+    fn uniform_spectral_request_rejects_folded_coverage_overflow() {
+        let input = test_handle(PROVIDER_A.device_id());
+        let request = spectral_request(
+            &input,
+            ProviderSpectralFrameMode::FoldedColumns {
+                input_rows: usize::MAX,
+            },
+        );
+
+        assert!(validate_uniform_spectral_request(&request).is_err());
     }
 
     #[test]

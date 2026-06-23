@@ -625,26 +625,38 @@ fn validate_zip64_entry_count_from_raw(bytes: &[u8], eocd_offset: usize) -> Buil
             "xlsread: invalid ZIP64 workbook: missing locator",
         )
     })?;
-    if bytes.get(locator_offset..locator_offset + 4) != Some(b"PK\x06\x07") {
+    if checked_zip_slice(bytes, locator_offset, 4)? != b"PK\x06\x07" {
         return Err(xlsread_error_with(
             &XLSREAD_ERROR_IO,
             "xlsread: invalid ZIP64 workbook: missing locator",
         ));
     }
-    let zip64_eocd_offset = read_le_u64(bytes, locator_offset + 8)?;
+    let zip64_locator_record_offset = locator_offset.checked_add(8).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP workbook: truncated directory",
+        )
+    })?;
+    let zip64_eocd_offset = read_le_u64(bytes, zip64_locator_record_offset)?;
     let zip64_eocd_offset = usize::try_from(zip64_eocd_offset).map_err(|_| {
         xlsread_error_with(
             &XLSREAD_ERROR_IO,
             "xlsread: ZIP64 workbook directory offset exceeds supported bounds",
         )
     })?;
-    if bytes.get(zip64_eocd_offset..zip64_eocd_offset + 4) != Some(b"PK\x06\x06") {
+    if checked_zip_slice(bytes, zip64_eocd_offset, 4)? != b"PK\x06\x06" {
         return Err(xlsread_error_with(
             &XLSREAD_ERROR_IO,
             "xlsread: invalid ZIP64 workbook: missing end of central directory",
         ));
     }
-    let total_entries = read_le_u64(bytes, zip64_eocd_offset + 32)?;
+    let total_entries_offset = zip64_eocd_offset.checked_add(32).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP workbook: truncated directory",
+        )
+    })?;
+    let total_entries = read_le_u64(bytes, total_entries_offset)?;
     let total_entries = usize::try_from(total_entries).map_err(|_| {
         xlsread_error_with(
             &XLSREAD_ERROR_IO,
@@ -671,23 +683,28 @@ fn find_zip_eocd(bytes: &[u8]) -> Option<usize> {
     })
 }
 
-fn read_le_u16(bytes: &[u8], offset: usize) -> BuiltinResult<u16> {
-    let slice = bytes.get(offset..offset + 2).ok_or_else(|| {
+fn checked_zip_slice(bytes: &[u8], offset: usize, len: usize) -> BuiltinResult<&[u8]> {
+    let end = offset.checked_add(len).ok_or_else(|| {
         xlsread_error_with(
             &XLSREAD_ERROR_IO,
             "xlsread: invalid ZIP workbook: truncated directory",
         )
     })?;
+    bytes.get(offset..end).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP workbook: truncated directory",
+        )
+    })
+}
+
+fn read_le_u16(bytes: &[u8], offset: usize) -> BuiltinResult<u16> {
+    let slice = checked_zip_slice(bytes, offset, 2)?;
     Ok(u16::from_le_bytes([slice[0], slice[1]]))
 }
 
 fn read_le_u64(bytes: &[u8], offset: usize) -> BuiltinResult<u64> {
-    let slice = bytes.get(offset..offset + 8).ok_or_else(|| {
-        xlsread_error_with(
-            &XLSREAD_ERROR_IO,
-            "xlsread: invalid ZIP workbook: truncated directory",
-        )
-    })?;
+    let slice = checked_zip_slice(bytes, offset, 8)?;
     Ok(u64::from_le_bytes([
         slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7],
     ]))
@@ -1671,6 +1688,47 @@ mod tests {
     }
 
     #[test]
+    fn xlsread_zip_preflight_rejects_missing_zip64_locator() {
+        let mut bytes = b"PK\x03\x04".to_vec();
+        bytes.extend_from_slice(b"PK\x05\x06");
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&u16::MAX.to_le_bytes());
+        bytes.extend_from_slice(&u16::MAX.to_le_bytes());
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+
+        let err = preflight_zip_workbook(&bytes).expect_err("missing zip64 locator");
+        assert!(err.message().contains("missing locator"));
+    }
+
+    #[test]
+    fn xlsread_zip_preflight_rejects_out_of_bounds_zip64_eocd_offset() {
+        let mut bytes = zip64_entry_count_fixture(1);
+        let eocd_offset = find_zip_eocd(&bytes).expect("eocd");
+        let locator_record_offset = eocd_offset - 20 + 8;
+        bytes[locator_record_offset..locator_record_offset + 8]
+            .copy_from_slice(&u64::MAX.to_le_bytes());
+
+        let err = preflight_zip_workbook(&bytes).expect_err("out-of-bounds zip64 eocd");
+        assert!(err.message().contains("truncated directory"));
+    }
+
+    #[test]
+    fn xlsread_zip_preflight_rejects_truncated_zip64_eocd_offset() {
+        let mut bytes = zip64_entry_count_fixture(1);
+        let eocd_offset = find_zip_eocd(&bytes).expect("eocd");
+        let locator_record_offset = eocd_offset - 20 + 8;
+        let truncated_offset = (bytes.len() - 2) as u64;
+        bytes[locator_record_offset..locator_record_offset + 8]
+            .copy_from_slice(&truncated_offset.to_le_bytes());
+
+        let err = preflight_zip_workbook(&bytes).expect_err("truncated zip64 eocd");
+        assert!(err.message().contains("truncated directory"));
+    }
+
+    #[test]
     fn xlsread_zip_eocd_scan_ignores_signature_inside_comment() {
         let mut bytes = b"PK\x03\x04".to_vec();
         let eocd_offset = bytes.len();
@@ -1686,6 +1744,12 @@ mod tests {
         bytes.extend_from_slice(comment);
 
         assert_eq!(find_zip_eocd(&bytes), Some(eocd_offset));
+    }
+
+    #[test]
+    fn xlsread_zip_checked_slice_rejects_offset_overflow() {
+        let err = checked_zip_slice(b"PK\x03\x04", usize::MAX, 4).expect_err("overflowing offset");
+        assert!(err.message().contains("truncated directory"));
     }
 
     fn zip64_entry_count_fixture(entry_count: u64) -> Vec<u8> {

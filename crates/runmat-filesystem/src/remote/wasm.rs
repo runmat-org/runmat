@@ -722,8 +722,10 @@ impl FsProvider for RemoteFsProvider {
         let normalized = self.normalize(path);
         let mut exists = false;
         let mut metadata = FsMetadata::new(FsFileType::File, 0, None, false);
+        let mut content_loaded = false;
+        let mut metadata_hash_valid = true;
 
-        if flags.read || flags.append || (!flags.create && !flags.create_new) {
+        if flags.read || flags.write || flags.append || !flags.create || flags.create_new {
             match self.fetch_metadata(&normalized) {
                 Ok(meta) => {
                     if meta.file_type != "file" {
@@ -733,6 +735,7 @@ impl FsProvider for RemoteFsProvider {
                         ));
                     }
                     data = self.download_raw_file(&normalized, meta.len)?;
+                    content_loaded = true;
                     metadata = meta.into();
                     exists = true;
                 }
@@ -752,6 +755,8 @@ impl FsProvider for RemoteFsProvider {
 
         if flags.truncate {
             data.clear();
+            content_loaded = true;
+            metadata_hash_valid = false;
         }
 
         if flags.create && !exists {
@@ -772,6 +777,8 @@ impl FsProvider for RemoteFsProvider {
             path: normalized,
             data,
             metadata,
+            content_loaded,
+            metadata_hash_valid,
             cursor,
             flags: flags.clone(),
             dirty: false,
@@ -987,6 +994,8 @@ struct RemoteFileHandle {
     path: String,
     data: Vec<u8>,
     metadata: FsMetadata,
+    content_loaded: bool,
+    metadata_hash_valid: bool,
     cursor: usize,
     flags: OpenFlags,
     dirty: bool,
@@ -999,7 +1008,24 @@ impl RemoteFileHandle {
         }
         self.provider.upload_entire_file(&self.path, &self.data)?;
         self.dirty = false;
+        self.content_loaded = true;
         Ok(())
+    }
+
+    fn metadata_len(&self) -> u64 {
+        if self.dirty || self.content_loaded {
+            self.data.len() as u64
+        } else {
+            self.metadata.len()
+        }
+    }
+
+    fn metadata_hash(&self) -> Option<String> {
+        if self.metadata_hash_valid {
+            self.metadata.hash().map(str::to_owned)
+        } else {
+            None
+        }
     }
 }
 
@@ -1045,6 +1071,7 @@ impl Write for RemoteFileHandle {
         self.data[self.cursor..self.cursor + buf.len()].copy_from_slice(buf);
         self.cursor += buf.len();
         self.dirty = true;
+        self.metadata_hash_valid = false;
         Ok(buf.len())
     }
 
@@ -1076,10 +1103,10 @@ impl FileHandle for RemoteFileHandle {
     async fn metadata_async(&self) -> io::Result<FsMetadata> {
         Ok(FsMetadata::new_with_hash(
             self.metadata.file_type(),
-            self.data.len() as u64,
+            self.metadata_len(),
             self.metadata.modified(),
             self.metadata.is_readonly(),
-            self.metadata.hash().map(str::to_owned),
+            self.metadata_hash(),
         ))
     }
 }

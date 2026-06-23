@@ -81,6 +81,36 @@ struct RemoteInner {
     retry_max_delay: Duration,
 }
 
+struct FsWriteChunkRequest<'a> {
+    path: &'a str,
+    offset: u64,
+    truncate: bool,
+    final_chunk: bool,
+    create_new: bool,
+    data: &'a [u8],
+    hash: Option<&'a str>,
+}
+
+struct UploadSessionCompleteParams<'a> {
+    path: &'a str,
+    session_id: &'a str,
+    blob_key: &'a str,
+    size_bytes: u64,
+    content_sha256: &'a str,
+    chunk_count: usize,
+    create_new: bool,
+}
+
+struct MultipartCompleteParams {
+    path: String,
+    session_id: String,
+    blob_key: String,
+    upload_id: String,
+    size_bytes: u64,
+    create_new: bool,
+    parts: Vec<MultipartPart>,
+}
+
 impl RemoteInner {
     fn new(config: RemoteFsConfig) -> io::Result<Self> {
         if config.base_url.is_empty() {
@@ -271,26 +301,27 @@ impl RemoteInner {
 
     fn upload_chunk(
         &self,
-        path: &str,
-        offset: u64,
-        truncate: bool,
-        final_chunk: bool,
-        data: &[u8],
-        hash: Option<&str>,
+        request: FsWriteChunkRequest<'_>,
     ) -> io::Result<Option<FsWriteSessionResponse>> {
-        let mut query = vec![("path", path.to_string()), ("offset", offset.to_string())];
-        if truncate {
+        let mut query = vec![
+            ("path", request.path.to_string()),
+            ("offset", request.offset.to_string()),
+        ];
+        if request.truncate {
             query.push(("truncate", "true".to_string()));
         }
-        if final_chunk {
+        if request.final_chunk {
             query.push(("final", "true".to_string()));
         }
-        if let Some(hash) = hash {
+        if request.create_new {
+            query.push(("createNew", "true".to_string()));
+        }
+        if let Some(hash) = request.hash {
             query.push(("hash", hash.to_string()));
         }
         let resp = self
             .request(reqwest::Method::PUT, "/fs/write", &query)
-            .body(data.to_vec())
+            .body(request.data.to_vec())
             .send()
             .map_err(map_http_err)?;
         if resp.status() == StatusCode::ACCEPTED {
@@ -345,24 +376,17 @@ impl RemoteInner {
         )
     }
 
-    fn upload_session_complete(
-        &self,
-        path: &str,
-        session_id: &str,
-        blob_key: &str,
-        size_bytes: u64,
-        content_sha256: &str,
-        chunk_count: usize,
-    ) -> io::Result<()> {
+    fn upload_session_complete(&self, params: UploadSessionCompleteParams<'_>) -> io::Result<()> {
         self.post_empty(
             "/fs/upload-session/complete",
             &UploadSessionCompleteRequest {
-                path: path.to_string(),
-                session_id: session_id.to_string(),
-                blob_key: blob_key.to_string(),
-                size_bytes: size_bytes as i64,
-                content_sha256: content_sha256.to_string(),
-                chunk_count,
+                path: params.path.to_string(),
+                session_id: params.session_id.to_string(),
+                blob_key: params.blob_key.to_string(),
+                size_bytes: params.size_bytes as i64,
+                content_sha256: params.content_sha256.to_string(),
+                chunk_count: params.chunk_count,
+                create_new: params.create_new,
                 hash: None,
             },
         )
@@ -389,25 +413,18 @@ impl RemoteInner {
         Ok(response.upload_url)
     }
 
-    fn multipart_complete(
-        &self,
-        path: &str,
-        session_id: &str,
-        blob_key: &str,
-        upload_id: &str,
-        size_bytes: u64,
-        parts: Vec<MultipartPart>,
-    ) -> io::Result<()> {
+    fn multipart_complete(&self, params: MultipartCompleteParams) -> io::Result<()> {
         let resp = self
             .request(reqwest::Method::POST, "/fs/multipart-upload/complete", &[])
             .json(&MultipartUploadCompleteRequest {
-                path: path.to_string(),
-                session_id: session_id.to_string(),
-                blob_key: blob_key.to_string(),
-                upload_id: upload_id.to_string(),
-                size_bytes: size_bytes as i64,
+                path: params.path,
+                session_id: params.session_id,
+                blob_key: params.blob_key,
+                upload_id: params.upload_id,
+                size_bytes: params.size_bytes as i64,
+                create_new: params.create_new,
                 hash: None,
-                parts,
+                parts: params.parts,
             })
             .send()
             .map_err(map_http_err)?;
@@ -701,19 +718,33 @@ impl RemoteFsProvider {
         Ok(buffer)
     }
 
-    fn upload_entire_file(&self, path: &str, data: &[u8]) -> io::Result<()> {
+    fn upload_entire_file(&self, path: &str, data: &[u8], create_new: bool) -> io::Result<()> {
         if data.len() as u64 >= self.inner.shard_threshold_bytes {
-            return self.upload_sharded_file(path, data);
+            return self.upload_sharded_file(path, data, create_new);
         }
-        self.upload_unsharded_file(path, data, None)
+        self.upload_unsharded_file(path, data, create_new, None)
     }
 
-    fn upload_unsharded_file(&self, path: &str, data: &[u8], hash: Option<&str>) -> io::Result<()> {
+    fn upload_unsharded_file(
+        &self,
+        path: &str,
+        data: &[u8],
+        create_new: bool,
+        hash: Option<&str>,
+    ) -> io::Result<()> {
         if data.len() as u64 >= self.inner.direct_write_threshold_bytes {
-            return self.upload_multipart_file(path, data);
+            return self.upload_multipart_file(path, data, create_new);
         }
         if data.is_empty() {
-            self.inner.upload_chunk(path, 0, true, true, data, hash)?;
+            self.inner.upload_chunk(FsWriteChunkRequest {
+                path,
+                offset: 0,
+                truncate: true,
+                final_chunk: true,
+                create_new,
+                data,
+                hash,
+            })?;
             return Ok(());
         }
         let chunk = self.inner.chunk_bytes;
@@ -723,9 +754,15 @@ impl RemoteFsProvider {
             let slice = &data[offset..end];
             let truncate = offset == 0;
             let final_chunk = end == data.len();
-            let result =
-                self.inner
-                    .upload_chunk(path, offset as u64, truncate, final_chunk, slice, hash)?;
+            let result = self.inner.upload_chunk(FsWriteChunkRequest {
+                path,
+                offset: offset as u64,
+                truncate,
+                final_chunk,
+                create_new: create_new && truncate,
+                data: slice,
+                hash,
+            })?;
             if let Some(session) = result {
                 let expected = offset as u64 + slice.len() as u64;
                 if session.next_offset as u64 != expected {
@@ -737,7 +774,7 @@ impl RemoteFsProvider {
         Ok(())
     }
 
-    fn upload_sharded_file(&self, path: &str, data: &[u8]) -> io::Result<()> {
+    fn upload_sharded_file(&self, path: &str, data: &[u8], create_new: bool) -> io::Result<()> {
         let shard_size = self.inner.shard_size_bytes as usize;
         let mut shards = Vec::new();
         let mut offset = 0usize;
@@ -745,7 +782,7 @@ impl RemoteFsProvider {
             let end = std::cmp::min(offset + shard_size, data.len());
             let slice = &data[offset..end];
             let shard_path = format!("{}/{}", SHARD_PREFIX, Uuid::new_v4());
-            self.upload_unsharded_file(&shard_path, slice, None)?;
+            self.upload_unsharded_file(&shard_path, slice, false, None)?;
             shards.push(ShardEntry {
                 path: shard_path,
                 size: slice.len() as u64,
@@ -760,12 +797,20 @@ impl RemoteFsProvider {
         };
         let bytes = serde_json::to_vec(&manifest)
             .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid manifest"))?;
-        self.upload_unsharded_file(path, &bytes, Some(MANIFEST_HASH))
+        self.upload_unsharded_file(path, &bytes, create_new, Some(MANIFEST_HASH))
     }
 
-    fn upload_multipart_file(&self, path: &str, data: &[u8]) -> io::Result<()> {
+    fn upload_multipart_file(&self, path: &str, data: &[u8], create_new: bool) -> io::Result<()> {
         if data.is_empty() {
-            self.inner.upload_chunk(path, 0, true, true, data, None)?;
+            self.inner.upload_chunk(FsWriteChunkRequest {
+                path,
+                offset: 0,
+                truncate: true,
+                final_chunk: true,
+                create_new,
+                data,
+                hash: None,
+            })?;
             return Ok(());
         }
         let content_sha256 = sha256_hex(data);
@@ -776,7 +821,7 @@ impl RemoteFsProvider {
             {
                 Ok(session) => session,
                 Err(err) if err.kind() == ErrorKind::NotFound => {
-                    return self.upload_multipart_file_legacy(path, data);
+                    return self.upload_multipart_file_legacy(path, data, create_new);
                 }
                 Err(err) => return Err(err),
             };
@@ -860,18 +905,25 @@ impl RemoteFsProvider {
         if let Some(err) = error.lock().unwrap().take() {
             return Err(err);
         }
-        self.inner.upload_session_complete(
-            path,
-            &session.session_id,
-            &session.blob_key,
-            data.len() as u64,
-            &content_sha256,
-            descriptors.len(),
-        )?;
+        self.inner
+            .upload_session_complete(UploadSessionCompleteParams {
+                path,
+                session_id: &session.session_id,
+                blob_key: &session.blob_key,
+                size_bytes: data.len() as u64,
+                content_sha256: &content_sha256,
+                chunk_count: descriptors.len(),
+                create_new,
+            })?;
         Ok(())
     }
 
-    fn upload_multipart_file_legacy(&self, path: &str, data: &[u8]) -> io::Result<()> {
+    fn upload_multipart_file_legacy(
+        &self,
+        path: &str,
+        data: &[u8],
+        create_new: bool,
+    ) -> io::Result<()> {
         let session = self.inner.multipart_create(path, data.len() as u64)?;
         let part_size = session.part_size_bytes as usize;
         let mut tasks = std::collections::VecDeque::new();
@@ -960,14 +1012,15 @@ impl RemoteFsProvider {
             parts.push(part);
         }
         parts.sort_by_key(|part| part.part_number);
-        self.inner.multipart_complete(
-            path,
-            &session.session_id,
-            &session.blob_key,
-            &session.upload_id,
-            data.len() as u64,
+        self.inner.multipart_complete(MultipartCompleteParams {
+            path: path.to_string(),
+            session_id: session.session_id,
+            blob_key: session.blob_key,
+            upload_id: session.upload_id,
+            size_bytes: data.len() as u64,
+            create_new,
             parts,
-        )?;
+        })?;
         Ok(())
     }
 }
@@ -1007,6 +1060,8 @@ impl FsProvider for RemoteFsProvider {
         let normalized = self.normalize(path);
         let mut data = Vec::new();
         let mut metadata = FsMetadata::new(FsFileType::File, 0, None, false);
+        let mut content_loaded = false;
+        let mut metadata_hash_valid = true;
         if flags.read || flags.write || flags.append || !flags.create || flags.create_new {
             match self.inner.fetch_metadata(&normalized) {
                 Ok(meta) => {
@@ -1025,6 +1080,7 @@ impl FsProvider for RemoteFsProvider {
                         } else {
                             self.download_raw_file(&normalized, meta.len)?
                         };
+                        content_loaded = true;
                     }
                     metadata = meta.into();
                 }
@@ -1035,6 +1091,8 @@ impl FsProvider for RemoteFsProvider {
         }
         if flags.truncate {
             data.clear();
+            content_loaded = true;
+            metadata_hash_valid = false;
         }
         if flags.create {
             self.ensure_parent_exists(path)?;
@@ -1044,6 +1102,9 @@ impl FsProvider for RemoteFsProvider {
             path: normalized,
             data,
             metadata,
+            content_loaded,
+            metadata_hash_valid,
+            create_new_pending: flags.create_new,
             position: 0,
             flags: flags.clone(),
             dirty: false,
@@ -1067,7 +1128,7 @@ impl FsProvider for RemoteFsProvider {
     async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
         let normalized = self.normalize(path);
         self.ensure_parent_exists(path)?;
-        self.upload_entire_file(&normalized, data)
+        self.upload_entire_file(&normalized, data, false)
     }
 
     async fn remove_file(&self, path: &Path) -> io::Result<()> {
@@ -1212,6 +1273,9 @@ struct RemoteFileHandle {
     path: String,
     data: Vec<u8>,
     metadata: FsMetadata,
+    content_loaded: bool,
+    metadata_hash_valid: bool,
+    create_new_pending: bool,
     position: usize,
     flags: OpenFlags,
     dirty: bool,
@@ -1222,9 +1286,28 @@ impl RemoteFileHandle {
         if !self.dirty {
             return Ok(());
         }
-        self.provider.upload_entire_file(&self.path, &self.data)?;
+        self.provider
+            .upload_entire_file(&self.path, &self.data, self.create_new_pending)?;
         self.dirty = false;
+        self.content_loaded = true;
+        self.create_new_pending = false;
         Ok(())
+    }
+
+    fn metadata_len(&self) -> u64 {
+        if self.dirty || self.content_loaded {
+            self.data.len() as u64
+        } else {
+            self.metadata.len()
+        }
+    }
+
+    fn metadata_hash(&self) -> Option<String> {
+        if self.metadata_hash_valid {
+            self.metadata.hash().map(str::to_owned)
+        } else {
+            None
+        }
     }
 }
 
@@ -1256,6 +1339,7 @@ impl Write for RemoteFileHandle {
         self.data[self.position..self.position + buf.len()].copy_from_slice(buf);
         self.position += buf.len();
         self.dirty = true;
+        self.metadata_hash_valid = false;
         Ok(buf.len())
     }
 
@@ -1284,10 +1368,10 @@ impl FileHandle for RemoteFileHandle {
     async fn metadata_async(&self) -> io::Result<FsMetadata> {
         Ok(FsMetadata::new_with_hash(
             self.metadata.file_type(),
-            self.data.len() as u64,
+            self.metadata_len(),
             self.metadata.modified(),
             self.metadata.is_readonly(),
-            self.metadata.hash().map(str::to_owned),
+            self.metadata_hash(),
         ))
     }
 }
@@ -1295,7 +1379,7 @@ impl FileHandle for RemoteFileHandle {
 impl Drop for RemoteFileHandle {
     fn drop(&mut self) {
         if self.dirty {
-            if let Err(err) = self.provider.upload_entire_file(&self.path, &self.data) {
+            if let Err(err) = self.flush_remote() {
                 eprintln!("remote fs flush failed: {err}");
             }
         }
@@ -1433,6 +1517,8 @@ struct UploadSessionCompleteRequest {
     size_bytes: i64,
     content_sha256: String,
     chunk_count: usize,
+    #[serde(default, skip_serializing_if = "is_false")]
+    create_new: bool,
     hash: Option<String>,
 }
 
@@ -1488,6 +1574,8 @@ struct MultipartUploadCompleteRequest {
     upload_id: String,
     #[serde(rename = "sizeBytes")]
     size_bytes: i64,
+    #[serde(rename = "createNew", default, skip_serializing_if = "is_false")]
+    create_new: bool,
     hash: Option<String>,
     parts: Vec<MultipartPart>,
 }
@@ -1529,6 +1617,10 @@ fn sha256_hex(data: &[u8]) -> String {
         let _ = write!(out, "{byte:02x}");
     }
     out
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn map_http_err(err: reqwest::Error) -> io::Error {
@@ -1641,6 +1733,8 @@ mod tests {
         offset: Option<u64>,
         length: Option<usize>,
         truncate: Option<String>,
+        #[serde(rename = "createNew")]
+        create_new: Option<String>,
         recursive: Option<String>,
     }
 
@@ -1743,6 +1837,25 @@ mod tests {
         let path = harness.resolve(&params.path);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        }
+        if params.create_new.as_deref() == Some("true") {
+            if params.offset.unwrap_or(0) != 0 {
+                return Err(StatusCode::BAD_REQUEST);
+            }
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .map_err(|err| {
+                    if err.kind() == ErrorKind::AlreadyExists {
+                        StatusCode::CONFLICT
+                    } else {
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    }
+                })?;
+            std::io::Write::write_all(&mut file, &body)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            return Ok(());
         }
         let mut data = if params.truncate.as_deref() == Some("true") || !path.exists() {
             Vec::new()
@@ -1900,7 +2013,23 @@ mod tests {
         if let Some(parent) = target_path.parent() {
             std::fs::create_dir_all(parent).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         }
-        std::fs::write(target_path, data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if req.create_new {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(target_path)
+                .map_err(|err| {
+                    if err.kind() == ErrorKind::AlreadyExists {
+                        StatusCode::CONFLICT
+                    } else {
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    }
+                })?;
+            std::io::Write::write_all(&mut file, &data)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        } else {
+            std::fs::write(target_path, data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        }
         Ok(())
     }
 
@@ -2172,6 +2301,110 @@ mod tests {
         assert_eq!(data, read_back);
         executor::block_on(provider.remove_file(Path::new("/reports/data.bin"))).expect("remove");
         assert!(!harness.resolve("/reports/data.bin").exists());
+    }
+
+    #[test]
+    fn remote_provider_write_only_handle_metadata_uses_remote_len_until_dirty() {
+        let (base, harness, _rt) = spawn_server();
+        let provider = RemoteFsProvider::new(RemoteFsConfig {
+            base_url: base,
+            auth_token: None,
+            chunk_bytes: 1024,
+            parallel_requests: 4,
+            direct_read_threshold_bytes: u64::MAX,
+            direct_write_threshold_bytes: 1024,
+            timeout: Duration::from_secs(30),
+            ..RemoteFsConfig::default()
+        })
+        .expect("provider");
+        std::fs::create_dir_all(harness.resolve("/reports")).expect("mkdir");
+        std::fs::write(harness.resolve("/reports/data.bin"), b"remote bytes").expect("write");
+
+        let flags = OpenFlags {
+            write: true,
+            ..OpenFlags::default()
+        };
+        let mut handle = provider
+            .open(Path::new("/reports/data.bin"), &flags)
+            .expect("open write-only");
+        let metadata = executor::block_on(handle.metadata_async()).expect("metadata");
+        assert_eq!(metadata.len(), b"remote bytes".len() as u64);
+
+        handle.write_all(b"new").expect("write handle");
+        let metadata = executor::block_on(handle.metadata_async()).expect("metadata");
+        assert_eq!(metadata.len(), 3);
+        assert_eq!(metadata.hash(), None);
+    }
+
+    #[test]
+    fn remote_provider_create_new_rejects_existing_target_at_direct_write() {
+        let (base, harness, _rt) = spawn_server();
+        let provider = RemoteFsProvider::new(RemoteFsConfig {
+            base_url: base,
+            auth_token: None,
+            chunk_bytes: 1024,
+            parallel_requests: 4,
+            direct_read_threshold_bytes: u64::MAX,
+            direct_write_threshold_bytes: 1024,
+            timeout: Duration::from_secs(30),
+            ..RemoteFsConfig::default()
+        })
+        .expect("provider");
+
+        let flags = OpenFlags {
+            write: true,
+            create_new: true,
+            ..OpenFlags::default()
+        };
+        let mut handle = provider
+            .open(Path::new("/reports/new.bin"), &flags)
+            .expect("open create_new");
+        std::fs::create_dir_all(harness.resolve("/reports")).expect("mkdir");
+        std::fs::write(harness.resolve("/reports/new.bin"), b"winner").expect("write winner");
+
+        handle.write_all(b"loser").expect("write handle");
+        let err = executor::block_on(handle.flush_async()).expect_err("create_new conflict");
+        assert_eq!(err.kind(), ErrorKind::AlreadyExists);
+        assert_eq!(
+            std::fs::read(harness.resolve("/reports/new.bin")).expect("read winner"),
+            b"winner"
+        );
+    }
+
+    #[test]
+    fn remote_provider_create_new_rejects_existing_target_at_upload_complete() {
+        let (base, harness, _rt) = spawn_server();
+        let provider = RemoteFsProvider::new(RemoteFsConfig {
+            base_url: base,
+            auth_token: None,
+            chunk_bytes: 1024,
+            parallel_requests: 2,
+            direct_read_threshold_bytes: u64::MAX,
+            direct_write_threshold_bytes: 1024,
+            timeout: Duration::from_secs(30),
+            ..RemoteFsConfig::default()
+        })
+        .expect("provider");
+
+        let flags = OpenFlags {
+            write: true,
+            create_new: true,
+            ..OpenFlags::default()
+        };
+        let mut handle = provider
+            .open(Path::new("/reports/session.bin"), &flags)
+            .expect("open create_new");
+        std::fs::create_dir_all(harness.resolve("/reports")).expect("mkdir");
+        std::fs::write(harness.resolve("/reports/session.bin"), b"winner").expect("write winner");
+
+        let loser = vec![7u8; 4096];
+        handle.write_all(&loser).expect("write handle");
+        let err = executor::block_on(handle.flush_async()).expect_err("create_new conflict");
+        assert_eq!(err.kind(), ErrorKind::AlreadyExists);
+        assert_eq!(
+            std::fs::read(harness.resolve("/reports/session.bin")).expect("read winner"),
+            b"winner"
+        );
     }
 
     #[test]
