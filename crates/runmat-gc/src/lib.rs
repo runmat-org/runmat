@@ -10,6 +10,7 @@ use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::thread::ThreadId;
 use thiserror::Error;
 
 pub mod allocator;
@@ -399,6 +400,10 @@ impl GarbageCollector {
             self.collection_in_progress.store(false, Ordering::Release);
             return Ok(0);
         }
+        if registered_roots_exist_on_other_threads() {
+            self.collection_in_progress.store(false, Ordering::Release);
+            return Ok(0);
+        }
 
         let start_time = Instant::now();
 
@@ -453,6 +458,10 @@ impl GarbageCollector {
             return Ok(0);
         }
         if self.active_value_borrows.load(Ordering::Acquire) != 0 {
+            self.collection_in_progress.store(false, Ordering::Release);
+            return Ok(0);
+        }
+        if registered_roots_exist_on_other_threads() {
             self.collection_in_progress.store(false, Ordering::Release);
             return Ok(0);
         }
@@ -542,9 +551,37 @@ thread_local! {
     static ROOT_SCANNER: RootScanner = RootScanner::new();
 }
 
+static ACTIVE_ROOT_THREADS: once_cell::sync::Lazy<Mutex<HashMap<ThreadId, usize>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
+
 /// Global write barrier manager
 static WRITE_BARRIERS: once_cell::sync::Lazy<Arc<WriteBarrierManager>> =
     once_cell::sync::Lazy::new(|| Arc::new(WriteBarrierManager::new(true, false)));
+
+fn register_active_root_thread() {
+    let thread_id = std::thread::current().id();
+    let mut roots = ACTIVE_ROOT_THREADS.lock();
+    *roots.entry(thread_id).or_insert(0) += 1;
+}
+
+fn unregister_active_root_thread() {
+    let thread_id = std::thread::current().id();
+    let mut roots = ACTIVE_ROOT_THREADS.lock();
+    if let Some(count) = roots.get_mut(&thread_id) {
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            roots.remove(&thread_id);
+        }
+    }
+}
+
+fn registered_roots_exist_on_other_threads() -> bool {
+    let current = std::thread::current().id();
+    ACTIVE_ROOT_THREADS
+        .lock()
+        .iter()
+        .any(|(thread_id, count)| *thread_id != current && *count > 0)
+}
 
 /// Global GC functions for easy access
 pub fn gc_allocate(value: Value) -> Result<GcHandle> {
@@ -680,13 +717,17 @@ pub fn gc_get_config() -> GcConfig {
     GC.get_config()
 }
 
-/// Simplified root registration for backwards compatibility
+/// Register a root source in the current thread-local root scanner.
 pub fn gc_register_root(root: Box<dyn GcRoot>) -> Result<RootId> {
-    ROOT_SCANNER.with(|scanner| scanner.register_root(root))
+    let root_id = ROOT_SCANNER.with(|scanner| scanner.register_root(root))?;
+    register_active_root_thread();
+    Ok(root_id)
 }
 
 pub fn gc_unregister_root(root_id: RootId) -> Result<()> {
-    ROOT_SCANNER.with(|scanner| scanner.unregister_root(root_id))
+    ROOT_SCANNER.with(|scanner| scanner.unregister_root(root_id))?;
+    unregister_active_root_thread();
+    Ok(())
 }
 
 /// Record a write for GC barriers (approximate old->young tracking)
@@ -752,6 +793,7 @@ pub fn gc_reset_for_test() -> Result<()> {
         let mut roots = GC.root_ptrs.lock();
         roots.clear();
     }
+    ACTIVE_ROOT_THREADS.lock().clear();
 
     // Ensure collection is not in progress
     GC.collection_in_progress.store(false, Ordering::Relaxed);
@@ -847,6 +889,51 @@ mod tests {
             }
 
             let _ = gc_collect_major();
+        });
+    }
+
+    #[test]
+    fn collection_skips_when_other_thread_has_registered_roots() {
+        use runmat_builtins::HandleRef;
+        use std::sync::mpsc;
+        use std::thread;
+
+        gc_test_context(|| {
+            let (ready_tx, ready_rx) = mpsc::channel();
+            let (collect_done_tx, collect_done_rx) = mpsc::channel();
+            let (result_tx, result_rx) = mpsc::channel();
+
+            let worker = thread::spawn(move || {
+                let handle =
+                    gc_allocate(Value::String("thread-root".to_string())).expect("allocation");
+                let root_value = Value::HandleObject(HandleRef {
+                    class_name: "ThreadRoot".to_string(),
+                    target: handle,
+                    valid: true,
+                });
+                let root_id =
+                    gc_register_root(Box::new(GlobalRoot::new(vec![root_value], "worker".into())))
+                        .expect("register worker root");
+
+                ready_tx.send(()).expect("signal root ready");
+                collect_done_rx.recv().expect("wait for main collection");
+
+                let still_live = gc_clone_value(&handle).is_ok();
+                gc_unregister_root(root_id).expect("unregister worker root");
+                result_tx.send(still_live).expect("send liveness result");
+            });
+
+            ready_rx.recv().expect("worker root should be registered");
+            assert_eq!(
+                gc_collect_minor().expect("cross-thread collection should skip"),
+                0
+            );
+            collect_done_tx.send(()).expect("signal collection done");
+            assert!(
+                result_rx.recv().expect("worker should report liveness"),
+                "collection from another thread must not invalidate thread-local roots"
+            );
+            worker.join().expect("worker thread should complete");
         });
     }
 
