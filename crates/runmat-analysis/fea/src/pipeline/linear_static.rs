@@ -73,7 +73,7 @@ pub fn run_linear_static_with_options(
         options.thermo_mechanical_context,
         options.electro_thermal_context,
     );
-    super::reject_moment_loads_without_rotational_dofs(model, &summary)?;
+    super::validate_rotational_dof_targets(model, &summary)?;
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::ModelAssembly,

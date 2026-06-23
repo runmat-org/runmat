@@ -154,6 +154,26 @@ fn moment_loads_require_rotational_dofs() {
 }
 
 #[test]
+fn prescribed_rotations_require_rotational_dofs() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
+        bc_id: "tip_rotation".to_string(),
+        region_id: "tip".to_string(),
+        kind: runmat_analysis_core::BoundaryConditionKind::PrescribedRotation {
+            rx: 0.1,
+            ry: 0.0,
+            rz: 0.0,
+        },
+    }];
+
+    let err = crate::run_linear_static(&model, ComputeBackend::Cpu)
+        .expect_err("prescribed rotations should require rotational DOFs");
+    let message = err.to_string();
+    assert!(message.contains("prescribed rotations require rotational-DOF structural elements"));
+    assert!(message.contains("bc_id=tip_rotation"));
+}
+
+#[test]
 fn assembly_summary_reports_structural_dof_layout_metrics() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.loads[0].kind = runmat_analysis_core::LoadKind::Moment {

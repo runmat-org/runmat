@@ -67,7 +67,7 @@ pub fn run_nonlinear_with_options(
     );
     let summary =
         assemble_linear_system(model, prep_context.clone(), thermo_context, electro_context);
-    super::reject_moment_loads_without_rotational_dofs(model, &summary)?;
+    super::validate_rotational_dof_targets(model, &summary)?;
     emit_phase(
         "fea.run_nonlinear",
         FeaProgressPhase::ModelAssembly,

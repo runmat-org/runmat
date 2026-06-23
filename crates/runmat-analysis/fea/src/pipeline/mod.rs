@@ -7,7 +7,9 @@ pub mod thermal;
 pub mod thermo_mechanical;
 pub mod transient;
 
-use runmat_analysis_core::{AnalysisModel, LoadKind, StructuralElementKind, StructuralModel};
+use runmat_analysis_core::{
+    AnalysisModel, BoundaryConditionKind, LoadKind, StructuralElementKind, StructuralModel,
+};
 
 use crate::{
     assembly::{dofs::StructuralDofKind, AssemblySummary},
@@ -16,8 +18,10 @@ use crate::{
 
 const MOMENT_REQUIRES_ROTATIONAL_DOF_MESSAGE: &str =
     "moment loads require rotational-DOF structural elements";
+const ROTATION_REQUIRES_ROTATIONAL_DOF_MESSAGE: &str =
+    "prescribed rotations require rotational-DOF structural elements";
 
-pub(crate) fn reject_moment_loads_without_rotational_dofs(
+pub(crate) fn validate_rotational_dof_targets(
     model: &AnalysisModel,
     summary: &AssemblySummary,
 ) -> Result<(), FeaRunError> {
@@ -40,6 +44,25 @@ pub(crate) fn reject_moment_loads_without_rotational_dofs(
             return Err(moment_load_error(load));
         }
     }
+    for bc in &model.boundary_conditions {
+        if !matches!(bc.kind, BoundaryConditionKind::PrescribedRotation { .. }) {
+            continue;
+        }
+        if !summary.structural_dof_layout.has_rotational_dofs() {
+            return Err(rotation_boundary_condition_error(bc));
+        }
+        let Some(structural) = model.structural.as_ref() else {
+            continue;
+        };
+        let target_nodes = structural_target_nodes(structural, &bc.region_id);
+        if target_nodes.is_empty()
+            || target_nodes
+                .iter()
+                .any(|node_index| !node_has_rotational_dofs(summary, *node_index))
+        {
+            return Err(rotation_boundary_condition_error(bc));
+        }
+    }
     Ok(())
 }
 
@@ -47,6 +70,13 @@ fn moment_load_error(load: &runmat_analysis_core::LoadCase) -> FeaRunError {
     FeaRunError::InvalidModel(format!(
         "{}; load_id={} region_id={}",
         MOMENT_REQUIRES_ROTATIONAL_DOF_MESSAGE, load.load_id, load.region_id
+    ))
+}
+
+fn rotation_boundary_condition_error(bc: &runmat_analysis_core::BoundaryCondition) -> FeaRunError {
+    FeaRunError::InvalidModel(format!(
+        "{}; bc_id={} region_id={}",
+        ROTATION_REQUIRES_ROTATIONAL_DOF_MESSAGE, bc.bc_id, bc.region_id
     ))
 }
 
