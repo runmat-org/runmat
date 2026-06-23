@@ -9,7 +9,9 @@
 
 #[cfg(test)]
 mod tests {
-    use runmat_builtins::{CellArray, HandleRef, Value};
+    use runmat_builtins::{
+        CellArray, Closure, HandleRef, Listener, ObjectInstance, StructValue, Value,
+    };
     use runmat_gc::*;
     use std::ptr::NonNull;
 
@@ -131,6 +133,61 @@ mod tests {
                 gc_clone_value(&target_handle)
                     .expect("cell target should remain live through trace"),
                 Value::Num(42.0)
+            );
+        });
+    }
+
+    #[test]
+    fn root_traversal_scans_nested_trace_variants() {
+        gc_test_context(|| {
+            let target = gc_allocate(Value::String("target".to_string()))
+                .expect("target allocation should succeed");
+            let callback = gc_allocate(Value::String("callback".to_string()))
+                .expect("callback allocation should succeed");
+
+            let handle = Value::HandleObject(HandleRef {
+                class_name: "Thing".to_string(),
+                target,
+                valid: true,
+            });
+            let listener = Value::Listener(Listener {
+                id: 1,
+                target,
+                event_name: "Changed".to_string(),
+                callback,
+                enabled: true,
+                valid: true,
+            });
+            let closure = Value::Closure(Closure {
+                function_name: "callback".to_string(),
+                bound_function: None,
+                captures: vec![Value::OutputList(vec![handle, listener])],
+            });
+
+            let mut object = ObjectInstance::new("Owner".to_string());
+            object.properties.insert("capture".to_string(), closure);
+
+            let mut root_struct = StructValue::new();
+            root_struct
+                .fields
+                .insert("object".to_string(), Value::Object(object));
+
+            let rooted = gc_allocate_rooted(Value::Struct(root_struct))
+                .expect("rooted nested value should allocate");
+
+            gc_collect_minor().expect("minor collection should succeed");
+
+            assert!(matches!(
+                &*gc_read_value(&rooted.handle()).expect("root should remain live"),
+                Value::Struct(_)
+            ));
+            assert_eq!(
+                gc_clone_value(&target).expect("listener target should remain live"),
+                Value::String("target".to_string())
+            );
+            assert_eq!(
+                gc_clone_value(&callback).expect("listener callback should remain live"),
+                Value::String("callback".to_string())
             );
         });
     }
