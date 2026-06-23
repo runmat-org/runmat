@@ -60,7 +60,9 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE, FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT,
     FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+    FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
@@ -2686,6 +2688,34 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
             Some("1"),
             AnalysisFieldLocation::Element,
         ),
+        (
+            FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE.to_string(),
+            "structural",
+            "shell_membrane_force",
+            Some("N"),
+            AnalysisFieldLocation::Element,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT.to_string(),
+            "structural",
+            "shell_bending_moment",
+            Some("N*m"),
+            AnalysisFieldLocation::Element,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR.to_string(),
+            "structural",
+            "shell_transverse_shear",
+            Some("N"),
+            AnalysisFieldLocation::Element,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_SHELL_VON_MISES.to_string(),
+            "structural",
+            "shell_von_mises",
+            Some("Pa"),
+            AnalysisFieldLocation::Element,
+        ),
     ];
 
     for (field_id, family, quantity, unit, location) in cases {
@@ -2699,6 +2729,28 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
         assert_eq!(descriptor.unit.as_deref(), unit, "{field_id} unit");
         assert_eq!(descriptor.location, location, "{field_id} location");
     }
+
+    let membrane = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+        vec![1, 3],
+        vec![0.0, 0.0, 0.0],
+    ));
+    assert_eq!(membrane.kind, AnalysisFieldKind::Vector);
+    assert_eq!(membrane.component_count, Some(3));
+    let shear = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+        vec![1, 2],
+        vec![0.0, 0.0],
+    ));
+    assert_eq!(shear.kind, AnalysisFieldKind::Vector);
+    assert_eq!(shear.component_count, Some(2));
+    let von_mises = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
+        vec![1],
+        vec![0.0],
+    ));
+    assert_eq!(von_mises.kind, AnalysisFieldKind::Scalar);
+    assert_eq!(von_mises.component_count, None);
 }
 
 #[test]

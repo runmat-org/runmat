@@ -1217,12 +1217,15 @@ fn infer_field_unit(field_id: &str) -> Option<&'static str> {
     if normalized.contains("reaction_force")
         || normalized.contains("beam_axial_force")
         || normalized.contains("beam_shear_force")
+        || normalized.contains("shell_membrane_force")
+        || normalized.contains("shell_transverse_shear")
     {
         return Some("N");
     }
     if normalized.contains("reaction_moment")
         || normalized.contains("beam_torsion_moment")
         || normalized.contains("beam_bending_moment")
+        || normalized.contains("shell_bending_moment")
     {
         return Some("N*m");
     }
@@ -1289,7 +1292,7 @@ fn infer_field_location(field_id: &str) -> AnalysisFieldLocation {
     if normalized.starts_with("acoustic.") {
         return AnalysisFieldLocation::Node;
     }
-    if normalized.contains("beam_") {
+    if normalized.contains("beam_") || normalized.contains("shell_") {
         return AnalysisFieldLocation::Element;
     }
     if normalized.contains("temperature_gradient")
@@ -1335,8 +1338,14 @@ fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
     if normalized.contains("beam_shear_force")
         || normalized.contains("beam_bending_moment")
         || normalized.contains("beam_bending_stress")
+        || normalized.contains("shell_membrane_force")
+        || normalized.contains("shell_bending_moment")
+        || normalized.contains("shell_transverse_shear")
     {
         return AnalysisFieldKind::Vector;
+    }
+    if normalized.contains("shell_von_mises") {
+        return AnalysisFieldKind::Scalar;
     }
     if normalized.contains("beam_axial_force")
         || normalized.contains("beam_torsion_moment")
@@ -1409,6 +1418,15 @@ fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
         || normalized.contains("beam_bending_stress")
     {
         return Some(2);
+    }
+    if normalized.contains("shell_membrane_force") || normalized.contains("shell_bending_moment") {
+        return Some(3);
+    }
+    if normalized.contains("shell_transverse_shear") {
+        return Some(2);
+    }
+    if normalized.contains("shell_von_mises") {
+        return None;
     }
     if normalized.contains("beam_axial_force")
         || normalized.contains("beam_torsion_moment")

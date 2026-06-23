@@ -52,6 +52,8 @@ pub struct AssemblySummary {
     pub structural_dof_layout: StructuralDofLayout,
     #[serde(default)]
     pub structural_beam_recovery: Vec<BeamRecoveryElementSummary>,
+    #[serde(default)]
+    pub structural_shell_recovery: Vec<ShellRecoveryElementSummary>,
     pub constrained_dof_count: usize,
     pub load_count: usize,
     pub structural_material: StructuralMaterialSummary,
@@ -90,6 +92,16 @@ pub struct BeamRecoveryElementSummary {
     pub section: BeamSection,
     pub material: BeamMaterial,
     pub transform_global_to_local: BeamTransform12,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShellRecoveryElementSummary {
+    pub element_id: String,
+    pub region_id: String,
+    pub node_indices: [usize; 3],
+    pub area_m2: f64,
+    pub section: ShellSection,
+    pub material: ShellMaterial,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -911,6 +923,7 @@ pub fn assemble_linear_system(
             .unwrap_or_else(|| element_count_for_legacy_dofs(dof_count)),
         structural_dof_layout,
         structural_beam_recovery: Vec::new(),
+        structural_shell_recovery: Vec::new(),
         constrained_dof_count,
         load_count: model.loads.len().saturating_add(prep_load_bonus),
         structural_material,
@@ -1038,6 +1051,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
     let mut mass_diag = vec![0.0_f64; dof_count];
     let mut damping_diag = vec![0.0_f64; dof_count];
     let mut structural_beam_recovery = Vec::new();
+    let mut structural_shell_recovery = Vec::new();
 
     for element in &beam_elements {
         let StructuralElementKind::Beam(beam) = &element.kind else {
@@ -1117,6 +1131,14 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
             structural_material.density_kg_per_m3,
             frame.area_m2,
         );
+        structural_shell_recovery.push(ShellRecoveryElementSummary {
+            element_id: element.element_id.clone(),
+            region_id: element.region_id.clone(),
+            node_indices,
+            area_m2: frame.area_m2,
+            section,
+            material: shell_material,
+        });
     }
 
     let mut direct_rotational_moment_load_count = 0usize;
@@ -1287,6 +1309,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
         structural_solid_element_count: 0,
         structural_dof_layout,
         structural_beam_recovery,
+        structural_shell_recovery,
         constrained_dof_count,
         load_count: model.loads.len(),
         structural_material,

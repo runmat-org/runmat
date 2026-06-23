@@ -30,7 +30,9 @@ use crate::{
     FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
     FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
-    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+    FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 
@@ -292,10 +294,30 @@ fn shell_moment_solves_rotation_and_reaction_moment() {
         field(&result, FEA_FIELD_STRUCTURAL_REACTION_MOMENT).shape,
         vec![3, 3]
     );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE).shape,
+        vec![1, 3]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT).shape,
+        vec![1, 3]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR).shape,
+        vec![1, 2]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES).shape,
+        vec![1]
+    );
     let rotation = host_field(&result, FEA_FIELD_STRUCTURAL_ROTATION);
     let reaction_moment = host_field(&result, FEA_FIELD_STRUCTURAL_REACTION_MOMENT);
+    let shell_bending = host_field(&result, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT);
+    let shell_von_mises = host_field(&result, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES);
     assert!(rotation[7].abs() > 0.0);
     assert!(reaction_moment[1].abs() > 0.0);
+    assert!(shell_bending.iter().any(|value| value.abs() > 0.0));
+    assert!(shell_von_mises[0].is_finite() && shell_von_mises[0] > 0.0);
     assert!(result.diagnostics.iter().any(|diag| {
         diag.code == "FEA_STRUCTURAL_ROTATIONAL_DOF"
             && diag.message.contains("structural_rotational_dof_count=9")
