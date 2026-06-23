@@ -565,6 +565,7 @@ fn preflight_zip_workbook(bytes: &[u8]) -> BuiltinResult<()> {
     if !looks_like_zip(bytes) {
         return Ok(());
     }
+    validate_zip_entry_count_from_raw(bytes)?;
     let cursor = Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(cursor).map_err(|err| {
         xlsread_error_with(
@@ -600,6 +601,96 @@ fn validate_zip_entry_count(entry_count: usize) -> BuiltinResult<()> {
         ));
     }
     Ok(())
+}
+
+fn validate_zip_entry_count_from_raw(bytes: &[u8]) -> BuiltinResult<()> {
+    let eocd_offset = find_zip_eocd(bytes).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP workbook: missing end of central directory",
+        )
+    })?;
+    let total_entries = read_le_u16(bytes, eocd_offset + 10)? as usize;
+    if total_entries == u16::MAX as usize {
+        validate_zip64_entry_count_from_raw(bytes, eocd_offset)
+    } else {
+        validate_zip_entry_count(total_entries)
+    }
+}
+
+fn validate_zip64_entry_count_from_raw(bytes: &[u8], eocd_offset: usize) -> BuiltinResult<()> {
+    let locator_offset = eocd_offset.checked_sub(20).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP64 workbook: missing locator",
+        )
+    })?;
+    if bytes.get(locator_offset..locator_offset + 4) != Some(b"PK\x06\x07") {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP64 workbook: missing locator",
+        ));
+    }
+    let zip64_eocd_offset = read_le_u64(bytes, locator_offset + 8)?;
+    let zip64_eocd_offset = usize::try_from(zip64_eocd_offset).map_err(|_| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: ZIP64 workbook directory offset exceeds supported bounds",
+        )
+    })?;
+    if bytes.get(zip64_eocd_offset..zip64_eocd_offset + 4) != Some(b"PK\x06\x06") {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP64 workbook: missing end of central directory",
+        ));
+    }
+    let total_entries = read_le_u64(bytes, zip64_eocd_offset + 32)?;
+    let total_entries = usize::try_from(total_entries).map_err(|_| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: ZIP workbook entry count exceeds supported bounds",
+        )
+    })?;
+    validate_zip_entry_count(total_entries)
+}
+
+fn find_zip_eocd(bytes: &[u8]) -> Option<usize> {
+    const EOCD_LEN: usize = 22;
+    const MAX_COMMENT_LEN: usize = u16::MAX as usize;
+    if bytes.len() < EOCD_LEN {
+        return None;
+    }
+    let min_offset = bytes.len().saturating_sub(EOCD_LEN + MAX_COMMENT_LEN);
+    let max_offset = bytes.len() - EOCD_LEN;
+    (min_offset..=max_offset).rev().find(|&offset| {
+        if bytes.get(offset..offset + 4) != Some(b"PK\x05\x06") {
+            return false;
+        }
+        let comment_len = u16::from_le_bytes([bytes[offset + 20], bytes[offset + 21]]) as usize;
+        offset + EOCD_LEN + comment_len == bytes.len()
+    })
+}
+
+fn read_le_u16(bytes: &[u8], offset: usize) -> BuiltinResult<u16> {
+    let slice = bytes.get(offset..offset + 2).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP workbook: truncated directory",
+        )
+    })?;
+    Ok(u16::from_le_bytes([slice[0], slice[1]]))
+}
+
+fn read_le_u64(bytes: &[u8], offset: usize) -> BuiltinResult<u64> {
+    let slice = bytes.get(offset..offset + 8).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: invalid ZIP workbook: truncated directory",
+        )
+    })?;
+    Ok(u64::from_le_bytes([
+        slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7],
+    ]))
 }
 
 #[cfg(test)]
@@ -1570,6 +1661,59 @@ mod tests {
         let err =
             validate_zip_entry_count(MAX_XLSREAD_ZIP_ENTRIES + 1).expect_err("too many entries");
         assert!(err.message().contains("more than"));
+    }
+
+    #[test]
+    fn xlsread_zip_preflight_rejects_raw_zip64_excessive_entry_count() {
+        let bytes = zip64_entry_count_fixture((MAX_XLSREAD_ZIP_ENTRIES + 1) as u64);
+        let err = preflight_zip_workbook(&bytes).expect_err("too many zip64 entries");
+        assert!(err.message().contains("more than"));
+    }
+
+    #[test]
+    fn xlsread_zip_eocd_scan_ignores_signature_inside_comment() {
+        let mut bytes = b"PK\x03\x04".to_vec();
+        let eocd_offset = bytes.len();
+        let comment = b"comment with PK\x05\x06 marker";
+        bytes.extend_from_slice(b"PK\x05\x06");
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&(comment.len() as u16).to_le_bytes());
+        bytes.extend_from_slice(comment);
+
+        assert_eq!(find_zip_eocd(&bytes), Some(eocd_offset));
+    }
+
+    fn zip64_entry_count_fixture(entry_count: u64) -> Vec<u8> {
+        let mut bytes = b"PK\x03\x04".to_vec();
+        let zip64_eocd_offset = bytes.len() as u64;
+        bytes.extend_from_slice(b"PK\x06\x06");
+        bytes.extend_from_slice(&44u64.to_le_bytes());
+        bytes.extend_from_slice(&45u16.to_le_bytes());
+        bytes.extend_from_slice(&45u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&entry_count.to_le_bytes());
+        bytes.extend_from_slice(&entry_count.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(b"PK\x06\x07");
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&zip64_eocd_offset.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(b"PK\x05\x06");
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&u16::MAX.to_le_bytes());
+        bytes.extend_from_slice(&u16::MAX.to_le_bytes());
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes
     }
 
     #[test]

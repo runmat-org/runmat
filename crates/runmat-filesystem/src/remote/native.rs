@@ -1006,16 +1006,32 @@ impl FsProvider for RemoteFsProvider {
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let normalized = self.normalize(path);
         let mut data = Vec::new();
-        if flags.read {
-            let meta = self.inner.fetch_metadata(&normalized)?;
-            if meta.file_type != "file" {
-                return Err(io::Error::other("remote path is not a file"));
+        let mut metadata = FsMetadata::new(FsFileType::File, 0, None, false);
+        if flags.read || flags.write || flags.append || !flags.create || flags.create_new {
+            match self.inner.fetch_metadata(&normalized) {
+                Ok(meta) => {
+                    if meta.file_type != "file" {
+                        return Err(io::Error::other("remote path is not a file"));
+                    }
+                    if flags.create_new {
+                        return Err(io::Error::new(
+                            ErrorKind::AlreadyExists,
+                            format!("File already exists: {}", path.display()),
+                        ));
+                    }
+                    if flags.read || flags.append {
+                        data = if meta.hash.as_deref() == Some(MANIFEST_HASH) {
+                            self.download_sharded_file(&normalized, meta.len)?
+                        } else {
+                            self.download_raw_file(&normalized, meta.len)?
+                        };
+                    }
+                    metadata = meta.into();
+                }
+                Err(err)
+                    if err.kind() == ErrorKind::NotFound && (flags.create || flags.create_new) => {}
+                Err(err) => return Err(err),
             }
-            data = if meta.hash.as_deref() == Some(MANIFEST_HASH) {
-                self.download_sharded_file(&normalized, meta.len)?
-            } else {
-                self.download_raw_file(&normalized, meta.len)?
-            };
         }
         if flags.truncate {
             data.clear();
@@ -1027,6 +1043,7 @@ impl FsProvider for RemoteFsProvider {
             provider: self.clone(),
             path: normalized,
             data,
+            metadata,
             position: 0,
             flags: flags.clone(),
             dirty: false,
@@ -1194,6 +1211,7 @@ struct RemoteFileHandle {
     provider: RemoteFsProvider,
     path: String,
     data: Vec<u8>,
+    metadata: FsMetadata,
     position: usize,
     flags: OpenFlags,
     dirty: bool,
@@ -1264,11 +1282,12 @@ impl Seek for RemoteFileHandle {
 #[async_trait(?Send)]
 impl FileHandle for RemoteFileHandle {
     async fn metadata_async(&self) -> io::Result<FsMetadata> {
-        Ok(FsMetadata::new(
-            FsFileType::File,
+        Ok(FsMetadata::new_with_hash(
+            self.metadata.file_type(),
             self.data.len() as u64,
-            None,
-            false,
+            self.metadata.modified(),
+            self.metadata.is_readonly(),
+            self.metadata.hash().map(str::to_owned),
         ))
     }
 }

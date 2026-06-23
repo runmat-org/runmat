@@ -257,9 +257,14 @@ pub struct ProviderSpectralResult {
 pub async fn uniform_spectral_estimate(
     request: ProviderSpectralRequest<'_>,
 ) -> anyhow::Result<ProviderSpectralResult> {
+    let invalid_frame_mode = matches!(
+        request.frame_mode,
+        ProviderSpectralFrameMode::Sliding { hop: 0 }
+    );
     if request.window.is_empty()
         || request.nfft == 0
         || request.frame_count == 0
+        || invalid_frame_mode
         || !request.denominator.is_finite()
         || request.denominator <= 0.0
     {

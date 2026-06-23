@@ -721,6 +721,7 @@ impl FsProvider for RemoteFsProvider {
         let mut data = Vec::new();
         let normalized = self.normalize(path);
         let mut exists = false;
+        let mut metadata = FsMetadata::new(FsFileType::File, 0, None, false);
 
         if flags.read || flags.append || (!flags.create && !flags.create_new) {
             match self.fetch_metadata(&normalized) {
@@ -732,6 +733,7 @@ impl FsProvider for RemoteFsProvider {
                         ));
                     }
                     data = self.download_raw_file(&normalized, meta.len)?;
+                    metadata = meta.into();
                     exists = true;
                 }
                 Err(err) if err.kind() == ErrorKind::NotFound => {
@@ -769,6 +771,7 @@ impl FsProvider for RemoteFsProvider {
             provider: self.clone(),
             path: normalized,
             data,
+            metadata,
             cursor,
             flags: flags.clone(),
             dirty: false,
@@ -983,6 +986,7 @@ struct RemoteFileHandle {
     provider: RemoteFsProvider,
     path: String,
     data: Vec<u8>,
+    metadata: FsMetadata,
     cursor: usize,
     flags: OpenFlags,
     dirty: bool,
@@ -1070,11 +1074,12 @@ impl Seek for RemoteFileHandle {
 #[async_trait(?Send)]
 impl FileHandle for RemoteFileHandle {
     async fn metadata_async(&self) -> io::Result<FsMetadata> {
-        Ok(FsMetadata::new(
-            FsFileType::File,
+        Ok(FsMetadata::new_with_hash(
+            self.metadata.file_type(),
             self.data.len() as u64,
-            None,
-            false,
+            self.metadata.modified(),
+            self.metadata.is_readonly(),
+            self.metadata.hash().map(str::to_owned),
         ))
     }
 }

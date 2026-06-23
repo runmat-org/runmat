@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak};
 
 use futures::lock::Mutex as AsyncMutex;
 use runmat_builtins::{
@@ -25,7 +25,8 @@ const BUILTIN_NAME: &str = "writecell";
 const MAX_EXCEL_ROW_INDEX: usize = 1_048_575;
 const MAX_EXCEL_COLUMN_INDEX: usize = 16_383;
 type WriteLock = Arc<AsyncMutex<()>>;
-static WRITE_LOCKS: OnceLock<StdMutex<HashMap<String, WriteLock>>> = OnceLock::new();
+type WeakWriteLock = Weak<AsyncMutex<()>>;
+static WRITE_LOCKS: OnceLock<StdMutex<HashMap<String, WeakWriteLock>>> = OnceLock::new();
 
 const WRITECELL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "bytesWritten",
@@ -768,10 +769,13 @@ async fn write_lock_for_path(path: &Path) -> WriteLock {
     let mut locks = locks
         .lock()
         .expect("writecell write lock registry poisoned");
-    locks
-        .entry(key)
-        .or_insert_with(|| Arc::new(AsyncMutex::new(())))
-        .clone()
+    if let Some(lock) = locks.get(&key).and_then(Weak::upgrade) {
+        return lock;
+    }
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    let lock = Arc::new(AsyncMutex::new(()));
+    locks.insert(key, Arc::downgrade(&lock));
+    lock
 }
 
 async fn write_lock_key(path: &Path) -> String {
