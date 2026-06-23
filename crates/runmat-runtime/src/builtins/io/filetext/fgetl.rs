@@ -211,7 +211,7 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlE
         ));
     }
     let handle =
-        registry::take_handle(fid).ok_or_else(|| fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER))?;
+        registry::shared_handle(fid).ok_or_else(|| fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER))?;
 
     let mut guard = handle.lock().map_err(|_| {
         fgetl_error_with_detail(

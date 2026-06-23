@@ -177,6 +177,9 @@ pub(crate) fn gpu_vector_len(
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<usize> {
     ensure_vector_shape(builtin, label, &handle.shape)?;
+    if handle.shape.contains(&0) {
+        return Ok(0);
+    }
     Ok(handle.shape.iter().copied().max().unwrap_or(1))
 }
 
@@ -458,5 +461,16 @@ mod tests {
         let len = scalar_length_arg(Value::Num(4.0)).expect("valid length");
 
         assert_eq!(len, 4);
+    }
+
+    #[test]
+    fn gpu_vector_len_reports_zero_for_empty_vector_shape() {
+        let handle = GpuTensorHandle {
+            shape: vec![1, 0],
+            device_id: 0,
+            buffer_id: 0,
+        };
+        let len = gpu_vector_len("test", "x", &handle).expect("vector length");
+        assert_eq!(len, 0);
     }
 }

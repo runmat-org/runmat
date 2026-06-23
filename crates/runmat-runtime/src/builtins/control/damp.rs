@@ -206,6 +206,13 @@ impl DampingEval {
         let mut modes = poles
             .into_iter()
             .map(|pole| {
+                if sample_time > 0.0 && pole.norm() <= EPS {
+                    return DampingMode {
+                        pole,
+                        wn: f64::INFINITY,
+                        zeta: 1.0,
+                    };
+                }
                 let equivalent = if sample_time > 0.0 {
                     pole.ln() / sample_time
                 } else {
@@ -292,7 +299,7 @@ fn matrix_property(
             ));
         }
     };
-    if tensor.shape.len() > 2 || tensor.rows != tensor.cols {
+    if tensor.shape.len() != 2 || tensor.rows != tensor.cols {
         return Err(damp_error(
             "RunMat:damp:InvalidModel",
             format!("damp: ss {name} must be square, got {:?}", tensor.shape),
@@ -446,6 +453,14 @@ mod tests {
         assert!((tensor_data(&outputs[0])[0] - 6.931471805599453).abs() < 1.0e-10);
         assert!((tensor_data(&outputs[1])[0] - 1.0).abs() < 1.0e-12);
         assert!((tensor_data(&outputs[2])[0] - 0.5).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn damp_discrete_zero_pole_reports_deadbeat_damping() {
+        let report = DampingEval::from_poles(vec![Complex64::new(0.0, 0.0)], 0.1);
+        assert_eq!(report.modes.len(), 1);
+        assert!(report.modes[0].wn.is_infinite());
+        assert_eq!(report.modes[0].zeta, 1.0);
     }
 
     #[test]

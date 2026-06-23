@@ -23,6 +23,7 @@ const BUILTIN_NAME: &str = "xlsread";
 const MAX_EXCEL_ROW_INDEX: usize = 1_048_575;
 const MAX_EXCEL_COLUMN_INDEX: usize = 16_383;
 const MAX_XLSREAD_SELECTED_CELLS: usize = 5_000_000;
+const MAX_XLSREAD_WORKBOOK_BYTES: u64 = 512 * 1024 * 1024;
 
 const XLSREAD_OUTPUT_NUM: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "num",
@@ -481,6 +482,7 @@ fn normalize_spreadsheet_path(text: &str) -> BuiltinResult<String> {
 }
 
 async fn read_spreadsheet(path: &Path, request: &XlsReadRequest) -> BuiltinResult<XlsReadResult> {
+    let outputs = XlsReadOutputs::requested()?;
     let bytes = read_file_bytes(path).await?;
     let cursor = Cursor::new(bytes);
     let mut workbook = open_workbook_auto_from_rs(cursor).map_err(|err| {
@@ -524,25 +526,34 @@ async fn read_spreadsheet(path: &Path, request: &XlsReadRequest) -> BuiltinResul
             })?,
     };
     let cells = selected_cells(&range, request.range)?;
-    XlsReadResult::from_cells(cells)
+    XlsReadResult::from_cells(cells, outputs)
 }
 
 async fn read_file_bytes(path: &Path) -> BuiltinResult<Vec<u8>> {
-    let mut file = File::open_async(path).await.map_err(|err| {
+    let file = File::open_async(path).await.map_err(|err| {
         xlsread_error_with_source(
             &XLSREAD_ERROR_IO,
             format!("xlsread: unable to open '{}': {err}", path.display()),
             err,
         )
     })?;
+    let mut limited = file.take(MAX_XLSREAD_WORKBOOK_BYTES + 1);
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(|err| {
+    limited.read_to_end(&mut bytes).map_err(|err| {
         xlsread_error_with_source(
             &XLSREAD_ERROR_IO,
             format!("xlsread: unable to read '{}': {err}", path.display()),
             err,
         )
     })?;
+    if bytes.len() as u64 > MAX_XLSREAD_WORKBOOK_BYTES {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            format!(
+                "xlsread: workbook exceeds maximum supported size of {MAX_XLSREAD_WORKBOOK_BYTES} bytes"
+            ),
+        ));
+    }
     Ok(bytes)
 }
 
@@ -724,15 +735,28 @@ struct CellReference {
 }
 
 fn parse_cell_reference(token: &str) -> BuiltinResult<CellReference> {
+    let trimmed = token.trim();
+    let stripped = trimmed.chars().filter(|&ch| ch != '$').collect::<String>();
+    if let Some(reference) = parse_r1c1_reference(&stripped)? {
+        return Ok(reference);
+    }
     let mut letters = String::new();
     let mut digits = String::new();
-    for ch in token.trim().chars() {
+    let mut saw_digit = false;
+    for ch in trimmed.chars() {
         if ch == '$' {
             continue;
         }
         if ch.is_ascii_alphabetic() {
+            if saw_digit {
+                return Err(xlsread_error_with(
+                    &XLSREAD_ERROR_RANGE,
+                    format!("xlsread: invalid range component '{token}'"),
+                ));
+            }
             letters.push(ch.to_ascii_uppercase());
         } else if ch.is_ascii_digit() {
+            saw_digit = true;
             digits.push(ch);
         } else {
             return Err(xlsread_error_with(
@@ -770,6 +794,48 @@ fn parse_cell_reference(token: &str) -> BuiltinResult<CellReference> {
         Some(parsed - 1)
     };
     Ok(CellReference { row, col })
+}
+
+fn parse_r1c1_reference(token: &str) -> BuiltinResult<Option<CellReference>> {
+    let Some(rest) = token.strip_prefix('R').or_else(|| token.strip_prefix('r')) else {
+        return Ok(None);
+    };
+    let Some(split) = rest.find(['C', 'c']) else {
+        return Ok(None);
+    };
+    let (row_text, col_with_marker) = rest.split_at(split);
+    let col_text = &col_with_marker[1..];
+    if row_text.is_empty()
+        || col_text.is_empty()
+        || !row_text.chars().all(|ch| ch.is_ascii_digit())
+        || !col_text.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_RANGE,
+            format!("xlsread: invalid range component '{token}'"),
+        ));
+    }
+    let row = parse_one_based_r1c1_index(row_text, "row", token)?;
+    let col = parse_one_based_r1c1_index(col_text, "column", token)?;
+    Ok(Some(CellReference {
+        row: Some(row),
+        col: Some(col),
+    }))
+}
+
+fn parse_one_based_r1c1_index(text: &str, label: &str, token: &str) -> BuiltinResult<usize> {
+    let parsed = text.parse::<usize>().map_err(|_| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_RANGE,
+            format!("xlsread: invalid {label} index in '{token}'"),
+        )
+    })?;
+    parsed.checked_sub(1).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_RANGE,
+            format!("xlsread: {label} index in '{token}' must be one-based"),
+        )
+    })
 }
 
 fn column_index_from_letters(letters: &str) -> BuiltinResult<usize> {
@@ -942,30 +1008,87 @@ fn trim_empty_edges(rows: Vec<Vec<SpreadsheetData>>) -> BuiltinResult<Vec<Vec<Sp
 
 #[derive(Clone)]
 struct XlsReadResult {
-    num: Value,
-    txt: Value,
-    raw: Value,
+    num: Option<Value>,
+    txt: Option<Value>,
+    raw: Option<Value>,
+}
+
+#[derive(Clone, Copy)]
+struct XlsReadOutputs {
+    num: bool,
+    txt: bool,
+    raw: bool,
+}
+
+impl XlsReadOutputs {
+    fn requested() -> BuiltinResult<Self> {
+        match crate::output_count::current_output_count() {
+            Some(0) => Ok(Self {
+                num: false,
+                txt: false,
+                raw: false,
+            }),
+            Some(1) | None => Ok(Self {
+                num: true,
+                txt: false,
+                raw: false,
+            }),
+            Some(2) => Ok(Self {
+                num: true,
+                txt: true,
+                raw: false,
+            }),
+            Some(3) => Ok(Self {
+                num: true,
+                txt: true,
+                raw: true,
+            }),
+            Some(n) => Err(xlsread_error_with(
+                &XLSREAD_ERROR_OUTPUT_COUNT,
+                format!("xlsread: expected at most 3 outputs, got {n}"),
+            )),
+        }
+    }
 }
 
 impl XlsReadResult {
-    fn from_cells(rows: Vec<Vec<SpreadsheetData>>) -> BuiltinResult<Self> {
-        let num = build_numeric_output(&rows)?;
-        let txt = build_text_output(&rows)?;
-        let raw = build_raw_output(&rows)?;
+    fn from_cells(rows: Vec<Vec<SpreadsheetData>>, outputs: XlsReadOutputs) -> BuiltinResult<Self> {
+        let num = if outputs.num {
+            Some(build_numeric_output(&rows)?)
+        } else {
+            None
+        };
+        let txt = if outputs.txt {
+            Some(build_text_output(&rows)?)
+        } else {
+            None
+        };
+        let raw = if outputs.raw {
+            Some(build_raw_output(&rows)?)
+        } else {
+            None
+        };
         Ok(Self { num, txt, raw })
     }
 
     fn into_requested_value(self) -> BuiltinResult<Value> {
         match crate::output_count::current_output_count() {
             Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(1) => Ok(Value::OutputList(vec![self.num])),
-            Some(2) => Ok(Value::OutputList(vec![self.num, self.txt])),
-            Some(3) => Ok(Value::OutputList(vec![self.num, self.txt, self.raw])),
+            Some(1) => Ok(Value::OutputList(vec![self.num.expect("num output")])),
+            Some(2) => Ok(Value::OutputList(vec![
+                self.num.expect("num output"),
+                self.txt.expect("txt output"),
+            ])),
+            Some(3) => Ok(Value::OutputList(vec![
+                self.num.expect("num output"),
+                self.txt.expect("txt output"),
+                self.raw.expect("raw output"),
+            ])),
             Some(n) => Err(xlsread_error_with(
                 &XLSREAD_ERROR_OUTPUT_COUNT,
                 format!("xlsread: expected at most 3 outputs, got {n}"),
             )),
-            None => Ok(self.num),
+            None => Ok(self.num.expect("num output")),
         }
     }
 }
@@ -1300,6 +1423,21 @@ mod tests {
         assert_eq!(spec.start_col, 1);
         assert_eq!(spec.end_row, Some(2));
         assert_eq!(spec.end_col, Some(1));
+    }
+
+    #[test]
+    fn r1c1_range_is_parsed_explicitly() {
+        let spec = parse_range_string("R2C3:R4C5").expect("r1c1 range");
+        assert_eq!(spec.start_row, 1);
+        assert_eq!(spec.start_col, 2);
+        assert_eq!(spec.end_row, Some(3));
+        assert_eq!(spec.end_col, Some(4));
+    }
+
+    #[test]
+    fn interleaved_a1_tokens_are_rejected() {
+        let err = parse_range_string("A1B2").expect_err("invalid token");
+        assert!(err.message().contains("invalid range component"));
     }
 
     #[test]

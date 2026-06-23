@@ -5,7 +5,7 @@ use std::convert::TryFrom;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use encoding_rs::{Encoding, UTF_8};
+use encoding_rs::Encoding;
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -19,9 +19,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::io::filetext::helpers::decode_bytes;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "readmatrix";
+const MAX_READMATRIX_TEXT_BYTES: u64 = 512 * 1024 * 1024;
 
 const READMATRIX_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "M",
@@ -1215,74 +1217,87 @@ async fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> Builti
 }
 
 async fn read_file_bytes(path: &Path) -> BuiltinResult<Vec<u8>> {
-    let mut file = File::open_async(path).await.map_err(|err| {
+    let file = File::open_async(path).await.map_err(|err| {
         readmatrix_error_with_source(
             &READMATRIX_ERROR_IO_OPEN,
             format!("readmatrix: unable to read '{}': {err}", path.display()),
             err,
         )
     })?;
+    let mut limited = file.take(MAX_READMATRIX_TEXT_BYTES + 1);
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(|err| {
+    limited.read_to_end(&mut bytes).map_err(|err| {
         readmatrix_error_with_source(
             &READMATRIX_ERROR_IO_READ,
             format!("readmatrix: error reading '{}': {err}", path.display()),
             err,
         )
     })?;
+    if bytes.len() as u64 > MAX_READMATRIX_TEXT_BYTES {
+        return Err(readmatrix_error_with(
+            &READMATRIX_ERROR_IO_READ,
+            format!(
+                "readmatrix: file exceeds maximum supported text size of {MAX_READMATRIX_TEXT_BYTES} bytes"
+            ),
+        ));
+    }
     Ok(bytes)
 }
 
 fn validate_encoding_label(label: &str) -> BuiltinResult<()> {
-    encoding_for_label(label).map(|_| ()).ok_or_else(|| {
-        readmatrix_error_with(
-            &READMATRIX_ERROR_OPTION_VALUE,
-            format!("readmatrix: unsupported Encoding '{label}'"),
-        )
-    })
-}
-
-fn encoding_for_label(label: &str) -> Option<&'static Encoding> {
     let label = label.trim();
-    if label.is_empty()
-        || label.eq_ignore_ascii_case("auto")
-        || label.eq_ignore_ascii_case("default")
-        || label.eq_ignore_ascii_case("system")
-        || label.eq_ignore_ascii_case("native")
-        || label.eq_ignore_ascii_case("utf-8")
-        || label.eq_ignore_ascii_case("utf8")
-        || label.eq_ignore_ascii_case("unicode")
-    {
-        return Some(UTF_8);
+    if label.eq_ignore_ascii_case("auto") || label.eq_ignore_ascii_case("unicode") {
+        return Ok(());
     }
-    Encoding::for_label(label.as_bytes())
+    decode_bytes(&[], normalized_encoding_label(label), BUILTIN_NAME)
+        .map(|_| ())
+        .map_err(|_| {
+            readmatrix_error_with(
+                &READMATRIX_ERROR_OPTION_VALUE,
+                format!("readmatrix: unsupported Encoding '{label}'"),
+            )
+        })
 }
 
 fn decode_text_bytes(bytes: &[u8], encoding: &str) -> BuiltinResult<String> {
-    let (encoding, offset) = if encoding.trim().eq_ignore_ascii_case("auto") {
-        Encoding::for_bom(bytes).unwrap_or((UTF_8, 0))
+    let label = encoding.trim();
+    let normalized = normalized_encoding_label(label);
+    let chars = if normalized.eq_ignore_ascii_case("auto") {
+        if let Some((encoding, bom_len)) = Encoding::for_bom(bytes) {
+            decode_bom_bytes(bytes, encoding, bom_len)
+        } else {
+            decode_bytes(bytes, "utf-8", BUILTIN_NAME)
+        }
     } else {
-        (
-            encoding_for_label(encoding).ok_or_else(|| {
-                readmatrix_error_with(
-                    &READMATRIX_ERROR_OPTION_VALUE,
-                    format!("readmatrix: unsupported Encoding '{encoding}'"),
-                )
-            })?,
-            0,
-        )
-    };
-    let (decoded, _, had_errors) = encoding.decode(&bytes[offset..]);
+        decode_bytes(bytes, normalized, BUILTIN_NAME)
+    }
+    .map_err(|err| readmatrix_error_with(&READMATRIX_ERROR_IO_READ, err.message()))?;
+    Ok(chars.into_iter().collect())
+}
+
+fn decode_bom_bytes(
+    bytes: &[u8],
+    encoding: &'static Encoding,
+    bom_len: usize,
+) -> BuiltinResult<Vec<char>> {
+    let (decoded, had_errors) = encoding.decode_without_bom_handling(&bytes[bom_len..]);
     if had_errors {
         return Err(readmatrix_error_with(
             &READMATRIX_ERROR_IO_READ,
-            format!(
-                "readmatrix: unable to decode file contents using encoding '{}'",
-                encoding.name()
-            ),
+            "readmatrix: file contains bytes that are invalid for the detected Encoding",
         ));
     }
-    Ok(decoded.into_owned())
+    Ok(decoded.chars().collect())
+}
+
+fn normalized_encoding_label(label: &str) -> &str {
+    if label.eq_ignore_ascii_case("unicode") {
+        "utf-8"
+    } else if label.eq_ignore_ascii_case("default") || label.eq_ignore_ascii_case("native") {
+        "system"
+    } else {
+        label
+    }
 }
 
 fn strip_utf8_bom(text: String) -> String {
@@ -1908,6 +1923,50 @@ pub(crate) mod tests {
                 assert!(t.data[0].is_infinite() && t.data[0].is_sign_negative());
                 assert!(t.data[1].is_infinite() && t.data[1].is_sign_positive());
                 assert!(t.data[2].is_nan());
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+        let _ = fs::remove_file(&path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn readmatrix_accepts_shift_jis_encoding_label() {
+        let path = unique_path("readmatrix_shift_jis");
+        fs::write(&path, b"1,2\n3,4\n").expect("write sample file");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            vec![Value::from("Encoding"), Value::from("shift_jis")],
+        ))
+        .expect("readmatrix");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+        let _ = fs::remove_file(&path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn readmatrix_auto_detects_utf16_bom() {
+        let path = unique_path("readmatrix_utf16_auto");
+        let mut bytes = vec![0xFF, 0xFE];
+        for unit in "1,2\n3,4\n".encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+        fs::write(&path, bytes).expect("write sample file");
+        let result = block_on(readmatrix_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            vec![Value::from("Encoding"), Value::from("auto")],
+        ))
+        .expect("readmatrix");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

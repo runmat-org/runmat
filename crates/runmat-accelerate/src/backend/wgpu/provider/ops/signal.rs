@@ -27,16 +27,28 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("uniform_spectral_estimate: frame too large"))?;
         let frame_shader = spectral_frame_shader(request, self.precision);
         let frame_inputs = [request.input.clone(), window.clone()];
-        let framed = self.fused_elementwise_with_telemetry_exec(
+        let framed = match self.fused_elementwise_with_telemetry_exec(
             &frame_shader,
             &frame_inputs,
             &[request.nfft, request.frame_count],
             framed_len,
-        )?;
+        ) {
+            Ok(handle) => handle,
+            Err(err) => {
+                self.free_exec(&window).ok();
+                return Err(err);
+            }
+        };
         self.free_exec(&window).ok();
         runmat_accelerate_api::set_handle_storage(&framed, GpuTensorStorage::ComplexInterleaved);
 
-        let spectrum = self.fft_dim_exec(&framed, None, 0).await?;
+        let spectrum = match self.fft_dim_exec(&framed, None, 0).await {
+            Ok(handle) => handle,
+            Err(err) => {
+                self.free_exec(&framed).ok();
+                return Err(err);
+            }
+        };
         self.free_exec(&framed).ok();
 
         let rows = spectral_selected_frequency_len(request.nfft, request.range);
@@ -46,14 +58,23 @@ impl WgpuProvider {
             let selected_len = rows
                 .checked_mul(request.frame_count)
                 .and_then(|len| len.checked_mul(2))
-                .ok_or_else(|| anyhow!("uniform_spectral_estimate: output too large"))?;
+                .ok_or_else(|| {
+                    self.free_exec(&spectrum).ok();
+                    anyhow!("uniform_spectral_estimate: output too large")
+                })?;
             let shader = spectral_select_shader(request.nfft, rows, request.range, self.precision);
-            let handle = self.fused_elementwise_with_telemetry_exec(
+            let handle = match self.fused_elementwise_with_telemetry_exec(
                 &shader,
                 std::slice::from_ref(&spectrum),
                 &[rows, request.frame_count],
                 selected_len,
-            )?;
+            ) {
+                Ok(handle) => handle,
+                Err(err) => {
+                    self.free_exec(&spectrum).ok();
+                    return Err(err);
+                }
+            };
             self.free_exec(&spectrum).ok();
             runmat_accelerate_api::set_handle_storage(
                 &handle,
@@ -62,9 +83,10 @@ impl WgpuProvider {
             handle
         };
 
-        let ps_len = rows
-            .checked_mul(request.frame_count)
-            .ok_or_else(|| anyhow!("uniform_spectral_estimate: power output too large"))?;
+        let ps_len = rows.checked_mul(request.frame_count).ok_or_else(|| {
+            self.free_exec(&selected).ok();
+            anyhow!("uniform_spectral_estimate: power output too large")
+        })?;
         let ps_shader = spectral_power_shader(
             rows,
             request.range,
@@ -72,12 +94,18 @@ impl WgpuProvider {
             request.denominator,
             self.precision,
         );
-        let ps = self.fused_elementwise_with_telemetry_exec(
+        let ps = match self.fused_elementwise_with_telemetry_exec(
             &ps_shader,
             std::slice::from_ref(&selected),
             &[rows, request.frame_count],
             ps_len,
-        )?;
+        ) {
+            Ok(handle) => handle,
+            Err(err) => {
+                self.free_exec(&selected).ok();
+                return Err(err);
+            }
+        };
 
         Ok(ProviderSpectralResult {
             s: selected,
@@ -1609,7 +1637,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 
 fn spectral_centered_shift(nfft: usize) -> usize {
     if nfft.is_multiple_of(2) {
-        nfft / 2 + 1
+        nfft / 2
     } else {
         nfft.div_ceil(2)
     }

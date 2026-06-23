@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -20,6 +21,11 @@ fn run_runmat(args: &[&str]) -> std::process::Output {
 }
 
 fn run_runmat_in_dir(args: &[&str], current_dir: Option<&Path>) -> std::process::Output {
+    let os_args = args.iter().map(OsStr::new).collect::<Vec<_>>();
+    run_runmat_in_dir_os(&os_args, current_dir)
+}
+
+fn run_runmat_in_dir_os(args: &[&OsStr], current_dir: Option<&Path>) -> std::process::Output {
     let temp_dir = TempDir::new().expect("failed to create temp dir for config");
     let config_path = write_test_config(temp_dir.path());
     let mut command = Command::new(get_binary_path());
@@ -83,8 +89,8 @@ fn test_signal_compatibility_harness_cli() {
     )
     .unwrap();
 
-    let output = run_runmat_in_dir(
-        &["run", script_path.to_str().unwrap()],
+    let output = run_runmat_in_dir_os(
+        &[OsStr::new("run"), script_path.as_os_str()],
         Some(temp_dir.path()),
     );
     assert!(

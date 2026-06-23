@@ -454,9 +454,9 @@ fn stopband_ratio(kind: FilterKind, wp: &[f64], ws: &[f64]) -> BuiltinResult<f64
                 .fold(f64::INFINITY, f64::min))
         }
         FilterKind::Bandstop => {
-            let bandwidth = ws[1] - ws[0];
-            let center_sq = ws[0] * ws[1];
-            Ok(wp
+            let bandwidth = wp[1] - wp[0];
+            let center_sq = wp[0] * wp[1];
+            Ok(ws
                 .iter()
                 .map(|&edge| (bandwidth * edge / (edge * edge - center_sq)).abs())
                 .fold(f64::INFINITY, f64::min))
@@ -467,7 +467,7 @@ fn stopband_ratio(kind: FilterKind, wp: &[f64], ws: &[f64]) -> BuiltinResult<f64
 fn natural_frequency(
     kind: FilterKind,
     wp: &[f64],
-    ws: &[f64],
+    _ws: &[f64],
     epsilon: f64,
     order: usize,
 ) -> BuiltinResult<Vec<f64>> {
@@ -486,8 +486,8 @@ fn natural_frequency(
             ])
         }
         FilterKind::Bandstop => {
-            let bandwidth = ws[1] - ws[0];
-            let center_sq = ws[0] * ws[1];
+            let bandwidth = wp[1] - wp[0];
+            let center_sq = wp[0] * wp[1];
             let disc = bandwidth * bandwidth + 4.0 * cutoff_scale * cutoff_scale * center_sq;
             let root = disc.sqrt();
             Ok(vec![
@@ -613,6 +613,26 @@ mod tests {
         assert!(wn[0] < 0.3);
         assert!(wn[1] > 0.5);
         assert!(wn[0] < wn[1]);
+    }
+
+    #[test]
+    fn bandstop_uses_passband_edges_for_transform_basis() {
+        let wp = Tensor::new(vec![0.2, 0.7], vec![1, 2]).unwrap();
+        let ws = Tensor::new(vec![0.35, 0.5], vec![1, 2]).unwrap();
+        let out = call(
+            Value::Tensor(wp),
+            Value::Tensor(ws),
+            Value::Num(1.0),
+            Value::Num(40.0),
+            &[],
+            Some(2),
+        )
+        .unwrap();
+        let (n, wn) = outputs(out);
+        assert!(n >= 1.0);
+        assert_eq!(wn.len(), 2);
+        assert!(wn[0] < 0.35);
+        assert!(wn[1] > 0.5);
     }
 
     #[test]

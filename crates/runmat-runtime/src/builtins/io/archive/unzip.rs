@@ -10,7 +10,9 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
-use runmat_filesystem::{self as vfs, File};
+#[cfg(target_arch = "wasm32")]
+use runmat_filesystem::File;
+use runmat_filesystem::{self as vfs};
 use runmat_macros::runtime_builtin;
 use url::Url;
 use zip::result::ZipError;
@@ -230,14 +232,7 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<UnzipResult> {
         extract_remote_archive(&request.archive, &output_folder).await?
     } else {
         let path = resolve_archive_path(&request.archive)?;
-        let file = File::open(&path).map_err(|err| {
-            unzip_error_with_source(
-                &UNZIP_ERROR_IO,
-                format!("unzip: unable to open '{}': {err}", path.display()),
-                err,
-            )
-        })?;
-        extract_archive(file, &output_folder).await?
+        extract_local_archive(&path, &output_folder).await?
     };
 
     Ok(UnzipResult { filenames })
@@ -290,18 +285,8 @@ async fn extract_remote_archive(
 ) -> BuiltinResult<Vec<String>> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let temp = download_archive_to_temp_file(url_text)?;
-        let file = std::fs::File::open(&temp.path).map_err(|err| {
-            unzip_error_with_source(
-                &UNZIP_ERROR_IO,
-                format!(
-                    "unzip: unable to open temporary archive '{}': {err}",
-                    temp.path.display()
-                ),
-                err,
-            )
-        })?;
-        extract_archive(file, output_folder).await
+        let temp = download_archive_to_temp_file_async(url_text.to_string()).await?;
+        extract_archive_file_on_worker(temp.path.clone(), output_folder.to_path_buf()).await
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -309,6 +294,46 @@ async fn extract_remote_archive(
         let bytes = download_archive(url_text)?;
         extract_archive(Cursor::new(bytes), output_folder).await
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn extract_local_archive(path: &Path, output_folder: &Path) -> BuiltinResult<Vec<String>> {
+    extract_archive_file_on_worker(path.to_path_buf(), output_folder.to_path_buf()).await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn extract_local_archive(path: &Path, output_folder: &Path) -> BuiltinResult<Vec<String>> {
+    let file = File::open(path).map_err(|err| {
+        unzip_error_with_source(
+            &UNZIP_ERROR_IO,
+            format!("unzip: unable to open '{}': {err}", path.display()),
+            err,
+        )
+    })?;
+    extract_archive(file, output_folder).await
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn download_archive_to_temp_file_async(url_text: String) -> BuiltinResult<TempArchive> {
+    let (tx, rx) = futures::channel::oneshot::channel();
+    std::thread::Builder::new()
+        .name("runmat-unzip-download".to_string())
+        .spawn(move || {
+            let _ = tx.send(download_archive_to_temp_file(&url_text));
+        })
+        .map_err(|err| {
+            unzip_error_with_source(
+                &UNZIP_ERROR_HTTP,
+                format!("unzip: unable to spawn download worker: {err}"),
+                err,
+            )
+        })?;
+    rx.await.map_err(|_| {
+        unzip_error_with(
+            &UNZIP_ERROR_HTTP,
+            "unzip: download worker terminated before returning a result",
+        )
+    })?
 }
 
 fn value_to_string_scalar(
@@ -438,17 +463,7 @@ fn download_archive_to_temp_file(url_text: &str) -> BuiltinResult<TempArchive> {
         ensure_compressed_size_within_limit(length)?;
     }
 
-    let temp_path = unique_temp_archive_path();
-    let mut out = std::fs::File::create(&temp_path).map_err(|err| {
-        unzip_error_with_source(
-            &UNZIP_ERROR_IO,
-            format!(
-                "unzip: unable to create temporary archive '{}': {err}",
-                temp_path.display()
-            ),
-            err,
-        )
-    })?;
+    let (temp_path, mut out) = create_unique_temp_archive()?;
     let mut downloaded = 0u64;
     let mut buffer = [0u8; 64 * 1024];
     loop {
@@ -489,6 +504,44 @@ fn unique_temp_archive_path() -> PathBuf {
         .unwrap_or_default();
     path.push(format!("runmat_unzip_{}_{}.zip", std::process::id(), nanos));
     path
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn create_unique_temp_archive() -> BuiltinResult<(PathBuf, std::fs::File)> {
+    for attempt in 0..32u32 {
+        let mut path = unique_temp_archive_path();
+        if attempt > 0 {
+            path.set_file_name(format!(
+                "{}_{}.zip",
+                path.file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("runmat_unzip"),
+                attempt
+            ));
+        }
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => return Ok((path, file)),
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(unzip_error_with_source(
+                    &UNZIP_ERROR_IO,
+                    format!(
+                        "unzip: unable to create temporary archive '{}': {err}",
+                        path.display()
+                    ),
+                    err,
+                ));
+            }
+        }
+    }
+    Err(unzip_error_with(
+        &UNZIP_ERROR_IO,
+        "unzip: unable to allocate a unique temporary archive path",
+    ))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -533,7 +586,52 @@ fn ensure_compressed_size_within_limit(size: u64) -> BuiltinResult<()> {
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+async fn extract_archive_file_on_worker(
+    path: PathBuf,
+    output_folder: PathBuf,
+) -> BuiltinResult<Vec<String>> {
+    let (tx, rx) = futures::channel::oneshot::channel();
+    std::thread::Builder::new()
+        .name("runmat-unzip-extract".to_string())
+        .spawn(move || {
+            let result = (|| {
+                let file = std::fs::File::open(&path).map_err(|err| {
+                    unzip_error_with_source(
+                        &UNZIP_ERROR_IO,
+                        format!("unzip: unable to open '{}': {err}", path.display()),
+                        err,
+                    )
+                })?;
+                futures::executor::block_on(extract_archive_impl(file, &output_folder))
+            })();
+            let _ = tx.send(result);
+        })
+        .map_err(|err| {
+            unzip_error_with_source(
+                &UNZIP_ERROR_IO,
+                format!("unzip: unable to spawn extraction worker: {err}"),
+                err,
+            )
+        })?;
+    rx.await.map_err(|err| {
+        unzip_error_with_source(
+            &UNZIP_ERROR_IO,
+            format!("unzip: extraction worker did not return a result: {err}"),
+            err,
+        )
+    })?
+}
+
+#[cfg(target_arch = "wasm32")]
 async fn extract_archive<R>(reader: R, output_folder: &Path) -> BuiltinResult<Vec<String>>
+where
+    R: Read + Seek,
+{
+    extract_archive_impl(reader, output_folder).await
+}
+
+async fn extract_archive_impl<R>(reader: R, output_folder: &Path) -> BuiltinResult<Vec<String>>
 where
     R: Read + Seek,
 {
@@ -580,13 +678,22 @@ where
         }
         reject_symlink_components(output_folder, &relative).await?;
 
-        let mut out = File::create(&output_path).map_err(|err| {
-            unzip_error_with_source(
-                &UNZIP_ERROR_IO,
-                format!("unzip: unable to create '{}': {err}", output_path.display()),
-                err,
-            )
-        })?;
+        let temp_output_path = temporary_output_path(&output_path);
+        let mut open_options = vfs::OpenOptions::new();
+        open_options.write(true).create_new(true);
+        let mut out = open_options
+            .open_async(&temp_output_path)
+            .await
+            .map_err(|err| {
+                unzip_error_with_source(
+                    &UNZIP_ERROR_IO,
+                    format!(
+                        "unzip: unable to create temporary output '{}': {err}",
+                        temp_output_path.display()
+                    ),
+                    err,
+                )
+            })?;
         let mut buffer = [0u8; 64 * 1024];
         loop {
             let read = entry.read(&mut buffer).map_err(|err| {
@@ -614,15 +721,64 @@ where
             out.write_all(&buffer[..read]).map_err(|err| {
                 unzip_error_with_source(
                     &UNZIP_ERROR_IO,
-                    format!("unzip: unable to write '{}': {err}", output_path.display()),
+                    format!(
+                        "unzip: unable to write temporary output '{}': {err}",
+                        temp_output_path.display()
+                    ),
                     err,
                 )
             })?;
+        }
+        out.flush_async().await.map_err(|err| {
+            unzip_error_with_source(
+                &UNZIP_ERROR_IO,
+                format!(
+                    "unzip: unable to flush temporary output '{}': {err}",
+                    temp_output_path.display()
+                ),
+                err,
+            )
+        })?;
+        out.sync_all_async().await.map_err(|err| {
+            unzip_error_with_source(
+                &UNZIP_ERROR_IO,
+                format!(
+                    "unzip: unable to sync temporary output '{}': {err}",
+                    temp_output_path.display()
+                ),
+                err,
+            )
+        })?;
+        drop(out);
+        reject_symlink_components(output_folder, &relative).await?;
+        if let Err(err) = vfs::rename_async(&temp_output_path, &output_path).await {
+            let _ = vfs::remove_file_async(&temp_output_path).await;
+            return Err(unzip_error_with_source(
+                &UNZIP_ERROR_IO,
+                format!("unzip: unable to create '{}': {err}", output_path.display()),
+                err,
+            ));
         }
         filenames.push(path_to_string(&output_path));
     }
 
     Ok(filenames)
+}
+
+fn temporary_output_path(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("entry");
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    parent.join(format!(
+        ".{name}.runmat-unzip-tmp-{}-{nanos}",
+        std::process::id()
+    ))
 }
 
 async fn reject_symlink_path(path: &Path) -> BuiltinResult<()> {

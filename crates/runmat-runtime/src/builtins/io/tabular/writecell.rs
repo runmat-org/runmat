@@ -1,6 +1,6 @@
 //! MATLAB-compatible `writecell` builtin for heterogeneous cell-array export.
 
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
@@ -8,7 +8,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, Value,
 };
-use runmat_filesystem::OpenOptions;
+use runmat_filesystem::{File, OpenOptions};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::expand_user_path;
@@ -266,7 +266,7 @@ async fn writecell_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResul
         .map_err(map_control_flow)?;
     let table = CellTable::from_value(gathered).await?;
 
-    let bytes_written = match options.resolve_file_type(&path) {
+    let bytes_written = match options.resolve_file_type(&path)? {
         OutputFileType::DelimitedText => write_delimited_cells(&path, &table, &options).await?,
         OutputFileType::Spreadsheet => write_spreadsheet_cells(&path, &table, &options).await?,
     };
@@ -343,15 +343,20 @@ struct RangeStart {
 }
 
 impl WriteCellOptions {
-    fn resolve_file_type(&self, path: &Path) -> OutputFileType {
+    fn resolve_file_type(&self, path: &Path) -> BuiltinResult<OutputFileType> {
         if let Some(file_type) = self.file_type {
-            return file_type;
+            if file_type == OutputFileType::Spreadsheet {
+                ensure_supported_spreadsheet_extension(path)?;
+            }
+            return Ok(file_type);
         }
         match path_extension_lower(path).as_deref() {
-            Some("xls") | Some("xlsx") | Some("xlsm") | Some("xlsb") | Some("ods") => {
-                OutputFileType::Spreadsheet
-            }
-            _ => OutputFileType::DelimitedText,
+            Some("xlsx") | Some("xlsm") => Ok(OutputFileType::Spreadsheet),
+            Some(ext) if is_unsupported_spreadsheet_extension(ext) => Err(writecell_error_with(
+                &WRITECELL_ERROR_OPTION,
+                format!("writecell: unsupported spreadsheet file extension '.{ext}'"),
+            )),
+            _ => Ok(OutputFileType::DelimitedText),
         }
     }
 
@@ -372,6 +377,24 @@ impl WriteCellOptions {
     fn range_start(&self) -> RangeStart {
         self.range.unwrap_or_default()
     }
+}
+
+fn ensure_supported_spreadsheet_extension(path: &Path) -> BuiltinResult<()> {
+    match path_extension_lower(path).as_deref() {
+        Some("xlsx") | Some("xlsm") => Ok(()),
+        Some(ext) => Err(writecell_error_with(
+            &WRITECELL_ERROR_OPTION,
+            format!("writecell: unsupported spreadsheet file extension '.{ext}'"),
+        )),
+        None => Err(writecell_error_with(
+            &WRITECELL_ERROR_OPTION,
+            "writecell: spreadsheet output requires an .xlsx or .xlsm extension",
+        )),
+    }
+}
+
+fn is_unsupported_spreadsheet_extension(ext: &str) -> bool {
+    matches!(ext, "xls" | "xlsb" | "ods")
 }
 
 async fn parse_options(args: &[Value]) -> BuiltinResult<WriteCellOptions> {
@@ -682,16 +705,14 @@ async fn write_delimited_cells(
 ) -> BuiltinResult<usize> {
     let delimiter = options.resolve_delimiter(path);
     let line_ending = options.line_ending.as_str();
-    let mut open_options = OpenOptions::new();
-    open_options.create(true);
-    match options.write_mode {
-        WriteMode::Overwrite => {
-            open_options.write(true).truncate(true);
-        }
-        WriteMode::Append => {
-            open_options.write(true).append(true);
-        }
+    let payload = build_delimited_payload(table, options, &delimiter, line_ending);
+    if options.write_mode == WriteMode::Overwrite {
+        safe_replace_file(path, &payload, "delimited text").await?;
+        return Ok(payload.len());
     }
+
+    let mut open_options = OpenOptions::new();
+    open_options.create(true).write(true).append(true);
 
     let mut file = open_options.open_async(path).await.map_err(|err| {
         writecell_error_with_source(
@@ -705,40 +726,24 @@ async fn write_delimited_cells(
     })?;
 
     let mut bytes_written = 0usize;
-    for row in 0..table.rows {
-        for col in 0..table.cols {
-            if col > 0 {
-                file.write_all(delimiter.as_bytes()).map_err(|err| {
-                    writecell_error_with_source(
-                        &WRITECELL_ERROR_IO,
-                        format!("writecell: failed to write delimiter ({err})"),
-                        err,
-                    )
-                })?;
-                bytes_written += delimiter.len();
-            }
-            let rendered = format_cell_for_text(table.get(row, col), options, &delimiter);
-            if !rendered.is_empty() {
-                file.write_all(rendered.as_bytes()).map_err(|err| {
-                    writecell_error_with_source(
-                        &WRITECELL_ERROR_IO,
-                        format!("writecell: failed to write cell value ({err})"),
-                        err,
-                    )
-                })?;
-                bytes_written += rendered.len();
-            }
-        }
+    if append_needs_line_ending(path).await? {
         file.write_all(line_ending.as_bytes()).map_err(|err| {
             writecell_error_with_source(
                 &WRITECELL_ERROR_IO,
-                format!("writecell: failed to write line ending ({err})"),
+                format!("writecell: failed to write append line ending ({err})"),
                 err,
             )
         })?;
         bytes_written += line_ending.len();
     }
-
+    file.write_all(&payload).map_err(|err| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            format!("writecell: failed to write delimited text ({err})"),
+            err,
+        )
+    })?;
+    bytes_written += payload.len();
     file.flush_async().await.map_err(|err| {
         writecell_error_with_source(
             &WRITECELL_ERROR_IO,
@@ -747,6 +752,74 @@ async fn write_delimited_cells(
         )
     })?;
     Ok(bytes_written)
+}
+
+fn build_delimited_payload(
+    table: &CellTable,
+    options: &WriteCellOptions,
+    delimiter: &str,
+    line_ending: &str,
+) -> Vec<u8> {
+    let mut payload = Vec::new();
+    for row in 0..table.rows {
+        for col in 0..table.cols {
+            if col > 0 {
+                payload.extend_from_slice(delimiter.as_bytes());
+            }
+            let rendered = format_cell_for_text(table.get(row, col), options, delimiter);
+            if !rendered.is_empty() {
+                payload.extend_from_slice(rendered.as_bytes());
+            }
+        }
+        payload.extend_from_slice(line_ending.as_bytes());
+    }
+    payload
+}
+
+async fn append_needs_line_ending(path: &Path) -> BuiltinResult<bool> {
+    let metadata = match runmat_filesystem::metadata_async(path).await {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => {
+            return Err(writecell_error_with_source(
+                &WRITECELL_ERROR_IO,
+                format!(
+                    "writecell: unable to inspect \"{}\" ({err})",
+                    path.display()
+                ),
+                err,
+            ));
+        }
+    };
+    if metadata.is_empty() {
+        return Ok(false);
+    }
+    let mut file = File::open_async(path).await.map_err(|err| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            format!(
+                "writecell: unable to inspect \"{}\" ({err})",
+                path.display()
+            ),
+            err,
+        )
+    })?;
+    file.seek(SeekFrom::End(-1)).map_err(|err| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            format!("writecell: unable to inspect file ending ({err})"),
+            err,
+        )
+    })?;
+    let mut byte = [0u8; 1];
+    file.read_exact(&mut byte).map_err(|err| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            format!("writecell: unable to read file ending ({err})"),
+            err,
+        )
+    })?;
+    Ok(!matches!(byte[0], b'\n' | b'\r'))
 }
 
 async fn write_spreadsheet_cells(
@@ -761,9 +834,13 @@ async fn write_spreadsheet_cells(
         ));
     }
     let range_start = options.range_start();
-    if range_start.row + table.rows > MAX_EXCEL_ROW_INDEX + 1
-        || range_start.col + table.cols > MAX_EXCEL_COLUMN_INDEX + 1
-    {
+    let end_row = range_start.row.checked_add(table.rows).ok_or_else(|| {
+        writecell_error_with(&WRITECELL_ERROR_OPTION, "writecell: Range row overflow")
+    })?;
+    let end_col = range_start.col.checked_add(table.cols).ok_or_else(|| {
+        writecell_error_with(&WRITECELL_ERROR_OPTION, "writecell: Range column overflow")
+    })?;
+    if end_row > MAX_EXCEL_ROW_INDEX + 1 || end_col > MAX_EXCEL_COLUMN_INDEX + 1 {
         return Err(writecell_error_with(
             &WRITECELL_ERROR_OPTION,
             "writecell: Range exceeds Excel worksheet limits",
@@ -771,19 +848,25 @@ async fn write_spreadsheet_cells(
     }
 
     let bytes = build_xlsx_workbook(table, &options.sheet_name(), range_start)?;
+    safe_replace_file(path, &bytes, "spreadsheet").await?;
+    Ok(bytes.len())
+}
+
+async fn safe_replace_file(path: &Path, bytes: &[u8], label: &str) -> BuiltinResult<()> {
+    let temp_path = temporary_sibling_path(path);
     let mut open_options = OpenOptions::new();
-    open_options.create(true).write(true).truncate(true);
-    let mut file = open_options.open_async(path).await.map_err(|err| {
+    open_options.write(true).create_new(true);
+    let mut file = open_options.open_async(&temp_path).await.map_err(|err| {
         writecell_error_with_source(
             &WRITECELL_ERROR_IO,
             format!(
-                "writecell: unable to open \"{}\" for writing ({err})",
-                path.display()
+                "writecell: unable to create temporary {label} file \"{}\" ({err})",
+                temp_path.display()
             ),
             err,
         )
     })?;
-    file.write_all(&bytes).map_err(|err| {
+    file.write_all(bytes).map_err(|err| {
         writecell_error_with_source(
             &WRITECELL_ERROR_IO,
             format!("writecell: failed to write spreadsheet ({err})"),
@@ -793,11 +876,43 @@ async fn write_spreadsheet_cells(
     file.flush_async().await.map_err(|err| {
         writecell_error_with_source(
             &WRITECELL_ERROR_IO,
-            format!("writecell: failed to flush output ({err})"),
+            format!("writecell: failed to flush temporary {label} file ({err})"),
             err,
         )
     })?;
-    Ok(bytes.len())
+    file.sync_all_async().await.map_err(|err| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            format!("writecell: failed to sync temporary {label} file ({err})"),
+            err,
+        )
+    })?;
+    drop(file);
+    if let Err(err) = runmat_filesystem::rename_async(&temp_path, path).await {
+        let _ = runmat_filesystem::remove_file_async(&temp_path).await;
+        return Err(writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            format!(
+                "writecell: failed to replace \"{}\" with temporary {label} file ({err})",
+                path.display()
+            ),
+            err,
+        ));
+    }
+    Ok(())
+}
+
+fn temporary_sibling_path(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("writecell");
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    parent.join(format!(".{name}.runmat-tmp-{}-{nanos}", std::process::id()))
 }
 
 fn build_xlsx_workbook(
@@ -1254,6 +1369,33 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn writecell_append_inserts_missing_row_boundary() {
+        let path = temp_path("txt");
+        fs::write(&path, "existing").expect("seed");
+        let filename = path.to_string_lossy().into_owned();
+        let values = cell(vec![Value::from("tail"), Value::Num(3.0)], 1, 2);
+
+        block_on(writecell_builtin(
+            values,
+            vec![
+                Value::from(filename),
+                Value::from("Delimiter"),
+                Value::from("|"),
+                Value::from("QuoteStrings"),
+                Value::Bool(false),
+                Value::from("WriteMode"),
+                Value::from("append"),
+            ],
+        ))
+        .expect("append write");
+
+        let contents = fs::read_to_string(&path).expect("read contents");
+        assert_eq!(contents, "existing\ntail|3\n");
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn writecell_accepts_scalar_char_tensor_and_logical_cells() {
         let path = temp_path("csv");
         let filename = path.to_string_lossy().into_owned();
@@ -1333,6 +1475,20 @@ mod tests {
         );
         assert_eq!(range.get((0, 1)), Some(&Data::Float(1.5)));
         assert_eq!(range.get((0, 2)), Some(&Data::Bool(true)));
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn writecell_rejects_unsupported_spreadsheet_extension() {
+        let path = temp_path("xls");
+        let filename = path.to_string_lossy().into_owned();
+        let values = cell(vec![Value::from("A"), Value::Num(1.0)], 1, 2);
+        let err = block_on(writecell_builtin(values, vec![Value::from(filename)]))
+            .expect_err("unsupported extension");
+        assert!(err
+            .message()
+            .contains("unsupported spreadsheet file extension"));
         let _ = fs::remove_file(path);
     }
 }

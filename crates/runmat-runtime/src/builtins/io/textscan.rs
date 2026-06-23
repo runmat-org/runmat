@@ -256,7 +256,7 @@ fn parse_registered_file(
             format!("textscan: file identifier {fid} is not open for reading"),
         ));
     }
-    let handle = registry::take_handle(fid).ok_or_else(|| {
+    let handle = registry::shared_handle(fid).ok_or_else(|| {
         textscan_error_with(
             &TEXTSCAN_ERROR_FILE,
             format!("textscan: invalid file identifier {fid}"),
@@ -374,6 +374,12 @@ impl DecodedFileText {
 fn byte_preserving_encoding_width(encoding: &str) -> BuiltinResult<Option<usize>> {
     let label = encoding.trim();
     if label.is_empty() || label.eq_ignore_ascii_case("utf-8") || label.eq_ignore_ascii_case("utf8")
+    {
+        return Ok(None);
+    }
+    if label.eq_ignore_ascii_case("shift_jis")
+        || label.eq_ignore_ascii_case("shift-jis")
+        || label.eq_ignore_ascii_case("sjis")
     {
         return Ok(None);
     }

@@ -196,7 +196,7 @@ pub async fn evaluate(fid_value: &Value) -> BuiltinResult<bool> {
     }
 
     let handle =
-        registry::take_handle(fid).ok_or_else(|| feof_error(&FEOF_ERROR_INVALID_IDENTIFIER))?;
+        registry::shared_handle(fid).ok_or_else(|| feof_error(&FEOF_ERROR_INVALID_IDENTIFIER))?;
     let mut guard = handle.lock().map_err(|_| {
         feof_error_with_detail(
             &FEOF_ERROR_INTERNAL,

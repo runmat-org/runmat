@@ -1,5 +1,6 @@
 //! Audio file metadata builtins.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
@@ -18,6 +19,7 @@ use crate::builtins::common::spec::{
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "audioinfo";
+const MAX_AUDIOINFO_SCAN_BYTES: u64 = 512 * 1024 * 1024;
 
 const AUDIOINFO_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "info",
@@ -156,19 +158,41 @@ async fn audioinfo_builtin(filename: Value) -> BuiltinResult<Value> {
         .await
         .map_err(map_control_flow)?;
     let path = resolve_path(&filename)?;
-    let bytes = fs::read_async(&path).await.map_err(|err| {
+    let (bytes, file_size) = read_audioinfo_prefix(&path).await?;
+    let metadata = AudioMetadata::parse(&bytes).map_err(|message| {
+        audioinfo_error_with(&AUDIOINFO_ERROR_FORMAT, format!("audioinfo: {message}"))
+    })?;
+    Ok(Value::Struct(metadata.into_struct(&path, file_size as f64)))
+}
+
+async fn read_audioinfo_prefix(path: &Path) -> BuiltinResult<(Vec<u8>, u64)> {
+    let metadata = fs::metadata_async(path).await.map_err(|err| {
+        audioinfo_error_with_source(
+            &AUDIOINFO_ERROR_IO,
+            format!(
+                "audioinfo: unable to inspect \"{}\" ({err})",
+                path.display()
+            ),
+            err,
+        )
+    })?;
+    let file = fs::File::open_async(path).await.map_err(|err| {
         audioinfo_error_with_source(
             &AUDIOINFO_ERROR_IO,
             format!("audioinfo: unable to read \"{}\" ({err})", path.display()),
             err,
         )
     })?;
-    let metadata = AudioMetadata::parse(&bytes).map_err(|message| {
-        audioinfo_error_with(&AUDIOINFO_ERROR_FORMAT, format!("audioinfo: {message}"))
+    let mut limited = file.take(MAX_AUDIOINFO_SCAN_BYTES);
+    let mut bytes = Vec::new();
+    limited.read_to_end(&mut bytes).map_err(|err| {
+        audioinfo_error_with_source(
+            &AUDIOINFO_ERROR_IO,
+            format!("audioinfo: unable to read \"{}\" ({err})", path.display()),
+            err,
+        )
     })?;
-    Ok(Value::Struct(
-        metadata.into_struct(&path, bytes.len() as f64),
-    ))
+    Ok((bytes, metadata.len()))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -244,22 +268,65 @@ fn parse_wave(bytes: &[u8]) -> Result<AudioMetadata, String> {
     if bytes.len() < 12 || &bytes[8..12] != b"WAVE" {
         return Err("RIFF/RF64 file is not a WAVE container".to_string());
     }
+    let is_rf64 = bytes.starts_with(b"RF64");
     let mut pos = 12usize;
     let mut fmt: Option<WaveFormat> = None;
     let mut data_bytes: Option<u64> = None;
+    let mut rf64_data_size: Option<u64> = None;
     while pos + 8 <= bytes.len() {
         let id = &bytes[pos..pos + 4];
-        let size = read_u32_le(bytes, pos + 4)? as usize;
+        let declared_size = read_u32_le(bytes, pos + 4)?;
         pos += 8;
-        if pos + size > bytes.len() {
-            return Err("WAVE chunk extends past end of file".to_string());
-        }
+        let size = if is_rf64 && id == b"data" && declared_size == u32::MAX {
+            let data_size = rf64_data_size.ok_or_else(|| {
+                "RF64 data chunk uses sentinel size without ds64 metadata".to_string()
+            })?;
+            usize::try_from(data_size)
+                .map_err(|_| "RF64 data chunk is too large for this platform".to_string())?
+        } else {
+            declared_size as usize
+        };
         match id {
-            b"fmt " => fmt = Some(parse_wave_fmt(&bytes[pos..pos + size])?),
-            b"data" => data_bytes = Some(size as u64),
-            _ => {}
+            b"ds64" if is_rf64 => {
+                let end = pos
+                    .checked_add(size)
+                    .ok_or_else(|| "WAVE chunk size overflows address space".to_string())?;
+                if end > bytes.len() {
+                    return Err("WAVE chunk extends past end of file".to_string());
+                }
+                if size < 24 {
+                    return Err("RF64 ds64 chunk is too short".to_string());
+                }
+                rf64_data_size = Some(read_u64_le(bytes, pos + 8)?);
+            }
+            b"fmt " => {
+                let end = pos
+                    .checked_add(size)
+                    .ok_or_else(|| "WAVE chunk size overflows address space".to_string())?;
+                if end > bytes.len() {
+                    return Err("WAVE chunk extends past end of file".to_string());
+                }
+                fmt = Some(parse_wave_fmt(&bytes[pos..end])?);
+            }
+            b"data" => {
+                data_bytes = Some(size as u64);
+                break;
+            }
+            _ => {
+                let end = pos
+                    .checked_add(size)
+                    .ok_or_else(|| "WAVE chunk size overflows address space".to_string())?;
+                if end > bytes.len() {
+                    return Err("WAVE chunk extends past end of file".to_string());
+                }
+            }
         }
-        pos += size + (size % 2);
+        let end = pos
+            .checked_add(size)
+            .ok_or_else(|| "WAVE chunk size overflows address space".to_string())?;
+        pos = end
+            .checked_add(size % 2)
+            .ok_or_else(|| "WAVE chunk padding overflows address space".to_string())?;
     }
 
     let fmt = fmt.ok_or_else(|| "WAVE file is missing a fmt chunk".to_string())?;
@@ -389,7 +456,10 @@ fn parse_aiff(bytes: &[u8]) -> Result<AudioMetadata, String> {
         let id = &bytes[pos..pos + 4];
         let size = read_u32_be(bytes, pos + 4)? as usize;
         pos += 8;
-        if pos + size > bytes.len() {
+        let end = pos
+            .checked_add(size)
+            .ok_or_else(|| "AIFF chunk size overflows address space".to_string())?;
+        if end > bytes.len() {
             return Err("AIFF chunk extends past end of file".to_string());
         }
         if id == b"COMM" {
@@ -423,7 +493,9 @@ fn parse_aiff(bytes: &[u8]) -> Result<AudioMetadata, String> {
                 bit_rate: Some(sample_rate * channels as f64 * bits_per_sample as f64),
             });
         }
-        pos += size + (size % 2);
+        pos = end
+            .checked_add(size % 2)
+            .ok_or_else(|| "AIFF chunk padding overflows address space".to_string())?;
     }
     Err("AIFF file is missing COMM metadata".to_string())
 }
@@ -733,6 +805,22 @@ fn read_u32_be(bytes: &[u8], pos: usize) -> Result<u32, String> {
     ]))
 }
 
+fn read_u64_le(bytes: &[u8], pos: usize) -> Result<u64, String> {
+    if pos + 8 > bytes.len() {
+        return Err("unexpected end of file".to_string());
+    }
+    Ok(u64::from_le_bytes([
+        bytes[pos],
+        bytes[pos + 1],
+        bytes[pos + 2],
+        bytes[pos + 3],
+        bytes[pos + 4],
+        bytes[pos + 5],
+        bytes[pos + 6],
+        bytes[pos + 7],
+    ]))
+}
+
 fn find_signature(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())
@@ -812,6 +900,32 @@ mod tests {
         bytes
     }
 
+    fn rf64_fixture(sample_rate: u32, channels: u16, bits: u16, frames: u64) -> Vec<u8> {
+        let block_align = channels * (bits / 8);
+        let byte_rate = sample_rate * block_align as u32;
+        let data_size = frames * block_align as u64;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RF64");
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"ds64");
+        bytes.extend_from_slice(&24u32.to_le_bytes());
+        bytes.extend_from_slice(&(36u64 + data_size).to_le_bytes());
+        bytes.extend_from_slice(&data_size.to_le_bytes());
+        bytes.extend_from_slice(&frames.to_le_bytes());
+        bytes.extend_from_slice(b"fmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&channels.to_le_bytes());
+        bytes.extend_from_slice(&sample_rate.to_le_bytes());
+        bytes.extend_from_slice(&byte_rate.to_le_bytes());
+        bytes.extend_from_slice(&block_align.to_le_bytes());
+        bytes.extend_from_slice(&bits.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn audioinfo_descriptor_covers_core_form() {
@@ -842,6 +956,15 @@ mod tests {
         assert_eq!(field(&info, "TotalSamples"), &Value::Num(4.0));
         assert_eq!(field(&info, "BitsPerSample"), &Value::Num(16.0));
         let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioinfo_reads_rf64_data_size_from_ds64() {
+        let metadata = AudioMetadata::parse(&rf64_fixture(48_000, 2, 16, 5)).expect("rf64");
+        assert_eq!(metadata.format, "WAV");
+        assert_eq!(metadata.total_samples, Some(5));
+        assert_eq!(metadata.num_channels, 2);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
