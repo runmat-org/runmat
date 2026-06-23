@@ -49,15 +49,23 @@ pub const OBJECT_SUBSASGN_METHOD: &str = "subsasgn";
 pub(crate) const IDENT_UNDEFINED_FUNCTION: &str = "RunMat:UndefinedFunction";
 pub(crate) const HANDLE_VALID_FLAG_PROPERTY: &str = "__runmat_handle_valid__";
 
+fn object_handle_flag_valid(obj: &runmat_builtins::ObjectInstance) -> bool {
+    !matches!(
+        obj.properties.get(HANDLE_VALID_FLAG_PROPERTY),
+        Some(Value::Bool(false))
+    )
+}
+
 pub(crate) fn is_handle_valid(handle: &runmat_builtins::HandleRef) -> bool {
     if !handle.valid {
         return false;
     }
+    is_handle_target_valid(handle)
+}
+
+pub(crate) fn is_handle_target_valid(handle: &runmat_builtins::HandleRef) -> bool {
     runmat_gc::gc_with_value(&handle.target, |target| match target {
-        Value::Object(obj) => !matches!(
-            obj.properties.get(HANDLE_VALID_FLAG_PROPERTY),
-            Some(Value::Bool(false))
-        ),
+        Value::Object(obj) => object_handle_flag_valid(obj),
         _ => false,
     })
     .unwrap_or(false)
@@ -638,7 +646,14 @@ pub(crate) async fn addlistener_builtin(
             }
             runmat_gc::gc_handle_addr(&h.target)
         }
-        Value::Object(o) => o as *const _ as usize,
+        Value::Object(_) => {
+            return Err(
+                build_runtime_error("addlistener: target object must be a handle object")
+                    .with_builtin("addlistener")
+                    .with_identifier("RunMat:AddListenerTargetInvalid")
+                    .build(),
+            )
+        }
         _ => {
             return Err(
                 build_runtime_error("addlistener: target must be handle or object")
@@ -658,13 +673,6 @@ pub(crate) async fn addlistener_builtin(
             let class_name = h.class_name.clone();
             (
                 runmat_gc::gc_root(h.target).map_err(|e| format!("gc: {e}"))?,
-                class_name,
-            )
-        }
-        Value::Object(o) => {
-            let class_name = o.class_name.clone();
-            (
-                runmat_gc::gc_allocate_rooted(Value::Object(o)).map_err(|e| format!("gc: {e}"))?,
                 class_name,
             )
         }
@@ -706,7 +714,14 @@ pub(crate) async fn notify_builtin(
 ) -> crate::BuiltinResult<Value> {
     let key_ptr: usize = match &target {
         Value::HandleObject(h) => runmat_gc::gc_handle_addr(&h.target),
-        Value::Object(o) => o as *const _ as usize,
+        Value::Object(_) => {
+            return Err(
+                build_runtime_error("notify: target object must be a handle object")
+                    .with_builtin("notify")
+                    .with_identifier("RunMat:NotifyTargetInvalid")
+                    .build(),
+            )
+        }
         _ => {
             return Err(
                 build_runtime_error("notify: target must be handle or object")
@@ -911,7 +926,7 @@ pub async fn call_super_constructor(
         receiver_obj: &mut runmat_builtins::ObjectInstance,
         ctor_result: Value,
         owner: Option<&runmat_gc::GcHandle>,
-    ) {
+    ) -> Result<(), RuntimeError> {
         match ctor_result {
             Value::Object(parent_obj) => {
                 for (name, value) in parent_obj.properties {
@@ -922,14 +937,34 @@ pub async fn call_super_constructor(
                 }
             }
             Value::HandleObject(parent_handle) => {
-                if let Ok(Value::Object(parent_obj)) =
-                    runmat_gc::gc_clone_value(&parent_handle.target)
-                {
-                    for (name, value) in parent_obj.properties {
-                        if let Some(owner) = owner {
-                            runmat_gc::gc_record_handle_write(owner, &value);
+                if !is_handle_target_valid(&parent_handle) {
+                    if owner.is_some() {
+                        return Ok(());
+                    }
+                    return Err(build_runtime_error(
+                        "super constructor returned invalid parent handle",
+                    )
+                    .build());
+                }
+                match runmat_gc::gc_clone_value(&parent_handle.target).map_err(|e| {
+                    build_runtime_error(format!(
+                        "super constructor returned stale parent handle: {e}"
+                    ))
+                    .build()
+                })? {
+                    Value::Object(parent_obj) => {
+                        for (name, value) in parent_obj.properties {
+                            if let Some(owner) = owner {
+                                runmat_gc::gc_record_handle_write(owner, &value);
+                            }
+                            receiver_obj.properties.insert(name, value);
                         }
-                        receiver_obj.properties.insert(name, value);
+                    }
+                    _ => {
+                        return Err(build_runtime_error(
+                            "super constructor returned non-object parent handle",
+                        )
+                        .build());
                     }
                 }
             }
@@ -943,30 +978,34 @@ pub async fn call_super_constructor(
             }
             _ => {}
         }
+        Ok(())
     }
     match receiver {
         Value::Object(mut receiver_obj) => {
-            merge_parent_props_into_object(&mut receiver_obj, ctor_result, None);
+            merge_parent_props_into_object(&mut receiver_obj, ctor_result, None)?;
             Ok(Value::Object(receiver_obj))
         }
         Value::HandleObject(handle) => {
             let merged = runmat_gc::gc_with_value_mut(&handle.target, |target| {
                 if let Value::Object(receiver_obj) = target {
-                    merge_parent_props_into_object(receiver_obj, ctor_result, Some(&handle.target));
-                    true
+                    if !object_handle_flag_valid(receiver_obj) {
+                        return Err(build_runtime_error(
+                            "super constructor receiver handle is invalid",
+                        )
+                        .build());
+                    }
+                    merge_parent_props_into_object(receiver_obj, ctor_result, Some(&handle.target))
                 } else {
-                    false
+                    Err(
+                        build_runtime_error("super constructor receiver target is not an object")
+                            .build(),
+                    )
                 }
             })
             .map_err(|e| {
                 build_runtime_error(format!("super constructor receiver invalid: {e}")).build()
             })?;
-            if !merged {
-                return Err(build_runtime_error(
-                    "super constructor receiver target is not an object",
-                )
-                .build());
-            }
+            merged?;
             Ok(Value::HandleObject(handle))
         }
         _ => Ok(receiver),
@@ -3051,7 +3090,7 @@ mod tests {
     }
 
     #[test]
-    fn addlistener_preserves_object_target_when_callback_allocation_collects() {
+    fn addlistener_preserves_handle_target_when_callback_allocation_collects() {
         runmat_gc::gc_test_context(|| {
             reset_event_registry_for_test();
             let config = runmat_gc::GcConfig {
@@ -3066,9 +3105,8 @@ mod tests {
                 let _ = runmat_gc::gc_allocate(Value::Num(i as f64)).expect("seed allocation");
             }
 
-            let target = Value::Object(runmat_builtins::ObjectInstance::new(
-                "EventTarget".to_string(),
-            ));
+            let target =
+                block_on(new_handle_object_builtin("EventTarget".to_string())).expect("target");
             let listener = block_on(addlistener_builtin(
                 target,
                 "ChangedSoundness".to_string(),

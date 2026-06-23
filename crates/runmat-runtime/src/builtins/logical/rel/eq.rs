@@ -271,10 +271,19 @@ fn eq_identity(lhs: &Value, rhs: &Value) -> Option<Value> {
     }
 }
 
-fn handle_identity(value: &Value) -> Option<(u8, usize)> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RuntimeIdentity {
+    Handle { addr: usize, epoch: usize },
+    Listener(u64),
+}
+
+fn handle_identity(value: &Value) -> Option<RuntimeIdentity> {
     match value {
-        Value::HandleObject(handle) => Some((0, runmat_gc::gc_handle_addr(&handle.target))),
-        Value::Listener(listener) => Some((1, listener.id as usize)),
+        Value::HandleObject(handle) => Some(RuntimeIdentity::Handle {
+            addr: handle.target.addr(),
+            epoch: handle.target.epoch(),
+        }),
+        Value::Listener(listener) => Some(RuntimeIdentity::Listener(listener.id)),
         _ => None,
     }
 }

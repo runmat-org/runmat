@@ -19,6 +19,7 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "dlmwrite";
+const MAX_NUMERIC_FORMAT_FIELD: usize = 4096;
 
 const DLMWRITE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "bytesWritten",
@@ -1049,6 +1050,12 @@ impl ParsedFormat {
                     break;
                 }
             }
+            if saw_digit && value > MAX_NUMERIC_FORMAT_FIELD {
+                return Err(dlmwrite_error_with(
+                    &DLMWRITE_ERROR_FORMAT,
+                    format!("dlmwrite: {label} exceeds maximum supported precision format size"),
+                ));
+            }
             Ok(if saw_digit { Some(value) } else { None })
         }
 
@@ -1439,7 +1446,16 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn precision_parser_rejects_unsafe_native_format_shapes() {
-        for spec in ["%n", "%s", "%*f", "%.2f %.2f", "%.2lf", "prefix %.2f"] {
+        for spec in [
+            "%n",
+            "%s",
+            "%*f",
+            "%.2f %.2f",
+            "%.2lf",
+            "prefix %.2f",
+            "%4097f",
+            "%.4097f",
+        ] {
             let err = super::format_float(1.0, spec).expect_err("format should be rejected");
             assert!(
                 err.message().contains("precision format")

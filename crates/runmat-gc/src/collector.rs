@@ -62,10 +62,11 @@ impl MarkSweepCollector {
                 if let Some(handle) = allocator.handle_for_live_ptr(ptr) {
                     crate::gc_run_finalizer_for_handle(handle);
                 }
-                allocator.note_value_dropped(ptr);
-                // Drop the value in place to run destructors if any
-                unsafe {
-                    std::ptr::drop_in_place(ptr as *mut Value);
+                if allocator.note_value_dropped(ptr) {
+                    // Drop the value in place to run destructors if any
+                    unsafe {
+                        std::ptr::drop_in_place(ptr as *mut Value);
+                    }
                 }
                 // Space remains reserved; a free-list compactor can reclaim later
             } else {
@@ -111,16 +112,28 @@ impl MarkSweepCollector {
         // Phase 1: Mark reachable objects in all generations
         self.mark_phase(allocator, roots, usize::MAX)?;
 
-        // Phase 2: Sweep unmarked objects (reuse young sweep and then clear marks)
-        // Do not call collect_young_generation to avoid double incrementing stats/marks; inline minimal work
-        let collected = {
-            // Reuse the young sweep logic without updating collection counters here
-            let mut temp_collector = MarkSweepCollector::new(&self.config);
-            temp_collector.marked_objects = std::mem::take(&mut self.marked_objects);
-            let c = temp_collector.collect_young_generation(allocator, roots, stats)?;
-            self.marked_objects = temp_collector.marked_objects; // bring back mark set (already cleared inside)
-            c
-        };
+        // Phase 2: Sweep every currently live allocation. Promoted objects are
+        // logical old-generation occupants even though their slots are still in
+        // allocator blocks, so major GC must not restrict itself to young
+        // collection candidates.
+        let _ = stats;
+        let allocated_ptrs = allocator.all_live_collection_candidates();
+        let mut collected = 0usize;
+        for ptr in allocated_ptrs {
+            let addr = ptr as usize;
+            if !self.marked_objects.lock().contains(&addr) {
+                if let Some(handle) = allocator.handle_for_live_ptr(ptr) {
+                    crate::gc_run_finalizer_for_handle(handle);
+                }
+                if allocator.note_value_dropped(ptr) {
+                    collected += 1;
+                    unsafe {
+                        std::ptr::drop_in_place(ptr as *mut Value);
+                    }
+                }
+            }
+        }
+        self.marked_objects.lock().clear();
 
         self.collections_performed += 1;
         self.total_objects_collected += collected;

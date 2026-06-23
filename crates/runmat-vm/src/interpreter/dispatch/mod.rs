@@ -1231,11 +1231,7 @@ pub async fn dispatch_instruction(
         Instr::ExitScope(local_count) => {
             for _ in 0..*local_count {
                 if let Some(value) = context.locals.pop() {
-                    if let Some(id) = spawn_task_id_from_value(&value) {
-                        if !spawn_task_id_still_live(id, stack, vars, context, None, None)? {
-                            context.spawned_task_ids.remove(&id);
-                        }
-                    }
+                    retire_spawn_task_id_if_dropped(context, &value, stack, vars, None, None)?;
                     #[cfg(feature = "native-accel")]
                     clear_scope_value_residency_excluding_live_values(&value, stack, vars, context);
                     #[cfg(not(feature = "native-accel"))]

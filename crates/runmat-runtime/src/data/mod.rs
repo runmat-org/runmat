@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -124,11 +125,48 @@ pub enum TxnStatus {
 }
 
 thread_local! {
-    static TX_REGISTRY: RefCell<HashMap<String, PendingTxn>> = RefCell::new(HashMap::new());
+    static FALLBACK_TX_REGISTRY: RefCell<HashMap<String, PendingTxn>> = RefCell::new(HashMap::new());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+tokio::task_local! {
+    static TASK_TX_REGISTRY: RefCell<HashMap<String, PendingTxn>>;
+}
+
+pub async fn with_tx_registry_scope<F>(future: F) -> F::Output
+where
+    F: Future,
+{
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if TASK_TX_REGISTRY.try_with(|_| ()).is_ok() {
+            future.await
+        } else {
+            TASK_TX_REGISTRY
+                .scope(RefCell::new(HashMap::new()), future)
+                .await
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        future.await
+    }
 }
 
 fn with_tx_registry<T>(f: impl FnOnce(&mut HashMap<String, PendingTxn>) -> T) -> BuiltinResult<T> {
-    TX_REGISTRY.with(|registry| {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if TASK_TX_REGISTRY.try_with(|_| ()).is_ok() {
+            return TASK_TX_REGISTRY.with(|registry| {
+                let mut registry = registry.try_borrow_mut().map_err(|_| {
+                    data_error("data transaction registry is already mutably borrowed")
+                })?;
+                Ok(f(&mut registry))
+            });
+        }
+    }
+
+    FALLBACK_TX_REGISTRY.with(|registry| {
         let mut registry = registry
             .try_borrow_mut()
             .map_err(|_| data_error("data transaction registry is already mutably borrowed"))?;
@@ -1033,7 +1071,25 @@ pub fn with_tx<T>(
     tx_id: &str,
     f: impl FnOnce(&PendingTxn) -> BuiltinResult<T>,
 ) -> BuiltinResult<T> {
-    TX_REGISTRY.with(|registry| {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if TASK_TX_REGISTRY.try_with(|_| ()).is_ok() {
+            return TASK_TX_REGISTRY.with(|registry| {
+                let registry = registry
+                    .try_borrow()
+                    .map_err(|_| data_error("data transaction registry is already borrowed"))?;
+                let tx = registry.get(tx_id).ok_or_else(|| {
+                    data_error_with_identifier(
+                        format!("transaction '{tx_id}' not found"),
+                        DATA_TRANSACTION_NOT_FOUND_IDENTIFIER,
+                    )
+                })?;
+                f(tx)
+            });
+        }
+    }
+
+    FALLBACK_TX_REGISTRY.with(|registry| {
         let registry = registry
             .try_borrow()
             .map_err(|_| data_error("data transaction registry is already borrowed"))?;

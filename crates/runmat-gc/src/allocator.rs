@@ -179,7 +179,7 @@ impl Generation {
         std::mem::take(&mut self.allocated_ptrs)
     }
 
-    pub fn note_value_slot_freed(&mut self, ptr: *const u8) {
+    fn note_value_slot_freed(&mut self, ptr: *const u8) {
         if self.find_block_containing(ptr).is_some() {
             let value_size = std::mem::size_of::<Value>();
             self.allocated_bytes
@@ -326,6 +326,10 @@ impl GenerationalAllocator {
     /// Allocate a Value object
     pub fn allocate(&mut self, value: Value, stats: &GcStats) -> Result<GcHandle> {
         let size = self.estimate_value_size(&value);
+        let epoch = self.next_epoch;
+        let next_epoch = epoch.checked_add(1).ok_or_else(|| {
+            GcError::OutOfMemory("GC allocation epoch space exhausted".to_string())
+        })?;
 
         // Always allocate in young generation first
         let ptr = self.generations[0].allocate(size)?;
@@ -335,8 +339,7 @@ impl GenerationalAllocator {
             std::ptr::write(ptr as *mut Value, value);
         }
         let raw = ptr.cast_const();
-        let epoch = self.next_epoch;
-        self.next_epoch = self.next_epoch.wrapping_add(1).max(1);
+        self.next_epoch = next_epoch;
         self.live_ptrs.insert(raw);
         self.live_epochs.insert(raw, epoch);
 
@@ -356,6 +359,11 @@ impl GenerationalAllocator {
             .into_iter()
             .filter(|ptr| self.live_ptrs.contains(ptr) && seen.insert(*ptr))
             .collect()
+    }
+
+    /// Return all currently live Value pointers for a major collection sweep.
+    pub fn all_live_collection_candidates(&self) -> Vec<*const u8> {
+        self.live_ptrs.iter().copied().collect()
     }
 
     /// Drain all pointers the allocator still believes may contain initialized
@@ -387,6 +395,7 @@ impl GenerationalAllocator {
 
         let ptrs: Vec<(*const Value, Option<GcHandle>)> = ptrs
             .into_iter()
+            .filter(|ptr| self.live_ptrs.contains(ptr))
             .map(|ptr| (ptr.cast::<Value>(), self.handle_for_live_ptr(ptr)))
             .collect();
 
@@ -429,14 +438,17 @@ impl GenerationalAllocator {
     /// Mark an initialized Value slot as no longer live after sweep/reset drops
     /// it. Later validation must reject handles to this slot until it is reused
     /// by a fresh allocation.
-    pub fn note_value_dropped(&mut self, ptr: *const u8) {
-        self.live_ptrs.remove(&ptr);
+    pub fn note_value_dropped(&mut self, ptr: *const u8) -> bool {
+        if !self.live_ptrs.remove(&ptr) {
+            return false;
+        }
         self.live_epochs.remove(&ptr);
         self.survival_counts.remove(&ptr);
         self.promoted_ptrs.remove(&ptr);
         if let Some(generation) = self.generations.get_mut(0) {
             generation.note_value_slot_freed(ptr);
         }
+        true
     }
 
     /// Check if young generation currently tracks any survivors

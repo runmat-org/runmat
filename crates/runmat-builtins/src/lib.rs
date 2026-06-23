@@ -2805,12 +2805,12 @@ pub fn get_static_property_value(class_name: &str, prop: &str) -> Option<Value> 
 }
 
 pub fn set_static_property_value(class_name: &str, prop: &str, value: Value) {
+    mark_static_values_thread_active();
     STATIC_VALUES.with(|values| {
         values
             .borrow_mut()
             .insert((class_name.to_string(), prop.to_string()), value);
     });
-    mark_static_values_thread_active();
 }
 
 /// Set a static property, resolving the defining ancestor class for storage.

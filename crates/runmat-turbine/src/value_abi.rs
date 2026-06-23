@@ -1,14 +1,15 @@
 use runmat_builtins::{IntValue, Value};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
 thread_local! {
-    static ABI_GC_ROOTS: RefCell<HashMap<usize, runmat_gc::ExplicitRoot>> =
+    static ABI_GC_ROOTS: RefCell<HashMap<u64, runmat_gc::ExplicitRoot>> =
         RefCell::new(HashMap::new());
+    static NEXT_ABI_GC_TOKEN: Cell<u64> = const { Cell::new(1) };
 }
 
 pub struct TurbineAbiRootScope {
-    baseline: HashSet<usize>,
+    baseline: HashSet<u64>,
 }
 
 impl TurbineAbiRootScope {
@@ -16,6 +17,22 @@ impl TurbineAbiRootScope {
         let baseline = ABI_GC_ROOTS.with(|roots| roots.borrow().keys().copied().collect());
         Self { baseline }
     }
+}
+
+fn next_abi_gc_token() -> crate::Result<u64> {
+    NEXT_ABI_GC_TOKEN.with(|next| {
+        let token = next.get();
+        if token == 0 {
+            return Err(crate::execution_error(
+                "Turbine ABI GC token space exhausted",
+            ));
+        }
+        let next_token = token
+            .checked_add(1)
+            .ok_or_else(|| crate::execution_error("Turbine ABI GC token space exhausted"))?;
+        next.set(next_token);
+        Ok(token)
+    })
 }
 
 impl Drop for TurbineAbiRootScope {
@@ -109,7 +126,7 @@ impl TurbineValue {
             value => {
                 let root = runmat_gc::gc_allocate_rooted(value)
                     .map_err(|err| crate::execution_error(err.to_string()))?;
-                let payload = runmat_gc::gc_handle_addr(&root.handle());
+                let payload = next_abi_gc_token()?;
                 ABI_GC_ROOTS.with(|roots| {
                     roots.borrow_mut().insert(payload, root);
                 });
@@ -132,9 +149,8 @@ impl TurbineValue {
                 if self.payload == 0 {
                     return Err(crate::execution_error("null Turbine GC value handle"));
                 }
-                let addr = self.payload as usize;
                 let ptr = ABI_GC_ROOTS
-                    .with(|roots| roots.borrow().get(&addr).map(|root| root.handle()))
+                    .with(|roots| roots.borrow().get(&self.payload).map(|root| root.handle()))
                     .ok_or_else(|| crate::execution_error("unknown Turbine GC value handle"))?;
                 runmat_gc::gc_clone_value(&ptr)
                     .map_err(|err| crate::execution_error(err.to_string()))
@@ -145,7 +161,7 @@ impl TurbineValue {
     pub fn release_gc_root(self) {
         if self.tag == TurbineValueTag::GcHandle {
             ABI_GC_ROOTS.with(|roots| {
-                roots.borrow_mut().remove(&(self.payload as usize));
+                roots.borrow_mut().remove(&self.payload);
             });
         }
     }

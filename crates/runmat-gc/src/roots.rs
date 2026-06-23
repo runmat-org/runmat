@@ -264,6 +264,32 @@ impl RootScanner {
         Ok(all_roots)
     }
 
+    /// Remove inactive roots from this thread-local scanner.
+    ///
+    /// The GC-level registration accounting lives outside `RootScanner`, so the
+    /// caller must decrement its active-root accounting by the returned count.
+    pub fn remove_inactive_roots(&self) -> usize {
+        let inactive_ids = {
+            let roots = self.roots.read();
+            roots
+                .iter()
+                .filter_map(|(&root_id, root)| (!root.is_active()).then_some(root_id))
+                .collect::<Vec<_>>()
+        };
+        if inactive_ids.is_empty() {
+            return 0;
+        }
+
+        let mut roots = self.roots.write();
+        let mut removed = 0usize;
+        for root_id in inactive_ids {
+            if roots.remove(&root_id).is_some() {
+                removed += 1;
+            }
+        }
+        removed
+    }
+
     /// Get information about all registered roots
     pub fn root_info(&self) -> Vec<RootInfo> {
         let roots = self.roots.read();
@@ -336,83 +362,86 @@ mod tests {
 
     #[test]
     fn global_root_scans_direct_handle_and_listener_targets() {
-        crate::gc_reset_for_test().expect("reset gc");
-        let target = crate::gc_allocate(Value::Object(ObjectInstance::new("widget".to_string())))
-            .expect("target allocation");
-        let callback = crate::gc_allocate(Value::FunctionHandle("onEvent".to_string()))
-            .expect("callback allocation");
+        crate::gc_test_context(|| {
+            let target =
+                crate::gc_allocate(Value::Object(ObjectInstance::new("widget".to_string())))
+                    .expect("target allocation");
+            let callback = crate::gc_allocate(Value::FunctionHandle("onEvent".to_string()))
+                .expect("callback allocation");
 
-        let values = vec![
-            Value::HandleObject(HandleRef {
-                class_name: "widget".to_string(),
-                target,
-                valid: true,
-            }),
-            Value::Listener(Listener {
-                id: 1,
-                target,
-                target_class_name: "widget".to_string(),
-                event_name: "Changed".to_string(),
-                callback,
-                enabled: true,
-                valid: true,
-            }),
-        ];
+            let values = vec![
+                Value::HandleObject(HandleRef {
+                    class_name: "widget".to_string(),
+                    target,
+                    valid: true,
+                }),
+                Value::Listener(Listener {
+                    id: 1,
+                    target,
+                    target_class_name: "widget".to_string(),
+                    event_name: "Changed".to_string(),
+                    callback,
+                    enabled: true,
+                    valid: true,
+                }),
+            ];
 
-        let root = GlobalRoot::new(values, "handles".to_string());
-        let scanned = root.scan();
-        let scanned_addrs: Vec<usize> = scanned.into_iter().map(ptr_addr).collect();
+            let root = GlobalRoot::new(values, "handles".to_string());
+            let scanned = root.scan();
+            let scanned_addrs: Vec<usize> = scanned.into_iter().map(ptr_addr).collect();
 
-        assert!(scanned_addrs.contains(&ptr_addr(target)));
-        assert!(scanned_addrs.contains(&ptr_addr(callback)));
+            assert!(scanned_addrs.contains(&ptr_addr(target)));
+            assert!(scanned_addrs.contains(&ptr_addr(callback)));
+        });
     }
 
     #[test]
     fn global_root_scans_owned_nested_value_containers() {
-        crate::gc_reset_for_test().expect("reset gc");
-        let handle_target =
-            crate::gc_allocate(Value::Object(ObjectInstance::new("nested".to_string())))
-                .expect("target allocation");
-        let callback = crate::gc_allocate(Value::FunctionHandle("cb".to_string()))
-            .expect("callback allocation");
+        crate::gc_test_context(|| {
+            let handle_target =
+                crate::gc_allocate(Value::Object(ObjectInstance::new("nested".to_string())))
+                    .expect("target allocation");
+            let callback = crate::gc_allocate(Value::FunctionHandle("cb".to_string()))
+                .expect("callback allocation");
 
-        let handle = Value::HandleObject(HandleRef {
-            class_name: "nested".to_string(),
-            target: handle_target,
-            valid: true,
+            let handle = Value::HandleObject(HandleRef {
+                class_name: "nested".to_string(),
+                target: handle_target,
+                valid: true,
+            });
+            let listener = Value::Listener(Listener {
+                id: 7,
+                target: handle_target,
+                target_class_name: "nested".to_string(),
+                event_name: "Changed".to_string(),
+                callback,
+                enabled: true,
+                valid: true,
+            });
+
+            let mut object = ObjectInstance::new("owner".to_string());
+            object.properties.insert("h".to_string(), handle.clone());
+
+            let mut struct_value = StructValue::new();
+            struct_value.fields.insert(
+                "closure".to_string(),
+                Value::Closure(Closure {
+                    function_name: "f".to_string(),
+                    bound_function: None,
+                    captures: vec![listener],
+                }),
+            );
+            struct_value
+                .fields
+                .insert("object".to_string(), Value::Object(object));
+
+            let root = GlobalRoot::new(vec![Value::Struct(struct_value)], "nested".to_string());
+            let scanned = root.scan();
+            let scanned_addrs: Vec<usize> = scanned.into_iter().map(ptr_addr).collect();
+
+            assert!(scanned_addrs.contains(&ptr_addr(handle_target)));
+            assert!(scanned_addrs.contains(&ptr_addr(callback)));
         });
-        let listener = Value::Listener(Listener {
-            id: 7,
-            target: handle_target,
-            target_class_name: "nested".to_string(),
-            event_name: "Changed".to_string(),
-            callback,
-            enabled: true,
-            valid: true,
-        });
-
-        let mut object = ObjectInstance::new("owner".to_string());
-        object.properties.insert("h".to_string(), handle.clone());
-
-        let mut struct_value = StructValue::new();
-        struct_value.fields.insert(
-            "closure".to_string(),
-            Value::Closure(Closure {
-                function_name: "f".to_string(),
-                bound_function: None,
-                captures: vec![listener],
-            }),
-        );
-        struct_value
-            .fields
-            .insert("object".to_string(), Value::Object(object));
-
-        let root = GlobalRoot::new(vec![Value::Struct(struct_value)], "nested".to_string());
-        let scanned = root.scan();
-        let scanned_addrs: Vec<usize> = scanned.into_iter().map(ptr_addr).collect();
-
-        assert!(scanned_addrs.contains(&ptr_addr(handle_target)));
-        assert!(scanned_addrs.contains(&ptr_addr(callback)));
     }
 
     #[test]

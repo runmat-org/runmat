@@ -26,6 +26,25 @@ fn positive_integer_cell_index(value: f64, identifier: &str) -> Result<usize, Ru
     Ok(value as usize)
 }
 
+fn cell_row_major_pos_from_linear(
+    ca: &runmat_builtins::CellArray,
+    idx: usize,
+) -> Result<usize, RuntimeError> {
+    if idx == 0 || idx > ca.data.len() {
+        return Err(indexing_error_with_identifier(
+            format!("Cell index {} out of bounds (1 to {})", idx, ca.data.len()),
+            "RunMat:CellIndexOutOfBounds",
+        ));
+    }
+    if ca.rows <= 1 || ca.cols <= 1 {
+        return Ok(idx - 1);
+    }
+    let zero = idx - 1;
+    let row = zero % ca.rows;
+    let col = zero / ca.rows;
+    Ok(row * ca.cols + col)
+}
+
 /// Get a single element from a tensor (1-based indexing like language)
 pub fn matrix_get_element(tensor: &Tensor, row: usize, col: usize) -> Result<f64, RuntimeError> {
     if row == 0 || col == 0 {
@@ -294,7 +313,8 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                         "RunMat:CellIndexOutOfBounds",
                     ));
                 }
-                Ok(ca.data[idx - 1].clone())
+                let pos = cell_row_major_pos_from_linear(ca, idx)?;
+                Ok(ca.data[pos].clone())
             } else if indices.len() == 2 {
                 let row =
                     positive_integer_cell_index(indices[0], "RunMat:CellSubscriptOutOfBounds")?;
@@ -389,5 +409,22 @@ mod tests {
         let err = block_on(perform_indexing(&Value::Cell(cell), &[f64::NAN, 1.0]))
             .expect_err("NaN cell subscript should fail");
         assert_eq!(err.identifier(), Some("RunMat:CellSubscriptOutOfBounds"));
+    }
+
+    #[test]
+    fn cell_linear_index_uses_column_major_semantics_for_2d_cells() {
+        let cell = CellArray::new(
+            vec![
+                Value::String("r1c1".to_string()),
+                Value::String("r1c2".to_string()),
+                Value::String("r2c1".to_string()),
+                Value::String("r2c2".to_string()),
+            ],
+            2,
+            2,
+        )
+        .expect("cell");
+        let value = block_on(perform_indexing(&Value::Cell(cell), &[2.0])).expect("cell read");
+        assert_eq!(value, Value::String("r2c1".to_string()));
     }
 }

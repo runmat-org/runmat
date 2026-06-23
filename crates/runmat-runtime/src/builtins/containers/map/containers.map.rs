@@ -1171,8 +1171,17 @@ fn allocate_handle(store: MapStore, builtin: &'static str) -> BuiltinResult<Valu
     storage
         .properties
         .insert("id".to_string(), Value::Int(IntValue::U64(id)));
-    let gc = runmat_gc::gc_allocate(Value::Object(storage))
-        .map_err(|e| map_error(format!("containers.Map: {e}"), builtin))?;
+    let gc = match runmat_gc::gc_allocate(Value::Object(storage)) {
+        Ok(gc) => gc,
+        Err(e) => {
+            MAP_REGISTRY.with(|registry| {
+                if let Ok(mut registry) = registry.try_borrow_mut() {
+                    registry.remove(&id);
+                }
+            });
+            return Err(map_error(format!("containers.Map: {e}"), builtin));
+        }
+    };
     Ok(Value::HandleObject(HandleRef {
         class_name: CLASS_NAME.to_string(),
         target: gc,
@@ -1272,7 +1281,16 @@ fn map_id(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<u64> {
                 Ok(id as u64)
             }
         }
-        Some(Value::Num(n)) if *n >= 0.0 => Ok(*n as u64),
+        Some(Value::Num(n)) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0 => {
+            if *n > u64::MAX as f64 {
+                Err(map_internal(
+                    "containers.Map: map identifier out of range",
+                    builtin,
+                ))
+            } else {
+                Ok(*n as u64)
+            }
+        }
         _ => Err(map_internal(
             "containers.Map: corrupted storage identifier",
             builtin,
@@ -2333,6 +2351,25 @@ pub(crate) mod tests {
         .unwrap();
         let map = containers_map_builtin(vec![keys, values]).expect("map");
         assert_eq!(map_length(&map), Some(3));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn map_id_rejects_corrupted_numeric_identifiers() {
+        for id_value in [Value::Num(1.9), Value::Num(f64::INFINITY)] {
+            let mut storage = ObjectInstance::new(CLASS_NAME.to_string());
+            storage.properties.insert("id".to_string(), id_value);
+            let target = runmat_gc::gc_allocate(Value::Object(storage)).expect("storage");
+            let handle = HandleRef {
+                class_name: CLASS_NAME.to_string(),
+                target,
+                valid: true,
+            };
+
+            let err =
+                map_id(&handle, BUILTIN_CONSTRUCTOR).expect_err("corrupted map id should reject");
+            assert_eq!(err.identifier(), CONTAINERS_MAP_ERROR_INTERNAL.identifier);
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

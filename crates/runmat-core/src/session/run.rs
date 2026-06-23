@@ -270,8 +270,11 @@ impl RunMatSession {
         // small for two nested interpret() invocations. We cannot move the inner
         // evaluation to another thread because `Value` can carry thread-confined
         // GC handles, so the native path grows the current stack and blocks the
-        // calling future synchronously while the inner eval completes.
+        // calling future synchronously while the inner eval completes. To avoid
+        // blocking async-yielding prompt code on that local executor, native
+        // prompt eval deliberately disables top-level await.
         let compat = self.compat_mode;
+        #[cfg(target_arch = "wasm32")]
         let top_level_await_enabled = self.top_level_await_enabled;
         let source_name_for_eval_hook = self.current_source_name().to_string();
         let known_project_symbols_for_eval_hook = Arc::new(discover_known_project_symbols(Some(
@@ -340,7 +343,7 @@ impl RunMatSession {
                                 futures::executor::block_on(eval_expr(
                                     expr,
                                     compat,
-                                    top_level_await_enabled,
+                                    false,
                                     known_project_symbols,
                                 ))
                             })

@@ -188,8 +188,17 @@ impl Deref for GcValueRef<'_> {
 /// The guard keeps collection from reclaiming the value and enforces exclusive
 /// mutable access through the GC borrow gate.
 pub struct GcValueMut<'gc> {
+    owner: GcHandle,
     raw: *mut Value,
     _borrow: GcValueBorrowGuard<'gc>,
+}
+
+impl Drop for GcValueMut<'_> {
+    fn drop(&mut self) {
+        // Record old->young edges for the final value stored through this
+        // mutable guard before the borrow gate is released.
+        gc_record_handle_write(&self.owner, unsafe { &*self.raw });
+    }
 }
 
 impl Deref for GcValueMut<'_> {
@@ -384,6 +393,7 @@ impl GarbageCollector {
         let raw = Self::non_null_value_ptr(ptr)? as *mut Value;
         self.validate_value_handle(ptr, raw)?;
         Ok(GcValueMut {
+            owner: *ptr,
             raw,
             _borrow: borrow,
         })
@@ -441,6 +451,7 @@ impl GarbageCollector {
             combined_roots.extend(roots.keys().cloned());
         }
         // External roots
+        prune_inactive_thread_roots();
         if let Ok(mut ext) = ROOT_SCANNER.with(|scanner| scanner.scan_roots()) {
             combined_roots.append(&mut ext);
         }
@@ -502,6 +513,7 @@ impl GarbageCollector {
             let roots = self.root_ptrs.lock();
             combined_roots.extend(roots.keys().cloned());
         }
+        prune_inactive_thread_roots();
         if let Ok(mut ext) = ROOT_SCANNER.with(|scanner| scanner.scan_roots()) {
             combined_roots.append(&mut ext);
         }
@@ -630,6 +642,13 @@ fn registered_roots_exist_on_other_threads() -> bool {
         .lock()
         .iter()
         .any(|(thread_id, count)| *thread_id != current && *count > 0)
+}
+
+fn prune_inactive_thread_roots() {
+    let removed = ROOT_SCANNER.with(|scanner| scanner.remove_inactive_roots());
+    for _ in 0..removed {
+        unregister_active_root_thread();
+    }
 }
 
 /// Global GC functions for easy access
@@ -784,9 +803,14 @@ pub fn gc_get_config() -> GcConfig {
 
 /// Register a root source in the current thread-local root scanner.
 pub fn gc_register_root(root: Box<dyn GcRoot>) -> Result<RootId> {
-    let root_id = ROOT_SCANNER.with(|scanner| scanner.register_root(root))?;
     register_active_root_thread();
-    Ok(root_id)
+    match ROOT_SCANNER.with(|scanner| scanner.register_root(root)) {
+        Ok(root_id) => Ok(root_id),
+        Err(err) => {
+            unregister_active_root_thread();
+            Err(err)
+        }
+    }
 }
 
 pub fn gc_unregister_root(root_id: RootId) -> Result<()> {
@@ -878,6 +902,7 @@ pub fn gc_force_collect() -> Result<usize> {
 /// Reset GC for testing - always available
 pub fn gc_reset_for_test() -> Result<()> {
     ROOT_SCANNER.with(|scanner| scanner.clear());
+    WRITE_BARRIERS.clear_after_major_gc();
 
     // Reset statistics
     GC.stats.reset();
