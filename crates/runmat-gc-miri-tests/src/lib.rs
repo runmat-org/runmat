@@ -28,6 +28,31 @@ mod tests {
     }
 
     #[test]
+    fn allocation_triggered_collection_preserves_returned_handle() {
+        gc_test_context(|| {
+            let mut config = GcConfig::default();
+            config.young_generation_size = 64 * 1024 * 1024;
+            config.minor_gc_threshold = 0.35;
+            config.major_gc_threshold = 0.9;
+            gc_configure(config).expect("configure aggressive periodic minor collection");
+
+            let mut returned = None;
+            for i in 0..32 {
+                returned = Some(
+                    gc_allocate(Value::String(format!("value-{i}")))
+                        .expect("allocation should succeed"),
+                );
+            }
+
+            let handle = returned.expect("loop should allocate a value");
+            assert_eq!(
+                gc_clone_value(&handle).expect("allocation should not return a collected handle"),
+                Value::String("value-31".to_string())
+            );
+        });
+    }
+
+    #[test]
     fn read_guard_rejects_unowned_address() {
         gc_test_context(|| {
             let boxed = Box::new(Value::Num(1.0));

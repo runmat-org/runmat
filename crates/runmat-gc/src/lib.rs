@@ -261,7 +261,11 @@ impl GarbageCollector {
         if usage > cfg.minor_gc_threshold
             || (cfg.minor_gc_threshold <= 0.35 && alloc_count > 0 && alloc_count.is_multiple_of(32))
         {
-            let _ = self.collect_minor();
+            self.add_root(ptr)?;
+            let collect_result = self.collect_minor();
+            let remove_result = self.remove_root(ptr);
+            collect_result?;
+            remove_result?;
         }
         Ok(ptr)
     }
