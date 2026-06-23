@@ -2,16 +2,20 @@ pub mod dofs;
 pub mod elements;
 
 use runmat_analysis_core::{
-    AnalysisModel, BeamSectionModel, BoundaryConditionKind, LoadKind, StructuralElementKind,
-    StructuralModel,
+    AnalysisModel, BeamSectionModel, BoundaryConditionKind, LoadKind, ShellSectionModel,
+    StructuralElementKind, StructuralModel,
 };
 use serde::{Deserialize, Serialize};
 
 use self::{
     dofs::{StructuralDofKind, StructuralDofLayout, StructuralNodeDofSet},
     elements::beam::{
-        global_stiffness_matrix, transformation_matrix, BeamElementGeometry, BeamMaterial,
-        BeamSection, BeamTransform12, BEAM_ELEMENT_DOF_COUNT,
+        global_stiffness_matrix as beam_global_stiffness_matrix, transformation_matrix,
+        BeamElementGeometry, BeamMaterial, BeamSection, BeamTransform12, BEAM_ELEMENT_DOF_COUNT,
+    },
+    elements::shell::{
+        global_stiffness_matrix as shell_global_stiffness_matrix, ShellElementGeometry,
+        ShellMaterial, ShellSection, SHELL_ELEMENT_DOF_COUNT, SHELL_NODE_DOF_COUNT,
     },
 };
 
@@ -1004,13 +1008,23 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
         .iter()
         .filter(|element| matches!(element.kind, StructuralElementKind::Beam(_)))
         .collect::<Vec<_>>();
-    if beam_elements.is_empty() || structural.nodes.is_empty() {
+    let shell_elements = structural
+        .elements
+        .iter()
+        .filter(|element| matches!(element.kind, StructuralElementKind::Shell(_)))
+        .collect::<Vec<_>>();
+    if (beam_elements.is_empty() && shell_elements.is_empty()) || structural.nodes.is_empty() {
         return None;
     }
 
     let structural_material = structural_material_summary(model);
     let beam_material = BeamMaterial {
         youngs_modulus_pa: structural_material.youngs_modulus_pa,
+        shear_modulus_pa: structural_material.shear_modulus_pa,
+    };
+    let shell_material = ShellMaterial {
+        youngs_modulus_pa: structural_material.youngs_modulus_pa,
+        poisson_ratio: structural_material.poisson_ratio,
         shear_modulus_pa: structural_material.shear_modulus_pa,
     };
     let node_count = structural.nodes.len();
@@ -1025,7 +1039,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
     let mut damping_diag = vec![0.0_f64; dof_count];
     let mut structural_beam_recovery = Vec::new();
 
-    for element in beam_elements {
+    for element in &beam_elements {
         let StructuralElementKind::Beam(beam) = &element.kind else {
             continue;
         };
@@ -1039,7 +1053,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
         };
         let frame = geometry.local_frame().ok()?;
         let transform_global_to_local = transformation_matrix(frame);
-        let stiffness = global_stiffness_matrix(section, beam_material, geometry).ok()?;
+        let stiffness = beam_global_stiffness_matrix(section, beam_material, geometry).ok()?;
         let element_dofs =
             beam_element_dof_indices(&structural_dof_layout, node_i_index, node_j_index)?;
         for (local_row, &global_row) in element_dofs.iter().enumerate() {
@@ -1066,6 +1080,42 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
             structural_material.density_kg_per_m3,
             frame.length_m,
             &transform_global_to_local,
+        );
+    }
+
+    for element in &shell_elements {
+        let StructuralElementKind::Shell(shell) = &element.kind else {
+            continue;
+        };
+        let node_indices = [
+            structural_node_index(structural, shell.node_ids[0])?,
+            structural_node_index(structural, shell.node_ids[1])?,
+            structural_node_index(structural, shell.node_ids[2])?,
+        ];
+        let section = structural_shell_section(structural, &shell.section_id)?;
+        let geometry = ShellElementGeometry {
+            nodes_m: [
+                structural.nodes[node_indices[0]].coordinates_m,
+                structural.nodes[node_indices[1]].coordinates_m,
+                structural.nodes[node_indices[2]].coordinates_m,
+            ],
+            reference_axis: shell.reference_axis,
+        };
+        let frame = geometry.local_frame().ok()?;
+        let stiffness = shell_global_stiffness_matrix(section, shell_material, geometry).ok()?;
+        let element_dofs = shell_element_dof_indices(&structural_dof_layout, node_indices)?;
+        for (local_row, &global_row) in element_dofs.iter().enumerate() {
+            for (local_col, &global_col) in element_dofs.iter().enumerate() {
+                dense[global_row * dof_count + global_col] += stiffness[local_row][local_col];
+            }
+        }
+        add_lumped_shell_mass_and_damping(
+            &mut mass_diag,
+            &mut damping_diag,
+            &element_dofs,
+            section,
+            structural_material.density_kg_per_m3,
+            frame.area_m2,
         );
     }
 
@@ -1232,8 +1282,8 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
             .count(),
         structural_direct_rotational_moment_load_count: direct_rotational_moment_load_count,
         structural_rotational_constraint_count: rotational_constraint_count,
-        structural_beam_element_count: structural.elements.len(),
-        structural_shell_element_count: 0,
+        structural_beam_element_count: beam_elements.len(),
+        structural_shell_element_count: shell_elements.len(),
         structural_solid_element_count: 0,
         structural_dof_layout,
         structural_beam_recovery,
@@ -1323,6 +1373,17 @@ fn structural_beam_section(structural: &StructuralModel, section_id: &str) -> Op
         .map(section_from_model)
 }
 
+fn structural_shell_section(
+    structural: &StructuralModel,
+    section_id: &str,
+) -> Option<ShellSection> {
+    structural
+        .shell_sections
+        .iter()
+        .find(|section| section.section_id == section_id)
+        .map(shell_section_from_model)
+}
+
 fn section_from_model(section: &BeamSectionModel) -> BeamSection {
     BeamSection {
         area_m2: section.area_m2,
@@ -1335,6 +1396,14 @@ fn section_from_model(section: &BeamSectionModel) -> BeamSection {
     }
 }
 
+fn shell_section_from_model(section: &ShellSectionModel) -> ShellSection {
+    ShellSection {
+        thickness_m: section.thickness_m,
+        shear_correction: section.shear_correction,
+        drilling_stiffness_scale: section.drilling_stiffness_scale,
+    }
+}
+
 fn beam_element_dof_indices(
     layout: &StructuralDofLayout,
     node_i_index: usize,
@@ -1344,6 +1413,20 @@ fn beam_element_dof_indices(
     for (local, kind) in StructuralDofKind::ORDER.iter().copied().enumerate() {
         indices[local] = layout.index(node_i_index, kind)?;
         indices[local + 6] = layout.index(node_j_index, kind)?;
+    }
+    Some(indices)
+}
+
+fn shell_element_dof_indices(
+    layout: &StructuralDofLayout,
+    node_indices: [usize; 3],
+) -> Option<[usize; SHELL_ELEMENT_DOF_COUNT]> {
+    let mut indices = [0usize; SHELL_ELEMENT_DOF_COUNT];
+    for (node_offset, node_index) in node_indices.iter().enumerate() {
+        for (component, kind) in StructuralDofKind::ORDER.iter().enumerate() {
+            indices[node_offset * SHELL_NODE_DOF_COUNT + component] =
+                layout.index(*node_index, *kind)?;
+        }
     }
     Some(indices)
 }
@@ -1384,6 +1467,33 @@ fn add_lumped_beam_mass_and_damping(
                 .sum::<f64>();
             let dof = element_dofs[node_offset + 3 + global_component];
             mass_diag[dof] += inertia.max(1.0e-18);
+            damping_diag[dof] += 0.01;
+        }
+    }
+}
+
+fn add_lumped_shell_mass_and_damping(
+    mass_diag: &mut [f64],
+    damping_diag: &mut [f64],
+    element_dofs: &[usize; SHELL_ELEMENT_DOF_COUNT],
+    section: ShellSection,
+    density_kg_per_m3: f64,
+    area_m2: f64,
+) {
+    let density = density_kg_per_m3.max(1.0);
+    let thickness = section.thickness_m.max(1.0e-12);
+    let area = area_m2.max(1.0e-18);
+    let nodal_mass = density * thickness * area / 3.0;
+    let nodal_rotary_inertia = nodal_mass * thickness.powi(2) / 12.0;
+    for node_offset in [0usize, 6, 12] {
+        for component in 0..3 {
+            let dof = element_dofs[node_offset + component];
+            mass_diag[dof] += nodal_mass;
+            damping_diag[dof] += 0.01;
+        }
+        for component in 3..6 {
+            let dof = element_dofs[node_offset + component];
+            mass_diag[dof] += nodal_rotary_inertia.max(1.0e-18);
             damping_diag[dof] += 0.01;
         }
     }
