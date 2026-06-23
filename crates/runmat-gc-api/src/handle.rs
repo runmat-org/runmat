@@ -17,6 +17,26 @@ use std::num::NonZeroUsize;
 /// fn assert_sync<T: Sync>() {}
 /// assert_sync::<runmat_gc_api::GcHandle>();
 /// ```
+///
+/// ```compile_fail
+/// fn deref(handle: runmat_gc_api::GcHandle) {
+///     let _ = *handle;
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use std::ops::Deref;
+///
+/// fn deref_method(handle: runmat_gc_api::GcHandle) {
+///     let _ = handle.deref();
+/// }
+/// ```
+///
+/// ```compile_fail
+/// fn mutable_reference(mut handle: runmat_gc_api::GcHandle) {
+///     let _: &mut _ = &mut *handle;
+/// }
+/// ```
 #[derive(Copy, Clone)]
 pub struct GcHandle {
     raw: NonZeroUsize,
