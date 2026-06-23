@@ -66,6 +66,24 @@ pub(crate) fn validate_rotational_dof_targets(
     Ok(())
 }
 
+pub(crate) fn reject_moment_loads_for_nonstructural_pipeline(
+    model: &AnalysisModel,
+    family: &str,
+) -> Result<(), FeaRunError> {
+    let Some(load) = model
+        .loads
+        .iter()
+        .find(|load| matches!(load.kind, LoadKind::Moment { .. }))
+    else {
+        return Ok(());
+    };
+
+    Err(FeaRunError::InvalidModel(format!(
+        "moment loads are structural loads and cannot be used in {family} solves; load_id={} region_id={}",
+        load.load_id, load.region_id
+    )))
+}
+
 fn moment_load_error(load: &runmat_analysis_core::LoadCase) -> FeaRunError {
     FeaRunError::InvalidModel(format!(
         "{}; load_id={} region_id={}",

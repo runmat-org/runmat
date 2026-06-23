@@ -48,6 +48,7 @@ pub fn run_electromagnetic_with_options(
     );
     check_cancelled("fea.run_electromagnetic")?;
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+    super::reject_moment_loads_for_nonstructural_pipeline(model, "electromagnetic")?;
     emit_phase(
         "fea.run_electromagnetic",
         FeaProgressPhase::RegionResolution,

@@ -740,6 +740,30 @@ fn fixture_missing_loads_is_rejected() {
 }
 
 #[test]
+fn thermal_pipeline_rejects_moment_loads_before_assembly() {
+    let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let err = crate::run_thermal(&model, ComputeBackend::Cpu)
+        .expect_err("thermal solve should reject structural moment loads");
+    let message = err.to_string();
+
+    assert!(message.contains("moment loads are structural loads"));
+    assert!(message.contains("thermal"));
+    assert!(message.contains("load_id=tip_moment_z"));
+}
+
+#[test]
+fn electromagnetic_pipeline_rejects_moment_loads_before_domain_validation() {
+    let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let err = crate::run_electromagnetic(&model, ComputeBackend::Cpu)
+        .expect_err("electromagnetic solve should reject structural moment loads");
+    let message = err.to_string();
+
+    assert!(message.contains("moment loads are structural loads"));
+    assert!(message.contains("electromagnetic"));
+    assert!(message.contains("load_id=tip_moment_z"));
+}
+
+#[test]
 fn modal_solver_emits_modes_for_modal_step_fixture() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.steps = vec![runmat_analysis_core::AnalysisStep {
