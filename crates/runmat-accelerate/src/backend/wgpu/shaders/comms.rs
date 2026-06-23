@@ -173,10 +173,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     }}
     let channel = out_idx / params.output_rows;
     let group = out_idx - channel * params.output_rows;
-    let base = channel * params.input_rows + group * params.bits_per_symbol;
     var symbol: u32 = 0u;
     for (var bit_idx: u32 = 0u; bit_idx < params.bits_per_symbol; bit_idx = bit_idx + 1u) {{
-        let input_idx = base + bit_idx;
+        let input_row = group * params.bits_per_symbol + bit_idx;
+        let input_idx = input_row + channel * params.input_rows;
         let raw = Bits.data[input_idx];
         if !isfinite_scalar(raw) {{
             set_error(1u, input_idx);

@@ -132,6 +132,14 @@ fn cos_complex_host(re: f64, im: f64) -> (f64, f64) {
     (re.cos() * im.cosh(), -re.sin() * im.sinh())
 }
 
+fn sinh_complex_host(re: f64, im: f64) -> (f64, f64) {
+    (re.sinh() * im.cos(), re.cosh() * im.sin())
+}
+
+fn cosh_complex_host(re: f64, im: f64) -> (f64, f64) {
+    (re.cosh() * im.cos(), re.sinh() * im.sin())
+}
+
 fn tan_complex_host(re: f64, im: f64) -> (f64, f64) {
     let two_re = 2.0 * re;
     let two_im = 2.0 * im;
@@ -3568,20 +3576,28 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            let storage = runmat_accelerate_api::handle_storage(a);
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out: Vec<f64> = abuf.iter().map(|&x| x.sinh()).collect();
+            let out: Vec<f64> = if storage == GpuTensorStorage::ComplexInterleaved {
+                ensure!(
+                    abuf.len() % 2 == 0,
+                    "unary_sinh: complex-interleaved buffer has odd length"
+                );
+                let mut out = Vec::with_capacity(abuf.len());
+                for pair in abuf.chunks_exact(2) {
+                    let (re, im) = sinh_complex_host(pair[0], pair[1]);
+                    out.push(re);
+                    out.push(im);
+                }
+                out
+            } else {
+                abuf.iter().map(|&x| x.sinh()).collect()
+            };
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: 0,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
         })
     }
     fn unary_cosh<'a>(
@@ -3589,20 +3605,28 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            let storage = runmat_accelerate_api::handle_storage(a);
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
-            let out: Vec<f64> = abuf.iter().map(|&x| x.cosh()).collect();
+            let out: Vec<f64> = if storage == GpuTensorStorage::ComplexInterleaved {
+                ensure!(
+                    abuf.len() % 2 == 0,
+                    "unary_cosh: complex-interleaved buffer has odd length"
+                );
+                let mut out = Vec::with_capacity(abuf.len());
+                for pair in abuf.chunks_exact(2) {
+                    let (re, im) = cosh_complex_host(pair[0], pair[1]);
+                    out.push(re);
+                    out.push(im);
+                }
+                out
+            } else {
+                abuf.iter().map(|&x| x.cosh()).collect()
+            };
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: 0,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
         })
     }
 

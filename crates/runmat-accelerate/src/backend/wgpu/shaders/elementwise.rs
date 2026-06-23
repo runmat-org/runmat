@@ -10,6 +10,8 @@ pub(crate) enum ComplexUnaryOp {
     Sin,
     Sinc,
     Cos,
+    Sinh,
+    Cosh,
     Tan,
     Sign,
 }
@@ -132,7 +134,11 @@ fn sinc_complex_lane(out_idx: u32) -> {ty} {{
             ty = ty,
             max_finite = max_finite,
         ),
-        ComplexUnaryOp::Sin | ComplexUnaryOp::Cos | ComplexUnaryOp::Tan => format!(
+        ComplexUnaryOp::Sin
+        | ComplexUnaryOp::Cos
+        | ComplexUnaryOp::Sinh
+        | ComplexUnaryOp::Cosh
+        | ComplexUnaryOp::Tan => format!(
             r#"
 fn zero_safe_mul_complex_unary(a: {ty}, b: {ty}) -> {ty} {{
     if a == {ty}(0.0) {{
@@ -156,6 +162,24 @@ fn cos_complex_lane(out_idx: u32) -> {ty} {{
     let im = A.data[elem * 2u + 1u];
     let out_re = zero_safe_mul_complex_unary(cos(re), cosh(im));
     let out_im = -zero_safe_mul_complex_unary(sin(re), sinh(im));
+    return select(out_re, out_im, (out_idx % 2u) == 1u);
+}}
+
+fn sinh_complex_lane(out_idx: u32) -> {ty} {{
+    let elem = out_idx / 2u;
+    let re = A.data[elem * 2u];
+    let im = A.data[elem * 2u + 1u];
+    let out_re = zero_safe_mul_complex_unary(sinh(re), cos(im));
+    let out_im = zero_safe_mul_complex_unary(cosh(re), sin(im));
+    return select(out_re, out_im, (out_idx % 2u) == 1u);
+}}
+
+fn cosh_complex_lane(out_idx: u32) -> {ty} {{
+    let elem = out_idx / 2u;
+    let re = A.data[elem * 2u];
+    let im = A.data[elem * 2u + 1u];
+    let out_re = zero_safe_mul_complex_unary(cosh(re), cos(im));
+    let out_im = zero_safe_mul_complex_unary(sinh(re), sin(im));
     return select(out_re, out_im, (out_idx % 2u) == 1u);
 }}
 
@@ -272,6 +296,8 @@ fn sign_complex_lane(out_idx: u32) -> {ty} {{
         ComplexUnaryOp::Sin => "sin_complex_lane(idx)",
         ComplexUnaryOp::Sinc => "sinc_complex_lane(idx)",
         ComplexUnaryOp::Cos => "cos_complex_lane(idx)",
+        ComplexUnaryOp::Sinh => "sinh_complex_lane(idx)",
+        ComplexUnaryOp::Cosh => "cosh_complex_lane(idx)",
         ComplexUnaryOp::Tan => "tan_complex_lane(idx)",
         ComplexUnaryOp::Sign => "sign_complex_lane(idx)",
     };

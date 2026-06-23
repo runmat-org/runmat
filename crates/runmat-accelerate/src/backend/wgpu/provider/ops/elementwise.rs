@@ -189,6 +189,26 @@ impl WgpuProvider {
         self.complex_unary_exec(a, ComplexUnaryOp::Cos, true)
     }
 
+    pub(crate) fn unary_sinh_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sinh, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Sinh, true)
+    }
+
+    pub(crate) fn unary_cosh_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if self.effective_storage_for_entry(a, &entry)
+            != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            return self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Cosh, a);
+        }
+        self.complex_unary_exec(a, ComplexUnaryOp::Cosh, true)
+    }
+
     pub(crate) fn unary_tan_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(a)?;
         if self.effective_storage_for_entry(a, &entry)

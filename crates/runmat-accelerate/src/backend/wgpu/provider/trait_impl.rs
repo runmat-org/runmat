@@ -495,18 +495,14 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sinh, a) },
-        )
+        Box::pin(async move { self.unary_sinh_exec(a) })
     }
 
     fn unary_cosh<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Cosh, a) },
-        )
+        Box::pin(async move { self.unary_cosh_exec(a) })
     }
 
     fn unary_asin<'a>(
