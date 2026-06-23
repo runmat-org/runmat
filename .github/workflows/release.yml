@@ -574,20 +574,19 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          for d in crates/*; do
-            if [ -d "$d" ]; then
-              if [ -f LICENSE ] || [ -f LICENSE.md ]; then
-                cp -f LICENSE* "$d/" || true
-                if [ -f "$d/LICENSE.md" ]; then mv -f "$d/LICENSE.md" "$d/LICENSE"; fi
-              fi
+          while IFS= read -r toml; do
+            d="${toml%/*}"
+            if [ -f LICENSE ] || [ -f LICENSE.md ]; then
+              cp -f LICENSE* "$d/" || true
+              if [ -f "$d/LICENSE.md" ]; then mv -f "$d/LICENSE.md" "$d/LICENSE"; fi
             fi
-          done
+          done < <(find crates -mindepth 2 -maxdepth 4 -name Cargo.toml | sort)
 
       - name: Normalize Cargo.toml license metadata
         shell: bash
         run: |
           set -euxo pipefail
-          for toml in crates/*/Cargo.toml; do
+          while IFS= read -r toml; do
             if grep -Eq '^license-file[[:space:]]*=[[:space:]]*"\..*/LICENSE' "$toml"; then
               sed -E -i.bak 's#^license-file[[:space:]]*=[[:space:]]*"\..*/LICENSE.*#license-file = "LICENSE"#' "$toml"
               rm -f "$toml.bak"
@@ -595,7 +594,7 @@ jobs:
             if ! grep -Eq '^license[[:space:]]*=' "$toml" && [ -f "${toml%/*}/LICENSE" ]; then
               awk 'BEGIN{printed=0} {print} /^\[package\]/{if(!printed){print "license = \"MIT\""; printed=1}}' "$toml" > "$toml.tmp" && mv "$toml.tmp" "$toml"
             fi
-          done
+          done < <(find crates -mindepth 2 -maxdepth 4 -name Cargo.toml | sort)
 
       - name: Verify published crate assets
         shell: bash
