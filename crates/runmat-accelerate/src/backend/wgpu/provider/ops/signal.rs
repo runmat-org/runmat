@@ -14,17 +14,17 @@ impl WgpuProvider {
             "uniform_spectral_estimate: invalid request"
         );
 
-        let window_shape = [request.window.len(), 1usize];
-        let window = self.upload_exec(&HostTensorView {
-            data: request.window,
-            shape: &window_shape,
-        })?;
-
         let framed_len = request
             .nfft
             .checked_mul(request.frame_count)
             .and_then(|len| len.checked_mul(2))
             .ok_or_else(|| anyhow!("uniform_spectral_estimate: frame too large"))?;
+
+        let window_shape = [request.window.len(), 1usize];
+        let window = self.upload_exec(&HostTensorView {
+            data: request.window,
+            shape: &window_shape,
+        })?;
         let frame_shader = spectral_frame_shader(request, self.precision);
         let frame_inputs = [request.input.clone(), window.clone()];
         let framed = match self.fused_elementwise_with_telemetry_exec(
@@ -1637,6 +1637,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 
 fn spectral_centered_shift(nfft: usize) -> usize {
     if nfft.is_multiple_of(2) {
+        // Match the host signal helpers' centered-bin interval for even nfft.
         nfft / 2 + 1
     } else {
         nfft.div_ceil(2)

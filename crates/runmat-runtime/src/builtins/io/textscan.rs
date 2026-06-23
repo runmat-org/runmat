@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::io::{Read, Seek, SeekFrom};
 
+use encoding_rs::{Encoding, SHIFT_JIS};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -404,7 +405,7 @@ fn decode_shift_jis_with_offsets(bytes: &[u8], encoding: &str) -> BuiltinResult<
 
 fn shift_jis_unit_width(bytes: &[u8], offset: usize) -> BuiltinResult<usize> {
     let first = bytes[offset];
-    if first <= 0x7F || (0xA1..=0xDF).contains(&first) {
+    if first <= 0x80 || (0xA1..=0xDF).contains(&first) {
         return Ok(1);
     }
     if (0x81..=0x9F).contains(&first) || (0xE0..=0xFC).contains(&first) {
@@ -425,10 +426,7 @@ fn shift_jis_unit_width(bytes: &[u8], offset: usize) -> BuiltinResult<usize> {
 }
 
 fn is_shift_jis_encoding(encoding: &str) -> bool {
-    let label = encoding.trim();
-    label.eq_ignore_ascii_case("shift_jis")
-        || label.eq_ignore_ascii_case("shift-jis")
-        || label.eq_ignore_ascii_case("sjis")
+    Encoding::for_label(encoding.trim().as_bytes()) == Some(SHIFT_JIS)
 }
 
 fn byte_preserving_encoding_width(encoding: &str) -> BuiltinResult<Option<usize>> {
@@ -437,10 +435,7 @@ fn byte_preserving_encoding_width(encoding: &str) -> BuiltinResult<Option<usize>
     {
         return Ok(None);
     }
-    if label.eq_ignore_ascii_case("shift_jis")
-        || label.eq_ignore_ascii_case("shift-jis")
-        || label.eq_ignore_ascii_case("sjis")
-    {
+    if is_shift_jis_encoding(label) {
         return Ok(None);
     }
     if label.eq_ignore_ascii_case("binary")
@@ -1734,17 +1729,54 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn textscan_shift_jis_registered_file_restores_source_byte_position() {
+        shift_jis_registered_file_restores_source_byte_position(
+            "shift_jis",
+            &[
+                b'1', b' ', 0x82, 0xA0, b'\n', b'2', b' ', b'n', b'e', b'x', b't', b'\n',
+            ],
+            "あ",
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn textscan_shift_jis_alias_restores_source_byte_position() {
+        shift_jis_registered_file_restores_source_byte_position(
+            "windows-31j",
+            &[
+                b'1', b' ', 0x82, 0xA0, b'\n', b'2', b' ', b'n', b'e', b'x', b't', b'\n',
+            ],
+            "あ",
+        );
+        assert!(is_shift_jis_encoding("ms932"));
+        assert!(is_shift_jis_encoding("x-sjis"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn textscan_shift_jis_0x80_advances_one_source_byte() {
+        shift_jis_registered_file_restores_source_byte_position(
+            "ms932",
+            &[
+                b'1', b' ', 0x80, b'\n', b'2', b' ', b'n', b'e', b'x', b't', b'\n',
+            ],
+            "\u{80}",
+        );
+    }
+
+    fn shift_jis_registered_file_restores_source_byte_position(
+        encoding: &str,
+        bytes: &[u8],
+        expected_text: &str,
+    ) {
         let _guard = registry::test_guard();
         registry::reset_for_tests();
         let mut path = std::env::temp_dir();
-        path.push("runmat_textscan_shift_jis_position.txt");
-        std::fs::write(
-            &path,
-            [
-                b'1', b' ', 0x82, 0xA0, b'\n', b'2', b' ', b'n', b'e', b'x', b't', b'\n',
-            ],
-        )
-        .expect("write fixture");
+        path.push(format!(
+            "runmat_textscan_shift_jis_position_{}.txt",
+            encoding.replace('-', "_")
+        ));
+        std::fs::write(&path, bytes).expect("write fixture");
 
         let mut options = OpenOptions::new();
         options.read(true);
@@ -1754,7 +1786,7 @@ mod tests {
             path: path.clone(),
             permission: "r".to_string(),
             machinefmt: "native".to_string(),
-            encoding: "shift_jis".to_string(),
+            encoding: encoding.to_string(),
             handle: handle.clone(),
         });
 
@@ -1765,7 +1797,7 @@ mod tests {
         ))
         .expect("textscan");
         assert_eq!(numeric_column(&out, 0), vec![1.0]);
-        assert_eq!(text_column(&out, 1), vec!["あ".to_string()]);
+        assert_eq!(text_column(&out, 1), vec![expected_text.to_string()]);
 
         let mut remaining = Vec::new();
         let mut guard = handle.lock().expect("lock");

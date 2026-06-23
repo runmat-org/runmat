@@ -34,6 +34,13 @@ use data_contract::{
 
 #[async_trait(?Send)]
 pub trait FileHandle: Read + Write + Seek + Send + Sync {
+    async fn metadata_async(&self) -> io::Result<FsMetadata> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "file handle metadata is not supported by this provider",
+        ))
+    }
+
     async fn flush_async(&mut self) -> io::Result<()> {
         self.flush()
     }
@@ -45,6 +52,10 @@ pub trait FileHandle: Read + Write + Seek + Send + Sync {
 
 #[async_trait(?Send)]
 impl FileHandle for std::fs::File {
+    async fn metadata_async(&self) -> io::Result<FsMetadata> {
+        self.metadata().map(FsMetadata::from)
+    }
+
     async fn sync_all_async(&mut self) -> io::Result<()> {
         std::fs::File::sync_all(self)
     }
@@ -449,6 +460,10 @@ impl File {
 
     pub async fn flush_async(&mut self) -> io::Result<()> {
         self.inner.flush_async().await
+    }
+
+    pub async fn metadata_async(&self) -> io::Result<FsMetadata> {
+        self.inner.metadata_async().await
     }
 
     pub async fn sync_all_async(&mut self) -> io::Result<()> {

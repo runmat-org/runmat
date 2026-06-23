@@ -1262,7 +1262,16 @@ impl Seek for RemoteFileHandle {
 }
 
 #[async_trait(?Send)]
-impl FileHandle for RemoteFileHandle {}
+impl FileHandle for RemoteFileHandle {
+    async fn metadata_async(&self) -> io::Result<FsMetadata> {
+        Ok(FsMetadata::new(
+            FsFileType::File,
+            self.data.len() as u64,
+            None,
+            false,
+        ))
+    }
+}
 
 impl Drop for RemoteFileHandle {
     fn drop(&mut self) {

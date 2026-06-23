@@ -26,6 +26,7 @@ const MAX_XLSREAD_SELECTED_CELLS: usize = 5_000_000;
 const MAX_XLSREAD_WORKBOOK_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_XLSREAD_ZIP_TOTAL_UNCOMPRESSED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const MAX_XLSREAD_ZIP_ENTRIES: usize = 65_536;
 
 const XLSREAD_OUTPUT_NUM: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "num",
@@ -571,7 +572,8 @@ fn preflight_zip_workbook(bytes: &[u8]) -> BuiltinResult<()> {
             format!("xlsread: invalid ZIP workbook: {err}"),
         )
     })?;
-    let mut sizes = Vec::with_capacity(archive.len());
+    validate_zip_entry_count(archive.len())?;
+    let mut total = 0u64;
     for idx in 0..archive.len() {
         let entry = archive.by_index(idx).map_err(|err| {
             xlsread_error_with(
@@ -579,9 +581,9 @@ fn preflight_zip_workbook(bytes: &[u8]) -> BuiltinResult<()> {
                 format!("xlsread: unable to inspect ZIP workbook entry {idx}: {err}"),
             )
         })?;
-        sizes.push(entry.size());
+        validate_zip_uncompressed_entry(entry.size(), &mut total)?;
     }
-    validate_zip_uncompressed_limits(sizes)
+    Ok(())
 }
 
 fn looks_like_zip(bytes: &[u8]) -> bool {
@@ -590,34 +592,58 @@ fn looks_like_zip(bytes: &[u8]) -> bool {
         || bytes.starts_with(b"PK\x07\x08")
 }
 
+fn validate_zip_entry_count(entry_count: usize) -> BuiltinResult<()> {
+    if entry_count > MAX_XLSREAD_ZIP_ENTRIES {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            format!("xlsread: ZIP workbook contains more than {MAX_XLSREAD_ZIP_ENTRIES} entries"),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 fn validate_zip_uncompressed_limits<I>(sizes: I) -> BuiltinResult<()>
 where
     I: IntoIterator<Item = u64>,
 {
     let mut total = 0u64;
+    let mut entry_count = 0usize;
     for size in sizes {
-        if size > MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES {
-            return Err(xlsread_error_with(
-                &XLSREAD_ERROR_IO,
-                format!(
-                    "xlsread: ZIP workbook entry exceeds maximum expanded size of {MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES} bytes"
-                ),
-            ));
-        }
-        total = total.checked_add(size).ok_or_else(|| {
+        entry_count = entry_count.checked_add(1).ok_or_else(|| {
             xlsread_error_with(
                 &XLSREAD_ERROR_IO,
-                "xlsread: ZIP workbook expanded size overflows supported bounds",
+                "xlsread: ZIP workbook entry count overflows supported bounds",
             )
         })?;
-        if total > MAX_XLSREAD_ZIP_TOTAL_UNCOMPRESSED_BYTES {
-            return Err(xlsread_error_with(
-                &XLSREAD_ERROR_IO,
-                format!(
-                    "xlsread: ZIP workbook expanded size exceeds maximum of {MAX_XLSREAD_ZIP_TOTAL_UNCOMPRESSED_BYTES} bytes"
-                ),
-            ));
-        }
+        validate_zip_entry_count(entry_count)?;
+        validate_zip_uncompressed_entry(size, &mut total)?;
+    }
+    Ok(())
+}
+
+fn validate_zip_uncompressed_entry(size: u64, total: &mut u64) -> BuiltinResult<()> {
+    if size > MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            format!(
+                "xlsread: ZIP workbook entry exceeds maximum expanded size of {MAX_XLSREAD_ZIP_ENTRY_UNCOMPRESSED_BYTES} bytes"
+            ),
+        ));
+    }
+    *total = total.checked_add(size).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            "xlsread: ZIP workbook expanded size overflows supported bounds",
+        )
+    })?;
+    if *total > MAX_XLSREAD_ZIP_TOTAL_UNCOMPRESSED_BYTES {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_IO,
+            format!(
+                "xlsread: ZIP workbook expanded size exceeds maximum of {MAX_XLSREAD_ZIP_TOTAL_UNCOMPRESSED_BYTES} bytes"
+            ),
+        ));
     }
     Ok(())
 }
@@ -1537,6 +1563,13 @@ mod tests {
         let err = validate_zip_uncompressed_limits([part, part, part, part, 1])
             .expect_err("oversized total");
         assert!(err.message().contains("expanded size exceeds"));
+    }
+
+    #[test]
+    fn xlsread_zip_preflight_rejects_excessive_entry_count() {
+        let err =
+            validate_zip_entry_count(MAX_XLSREAD_ZIP_ENTRIES + 1).expect_err("too many entries");
+        assert!(err.message().contains("more than"));
     }
 
     #[test]

@@ -24,8 +24,8 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 const BUILTIN_NAME: &str = "writecell";
 const MAX_EXCEL_ROW_INDEX: usize = 1_048_575;
 const MAX_EXCEL_COLUMN_INDEX: usize = 16_383;
-type AppendLock = Arc<AsyncMutex<()>>;
-static APPEND_LOCKS: OnceLock<StdMutex<HashMap<String, AppendLock>>> = OnceLock::new();
+type WriteLock = Arc<AsyncMutex<()>>;
+static WRITE_LOCKS: OnceLock<StdMutex<HashMap<String, WriteLock>>> = OnceLock::new();
 
 const WRITECELL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "bytesWritten",
@@ -711,13 +711,13 @@ async fn write_delimited_cells(
     let delimiter = options.resolve_delimiter(path);
     let line_ending = options.line_ending.as_str();
     let payload = build_delimited_payload(table, options, &delimiter, line_ending);
+    let write_lock = write_lock_for_path(path).await;
+    let _write_guard = write_lock.lock().await;
+
     if options.write_mode == WriteMode::Overwrite {
         safe_replace_file(path, &payload, "delimited text").await?;
         return Ok(payload.len());
     }
-
-    let append_lock = append_lock_for_path(path);
-    let _append_guard = append_lock.lock().await;
 
     let mut open_options = OpenOptions::new();
     open_options.create(true).write(true).append(true);
@@ -762,28 +762,71 @@ async fn write_delimited_cells(
     Ok(bytes_written)
 }
 
-fn append_lock_for_path(path: &Path) -> AppendLock {
-    let key = append_lock_key(path);
-    let locks = APPEND_LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
+async fn write_lock_for_path(path: &Path) -> WriteLock {
+    let key = write_lock_key(path).await;
+    let locks = WRITE_LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
     let mut locks = locks
         .lock()
-        .expect("writecell append lock registry poisoned");
+        .expect("writecell write lock registry poisoned");
     locks
         .entry(key)
         .or_insert_with(|| Arc::new(AsyncMutex::new(())))
         .clone()
 }
 
-fn append_lock_key(path: &Path) -> String {
+async fn write_lock_key(path: &Path) -> String {
+    if let Ok(canonical) = runmat_filesystem::canonicalize_async(path).await {
+        return canonical.to_string_lossy().into_owned();
+    }
+
+    let absolute = lexical_absolute_path(path);
+    let mut candidate = absolute.as_path();
+    let mut suffix = PathBuf::new();
+    loop {
+        if let Ok(canonical) = runmat_filesystem::canonicalize_async(candidate).await {
+            let keyed = if suffix.as_os_str().is_empty() {
+                canonical
+            } else {
+                canonical.join(&suffix)
+            };
+            return keyed.to_string_lossy().into_owned();
+        }
+        let Some(name) = candidate.file_name() else {
+            break;
+        };
+        let mut next_suffix = PathBuf::from(name);
+        if !suffix.as_os_str().is_empty() {
+            next_suffix.push(&suffix);
+        }
+        suffix = next_suffix;
+        let Some(parent) = candidate.parent() else {
+            break;
+        };
+        if parent == candidate {
+            break;
+        }
+        candidate = parent;
+    }
+
+    lexical_normalize_path(absolute)
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn lexical_absolute_path(path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        std::env::current_dir()
+        runmat_filesystem::current_dir()
             .map(|cwd| cwd.join(path))
             .unwrap_or_else(|_| path.to_path_buf())
     };
+    lexical_normalize_path(absolute)
+}
+
+fn lexical_normalize_path(path: PathBuf) -> PathBuf {
     let mut normalized = PathBuf::new();
-    for component in absolute.components() {
+    for component in path.components() {
         match component {
             Component::CurDir => {}
             Component::ParentDir => {
@@ -792,7 +835,7 @@ fn append_lock_key(path: &Path) -> String {
             other => normalized.push(other.as_os_str()),
         }
     }
-    normalized.to_string_lossy().into_owned()
+    normalized
 }
 
 fn build_delimited_payload(
@@ -1312,9 +1355,13 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
     #[cfg(not(target_arch = "wasm32"))]
+    use std::sync::mpsc;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::Barrier;
     #[cfg(not(target_arch = "wasm32"))]
     use std::thread;
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::time::Duration;
 
     use runmat_builtins::{CharArray, LogicalArray, Tensor};
 
@@ -1486,6 +1533,52 @@ mod tests {
             let expected = format!("row{idx}|{idx}");
             assert!(lines.iter().any(|line| *line == expected));
         }
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn writecell_overwrite_uses_same_path_write_lock() {
+        let path = temp_path("txt");
+        fs::write(&path, "existing\n").expect("seed");
+        let filename = path.to_string_lossy().into_owned();
+        let lock = block_on(write_lock_for_path(&path));
+        let guard = block_on(lock.lock());
+        let (tx, rx) = mpsc::channel();
+
+        let handle = thread::spawn(move || {
+            let values = cell(vec![Value::from("replacement")], 1, 1);
+            block_on(writecell_builtin(values, vec![Value::from(filename)]))
+                .expect("overwrite write");
+            tx.send(()).expect("send completion");
+        });
+
+        thread::sleep(Duration::from_millis(50));
+        assert!(rx.try_recv().is_err());
+        drop(guard);
+        handle.join().expect("writer thread");
+        rx.recv_timeout(Duration::from_secs(1))
+            .expect("overwrite completion");
+
+        let contents = fs::read_to_string(&path).expect("read contents");
+        assert_eq!(contents, "\"replacement\"\n");
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writecell_canonical_aliases_share_write_lock() {
+        let path = temp_path("txt");
+        fs::write(&path, "").expect("seed");
+        let mut link = path.clone();
+        link.set_extension("link.txt");
+        std::os::unix::fs::symlink(&path, &link).expect("symlink");
+
+        let direct = block_on(write_lock_for_path(&path));
+        let alias = block_on(write_lock_for_path(&link));
+        assert!(Arc::ptr_eq(&direct, &alias));
+
+        let _ = fs::remove_file(link);
         let _ = fs::remove_file(path);
     }
 
