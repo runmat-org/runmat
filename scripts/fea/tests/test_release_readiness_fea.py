@@ -594,6 +594,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_TREND_BASELINE_SAMPLES",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND",
+            "RUNMAT_RELEASE_READINESS_ARTIFACT_REPLAY_OK",
+            "RUNMAT_RELEASE_READINESS_ARTIFACT_COMPAT_OK",
             "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
             "RUNMAT_THERMO_FIELD_SIGNING_KEY",
             "GITHUB_REF_NAME",
@@ -601,6 +603,29 @@ class ReleaseReadinessTests(unittest.TestCase):
             os.environ.pop(key, None)
 
     def test_pass_when_all_signals_healthy(self):
+        os.environ["RUNMAT_RELEASE_READINESS_ARTIFACT_REPLAY_OK"] = "true"
+        os.environ["RUNMAT_RELEASE_READINESS_ARTIFACT_COMPAT_OK"] = "true"
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.1,
+            contact_nonlinear_severity=0.1,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                plastic_nonlinear_severity=0.1,
+                contact_nonlinear_severity=0.1,
+            )
+        ]
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        self.assertEqual(result["verdict"], "pass")
+        self.assertEqual(result["reasons"], [])
+
+    def test_warns_when_artifact_verification_is_missing(self):
         latest = report(
             passed=True,
             publishable=True,
