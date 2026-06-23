@@ -1,10 +1,31 @@
 use runmat_builtins::{IntValue, Value};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 thread_local! {
     static ABI_GC_ROOTS: RefCell<HashMap<usize, runmat_gc::ExplicitRoot>> =
         RefCell::new(HashMap::new());
+}
+
+pub struct TurbineAbiRootScope {
+    baseline: HashSet<usize>,
+}
+
+impl TurbineAbiRootScope {
+    pub fn enter() -> Self {
+        let baseline = ABI_GC_ROOTS.with(|roots| roots.borrow().keys().copied().collect());
+        Self { baseline }
+    }
+}
+
+impl Drop for TurbineAbiRootScope {
+    fn drop(&mut self) {
+        ABI_GC_ROOTS.with(|roots| {
+            roots
+                .borrow_mut()
+                .retain(|addr, _root| self.baseline.contains(addr));
+        });
+    }
 }
 
 /// Stable value tag used by the Turbine host ABI.
@@ -118,6 +139,14 @@ impl TurbineValue {
                 runmat_gc::gc_clone_value(&ptr)
                     .map_err(|err| crate::execution_error(err.to_string()))
             }
+        }
+    }
+
+    pub fn release_gc_root(self) {
+        if self.tag == TurbineValueTag::GcHandle {
+            ABI_GC_ROOTS.with(|roots| {
+                roots.borrow_mut().remove(&(self.payload as usize));
+            });
         }
     }
 }

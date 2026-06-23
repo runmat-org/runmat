@@ -615,10 +615,20 @@ pub(crate) async fn addlistener_builtin(
         registry.next_id += 1;
         registry.next_id
     });
-    let target_root = match target {
-        Value::HandleObject(h) => runmat_gc::gc_root(h.target).map_err(|e| format!("gc: {e}"))?,
+    let (target_root, target_class_name) = match target {
+        Value::HandleObject(h) => {
+            let class_name = h.class_name.clone();
+            (
+                runmat_gc::gc_root(h.target).map_err(|e| format!("gc: {e}"))?,
+                class_name,
+            )
+        }
         Value::Object(o) => {
-            runmat_gc::gc_allocate_rooted(Value::Object(o)).map_err(|e| format!("gc: {e}"))?
+            let class_name = o.class_name.clone();
+            (
+                runmat_gc::gc_allocate_rooted(Value::Object(o)).map_err(|e| format!("gc: {e}"))?,
+                class_name,
+            )
         }
         _ => unreachable!(),
     };
@@ -627,6 +637,7 @@ pub(crate) async fn addlistener_builtin(
     let listener = runmat_builtins::Listener {
         id,
         target: target_root.handle(),
+        target_class_name,
         event_name: event_name.clone(),
         callback: callback_root.handle(),
         enabled: true,

@@ -3,29 +3,31 @@ use runmat_builtins::Value;
 use std::collections::HashSet;
 
 #[cfg(feature = "native-accel")]
-pub fn clear_value(value: &Value) {
-    clear_handles_in_value(value);
+pub fn clear_value(value: &Value) -> Result<(), String> {
+    clear_handles_in_value(value)
 }
 
 #[cfg(not(feature = "native-accel"))]
-pub fn clear_value(_value: &Value) {}
+pub fn clear_value(_value: &Value) -> Result<(), String> {
+    Ok(())
+}
 
 #[cfg(feature = "native-accel")]
-pub fn clear_value_excluding(current: &Value, incoming: &Value) {
+pub fn clear_value_excluding(current: &Value, incoming: &Value) -> Result<(), String> {
     let mut keep_ids = HashSet::new();
-    collect_gpu_buffer_ids(incoming, &mut keep_ids);
-    clear_handles_in_value_excluding(current, &keep_ids);
+    collect_gpu_buffer_ids(incoming, &mut keep_ids)?;
+    clear_handles_in_value_excluding(current, &keep_ids)
 }
 
 #[cfg(feature = "native-accel")]
-fn clear_handles_in_value(value: &Value) {
-    clear_handles_in_value_excluding(value, &HashSet::new());
+fn clear_handles_in_value(value: &Value) -> Result<(), String> {
+    clear_handles_in_value_excluding(value, &HashSet::new())
 }
 
 #[cfg(feature = "native-accel")]
-fn clear_handles_in_value_excluding(value: &Value, keep_ids: &HashSet<u64>) {
+fn clear_handles_in_value_excluding(value: &Value, keep_ids: &HashSet<u64>) -> Result<(), String> {
     let mut visited_handle_targets = HashSet::new();
-    clear_handles_in_value_excluding_with_visited(value, keep_ids, &mut visited_handle_targets);
+    clear_handles_in_value_excluding_with_visited(value, keep_ids, &mut visited_handle_targets)
 }
 
 #[cfg(feature = "native-accel")]
@@ -33,7 +35,7 @@ fn clear_handles_in_value_excluding_with_visited(
     value: &Value,
     keep_ids: &HashSet<u64>,
     visited_handle_targets: &mut HashSet<usize>,
-) {
+) -> Result<(), String> {
     match value {
         Value::GpuTensor(handle) => {
             if !keep_ids.contains(&handle.buffer_id) {
@@ -52,7 +54,7 @@ fn clear_handles_in_value_excluding_with_visited(
                     elem,
                     keep_ids,
                     visited_handle_targets,
-                );
+                )?;
             }
         }
         Value::Struct(struct_value) => {
@@ -61,7 +63,7 @@ fn clear_handles_in_value_excluding_with_visited(
                     elem,
                     keep_ids,
                     visited_handle_targets,
-                );
+                )?;
             }
         }
         Value::Object(object_value) => {
@@ -70,7 +72,7 @@ fn clear_handles_in_value_excluding_with_visited(
                     elem,
                     keep_ids,
                     visited_handle_targets,
-                );
+                )?;
             }
         }
         Value::Closure(closure) => {
@@ -79,7 +81,7 @@ fn clear_handles_in_value_excluding_with_visited(
                     capture,
                     keep_ids,
                     visited_handle_targets,
-                );
+                )?;
             }
         }
         Value::OutputList(values) => {
@@ -88,19 +90,20 @@ fn clear_handles_in_value_excluding_with_visited(
                     elem,
                     keep_ids,
                     visited_handle_targets,
-                );
+                )?;
             }
         }
         Value::HandleObject(handle) => {
             let raw_target = runmat_gc::gc_handle_addr(&handle.target);
             if visited_handle_targets.insert(raw_target) {
-                let _ = runmat_gc::gc_with_value(&handle.target, |target| {
+                runmat_gc::gc_with_value(&handle.target, |target| {
                     clear_handles_in_value_excluding_with_visited(
                         target,
                         keep_ids,
                         visited_handle_targets,
-                    );
-                });
+                    )
+                })
+                .map_err(|err| err.to_string())??;
             }
         }
         Value::Int(_)
@@ -123,12 +126,13 @@ fn clear_handles_in_value_excluding_with_visited(
         | Value::ClassRef(_)
         | Value::MException(_) => {}
     }
+    Ok(())
 }
 
 #[cfg(feature = "native-accel")]
-fn collect_gpu_buffer_ids(value: &Value, output: &mut HashSet<u64>) {
+fn collect_gpu_buffer_ids(value: &Value, output: &mut HashSet<u64>) -> Result<(), String> {
     let mut visited_handle_targets = HashSet::new();
-    collect_gpu_buffer_ids_with_visited(value, output, &mut visited_handle_targets);
+    collect_gpu_buffer_ids_with_visited(value, output, &mut visited_handle_targets)
 }
 
 #[cfg(feature = "native-accel")]
@@ -136,42 +140,43 @@ fn collect_gpu_buffer_ids_with_visited(
     value: &Value,
     output: &mut HashSet<u64>,
     visited_handle_targets: &mut HashSet<usize>,
-) {
+) -> Result<(), String> {
     match value {
         Value::GpuTensor(handle) => {
             output.insert(handle.buffer_id);
         }
         Value::Cell(cell) => {
             for elem in &cell.data {
-                collect_gpu_buffer_ids_with_visited(elem, output, visited_handle_targets);
+                collect_gpu_buffer_ids_with_visited(elem, output, visited_handle_targets)?;
             }
         }
         Value::Struct(struct_value) => {
             for elem in struct_value.fields.values() {
-                collect_gpu_buffer_ids_with_visited(elem, output, visited_handle_targets);
+                collect_gpu_buffer_ids_with_visited(elem, output, visited_handle_targets)?;
             }
         }
         Value::Object(object_value) => {
             for elem in object_value.properties.values() {
-                collect_gpu_buffer_ids_with_visited(elem, output, visited_handle_targets);
+                collect_gpu_buffer_ids_with_visited(elem, output, visited_handle_targets)?;
             }
         }
         Value::Closure(closure) => {
             for capture in &closure.captures {
-                collect_gpu_buffer_ids_with_visited(capture, output, visited_handle_targets);
+                collect_gpu_buffer_ids_with_visited(capture, output, visited_handle_targets)?;
             }
         }
         Value::OutputList(values) => {
             for elem in values {
-                collect_gpu_buffer_ids_with_visited(elem, output, visited_handle_targets);
+                collect_gpu_buffer_ids_with_visited(elem, output, visited_handle_targets)?;
             }
         }
         Value::HandleObject(handle) => {
             let raw_target = runmat_gc::gc_handle_addr(&handle.target);
             if visited_handle_targets.insert(raw_target) {
-                let _ = runmat_gc::gc_with_value(&handle.target, |target| {
-                    collect_gpu_buffer_ids_with_visited(target, output, visited_handle_targets);
-                });
+                runmat_gc::gc_with_value(&handle.target, |target| {
+                    collect_gpu_buffer_ids_with_visited(target, output, visited_handle_targets)
+                })
+                .map_err(|err| err.to_string())??;
             }
         }
         Value::Int(_)
@@ -194,6 +199,7 @@ fn collect_gpu_buffer_ids_with_visited(
         | Value::ClassRef(_)
         | Value::MException(_) => {}
     }
+    Ok(())
 }
 
 #[cfg(all(test, feature = "native-accel"))]
@@ -232,7 +238,7 @@ mod tests {
         let value = Value::Cell(
             CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).expect("cell"),
         );
-        clear_value(&value);
+        clear_value(&value).expect("clear nested cell handles");
         assert!(
             !fusion_residency::is_resident(&handle),
             "nested cell GPU handles should clear residency"
@@ -254,7 +260,7 @@ mod tests {
             bound_function: None,
             captures: vec![Value::GpuTensor(handle.clone())],
         });
-        clear_value(&value);
+        clear_value(&value).expect("clear nested closure handles");
         assert!(
             !fusion_residency::is_resident(&handle),
             "closure-captured GPU handles should clear residency"
@@ -278,7 +284,7 @@ mod tests {
             Value::GpuTensor(old_only.clone()),
         ]);
         let incoming = Value::GpuTensor(shared.clone());
-        clear_value_excluding(&current, &incoming);
+        clear_value_excluding(&current, &incoming).expect("clear excluding shared handles");
 
         assert!(
             fusion_residency::is_resident(&shared),
@@ -307,7 +313,7 @@ mod tests {
         assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
         fusion_residency::mark(&handle);
 
-        clear_value(&Value::GpuTensor(handle.clone()));
+        clear_value(&Value::GpuTensor(handle.clone())).expect("clear direct handle");
 
         assert!(
             !fusion_residency::is_resident(&handle),
@@ -337,7 +343,7 @@ mod tests {
             valid: true,
         });
 
-        clear_value(&value);
+        clear_value(&value).expect("clear handle-object target handles");
 
         assert!(
             !fusion_residency::is_resident(&handle),
@@ -375,7 +381,8 @@ mod tests {
             valid: true,
         });
 
-        clear_value_excluding(&current, &incoming);
+        clear_value_excluding(&current, &incoming)
+            .expect("clear excluding handle-object target handles");
 
         assert!(
             fusion_residency::is_resident(&shared),

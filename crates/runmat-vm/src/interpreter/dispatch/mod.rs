@@ -15,8 +15,10 @@ use crate::runtime::workspace::{
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{IntValue, ObjectInstance, StructValue, Tensor, Value};
 use runmat_runtime::dispatcher::gather_if_needed_async;
-use runmat_runtime::RuntimeError;
+use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::collections::{HashMap, HashSet};
+
+type VmResult<T> = Result<T, RuntimeError>;
 
 pub use arrays::{
     create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack,
@@ -476,55 +478,76 @@ fn spawn_task_id_from_value(value: &Value) -> Option<u64> {
     }
 }
 
-fn collect_spawn_task_ids_in_value(value: &Value, output: &mut HashSet<u64>) {
+fn collect_spawn_task_ids_in_value(value: &Value, output: &mut HashSet<u64>) -> VmResult<()> {
     let mut visited_handle_targets = HashSet::new();
-    collect_spawn_task_ids_in_value_with_visited(value, output, &mut visited_handle_targets);
+    collect_spawn_task_ids_in_value_with_visited(value, output, &mut visited_handle_targets)
 }
 
 fn collect_spawn_task_ids_in_value_with_visited(
     value: &Value,
     output: &mut HashSet<u64>,
     visited_handle_targets: &mut HashSet<usize>,
-) {
+) -> VmResult<()> {
     if let Some(task_id) = spawn_task_id_from_value(value) {
         output.insert(task_id);
     }
     match value {
         Value::Cell(cell) => {
             for entry in &cell.data {
-                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+                collect_spawn_task_ids_in_value_with_visited(
+                    entry,
+                    output,
+                    visited_handle_targets,
+                )?;
             }
         }
         Value::Struct(struct_value) => {
             for entry in struct_value.fields.values() {
-                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+                collect_spawn_task_ids_in_value_with_visited(
+                    entry,
+                    output,
+                    visited_handle_targets,
+                )?;
             }
         }
         Value::Object(object_value) => {
             for entry in object_value.properties.values() {
-                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+                collect_spawn_task_ids_in_value_with_visited(
+                    entry,
+                    output,
+                    visited_handle_targets,
+                )?;
             }
         }
         Value::Closure(closure) => {
             for entry in &closure.captures {
-                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+                collect_spawn_task_ids_in_value_with_visited(
+                    entry,
+                    output,
+                    visited_handle_targets,
+                )?;
             }
         }
         Value::OutputList(values) => {
             for entry in values {
-                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+                collect_spawn_task_ids_in_value_with_visited(
+                    entry,
+                    output,
+                    visited_handle_targets,
+                )?;
             }
         }
         Value::HandleObject(handle) => {
             let raw_target = runmat_gc::gc_handle_addr(&handle.target);
             if visited_handle_targets.insert(raw_target) {
-                let _ = runmat_gc::gc_with_value(&handle.target, |target| {
+                runmat_gc::gc_with_value(&handle.target, |target| {
                     collect_spawn_task_ids_in_value_with_visited(
                         target,
                         output,
                         visited_handle_targets,
-                    );
-                });
+                    )
+                })
+                .map_err(|err| build_runtime_error(err.to_string()).build())??;
             }
         }
         Value::Int(_)
@@ -548,9 +571,10 @@ fn collect_spawn_task_ids_in_value_with_visited(
         | Value::ClassRef(_)
         | Value::MException(_) => {}
     }
+    Ok(())
 }
 
-fn value_contains_spawn_task_id(value: &Value, task_id: u64) -> bool {
+fn value_contains_spawn_task_id(value: &Value, task_id: u64) -> VmResult<bool> {
     let mut visited_handle_targets = HashSet::new();
     value_contains_spawn_task_id_with_visited(value, task_id, &mut visited_handle_targets)
 }
@@ -559,35 +583,80 @@ fn value_contains_spawn_task_id_with_visited(
     value: &Value,
     task_id: u64,
     visited_handle_targets: &mut HashSet<usize>,
-) -> bool {
+) -> VmResult<bool> {
     if spawn_task_id_from_value(value) == Some(task_id) {
-        return true;
+        return Ok(true);
     }
-    match value {
-        Value::Cell(cell) => cell.data.iter().any(|entry| {
-            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
-        }),
-        Value::Struct(struct_value) => struct_value.fields.values().any(|entry| {
-            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
-        }),
-        Value::Object(object_value) => object_value.properties.values().any(|entry| {
-            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
-        }),
-        Value::Closure(closure) => closure.captures.iter().any(|entry| {
-            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
-        }),
-        Value::OutputList(values) => values.iter().any(|entry| {
-            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
-        }),
+    let found = match value {
+        Value::Cell(cell) => {
+            for entry in &cell.data {
+                if value_contains_spawn_task_id_with_visited(
+                    entry,
+                    task_id,
+                    visited_handle_targets,
+                )? {
+                    return Ok(true);
+                }
+            }
+            false
+        }
+        Value::Struct(struct_value) => {
+            for entry in struct_value.fields.values() {
+                if value_contains_spawn_task_id_with_visited(
+                    entry,
+                    task_id,
+                    visited_handle_targets,
+                )? {
+                    return Ok(true);
+                }
+            }
+            false
+        }
+        Value::Object(object_value) => {
+            for entry in object_value.properties.values() {
+                if value_contains_spawn_task_id_with_visited(
+                    entry,
+                    task_id,
+                    visited_handle_targets,
+                )? {
+                    return Ok(true);
+                }
+            }
+            false
+        }
+        Value::Closure(closure) => {
+            for entry in &closure.captures {
+                if value_contains_spawn_task_id_with_visited(
+                    entry,
+                    task_id,
+                    visited_handle_targets,
+                )? {
+                    return Ok(true);
+                }
+            }
+            false
+        }
+        Value::OutputList(values) => {
+            for entry in values {
+                if value_contains_spawn_task_id_with_visited(
+                    entry,
+                    task_id,
+                    visited_handle_targets,
+                )? {
+                    return Ok(true);
+                }
+            }
+            false
+        }
         Value::HandleObject(handle) => {
             let raw_target = runmat_gc::gc_handle_addr(&handle.target);
             if !visited_handle_targets.insert(raw_target) {
-                return false;
+                return Ok(false);
             }
             runmat_gc::gc_with_value(&handle.target, |target| {
                 value_contains_spawn_task_id_with_visited(target, task_id, visited_handle_targets)
             })
-            .unwrap_or(false)
+            .map_err(|err| build_runtime_error(err.to_string()).build())??
         }
         Value::Int(_)
         | Value::Num(_)
@@ -609,7 +678,8 @@ fn value_contains_spawn_task_id_with_visited(
         | Value::BoundFunctionHandle { .. }
         | Value::ClassRef(_)
         | Value::MException(_) => false,
-    }
+    };
+    Ok(found)
 }
 
 fn spawn_task_id_still_live(
@@ -620,26 +690,40 @@ fn spawn_task_id_still_live(
     excluded_var: Option<usize>,
     excluded_local: Option<usize>,
 ) -> bool {
-    if stack
-        .iter()
-        .any(|value| value_contains_spawn_task_id(value, task_id))
-    {
-        return true;
+    for value in stack {
+        match value_contains_spawn_task_id(value, task_id) {
+            Ok(true) => return true,
+            Ok(false) => {}
+            Err(err) => {
+                log::warn!("failed to traverse stack spawn task refs: {err}");
+                return true;
+            }
+        }
     }
     for (index, value) in vars.iter().enumerate() {
         if excluded_var == Some(index) {
             continue;
         }
-        if value_contains_spawn_task_id(value, task_id) {
-            return true;
+        match value_contains_spawn_task_id(value, task_id) {
+            Ok(true) => return true,
+            Ok(false) => {}
+            Err(err) => {
+                log::warn!("failed to traverse workspace spawn task refs: {err}");
+                return true;
+            }
         }
     }
     for (index, value) in context.locals.iter().enumerate() {
         if excluded_local == Some(index) {
             continue;
         }
-        if value_contains_spawn_task_id(value, task_id) {
-            return true;
+        match value_contains_spawn_task_id(value, task_id) {
+            Ok(true) => return true,
+            Ok(false) => {}
+            Err(err) => {
+                log::warn!("failed to traverse local spawn task refs: {err}");
+                return true;
+            }
         }
     }
     false
@@ -654,7 +738,10 @@ fn retire_spawn_task_id_if_dropped(
     excluded_local: Option<usize>,
 ) {
     let mut task_ids = HashSet::new();
-    collect_spawn_task_ids_in_value(value, &mut task_ids);
+    if let Err(err) = collect_spawn_task_ids_in_value(value, &mut task_ids) {
+        log::warn!("failed to collect dropped spawn task refs: {err}");
+        return;
+    }
     for id in task_ids {
         if !spawn_task_id_still_live(id, stack, vars, context, excluded_var, excluded_local) {
             context.spawned_task_ids.remove(&id);
@@ -672,12 +759,18 @@ fn retire_spawn_task_id_if_replaced(
     excluded_local: Option<usize>,
 ) {
     let mut current_ids = HashSet::new();
-    collect_spawn_task_ids_in_value(current, &mut current_ids);
+    if let Err(err) = collect_spawn_task_ids_in_value(current, &mut current_ids) {
+        log::warn!("failed to collect current spawn task refs: {err}");
+        return;
+    }
     if current_ids.is_empty() {
         return;
     }
     let mut incoming_ids = HashSet::new();
-    collect_spawn_task_ids_in_value(incoming, &mut incoming_ids);
+    if let Err(err) = collect_spawn_task_ids_in_value(incoming, &mut incoming_ids) {
+        log::warn!("failed to collect incoming spawn task refs: {err}");
+        return;
+    }
     for current_id in current_ids {
         if incoming_ids.contains(&current_id) {
             continue;
@@ -706,7 +799,11 @@ fn clear_popped_value_residency_excluding_live_values(
     live.extend(stack.iter().cloned());
     live.extend(vars.iter().cloned());
     live.extend(context.locals.iter().cloned());
-    crate::accel::residency::clear_value_excluding(popped, &Value::OutputList(live));
+    if let Err(err) =
+        crate::accel::residency::clear_value_excluding(popped, &Value::OutputList(live))
+    {
+        log::warn!("failed to clear popped GPU residency: {err}");
+    }
 }
 
 #[cfg(feature = "native-accel")]
@@ -720,7 +817,11 @@ fn clear_scope_value_residency_excluding_live_values(
     live.extend(stack.iter().cloned());
     live.extend(vars.iter().cloned());
     live.extend(context.locals.iter().cloned());
-    crate::accel::residency::clear_value_excluding(dropped_local, &Value::OutputList(live));
+    if let Err(err) =
+        crate::accel::residency::clear_value_excluding(dropped_local, &Value::OutputList(live))
+    {
+        log::warn!("failed to clear dropped local GPU residency: {err}");
+    }
 }
 
 #[cfg(feature = "native-accel")]
@@ -739,7 +840,11 @@ fn clear_overwritten_var_residency_excluding_live_values(
         }
     }
     live.extend(context.locals.iter().cloned());
-    crate::accel::residency::clear_value_excluding(overwritten, &Value::OutputList(live));
+    if let Err(err) =
+        crate::accel::residency::clear_value_excluding(overwritten, &Value::OutputList(live))
+    {
+        log::warn!("failed to clear overwritten variable GPU residency: {err}");
+    }
 }
 
 #[cfg(feature = "native-accel")]
@@ -758,7 +863,11 @@ fn clear_overwritten_local_residency_excluding_live_values(
             live.push(value.clone());
         }
     }
-    crate::accel::residency::clear_value_excluding(overwritten, &Value::OutputList(live));
+    if let Err(err) =
+        crate::accel::residency::clear_value_excluding(overwritten, &Value::OutputList(live))
+    {
+        log::warn!("failed to clear overwritten local GPU residency: {err}");
+    }
 }
 
 pub async fn dispatch_instruction(

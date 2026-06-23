@@ -282,9 +282,15 @@ fn test_independent_sessions_execute_on_distinct_threads() {
             gc_test_context(|| {
                 let mut engine = RunMatSession::new().unwrap();
                 let input = format!("x{i} = {i} * 2");
-                runmat_core::execute_text_request_for_testing(&mut engine, &input)
+                let expected = runmat_builtins::Value::Num((i * 2) as f64);
+                let assigned = runmat_core::execute_text_request_for_testing(&mut engine, &input)
                     .map(|result| result.error.is_none())
-                    .unwrap_or(false)
+                    .unwrap_or(false);
+                let read_back =
+                    runmat_core::execute_text_request_for_testing(&mut engine, &format!("x{i}"))
+                        .map(|result| result.error.is_none() && result.value == Some(expected))
+                        .unwrap_or(false);
+                assigned && read_back
             })
         });
         handles.push(handle);

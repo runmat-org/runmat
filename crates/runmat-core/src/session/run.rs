@@ -267,10 +267,10 @@ impl RunMatSession {
         // the outer interpret() is already on the call stack. On WASM the JS event
         // loop drives both as async state-machines and the WASM linear stack is
         // large, so nesting is safe. On native the default thread stack is too
-        // small for two nested interpret() invocations, so we instead run the inner
-        // interpret() on a dedicated thread that has its own 16 MB stack and block
-        // the calling future synchronously on the result (safe because the native
-        // executor — futures::executor::block_on — is already synchronous).
+        // small for two nested interpret() invocations. We cannot move the inner
+        // evaluation to another thread because `Value` can carry thread-confined
+        // GC handles, so the native path grows the current stack and blocks the
+        // calling future synchronously while the inner eval completes.
         let compat = self.compat_mode;
         let top_level_await_enabled = self.top_level_await_enabled;
         let source_name_for_eval_hook = self.current_source_name().to_string();
@@ -322,12 +322,30 @@ impl RunMatSession {
                             })
                     }
 
-                    Box::pin(eval_expr(
-                        expr,
-                        compat,
-                        top_level_await_enabled,
-                        Arc::clone(&known_project_symbols_for_eval_hook),
-                    ))
+                    let known_project_symbols = Arc::clone(&known_project_symbols_for_eval_hook);
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        Box::pin(eval_expr(
+                            expr,
+                            compat,
+                            top_level_await_enabled,
+                            known_project_symbols,
+                        ))
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        const INPUT_EVAL_STACK_BYTES: usize = 16 * 1024 * 1024;
+                        Box::pin(async move {
+                            stacker::grow(INPUT_EVAL_STACK_BYTES, || {
+                                futures::executor::block_on(eval_expr(
+                                    expr,
+                                    compat,
+                                    top_level_await_enabled,
+                                    known_project_symbols,
+                                ))
+                            })
+                        })
+                    }
                 },
             )));
 

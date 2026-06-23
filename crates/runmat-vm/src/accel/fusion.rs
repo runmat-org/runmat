@@ -419,7 +419,9 @@ pub fn write_elementwise_materialized_stores(
             VarKind::Global => {
                 let i = store.binding.index;
                 if i < vars.len() {
-                    accel_residency::clear_value_excluding(&vars[i], &value);
+                    if let Err(err) = accel_residency::clear_value_excluding(&vars[i], &value) {
+                        log::warn!("failed to clear fused global GPU residency: {err}");
+                    }
                 }
                 if i >= vars.len() {
                     vars.resize(i + 1, Value::Num(0.0));
@@ -433,12 +435,18 @@ pub fn write_elementwise_materialized_stores(
                     while context.locals.len() <= absolute {
                         context.locals.push(Value::Num(0.0));
                     }
-                    accel_residency::clear_value_excluding(&context.locals[absolute], &value);
+                    if let Err(err) =
+                        accel_residency::clear_value_excluding(&context.locals[absolute], &value)
+                    {
+                        log::warn!("failed to clear fused local GPU residency: {err}");
+                    }
                     context.locals[absolute] = value;
                 } else {
                     let i = store.binding.index;
                     if i < vars.len() {
-                        accel_residency::clear_value_excluding(&vars[i], &value);
+                        if let Err(err) = accel_residency::clear_value_excluding(&vars[i], &value) {
+                            log::warn!("failed to clear fused fallback GPU residency: {err}");
+                        }
                     }
                     if i >= vars.len() {
                         vars.resize(i + 1, Value::Num(0.0));

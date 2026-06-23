@@ -188,6 +188,7 @@ fn root_traversal_scans_nested_trace_variants() {
         let listener = Value::Listener(Listener {
             id: 1,
             target,
+            target_class_name: "Thing".to_string(),
             event_name: "Changed".to_string(),
             callback,
             enabled: true,

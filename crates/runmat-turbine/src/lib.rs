@@ -42,7 +42,7 @@ pub use cache::*;
 pub use compiler::*;
 pub use jit_memory::*;
 pub use profiler::HotspotProfiler;
-pub use value_abi::{TurbineArgSpec, TurbineValue, TurbineValueTag};
+pub use value_abi::{TurbineAbiRootScope, TurbineArgSpec, TurbineValue, TurbineValueTag};
 
 const JIT_FALLBACK_STACK_BYTES: usize = 16 * 1024 * 1024;
 const JIT_FALLBACK_STACK_ENV: &str = "RUNMAT_TURBINE_STACK_MB";
@@ -609,6 +609,7 @@ impl TurbineEngine {
 
         debug!("Executing compiled function {hash}");
 
+        let _abi_root_scope = TurbineAbiRootScope::enter();
         let mut turbine_vars: Vec<TurbineValue> = vars
             .iter()
             .cloned()

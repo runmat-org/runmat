@@ -1,5 +1,8 @@
 use std::cell::RefCell;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
+use std::hash::{Hash, Hasher};
 use std::rc::{Rc, Weak};
 use std::sync::OnceLock;
 
@@ -674,11 +677,11 @@ struct ActiveContext {
 }
 
 thread_local! {
-    static PLAN_CACHE: RefCell<HashMap<usize, Weak<FusionPlan>>> = RefCell::new(HashMap::new());
+    static PLAN_CACHE: RefCell<HashMap<u64, Weak<FusionPlan>>> = RefCell::new(HashMap::new());
     static ACTIVE_PLAN: RefCell<Option<ActiveContext>> = const { RefCell::new(None) };
 }
 
-fn with_plan_cache<R>(f: impl FnOnce(&mut HashMap<usize, Weak<FusionPlan>>) -> R) -> R {
+fn with_plan_cache<R>(f: impl FnOnce(&mut HashMap<u64, Weak<FusionPlan>>) -> R) -> R {
     PLAN_CACHE.with(|cache| f(&mut cache.borrow_mut()))
 }
 
@@ -730,7 +733,7 @@ pub fn prepare_fusion_plan(
         }
         return None;
     }
-    let key = graph as *const AccelGraph as usize;
+    let key = fusion_plan_cache_key(graph, &groups, candidate_group_count);
     if let Some(plan) = with_plan_cache(|cache| cache.get(&key).and_then(|weak| weak.upgrade())) {
         return Some(plan);
     }
@@ -741,6 +744,21 @@ pub fn prepare_fusion_plan(
         cache.insert(key, Rc::downgrade(&plan));
     });
     Some(plan)
+}
+
+fn fusion_plan_cache_key(
+    graph: &AccelGraph,
+    groups: &[FusionGroup],
+    candidate_group_count: usize,
+) -> u64 {
+    let mut text = String::new();
+    let _ = write!(
+        &mut text,
+        "candidates={candidate_group_count};graph={graph:?};groups={groups:?}"
+    );
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<FusionGroup> {
@@ -3578,6 +3596,24 @@ mod tests {
         assert!(
             std::rc::Rc::ptr_eq(&first, &second),
             "fusion plans should be reused within the current thread without implying Send/Sync ownership"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_cache_distinguishes_graph_content() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+        let first = prepare_fusion_plan(Some(&graph), &groups, 1).expect("first plan");
+
+        let mut changed_graph = simple_elementwise_graph();
+        changed_graph.nodes[0].label = AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv);
+        let changed_groups = detect_fusion_groups(&changed_graph);
+        let second =
+            prepare_fusion_plan(Some(&changed_graph), &changed_groups, 1).expect("second plan");
+
+        assert!(
+            !std::rc::Rc::ptr_eq(&first, &second),
+            "fusion plan cache must not reuse a plan for a different graph that happens to occupy a reused address"
         );
     }
 

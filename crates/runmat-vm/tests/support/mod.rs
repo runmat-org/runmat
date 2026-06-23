@@ -7,7 +7,23 @@ use runmat_runtime::RuntimeError;
 
 const EXEC_STACK_BYTES: usize = 32 * 1024 * 1024;
 
+struct VmThreadStateGuard;
+
+impl VmThreadStateGuard {
+    fn enter() -> Self {
+        runmat_vm::reset_thread_state_for_tests();
+        Self
+    }
+}
+
+impl Drop for VmThreadStateGuard {
+    fn drop(&mut self) {
+        runmat_vm::reset_thread_state_for_tests();
+    }
+}
+
 fn run_with_stack<T>(f: impl FnOnce() -> T) -> Result<T, RuntimeError> {
+    let _state_guard = VmThreadStateGuard::enter();
     Ok(stacker::grow(EXEC_STACK_BYTES, f))
 }
 

@@ -2914,7 +2914,6 @@ amt = c.amount;
             let outcome =
                 execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
                     .expect("execute script");
-            eprintln!("multilevel super outcome: {outcome:#?}");
 
             assert!(outcome_has_named_upsert(
                 &outcome,

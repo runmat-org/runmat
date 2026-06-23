@@ -288,6 +288,7 @@ pub(crate) mod tests {
         let listener_flag = run_isreal(Value::Listener(Listener {
             id: 42,
             target: test_handle_target(),
+            target_class_name: "EventTarget".into(),
             event_name: "changed".into(),
             callback: test_handle_target(),
             enabled: true,

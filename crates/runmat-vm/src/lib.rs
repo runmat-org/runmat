@@ -41,6 +41,13 @@ pub use runtime::workspace::{
     PendingWorkspaceGuard, WorkspaceAssignedReport,
 };
 
+#[doc(hidden)]
+pub fn reset_thread_state_for_tests() {
+    runtime::call_stack::reset_thread_state_for_tests();
+    runtime::globals::reset_thread_state_for_tests();
+    runtime::workspace::reset_thread_state_for_tests();
+}
+
 pub async fn call_method_or_member_index_named_with_outputs(
     base: runmat_builtins::Value,
     name: String,

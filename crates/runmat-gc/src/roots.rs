@@ -368,6 +368,7 @@ mod tests {
             Value::Listener(Listener {
                 id: 1,
                 target,
+                target_class_name: "widget".to_string(),
                 event_name: "Changed".to_string(),
                 callback,
                 enabled: true,
@@ -400,6 +401,7 @@ mod tests {
         let listener = Value::Listener(Listener {
             id: 7,
             target: handle_target,
+            target_class_name: "nested".to_string(),
             event_name: "Changed".to_string(),
             callback,
             enabled: true,

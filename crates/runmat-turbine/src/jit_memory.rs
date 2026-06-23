@@ -218,25 +218,23 @@ pub struct JitMemoryStats {
     pub array_pool_size: usize,
 }
 
-// Global JIT memory manager instance for the current thread.
 thread_local! {
-    static GLOBAL_JIT_MEMORY: &'static JitMemoryManager =
-        Box::leak(Box::new(JitMemoryManager::new()));
+    static GLOBAL_JIT_MEMORY: RefCell<JitMemoryManager> = RefCell::new(JitMemoryManager::new());
 }
 
-/// Get the global JIT memory manager
-pub fn get_jit_memory_manager() -> &'static JitMemoryManager {
-    GLOBAL_JIT_MEMORY.with(|manager| *manager)
+/// Borrow the global JIT memory manager for the current thread.
+pub fn with_jit_memory_manager<R>(f: impl FnOnce(&JitMemoryManager) -> R) -> R {
+    GLOBAL_JIT_MEMORY.with(|manager| f(&manager.borrow()))
 }
 
 /// Helper function to allocate a string for JIT use
 pub fn jit_allocate_string(s: &str) -> Result<(*const u8, usize), String> {
-    get_jit_memory_manager().allocate_string(s)
+    with_jit_memory_manager(|manager| manager.allocate_string(s))
 }
 
 /// Helper function to allocate an f64 array for JIT use
 pub fn jit_allocate_f64_array(values: &[f64]) -> Result<(*const f64, usize), String> {
-    get_jit_memory_manager().allocate_f64_array(values)
+    with_jit_memory_manager(|manager| manager.allocate_f64_array(values))
 }
 
 /// Helper to create runtime function signatures for Cranelift
@@ -358,8 +356,7 @@ mod tests {
     #[test]
     fn test_global_memory_manager() {
         runmat_gc::gc_test_context(|| {
-            let manager = get_jit_memory_manager();
-            manager.clear_pools();
+            with_jit_memory_manager(|manager| manager.clear_pools());
 
             let result = jit_allocate_string("global_test");
             assert!(result.is_ok());
@@ -367,7 +364,7 @@ mod tests {
             let array_result = jit_allocate_f64_array(&[1.0, 2.0]);
             assert!(array_result.is_ok());
 
-            manager.clear_pools();
+            with_jit_memory_manager(|manager| manager.clear_pools());
         });
     }
 

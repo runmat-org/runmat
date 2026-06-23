@@ -5394,6 +5394,7 @@ dependencies = [
  "runmat-time",
  "runmat-turbine",
  "runmat-vm",
+ "stacker",
  "tempfile",
  "tokio",
  "tracing",

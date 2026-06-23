@@ -447,6 +447,7 @@ pub(crate) mod tests {
         let listener = Listener {
             id: 1,
             target: test_handle_target(),
+            target_class_name: "EventTarget".into(),
             event_name: "Changed".into(),
             callback: test_handle_target(),
             enabled: true,

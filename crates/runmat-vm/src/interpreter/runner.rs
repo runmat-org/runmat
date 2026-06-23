@@ -75,7 +75,9 @@ fn ensure_wasm_builtins_registered() {
 
 #[cfg(feature = "native-accel")]
 fn clear_residency(value: &Value) {
-    accel_residency::clear_value(value);
+    if let Err(err) = accel_residency::clear_value(value) {
+        log::warn!("failed to clear GPU residency: {err}");
+    }
 }
 
 pub async fn invoke_semantic_function_value(
@@ -839,7 +841,9 @@ fn clear_semantic_function_temp_residency(result_vars: &[Value], output_values: 
     keep_values.extend(runtime_globals::collect_thread_roots());
     let keep = Value::OutputList(keep_values);
     for value in result_vars {
-        accel_residency::clear_value_excluding(value, &keep);
+        if let Err(err) = accel_residency::clear_value_excluding(value, &keep) {
+            log::warn!("failed to clear temporary semantic function GPU residency: {err}");
+        }
     }
 }
 
@@ -1351,7 +1355,9 @@ async fn run_interpreter_inner(
         live_values.extend(context.locals.iter().cloned());
         let live_values = Value::OutputList(live_values);
         for value in &stack {
-            accel_residency::clear_value_excluding(value, &live_values);
+            if let Err(err) = accel_residency::clear_value_excluding(value, &live_values) {
+                log::warn!("failed to clear stack GPU residency: {err}");
+            }
         }
     }
     sync_initial_vars(initial_vars, &vars);

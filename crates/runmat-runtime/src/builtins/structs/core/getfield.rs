@@ -1420,6 +1420,7 @@ pub(crate) mod tests {
         let listener = Listener {
             id: 9,
             target,
+            target_class_name: "EventTarget".to_string(),
             event_name: "tick".to_string(),
             callback,
             enabled: true,

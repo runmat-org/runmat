@@ -421,7 +421,9 @@ impl GarbageCollector {
         // RunMat has stop-the-world safepoints or synchronized root snapshots,
         // cross-thread collection must defer rather than miss another thread's
         // interpreter roots.
-        if registered_roots_exist_on_other_threads() {
+        if registered_roots_exist_on_other_threads()
+            || runmat_builtins::static_property_values_exist_on_other_threads()
+        {
             self.collection_in_progress.store(false, Ordering::Release);
             return Ok(0);
         }
@@ -438,6 +440,7 @@ impl GarbageCollector {
         if let Ok(mut ext) = ROOT_SCANNER.with(|scanner| scanner.scan_roots()) {
             combined_roots.append(&mut ext);
         }
+        combined_roots.extend(runmat_builtins::static_property_gc_roots());
         combined_roots.extend(gc_barrier_minor_roots());
 
         // Collect young generation via unified collector/allocator
@@ -483,7 +486,9 @@ impl GarbageCollector {
             return Ok(0);
         }
         // Same thread-local root visibility rule as minor collection.
-        if registered_roots_exist_on_other_threads() {
+        if registered_roots_exist_on_other_threads()
+            || runmat_builtins::static_property_values_exist_on_other_threads()
+        {
             self.collection_in_progress.store(false, Ordering::Release);
             return Ok(0);
         }
@@ -499,6 +504,7 @@ impl GarbageCollector {
         if let Ok(mut ext) = ROOT_SCANNER.with(|scanner| scanner.scan_roots()) {
             combined_roots.append(&mut ext);
         }
+        combined_roots.extend(runmat_builtins::static_property_gc_roots());
         combined_roots.extend(gc_barrier_minor_roots());
 
         let mut allocator = self.allocator.lock();

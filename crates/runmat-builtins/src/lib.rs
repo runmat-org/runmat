@@ -9,6 +9,8 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Mutex;
+use std::thread::ThreadId;
 pub use symbolic::{SymbolicExpr, SymbolicFunction};
 
 use indexmap::IndexMap;
@@ -2100,6 +2102,7 @@ impl PartialEq for HandleRef {
 pub struct Listener {
     pub id: u64,
     pub target: GcHandle,
+    pub target_class_name: String,
     pub event_name: String,
     pub callback: GcHandle,
     pub enabled: bool,
@@ -2108,7 +2111,7 @@ pub struct Listener {
 
 impl Listener {
     pub fn class_name(&self) -> String {
-        String::new()
+        self.target_class_name.clone()
     }
 }
 
@@ -2568,8 +2571,59 @@ thread_local! {
     static SEALED_CLASS_REGISTRY: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
     static ABSTRACT_CLASS_REGISTRY: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
     static STATIC_VALUES: RefCell<HashMap<(String, String), Value>> = RefCell::new(HashMap::new());
+    static STATIC_VALUE_THREAD_REGISTRATION: StaticValueThreadRegistration =
+        const { StaticValueThreadRegistration };
     static ENUMERATION_REGISTRY: RefCell<HashMap<String, HashSet<String>>> =
         RefCell::new(HashMap::new());
+}
+
+static STATIC_VALUE_THREADS: once_cell::sync::Lazy<Mutex<HashSet<ThreadId>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(HashSet::new()));
+
+struct StaticValueThreadRegistration;
+
+impl Drop for StaticValueThreadRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut threads) = STATIC_VALUE_THREADS.lock() {
+            threads.remove(&std::thread::current().id());
+        }
+    }
+}
+
+fn mark_static_values_thread_active() {
+    STATIC_VALUE_THREAD_REGISTRATION.with(|_| {});
+    if let Ok(mut threads) = STATIC_VALUE_THREADS.lock() {
+        threads.insert(std::thread::current().id());
+    }
+}
+
+pub fn static_property_values_exist_on_other_threads() -> bool {
+    let current = std::thread::current().id();
+    STATIC_VALUE_THREADS
+        .lock()
+        .map(|threads| threads.iter().any(|thread_id| *thread_id != current))
+        .unwrap_or(false)
+}
+
+pub fn static_property_gc_roots() -> Vec<GcHandle> {
+    struct RootCollector {
+        roots: Vec<GcHandle>,
+    }
+
+    impl Tracer for RootCollector {
+        fn mark(&mut self, handle: GcHandle) {
+            self.roots.push(handle);
+        }
+    }
+
+    STATIC_VALUES.with(|values| {
+        let values = values.borrow();
+        let mut collector = RootCollector { roots: Vec::new() };
+        for value in values.values() {
+            value.trace(&mut collector);
+        }
+        collector.roots
+    })
 }
 
 fn primitive_class_registry() -> HashMap<String, ClassDef> {
@@ -2756,6 +2810,7 @@ pub fn set_static_property_value(class_name: &str, prop: &str, value: Value) {
             .borrow_mut()
             .insert((class_name.to_string(), prop.to_string()), value);
     });
+    mark_static_values_thread_active();
 }
 
 /// Set a static property, resolving the defining ancestor class for storage.
