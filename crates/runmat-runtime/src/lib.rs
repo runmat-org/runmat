@@ -555,20 +555,20 @@ pub(crate) async fn addlistener_builtin(
         registry.next_id += 1;
         registry.next_id
     });
-    let tgt_gc = match target {
-        Value::HandleObject(h) => h.target,
+    let target_root = match target {
+        Value::HandleObject(h) => runmat_gc::gc_root(h.target).map_err(|e| format!("gc: {e}"))?,
         Value::Object(o) => {
-            runmat_gc::gc_allocate(Value::Object(o)).map_err(|e| format!("gc: {e}"))?
+            runmat_gc::gc_allocate_rooted(Value::Object(o)).map_err(|e| format!("gc: {e}"))?
         }
         _ => unreachable!(),
     };
     let callback = canonicalize_listener_callback(callback);
-    let cb_gc = runmat_gc::gc_allocate(callback).map_err(|e| format!("gc: {e}"))?;
+    let callback_root = runmat_gc::gc_allocate_rooted(callback).map_err(|e| format!("gc: {e}"))?;
     let listener = runmat_builtins::Listener {
         id,
-        target: tgt_gc,
+        target: target_root.handle(),
         event_name: event_name.clone(),
-        callback: cb_gc,
+        callback: callback_root.handle(),
         enabled: true,
         valid: true,
     };
@@ -2854,6 +2854,46 @@ mod tests {
         ))
         .expect_err("addlistener should reject non-object target");
         assert_eq!(err.identifier(), Some("RunMat:AddListenerTargetInvalid"));
+    }
+
+    #[test]
+    fn addlistener_preserves_object_target_when_callback_allocation_collects() {
+        runmat_gc::gc_test_context(|| {
+            let mut config = runmat_gc::GcConfig::default();
+            config.young_generation_size = 64 * 1024 * 1024;
+            config.minor_gc_threshold = 0.35;
+            config.major_gc_threshold = 0.9;
+            runmat_gc::gc_configure(config).expect("configure aggressive periodic minor GC");
+
+            for i in 0..30 {
+                let _ = runmat_gc::gc_allocate(Value::Num(i as f64)).expect("seed allocation");
+            }
+
+            let target = Value::Object(runmat_builtins::ObjectInstance::new(
+                "EventTarget".to_string(),
+            ));
+            let listener = block_on(addlistener_builtin(
+                target,
+                "ChangedSoundness".to_string(),
+                Value::FunctionHandle("sin".to_string()),
+            ))
+            .expect("listener registered");
+
+            let Value::Listener(listener) = listener else {
+                panic!("expected listener value");
+            };
+            let target = runmat_gc::gc_clone_value(&listener.target)
+                .expect("listener target should survive construction");
+            assert!(matches!(
+                target,
+                Value::Object(ref object) if object.class_name == "EventTarget"
+            ));
+            assert_eq!(
+                runmat_gc::gc_clone_value(&listener.callback)
+                    .expect("listener callback should survive construction"),
+                Value::FunctionHandle("sin".to_string())
+            );
+        });
     }
 
     #[test]
