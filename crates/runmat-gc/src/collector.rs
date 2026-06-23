@@ -136,10 +136,7 @@ impl MarkSweepCollector {
 
         // Mark all objects reachable from roots
         for root in roots.iter().cloned() {
-            let root_ptr: GcHandle<Value> = root;
-            if !root_ptr.is_null() {
-                self.mark_object(root_ptr, max_generation)?;
-            }
+            self.mark_object(root, max_generation)?;
         }
 
         log::trace!(
@@ -167,9 +164,7 @@ impl MarkSweepCollector {
         let mut child_roots = Vec::new();
         collect_value_roots(unsafe { &*obj.as_raw() }, &mut child_roots);
         for child in child_roots {
-            if !child.is_null() {
-                self.mark_object(child, max_generation)?;
-            }
+            self.mark_object(child, max_generation)?;
         }
 
         Ok(())

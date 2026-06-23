@@ -13,7 +13,6 @@ fn test_basic_allocation() {
             gc_clone_value(&ptr).expect("valid GC handle"),
             Value::Num(42.0)
         );
-        assert!(!ptr.is_null());
     });
 }
 

@@ -47,7 +47,7 @@ pub(crate) const IDENT_UNDEFINED_FUNCTION: &str = "RunMat:UndefinedFunction";
 pub(crate) const HANDLE_VALID_FLAG_PROPERTY: &str = "__runmat_handle_valid__";
 
 pub(crate) fn is_handle_valid(handle: &runmat_builtins::HandleRef) -> bool {
-    if !handle.valid || handle.target.is_null() {
+    if !handle.valid {
         return false;
     }
     runmat_gc::gc_with_value(&handle.target, |target| match target {
@@ -61,9 +61,6 @@ pub(crate) fn is_handle_valid(handle: &runmat_builtins::HandleRef) -> bool {
 }
 
 pub(crate) fn set_handle_valid(handle: &runmat_builtins::HandleRef, valid: bool) -> bool {
-    if handle.target.is_null() {
-        return false;
-    }
     runmat_gc::gc_with_value_mut(&handle.target, |target| match target {
         Value::Object(obj) => {
             obj.properties

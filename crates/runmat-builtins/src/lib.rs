@@ -2090,7 +2090,7 @@ pub struct HandleRef {
 }
 
 pub fn is_handle_valid(handle: &HandleRef) -> bool {
-    handle.valid && !handle.target.is_null()
+    handle.valid
 }
 
 pub fn set_handle_valid(_handle: &HandleRef, _valid: bool) -> bool {
@@ -2154,20 +2154,14 @@ impl Trace<Value> for ObjectInstance {
 
 impl Trace<Value> for HandleRef {
     fn trace(&self, tracer: &mut dyn Tracer<Value>) {
-        if !self.target.is_null() {
-            tracer.mark(self.target.clone());
-        }
+        tracer.mark(self.target.clone());
     }
 }
 
 impl Trace<Value> for Listener {
     fn trace(&self, tracer: &mut dyn Tracer<Value>) {
-        if !self.target.is_null() {
-            tracer.mark(self.target.clone());
-        }
-        if !self.callback.is_null() {
-            tracer.mark(self.callback.clone());
-        }
+        tracer.mark(self.target.clone());
+        tracer.mark(self.callback.clone());
     }
 }
 

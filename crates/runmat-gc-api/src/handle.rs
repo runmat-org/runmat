@@ -1,6 +1,7 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
 
 /// Opaque handle token for a RunMat GC allocation.
 ///
@@ -18,8 +19,8 @@ use std::marker::PhantomData;
 /// ```
 #[derive(Copy, Clone)]
 pub struct GcHandle<T> {
-    ptr: *const T,
-    _phantom: PhantomData<T>,
+    raw: NonZeroUsize,
+    _not_send_sync: PhantomData<*const T>,
 }
 
 impl<T> GcHandle<T> {
@@ -31,18 +32,15 @@ impl<T> GcHandle<T> {
     /// - The caller is responsible for upholding aliasing and lifetime invariants
     ///   when accessing the pointer through raw pointer APIs.
     pub unsafe fn from_raw(ptr: *const T) -> Self {
+        let raw = NonZeroUsize::new(ptr as usize).expect("GC handle pointer must be non-null");
         Self {
-            ptr,
-            _phantom: PhantomData,
+            raw,
+            _not_send_sync: PhantomData,
         }
     }
 
-    pub fn is_null(&self) -> bool {
-        self.ptr.is_null()
-    }
-
     pub fn addr(&self) -> usize {
-        self.ptr as usize
+        self.raw.get()
     }
 
     /// # Safety
@@ -52,13 +50,13 @@ impl<T> GcHandle<T> {
     /// (e.g., via rooting) for any dereference, and must respect aliasing and
     /// lifetime rules when using the pointer.
     pub unsafe fn as_raw(&self) -> *const T {
-        self.ptr
+        self.raw.get() as *const T
     }
 }
 
 impl<T> PartialEq for GcHandle<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.ptr == other.ptr
+        self.raw == other.raw
     }
 }
 
@@ -66,27 +64,19 @@ impl<T> Eq for GcHandle<T> {}
 
 impl<T> Hash for GcHandle<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.ptr.hash(state)
+        self.raw.hash(state)
     }
 }
 
 impl<T> fmt::Debug for GcHandle<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_null() {
-            write!(f, "GcHandle(null)")
-        } else {
-            write!(f, "GcHandle({:p})", self.ptr)
-        }
+        write!(f, "GcHandle({:p})", self.raw.get() as *const T)
     }
 }
 
 impl<T> fmt::Display for GcHandle<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_null() {
-            write!(f, "null")
-        } else {
-            write!(f, "{:p}", self.ptr)
-        }
+        write!(f, "{:p}", self.raw.get() as *const T)
     }
 }
 
