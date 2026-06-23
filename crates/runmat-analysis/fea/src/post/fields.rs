@@ -16,8 +16,8 @@ use crate::{
     assembly::{
         dofs::StructuralDofKind,
         elements::beam::{local_stiffness_matrix, BEAM_ELEMENT_DOF_COUNT},
-        AssemblySummary, BeamRecoveryElementSummary, PrepRecoveryEdgeSummary,
-        ShellRecoveryElementSummary, StructuralMaterialSummary,
+        AssemblySummary, BeamRecoveryElementSummary, PrepCoordinateSummary,
+        PrepRecoveryEdgeSummary, ShellRecoveryElementSummary, StructuralMaterialSummary,
     },
     operator::{apply_k, apply_k_unconstrained},
     solve::linear::LinearSolveResult,
@@ -512,6 +512,11 @@ fn prep_b_matrix_recovery_elements(
     }
 
     let node_count = displacement.len().div_ceil(VECTOR_COMPONENT_COUNT);
+    let full_elements = prep_full_b_matrix_recovery_elements(summary, node_count, prep_coordinates);
+    if !full_elements.is_empty() {
+        return full_elements;
+    }
+
     let sample_elements = prep_sample_b_matrix_recovery_elements(
         summary,
         node_count,
@@ -527,6 +532,64 @@ fn prep_b_matrix_recovery_elements(
         return sample_elements;
     }
 
+    fallback_b_matrix_recovery_elements(summary, node_count, prep_coordinates)
+}
+
+fn prep_full_b_matrix_recovery_elements(
+    summary: &AssemblySummary,
+    node_count: usize,
+    prep_coordinates: &PrepCoordinateSummary,
+) -> Vec<StructuralBMatrixElement> {
+    if prep_coordinates.element_topology_edge_nodes.len() < 3
+        || prep_coordinates.element_topology_element_edges.is_empty()
+        || prep_coordinates
+            .element_topology_node_coordinates_m
+            .is_empty()
+    {
+        return Vec::new();
+    }
+    prep_coordinates
+        .element_topology_element_edges
+        .iter()
+        .filter_map(|element_edges| {
+            let mut nodes = Vec::with_capacity(3);
+            for edge_index in element_edges {
+                let edge_index = *edge_index as usize;
+                let edge_nodes = *prep_coordinates
+                    .element_topology_edge_nodes
+                    .get(edge_index)?;
+                for node in edge_nodes {
+                    let node = node as usize;
+                    if node < node_count
+                        && node < prep_coordinates.element_topology_node_coordinates_m.len()
+                        && node_has_unconstrained_dof(summary, node)
+                        && !nodes.contains(&node)
+                    {
+                        nodes.push(node);
+                    }
+                }
+            }
+            if nodes.len() != 3 {
+                return None;
+            }
+            let coordinates_m = [
+                prep_coordinates.element_topology_node_coordinates_m[nodes[0]],
+                prep_coordinates.element_topology_node_coordinates_m[nodes[1]],
+                prep_coordinates.element_topology_node_coordinates_m[nodes[2]],
+            ];
+            reference_coordinates_are_valid(coordinates_m).then_some(StructuralBMatrixElement {
+                nodes: [nodes[0], nodes[1], nodes[2]],
+                coordinates_m,
+            })
+        })
+        .collect()
+}
+
+fn fallback_b_matrix_recovery_elements(
+    summary: &AssemblySummary,
+    node_count: usize,
+    prep_coordinates: &PrepCoordinateSummary,
+) -> Vec<StructuralBMatrixElement> {
     let mut nodes = summary
         .prep_recovery_edges
         .iter()

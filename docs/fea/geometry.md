@@ -54,6 +54,7 @@ Use inspection when you need to answer:
 | --- | --- |
 | What format is this file? | `geometry.inspect/v1` |
 | What meshes and regions were imported? | `geometry.list_regions/v1` |
+| What vertices and faces can I plot from a script? | `geometry.meshes(asset)` |
 | What are the basic counts and statistics? | `geometry.compute_stats/v1` |
 | Which entities match this bounded query? | `geometry.query_entities/v1` |
 | Can I save visual evidence for review? | `geometry.capture_view/v1` |

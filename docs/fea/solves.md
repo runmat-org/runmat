@@ -150,6 +150,8 @@ From RunMat code:
 run = fea.run(study);
 results = fea.results(run);
 stress = fea.field(results, "von_mises");
+figureHandle = fea.plot(run, "von_mises");
+print(figureHandle, "von_mises.png", "-dpng");
 
 later = fea.results(run.run_id);
 comparison = fea.compare("run_baseline", "run_candidate");

@@ -939,9 +939,31 @@ pub struct RunProvenance {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisRenderTopology {
+    pub schema_version: String,
+    pub source: AnalysisRenderTopologySource,
+    pub meshes: Vec<AnalysisRenderMesh>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisRenderTopologySource {
+    SolverPrep,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisRenderMesh {
+    pub mesh_id: String,
+    pub vertices: Vec<[f64; 3]>,
+    pub triangles: Vec<[u32; 3]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisRunResult {
     pub run_id: String,
     pub run: FeaRunResult,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_topology: Option<AnalysisRenderTopology>,
     pub modal_results: Option<ModalResultsData>,
     #[serde(default)]
     pub thermal_results: Option<ThermalResultsData>,
@@ -1732,6 +1754,8 @@ pub struct AnalysisStudyRunData {
     pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
     #[serde(default)]
     pub run_options: serde_json::Value,
+    #[serde(default)]
+    pub prep_artifact_id: Option<String>,
     pub study_fingerprint: String,
     pub operation_sequence: Vec<String>,
     pub run_operation: String,

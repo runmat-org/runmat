@@ -1,13 +1,13 @@
 use glam::{Vec3, Vec4};
 use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
 use runmat_plot::plots::{
-    BarChart, Figure, LinePlot, MeshDeformation, MeshFieldLocation, MeshScalarField,
-    MeshVectorField, PlotElement,
+    BarChart, Figure, LinePlot, MeshDeformation, MeshEdgeMode, MeshFieldLocation, MeshPlot,
+    MeshScalarField, MeshVectorField, PlotElement,
 };
 
 use super::contracts::{
-    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisRunKind, AnalysisRunResult,
-    AnalysisStudySpec, AnalysisTrendsData, AnalysisTrendsQuery,
+    AnalysisRenderTopology, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
+    AnalysisRunKind, AnalysisRunResult, AnalysisStudySpec, AnalysisTrendsData, AnalysisTrendsQuery,
 };
 use super::{analysis_results_compare_op, analysis_trends_op, collect_analysis_result_fields};
 use super::{run_kind, storage};
@@ -143,11 +143,19 @@ fn mesh_result_figures(
     run: &AnalysisRunResult,
     options: AnalysisFigureGenerationOptions,
 ) -> Vec<AnalysisGeneratedFigure> {
-    if geometry.surface_meshes.is_empty() || options.max_mesh_result_figures == 0 {
+    let render_topology = run
+        .render_topology
+        .as_ref()
+        .filter(|topology| render_topology_has_meshes(topology));
+    if (render_topology.is_none() && geometry.surface_meshes.is_empty())
+        || options.max_mesh_result_figures == 0
+    {
         return Vec::new();
     }
 
-    let estimated_geometry_bytes = geometry_surface_mesh_bytes(geometry);
+    let estimated_geometry_bytes = render_topology
+        .map(render_topology_mesh_bytes)
+        .unwrap_or_else(|| geometry_surface_mesh_bytes(geometry));
     let mut per_run_mesh_figure_limit = options.max_mesh_result_figures;
     let mut shared_warnings = Vec::new();
     if estimated_geometry_bytes > options.max_mesh_geometry_bytes {
@@ -159,20 +167,17 @@ fn mesh_result_figures(
     }
 
     let fields = collect_analysis_result_fields(run);
-    let preview_options = GeometryPreviewFigureOptions {
-        edge_overlay_triangle_limit: options.edge_overlay_triangle_limit,
-        ..GeometryPreviewFigureOptions::default()
-    };
-    let probe = match geometry_preview_figure(geometry, "FEA result", preview_options) {
-        Ok(figure) => figure,
-        Err(err) => {
-            return vec![warning_line_figure(
-                AnalysisGeneratedFigureKind::MeshResult,
-                "FEA result visualization",
-                format!("Geometry preview unavailable: {err}"),
-            )]
-        }
-    };
+    let probe =
+        match base_mesh_figure_for_run_source(geometry, render_topology, "FEA result", options) {
+            Some(figure) => figure,
+            None => {
+                return vec![warning_line_figure(
+                    AnalysisGeneratedFigureKind::MeshResult,
+                    "FEA result visualization",
+                    "Solver render topology and geometry preview are unavailable".to_string(),
+                )]
+            }
+        };
     let mesh_counts = collect_mesh_counts(&probe);
     if mesh_counts.is_empty() {
         return Vec::new();
@@ -188,6 +193,7 @@ fn mesh_result_figures(
         if figures.len() < per_run_mesh_figure_limit {
             if let Some(mut figure) = base_mesh_figure(
                 geometry,
+                render_topology,
                 format!("FEA deformed shape: {}", deformation.field_id),
                 options,
             ) {
@@ -212,7 +218,8 @@ fn mesh_result_figures(
             continue;
         };
         let title = format!("FEA scalar field: {}", scalar.field_id);
-        let Some(mut figure) = base_mesh_figure(geometry, title.clone(), options) else {
+        let Some(mut figure) = base_mesh_figure(geometry, render_topology, title.clone(), options)
+        else {
             continue;
         };
         let mut warnings = shared_warnings.clone();
@@ -243,7 +250,8 @@ fn mesh_result_figures(
             continue;
         };
         let title = format!("FEA vector field: {}", vector.field_id);
-        let Some(mut figure) = base_mesh_figure(geometry, title.clone(), options) else {
+        let Some(mut figure) = base_mesh_figure(geometry, render_topology, title.clone(), options)
+        else {
             continue;
         };
         let mut warnings = shared_warnings.clone();
@@ -268,6 +276,7 @@ fn mesh_result_figures(
     if figures.is_empty() {
         if let Some(figure) = base_mesh_figure(
             geometry,
+            render_topology,
             format!("FEA geometry result: {}", run.run_id),
             options,
         ) {
@@ -599,9 +608,25 @@ fn trend_figures(data: &AnalysisTrendsData) -> Vec<AnalysisGeneratedFigure> {
 
 fn base_mesh_figure(
     geometry: &runmat_geometry_core::GeometryAsset,
+    render_topology: Option<&AnalysisRenderTopology>,
     title: impl Into<String>,
     options: AnalysisFigureGenerationOptions,
 ) -> Option<Figure> {
+    base_mesh_figure_for_run_source(geometry, render_topology, title, options)
+}
+
+fn base_mesh_figure_for_run_source(
+    geometry: &runmat_geometry_core::GeometryAsset,
+    render_topology: Option<&AnalysisRenderTopology>,
+    title: impl Into<String>,
+    options: AnalysisFigureGenerationOptions,
+) -> Option<Figure> {
+    let title = title.into();
+    if let Some(topology) = render_topology {
+        if let Ok(figure) = render_topology_figure(topology, title.clone(), options) {
+            return Some(figure);
+        }
+    }
     geometry_preview_figure(
         geometry,
         title,
@@ -611,6 +636,69 @@ fn base_mesh_figure(
         },
     )
     .ok()
+}
+
+fn render_topology_figure(
+    topology: &AnalysisRenderTopology,
+    title: impl Into<String>,
+    options: AnalysisFigureGenerationOptions,
+) -> Result<Figure, String> {
+    if !render_topology_has_meshes(topology) {
+        return Err("solver render topology does not contain renderable meshes".to_string());
+    }
+    let mut figure = Figure::new()
+        .with_title(title)
+        .with_labels("X", "Y")
+        .with_grid(true)
+        .with_axis_equal(true);
+    figure.z_label = Some("Z".to_string());
+
+    for mesh in &topology.meshes {
+        if mesh.vertices.is_empty() || mesh.triangles.is_empty() {
+            continue;
+        }
+        let vertices = mesh
+            .vertices
+            .iter()
+            .map(|vertex| {
+                Ok(Vec3::new(
+                    f64_to_f32(vertex[0]).ok_or_else(|| {
+                        "solver render topology contains a non-renderable X coordinate".to_string()
+                    })?,
+                    f64_to_f32(vertex[1]).ok_or_else(|| {
+                        "solver render topology contains a non-renderable Y coordinate".to_string()
+                    })?,
+                    f64_to_f32(vertex[2]).ok_or_else(|| {
+                        "solver render topology contains a non-renderable Z coordinate".to_string()
+                    })?,
+                ))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let mut plot = MeshPlot::new(vertices, mesh.triangles.clone())?;
+        plot.set_mesh_id(Some(mesh.mesh_id.clone()));
+        plot.set_label(Some(format!(
+            "{}: {} solver triangles",
+            mesh.mesh_id,
+            mesh.triangles.len()
+        )));
+        plot.set_face_color(Vec4::new(0.34, 0.57, 0.82, 1.0));
+        plot.set_edge_color(Vec4::new(0.88, 0.93, 0.98, 0.82));
+        plot.set_face_alpha(0.94);
+        if mesh.triangles.len() > options.edge_overlay_triangle_limit {
+            plot.set_edge_mode(MeshEdgeMode::None);
+            plot.set_edge_width(0.0);
+        } else {
+            plot.set_edge_mode(MeshEdgeMode::All);
+            plot.set_edge_width(0.28);
+        }
+        figure.add_mesh_plot(plot);
+    }
+
+    if collect_mesh_counts(&figure).is_empty() {
+        Err("solver render topology did not produce any mesh plots".to_string())
+    } else {
+        Ok(figure)
+    }
 }
 
 fn collect_mesh_counts(figure: &Figure) -> Vec<MeshCounts> {
@@ -1139,6 +1227,24 @@ fn push_bar_value(
 fn geometry_surface_mesh_bytes(geometry: &runmat_geometry_core::GeometryAsset) -> usize {
     geometry
         .surface_meshes
+        .iter()
+        .map(|mesh| {
+            mesh.vertices.len() * 3 * std::mem::size_of::<f32>()
+                + mesh.triangles.len() * 3 * std::mem::size_of::<u32>()
+        })
+        .sum()
+}
+
+fn render_topology_has_meshes(topology: &AnalysisRenderTopology) -> bool {
+    topology
+        .meshes
+        .iter()
+        .any(|mesh| !mesh.vertices.is_empty() && !mesh.triangles.is_empty())
+}
+
+fn render_topology_mesh_bytes(topology: &AnalysisRenderTopology) -> usize {
+    topology
+        .meshes
         .iter()
         .map(|mesh| {
             mesh.vertices.len() * 3 * std::mem::size_of::<f32>()

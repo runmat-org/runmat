@@ -194,6 +194,8 @@ plan = fea.plan(study);
 result = fea.run(study);
 results = fea.results(result);
 stress = fea.field(results, "von_mises");
+fea.plot(result, "von_mises");
+print("bracket_von_mises.png", "-dpng");
 ```
 
 Use `.fea` when the study definition should be checked in as a portable declarative artifact:
@@ -203,9 +205,20 @@ study = fea.load("studies/bracket_static.fea");
 validation = fea.validate(study);
 result = fea.run(study);
 results = result.results();
+stress = result.field("structural.von_mises");
+peakStressPa = max(stress.values);
 ```
 
-`fea.load(...)` returns either a `fea.Study` or `fea.Sweep` object. `geometry.load(...)` returns a `geometry.Asset` object. The workflow builtins accept `.fea` paths, `fea.Study` objects, or `fea.Sweep` objects. `fea.RunResult` objects expose `results()` and `field(fieldId)` methods.
+`fea.load(...)` returns either a `fea.Study` or `fea.Sweep` object. `geometry.load(...)` returns a `geometry.Asset` object. The workflow builtins accept `.fea` paths, `fea.Study` objects, or `fea.Sweep` objects. `fea.RunResult` objects expose `results()`, `field(fieldId)`, and `plot(fieldId)` methods. `fea.Field` objects expose script-friendly `values`, `shape`, `unit`, `location`, `kind`, `family`, and `quantity` properties.
+
+For manual visualization, `geometry.meshes(asset)` returns patch-ready surface topology:
+
+```matlab
+asset = geometry.load("geometry/bracket.step");
+meshes = geometry.meshes(asset);
+m = meshes{1};
+patch("Faces", m.faces, "Vertices", m.vertices);
+```
 
 The typed constructors are:
 
@@ -222,6 +235,7 @@ The typed constructors are:
 | `fea.model(...)` | Explicit model assembled from typed components. |
 | `fea.study(...)` | Study assembled from geometry, physics profile/model data, backend, and run options. |
 | `fea.sweep(...)` | Study sweep assembled from `fea.Study` objects. |
+| `fea.plot(...)` | Create a RunMat figure for a result field on the study geometry mesh. |
 
 Region strings in these constructors use the same selector grammar as `.fea`: direct region id, `id:<region-id>`, `region:<region-id>`, `name:<region-name>`, or `tag:<tag>`.
 

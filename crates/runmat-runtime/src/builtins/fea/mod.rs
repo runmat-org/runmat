@@ -1,9 +1,9 @@
 use runmat_analysis_core::{
-    AnalysisInterface, AnalysisInterfaceKind, AnalysisModel, AnalysisModelId, AnalysisStep,
-    AnalysisStepKind, BoundaryCondition, BoundaryConditionKind, EvidenceConfidence, LoadCase,
-    LoadKind, MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel,
-    MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
-    ReferenceFrame,
+    AnalysisField, AnalysisFieldValues, AnalysisInterface, AnalysisInterfaceKind, AnalysisModel,
+    AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition, BoundaryConditionKind,
+    EvidenceConfidence, LoadCase, LoadKind, MaterialAcousticModel, MaterialAssignment,
+    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialPlasticModel,
+    MaterialThermalModel, ReferenceFrame,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_builtins::{
@@ -26,10 +26,11 @@ use crate::analysis::{
     analysis_validate_study_sweep_op, load_fea_document_from_path_async,
     AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
     AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisElectromagneticRunOptions,
-    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
-    AnalysisResultsCompareQuery, AnalysisResultsQuery, AnalysisRunKind, AnalysisRunOptions,
-    AnalysisStudySpec, AnalysisStudySweepSpec, AnalysisThermalRunOptions,
-    AnalysisTransientRunOptions, AnalysisTrendsQuery, FeaResolvedDocument,
+    AnalysisFieldDescriptor, AnalysisFsiRunOptions, AnalysisModalRunOptions,
+    AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery, AnalysisResultsQuery,
+    AnalysisRunKind, AnalysisRunOptions, AnalysisStudySpec, AnalysisStudySweepSpec,
+    AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendsQuery,
+    FeaResolvedDocument,
 };
 use crate::builtins::geometry::{GEOMETRY_ASSET_CLASS, GEOMETRY_ASSET_JSON_PROPERTY};
 use crate::builtins::io::json::jsondecode::value_from_json;
@@ -57,6 +58,8 @@ const FEA_TRENDS_CLASS: &str = "fea.Trends";
 const FEA_STUDY_SPEC_JSON_PROPERTY: &str = "__runmat_fea_study_spec_json";
 const FEA_SWEEP_SPEC_JSON_PROPERTY: &str = "__runmat_fea_sweep_spec_json";
 const FEA_PAYLOAD_JSON_PROPERTY: &str = "__runmat_fea_payload_json";
+const FEA_STUDY_CONTEXT_JSON_PROPERTY: &str = "__runmat_fea_study_context_json";
+const FEA_RUN_ID_CONTEXT_PROPERTY: &str = "__runmat_fea_run_id";
 
 const LOAD_NAME: &str = "fea.load";
 const STUDY_NAME: &str = "fea.study";
@@ -75,6 +78,7 @@ const PLAN_NAME: &str = "fea.plan";
 const RUN_NAME: &str = "fea.run";
 const RESULTS_NAME: &str = "fea.results";
 const FIELD_NAME: &str = "fea.field";
+const PLOT_NAME: &str = "fea.plot";
 const COMPARE_NAME: &str = "fea.compare";
 const TRENDS_NAME: &str = "fea.trends";
 
@@ -185,6 +189,11 @@ const FIELD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     inputs: &IN_VARIADIC_ARGS,
     outputs: &OUT_ANY,
 }];
+const PLOT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "figure = fea.plot(runOrResultsOrField, fieldId)",
+    inputs: &IN_VARIADIC_ARGS,
+    outputs: &OUT_ANY,
+}];
 const COMPARE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "comparison = fea.compare(baselineRunId, candidateRunId)",
     inputs: &IN_VARIADIC_ARGS,
@@ -285,6 +294,12 @@ pub const FEA_RESULTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const FEA_FIELD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &FIELD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+pub const FEA_PLOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PLOT_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
@@ -518,14 +533,7 @@ pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
 )]
 pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
     match resolve_document_input(input, RUN_NAME).await? {
-        FeaResolvedDocument::Study(spec) => operation_result_to_object(
-            RUN_NAME,
-            &ERROR_OPERATION,
-            &ERROR_INTERNAL,
-            FEA_RUN_RESULT_CLASS,
-            analysis_run_study_op(&spec, OperationContext::new(None, None)),
-            Some(FEA_PAYLOAD_JSON_PROPERTY),
-        ),
+        FeaResolvedDocument::Study(spec) => run_study_result_to_object(&spec),
         FeaResolvedDocument::Sweep(spec) => operation_result_to_object(
             RUN_NAME,
             &ERROR_OPERATION,
@@ -559,6 +567,18 @@ pub async fn fea_results_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 )]
 pub async fn fea_field_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     create_field_object_from_args(args)
+}
+
+#[runtime_builtin(
+    name = "fea.plot",
+    category = "fea",
+    summary = "Create a RunMat figure for an FEA result field on its geometry mesh.",
+    keywords = "fea,plot,visualize,mesh,von_mises,stress,field",
+    descriptor(crate::builtins::fea::FEA_PLOT_DESCRIPTOR),
+    builtin_path = "crate::builtins::fea"
+)]
+pub async fn fea_plot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    create_plot_from_args(args)
 }
 
 #[runtime_builtin(
@@ -1493,14 +1513,24 @@ fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     }
     let run_id = run_id_from_value(RESULTS_NAME, &args[0])?;
     let query = results_query_from_args(&args[1..])?;
-    operation_result_to_object(
+    let envelope = analysis_results_by_run_id_op(&run_id, query, OperationContext::new(None, None))
+        .map_err(|err| operation_error(RESULTS_NAME, &ERROR_OPERATION, err))?;
+    let mut object = serializable_to_object_value(
         RESULTS_NAME,
-        &ERROR_OPERATION,
         &ERROR_INTERNAL,
         FEA_RESULTS_CLASS,
-        analysis_results_by_run_id_op(&run_id, query, OperationContext::new(None, None)),
+        &envelope.data,
         Some(FEA_PAYLOAD_JSON_PROPERTY),
-    )
+    )?;
+    object
+        .properties
+        .insert("run_id".to_string(), Value::String(run_id.clone()));
+    object.properties.insert(
+        FEA_RUN_ID_CONTEXT_PROPERTY.to_string(),
+        Value::String(run_id),
+    );
+    copy_study_context_property(&args[0], &mut object);
+    Ok(Value::Object(object))
 }
 
 fn create_field_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1513,24 +1543,40 @@ fn create_field_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     }
     let field_id = scalar_string(&args[1], FIELD_NAME, &ERROR_INPUT)?;
     let results = results_data_from_value(FIELD_NAME, &args[0])?;
-    let field = results
-        .fields
-        .into_iter()
-        .find(|field| field.field_id == field_id)
-        .ok_or_else(|| {
-            builtin_error(
-                FIELD_NAME,
-                &ERROR_INPUT,
-                format!("FEA field `{field_id}` was not found in results"),
-            )
-        })?;
-    serializable_to_object(
-        FIELD_NAME,
-        &ERROR_INTERNAL,
-        FEA_FIELD_CLASS,
-        &field,
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
-    )
+    let field = find_field(results.fields.into_iter(), &field_id).ok_or_else(|| {
+        builtin_error(
+            FIELD_NAME,
+            &ERROR_INPUT,
+            format!("FEA field `{field_id}` was not found in results"),
+        )
+    })?;
+    let descriptor = find_descriptor(results.field_descriptors.iter(), &field_id)
+        .cloned()
+        .unwrap_or_else(|| AnalysisFieldDescriptor::from_field(&field));
+    let mut object = field_to_object(&field, &descriptor)?;
+    copy_study_context_property(&args[0], &mut object);
+    copy_run_id_context_property(&args[0], &mut object);
+    Ok(Value::Object(object))
+}
+
+fn create_plot_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+    #[cfg(feature = "plot-core")]
+    {
+        let request = plot_request_from_args(&args)?;
+        let mut figures = generate_plot_figures(&request.study, &request.run_id)?;
+        let figure = select_generated_figure(&mut figures, request.field_id.as_deref())?;
+        let handle = import_generated_figure(figure)?;
+        Ok(Value::Num(f64::from(handle)))
+    }
+    #[cfg(not(feature = "plot-core"))]
+    {
+        let _ = args;
+        Err(builtin_error(
+            PLOT_NAME,
+            &ERROR_OPERATION,
+            "fea.plot requires the plot-core runtime feature",
+        ))
+    }
 }
 
 fn create_compare_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -2200,15 +2246,13 @@ fn results_query_from_args(args: &[Value]) -> BuiltinResult<AnalysisResultsQuery
 fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<String> {
     match value {
         Value::Object(object) if object.class_name == FEA_RUN_RESULT_CLASS => {
-            if let Some(Value::String(run_id)) = object.properties.get("run_id") {
-                Ok(run_id.clone())
-            } else {
-                Err(builtin_error(
+            run_id_from_object(object).ok_or_else(|| {
+                builtin_error(
                     builtin,
                     &ERROR_INPUT,
                     "fea.RunResult does not contain a run_id; sweep results expose run_entries",
-                ))
-            }
+                )
+            })
         }
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
             scalar_string(value, builtin, &ERROR_INPUT)
@@ -2219,6 +2263,18 @@ fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Stri
             format!("expected run id string or fea.RunResult; got {other:?}"),
         )),
     }
+}
+
+fn run_id_from_object(object: &ObjectInstance) -> Option<String> {
+    object
+        .properties
+        .get(FEA_RUN_ID_CONTEXT_PROPERTY)
+        .or_else(|| object.properties.get("run_id"))
+        .or_else(|| object.properties.get("runId"))
+        .and_then(|value| match value {
+            Value::String(run_id) => Some(run_id.clone()),
+            _ => None,
+        })
 }
 
 fn results_data_from_value(
@@ -2240,6 +2296,439 @@ fn results_data_from_value(
             .map_err(|err| operation_error(builtin, &ERROR_OPERATION, err))
         }
     }
+}
+
+fn run_study_result_to_object(spec: &AnalysisStudySpec) -> BuiltinResult<Value> {
+    let envelope = analysis_run_study_op(spec, OperationContext::new(None, None))
+        .map_err(|err| operation_error(RUN_NAME, &ERROR_OPERATION, err))?;
+    let mut object = serializable_to_object_value(
+        RUN_NAME,
+        &ERROR_INTERNAL,
+        FEA_RUN_RESULT_CLASS,
+        &envelope.data,
+        Some(FEA_PAYLOAD_JSON_PROPERTY),
+    )?;
+    object.properties.insert(
+        FEA_RUN_ID_CONTEXT_PROPERTY.to_string(),
+        Value::String(envelope.data.run_id.clone()),
+    );
+    object.properties.insert(
+        "run_id".to_string(),
+        Value::String(envelope.data.run_id.clone()),
+    );
+    object.properties.insert(
+        "runId".to_string(),
+        Value::String(envelope.data.run_id.clone()),
+    );
+    insert_study_context(&mut object, spec)?;
+    Ok(Value::Object(object))
+}
+
+fn insert_study_context(
+    object: &mut ObjectInstance,
+    spec: &AnalysisStudySpec,
+) -> BuiltinResult<()> {
+    let json = serde_json::to_string(spec).map_err(|err| {
+        builtin_error_with_source(RUN_NAME, &ERROR_INTERNAL, err.to_string(), err)
+    })?;
+    object.properties.insert(
+        FEA_STUDY_CONTEXT_JSON_PROPERTY.to_string(),
+        Value::String(json),
+    );
+    Ok(())
+}
+
+fn copy_study_context_property(source: &Value, target: &mut ObjectInstance) {
+    if let Some(json) = study_context_json_from_value(source) {
+        target.properties.insert(
+            FEA_STUDY_CONTEXT_JSON_PROPERTY.to_string(),
+            Value::String(json),
+        );
+    }
+}
+
+fn copy_run_id_context_property(source: &Value, target: &mut ObjectInstance) {
+    if let Some(run_id) = run_id_context_from_value(source) {
+        target.properties.insert(
+            FEA_RUN_ID_CONTEXT_PROPERTY.to_string(),
+            Value::String(run_id.clone()),
+        );
+        target
+            .properties
+            .entry("run_id".to_string())
+            .or_insert(Value::String(run_id.clone()));
+        target
+            .properties
+            .entry("runId".to_string())
+            .or_insert(Value::String(run_id));
+    }
+}
+
+fn study_context_json_from_value(value: &Value) -> Option<String> {
+    let Value::Object(object) = value else {
+        return None;
+    };
+    if object.class_name == FEA_STUDY_CLASS {
+        if let Some(Value::String(json)) = object.properties.get(FEA_STUDY_SPEC_JSON_PROPERTY) {
+            return Some(json.clone());
+        }
+    }
+    object
+        .properties
+        .get(FEA_STUDY_CONTEXT_JSON_PROPERTY)
+        .and_then(|value| match value {
+            Value::String(json) => Some(json.clone()),
+            _ => None,
+        })
+}
+
+fn study_context_from_value(
+    builtin: &'static str,
+    value: &Value,
+) -> BuiltinResult<AnalysisStudySpec> {
+    let Some(json) = study_context_json_from_value(value) else {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("{builtin}: FEA plot requires study geometry context; pass a fea.RunResult from fea.run(study), a derived fea.Results/fea.Field, or call fea.plot(study, runId, fieldId)"),
+        ));
+    };
+    serde_json::from_str(&json)
+        .map_err(|err| builtin_error_with_source(builtin, &ERROR_INPUT, err.to_string(), err))
+}
+
+fn run_id_context_from_value(value: &Value) -> Option<String> {
+    let Value::Object(object) = value else {
+        return None;
+    };
+    run_id_from_object(object)
+}
+
+fn field_to_object(
+    field: &AnalysisField,
+    descriptor: &AnalysisFieldDescriptor,
+) -> BuiltinResult<ObjectInstance> {
+    ensure_fea_classes_registered();
+    let mut object = ObjectInstance::new(FEA_FIELD_CLASS.to_string());
+    object.properties.insert(
+        "field_id".to_string(),
+        Value::String(field.field_id.clone()),
+    );
+    object
+        .properties
+        .insert("id".to_string(), Value::String(field.field_id.clone()));
+    object.properties.insert(
+        "shape".to_string(),
+        usize_slice_tensor(&field.shape, 1, field.shape.len())?,
+    );
+    object
+        .properties
+        .insert("values".to_string(), field_values_value(field)?);
+    object.properties.insert(
+        "unit".to_string(),
+        Value::String(descriptor.unit.clone().unwrap_or_default()),
+    );
+    object.properties.insert(
+        "location".to_string(),
+        Value::String(format!("{:?}", descriptor.location).to_ascii_lowercase()),
+    );
+    object.properties.insert(
+        "kind".to_string(),
+        Value::String(format!("{:?}", descriptor.kind).to_ascii_lowercase()),
+    );
+    object.properties.insert(
+        "family".to_string(),
+        Value::String(descriptor.family.clone()),
+    );
+    object.properties.insert(
+        "quantity".to_string(),
+        Value::String(descriptor.quantity.clone()),
+    );
+    object.properties.insert(
+        "component_count".to_string(),
+        descriptor
+            .component_count
+            .map(|value| Value::Num(value as f64))
+            .unwrap_or_else(empty_double_value),
+    );
+    object.properties.insert(
+        "element_count".to_string(),
+        Value::Num(descriptor.element_count as f64),
+    );
+    object.properties.insert(
+        "storage".to_string(),
+        Value::String(format!("{:?}", descriptor.storage).to_ascii_lowercase()),
+    );
+    object.properties.insert(
+        "descriptor".to_string(),
+        serializable_to_value(FIELD_NAME, &ERROR_INTERNAL, descriptor)?,
+    );
+    let json = serde_json::to_string(field).map_err(|err| {
+        builtin_error_with_source(FIELD_NAME, &ERROR_INTERNAL, err.to_string(), err)
+    })?;
+    object
+        .properties
+        .insert(FEA_PAYLOAD_JSON_PROPERTY.to_string(), Value::String(json));
+    Ok(object)
+}
+
+fn field_values_value(field: &AnalysisField) -> BuiltinResult<Value> {
+    match &field.values {
+        AnalysisFieldValues::HostF64(values) => Tensor::new(values.clone(), field.shape.clone())
+            .map(Value::Tensor)
+            .map_err(|err| {
+                builtin_error(
+                    FIELD_NAME,
+                    &ERROR_INTERNAL,
+                    format!("fea.field: failed to build values tensor: {err}"),
+                )
+            }),
+        AnalysisFieldValues::DeviceRef(device) => {
+            serializable_to_value(FIELD_NAME, &ERROR_INTERNAL, device)
+        }
+    }
+}
+
+fn usize_slice_tensor(values: &[usize], rows: usize, cols: usize) -> BuiltinResult<Value> {
+    Tensor::new_2d(
+        values.iter().map(|value| *value as f64).collect(),
+        rows,
+        cols,
+    )
+    .map(Value::Tensor)
+    .map_err(|err| {
+        builtin_error(
+            FIELD_NAME,
+            &ERROR_INTERNAL,
+            format!("fea.field: failed to build metadata tensor: {err}"),
+        )
+    })
+}
+
+fn empty_double_value() -> Value {
+    Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty tensor shape is valid"))
+}
+
+fn find_field<I>(fields: I, requested: &str) -> Option<AnalysisField>
+where
+    I: IntoIterator<Item = AnalysisField>,
+{
+    let mut suffix_matches = Vec::new();
+    for field in fields {
+        if field.field_id == requested {
+            return Some(field);
+        }
+        if field_id_matches(&field.field_id, requested) {
+            suffix_matches.push(field);
+        }
+    }
+    if suffix_matches.len() == 1 {
+        suffix_matches.pop()
+    } else {
+        None
+    }
+}
+
+fn find_descriptor<'a, I>(descriptors: I, requested: &str) -> Option<&'a AnalysisFieldDescriptor>
+where
+    I: IntoIterator<Item = &'a AnalysisFieldDescriptor>,
+{
+    let mut suffix_matches = Vec::new();
+    for descriptor in descriptors {
+        if descriptor.field_id == requested {
+            return Some(descriptor);
+        }
+        if field_id_matches(&descriptor.field_id, requested) {
+            suffix_matches.push(descriptor);
+        }
+    }
+    if suffix_matches.len() == 1 {
+        suffix_matches.pop()
+    } else {
+        None
+    }
+}
+
+fn field_id_matches(candidate: &str, requested: &str) -> bool {
+    candidate == requested
+        || candidate
+            .strip_suffix(requested)
+            .is_some_and(|prefix| prefix.ends_with('.'))
+        || candidate
+            .rsplit_once('.')
+            .is_some_and(|(_, tail)| tail == requested)
+}
+
+struct FeaPlotRequest {
+    study: AnalysisStudySpec,
+    run_id: String,
+    field_id: Option<String>,
+}
+
+fn plot_request_from_args(args: &[Value]) -> BuiltinResult<FeaPlotRequest> {
+    if args.is_empty() {
+        return Err(builtin_error(
+            PLOT_NAME,
+            &ERROR_INPUT,
+            "fea.plot requires a run, results, field, or study/run pair",
+        ));
+    }
+
+    let (core, field_from_name_value) = split_plot_field_name_value(args)?;
+    match core {
+        [single] => plot_request_from_context_value(single, field_from_name_value),
+        [first, second] if is_fea_study(first) => {
+            let study = study_context_from_value(PLOT_NAME, first)?;
+            let run_id = run_id_from_value(PLOT_NAME, second)?;
+            Ok(FeaPlotRequest {
+                study,
+                run_id,
+                field_id: field_from_name_value,
+            })
+        }
+        [first, second] => {
+            let mut request = plot_request_from_context_value(first, None)?;
+            request.field_id = Some(scalar_string(second, PLOT_NAME, &ERROR_INPUT)?);
+            if field_from_name_value.is_some() {
+                request.field_id = field_from_name_value;
+            }
+            Ok(request)
+        }
+        [first, second, third] if is_fea_study(first) => {
+            let study = study_context_from_value(PLOT_NAME, first)?;
+            let run_id = run_id_from_value(PLOT_NAME, second)?;
+            let field_id = match field_from_name_value {
+                Some(field_id) => Some(field_id),
+                None => Some(scalar_string(third, PLOT_NAME, &ERROR_INPUT)?),
+            };
+            Ok(FeaPlotRequest {
+                study,
+                run_id,
+                field_id,
+            })
+        }
+        _ => Err(builtin_error(
+            PLOT_NAME,
+            &ERROR_INPUT,
+            "fea.plot supports plot(run, field), plot(results, field), plot(field), or plot(study, runId, field)",
+        )),
+    }
+}
+
+fn split_plot_field_name_value(args: &[Value]) -> BuiltinResult<(&[Value], Option<String>)> {
+    if args.len() >= 3 && is_field_option_name(&args[args.len() - 2]) {
+        let field_id = scalar_string(&args[args.len() - 1], PLOT_NAME, &ERROR_INPUT)?;
+        Ok((&args[..args.len() - 2], Some(field_id)))
+    } else {
+        Ok((args, None))
+    }
+}
+
+fn is_field_option_name(value: &Value) -> bool {
+    scalar_string(value, PLOT_NAME, &ERROR_INPUT)
+        .map(|name| {
+            matches!(
+                name.to_ascii_lowercase().as_str(),
+                "field" | "fieldid" | "field_id"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn is_fea_study(value: &Value) -> bool {
+    matches!(value, Value::Object(object) if object.class_name == FEA_STUDY_CLASS)
+}
+
+fn plot_request_from_context_value(
+    value: &Value,
+    field_override: Option<String>,
+) -> BuiltinResult<FeaPlotRequest> {
+    let study = study_context_from_value(PLOT_NAME, value)?;
+    let run_id = run_id_context_from_value(value)
+        .or_else(|| run_id_from_value(PLOT_NAME, value).ok())
+        .ok_or_else(|| {
+            builtin_error(
+                PLOT_NAME,
+                &ERROR_INPUT,
+                "fea.plot requires a run_id; use a fea.RunResult from fea.run or pass fea.plot(study, runId, field)",
+            )
+        })?;
+    let field_id = field_override.or_else(|| match value {
+        Value::Object(object) if object.class_name == FEA_FIELD_CLASS => object
+            .properties
+            .get("field_id")
+            .and_then(|value| match value {
+                Value::String(field_id) => Some(field_id.clone()),
+                _ => None,
+            }),
+        _ => None,
+    });
+    Ok(FeaPlotRequest {
+        study,
+        run_id,
+        field_id,
+    })
+}
+
+#[cfg(feature = "plot-core")]
+fn generate_plot_figures(
+    study: &AnalysisStudySpec,
+    run_id: &str,
+) -> BuiltinResult<Vec<crate::analysis::AnalysisGeneratedFigure>> {
+    crate::analysis::analysis_generate_study_run_figures(
+        study,
+        run_id,
+        crate::analysis::AnalysisFigureGenerationOptions {
+            include_comparison: false,
+            include_trends: false,
+            max_mesh_result_figures: 8,
+            ..crate::analysis::AnalysisFigureGenerationOptions::default()
+        },
+    )
+    .map_err(|err| builtin_error(PLOT_NAME, &ERROR_OPERATION, err))
+}
+
+#[cfg(feature = "plot-core")]
+fn select_generated_figure(
+    figures: &mut Vec<crate::analysis::AnalysisGeneratedFigure>,
+    field_id: Option<&str>,
+) -> BuiltinResult<crate::analysis::AnalysisGeneratedFigure> {
+    if figures.is_empty() {
+        return Err(builtin_error(
+            PLOT_NAME,
+            &ERROR_OPERATION,
+            "fea.plot could not generate a renderable FEA figure for this run",
+        ));
+    }
+    let Some(field_id) = field_id else {
+        return Ok(figures.remove(0));
+    };
+    if let Some(index) = figures.iter().position(|figure| {
+        figure
+            .field_ids
+            .iter()
+            .any(|candidate| field_id_matches(candidate, field_id))
+    }) {
+        return Ok(figures.remove(index));
+    }
+    let available = figures
+        .iter()
+        .flat_map(|figure| figure.field_ids.iter())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(builtin_error(
+        PLOT_NAME,
+        &ERROR_INPUT,
+        format!("FEA field `{field_id}` did not produce a mesh figure; available figure fields: {available}"),
+    ))
+}
+
+#[cfg(feature = "plot-core")]
+fn import_generated_figure(figure: crate::analysis::AnalysisGeneratedFigure) -> BuiltinResult<u32> {
+    Ok(crate::builtins::plotting::import_runtime_figure(
+        figure.figure,
+    ))
 }
 
 struct NameValuePair<'a> {
@@ -2712,6 +3201,28 @@ fn serializable_to_object<T: Serialize>(
     value: &T,
     hidden_json_property: Option<&'static str>,
 ) -> BuiltinResult<Value> {
+    serializable_to_object_value(builtin, error, class_name, value, hidden_json_property)
+        .map(Value::Object)
+}
+
+fn serializable_to_value<T: Serialize>(
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+    value: &T,
+) -> BuiltinResult<Value> {
+    let json = serde_json::to_value(value)
+        .map_err(|err| builtin_error_with_source(builtin, error, err.to_string(), err))?;
+    value_from_json(&json)
+        .map_err(|err| builtin_error_with_source(builtin, error, err.message().to_string(), err))
+}
+
+fn serializable_to_object_value<T: Serialize>(
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+    class_name: &'static str,
+    value: &T,
+    hidden_json_property: Option<&'static str>,
+) -> BuiltinResult<ObjectInstance> {
     ensure_fea_classes_registered();
     let json = serde_json::to_value(value)
         .map_err(|err| builtin_error_with_source(builtin, error, err.to_string(), err))?;
@@ -2728,7 +3239,7 @@ fn serializable_to_object<T: Serialize>(
             .properties
             .insert(property.to_string(), Value::String(json.to_string()));
     }
-    Ok(Value::Object(object))
+    Ok(object)
 }
 
 fn geometry_asset_from_value(value: &Value) -> BuiltinResult<GeometryAsset> {
@@ -2887,7 +3398,11 @@ fn ensure_fea_classes_registered() {
                 name: class_name.to_string(),
                 parent: None,
                 properties: HashMap::new(),
-                methods: HashMap::new(),
+                methods: if class_name == FEA_FIELD_CLASS {
+                    field_methods()
+                } else {
+                    HashMap::new()
+                },
             });
         }
     });
@@ -2918,7 +3433,31 @@ fn workflow_methods() -> HashMap<String, MethodDef> {
 }
 
 fn run_result_methods() -> HashMap<String, MethodDef> {
-    [("results", RESULTS_NAME), ("field", FIELD_NAME)]
+    [
+        ("results", RESULTS_NAME),
+        ("field", FIELD_NAME),
+        ("plot", PLOT_NAME),
+    ]
+    .into_iter()
+    .map(|(name, function_name)| {
+        (
+            name.to_string(),
+            MethodDef {
+                name: name.to_string(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: function_name.to_string(),
+                implicit_class_argument: None,
+            },
+        )
+    })
+    .collect()
+}
+
+fn results_methods() -> HashMap<String, MethodDef> {
+    [("field", FIELD_NAME), ("plot", PLOT_NAME)]
         .into_iter()
         .map(|(name, function_name)| {
             (
@@ -2937,8 +3476,8 @@ fn run_result_methods() -> HashMap<String, MethodDef> {
         .collect()
 }
 
-fn results_methods() -> HashMap<String, MethodDef> {
-    [("field", FIELD_NAME)]
+fn field_methods() -> HashMap<String, MethodDef> {
+    [("plot", PLOT_NAME)]
         .into_iter()
         .map(|(name, function_name)| {
             (
@@ -3312,6 +3851,176 @@ run:
         ]))
         .expect("sweep should build");
         assert_object_class(&sweep, FEA_SWEEP_CLASS);
+    }
+
+    #[test]
+    fn fea_results_field_exposes_values_metadata_and_plot_context() {
+        let (run_value, _study) = synthetic_plot_run_value();
+
+        let results = block_on(fea_results_builtin(vec![run_value])).expect("results should load");
+        let Value::Object(results_object) = results.clone() else {
+            panic!("expected results object");
+        };
+        assert_eq!(results_object.class_name, FEA_RESULTS_CLASS);
+        assert_eq!(
+            results_object.properties.get("run_id"),
+            Some(&Value::String("synthetic_plot_run".to_string()))
+        );
+        assert!(results_object
+            .properties
+            .contains_key(FEA_STUDY_CONTEXT_JSON_PROPERTY));
+
+        let field = block_on(fea_field_builtin(vec![
+            results,
+            Value::String("von_mises".to_string()),
+        ]))
+        .expect("field should resolve by unique suffix");
+        let Value::Object(field_object) = field else {
+            panic!("expected field object");
+        };
+        assert_eq!(field_object.class_name, FEA_FIELD_CLASS);
+        assert_eq!(
+            field_object.properties.get("field_id"),
+            Some(&Value::String("structural.von_mises".to_string()))
+        );
+        assert_eq!(
+            field_object.properties.get("unit"),
+            Some(&Value::String("Pa".to_string()))
+        );
+        assert_eq!(
+            field_object.properties.get("location"),
+            Some(&Value::String("element".to_string()))
+        );
+        let Some(Value::Tensor(values)) = field_object.properties.get("values") else {
+            panic!("expected values tensor");
+        };
+        assert_eq!(values.shape, vec![1]);
+        assert_eq!(values.data, vec![42.0]);
+        assert!(field_object
+            .properties
+            .contains_key(FEA_STUDY_CONTEXT_JSON_PROPERTY));
+        assert_eq!(
+            field_object.properties.get(FEA_RUN_ID_CONTEXT_PROPERTY),
+            Some(&Value::String("synthetic_plot_run".to_string()))
+        );
+    }
+
+    #[cfg(feature = "plot-core")]
+    #[test]
+    fn fea_plot_returns_figure_handle_for_contextual_run_results_and_fields() {
+        let (run_value, _study) = synthetic_plot_run_value();
+
+        let run_handle = block_on(fea_plot_builtin(vec![
+            run_value.clone(),
+            Value::String("von_mises".to_string()),
+        ]))
+        .expect("run plot should create a figure");
+        assert!(matches!(run_handle, Value::Num(handle) if handle >= 1.0));
+
+        let results = block_on(fea_results_builtin(vec![run_value])).expect("results should load");
+        let field = block_on(fea_field_builtin(vec![
+            results,
+            Value::String("structural.von_mises".to_string()),
+        ]))
+        .expect("field should resolve");
+        let field_handle =
+            block_on(fea_plot_builtin(vec![field])).expect("field plot should create a figure");
+        assert!(matches!(field_handle, Value::Num(handle) if handle >= 1.0));
+    }
+
+    fn synthetic_plot_run_value() -> (Value, Value) {
+        crate::analysis::storage::configure_artifact_store(
+            crate::analysis::storage::AnalysisArtifactStoreConfig::InMemory,
+        )
+        .expect("artifact store should configure");
+
+        let tmp = tempfile::tempdir().expect("tempdir should be created");
+        std::fs::write(tmp.path().join("part.stl"), TRIANGLE_STL)
+            .expect("geometry fixture should write");
+        let fea_path = tmp.path().join("plot.fea");
+        std::fs::write(
+            &fea_path,
+            r#"
+version: 1
+kind: study
+id: synthetic_plot
+geometry:
+  path: part.stl
+  units: meter
+model:
+  profile: linear_static_structural
+run:
+  backend: cpu
+"#,
+        )
+        .expect("FEA fixture should write");
+        let study = block_on(fea_load_builtin(fea_path.to_string_lossy().to_string()))
+            .expect("study should load");
+        let Value::Object(study_object) = &study else {
+            panic!("expected study object");
+        };
+        let study_json = match study_object.properties.get(FEA_STUDY_SPEC_JSON_PROPERTY) {
+            Some(Value::String(json)) => json.clone(),
+            _ => panic!("expected study spec payload"),
+        };
+
+        let run = crate::analysis::AnalysisRunResult {
+            run_id: "synthetic_plot_run".to_string(),
+            run: runmat_analysis_fea::FeaRunResult {
+                backend: ComputeBackend::Cpu,
+                solver_backend: "synthetic".to_string(),
+                solver_device_apply_k_ratio: 0.0,
+                solver_method: "synthetic".to_string(),
+                preconditioner: "none".to_string(),
+                solver_host_sync_count: 0,
+                diagnostics: Vec::new(),
+                fields: vec![AnalysisField::host_f64(
+                    "structural.von_mises",
+                    vec![1],
+                    vec![42.0],
+                )],
+            },
+            render_topology: None,
+            modal_results: None,
+            thermal_results: None,
+            transient_results: None,
+            nonlinear_results: None,
+            electromagnetic_results: None,
+            model_validity: crate::analysis::QualityGate::Pass,
+            solver_convergence: crate::analysis::QualityGate::Pass,
+            result_quality: crate::analysis::QualityGate::Pass,
+            run_status: crate::analysis::RunStatus::Publishable,
+            publishable: true,
+            quality_reasons: Vec::new(),
+            provenance: crate::analysis::RunProvenance {
+                backend: ComputeBackend::Cpu,
+                solver_backend: "synthetic".to_string(),
+                solver_device_apply_k_ratio: 0.0,
+                solver_host_sync_count: 0,
+                precision_mode: "fp64".to_string(),
+                deterministic_mode: true,
+                solver_method: "synthetic".to_string(),
+                preconditioner: "none".to_string(),
+                quality_policy: "balanced".to_string(),
+                fallback_events: Vec::new(),
+            },
+        };
+        crate::analysis::storage::persist_run_result(&run).expect("run should persist");
+
+        let mut object = ObjectInstance::new(FEA_RUN_RESULT_CLASS.to_string());
+        object.properties.insert(
+            "run_id".to_string(),
+            Value::String("synthetic_plot_run".to_string()),
+        );
+        object.properties.insert(
+            FEA_RUN_ID_CONTEXT_PROPERTY.to_string(),
+            Value::String("synthetic_plot_run".to_string()),
+        );
+        object.properties.insert(
+            FEA_STUDY_CONTEXT_JSON_PROPERTY.to_string(),
+            Value::String(study_json),
+        );
+        (Value::Object(object), study)
     }
 
     fn assert_object_class(value: &Value, expected: &str) {

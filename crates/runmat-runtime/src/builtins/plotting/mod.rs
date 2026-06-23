@@ -357,6 +357,13 @@ pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> crate::Builtin
     Ok(())
 }
 
+#[cfg(feature = "plot-core")]
+pub fn import_runtime_figure(figure: runmat_plot::plots::Figure) -> u32 {
+    let handle = state::import_figure(figure);
+    register_imported_figure(handle.as_u32());
+    handle.as_u32()
+}
+
 type ImportedFigureRegistry = Mutex<HashMap<u32, ()>>;
 #[cfg(all(feature = "plot-core", not(target_arch = "wasm32")))]
 type GeometrySceneRegistry = Mutex<HashMap<u32, runmat_plot::GeometryScene>>;

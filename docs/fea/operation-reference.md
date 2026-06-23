@@ -87,6 +87,7 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `geometry.inspect(path)` | Read a geometry file and return a `geometry.InspectResult` object. |
 | `geometry.load(path)` | Read a geometry file and return a `geometry.Asset` object. |
 | `geometry.listRegions(asset)` | Return imported regions from a `geometry.Asset`. |
+| `geometry.meshes(asset)` | Return patch-ready surface mesh topology with vertices, faces/triangles, and region mappings. |
 | `fea.load(path)` | Load a `.fea` study or sweep file and return `fea.Study` or `fea.Sweep`. |
 | `fea.material(...)`, `fea.materialAssignment(...)` | Create typed material data and region assignments. |
 | `fea.boundaryCondition(...)`, `fea.loadCase(...)` | Create typed constraints, loads, and sources. |
@@ -100,10 +101,11 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.run(study)` | Run a `.fea` path, `fea.Study`, or `fea.Sweep`. |
 | `fea.results(runOrId, Name, Value, ...)` | Load result data from a run result object or persisted run id. |
 | `fea.field(resultsOrRun, fieldId)` | Extract one field from a result query. |
+| `fea.plot(runOrResultsOrField, fieldId)` | Create a RunMat figure for a result field using the study geometry context. |
 | `fea.compare(baselineRunId, candidateRunId, Name, Value, ...)` | Compare two persisted runs. |
 | `fea.trends(Name, Value, ...)` | Summarize recent persisted runs. |
 
-`fea.Study` and `fea.Sweep` objects expose `validate`, `plan`, and `run` methods through the class system. `fea.RunResult` exposes `results` and `field`; `fea.Results` exposes `field`.
+`fea.Study` and `fea.Sweep` objects expose `validate`, `plan`, and `run` methods through the class system. `fea.RunResult` exposes `results`, `field`, and `plot`; `fea.Results` exposes `field` and `plot`; `fea.Field` exposes `plot`.
 
 ## `.fea` Document Fields
 

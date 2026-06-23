@@ -62,7 +62,7 @@ runmat-server-client = { workspace = true }
 
 [features]
 # High-level feature toggles (default build keeps everything enabled)
-default = ["gui", "blas-lapack", "wgpu", "jit"]
+default = ["gui", "blas-lapack", "wgpu", "jit", "occt-native"]
 wgpu = ["runmat-accelerate/wgpu", "runmat-runtime/wgpu"]
 gui = ["runmat-plot/gui"]
 blas-lapack = ["runmat-runtime/blas-lapack"]

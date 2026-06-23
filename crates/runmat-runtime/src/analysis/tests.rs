@@ -1798,6 +1798,15 @@ fn analysis_run_study_executes_linear_static_path() {
     );
     assert!(envelope.data.study_fingerprint.starts_with("sha256:"));
     assert!(envelope.data.run_id.starts_with("run_"));
+    let prep_artifact_id = envelope
+        .data
+        .prep_artifact_id
+        .as_ref()
+        .expect("study run should persist generated prep artifact id");
+    assert_eq!(
+        envelope.data.run_options["prep_artifact_id"].as_str(),
+        Some(prep_artifact_id.as_str())
+    );
     assert!(envelope.data.evidence_artifact_path.ends_with("run.json"));
 
     let persisted = storage::load_run_result(&envelope.data.run_id)
@@ -1813,6 +1822,31 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(persisted.result_quality, envelope.data.result_quality);
     assert_eq!(persisted.quality_reasons, envelope.data.quality_reasons);
     assert_eq!(persisted.provenance, envelope.data.provenance);
+    let render_topology = persisted
+        .render_topology
+        .as_ref()
+        .expect("study run should persist solver render topology");
+    assert_eq!(
+        render_topology.schema_version,
+        "analysis_render_topology/v1"
+    );
+    assert_eq!(render_topology.meshes.len(), 1);
+    assert_eq!(
+        render_topology.meshes[0].vertices.len(),
+        spec.geometry.surface_meshes[0].vertices.len()
+    );
+    assert_eq!(
+        render_topology.meshes[0].triangles.len(),
+        spec.geometry.surface_meshes[0].triangles.len()
+    );
+    let von_mises = persisted
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .expect("study run should persist von Mises field");
+    assert_eq!(
+        von_mises.shape,
+        vec![spec.geometry.surface_meshes[0].triangles.len()]
+    );
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
 }
@@ -1838,9 +1872,38 @@ fn analysis_run_study_honors_electromagnetic_run_options() {
     assert_eq!(envelope.op_version, "fea.run_study/v1");
     assert_eq!(envelope.data.run_kind, AnalysisRunKind::Electromagnetic);
     assert_eq!(envelope.data.backend, ComputeBackend::Cpu);
+    let resolved_options = envelope
+        .data
+        .electromagnetic_run_options
+        .as_ref()
+        .expect("electromagnetic study should return resolved options");
+    let requested_options = spec
+        .electromagnetic_run_options
+        .as_ref()
+        .expect("test should configure electromagnetic options");
     assert_eq!(
-        envelope.data.electromagnetic_run_options,
-        spec.electromagnetic_run_options
+        resolved_options.sweep_enabled,
+        requested_options.sweep_enabled
+    );
+    assert_eq!(
+        resolved_options.sweep_frequency_hz,
+        requested_options.sweep_frequency_hz
+    );
+    assert_eq!(
+        resolved_options.residual_target,
+        requested_options.residual_target
+    );
+    assert_eq!(
+        resolved_options.harmonic_tolerance,
+        requested_options.harmonic_tolerance
+    );
+    assert_eq!(
+        resolved_options.harmonic_max_iterations,
+        requested_options.harmonic_max_iterations
+    );
+    assert_eq!(
+        resolved_options.prep_artifact_id.as_deref(),
+        envelope.data.prep_artifact_id.as_deref()
     );
     assert_eq!(envelope.data.run_operation, "fea.run_electromagnetic");
     assert_eq!(envelope.data.run_op_version, "fea.run_electromagnetic/v1");
@@ -1882,9 +1945,11 @@ fn analysis_run_study_emits_default_electromagnetic_options_when_unspecified() {
         .expect("electromagnetic study run should succeed");
 
     assert_eq!(envelope.data.run_kind, AnalysisRunKind::Electromagnetic);
+    let mut expected_options = AnalysisElectromagneticRunOptions::default();
+    expected_options.prep_artifact_id = envelope.data.prep_artifact_id.clone();
     assert_eq!(
         envelope.data.electromagnetic_run_options,
-        Some(AnalysisElectromagneticRunOptions::default())
+        Some(expected_options)
     );
     assert_eq!(envelope.data.run_operation, "fea.run_electromagnetic");
     assert_eq!(envelope.data.run_op_version, "fea.run_electromagnetic/v1");
@@ -8643,6 +8708,59 @@ fn analysis_results_include_electromagnetic_fields_for_em_runs() {
 }
 
 #[cfg(feature = "plot-core")]
+fn solver_topology_counts(run_id: &str) -> (usize, usize) {
+    let persisted = storage::load_run_result(run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let topology = persisted
+        .render_topology
+        .as_ref()
+        .expect("run should persist render topology");
+    (
+        topology
+            .meshes
+            .iter()
+            .map(|mesh| mesh.vertices.len())
+            .sum::<usize>(),
+        topology
+            .meshes
+            .iter()
+            .map(|mesh| mesh.triangles.len())
+            .sum::<usize>(),
+    )
+}
+
+#[cfg(feature = "plot-core")]
+fn assert_any_solver_topology_overlay(figures: &[AnalysisGeneratedFigure], run_id: &str) {
+    let (vertex_count, triangle_count) = solver_topology_counts(run_id);
+    let overlay_counts = figures
+        .iter()
+        .filter(|figure| matches!(figure.kind, AnalysisGeneratedFigureKind::MeshResult))
+        .flat_map(|figure| figure.figure.plots())
+        .filter_map(|plot| match plot {
+            runmat_plot::plots::PlotElement::Mesh(mesh) => Some(mesh),
+            _ => None,
+        })
+        .map(|mesh| {
+            mesh.scalar_field()
+                .map(|field| field.values.len())
+                .or_else(|| mesh.vector_field().map(|field| field.vectors.len()))
+                .unwrap_or(0)
+        })
+        .filter(|count| *count > 0)
+        .collect::<Vec<_>>();
+    assert!(
+        overlay_counts
+            .iter()
+            .any(|count| *count == vertex_count || *count == triangle_count),
+        "expected at least one overlay count to match solver topology vertices={} or triangles={}, got {:?}",
+        vertex_count,
+        triangle_count,
+        overlay_counts
+    );
+}
+
+#[cfg(feature = "plot-core")]
 #[test]
 fn analysis_generate_study_run_figures_returns_mesh_figures() {
     let _guard = analysis_test_guard();
@@ -8665,6 +8783,63 @@ fn analysis_generate_study_run_figures_returns_mesh_figures() {
         .iter()
         .any(|figure| matches!(figure.kind, AnalysisGeneratedFigureKind::MeshResult)));
     assert!(figures.iter().any(|figure| !figure.figure.is_empty()));
+    let stress_figure = figures
+        .iter()
+        .find(|figure| {
+            figure
+                .field_ids
+                .iter()
+                .any(|field_id| field_id == FEA_FIELD_STRUCTURAL_VON_MISES)
+        })
+        .expect("von Mises figure should be generated");
+    let persisted = storage::load_run_result(&run.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let topology = persisted
+        .render_topology
+        .as_ref()
+        .expect("run should persist render topology");
+    let solver_triangle_count = topology
+        .meshes
+        .iter()
+        .map(|mesh| mesh.triangles.len())
+        .sum::<usize>();
+    let overlay_triangle_count = stress_figure
+        .figure
+        .plots()
+        .filter_map(|plot| match plot {
+            runmat_plot::plots::PlotElement::Mesh(mesh) => mesh.scalar_field(),
+            _ => None,
+        })
+        .filter(|field| {
+            field.field_id == FEA_FIELD_STRUCTURAL_VON_MISES
+                && field.location == runmat_plot::plots::MeshFieldLocation::Triangle
+        })
+        .map(|field| field.values.len())
+        .sum::<usize>();
+    assert_eq!(overlay_triangle_count, solver_triangle_count);
+}
+
+#[cfg(feature = "plot-core")]
+#[test]
+fn analysis_generate_study_run_figures_uses_solver_topology_for_em_fields() {
+    let _guard = analysis_test_guard();
+    let spec = sample_electromagnetic_study_spec();
+    let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("electromagnetic study should run");
+
+    let figures = analysis_generate_study_run_figures(
+        &spec,
+        &run.data.run_id,
+        AnalysisFigureGenerationOptions {
+            include_comparison: false,
+            include_trends: false,
+            ..AnalysisFigureGenerationOptions::default()
+        },
+    )
+    .expect("study figures should be generated");
+
+    assert_any_solver_topology_overlay(&figures, &run.data.run_id);
 }
 
 #[test]
