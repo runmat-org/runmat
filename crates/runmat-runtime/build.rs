@@ -35,6 +35,8 @@ fn main() {
     // Help the linker find and link LAPACK/BLAS on Windows and Linux when using system libs.
     // We honor standard envs often used by lapack-sys/blas-sys and vcpkg.
 
+    let mut vcpkg_lib_path = None;
+
     // vcpkg paths
     if let Ok(vcpkg_root) = env::var("VCPKG_ROOT") {
         let triplet = env::var("VCPKGRS_TRIPLET")
@@ -43,6 +45,7 @@ fn main() {
             .unwrap_or_else(|| "x64-windows".to_string());
         let lib_path = format!("{vcpkg_root}/installed/{triplet}/lib");
         println!("cargo:rustc-link-search=native={lib_path}");
+        vcpkg_lib_path = Some(PathBuf::from(lib_path));
         println!("cargo:rerun-if-env-changed=VCPKG_ROOT");
         println!("cargo:rerun-if-env-changed=VCPKGRS_TRIPLET");
         println!("cargo:rerun-if-env-changed=VCPKG_DEFAULT_TRIPLET");
@@ -65,7 +68,13 @@ fn main() {
         }
         println!("cargo:rerun-if-env-changed=LAPACK_LIBS");
     } else if target_os == "windows" {
-        // vcpkg's OpenBLAS package supplies the LAPACK symbols we use.
+        println!("cargo:rustc-link-lib=lapack");
+        if vcpkg_lib_path
+            .as_ref()
+            .is_some_and(|path| path.join("libf2c.lib").exists())
+        {
+            println!("cargo:rustc-link-lib=libf2c");
+        }
         println!("cargo:rustc-link-lib=openblas");
     }
 
