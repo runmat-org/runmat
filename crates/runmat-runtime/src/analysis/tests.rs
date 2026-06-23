@@ -2018,6 +2018,26 @@ fn analysis_validate_maps_typed_error_code() {
 }
 
 #[test]
+fn analysis_validate_maps_invalid_moment_error_code() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.loads[0].kind = LoadKind::Moment {
+        mx: f64::INFINITY,
+        my: 0.0,
+        mz: 1.0,
+    };
+    let context = OperationContext::new(None, None);
+    let error = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
+        .expect_err("validation should fail");
+
+    assert_eq!(error.error_code, "RM.FEA.VALIDATE.INVALID_MOMENT");
+    assert_eq!(
+        error.context.get("load_id").map(String::as_str),
+        Some("load_tip")
+    );
+}
+
+#[test]
 fn analysis_run_linear_static_returns_typed_envelope() {
     let _guard = analysis_test_guard();
     let model = sample_model();

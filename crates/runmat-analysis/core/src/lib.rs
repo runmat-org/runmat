@@ -119,6 +119,35 @@ mod tests {
     }
 
     #[test]
+    fn invalid_moment_vectors_fail_validation() {
+        let mut model = valid_model();
+        model.loads[0].kind = LoadKind::Moment {
+            mx: f64::NAN,
+            my: 0.0,
+            mz: 1.0,
+        };
+        assert_eq!(
+            validate_model(&model).expect_err("expected nonfinite moment validation failure"),
+            AnalysisValidationError::InvalidMomentVector {
+                load_id: "load_tip".to_string()
+            }
+        );
+
+        let mut model = valid_model();
+        model.loads[0].kind = LoadKind::Moment {
+            mx: 0.0,
+            my: 0.0,
+            mz: 0.0,
+        };
+        assert_eq!(
+            validate_model(&model).expect_err("expected zero moment validation failure"),
+            AnalysisValidationError::ZeroMomentVector {
+                load_id: "load_tip".to_string()
+            }
+        );
+    }
+
+    #[test]
     fn unit_frame_mismatch_rejection() {
         let mut model = valid_model();
         model.units = UnitSystem::Inch;

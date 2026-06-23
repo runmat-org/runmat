@@ -1,7 +1,10 @@
 use runmat_geometry_core::UnitSystem;
 use thiserror::Error;
 
-use crate::problem::model::{AnalysisModel, ReferenceFrame};
+use crate::problem::{
+    loads::LoadKind,
+    model::{AnalysisModel, ReferenceFrame},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum AnalysisValidationError {
@@ -13,6 +16,12 @@ pub enum AnalysisValidationError {
     MissingBoundaryConditions,
     #[error("ANALYSIS_VALIDATION_MISSING_LOADS: analysis model must include at least one load")]
     MissingLoads,
+    #[error(
+        "ANALYSIS_VALIDATION_INVALID_MOMENT: moment load {load_id} must have finite components"
+    )]
+    InvalidMomentVector { load_id: String },
+    #[error("ANALYSIS_VALIDATION_ZERO_MOMENT: moment load {load_id} must have nonzero magnitude")]
+    ZeroMomentVector { load_id: String },
     #[error(
         "ANALYSIS_VALIDATION_UNIT_MISMATCH: model units {model:?} do not match geometry units {geometry:?}"
     )]
@@ -38,6 +47,20 @@ pub fn validate_model(model: &AnalysisModel) -> Result<(), AnalysisValidationErr
     }
     if model.loads.is_empty() {
         return Err(AnalysisValidationError::MissingLoads);
+    }
+    for load in &model.loads {
+        if let LoadKind::Moment { mx, my, mz } = load.kind {
+            if !mx.is_finite() || !my.is_finite() || !mz.is_finite() {
+                return Err(AnalysisValidationError::InvalidMomentVector {
+                    load_id: load.load_id.clone(),
+                });
+            }
+            if mx == 0.0 && my == 0.0 && mz == 0.0 {
+                return Err(AnalysisValidationError::ZeroMomentVector {
+                    load_id: load.load_id.clone(),
+                });
+            }
+        }
     }
     Ok(())
 }

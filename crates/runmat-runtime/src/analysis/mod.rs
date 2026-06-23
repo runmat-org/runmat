@@ -15149,6 +15149,16 @@ fn map_validate_error(
             "FEA model must include at least one load".to_string(),
             BTreeMap::new(),
         ),
+        AnalysisValidationError::InvalidMomentVector { load_id } => (
+            "RM.FEA.VALIDATE.INVALID_MOMENT",
+            format!("moment load {load_id} must have finite components"),
+            BTreeMap::from([("load_id".to_string(), load_id)]),
+        ),
+        AnalysisValidationError::ZeroMomentVector { load_id } => (
+            "RM.FEA.VALIDATE.ZERO_MOMENT",
+            format!("moment load {load_id} must have nonzero magnitude"),
+            BTreeMap::from([("load_id".to_string(), load_id)]),
+        ),
         AnalysisValidationError::UnitMismatch { model, geometry } => (
             "RM.FEA.VALIDATE.UNIT_MISMATCH",
             format!("model units {model:?} do not match geometry units {geometry:?}"),
