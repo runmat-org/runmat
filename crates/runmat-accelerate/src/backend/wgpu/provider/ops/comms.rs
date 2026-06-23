@@ -4,7 +4,6 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-use super::backend_shared::gpu_per_buffer_limit_error;
 use super::backend_types::WgpuProvider;
 use crate::backend::wgpu::shaders::comms::{
     modulate_bits_constellation_shader, modulate_constellation_shader,
@@ -21,75 +20,7 @@ impl Drop for UploadedTemp<'_> {
     }
 }
 
-const CPU_COMMS_FAST_PATH_MAX_LOGICAL_LEN: usize = 4096;
-
-fn modulation_epsilon(precision: crate::backend::wgpu::types::NumericPrecision) -> f64 {
-    match precision {
-        crate::backend::wgpu::types::NumericPrecision::F64 => 1.0e-9,
-        crate::backend::wgpu::types::NumericPrecision::F32 => 1.0e-5,
-    }
-}
-
-fn bit_epsilon(precision: crate::backend::wgpu::types::NumericPrecision) -> f64 {
-    match precision {
-        crate::backend::wgpu::types::NumericPrecision::F64 => 1.0e-9,
-        crate::backend::wgpu::types::NumericPrecision::F32 => 1.0e-6,
-    }
-}
-
 impl WgpuProvider {
-    fn upload_complex_interleaved_exec(
-        &self,
-        data: &[f64],
-        shape: Vec<usize>,
-        label: &str,
-    ) -> Result<GpuTensorHandle> {
-        let len = data.len();
-        let bytes = (len as u64).saturating_mul(self.element_size as u64);
-        if bytes > self.adapter_limits.max_buffer_size {
-            return Err(gpu_per_buffer_limit_error(
-                label,
-                bytes,
-                self.adapter_limits.max_buffer_size,
-            ));
-        }
-        let buffer = if len == 0 {
-            self.create_storage_buffer(0, label)
-        } else {
-            match self.precision {
-                crate::backend::wgpu::types::NumericPrecision::F64 => Arc::new(
-                    self.device_ref()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some(label),
-                            contents: cast_slice(data),
-                            usage: wgpu::BufferUsages::STORAGE
-                                | wgpu::BufferUsages::COPY_DST
-                                | wgpu::BufferUsages::COPY_SRC,
-                        }),
-                ),
-                crate::backend::wgpu::types::NumericPrecision::F32 => {
-                    let data_f32: Vec<f32> = data.iter().map(|v| *v as f32).collect();
-                    Arc::new(self.device_ref().create_buffer_init(
-                        &wgpu::util::BufferInitDescriptor {
-                            label: Some(label),
-                            contents: cast_slice(&data_f32),
-                            usage: wgpu::BufferUsages::STORAGE
-                                | wgpu::BufferUsages::COPY_DST
-                                | wgpu::BufferUsages::COPY_SRC,
-                        },
-                    ))
-                }
-            }
-        };
-        self.telemetry.record_upload_bytes(bytes);
-        Ok(self.register_existing_buffer_with_storage(
-            buffer,
-            shape,
-            len,
-            GpuTensorStorage::ComplexInterleaved,
-        ))
-    }
-
     pub(crate) async fn modulate_constellation_exec(
         &self,
         request: &runmat_accelerate_api::ProviderModulationRequest<'_>,
@@ -139,40 +70,6 @@ impl WgpuProvider {
             return Ok(handle);
         }
 
-        let host = self.download_exec(request.input).await?;
-        ensure!(
-            host.data.len() == logical_len,
-            "modulate_constellation: input data length does not match shape"
-        );
-        let epsilon = modulation_epsilon(self.precision);
-        let mut host_output = Vec::with_capacity(out_len);
-        for value in host.data {
-            ensure!(
-                value.is_finite(),
-                "modulate_constellation: symbols must be finite integers"
-            );
-            let rounded = value.round();
-            ensure!(
-                (value - rounded).abs() <= epsilon && rounded >= 0.0,
-                "modulate_constellation: symbols must be nonnegative integers"
-            );
-            let symbol = rounded as usize;
-            ensure!(
-                symbol < order,
-                "modulate_constellation: symbols must be in range"
-            );
-            let point = symbol * 2;
-            host_output.push(request.constellation[point]);
-            host_output.push(request.constellation[point + 1]);
-        }
-        if logical_len <= CPU_COMMS_FAST_PATH_MAX_LOGICAL_LEN {
-            return self.upload_complex_interleaved_exec(
-                &host_output,
-                entry.shape,
-                "runmat-modulate-constellation-cpu-fast-path",
-            );
-        }
-
         let table_shape = [request.constellation.len(), 1usize];
         let table = UploadedTemp {
             provider: self,
@@ -196,7 +93,7 @@ impl WgpuProvider {
             },
         ));
 
-        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+        let workgroup_size = crate::backend::wgpu::config::WORKGROUP_SIZE;
         let shader = modulate_constellation_shader(self.precision, order, workgroup_size);
         let bgl = crate::backend::wgpu::bindings::build_bgl_for_layout_tag(
             self.device_ref(),
@@ -426,50 +323,6 @@ impl WgpuProvider {
             return Ok(handle);
         }
 
-        let host = self.download_exec(request.input).await?;
-        ensure!(
-            host.data.len() == logical_len,
-            "modulate_bits_constellation: input data length does not match shape"
-        );
-        let bit_tol = bit_epsilon(self.precision);
-        let mut host_output = Vec::with_capacity(out_len);
-        for channel in 0..channels {
-            let channel_offset = channel * request.input_rows;
-            for group in 0..output_rows {
-                let mut symbol = 0usize;
-                for bit_idx in 0..request.bits_per_symbol {
-                    let value =
-                        host.data[channel_offset + group * request.bits_per_symbol + bit_idx];
-                    ensure!(
-                        value.is_finite(),
-                        "modulate_bits_constellation: bits must be finite"
-                    );
-                    let bit = if value.abs() <= bit_tol {
-                        0usize
-                    } else if (value - 1.0).abs() <= bit_tol {
-                        1usize
-                    } else {
-                        return Err(anyhow!("modulate_bits_constellation: bits must be 0 or 1"));
-                    };
-                    symbol = (symbol << 1) | bit;
-                }
-                ensure!(
-                    symbol < order,
-                    "modulate_bits_constellation: symbols must be in range"
-                );
-                let point = symbol * 2;
-                host_output.push(request.constellation[point]);
-                host_output.push(request.constellation[point + 1]);
-            }
-        }
-        if output_logical_len <= CPU_COMMS_FAST_PATH_MAX_LOGICAL_LEN {
-            return self.upload_complex_interleaved_exec(
-                &host_output,
-                output_shape,
-                "runmat-modulate-bits-constellation-cpu-fast-path",
-            );
-        }
-
         let table_shape = [request.constellation.len(), 1usize];
         let table = UploadedTemp {
             provider: self,
@@ -493,7 +346,7 @@ impl WgpuProvider {
             },
         ));
 
-        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+        let workgroup_size = crate::backend::wgpu::config::WORKGROUP_SIZE;
         let shader = modulate_bits_constellation_shader(self.precision, order, workgroup_size);
         let bgl = crate::backend::wgpu::bindings::build_bgl_for_layout_tag(
             self.device_ref(),

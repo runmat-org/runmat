@@ -76,15 +76,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         return;
     }}
 
-    let symbol_value = floor(raw + {ty}(0.5));
-    if abs(symbol_value - raw) > EPSILON {{
+    let rounded = round(raw);
+    if abs(rounded - raw) > EPSILON {{
         set_error(3u, idx);
         Out.data[idx * 2u] = {ty}(0.0);
         Out.data[idx * 2u + 1u] = {ty}(0.0);
         return;
     }}
 
-    let symbol = u32(symbol_value);
+    let symbol = u32(rounded);
     if symbol >= ORDER {{
         set_error(2u, idx);
         Out.data[idx * 2u] = {ty}(0.0);
@@ -182,16 +182,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
             set_error(1u, input_idx);
             return;
         }}
-        var bit: u32 = 0u;
-        if abs(raw) <= BIT_TOL {{
-            bit = 0u;
-        }} else if abs(raw - {ty}(1.0)) <= BIT_TOL {{
-            bit = 1u;
-        }} else {{
+        let rounded = round(raw);
+        if abs(raw - rounded) > BIT_TOL || (rounded != {ty}(0.0) && rounded != {ty}(1.0)) {{
             set_error(2u, input_idx);
             return;
         }}
-        symbol = (symbol << 1u) | bit;
+        symbol = (symbol << 1u) | u32(rounded);
     }}
     if symbol >= ORDER {{
         set_error(3u, out_idx);
