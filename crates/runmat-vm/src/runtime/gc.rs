@@ -2,16 +2,18 @@ use runmat_builtins::Value;
 use runmat_gc::{
     gc_register_root, gc_unregister_root, GlobalRoot, RootId, StackRoot, VariableArrayRoot,
 };
+use std::marker::PhantomData;
 
 /// RAII wrapper for GC root management during interpretation.
-pub struct InterpretContext {
+pub struct InterpretContext<'roots> {
     pub(crate) stack_root_id: Option<RootId>,
     pub(crate) vars_root_id: Option<RootId>,
     pub(crate) extra_root_ids: Vec<RootId>,
+    _roots: PhantomData<fn(&'roots Vec<Value>, &'roots Vec<Value>)>,
 }
 
-impl InterpretContext {
-    pub fn new(stack: &Vec<Value>, vars: &Vec<Value>) -> Result<Self, String> {
+impl<'roots> InterpretContext<'roots> {
+    pub fn new(stack: &'roots Vec<Value>, vars: &'roots Vec<Value>) -> Result<Self, String> {
         let stack_root = Box::new(unsafe {
             StackRoot::new(stack as *const Vec<Value>, "interpreter_stack".to_string())
         });
@@ -28,6 +30,7 @@ impl InterpretContext {
             stack_root_id: Some(stack_root_id),
             vars_root_id: Some(vars_root_id),
             extra_root_ids: Vec::new(),
+            _roots: PhantomData,
         })
     }
 
@@ -47,7 +50,7 @@ impl InterpretContext {
     }
 }
 
-impl Drop for InterpretContext {
+impl Drop for InterpretContext<'_> {
     fn drop(&mut self) {
         if let Some(id) = self.stack_root_id.take() {
             let _ = gc_unregister_root(id);
