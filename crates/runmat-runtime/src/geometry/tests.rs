@@ -988,6 +988,14 @@ fn prep_artifact_retention_prunes_old_entries() {
             OperationContext::new(None, None),
         )
         .expect("prep should succeed");
+        assert!(
+            !prep
+                .data
+                .prep_artifact_id
+                .chars()
+                .any(|ch| matches!(ch, '"' | ':' | '<' | '>' | '|' | '*' | '?' | '\r' | '\n')),
+            "prep artifact id should be portable for GitHub artifact upload"
+        );
         ids.push(prep.data.prep_artifact_id);
     }
 

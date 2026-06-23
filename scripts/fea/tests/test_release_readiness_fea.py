@@ -601,8 +601,22 @@ class ReleaseReadinessTests(unittest.TestCase):
             os.environ.pop(key, None)
 
     def test_pass_when_all_signals_healthy(self):
-        latest = report(passed=True, publishable=True, gpu_ms=100.0)
-        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.1,
+            contact_nonlinear_severity=0.1,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                plastic_nonlinear_severity=0.1,
+                contact_nonlinear_severity=0.1,
+            )
+        ]
         result = evaluate_release_readiness(latest, rolling, protected=False)
         self.assertEqual(result["verdict"], "warn")
         codes = {reason["code"] for reason in result["reasons"]}

@@ -1945,8 +1945,10 @@ fn analysis_run_study_emits_default_electromagnetic_options_when_unspecified() {
         .expect("electromagnetic study run should succeed");
 
     assert_eq!(envelope.data.run_kind, AnalysisRunKind::Electromagnetic);
-    let mut expected_options = AnalysisElectromagneticRunOptions::default();
-    expected_options.prep_artifact_id = envelope.data.prep_artifact_id.clone();
+    let expected_options = AnalysisElectromagneticRunOptions {
+        prep_artifact_id: envelope.data.prep_artifact_id.clone(),
+        ..Default::default()
+    };
     assert_eq!(
         envelope.data.electromagnetic_run_options,
         Some(expected_options)

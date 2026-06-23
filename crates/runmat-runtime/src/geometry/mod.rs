@@ -381,6 +381,28 @@ fn prep_artifact_path(root: &Path, prep_artifact_id: &str) -> PathBuf {
     root.join("prep").join(format!("{prep_artifact_id}.json"))
 }
 
+fn prep_artifact_id_fragment(value: &str) -> String {
+    let mut fragment = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-' => {
+                fragment.push(byte as char);
+            }
+            _ => {
+                if !fragment.ends_with('_') {
+                    fragment.push('_');
+                }
+            }
+        }
+    }
+    let fragment = fragment.trim_matches('_').to_string();
+    if fragment.is_empty() {
+        "geometry".to_string()
+    } else {
+        fragment
+    }
+}
+
 fn fs_create_dir_all(path: impl Into<PathBuf>) -> std::io::Result<()> {
     runmat_filesystem::create_dir_all(path.into())
 }
@@ -451,8 +473,8 @@ fn persist_prep_artifact(
     prep: MeshingPrepResult,
 ) -> Result<StoredGeometryPrepArtifact, String> {
     let prep_artifact_id = format!(
-        "prep:{}:{}:{}",
-        geometry.geometry_id,
+        "prep_{}_{}_{}",
+        prep_artifact_id_fragment(&geometry.geometry_id),
         geometry.revision,
         prep_artifact_counter().fetch_add(1, Ordering::Relaxed)
     );

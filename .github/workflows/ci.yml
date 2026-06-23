@@ -294,6 +294,7 @@ jobs:
         run: cargo test -p runmat-runtime --test geometry_prep_conformance --test prep_solve_conformance --test operation_contracts
 
       - name: Run FEA benchmark conformance
+        id: fea_benchmark_conformance
         run: cargo test -p runmat-runtime --test analysis
 
       - name: Verify filesystem artifact replay stability
@@ -337,7 +338,7 @@ jobs:
 
       - name: Verify thermo field artifact trust chain
         id: thermo_field_trust
-        if: always()
+        if: always() && steps.fea_benchmark_conformance.outcome == 'success'
         run: |
           python3 - <<'PY'
           import json
@@ -937,8 +938,52 @@ jobs:
 
           Write-Host "Cloning vcpkg and installing OpenBLAS/LAPACK"
           $vcpkgRoot = Join-Path $pwd "vcpkg"
-          git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
+          git clone --depth 1 --branch 2026.06.01 https://github.com/microsoft/vcpkg.git $vcpkgRoot
           & "$vcpkgRoot\bootstrap-vcpkg.bat"
+
+          $finder = Join-Path $vcpkgRoot "scripts\cmake\vcpkg_find_fortran.cmake"
+          $content = Get-Content -LiteralPath $finder -Raw
+          $needle = "    include(CMakeDetermineFortranCompiler)"
+          $replacement = @'
+              include(CMakeDetermineFortranCompiler)
+
+              if(CMAKE_HOST_WIN32 AND "${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}" STREQUAL "" AND
+                 ("${VCPKG_TARGET_ARCHITECTURE}" STREQUAL "x86" OR "${VCPKG_TARGET_ARCHITECTURE}" STREQUAL "x64"))
+                  if(CMAKE_Fortran_COMPILER)
+                      message(STATUS "Ignoring ambient Fortran compiler '${CMAKE_Fortran_COMPILER}' so vcpkg uses internal MinGW gfortran")
+                      unset(CMAKE_Fortran_COMPILER)
+                      unset(CMAKE_Fortran_COMPILER CACHE)
+                  endif()
+              endif()
+          '@
+          if (-not $content.Contains($replacement)) {
+            if (-not $content.Contains($needle)) {
+              throw "Could not find expected CMakeDetermineFortranCompiler hook in $finder"
+            }
+            Set-Content -LiteralPath $finder -Value $content.Replace($needle, $replacement) -NoNewline
+          }
+
+          $keptPath = [System.Collections.Generic.List[string]]::new()
+          foreach ($entry in ($env:Path -split ";")) {
+            if ([string]::IsNullOrWhiteSpace($entry)) {
+              continue
+            }
+            $expanded = [Environment]::ExpandEnvironmentVariables($entry.Trim('"'))
+            $hasFortran = $false
+            foreach ($compiler in @("flang.exe", "flang-new.exe", "gfortran.exe", "ifort.exe", "ifx.exe")) {
+              if (Test-Path -LiteralPath (Join-Path $expanded $compiler)) {
+                $hasFortran = $true
+                break
+              }
+            }
+            if (-not $hasFortran) {
+              $keptPath.Add($entry)
+            }
+          }
+          Remove-Item Env:FC -ErrorAction SilentlyContinue
+          Remove-Item Env:F77 -ErrorAction SilentlyContinue
+          Remove-Item Env:F90 -ErrorAction SilentlyContinue
+          $env:Path = [string]::Join(";", $keptPath)
 
           # Compute vcpkg triplet based on target
           if (Test-Path env:MatrixPlatformTarget) { Remove-Item env:MatrixPlatformTarget }
@@ -950,12 +995,12 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
 
-          # Install OpenBLAS and LAPACK provider; on arm64-windows use --allow-unsupported for gfortran
-          & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet"
+          # Install OpenBLAS, LAPACK, and OpenCASCADE. LAPACK must use vcpkg's
+          # bundled MinGW gfortran runtime; Visual Studio flang fails this build.
           if ($triplet -eq "arm64-windows") {
-            & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet" --allow-unsupported
+            & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet" "lapack-reference:$triplet" "opencascade:$triplet" --allow-unsupported
           } else {
-            & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet"
+            & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet" "lapack-reference:$triplet" "opencascade:$triplet"
           }
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
           Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\$triplet\bin"
@@ -966,6 +1011,11 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_ROOT=$vcpkgRoot\installed\$triplet"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_INCLUDE_DIR=$vcpkgRoot\installed\$triplet\include\opencascade"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_BIN_DIR=$vcpkgRoot\installed\$triplet\bin"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_LINK_MODE=dylib"
 
       - name: Cross build (linux-x86_64)
         if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
@@ -985,7 +1035,7 @@ jobs:
         env:
           OPENSSL_NO_PKG_CONFIG: '1'
           OPENSSL_STATIC: '1'
-          RUNMAT_OCCT_LINK_MODE: static
+          RUNMAT_OCCT_LINK_MODE: ${{ runner.os == 'Windows' && 'dylib' || 'static' }}
         with:
           command: ${{ matrix.platform.command }}
           target: ${{ matrix.platform.target }}
