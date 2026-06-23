@@ -198,6 +198,12 @@ struct FeaBeamSectionDocument {
     iy_m4: f64,
     iz_m4: f64,
     torsion_j_m4: f64,
+    #[serde(default)]
+    outer_fiber_y_m: f64,
+    #[serde(default)]
+    outer_fiber_z_m: f64,
+    #[serde(default)]
+    torsion_outer_radius_m: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -603,6 +609,9 @@ fn resolve_structural_model(
                 iy_m4: section.iy_m4,
                 iz_m4: section.iz_m4,
                 torsion_j_m4: section.torsion_j_m4,
+                outer_fiber_y_m: section.outer_fiber_y_m,
+                outer_fiber_z_m: section.outer_fiber_z_m,
+                torsion_outer_radius_m: section.torsion_outer_radius_m,
             })
             .collect(),
     })

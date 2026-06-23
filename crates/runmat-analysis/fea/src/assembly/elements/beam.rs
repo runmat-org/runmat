@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const BEAM_NODE_DOF_COUNT: usize = 6;
@@ -6,15 +7,21 @@ pub const BEAM_ELEMENT_DOF_COUNT: usize = 12;
 pub type BeamMatrix12 = [[f64; BEAM_ELEMENT_DOF_COUNT]; BEAM_ELEMENT_DOF_COUNT];
 pub type BeamTransform12 = [[f64; BEAM_ELEMENT_DOF_COUNT]; BEAM_ELEMENT_DOF_COUNT];
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct BeamSection {
     pub area_m2: f64,
     pub iy_m4: f64,
     pub iz_m4: f64,
     pub torsion_j_m4: f64,
+    #[serde(default)]
+    pub outer_fiber_y_m: f64,
+    #[serde(default)]
+    pub outer_fiber_z_m: f64,
+    #[serde(default)]
+    pub torsion_outer_radius_m: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct BeamMaterial {
     pub youngs_modulus_pa: f64,
     pub shear_modulus_pa: f64,
@@ -253,6 +260,9 @@ mod tests {
             iy_m4: 1.6e-9,
             iz_m4: 6.4e-9,
             torsion_j_m4: 2.4e-9,
+            outer_fiber_y_m: 0.01,
+            outer_fiber_z_m: 0.005,
+            torsion_outer_radius_m: 0.011_180_339_887_498_949,
         }
     }
 

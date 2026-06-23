@@ -1214,10 +1214,16 @@ fn infer_field_unit(field_id: &str) -> Option<&'static str> {
     {
         return Some("Pa");
     }
-    if normalized.contains("reaction_force") {
+    if normalized.contains("reaction_force")
+        || normalized.contains("beam_axial_force")
+        || normalized.contains("beam_shear_force")
+    {
         return Some("N");
     }
-    if normalized.contains("reaction_moment") {
+    if normalized.contains("reaction_moment")
+        || normalized.contains("beam_torsion_moment")
+        || normalized.contains("beam_bending_moment")
+    {
         return Some("N*m");
     }
     if normalized.contains("rotation") {
@@ -1283,6 +1289,9 @@ fn infer_field_location(field_id: &str) -> AnalysisFieldLocation {
     if normalized.starts_with("acoustic.") {
         return AnalysisFieldLocation::Node;
     }
+    if normalized.contains("beam_") {
+        return AnalysisFieldLocation::Element;
+    }
     if normalized.contains("temperature_gradient")
         || normalized.contains("heat_flux")
         || normalized.contains("heat_source")
@@ -1322,6 +1331,18 @@ fn infer_field_kind(field_id: &str, shape: &[usize]) -> AnalysisFieldKind {
             [_, components] if (2..=3).contains(components) => AnalysisFieldKind::Vector,
             _ => AnalysisFieldKind::Scalar,
         };
+    }
+    if normalized.contains("beam_shear_force")
+        || normalized.contains("beam_bending_moment")
+        || normalized.contains("beam_bending_stress")
+    {
+        return AnalysisFieldKind::Vector;
+    }
+    if normalized.contains("beam_axial_force")
+        || normalized.contains("beam_torsion_moment")
+        || normalized.contains("beam_torsion_stress")
+    {
+        return AnalysisFieldKind::Scalar;
     }
     if normalized.contains("temperature_gradient")
         || normalized.contains("wall_shear_stress")
@@ -1382,6 +1403,18 @@ fn infer_component_count(field_id: &str, shape: &[usize]) -> Option<usize> {
             [_, components] if (2..=3).contains(components) => Some(*components),
             _ => None,
         };
+    }
+    if normalized.contains("beam_shear_force")
+        || normalized.contains("beam_bending_moment")
+        || normalized.contains("beam_bending_stress")
+    {
+        return Some(2);
+    }
+    if normalized.contains("beam_axial_force")
+        || normalized.contains("beam_torsion_moment")
+        || normalized.contains("beam_torsion_stress")
+    {
+        return None;
     }
     if normalized.contains("temperature_gradient")
         || normalized.contains("wall_shear_stress")

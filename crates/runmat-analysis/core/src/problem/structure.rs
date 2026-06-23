@@ -44,6 +44,12 @@ pub struct BeamSectionModel {
     pub iy_m4: f64,
     pub iz_m4: f64,
     pub torsion_j_m4: f64,
+    #[serde(default)]
+    pub outer_fiber_y_m: f64,
+    #[serde(default)]
+    pub outer_fiber_z_m: f64,
+    #[serde(default)]
+    pub torsion_outer_radius_m: f64,
 }
 
 fn default_beam_reference_axis() -> [f64; 3] {

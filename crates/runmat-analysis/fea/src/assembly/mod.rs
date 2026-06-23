@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use self::{
     dofs::{StructuralDofKind, StructuralDofLayout, StructuralNodeDofSet},
     elements::beam::{
-        global_stiffness_matrix, BeamElementGeometry, BeamMaterial, BeamSection,
-        BEAM_ELEMENT_DOF_COUNT,
+        global_stiffness_matrix, transformation_matrix, BeamElementGeometry, BeamMaterial,
+        BeamSection, BeamTransform12, BEAM_ELEMENT_DOF_COUNT,
     },
 };
 
@@ -46,6 +46,8 @@ pub struct AssemblySummary {
     pub structural_solid_element_count: usize,
     #[serde(default)]
     pub structural_dof_layout: StructuralDofLayout,
+    #[serde(default)]
+    pub structural_beam_recovery: Vec<BeamRecoveryElementSummary>,
     pub constrained_dof_count: usize,
     pub load_count: usize,
     pub structural_material: StructuralMaterialSummary,
@@ -70,6 +72,18 @@ pub struct StructuralMaterialSummary {
     pub poisson_ratio: f64,
     pub lame_lambda_pa: f64,
     pub shear_modulus_pa: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BeamRecoveryElementSummary {
+    pub element_id: String,
+    pub region_id: String,
+    pub node_i_index: usize,
+    pub node_j_index: usize,
+    pub length_m: f64,
+    pub section: BeamSection,
+    pub material: BeamMaterial,
+    pub transform_global_to_local: BeamTransform12,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -879,6 +893,7 @@ pub fn assemble_linear_system(
             .map(|prep| prep.prepared_element_count.max(prep.prepared_mesh_count))
             .unwrap_or_else(|| element_count_for_legacy_dofs(dof_count)),
         structural_dof_layout,
+        structural_beam_recovery: Vec::new(),
         constrained_dof_count,
         load_count: model.loads.len().saturating_add(prep_load_bonus),
         structural_material,
@@ -995,22 +1010,21 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
     let mut rhs = vec![0.0_f64; dof_count];
     let mut mass_diag = vec![1.0_f64; dof_count];
     let mut damping_diag = vec![0.0_f64; dof_count];
+    let mut structural_beam_recovery = Vec::new();
 
     for element in beam_elements {
         let StructuralElementKind::Beam(beam) = &element.kind;
         let node_i_index = structural_node_index(structural, beam.node_ids[0])?;
         let node_j_index = structural_node_index(structural, beam.node_ids[1])?;
         let section = structural_beam_section(structural, &beam.section_id)?;
-        let stiffness = global_stiffness_matrix(
-            section,
-            beam_material,
-            BeamElementGeometry {
-                node_i_m: structural.nodes[node_i_index].coordinates_m,
-                node_j_m: structural.nodes[node_j_index].coordinates_m,
-                reference_axis: beam.reference_axis,
-            },
-        )
-        .ok()?;
+        let geometry = BeamElementGeometry {
+            node_i_m: structural.nodes[node_i_index].coordinates_m,
+            node_j_m: structural.nodes[node_j_index].coordinates_m,
+            reference_axis: beam.reference_axis,
+        };
+        let frame = geometry.local_frame().ok()?;
+        let transform_global_to_local = transformation_matrix(frame);
+        let stiffness = global_stiffness_matrix(section, beam_material, geometry).ok()?;
         let element_dofs =
             beam_element_dof_indices(&structural_dof_layout, node_i_index, node_j_index)?;
         for (local_row, &global_row) in element_dofs.iter().enumerate() {
@@ -1018,6 +1032,16 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
                 dense[global_row * dof_count + global_col] += stiffness[local_row][local_col];
             }
         }
+        structural_beam_recovery.push(BeamRecoveryElementSummary {
+            element_id: element.element_id.clone(),
+            region_id: element.region_id.clone(),
+            node_i_index,
+            node_j_index,
+            length_m: frame.length_m,
+            section,
+            material: beam_material,
+            transform_global_to_local,
+        });
 
         let length = distance(
             structural.nodes[node_i_index].coordinates_m,
@@ -1198,6 +1222,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
         structural_shell_element_count: 0,
         structural_solid_element_count: 0,
         structural_dof_layout,
+        structural_beam_recovery,
         constrained_dof_count,
         load_count: model.loads.len(),
         structural_material,
@@ -1279,6 +1304,9 @@ fn section_from_model(section: &BeamSectionModel) -> BeamSection {
         iy_m4: section.iy_m4,
         iz_m4: section.iz_m4,
         torsion_j_m4: section.torsion_j_m4,
+        outer_fiber_y_m: section.outer_fiber_y_m,
+        outer_fiber_z_m: section.outer_fiber_z_m,
+        torsion_outer_radius_m: section.torsion_outer_radius_m,
     }
 }
 

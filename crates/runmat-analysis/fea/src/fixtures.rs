@@ -357,6 +357,9 @@ fn structural_beam_reference_model(
             iy_m4: 1.6e-9,
             iz_m4: 6.4e-9,
             torsion_j_m4: 2.4e-9,
+            outer_fiber_y_m: 0.01,
+            outer_fiber_z_m: 0.005,
+            torsion_outer_radius_m: 0.011_180_339_887_498_949,
         }],
     });
     model

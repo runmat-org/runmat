@@ -24,7 +24,10 @@ use crate::{
     FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
     FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
-    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
+    FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
+    FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE, FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT,
+    FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
     FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
     FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
@@ -201,6 +204,9 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
             iy_m4: 1.6e-9,
             iz_m4,
             torsion_j_m4: 2.4e-9,
+            outer_fiber_y_m: 0.01,
+            outer_fiber_z_m: 0.005,
+            torsion_outer_radius_m: 0.011_180_339_887_498_949,
         }],
     });
     model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
@@ -232,12 +238,40 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
         field(&result, FEA_FIELD_STRUCTURAL_REACTION_MOMENT).shape,
         vec![2, 3]
     );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE).shape,
+        vec![1]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE).shape,
+        vec![1, 2]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT).shape,
+        vec![1]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT).shape,
+        vec![1, 2]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS).shape,
+        vec![1, 2]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS).shape,
+        vec![1]
+    );
 
     let expected_rotation = moment_n_m * length_m / (youngs_modulus_pa * iz_m4);
     let expected_displacement = moment_n_m * length_m.powi(2) / (2.0 * youngs_modulus_pa * iz_m4);
+    let expected_bending_stress = moment_n_m * 0.01 / iz_m4;
     let displacement = host_field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT);
     let rotation = host_field(&result, FEA_FIELD_STRUCTURAL_ROTATION);
     let reaction_moment = host_field(&result, FEA_FIELD_STRUCTURAL_REACTION_MOMENT);
+    let beam_bending_moment = host_field(&result, FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT);
+    let beam_bending_stress = host_field(&result, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS);
+    let beam_torsion = host_field(&result, FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT);
 
     assert!(
         (rotation[5] - expected_rotation).abs() <= expected_rotation.abs() * 1.0e-6,
@@ -257,6 +291,20 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
         reaction_moment[2],
         moment_n_m
     );
+    assert!(
+        (beam_bending_moment[1].abs() - moment_n_m).abs() <= moment_n_m.abs() * 1.0e-6,
+        "beam_bending_moment_z={} applied={}",
+        beam_bending_moment[1],
+        moment_n_m
+    );
+    assert!(
+        (beam_bending_stress[1].abs() - expected_bending_stress).abs()
+            <= expected_bending_stress.abs() * 1.0e-6,
+        "beam_bending_stress_z={} expected={}",
+        beam_bending_stress[1],
+        expected_bending_stress
+    );
+    assert!(beam_torsion[0].abs() <= 1.0e-8);
     assert!(result.diagnostics.iter().any(|diag| {
         diag.code == "FEA_STRUCTURAL_ROTATIONAL_DOF"
             && diag.message.contains("structural_rotational_dof_count=6")

@@ -55,7 +55,10 @@ use runmat_analysis_fea::{
     FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
     FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
-    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
+    FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
+    FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE, FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT,
+    FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
     FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
@@ -911,6 +914,9 @@ sections:
     iy_m4: 1.6e-9
     iz_m4: 6.4e-9
     torsion_j_m4: 2.4e-9
+    outer_fiber_y_m: 0.01
+    outer_fiber_z_m: 0.005
+    torsion_outer_radius_m: 0.011180339887498949
 boundary_conditions:
   - id: fixed_root
     region: beam_span
@@ -946,6 +952,12 @@ run:
     assert_eq!(beam.node_ids, [1, 2]);
     assert_eq!(beam.section_id, "rect_20x10");
     assert_eq!(beam.reference_axis, [0.0, 0.0, 1.0]);
+    assert_eq!(structural.beam_sections[0].outer_fiber_y_m, 0.01);
+    assert_eq!(structural.beam_sections[0].outer_fiber_z_m, 0.005);
+    assert_eq!(
+        structural.beam_sections[0].torsion_outer_radius_m,
+        0.011_180_339_887_498_949
+    );
 }
 
 #[test]
@@ -2650,6 +2662,114 @@ fn analysis_results_describes_structural_l2_fields() {
     assert_eq!(
         descriptor(FEA_FIELD_STRUCTURAL_EQUATION_SCALE).kind,
         AnalysisFieldKind::Scalar
+    );
+}
+
+#[test]
+fn analysis_results_describes_beam_resultant_fields() {
+    let _guard = analysis_test_guard();
+    let model = runmat_analysis_fea::fixtures::fixture_model(
+        runmat_analysis_fea::fixtures::FixtureId::StructuralBeamCantileverEndMomentReference,
+    );
+    let run = analysis_run_linear_static_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-results-beam-fields-1".to_string()), None),
+    )
+    .expect("beam run should pass");
+
+    assert_eq!(
+        run.data
+            .run
+            .field(FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT)
+            .expect("beam bending moment field should be present")
+            .shape,
+        vec![1, 2]
+    );
+    assert_eq!(
+        run.data
+            .run
+            .field(FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS)
+            .expect("beam torsion stress field should be present")
+            .shape,
+        vec![1]
+    );
+
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery {
+            include_fields: vec![
+                FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE.to_string(),
+                FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE.to_string(),
+                FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT.to_string(),
+                FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT.to_string(),
+                FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS.to_string(),
+                FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS.to_string(),
+            ],
+            include_field_values: false,
+            include_diagnostics: false,
+            diagnostic_codes: Vec::new(),
+            include_modal_results: true,
+            mode_indices: Vec::new(),
+            include_transient_results: true,
+            transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: true,
+            include_electromagnetic_results: true,
+        },
+        OperationContext::new(Some("trace-results-beam-fields-2".to_string()), None),
+    )
+    .expect("beam results should pass");
+
+    let descriptor = |field_id: &str| {
+        results
+            .data
+            .field_descriptors
+            .iter()
+            .find(|descriptor| descriptor.field_id == field_id)
+            .expect("descriptor should be present")
+    };
+
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE)
+            .unit
+            .as_deref(),
+        Some("N")
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE).kind,
+        AnalysisFieldKind::Scalar
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE).component_count,
+        Some(2)
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT)
+            .unit
+            .as_deref(),
+        Some("N*m")
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT).kind,
+        AnalysisFieldKind::Vector
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS)
+            .unit
+            .as_deref(),
+        Some("Pa")
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS).component_count,
+        Some(2)
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS).kind,
+        AnalysisFieldKind::Scalar
+    );
+    assert_eq!(
+        descriptor(FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS).location,
+        AnalysisFieldLocation::Element
     );
 }
 
