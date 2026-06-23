@@ -7,6 +7,7 @@ use runmat_builtins::Value;
 use runmat_time::Instant;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
+use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
@@ -147,6 +148,53 @@ impl Drop for GcValueBorrowGuard<'_> {
     }
 }
 
+/// Immutable guarded access to a GC-managed `Value`.
+///
+/// The guard keeps collection from reclaiming the value while the borrow is
+/// active. Unlike `GcHandle`, this type may dereference because its lifetime is
+/// tied to an active GC borrow guard.
+pub struct GcValueRef<'gc> {
+    raw: *const Value,
+    _borrow: GcValueBorrowGuard<'gc>,
+}
+
+impl Deref for GcValueRef<'_> {
+    type Target = Value;
+
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: `raw` was validated as a GC-owned Value before this guard was
+        // constructed, and `_borrow` prevents collection for the guard lifetime.
+        unsafe { &*self.raw }
+    }
+}
+
+/// Mutable guarded access to a GC-managed `Value`.
+///
+/// The guard keeps collection from reclaiming the value and enforces exclusive
+/// mutable access through the GC borrow gate.
+pub struct GcValueMut<'gc> {
+    raw: *mut Value,
+    _borrow: GcValueBorrowGuard<'gc>,
+}
+
+impl Deref for GcValueMut<'_> {
+    type Target = Value;
+
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: `raw` was validated as a GC-owned Value before this guard was
+        // constructed, and `_borrow` prevents collection for the guard lifetime.
+        unsafe { &*self.raw }
+    }
+}
+
+impl DerefMut for GcValueMut<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // SAFETY: `raw` was validated as a GC-owned Value before this guard was
+        // constructed, and `_borrow` enforces exclusive mutable access.
+        unsafe { &mut *self.raw }
+    }
+}
+
 impl GarbageCollector {
     pub fn new() -> Result<Self> {
         Self::with_config(GcConfig::default())
@@ -276,20 +324,38 @@ impl GarbageCollector {
     ///
     /// Collection is blocked for the duration of the callback.
     pub fn with_value<R>(&self, ptr: &GcHandle, f: impl FnOnce(&Value) -> R) -> Result<R> {
-        let _borrow = self.begin_value_borrow(false)?;
-        let raw = Self::non_null_value_ptr(ptr)?;
-        self.validate_value_ptr(raw)?;
-        Ok(f(unsafe { &*raw }))
+        let value = self.read_value(ptr)?;
+        Ok(f(&value))
     }
 
     /// Mutably access a GC-managed value after validating that the pointer belongs to the GC heap.
     ///
     /// Collection is blocked for the duration of the callback and mutable access is exclusive.
     pub fn with_value_mut<R>(&self, ptr: &GcHandle, f: impl FnOnce(&mut Value) -> R) -> Result<R> {
-        let _borrow = self.begin_value_borrow(true)?;
+        let mut value = self.write_value(ptr)?;
+        Ok(f(&mut value))
+    }
+
+    /// Borrow a GC-managed value through an explicit guard.
+    pub fn read_value(&self, ptr: &GcHandle) -> Result<GcValueRef<'_>> {
+        let borrow = self.begin_value_borrow(false)?;
+        let raw = Self::non_null_value_ptr(ptr)?;
+        self.validate_value_ptr(raw)?;
+        Ok(GcValueRef {
+            raw,
+            _borrow: borrow,
+        })
+    }
+
+    /// Mutably borrow a GC-managed value through an explicit guard.
+    pub fn write_value(&self, ptr: &GcHandle) -> Result<GcValueMut<'_>> {
+        let borrow = self.begin_value_borrow(true)?;
         let raw = Self::non_null_value_ptr(ptr)? as *mut Value;
         self.validate_value_ptr(raw)?;
-        Ok(f(unsafe { &mut *raw }))
+        Ok(GcValueMut {
+            raw,
+            _borrow: borrow,
+        })
     }
 
     /// Clone a GC-managed value through the guarded access path.
@@ -598,6 +664,14 @@ pub fn gc_with_value<R>(ptr: &GcHandle, f: impl FnOnce(&Value) -> R) -> Result<R
 
 pub fn gc_with_value_mut<R>(ptr: &GcHandle, f: impl FnOnce(&mut Value) -> R) -> Result<R> {
     GC.with_value_mut(ptr, f)
+}
+
+pub fn gc_read_value(ptr: &GcHandle) -> Result<GcValueRef<'static>> {
+    GC.read_value(ptr)
+}
+
+pub fn gc_write_value(ptr: &GcHandle) -> Result<GcValueMut<'static>> {
+    GC.write_value(ptr)
 }
 
 pub fn gc_clone_value(ptr: &GcHandle) -> Result<Value> {
@@ -913,6 +987,43 @@ mod tests {
             assert_eq!(
                 gc_clone_value(&ptr).expect("value should remain live"),
                 Value::Num(1.0)
+            );
+        });
+    }
+
+    #[test]
+    fn read_guard_derefs_value_and_blocks_collection() {
+        gc_test_context(|| {
+            let ptr = gc_allocate(Value::Num(9.0)).expect("allocation failed");
+            let guard = gc_read_value(&ptr).expect("read guard should succeed");
+
+            assert_eq!(*guard, Value::Num(9.0));
+            assert_eq!(
+                gc_collect_minor().expect("collection should be skipped during guard"),
+                0
+            );
+        });
+    }
+
+    #[test]
+    fn write_guard_mutates_value_and_is_exclusive() {
+        gc_test_context(|| {
+            let ptr = gc_allocate(Value::Num(1.0)).expect("allocation failed");
+            {
+                let mut guard = gc_write_value(&ptr).expect("write guard should succeed");
+                *guard = Value::Num(2.0);
+
+                let nested = gc_write_value(&ptr);
+                assert!(matches!(nested, Err(GcError::SyncError(_))));
+                assert_eq!(
+                    gc_collect_minor().expect("collection should be skipped during guard"),
+                    0
+                );
+            }
+
+            assert_eq!(
+                gc_clone_value(&ptr).expect("mutated value should remain live"),
+                Value::Num(2.0)
             );
         });
     }
