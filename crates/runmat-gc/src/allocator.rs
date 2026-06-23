@@ -7,7 +7,7 @@ use crate::Value;
 use crate::{GcConfig, GcError, GcHandle, GcStats, Result};
 use std::collections::{HashMap, HashSet};
 use std::mem::MaybeUninit;
-use std::num::NonZeroUsize;
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Size classes for object allocation
@@ -54,8 +54,8 @@ pub struct Generation {
     /// Maximum size for this generation
     max_size: usize,
 
-    /// Objects that survived collection and may be promoted (stored as addresses)
-    survivor_objects: Vec<usize>,
+    /// Objects that survived collection and may be promoted.
+    survivor_objects: Vec<*const u8>,
 
     /// Addresses of allocated objects (object starts) in this generation
     allocated_ptrs: Vec<*const u8>,
@@ -153,17 +153,23 @@ impl Generation {
 
     /// Mark an object as survivor for potential promotion
     pub fn mark_survivor(&mut self, ptr: *const u8) {
-        self.survivor_objects.push(ptr as usize);
+        self.survivor_objects.push(ptr);
     }
 
     /// Get survivor objects for promotion
-    pub fn take_survivors(&mut self) -> Vec<usize> {
+    pub fn take_survivors(&mut self) -> Vec<*const u8> {
         std::mem::take(&mut self.survivor_objects)
     }
 
     /// Drain allocated object pointers from this generation
     pub fn take_allocated_ptrs(&mut self) -> Vec<*const u8> {
         std::mem::take(&mut self.allocated_ptrs)
+    }
+
+    fn take_tracked_ptrs_for_reset(&mut self) -> Vec<*const u8> {
+        let mut ptrs = std::mem::take(&mut self.allocated_ptrs);
+        ptrs.extend(std::mem::take(&mut self.survivor_objects));
+        ptrs
     }
 
     /// Reset generation (after collection)
@@ -210,7 +216,10 @@ impl MemoryBlock {
     fn allocate(&mut self, size_bytes: usize) -> Option<*mut u8> {
         let slots_needed = Self::slots_for_bytes(size_bytes);
         if self.current_slot + slots_needed <= self.memory.len() {
-            let ptr = self.memory[self.current_slot].as_mut_ptr().cast::<u8>();
+            // Use the vector's raw buffer pointer directly. Indexing would
+            // create a temporary `&mut` to an element, and later allocations
+            // can invalidate earlier raw tags under Stacked Borrows.
+            let ptr = unsafe { self.memory.as_mut_ptr().add(self.current_slot) }.cast::<u8>();
             self.current_slot += slots_needed;
             Some(ptr)
         } else {
@@ -289,6 +298,36 @@ impl GenerationalAllocator {
     /// Drain allocated object pointers from the young generation
     pub fn young_take_allocations(&mut self) -> Vec<*const u8> {
         self.generations[0].take_allocated_ptrs()
+    }
+
+    /// Drain all pointers the allocator still believes may contain initialized
+    /// Values. This is only for whole-GC teardown/reset paths.
+    pub fn take_tracked_value_ptrs_for_reset(&mut self) -> Vec<*const Value> {
+        let mut ptrs = Vec::new();
+        let mut seen = HashSet::new();
+
+        for generation in &mut self.generations {
+            for ptr in generation.take_tracked_ptrs_for_reset() {
+                if seen.insert(ptr) {
+                    ptrs.push(ptr.cast::<Value>());
+                }
+            }
+        }
+
+        for ptr in self.survival_counts.keys().copied() {
+            if seen.insert(ptr) {
+                ptrs.push(ptr.cast::<Value>());
+            }
+        }
+
+        for ptr in self.promoted_ptrs.drain() {
+            if seen.insert(ptr) {
+                ptrs.push(ptr.cast::<Value>());
+            }
+        }
+
+        self.survival_counts.clear();
+        ptrs
     }
 
     /// Reset the young generation after a collection cycle
@@ -431,11 +470,11 @@ impl GenerationalAllocator {
 }
 
 fn value_handle_from_ptr(ptr: *const Value) -> Result<GcHandle> {
-    let raw = NonZeroUsize::new(ptr as usize)
+    let raw = NonNull::new(ptr as *mut ())
         .ok_or_else(|| GcError::InvalidPointer("null GC allocation pointer".to_string()))?;
     // SAFETY: allocator callers only pass addresses returned by generation
     // allocation or promotion of existing generation-owned Value slots.
-    Ok(unsafe { GcHandle::from_addr_unchecked(raw) })
+    Ok(unsafe { GcHandle::from_ptr_unchecked(raw) })
 }
 
 /// Statistics for the allocator
@@ -482,7 +521,10 @@ mod tests {
 
         // SAFETY: this handle was returned by the allocator under test and no
         // collection or mutation runs before this read.
-        assert_eq!(unsafe { &*(ptr.addr() as *const Value) }, &Value::Num(42.0));
+        assert_eq!(
+            unsafe { &*ptr.as_ptr_unchecked().cast::<Value>().as_ptr() },
+            &Value::Num(42.0)
+        );
     }
 
     #[test]

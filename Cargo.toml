@@ -17,6 +17,7 @@ members = [
     "crates/runmat-turbine",
     "crates/runmat-gc-api",
     "crates/runmat-gc",
+    "crates/runmat-gc-miri-tests",
     "crates/runmat-snapshot",
     "crates/runmat-logging",
     "crates/runmat-lsp",

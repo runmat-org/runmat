@@ -5453,6 +5453,14 @@ name = "runmat-gc-api"
 version = "0.5.0"
 
 [[package]]
+name = "runmat-gc-miri-tests"
+version = "0.5.0"
+dependencies = [
+ "runmat-builtins",
+ "runmat-gc",
+]
+
+[[package]]
 name = "runmat-hir"
 version = "0.5.0"
 dependencies = [

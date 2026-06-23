@@ -9,6 +9,7 @@
 
 use runmat_builtins::{CellArray, HandleRef, Value};
 use runmat_gc::*;
+use std::ptr::NonNull;
 
 #[test]
 fn allocation_returns_value_aligned_handles() {
@@ -28,8 +29,8 @@ fn read_guard_rejects_unowned_address() {
         let boxed = Box::new(Value::Num(1.0));
         let raw = Box::into_raw(boxed);
         let handle = unsafe {
-            runmat_gc::GcHandle::from_addr_unchecked(
-                std::num::NonZeroUsize::new(raw as usize).expect("box pointer should be non-null"),
+            runmat_gc::GcHandle::from_ptr_unchecked(
+                NonNull::new(raw.cast()).expect("box pointer should be non-null"),
             )
         };
 

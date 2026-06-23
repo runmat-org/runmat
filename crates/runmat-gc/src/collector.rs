@@ -148,7 +148,11 @@ impl MarkSweepCollector {
 
     /// Mark an object and recursively mark all objects it references
     fn mark_object(&mut self, obj: GcHandle, max_generation: usize) -> Result<()> {
-        let ptr = obj.addr() as *const u8;
+        // SAFETY: this exposes the handle's preserved pointer token for
+        // address-keyed mark bookkeeping. Ownership/liveness is established by
+        // the root set and allocator before sweep.
+        let value_ptr = unsafe { obj.as_ptr_unchecked().cast::<Value>() };
+        let ptr = value_ptr.as_ptr().cast::<u8>();
         let ptr_addr = ptr as usize;
 
         // Skip if already marked
@@ -165,7 +169,7 @@ impl MarkSweepCollector {
         // SAFETY: mark traversal is limited to roots collected from GC-owned
         // handles, and `ptr` is only borrowed during the stop-the-world mark
         // phase before any sweep can reclaim the object.
-        collect_value_roots(unsafe { &*(obj.addr() as *const Value) }, &mut child_roots);
+        collect_value_roots(unsafe { value_ptr.as_ref() }, &mut child_roots);
         for child in child_roots {
             self.mark_object(child, max_generation)?;
         }

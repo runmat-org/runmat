@@ -6,8 +6,8 @@ use parking_lot::{Mutex, RwLock};
 use runmat_builtins::Value;
 use runmat_time::Instant;
 use std::collections::HashSet;
-use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
@@ -116,8 +116,8 @@ pub struct GarbageCollector {
     /// Mark-and-sweep collector
     collector: Mutex<MarkSweepCollector>,
 
-    /// Explicit roots stored as raw addresses (address-keyed)
-    root_ptrs: Arc<Mutex<HashSet<usize>>>,
+    /// Explicit roots stored as identity handles.
+    root_ptrs: Arc<Mutex<HashSet<GcHandle>>>,
 
     /// Collection state
     collection_in_progress: AtomicBool,
@@ -267,7 +267,9 @@ impl GarbageCollector {
     }
 
     fn non_null_value_ptr(ptr: &GcHandle) -> Result<*const Value> {
-        Ok(ptr.addr() as *const Value)
+        // SAFETY: this exposes the handle's preserved pointer token. Callers
+        // validate heap ownership before dereferencing it.
+        Ok(unsafe { ptr.as_ptr_unchecked().cast::<Value>().as_ptr() })
     }
 
     fn validate_value_ptr(&self, raw: *const Value) -> Result<()> {
@@ -398,14 +400,7 @@ impl GarbageCollector {
         let mut combined_roots: Vec<GcHandle> = Vec::new();
         {
             let roots = self.root_ptrs.lock();
-            combined_roots.extend(
-                roots
-                    .iter()
-                    .filter_map(|&addr| NonZeroUsize::new(addr))
-                    // SAFETY: explicit roots are recorded from live GC handles
-                    // via `GcHandle::addr` in `add_root`.
-                    .map(|addr| unsafe { GcHandle::from_addr_unchecked(addr) }),
-            );
+            combined_roots.extend(roots.iter().cloned());
         }
         // External roots
         if let Ok(mut ext) = ROOT_SCANNER.with(|scanner| scanner.scan_roots()) {
@@ -462,14 +457,7 @@ impl GarbageCollector {
         let mut combined_roots: Vec<GcHandle> = Vec::new();
         {
             let roots = self.root_ptrs.lock();
-            combined_roots.extend(
-                roots
-                    .iter()
-                    .filter_map(|&addr| NonZeroUsize::new(addr))
-                    // SAFETY: explicit roots are recorded from live GC handles
-                    // via `GcHandle::addr` in `add_root`.
-                    .map(|addr| unsafe { GcHandle::from_addr_unchecked(addr) }),
-            );
+            combined_roots.extend(roots.iter().cloned());
         }
         if let Ok(mut ext) = ROOT_SCANNER.with(|scanner| scanner.scan_roots()) {
             combined_roots.append(&mut ext);
@@ -498,21 +486,13 @@ impl GarbageCollector {
 
     /// Add a root to protect an object from collection
     pub fn add_root(&self, root: GcHandle) -> Result<()> {
-        let value_ptr = root.addr();
-        if value_ptr == 0 {
-            return Ok(());
-        }
-        self.root_ptrs.lock().insert(value_ptr);
+        self.root_ptrs.lock().insert(root);
         Ok(())
     }
 
     /// Remove a root
     pub fn remove_root(&self, root: GcHandle) -> Result<()> {
-        let value_ptr = root.addr();
-        if value_ptr == 0 {
-            return Ok(());
-        }
-        self.root_ptrs.lock().remove(&value_ptr);
+        self.root_ptrs.lock().remove(&root);
         Ok(())
     }
 
@@ -682,12 +662,20 @@ pub fn gc_handle_addr(handle: &GcHandle) -> usize {
     handle.addr()
 }
 
-pub fn gc_handle_from_addr(addr: usize) -> Result<GcHandle> {
-    let raw = NonZeroUsize::new(addr)
+/// Reconstruct a GC handle from an exposed address.
+///
+/// # Safety
+///
+/// `addr` must have been produced from a live RunMat `GcHandle` for the
+/// current GC heap, and the caller must preserve the provenance requirements of
+/// any later access. Prefer carrying `GcHandle` values directly instead of
+/// round-tripping through integer addresses.
+pub unsafe fn gc_handle_from_addr(addr: usize) -> Result<GcHandle> {
+    let raw = NonNull::new(addr as *mut ())
         .ok_or_else(|| GcError::InvalidPointer("null GC value handle address".to_string()))?;
     GC.validate_value_ptr(addr as *const Value)?;
     // SAFETY: the address was validated against the current RunMat GC heap.
-    Ok(unsafe { GcHandle::from_addr_unchecked(raw) })
+    Ok(unsafe { GcHandle::from_ptr_unchecked(raw) })
 }
 
 pub fn gc_stats() -> GcStats {
@@ -731,10 +719,10 @@ pub fn gc_barrier_minor_roots() -> Vec<GcHandle> {
     WRITE_BARRIERS
         .get_minor_gc_roots()
         .into_iter()
-        .filter_map(|p| NonZeroUsize::new(p as usize))
+        .filter_map(|p| NonNull::new(p as *mut ()))
         // SAFETY: barrier roots are recorded from GC-owned pointer addresses by
         // the write-barrier manager.
-        .map(|addr| unsafe { GcHandle::from_addr_unchecked(addr) })
+        .map(|ptr| unsafe { GcHandle::from_ptr_unchecked(ptr) })
         .collect()
 }
 
@@ -754,6 +742,17 @@ pub fn gc_reset_for_test() -> Result<()> {
         let config = GcConfig::default();
         *GC.config.write() = config.clone();
         let mut alloc = GC.allocator.lock();
+        let live_ptrs = alloc.take_tracked_value_ptrs_for_reset();
+        for ptr in live_ptrs {
+            let addr = ptr as usize;
+            gc_run_finalizer_for_addr(addr);
+            // SAFETY: these pointers are drained from allocator bookkeeping for
+            // initialized Value slots that remain live at whole-GC test reset.
+            // Each pointer is deduplicated before it is returned.
+            unsafe {
+                std::ptr::drop_in_place(ptr as *mut Value);
+            }
+        }
         *alloc = GenerationalAllocator::new(&config);
         let mut coll = GC.collector.lock();
         *coll = MarkSweepCollector::new(&config);
@@ -891,10 +890,10 @@ mod tests {
             {
                 let root = gc_root(protected).expect("root guard creation failed");
                 assert_eq!(root.handle().addr(), addr);
-                assert!(GC.root_ptrs.lock().contains(&addr));
+                assert!(GC.root_ptrs.lock().contains(&protected));
             }
 
-            assert!(!GC.root_ptrs.lock().contains(&addr));
+            assert!(!GC.root_ptrs.lock().contains(&protected));
         });
     }
 
@@ -906,11 +905,11 @@ mod tests {
             let addr = protected.addr();
 
             let root = gc_root(protected).expect("root guard creation failed");
-            assert!(GC.root_ptrs.lock().contains(&addr));
+            assert!(GC.root_ptrs.lock().contains(&protected));
 
             let handle = root.unroot().expect("explicit unroot failed");
             assert_eq!(handle.addr(), addr);
-            assert!(!GC.root_ptrs.lock().contains(&addr));
+            assert!(!GC.root_ptrs.lock().contains(&protected));
         });
     }
 
@@ -920,9 +919,8 @@ mod tests {
             let root =
                 gc_allocate_rooted(Value::String("rooted".to_string())).expect("rooted alloc");
             let handle = root.handle();
-            let addr = handle.addr();
 
-            assert!(GC.root_ptrs.lock().contains(&addr));
+            assert!(GC.root_ptrs.lock().contains(&handle));
             gc_collect_minor().expect("minor collection failed");
             assert_eq!(
                 gc_clone_value(&handle).expect("rooted handle should remain live"),
@@ -930,7 +928,7 @@ mod tests {
             );
 
             drop(root);
-            assert!(!GC.root_ptrs.lock().contains(&addr));
+            assert!(!GC.root_ptrs.lock().contains(&handle));
         });
     }
 
@@ -959,8 +957,8 @@ mod tests {
         gc_test_context(|| {
             let raw = Box::into_raw(Box::new(Value::Num(1.0)));
             let ptr = unsafe {
-                GcHandle::from_addr_unchecked(
-                    NonZeroUsize::new(raw as usize).expect("non-null test pointer"),
+                GcHandle::from_ptr_unchecked(
+                    NonNull::new(raw.cast()).expect("non-null test pointer"),
                 )
             };
 
