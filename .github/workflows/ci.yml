@@ -106,6 +106,7 @@ jobs:
             libegl1-mesa-dev
             libgl1-mesa-dev
             liblapack-dev
+            libocct-data-exchange-dev
             libopenblas-dev
             libssl-dev
             libudev-dev
@@ -156,6 +157,15 @@ jobs:
           if [[ -n "${ldconfig_bin}" ]] && ! "${ldconfig_bin}" -p | grep -q 'liblapack\.so'; then
             missing+=('liblapack(runtime)')
           fi
+          if [[ ! -d /usr/include/opencascade ]]; then
+            missing+=('opencascade(headers)')
+          fi
+          if [[ ! -e /usr/lib/x86_64-linux-gnu/libTKSTEP.so && ! -e /usr/lib/x86_64-linux-gnu/libTKDESTEP.so ]]; then
+            missing+=('opencascade(step-libs)')
+          fi
+          if [[ ! -e /usr/lib/x86_64-linux-gnu/libTKIGES.so && ! -e /usr/lib/x86_64-linux-gnu/libTKDEIGES.so && ! -e /usr/lib/x86_64-linux-gnu/libTKXDEIGES.so ]]; then
+            missing+=('opencascade(iges-libs)')
+          fi
 
           if ((${#missing[@]} > 0)); then
             printf 'Missing Linux runner prerequisites:\n' >&2
@@ -163,6 +173,12 @@ jobs:
             echo "Provision the runner with scripts/bootstrap-linux-runner.sh." >&2
             exit 1
           fi
+
+          {
+            echo "RUNMAT_OCCT_INCLUDE_DIR=/usr/include/opencascade"
+            echo "RUNMAT_OCCT_LIB_DIR=/usr/lib/x86_64-linux-gnu"
+            echo "RUNMAT_OCCT_LINK_MODE=dylib"
+          } >> "${GITHUB_ENV}"
 
       - name: Install macOS dependencies (ZMQ)
         if: runner.os == 'macOS'
