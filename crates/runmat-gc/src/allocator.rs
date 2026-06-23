@@ -360,29 +360,35 @@ impl GenerationalAllocator {
 
     /// Drain all pointers the allocator still believes may contain initialized
     /// Values. This is only for whole-GC teardown/reset paths.
-    pub fn take_tracked_value_ptrs_for_reset(&mut self) -> Vec<*const Value> {
+    pub fn take_tracked_value_ptrs_for_reset(&mut self) -> Vec<(*const Value, Option<GcHandle>)> {
         let mut ptrs = Vec::new();
         let mut seen = HashSet::new();
 
         for generation in &mut self.generations {
             for ptr in generation.take_tracked_ptrs_for_reset() {
                 if seen.insert(ptr) {
-                    ptrs.push(ptr.cast::<Value>());
+                    ptrs.push(ptr);
                 }
             }
         }
 
         for ptr in self.survival_counts.keys().copied() {
             if seen.insert(ptr) {
-                ptrs.push(ptr.cast::<Value>());
+                ptrs.push(ptr);
             }
         }
 
-        for ptr in self.promoted_ptrs.drain() {
+        let promoted_ptrs: Vec<*const u8> = self.promoted_ptrs.drain().collect();
+        for ptr in promoted_ptrs {
             if seen.insert(ptr) {
-                ptrs.push(ptr.cast::<Value>());
+                ptrs.push(ptr);
             }
         }
+
+        let ptrs: Vec<(*const Value, Option<GcHandle>)> = ptrs
+            .into_iter()
+            .map(|ptr| (ptr.cast::<Value>(), self.handle_for_live_ptr(ptr)))
+            .collect();
 
         self.survival_counts.clear();
         self.live_ptrs.clear();

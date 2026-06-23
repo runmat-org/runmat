@@ -84,23 +84,36 @@ thread_local! {
     static RUNTIME_CONTEXT: Cell<*const RuntimeContext> = Cell::new(std::ptr::null());
 }
 
-fn set_runtime_context(context: &'static RuntimeContext) {
-    RUNTIME_CONTEXT.with(|cell| cell.set(context as *const RuntimeContext));
+struct RuntimeContextGuard {
+    previous: *const RuntimeContext,
+    _context: Box<RuntimeContext>,
 }
 
-fn clear_runtime_context() {
-    RUNTIME_CONTEXT.with(|cell| cell.set(std::ptr::null()));
+impl Drop for RuntimeContextGuard {
+    fn drop(&mut self) {
+        RUNTIME_CONTEXT.with(|cell| cell.set(self.previous));
+    }
 }
 
-fn get_runtime_context() -> Option<&'static RuntimeContext> {
+fn enter_runtime_context(context: RuntimeContext) -> RuntimeContextGuard {
+    let context = Box::new(context);
+    let ptr = context.as_ref() as *const RuntimeContext;
+    let previous = RUNTIME_CONTEXT.with(|cell| cell.replace(ptr));
+    RuntimeContextGuard {
+        previous,
+        _context: context,
+    }
+}
+
+fn with_runtime_context<R>(f: impl FnOnce(&RuntimeContext) -> R) -> Option<R> {
     RUNTIME_CONTEXT.with(|cell| {
         let ptr = cell.get();
-        if ptr.is_null() {
-            None
-        } else {
-            Some(unsafe { &*ptr })
-        }
+        (!ptr.is_null()).then(|| f(unsafe { &*ptr }))
     })
+}
+
+fn runtime_function_registry() -> Option<FunctionRegistry> {
+    with_runtime_context(|context| context.function_registry.clone())
 }
 
 fn declare_host_semantic_call_in_module(module: &mut JITModule) -> FuncId {
@@ -616,31 +629,19 @@ impl TurbineEngine {
             .map(TurbineValue::from_runtime_value)
             .collect::<Result<Vec<_>>>()?;
 
-        // Set up runtime context for user function calls
-        let runtime_context = RuntimeContext::new(function_registry.clone());
-        // Note: Using Box::leak to create a 'static reference - this is safe for our use case
-        // but in production we'd want a more sophisticated lifetime management
-        let static_context = Box::leak(Box::new(runtime_context));
+        if func.ptr.is_null() {
+            return Err(TurbineError::InvalidFunctionPointer);
+        }
 
         // Execute the JIT compiled function
+        let _runtime_context =
+            enter_runtime_context(RuntimeContext::new(function_registry.clone()));
         let result = unsafe {
-            if func.ptr.is_null() {
-                return Err(TurbineError::InvalidFunctionPointer);
-            }
-
-            // Set runtime context for JIT function calls
-            set_runtime_context(static_context);
-
             // Cast function pointer to correct signature: fn(*mut TurbineValue, usize) -> i32
             let jit_fn: extern "C" fn(*mut TurbineValue, usize) -> i32 =
                 std::mem::transmute(func.ptr);
 
-            let exec_result = jit_fn(turbine_vars.as_mut_ptr(), turbine_vars.len());
-
-            // Clear runtime context after execution
-            clear_runtime_context();
-
-            exec_result
+            jit_fn(turbine_vars.as_mut_ptr(), turbine_vars.len())
         };
 
         for (i, turbine_value) in turbine_vars.iter().copied().enumerate() {
@@ -1057,8 +1058,8 @@ pub extern "C" fn runmat_call_semantic_function(
         &[]
     };
 
-    let context = match get_runtime_context() {
-        Some(ctx) => ctx,
+    let function_registry = match runtime_function_registry() {
+        Some(function_registry) => function_registry,
         None => {
             error!("No runtime context available for semantic function call");
             return 1;
@@ -1077,7 +1078,7 @@ pub extern "C" fn runmat_call_semantic_function(
         function_id,
         &args,
         1,
-        &context.function_registry,
+        &function_registry,
     )))
     .and_then(|result| result.map_err(TurbineError::ExecutionError));
 
@@ -1139,8 +1140,8 @@ pub extern "C" fn runmat_call_semantic_function_outputs(
         &[]
     };
 
-    let context = match get_runtime_context() {
-        Some(ctx) => ctx,
+    let function_registry = match runtime_function_registry() {
+        Some(function_registry) => function_registry,
         None => {
             error!("No runtime context available for semantic function outputs call");
             return 1;
@@ -1160,7 +1161,7 @@ pub extern "C" fn runmat_call_semantic_function_outputs(
         function_id,
         &args,
         out_count,
-        &context.function_registry,
+        &function_registry,
     )))
     .and_then(|result| result.map_err(TurbineError::ExecutionError));
 
@@ -1384,7 +1385,7 @@ pub extern "C" fn runmat_call_semantic_function_value(
     result_ptr: *mut TurbineValue,
 ) -> i32 {
     let output = (|| -> Result<Value> {
-        let context = get_runtime_context().ok_or_else(|| {
+        let function_registry = runtime_function_registry().ok_or_else(|| {
             execution_error("No runtime context available for TurbineValue semantic call")
         })?;
         let function_id = usize::try_from(function_id)
@@ -1394,7 +1395,7 @@ pub extern "C" fn runmat_call_semantic_function_value(
             function_id,
             &args,
             1,
-            &context.function_registry,
+            &function_registry,
         )))?
         .map_err(TurbineError::ExecutionError)
     })();
@@ -1424,7 +1425,7 @@ pub extern "C" fn runmat_call_semantic_function_values(
         if out_count > 0 && results_ptr.is_null() {
             return Err(execution_error("null TurbineValue results pointer"));
         }
-        let context = get_runtime_context().ok_or_else(|| {
+        let function_registry = runtime_function_registry().ok_or_else(|| {
             execution_error("No runtime context available for TurbineValue semantic outputs call")
         })?;
         let function_id = usize::try_from(function_id)
@@ -1435,7 +1436,7 @@ pub extern "C" fn runmat_call_semantic_function_values(
             function_id,
             &args,
             out_count,
-            &context.function_registry,
+            &function_registry,
         )))?
         .map_err(TurbineError::ExecutionError)?;
         Ok(match output {
@@ -1472,7 +1473,7 @@ pub extern "C" fn runmat_call_semantic_function_expanded_value(
     result_ptr: *mut TurbineValue,
 ) -> i32 {
     let output = (|| -> Result<Value> {
-        let context = get_runtime_context().ok_or_else(|| {
+        let function_registry = runtime_function_registry().ok_or_else(|| {
             execution_error("No runtime context available for expanded TurbineValue semantic call")
         })?;
         let function_id = usize::try_from(function_id)
@@ -1484,7 +1485,7 @@ pub extern "C" fn runmat_call_semantic_function_expanded_value(
             function_id,
             &expanded_args,
             1,
-            &context.function_registry,
+            &function_registry,
         )))?
         .map_err(TurbineError::ExecutionError)
     })();
@@ -1516,7 +1517,7 @@ pub extern "C" fn runmat_call_semantic_function_expanded_values(
         if out_count > 0 && results_ptr.is_null() {
             return Err(execution_error("null TurbineValue results pointer"));
         }
-        let context = get_runtime_context().ok_or_else(|| {
+        let function_registry = runtime_function_registry().ok_or_else(|| {
             execution_error(
                 "No runtime context available for expanded TurbineValue semantic outputs call",
             )
@@ -1531,7 +1532,7 @@ pub extern "C" fn runmat_call_semantic_function_expanded_values(
             function_id,
             &expanded_args,
             out_count,
-            &context.function_registry,
+            &function_registry,
         )))?
         .map_err(TurbineError::ExecutionError)?;
         Ok(match output {
@@ -1844,14 +1845,13 @@ mod tests {
     use runmat_vm::FunctionBytecode;
     use std::collections::HashMap;
 
-    fn install_semantic_context(functions: Vec<FunctionBytecode>) {
+    fn install_semantic_context(functions: Vec<FunctionBytecode>) -> RuntimeContextGuard {
         let mut bound_functions = HashMap::new();
         for function in functions {
             bound_functions.insert(function.function, function);
         }
         let registry = FunctionRegistry::new(bound_functions);
-        let context = Box::leak(Box::new(RuntimeContext::new(registry)));
-        set_runtime_context(context);
+        enter_runtime_context(RuntimeContext::new(registry))
     }
 
     fn bound_function(
@@ -1900,7 +1900,7 @@ mod tests {
     #[test]
     fn function_value_host_call_round_trips_scalar() {
         let function = FunctionId(1);
-        install_semantic_context(vec![bound_function(
+        let _context = install_semantic_context(vec![bound_function(
             function,
             "inc",
             vec![
@@ -1922,7 +1922,6 @@ mod tests {
             args.len() as i32,
             &mut result,
         );
-        clear_runtime_context();
 
         assert_eq!(status, 0);
         assert_eq!(result.to_runtime_value().unwrap(), Value::Num(42.0));
@@ -1931,7 +1930,7 @@ mod tests {
     #[test]
     fn function_value_host_call_round_trips_handle_value() {
         let function = FunctionId(2);
-        install_semantic_context(vec![bound_function(
+        let _context = install_semantic_context(vec![bound_function(
             function,
             "label",
             vec![Instr::LoadString("ok".to_string()), Instr::StoreVar(0)],
@@ -1947,7 +1946,6 @@ mod tests {
             0,
             &mut result,
         );
-        clear_runtime_context();
 
         assert_eq!(status, 0);
         assert_eq!(
@@ -1959,7 +1957,7 @@ mod tests {
     #[test]
     fn function_values_host_call_writes_multiple_outputs() {
         let function = FunctionId(3);
-        install_semantic_context(vec![bound_function(
+        let _context = install_semantic_context(vec![bound_function(
             function,
             "pair",
             vec![
@@ -1982,7 +1980,6 @@ mod tests {
             results.len() as i32,
             results.as_mut_ptr(),
         );
-        clear_runtime_context();
 
         assert_eq!(status, 0);
         assert_eq!(results[0].to_runtime_value().unwrap(), Value::Num(7.0));

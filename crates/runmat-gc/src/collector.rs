@@ -59,7 +59,9 @@ impl MarkSweepCollector {
             if !self.marked_objects.lock().contains(&addr) {
                 collected += 1;
                 // Run finalizer if registered for this object address
-                crate::gc_run_finalizer_for_addr(addr);
+                if let Some(handle) = allocator.handle_for_live_ptr(ptr) {
+                    crate::gc_run_finalizer_for_handle(handle);
+                }
                 allocator.note_value_dropped(ptr);
                 // Drop the value in place to run destructors if any
                 unsafe {

@@ -1046,7 +1046,7 @@ async fn assign_into_handle(
     }
     let current = runmat_gc::gc_clone_value(&handle.target)
         .map_err(|e| setfield_flow(format!("setfield: invalid handle target: {e}")))?;
-    let updated = assign_into_value(current, steps, rhs).await?;
+    let updated = assign_into_value(current.clone(), steps, rhs).await?;
     runmat_gc::gc_with_value_mut(&handle.target, |target| -> BuiltinResult<()> {
         let target_valid = match target {
             Value::Object(obj) => !matches!(
@@ -1066,6 +1066,12 @@ async fn assign_into_handle(
                 handle.class_name
             )));
         }
+        if *target != current {
+            return Err(setfield_flow(
+                "setfield: handle target changed during asynchronous assignment",
+            ));
+        }
+        runmat_gc::gc_record_handle_write(&handle.target, &updated);
         *target = updated;
         Ok(())
     })

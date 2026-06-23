@@ -513,6 +513,7 @@ fn normalize_constructor_result(
                 let merged = runmat_gc::gc_with_value_mut(&handle.target, |target| {
                     if let Value::Object(object) = target {
                         for (field, value) in struct_value.fields {
+                            runmat_gc::gc_record_handle_write(&handle.target, &value);
                             object.properties.insert(field, value);
                         }
                         true

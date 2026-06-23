@@ -910,10 +910,14 @@ pub async fn call_super_constructor(
     fn merge_parent_props_into_object(
         receiver_obj: &mut runmat_builtins::ObjectInstance,
         ctor_result: Value,
+        owner: Option<&runmat_gc::GcHandle>,
     ) {
         match ctor_result {
             Value::Object(parent_obj) => {
                 for (name, value) in parent_obj.properties {
+                    if let Some(owner) = owner {
+                        runmat_gc::gc_record_handle_write(owner, &value);
+                    }
                     receiver_obj.properties.insert(name, value);
                 }
             }
@@ -922,12 +926,18 @@ pub async fn call_super_constructor(
                     runmat_gc::gc_clone_value(&parent_handle.target)
                 {
                     for (name, value) in parent_obj.properties {
+                        if let Some(owner) = owner {
+                            runmat_gc::gc_record_handle_write(owner, &value);
+                        }
                         receiver_obj.properties.insert(name, value);
                     }
                 }
             }
             Value::Struct(parent_fields) => {
                 for (name, value) in parent_fields.fields {
+                    if let Some(owner) = owner {
+                        runmat_gc::gc_record_handle_write(owner, &value);
+                    }
                     receiver_obj.properties.insert(name, value);
                 }
             }
@@ -936,13 +946,13 @@ pub async fn call_super_constructor(
     }
     match receiver {
         Value::Object(mut receiver_obj) => {
-            merge_parent_props_into_object(&mut receiver_obj, ctor_result);
+            merge_parent_props_into_object(&mut receiver_obj, ctor_result, None);
             Ok(Value::Object(receiver_obj))
         }
         Value::HandleObject(handle) => {
             let merged = runmat_gc::gc_with_value_mut(&handle.target, |target| {
                 if let Value::Object(receiver_obj) = target {
-                    merge_parent_props_into_object(receiver_obj, ctor_result);
+                    merge_parent_props_into_object(receiver_obj, ctor_result, Some(&handle.target));
                     true
                 } else {
                     false

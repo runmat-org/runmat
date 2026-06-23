@@ -492,18 +492,29 @@ fn build_area_gpu_plots(
             }
             let axis = match scalar {
                 runmat_plot::gpu::ScalarType::F32 => {
-                    let owned: Box<[f32]> = values
-                        .iter()
-                        .map(|v| *v as f32)
-                        .collect::<Vec<_>>()
-                        .into_boxed_slice();
-                    let leaked: &'static [f32] = Box::leak(owned);
-                    runmat_plot::gpu::axis::AxisData::F32(leaked)
+                    let values_f32: Vec<f32> = values.iter().map(|v| *v as f32).collect();
+                    let axis = runmat_plot::gpu::axis::AxisData::F32(&values_f32);
+                    runmat_plot::gpu::axis::AxisData::Buffer(
+                        runmat_plot::gpu::axis::axis_storage_buffer(
+                            &context.device,
+                            "area host x axis",
+                            &axis,
+                            scalar,
+                        )
+                        .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, e))?,
+                    )
                 }
                 runmat_plot::gpu::ScalarType::F64 => {
-                    let owned: Box<[f64]> = values.clone().into_boxed_slice();
-                    let leaked: &'static [f64] = Box::leak(owned);
-                    runmat_plot::gpu::axis::AxisData::F64(leaked)
+                    let axis = runmat_plot::gpu::axis::AxisData::F64(&values);
+                    runmat_plot::gpu::axis::AxisData::Buffer(
+                        runmat_plot::gpu::axis::axis_storage_buffer(
+                            &context.device,
+                            "area host x axis",
+                            &axis,
+                            scalar,
+                        )
+                        .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, e))?,
+                    )
                 }
             };
             (

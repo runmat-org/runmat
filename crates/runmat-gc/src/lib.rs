@@ -15,7 +15,7 @@ pub mod allocator;
 pub mod barriers;
 pub mod collector;
 pub mod config;
-pub use runmat_gc_api::{GcHandle, GcRoot, RootId, RootInfo, RootScannerStats};
+pub use runmat_gc_api::{GcHandle, GcRoot, RootId, RootInfo, RootScannerStats, Trace, Tracer};
 pub mod generations;
 pub mod roots;
 pub mod stats;
@@ -30,33 +30,40 @@ pub trait GcFinalizer: Send + Sync {
     fn finalize(&self);
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct GcIdentity {
+    addr: usize,
+    epoch: usize,
+}
+
+impl From<GcHandle> for GcIdentity {
+    fn from(handle: GcHandle) -> Self {
+        Self {
+            addr: handle.addr(),
+            epoch: handle.epoch(),
+        }
+    }
+}
+
 static FINALIZERS: once_cell::sync::Lazy<
-    parking_lot::Mutex<HashMap<usize, std::sync::Arc<dyn GcFinalizer>>>,
+    parking_lot::Mutex<HashMap<GcIdentity, std::sync::Arc<dyn GcFinalizer>>>,
 > = once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(HashMap::new()));
 
 /// Register a finalizer for the provided GC handle.
 pub fn gc_register_finalizer(ptr: GcHandle, f: std::sync::Arc<dyn GcFinalizer>) -> Result<()> {
-    let addr = ptr.addr();
-    if addr == 0 {
-        return Ok(());
-    }
-    FINALIZERS.lock().insert(addr, f);
+    FINALIZERS.lock().insert(ptr.into(), f);
     Ok(())
 }
 
 /// Remove any registered finalizer for the provided GC handle.
 pub fn gc_unregister_finalizer(ptr: GcHandle) -> Result<()> {
-    let addr = ptr.addr();
-    if addr == 0 {
-        return Ok(());
-    }
-    FINALIZERS.lock().remove(&addr);
+    FINALIZERS.lock().remove(&ptr.into());
     Ok(())
 }
 
-/// Internal: run and remove finalizer for an address if present.
-pub(crate) fn gc_run_finalizer_for_addr(addr: usize) {
-    if let Some(f) = FINALIZERS.lock().remove(&addr) {
+/// Internal: run and remove finalizer for a live handle if present.
+pub(crate) fn gc_run_finalizer_for_handle(handle: GcHandle) {
+    if let Some(f) = FINALIZERS.lock().remove(&handle.into()) {
         // Run finalizer; avoid panicking across GC boundaries
         f.finalize();
     }
@@ -790,17 +797,66 @@ pub fn gc_unregister_root(root_id: RootId) -> Result<()> {
 
 /// Record a write for GC barriers (approximate old->young tracking)
 pub fn gc_record_write(old: &Value, new: &Value) {
-    // Generation-aware barrier: record only if old is logically old and new is young
+    // Generation-aware barrier: record old->young edges discovered through the
+    // new value. `new` may be a plain `Value` that contains GC handles rather
+    // than a GC allocation itself.
     let old_ptr = old as *const Value as *const u8;
-    let young_ptr = new as *const Value as *const u8;
-    // Query allocator logical generations
     let alloc = GC.allocator.lock();
     let old_gen = alloc.logical_generation(old_ptr).unwrap_or(0);
-    let new_gen = alloc.logical_generation(young_ptr).unwrap_or(0);
-    drop(alloc);
-    if old_gen > new_gen {
-        WRITE_BARRIERS.record_reference(old_ptr, young_ptr);
+    if old_gen == 0 {
+        return;
     }
+    for young in gc_handles_in_value(new) {
+        let young_ptr = young.addr() as *const u8;
+        if alloc.is_live_handle(&young)
+            && alloc
+                .logical_generation(young_ptr)
+                .is_some_and(|new_gen| old_gen > new_gen)
+        {
+            WRITE_BARRIERS.record_reference(old_ptr, young_ptr);
+        }
+    }
+}
+
+/// Record a write into a GC-owned container whose owning allocation is known.
+pub fn gc_record_handle_write(owner: &GcHandle, new: &Value) {
+    let owner_ptr = owner.addr() as *const u8;
+    let alloc = GC.allocator.lock();
+    if !alloc.is_live_handle(owner) {
+        return;
+    }
+    let owner_gen = alloc.logical_generation(owner_ptr).unwrap_or(0);
+    if owner_gen == 0 {
+        return;
+    }
+    for young in gc_handles_in_value(new) {
+        let young_ptr = young.addr() as *const u8;
+        if alloc.is_live_handle(&young)
+            && alloc
+                .logical_generation(young_ptr)
+                .is_some_and(|new_gen| owner_gen > new_gen)
+        {
+            WRITE_BARRIERS.record_reference(owner_ptr, young_ptr);
+        }
+    }
+}
+
+fn gc_handles_in_value(value: &Value) -> Vec<GcHandle> {
+    struct HandleCollector {
+        handles: Vec<GcHandle>,
+    }
+
+    impl Tracer for HandleCollector {
+        fn mark(&mut self, handle: GcHandle) {
+            self.handles.push(handle);
+        }
+    }
+
+    let mut tracer = HandleCollector {
+        handles: Vec::new(),
+    };
+    value.trace(&mut tracer);
+    tracer.handles
 }
 
 /// Get barrier-derived roots for minor GC
@@ -832,9 +888,10 @@ pub fn gc_reset_for_test() -> Result<()> {
         *GC.config.write() = config.clone();
         let mut alloc = GC.allocator.lock();
         let live_ptrs = alloc.take_tracked_value_ptrs_for_reset();
-        for ptr in live_ptrs {
-            let addr = ptr as usize;
-            gc_run_finalizer_for_addr(addr);
+        for (ptr, handle) in live_ptrs {
+            if let Some(handle) = handle {
+                gc_run_finalizer_for_handle(handle);
+            }
             // SAFETY: these pointers are drained from allocator bookkeeping for
             // initialized Value slots that remain live at whole-GC test reset.
             // Each pointer is deduplicated before it is returned.
