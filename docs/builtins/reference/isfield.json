@@ -9,7 +9,6 @@
     "metadata"
   ],
   "summary": "Test struct field existence in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

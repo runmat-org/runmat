@@ -17,10 +17,11 @@ use runmat_accelerate_api::{
     ProviderNanMode, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
     ProviderPolyfitResult, ProviderPolyvalOptions, ProviderPrecision, ProviderQrOptions,
     ProviderQrPivot, ProviderQrPowerIterResult, ProviderQrResult, ProviderScanDirection,
-    ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult, ReductionFlavor,
-    ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison, SortOrder, SortResult,
-    SortRowsColumnSpec, SpawnHandleConcurrency, UnionOptions, UnionResult, UniqueOptions,
-    UniqueResult, WgpuBufferRef,
+    ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
+    ProviderSpectralResult, ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult,
+    ReductionFlavor, ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison,
+    SortOrder, SortResult, SortRowsColumnSpec, SpawnHandleConcurrency, UnionOptions, UnionResult,
+    UniqueOptions, UniqueResult, WgpuBufferRef,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
@@ -55,6 +56,8 @@ use std::sync::{Arc, Mutex};
 use tracing::info_span;
 use wgpu::util::DeviceExt;
 
+#[path = "ops/comms.rs"]
+mod comms;
 #[path = "ops/constructors.rs"]
 mod constructors;
 #[path = "ops/context.rs"]

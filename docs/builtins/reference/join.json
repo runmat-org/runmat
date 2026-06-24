@@ -10,7 +10,6 @@
     "dimension join"
   ],
   "summary": "Join text elements with delimiters in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

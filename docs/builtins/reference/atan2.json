@@ -9,7 +9,6 @@
     "arctangent"
   ],
   "summary": "Quadrant-aware inverse tangent atan2(y, x) in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

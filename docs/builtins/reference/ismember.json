@@ -10,7 +10,6 @@
     "gpu"
   ],
   "summary": "Test membership of elements or rows in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

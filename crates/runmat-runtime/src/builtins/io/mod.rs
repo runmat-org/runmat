@@ -1,13 +1,17 @@
+pub mod archive;
+pub mod audio;
 pub mod clc;
 pub mod data;
 pub mod disp;
 pub mod filetext;
 pub mod format;
 pub mod http;
+pub mod importdata;
 pub mod input;
 pub mod json;
 pub mod mat;
 pub mod net;
 pub mod repl_fs;
 pub mod tabular;
+pub mod textscan;
 pub(crate) mod type_resolvers;

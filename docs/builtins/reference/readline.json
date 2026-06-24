@@ -9,7 +9,6 @@
     "text"
   ],
   "summary": "Read a line of ASCII text from a `tcpclient` connection using MATLAB-compatible rules.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,7 +9,6 @@
     "MATLAB compatibility"
   ],
   "summary": "Create duration arrays from hour, minute, and second components with MATLAB-compatible construction behavior.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

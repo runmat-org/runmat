@@ -44,7 +44,7 @@ Format support means RunMat can ingest the file family. It does not guarantee th
 
 Source builds that do not enable the optional OCCT feature do not link OCCT. In those builds, STEP remains useful for assembly, product-label, and material-evidence metadata, but it does not produce CAD face topology. Official RunMat CLI and desktop binaries are built with OCCT enabled, so they can import STEP, IGES, and BREP topology through OCCT. Browser/WASM builds use the `occt-wasm-host` feature with a configured browser sidecar.
 
-Native packagers can build the OCCT path from the bundled OCCT source or point RunMat at an existing OCCT installation with `RUNMAT_OCCT_ROOT`, or with `RUNMAT_OCCT_INCLUDE_DIR` and `RUNMAT_OCCT_LIB_DIR`. `RUNMAT_OCCT_ROOT` accepts both `include/` and `include/opencascade/` header layouts. Use `RUNMAT_OCCT_LINK_MODE=static` for static CLI-style linking. Use `RUNMAT_OCCT_LINK_MODE=dylib` for dynamic desktop packaging; dynamic mode requires an existing dynamic OCCT installation and does not use the bundled static OCCT builder.
+Native packagers can build the OCCT path from the bundled OCCT source or point RunMat at an existing OCCT installation with `RUNMAT_OCCT_ROOT`, or with `RUNMAT_OCCT_INCLUDE_DIR` and `RUNMAT_OCCT_LIB_DIR`. Building bundled OCCT requires CMake on `PATH` or through Cargo's `CMAKE` environment overrides. `RUNMAT_OCCT_ROOT` accepts both `include/` and `include/opencascade/` header layouts. Use `RUNMAT_OCCT_LINK_MODE=static` for static CLI-style linking. Use `RUNMAT_OCCT_LINK_MODE=dylib` for dynamic desktop packaging; dynamic mode requires an existing dynamic OCCT installation and does not use the bundled static OCCT builder.
 
 ## Inspect Before Modeling
 

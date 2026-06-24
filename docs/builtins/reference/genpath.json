@@ -8,7 +8,6 @@
     "addpath"
   ],
   "summary": "Generate recursive path strings from folder trees in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

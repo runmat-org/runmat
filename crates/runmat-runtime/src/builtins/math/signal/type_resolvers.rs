@@ -24,6 +24,13 @@ pub fn deconv_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
+pub fn envelope_type(args: &[Type], _context: &ResolveContext) -> Type {
+    let Some(input) = args.first() else {
+        return Type::Unknown;
+    };
+    numeric_like(input)
+}
+
 pub fn filter_type(args: &[Type], _context: &ResolveContext) -> Type {
     let signal = args.get(2);
     match signal {
@@ -73,6 +80,39 @@ pub fn freqz_type(args: &[Type], context: &ResolveContext) -> Type {
     }
 }
 
+pub fn pwelch_type(args: &[Type], _context: &ResolveContext) -> Type {
+    if args.is_empty() {
+        return Type::Unknown;
+    }
+    Type::Tensor {
+        shape: Some(vec![None, None]),
+    }
+}
+
+pub fn periodogram_type(args: &[Type], _context: &ResolveContext) -> Type {
+    if args.is_empty() {
+        return Type::Unknown;
+    }
+    Type::Tensor {
+        shape: Some(vec![None, None]),
+    }
+}
+
+pub fn spectrogram_type(args: &[Type], _context: &ResolveContext) -> Type {
+    if args.is_empty() {
+        return Type::Unknown;
+    }
+    Type::Tensor {
+        shape: Some(vec![None, None]),
+    }
+}
+
+pub fn zplane_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Tensor {
+        shape: Some(vec![Some(1), None]),
+    }
+}
+
 pub fn butter_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.len() < 2 {
         return Type::Unknown;
@@ -80,6 +120,13 @@ pub fn butter_type(args: &[Type], _context: &ResolveContext) -> Type {
     Type::Tensor {
         shape: Some(vec![Some(1), None]),
     }
+}
+
+pub fn buttord_type(args: &[Type], _context: &ResolveContext) -> Type {
+    if args.len() < 4 {
+        return Type::Unknown;
+    }
+    Type::Num
 }
 
 pub fn pulse_train_type(args: &[Type], context: &ResolveContext) -> Type {

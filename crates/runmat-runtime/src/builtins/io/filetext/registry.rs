@@ -157,7 +157,7 @@ pub(crate) fn list_infos() -> Vec<FileInfo> {
     infos
 }
 
-pub(crate) fn take_handle(fid: i32) -> Option<SharedFileHandle> {
+pub(crate) fn shared_handle(fid: i32) -> Option<SharedFileHandle> {
     let guard = REGISTRY.lock().expect("file registry poisoned");
     guard
         .entries

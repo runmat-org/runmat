@@ -42,7 +42,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Uses elem_div when shapes match, scalar_div for tensor ./ scalar, and scalar_rdiv for scalar ./ tensor; implicit expansion or unsupported operand kinds fall back to the CPU before 'like' prototypes are honoured.",
+    notes: "Uses elem_div when shapes match, including complex-interleaved gpuArrays, attempts provider-side implicit expansion with repmat, and uses scalar_div/scalar_rdiv for real scalar cases; unsupported shapes or operand kinds fall back to the CPU before 'like' prototypes are honoured.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::rdivide")]
@@ -524,13 +524,13 @@ async fn rdivide_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> Builtin
             }
         }
     }
-    let left = gpu_helpers::gather_tensor_async(&lhs)
+    let left = gpu_helpers::gather_value_async(&Value::GpuTensor(lhs))
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    let right = gpu_helpers::gather_tensor_async(&rhs)
+    let right = gpu_helpers::gather_value_async(&Value::GpuTensor(rhs))
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    rdivide_host(Value::Tensor(left), Value::Tensor(right))
+    rdivide_host(left, right)
 }
 
 fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, Vec<usize>)> {
@@ -571,10 +571,10 @@ async fn rdivide_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResul
             }
         }
     }
-    let host_lhs = gpu_helpers::gather_tensor_async(&lhs)
+    let host_lhs = gpu_helpers::gather_value_async(&Value::GpuTensor(lhs))
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    rdivide_host(Value::Tensor(host_lhs), rhs)
+    rdivide_host(host_lhs, rhs)
 }
 
 async fn rdivide_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -585,10 +585,10 @@ async fn rdivide_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResu
             }
         }
     }
-    let host_rhs = gpu_helpers::gather_tensor_async(&rhs)
+    let host_rhs = gpu_helpers::gather_value_async(&Value::GpuTensor(rhs))
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    rdivide_host(lhs, Value::Tensor(host_rhs))
+    rdivide_host(lhs, host_rhs)
 }
 
 fn rdivide_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -798,7 +798,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
     use runmat_builtins::{
         CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
     };
@@ -999,6 +999,90 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
             assert_eq!(gathered.data, vec![5.0, 4.0, 3.0]);
+        });
+    }
+
+    #[test]
+    fn rdivide_complex_gpu_pair_stays_resident() {
+        test_support::with_test_provider(|provider| {
+            let lhs = ComplexTensor::new(vec![(1.0, 2.0), (3.0, -4.0)], vec![1, 2]).unwrap();
+            let rhs = ComplexTensor::new(vec![(2.0, -1.0), (-1.0, 1.0)], vec![1, 2]).unwrap();
+            let ha = gpu_helpers::upload_complex_tensor(provider, &lhs).expect("upload lhs");
+            let hb = gpu_helpers::upload_complex_tensor(provider, &rhs).expect("upload rhs");
+
+            let result = rdivide_builtin(Value::GpuTensor(ha), Value::GpuTensor(hb), Vec::new())
+                .expect("gpu complex rdivide");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected resident gpu complex tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(handle))).unwrap();
+            let Value::ComplexTensor(t) = gathered else {
+                panic!("expected gathered complex tensor, got {gathered:?}");
+            };
+            assert_eq!(t.shape, vec![1, 2]);
+            let expected = [(0.0, 1.0), (-3.5, 0.5)];
+            for (got, exp) in t.data.iter().zip(expected.iter()) {
+                assert!((got.0 - exp.0).abs() < EPS);
+                assert!((got.1 - exp.1).abs() < EPS);
+            }
+        });
+    }
+
+    #[test]
+    fn rdivide_complex_gpu_scalar_paths_stay_resident() {
+        test_support::with_test_provider(|provider| {
+            let complex = ComplexTensor::new(vec![(1.0, 2.0), (-4.0, 0.5)], vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+            let div_result = rdivide_builtin(Value::GpuTensor(handle), Value::Num(2.0), Vec::new())
+                .expect("gpu complex scalar divide");
+            let Value::GpuTensor(div_handle) = div_result else {
+                panic!("expected resident gpu complex tensor for scalar_div");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&div_handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
+                div_handle,
+            )))
+            .unwrap();
+            let Value::ComplexTensor(t) = gathered else {
+                panic!("expected gathered complex tensor, got {gathered:?}");
+            };
+            let expected = [(0.5, 1.0), (-2.0, 0.25)];
+            for (got, exp) in t.data.iter().zip(expected.iter()) {
+                assert!((got.0 - exp.0).abs() < EPS);
+                assert!((got.1 - exp.1).abs() < EPS);
+            }
+
+            let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+            let rdiv_result =
+                rdivide_builtin(Value::Num(2.0), Value::GpuTensor(handle), Vec::new())
+                    .expect("gpu scalar complex divide");
+            let Value::GpuTensor(rdiv_handle) = rdiv_result else {
+                panic!("expected resident gpu complex tensor for scalar_rdiv");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&rdiv_handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
+                rdiv_handle,
+            )))
+            .unwrap();
+            let Value::ComplexTensor(t) = gathered else {
+                panic!("expected gathered complex tensor, got {gathered:?}");
+            };
+            let expected = [(0.4, -0.8), (-32.0 / 65.0, -4.0 / 65.0)];
+            for (got, exp) in t.data.iter().zip(expected.iter()) {
+                assert!((got.0 - exp.0).abs() < EPS);
+                assert!((got.1 - exp.1).abs() < EPS);
+            }
         });
     }
 

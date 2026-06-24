@@ -63,6 +63,27 @@ pub struct RemoteFsProvider {
     timeout_ms: u32,
 }
 
+struct FsWriteChunkRequest<'a> {
+    path: &'a str,
+    offset: u64,
+    truncate: bool,
+    final_chunk: bool,
+    create_new: bool,
+    data: &'a [u8],
+    hash: Option<&'a str>,
+}
+
+struct UploadSessionCompleteParams<'a> {
+    path: &'a str,
+    session_id: &'a str,
+    blob_key: &'a str,
+    size_bytes: u64,
+    content_sha256: &'a str,
+    chunk_count: usize,
+    create_new: bool,
+    hash: Option<&'a str>,
+}
+
 impl RemoteFsProvider {
     pub fn new(config: RemoteFsConfig) -> io::Result<Self> {
         if config.base_url.is_empty() {
@@ -377,24 +398,25 @@ impl RemoteFsProvider {
 
     fn upload_chunk(
         &self,
-        path: &str,
-        offset: u64,
-        truncate: bool,
-        final_chunk: bool,
-        data: &[u8],
-        hash: Option<&str>,
+        request: FsWriteChunkRequest<'_>,
     ) -> io::Result<Option<FsWriteSessionResponse>> {
-        let mut query = vec![("path", path.to_string()), ("offset", offset.to_string())];
-        if truncate {
+        let mut query = vec![
+            ("path", request.path.to_string()),
+            ("offset", request.offset.to_string()),
+        ];
+        if request.truncate {
             query.push(("truncate", "true".into()));
         }
-        if final_chunk {
+        if request.final_chunk {
             query.push(("final", "true".into()));
         }
-        if let Some(hash) = hash {
+        if request.create_new {
+            query.push(("createNew", "true".into()));
+        }
+        if let Some(hash) = request.hash {
             query.push(("hash", hash.to_string()));
         }
-        let text = self.send_text("PUT", "/fs/write", &query, Some(data), None)?;
+        let text = self.send_text("PUT", "/fs/write", &query, Some(request.data), None)?;
         if text.is_empty() {
             return Ok(None);
         }
@@ -447,24 +469,16 @@ impl RemoteFsProvider {
         serde_json::from_str(&text).map_err(map_serde_err)
     }
 
-    fn upload_session_complete(
-        &self,
-        path: &str,
-        session_id: &str,
-        blob_key: &str,
-        size_bytes: u64,
-        content_sha256: &str,
-        chunk_count: usize,
-        hash: Option<&str>,
-    ) -> io::Result<()> {
+    fn upload_session_complete(&self, params: UploadSessionCompleteParams<'_>) -> io::Result<()> {
         let body = UploadSessionCompleteRequest {
-            path: path.to_string(),
-            session_id: session_id.to_string(),
-            blob_key: blob_key.to_string(),
-            size_bytes: size_bytes as i64,
-            content_sha256: content_sha256.to_string(),
-            chunk_count,
-            hash: hash.map(ToString::to_string),
+            path: params.path.to_string(),
+            session_id: params.session_id.to_string(),
+            blob_key: params.blob_key.to_string(),
+            size_bytes: params.size_bytes as i64,
+            content_sha256: params.content_sha256.to_string(),
+            chunk_count: params.chunk_count,
+            create_new: params.create_new,
+            hash: params.hash.map(ToString::to_string),
         };
         let payload = serde_json::to_vec(&body).map_err(map_serde_err)?;
         let _ = self.send_text(
@@ -570,21 +584,30 @@ impl RemoteFsProvider {
         Ok(buffer)
     }
 
-    fn upload_entire_file(&self, path: &str, data: &[u8]) -> io::Result<()> {
+    fn upload_entire_file(&self, path: &str, data: &[u8], create_new: bool) -> io::Result<()> {
         if data.len() as u64 >= self.shard_threshold_bytes {
-            return self.upload_sharded_file(path, data);
+            return self.upload_sharded_file(path, data, create_new);
         }
-        self.upload_unsharded_file(path, data, None)
+        self.upload_unsharded_file(path, data, create_new, None)
     }
 
     fn upload_unsharded_file_legacy(
         &self,
         path: &str,
         data: &[u8],
+        create_new: bool,
         hash: Option<&str>,
     ) -> io::Result<()> {
         if data.is_empty() {
-            self.upload_chunk(path, 0, true, true, data, hash)?;
+            self.upload_chunk(FsWriteChunkRequest {
+                path,
+                offset: 0,
+                truncate: true,
+                final_chunk: true,
+                create_new,
+                data,
+                hash,
+            })?;
             return Ok(());
         }
         let mut offset = 0;
@@ -594,8 +617,15 @@ impl RemoteFsProvider {
             let chunk = &data[offset..end];
             let truncate = index == 0;
             let final_chunk = end == data.len();
-            let session =
-                self.upload_chunk(path, offset as u64, truncate, final_chunk, chunk, hash)?;
+            let session = self.upload_chunk(FsWriteChunkRequest {
+                path,
+                offset: offset as u64,
+                truncate,
+                final_chunk,
+                create_new: create_new && truncate,
+                data: chunk,
+                hash,
+            })?;
             if let Some(session) = session {
                 let expected = offset as u64 + chunk.len() as u64;
                 if session.next_offset as u64 != expected {
@@ -608,15 +638,21 @@ impl RemoteFsProvider {
         Ok(())
     }
 
-    fn upload_unsharded_file(&self, path: &str, data: &[u8], hash: Option<&str>) -> io::Result<()> {
+    fn upload_unsharded_file(
+        &self,
+        path: &str,
+        data: &[u8],
+        create_new: bool,
+        hash: Option<&str>,
+    ) -> io::Result<()> {
         if data.is_empty() {
-            return self.upload_unsharded_file_legacy(path, data, hash);
+            return self.upload_unsharded_file_legacy(path, data, create_new, hash);
         }
         let content_sha256 = sha256_hex(data);
         let session = match self.upload_session_start(path, data.len() as u64, &content_sha256) {
             Ok(session) => session,
             Err(err) if err.kind() == ErrorKind::NotFound => {
-                return self.upload_unsharded_file_legacy(path, data, hash);
+                return self.upload_unsharded_file_legacy(path, data, create_new, hash);
             }
             Err(err) => return Err(err),
         };
@@ -656,19 +692,20 @@ impl RemoteFsProvider {
                 &data[start..end],
             )?;
         }
-        self.upload_session_complete(
+        self.upload_session_complete(UploadSessionCompleteParams {
             path,
-            &session.session_id,
-            &session.blob_key,
-            data.len() as u64,
-            &content_sha256,
-            chunks.len(),
+            session_id: &session.session_id,
+            blob_key: &session.blob_key,
+            size_bytes: data.len() as u64,
+            content_sha256: &content_sha256,
+            chunk_count: chunks.len(),
+            create_new,
             hash,
-        )?;
+        })?;
         Ok(())
     }
 
-    fn upload_sharded_file(&self, path: &str, data: &[u8]) -> io::Result<()> {
+    fn upload_sharded_file(&self, path: &str, data: &[u8], create_new: bool) -> io::Result<()> {
         let shard_size = self.shard_size_bytes as usize;
         let mut shards = Vec::new();
         let mut offset = 0usize;
@@ -676,7 +713,7 @@ impl RemoteFsProvider {
             let end = std::cmp::min(offset + shard_size, data.len());
             let slice = &data[offset..end];
             let shard_path = format!("{}/{}", SHARD_PREFIX, Uuid::new_v4());
-            self.upload_unsharded_file(&shard_path, slice, None)?;
+            self.upload_unsharded_file(&shard_path, slice, false, None)?;
             shards.push(ShardEntry {
                 path: shard_path,
                 size: slice.len() as u64,
@@ -691,7 +728,7 @@ impl RemoteFsProvider {
         };
         let bytes = serde_json::to_vec(&manifest)
             .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid manifest"))?;
-        self.upload_unsharded_file(path, &bytes, Some(MANIFEST_HASH))
+        self.upload_unsharded_file(path, &bytes, create_new, Some(MANIFEST_HASH))
     }
 }
 
@@ -721,8 +758,11 @@ impl FsProvider for RemoteFsProvider {
         let mut data = Vec::new();
         let normalized = self.normalize(path);
         let mut exists = false;
+        let mut metadata = FsMetadata::new(FsFileType::File, 0, None, false);
+        let mut content_loaded = false;
+        let mut metadata_hash_valid = true;
 
-        if flags.read || flags.append || (!flags.create && !flags.create_new) {
+        if flags.read || flags.write || flags.append || !flags.create || flags.create_new {
             match self.fetch_metadata(&normalized) {
                 Ok(meta) => {
                     if meta.file_type != "file" {
@@ -731,7 +771,17 @@ impl FsProvider for RemoteFsProvider {
                             "remote path is not a file",
                         ));
                     }
-                    data = self.download_raw_file(&normalized, meta.len)?;
+                    if flags.create_new {
+                        return Err(io::Error::new(
+                            ErrorKind::AlreadyExists,
+                            format!("File already exists: {}", path.display()),
+                        ));
+                    }
+                    if flags.read || flags.append {
+                        data = self.download_raw_file(&normalized, meta.len)?;
+                        content_loaded = true;
+                    }
+                    metadata = meta.into();
                     exists = true;
                 }
                 Err(err) if err.kind() == ErrorKind::NotFound => {
@@ -741,15 +791,10 @@ impl FsProvider for RemoteFsProvider {
             }
         }
 
-        if flags.create_new && exists {
-            return Err(io::Error::new(
-                ErrorKind::AlreadyExists,
-                format!("File already exists: {}", path.display()),
-            ));
-        }
-
         if flags.truncate {
             data.clear();
+            content_loaded = true;
+            metadata_hash_valid = false;
         }
 
         if flags.create && !exists {
@@ -769,6 +814,10 @@ impl FsProvider for RemoteFsProvider {
             provider: self.clone(),
             path: normalized,
             data,
+            metadata,
+            content_loaded,
+            metadata_hash_valid,
+            create_new_pending: flags.create_new,
             cursor,
             flags: flags.clone(),
             dirty: false,
@@ -813,7 +862,7 @@ impl FsProvider for RemoteFsProvider {
     async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
         let normalized = self.normalize(path);
         self.ensure_parent_exists(path)?;
-        self.upload_entire_file(&normalized, data)
+        self.upload_entire_file(&normalized, data, false)
     }
 
     async fn remove_file(&self, path: &Path) -> io::Result<()> {
@@ -983,6 +1032,10 @@ struct RemoteFileHandle {
     provider: RemoteFsProvider,
     path: String,
     data: Vec<u8>,
+    metadata: FsMetadata,
+    content_loaded: bool,
+    metadata_hash_valid: bool,
+    create_new_pending: bool,
     cursor: usize,
     flags: OpenFlags,
     dirty: bool,
@@ -993,16 +1046,35 @@ impl RemoteFileHandle {
         if !self.dirty {
             return Ok(());
         }
-        self.provider.upload_entire_file(&self.path, &self.data)?;
+        self.provider
+            .upload_entire_file(&self.path, &self.data, self.create_new_pending)?;
         self.dirty = false;
+        self.content_loaded = true;
+        self.create_new_pending = false;
         Ok(())
+    }
+
+    fn metadata_len(&self) -> u64 {
+        if self.dirty || self.content_loaded {
+            self.data.len() as u64
+        } else {
+            self.metadata.len()
+        }
+    }
+
+    fn metadata_hash(&self) -> Option<String> {
+        if self.metadata_hash_valid {
+            self.metadata.hash().map(str::to_owned)
+        } else {
+            None
+        }
     }
 }
 
 impl Drop for RemoteFileHandle {
     fn drop(&mut self) {
         if self.dirty {
-            let _ = self.provider.upload_entire_file(&self.path, &self.data);
+            let _ = self.flush_remote();
         }
     }
 }
@@ -1041,6 +1113,7 @@ impl Write for RemoteFileHandle {
         self.data[self.cursor..self.cursor + buf.len()].copy_from_slice(buf);
         self.cursor += buf.len();
         self.dirty = true;
+        self.metadata_hash_valid = false;
         Ok(buf.len())
     }
 
@@ -1068,7 +1141,17 @@ impl Seek for RemoteFileHandle {
 }
 
 #[async_trait(?Send)]
-impl FileHandle for RemoteFileHandle {}
+impl FileHandle for RemoteFileHandle {
+    async fn metadata_async(&self) -> io::Result<FsMetadata> {
+        Ok(FsMetadata::new_with_hash(
+            self.metadata.file_type(),
+            self.metadata_len(),
+            self.metadata.modified(),
+            self.metadata.is_readonly(),
+            self.metadata_hash(),
+        ))
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1217,6 +1300,8 @@ struct UploadSessionCompleteRequest {
     size_bytes: i64,
     content_sha256: String,
     chunk_count: usize,
+    #[serde(default, skip_serializing_if = "is_false")]
+    create_new: bool,
     hash: Option<String>,
 }
 
@@ -1236,6 +1321,10 @@ fn sha256_hex(data: &[u8]) -> String {
         let _ = write!(out, "{byte:02x}");
     }
     out
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[cfg(all(test, target_arch = "wasm32"))]

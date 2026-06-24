@@ -956,10 +956,15 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_PATH=$($zmq)"
           Add-Content -Path $env:GITHUB_ENV -Value "PKG_CONFIG_PATH=$($zmq)\lib\pkgconfig"
 
-          Write-Host "Cloning vcpkg and installing OpenBLAS/LAPACK"
+          Write-Host "Cloning vcpkg and installing OpenBLAS/CLAPACK/OpenCASCADE"
           $vcpkgRoot = Join-Path $pwd "vcpkg"
-          git clone --depth 1 --branch 2026.06.01 https://github.com/microsoft/vcpkg.git $vcpkgRoot
+          $vcpkgRevision = "a7eda31dc16994fcaa8587982eb833a8695f1b6f"
+          git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
+          if ($LASTEXITCODE -ne 0) { throw "git clone of vcpkg failed with exit code $LASTEXITCODE" }
+          git -C $vcpkgRoot checkout $vcpkgRevision
+          if ($LASTEXITCODE -ne 0) { throw "git checkout of vcpkg revision $vcpkgRevision failed with exit code $LASTEXITCODE" }
           & "$vcpkgRoot\bootstrap-vcpkg.bat"
+          if ($LASTEXITCODE -ne 0) { throw "bootstrap-vcpkg.bat failed with exit code $LASTEXITCODE" }
 
           $finder = Join-Path $vcpkgRoot "scripts\cmake\vcpkg_find_fortran.cmake"
           $content = Get-Content -LiteralPath $finder -Raw
@@ -1015,13 +1020,18 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
 
-          # Install OpenBLAS, LAPACK, and OpenCASCADE. LAPACK must use vcpkg's
-          # bundled MinGW gfortran runtime; Visual Studio flang fails this build.
+          # vcpkg builds OpenBLAS without LAPACK on Windows; use CLAPACK for
+          # LAPACK symbols without depending on a gfortran-backed LAPACK build.
+          & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet"
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install openblas failed with exit code $LASTEXITCODE" }
+          & "$vcpkgRoot\vcpkg.exe" install "clapack:$triplet"
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install clapack failed with exit code $LASTEXITCODE" }
           if ($triplet -eq "arm64-windows") {
-            & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet" "lapack-reference:$triplet" "opencascade:$triplet" --allow-unsupported
+            & "$vcpkgRoot\vcpkg.exe" install "opencascade:$triplet" --allow-unsupported
           } else {
-            & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet" "lapack-reference:$triplet" "opencascade:$triplet"
+            & "$vcpkgRoot\vcpkg.exe" install "opencascade:$triplet"
           }
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install opencascade failed with exit code $LASTEXITCODE" }
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
           Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\$triplet\bin"
 
@@ -1029,7 +1039,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
           Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIBS=openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
-          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
+          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;libf2c;openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
           Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_ROOT=$vcpkgRoot\installed\$triplet"
           Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_INCLUDE_DIR=$vcpkgRoot\installed\$triplet\include\opencascade"

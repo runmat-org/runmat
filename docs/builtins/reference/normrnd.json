@@ -10,7 +10,6 @@
     "statistics"
   ],
   "summary": "Generate normally distributed random numbers in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

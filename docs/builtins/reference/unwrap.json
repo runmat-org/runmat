@@ -9,9 +9,6 @@
     "radians"
   ],
   "summary": "Correct phase-angle jumps by adding multiples of `2*pi`.",
-  "references": [
-    "title: \"MATLAB unwrap documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

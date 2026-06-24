@@ -1,0 +1,109 @@
+{
+  "title": "inf",
+  "category": "array/creation",
+  "keywords": [
+    "inf",
+    "infinity",
+    "array",
+    "single",
+    "gpu",
+    "like"
+  ],
+  "summary": "Create arrays filled with IEEE positive infinity values using MATLAB-compatible size, class, and `like` forms.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses provider constant-fill hooks when available; otherwise falls back to uploading a host Inf tensor."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::inf::tests",
+    "integration": "runmat-vm basics inf_constant_and_constructor_coexist"
+  },
+  "description": "`inf(...)` creates positive-infinity-filled arrays across scalar, vector, matrix, and N-D size signatures, with MATLAB-compatible class and `'like'` option behavior.",
+  "behaviors": [
+    "`inf()` returns the scalar `Inf`.",
+    "`inf(n)` returns an `n x n` double array filled with `Inf`.",
+    "`inf(m, n, ...)` returns a dense double array with the requested dimensions.",
+    "`inf(sz)` accepts a size vector and returns an array with `prod(sz)` Inf elements.",
+    "`inf(A)` returns an Inf array with the same size as `A`.",
+    "`inf(___, 'single')` returns a single-precision numeric array.",
+    "`inf(___, 'like', prototype)` matches numeric precision and device residency for supported prototype arrays."
+  ],
+  "examples": [
+    {
+      "description": "Creating a 2x3 matrix of Inf values",
+      "input": "A = inf(2, 3)",
+      "output": "A = [Inf Inf Inf; Inf Inf Inf]"
+    },
+    {
+      "description": "Creating a single-precision Inf array",
+      "input": "A = inf(4, 1, 'single')",
+      "output": "A = [Inf; Inf; Inf; Inf]"
+    },
+    {
+      "description": "Creating a GPU-resident Inf array like a prototype",
+      "input": "G = gpuArray(rand(2,2));\nA = inf(2, 2, 'like', G)",
+      "output": "A = [Inf Inf; Inf Inf]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `inf` different from `Inf`?",
+      "answer": "Both bare identifiers resolve to the scalar IEEE positive-infinity constant. The callable form `inf(...)` constructs Inf-filled arrays."
+    },
+    {
+      "question": "Does `inf(n)` create a row vector?",
+      "answer": "No. MATLAB compatibility requires `inf(n)` to create an `n x n` matrix. Use `inf(1, n)` or `inf(n, 1)` for vectors."
+    },
+    {
+      "question": "Can `inf` create GPU arrays?",
+      "answer": "Yes. With a GPU prototype, `inf(..., 'like', G)` asks the active acceleration provider to allocate an Inf-filled GPU tensor."
+    }
+  ],
+  "links": [
+    {
+      "label": "zeros",
+      "url": "./zeros"
+    },
+    {
+      "label": "ones",
+      "url": "./ones"
+    },
+    {
+      "label": "nan",
+      "url": "./nan"
+    },
+    {
+      "label": "isinf",
+      "url": "./isinf"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/inf.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/inf.rs"
+  },
+  "gpu_residency": "When a GPU prototype is supplied, RunMat preserves residency by allocating the output through the active acceleration provider. If the provider cannot fill on device, RunMat falls back to a host Inf tensor and uploads it.",
+  "gpu_behavior": [
+    "Provider-backed `inf` construction uses constant-fill hooks, so fully resident GPU pipelines can create Inf arrays without first materializing a host tensor when provider support is available."
+  ]
+}

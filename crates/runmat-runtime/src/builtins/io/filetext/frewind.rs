@@ -189,7 +189,7 @@ pub async fn evaluate(fid_value: &Value) -> BuiltinResult<()> {
         return Ok(());
     }
 
-    let handle = registry::take_handle(fid)
+    let handle = registry::shared_handle(fid)
         .ok_or_else(|| frewind_error(&FREWIND_ERROR_INVALID_IDENTIFIER))?;
     let mut guard = handle.lock().map_err(|_| {
         frewind_error_with_detail(

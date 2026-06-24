@@ -10,7 +10,6 @@
     "like"
   ],
   "summary": "Compute element-wise sine values in radians across numeric and complex array inputs.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

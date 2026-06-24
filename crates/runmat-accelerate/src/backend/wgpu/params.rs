@@ -470,7 +470,7 @@ pub struct RepmatParams {
     pub len: u32,
     pub offset: u32,
     pub rank: u32,
-    pub _pad: u32,
+    pub storage_factor: u32,
     pub base_shape: [AlignedU32; REPMAT_MAX_RANK],
     pub new_shape: [AlignedU32; REPMAT_MAX_RANK],
     pub base_strides: [AlignedU32; REPMAT_MAX_RANK],

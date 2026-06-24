@@ -9,7 +9,6 @@
     "MATLAB isinf"
   ],
   "summary": "Test infinite values element-wise in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

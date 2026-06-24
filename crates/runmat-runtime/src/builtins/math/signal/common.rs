@@ -1,5 +1,5 @@
 use num_complex::Complex;
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{GpuTensorHandle, ProviderSpectralRange};
 use runmat_builtins::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
@@ -169,6 +169,69 @@ pub(crate) fn ensure_vector_shape(
 
 pub(crate) fn vector_is_row(shape: &[usize]) -> bool {
     shape.first().copied().unwrap_or(1) == 1
+}
+
+pub(crate) fn gpu_vector_len(
+    builtin: &'static str,
+    label: &str,
+    handle: &GpuTensorHandle,
+) -> BuiltinResult<usize> {
+    ensure_vector_shape(builtin, label, &handle.shape)?;
+    if handle.shape.contains(&0) {
+        return Ok(0);
+    }
+    Ok(handle.shape.iter().copied().max().unwrap_or(1))
+}
+
+pub(crate) fn gpu_matrix_shape(
+    builtin: &'static str,
+    label: &str,
+    handle: &GpuTensorHandle,
+) -> BuiltinResult<(usize, usize)> {
+    if handle.shape.len() > 2 {
+        return Err(signal_error(
+            builtin,
+            None,
+            format!("{builtin}: {label} must be a vector or 2-D matrix"),
+        ));
+    }
+    let rows = handle.shape.first().copied().unwrap_or(1);
+    let cols = handle.shape.get(1).copied().unwrap_or(1);
+    if rows == 0 || cols == 0 {
+        return Err(signal_error(
+            builtin,
+            None,
+            format!("{builtin}: {label} must be nonempty"),
+        ));
+    }
+    if rows == 1 || cols == 1 {
+        Ok((rows.max(cols), 1))
+    } else {
+        Ok((rows, cols))
+    }
+}
+
+pub(crate) fn selected_frequency_len(nfft: usize, range: ProviderSpectralRange) -> usize {
+    match range {
+        ProviderSpectralRange::Onesided => nfft / 2 + 1,
+        ProviderSpectralRange::Twosided | ProviderSpectralRange::Centered => nfft,
+    }
+}
+
+pub(crate) fn centered_shift(nfft: usize) -> usize {
+    if nfft.is_multiple_of(2) {
+        nfft / 2 + 1
+    } else {
+        nfft.div_ceil(2)
+    }
+}
+
+pub(crate) fn centered_frequency_offset(nfft: usize) -> isize {
+    if nfft.is_multiple_of(2) {
+        nfft as isize / 2 - 1
+    } else {
+        nfft as isize / 2
+    }
 }
 
 pub(crate) fn complex_vector_to_value(
@@ -398,5 +461,16 @@ mod tests {
         let len = scalar_length_arg(Value::Num(4.0)).expect("valid length");
 
         assert_eq!(len, 4);
+    }
+
+    #[test]
+    fn gpu_vector_len_reports_zero_for_empty_vector_shape() {
+        let handle = GpuTensorHandle {
+            shape: vec![1, 0],
+            device_id: 0,
+            buffer_id: 0,
+        };
+        let len = gpu_vector_len("test", "x", &handle).expect("vector length");
+        assert_eq!(len, 0);
     }
 }

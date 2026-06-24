@@ -10,7 +10,6 @@
     "text"
   ],
   "summary": "Write numeric or text payloads to TCP client connections with MATLAB-compatible encoding behavior.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

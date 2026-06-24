@@ -356,7 +356,7 @@ pub async fn evaluate(
             &FWRITE_ERROR_INVALID_IDENTIFIER,
         )
     })?;
-    let handle = registry::take_handle(fid).ok_or_else(|| {
+    let handle = registry::shared_handle(fid).ok_or_else(|| {
         fwrite_error_with_message(
             FWRITE_ERROR_INVALID_IDENTIFIER.message,
             &FWRITE_ERROR_INVALID_IDENTIFIER,

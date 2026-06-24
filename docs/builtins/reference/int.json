@@ -1,0 +1,91 @@
+{
+  "title": "int",
+  "category": "math/symbolic",
+  "keywords": [
+    "int",
+    "symbolic",
+    "integration",
+    "calculus",
+    "definite integral"
+  ],
+  "summary": "Evaluate scalar symbolic indefinite and definite integrals.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Symbolic integration works on host algebra values and is not uploaded to GPU providers."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::symbolic::int::tests",
+    "integration": "runmat-vm tests::symbolic_int_source_workflow"
+  },
+  "description": "`int(expr)` returns an indefinite integral with respect to the first symbolic variable in `expr`. `int(expr, var)` chooses the variable explicitly. `int(expr, a, b)` and `int(expr, var, a, b)` evaluate definite integrals by substituting the bounds into the antiderivative.",
+  "behaviors": [
+    "Default variable selection follows the scalar symbolic `symvar(expr, 1)` rule used by MATLAB-compatible calculus builtins: `x` is preferred when present, then remaining valid symbolic names are considered in deterministic lexical order.",
+    "Supported closed forms include constants, variables, sums, differences, scalar multiples, powers of the integration variable, reciprocal `1/x`, `sin`, `cos`, `exp`, `log(x)`, and `sqrt(x)`.",
+    "Definite integrals simplify numeric trigonometric and exponential bounds when the antiderivative can be evaluated.",
+    "Unsupported symbolic forms return a formal symbolic `int(...)` expression instead of failing, preserving downstream symbolic workflows.",
+    "The MATLAB name-value options `IgnoreAnalyticConstraints`, `PrincipalValue`, `IgnoreSpecialCases`, and `Hold` are accepted for scalar compatibility. RunMat currently ignores them for the supported elementary subset."
+  ],
+  "examples": [
+    {
+      "description": "Integrate a polynomial",
+      "input": "syms x\nF = int(x^2)",
+      "output": "F = x^3/3"
+    },
+    {
+      "description": "Evaluate a definite integral",
+      "input": "syms x\nA = int(sin(x), 0, pi)",
+      "output": "A = 2"
+    },
+    {
+      "description": "Choose the integration variable explicitly",
+      "input": "syms x y\nF = int(y, x)",
+      "output": "F = x*y"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `int` run on the GPU?",
+      "answer": "No. Symbolic expressions are host algebra values. Numeric tensors should use numerical integration routines when available."
+    },
+    {
+      "question": "What happens when RunMat cannot find a closed form?",
+      "answer": "RunMat returns a formal scalar symbolic `int(...)` expression so code can continue to manipulate or display the unevaluated integral."
+    }
+  ],
+  "links": [
+    {
+      "label": "sym",
+      "url": "./sym"
+    },
+    {
+      "label": "syms",
+      "url": "./syms"
+    },
+    {
+      "label": "diff",
+      "url": "./diff"
+    },
+    {
+      "label": "limit",
+      "url": "./limit"
+    },
+    {
+      "label": "vpa",
+      "url": "./vpa"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/symbolic/int.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/symbolic/int.rs"
+  }
+}

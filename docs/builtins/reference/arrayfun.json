@@ -9,7 +9,6 @@
     "uniformoutput"
   ],
   "summary": "Apply a function element-wise across array inputs in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

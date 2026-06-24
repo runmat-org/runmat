@@ -30,7 +30,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     nan_mode: ReductionNaN::Include,
     accepts_nan_mode: false,
-    notes: "Providers may implement unary_imag to materialise zero tensors in-place; the runtime gathers to the host whenever complex storage or string conversions are required.",
+    notes: "Providers may implement unary_imag to materialise zero tensors for real inputs or extract imaginary lanes from complex-interleaved GPU tensors; the runtime gathers only when the hook is absent or host-only conversions are required.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::imag")]
@@ -148,10 +148,15 @@ async fn imag_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
         .await
         .map_err(|err| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, err.to_string()))?;
-    Ok(tensor::tensor_into_value(imag_tensor(tensor)?))
+    match gathered {
+        Value::Complex(_, im) => Ok(Value::Num(im)),
+        Value::ComplexTensor(ct) => imag_complex_tensor(ct),
+        Value::Tensor(tensor) => Ok(tensor::tensor_into_value(imag_tensor(tensor)?)),
+        other => imag_real(other),
+    }
 }
 
 fn imag_real(value: Value) -> BuiltinResult<Value> {
@@ -375,6 +380,26 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn imag_complex_gpu_provider_stays_resident() {
+        test_support::with_test_provider(|provider| {
+            let complex = ComplexTensor::new(vec![(1.0, 2.0), (-3.0, 4.5)], vec![2, 1]).unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+            let result = imag_builtin(Value::GpuTensor(handle)).expect("imag");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out),
+                runmat_accelerate_api::GpuTensorStorage::Real
+            );
+            let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
+            assert_eq!(gathered.shape, vec![2, 1]);
+            assert_eq!(gathered.data, vec![2.0, 4.5]);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     #[cfg(feature = "wgpu")]
     fn imag_wgpu_matches_cpu_zero() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -402,5 +427,26 @@ pub(crate) mod tests {
         for (g, c) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
             assert!((g - c).abs() < 1e-12, "imag mismatch {} vs {}", g, c);
         }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn imag_wgpu_complex_matches_cpu() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = runmat_accelerate_api::provider().unwrap();
+        let complex = ComplexTensor::new(vec![(1.0, 2.0), (-3.0, 4.5)], vec![2, 1]).unwrap();
+        let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+        let gpu = block_on(imag_gpu(handle)).unwrap();
+        let Value::GpuTensor(out) = gpu else {
+            panic!("expected gpu tensor");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&out),
+            runmat_accelerate_api::GpuTensorStorage::Real
+        );
+        let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
+        assert_eq!(gathered.data, vec![2.0, 4.5]);
     }
 }

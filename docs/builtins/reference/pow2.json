@@ -8,7 +8,6 @@
     "gpu"
   ],
   "summary": "Compute powers of two in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

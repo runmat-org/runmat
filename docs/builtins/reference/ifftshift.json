@@ -8,7 +8,6 @@
     "gpu"
   ],
   "summary": "Shift centered spectra back to origin ordering in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

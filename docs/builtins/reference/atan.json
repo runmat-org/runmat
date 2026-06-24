@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Element-wise inverse tangent in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

@@ -9,7 +9,6 @@
     "cell array"
   ],
   "summary": "Return per-element character counts for text inputs with MATLAB-compatible output shaping.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

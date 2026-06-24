@@ -9,7 +9,6 @@
     "gpuArray less-than"
   ],
   "summary": "Compute element-wise less-than comparisons in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

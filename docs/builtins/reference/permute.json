@@ -8,7 +8,6 @@
     "gpu"
   ],
   "summary": "Reorder array dimensions in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

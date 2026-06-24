@@ -8,7 +8,6 @@
     "day of month"
   ],
   "summary": "Extract day-of-month numbers from datetime values in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

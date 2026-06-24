@@ -262,7 +262,7 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsE
         ));
     }
     let handle =
-        registry::take_handle(fid).ok_or_else(|| fgets_error(&FGETS_ERROR_INVALID_IDENTIFIER))?;
+        registry::shared_handle(fid).ok_or_else(|| fgets_error(&FGETS_ERROR_INVALID_IDENTIFIER))?;
 
     let nchar_limit = parse_nchar(rest).await?;
     let max_bytes = apply_matlab_nchar_limit(nchar_limit);

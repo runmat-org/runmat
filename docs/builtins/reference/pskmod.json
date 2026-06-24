@@ -1,0 +1,100 @@
+{
+  "title": "pskmod",
+  "category": "comms/modulation",
+  "keywords": [
+    "pskmod",
+    "psk",
+    "modulation",
+    "communications",
+    "gray",
+    "binary",
+    "phaseoffset",
+    "constellation",
+    "gpu"
+  ],
+  "summary": "Map integers or bit groups to PSK constellation points in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64",
+      "i32",
+      "bool"
+    ],
+    "broadcasting": "none",
+    "notes": "Integer-symbol and bit-input gpuArrays use the active provider's modulation hooks to produce complex-interleaved GPU storage directly. Providers without those hooks fall back to host-compatible validation and re-upload."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::comms::pskmod::tests"
+  },
+  "description": "`pskmod(X, M)` maps integer symbols or bit groups to unit-magnitude M-PSK complex-baseband samples. Phase offset, Gray ordering, binary ordering, custom symbol ordering, bit input, and output precision follow the MATLAB Communications Toolbox surface.",
+  "behaviors": [
+    "`X` must contain finite integer symbols in the inclusive range `[0, M-1]` when `InputType` is `'integer'`.",
+    "`M` must be an integer greater than one. Bit input additionally requires `M` to be a power of two.",
+    "The default phase offset is zero radians.",
+    "The default symbol order is `'gray'`; `'bin'` maps symbol `k` to angle `phaseoffset + 2*pi*k/M`.",
+    "Custom symbol order vectors must have length `M`, contain each integer in `[0, M-1]` exactly once, and label constellation points counter-clockwise starting at `phaseoffset`.",
+    "`InputType='bit'` groups rows by `log2(M)` bits per symbol with the first bit as the MSB, preserving remaining dimensions as independent channels.",
+    "`OutputDataType='single'` rounds real and imaginary samples through single precision before returning the complex tensor or resident complex gpuArray output.",
+    "`PlotConstellation=true` is accepted as a recognized option but raises an explicit not-implemented error."
+  ],
+  "examples": [
+    {
+      "description": "Default 8-PSK Gray mapping",
+      "input": "y = pskmod(0:7, 8)"
+    },
+    {
+      "description": "QPSK with a phase offset",
+      "input": "y = pskmod(0:3, 4, pi/4)"
+    },
+    {
+      "description": "Binary symbol ordering",
+      "input": "y = pskmod(0:3, 4, 0, 'bin')"
+    },
+    {
+      "description": "Bit input",
+      "input": "bits = [0 0; 0 1; 1 0; 1 1];\ny = pskmod(bits, 4, InputType='bit')"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does pskmod execute on the GPU?",
+      "answer": "Yes when the active provider implements the modulation hooks. Integer-symbol and bit-input gpuArrays can produce resident complex-interleaved outputs directly."
+    },
+    {
+      "question": "Is custom symbol ordering supported?",
+      "answer": "Yes. Supply a vector whose first element labels the constellation point at `phaseoffset`; later elements label points counter-clockwise around the unit circle."
+    }
+  ],
+  "links": [
+    {
+      "label": "qammod",
+      "url": "./qammod"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/comms/pskmod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/comms/pskmod.rs"
+  },
+  "gpu_residency": "The builtin declares `NewHandle` residency for gpuArray inputs. Integer-symbol and bit-input gpuArray inputs stay resident through provider-side constellation modulation and produce a complex-interleaved GPU handle when provider support is available.",
+  "gpu_behavior": [
+    "RunMat represents complex GPU tensors as interleaved real/imaginary buffers with complex storage metadata, so downstream GPU-aware FFT and signal paths can consume the modulation output without a host result.",
+    "The provider hooks receive a validated constellation table and write the complex output on device. They read back only a compact validation state for MATLAB-compatible symbol or bit errors."
+  ]
+}

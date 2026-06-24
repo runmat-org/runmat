@@ -14,7 +14,6 @@
     "gpu"
   ],
   "summary": "Solve linear systems with left-division in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,7 +9,6 @@
     "introspection"
   ],
   "summary": "Return array dimension sizes with MATLAB-compatible one-output and multi-output forms.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

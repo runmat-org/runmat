@@ -1,0 +1,78 @@
+{
+  "title": "uiputfile",
+  "category": "io/repl_fs",
+  "keywords": [
+    "uiputfile",
+    "file picker",
+    "file dialog",
+    "save file",
+    "filesystem",
+    "ui"
+  ],
+  "summary": "Open a host save-file dialog and return the selected file name and path.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs through the host filesystem provider. GPU-resident textual arguments are gathered before the save-file request is made."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::uiputfile::tests",
+    "integration": "builtins::io::repl_fs::uiputfile::tests::parses_filter_title_default_and_selection_outputs"
+  },
+  "description": "`uiputfile` requests a save-file target from the active RunMat filesystem provider and returns MATLAB-compatible output values. Interactive hosts can implement the provider hook to show a native or browser save picker; noninteractive hosts return the standard cancellation values.",
+  "behaviors": [
+    "`file = uiputfile()` uses an all-files filter.",
+    "`uiputfile(filter)` accepts a character vector, string scalar, semicolon-delimited pattern list, or an N-by-1/N-by-2 cell array of patterns and descriptions.",
+    "`uiputfile(filter, title, defaultName)` forwards the dialog title and initial file or directory path to the filesystem provider.",
+    "The selected `path` output is the containing directory with a trailing path separator. The `index` output is the one-based selected filter index.",
+    "Cancellation returns numeric zero for `file`, `path`, and `index`, matching MATLAB. This is also the behavior for filesystem providers that do not implement a save-file picker."
+  ],
+  "examples": [
+    {
+      "description": "Choose A MAT-File Destination",
+      "input": "[file, path] = uiputfile('*.mat', 'Save workspace');\nif isequal(file, 0)\n    return;\nend\nsave(fullfile(path, file));"
+    },
+    {
+      "description": "Use Multiple Filters",
+      "input": "filters = {'*.mat', 'MAT-files'; '*.txt', 'Text files'};\n[file, path, index] = uiputfile(filters, 'Export data', 'results.mat');"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What happens in noninteractive or headless RunMat hosts?",
+      "answer": "RunMat returns the MATLAB cancellation values (`0`) unless the active filesystem provider implements `selectFileSave` / `select_file_save`."
+    },
+    {
+      "question": "How does a browser host provide a real save picker?",
+      "answer": "Install a filesystem provider with a `selectFileSave(request)` function. Return `null` or `false` for cancellation, a string path for one file, or an object such as `{ path: '/data/results.mat', filterIndex: 1 }`."
+    },
+    {
+      "question": "Does `uiputfile` write the selected file?",
+      "answer": "No. It only returns the selected file name and directory. Use `fullfile(path, file)` with `save`, `fopen`, `writematrix`, or another file-writing builtin to create the file."
+    }
+  ],
+  "links": [
+    {
+      "label": "fullfile",
+      "url": "./fullfile"
+    },
+    {
+      "label": "save",
+      "url": "./save"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/uiputfile.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/uiputfile.rs"
+  },
+  "gpu_residency": "No. Save-file dialogs are host/UI operations and always execute outside GPU residency. The provider hook returns a path in the active filesystem namespace, so browser hosts should map save targets into the mounted provider namespace before returning the path."
+}

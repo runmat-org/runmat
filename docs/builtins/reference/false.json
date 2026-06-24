@@ -8,7 +8,6 @@
     "mask"
   ],
   "summary": "Create logical arrays filled with false values in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

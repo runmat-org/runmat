@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Flip arrays left-to-right in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

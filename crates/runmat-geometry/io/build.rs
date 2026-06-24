@@ -116,9 +116,104 @@ fn occt_paths(link_mode: &str) -> (PathBuf, PathBuf) {
     if env::var_os("CMAKE_POLICY_VERSION_MINIMUM").is_none() {
         env::set_var("CMAKE_POLICY_VERSION_MINIMUM", "3.5");
     }
+    require_cmake_for_bundled_occt();
     occt_sys::build_occt();
     let occt_path = occt_sys::occt_path();
     (occt_path.join("include"), occt_path.join("lib"))
+}
+
+#[cfg(feature = "occt-native")]
+fn require_cmake_for_bundled_occt() {
+    let target = env::var("TARGET").unwrap_or_default();
+    let cmake_env_keys = cmake_env_keys(&target);
+    for key in &cmake_env_keys {
+        println!("cargo:rerun-if-env-changed={key}");
+    }
+
+    let (source, cmake) = configured_cmake(&cmake_env_keys);
+    match std::process::Command::new(&cmake).arg("--version").output() {
+        Ok(output) if output.status.success() => {
+            println!(
+                "cargo:warning=RunMat OCCT: building bundled OCCT with CMake from {source}: {}",
+                cmake.display()
+            );
+            return;
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let detail = first_non_empty_line(&stderr)
+                .or_else(|| first_non_empty_line(&stdout))
+                .unwrap_or("no diagnostic output");
+            announce_missing_cmake(
+                &source,
+                &cmake,
+                &cmake_env_keys,
+                &format!("command exited with status {} ({detail})", output.status),
+            );
+        }
+        Err(err) => {
+            announce_missing_cmake(&source, &cmake, &cmake_env_keys, &err.to_string());
+        }
+    }
+
+    panic!("missing CMake required for bundled OCCT (occt-native)");
+}
+
+#[cfg(feature = "occt-native")]
+fn cmake_env_keys(target: &str) -> Vec<String> {
+    let target_env_key = target.replace('-', "_");
+    let mut keys = Vec::new();
+    if !target.is_empty() {
+        keys.push(format!("CMAKE_{target}"));
+    }
+    if !target_env_key.is_empty() && target_env_key != target {
+        keys.push(format!("CMAKE_{target_env_key}"));
+    }
+    keys.push("HOST_CMAKE".to_string());
+    keys.push("CMAKE".to_string());
+    keys
+}
+
+#[cfg(feature = "occt-native")]
+fn configured_cmake(cmake_env_keys: &[String]) -> (String, PathBuf) {
+    for key in cmake_env_keys {
+        if let Some(value) = env::var_os(key).filter(|value| !value.is_empty()) {
+            return (key.clone(), PathBuf::from(value));
+        }
+    }
+    ("PATH".to_string(), PathBuf::from("cmake"))
+}
+
+#[cfg(feature = "occt-native")]
+fn first_non_empty_line(text: &str) -> Option<&str> {
+    text.lines().map(str::trim).find(|line| !line.is_empty())
+}
+
+#[cfg(feature = "occt-native")]
+fn announce_missing_cmake(
+    source: &str,
+    cmake: &std::path::Path,
+    cmake_env_keys: &[String],
+    detail: &str,
+) {
+    println!(
+        "cargo:warning=RunMat OCCT: occt-native is enabled and no external OCCT installation was configured."
+    );
+    println!(
+        "cargo:warning=RunMat OCCT: building bundled OCCT requires a working CMake executable."
+    );
+    println!(
+        "cargo:warning=RunMat OCCT: checked {source} for `{}`: {detail}",
+        cmake.display()
+    );
+    println!(
+        "cargo:warning=RunMat OCCT: accepted CMake overrides: {}",
+        cmake_env_keys.join(", ")
+    );
+    println!(
+        "cargo:warning=RunMat OCCT: install CMake (macOS: `brew install cmake`), set CMAKE=/path/to/cmake, or set RUNMAT_OCCT_ROOT / RUNMAT_OCCT_INCLUDE_DIR+RUNMAT_OCCT_LIB_DIR."
+    );
 }
 
 #[cfg(feature = "occt-native")]

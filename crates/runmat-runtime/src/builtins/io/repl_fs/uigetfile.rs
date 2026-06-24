@@ -1,15 +1,19 @@
 //! MATLAB-compatible `uigetfile` builtin.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, Value,
 };
-use runmat_filesystem::{OpenFileDialogFilter, OpenFileDialogRequest, OpenFileDialogSelection};
+use runmat_filesystem::{OpenFileDialogRequest, OpenFileDialogSelection};
 use runmat_macros::runtime_builtin;
 
+use super::file_dialog::{
+    default_filters, ensure_same_directory, parse_filter_spec, scalar_text, selected_path_parts,
+    try_scalar_text,
+};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -339,7 +343,7 @@ fn parse_options(args: &[Value]) -> BuiltinResult<UigetfileOptions> {
     let mut end = args.len();
     let mut multiselect = false;
     while end >= 2 {
-        let option_name = match try_scalar_text(&args[end - 2])? {
+        let option_name = match try_scalar_text(&args[end - 2]) {
             Some(name) => name,
             None => break,
         };
@@ -356,17 +360,21 @@ fn parse_options(args: &[Value]) -> BuiltinResult<UigetfileOptions> {
     }
 
     let filters = if end >= 1 {
-        parse_filter_spec(&args[0])?
+        parse_filter_spec(&args[0], invalid_argument)?
     } else {
         default_filters()
     };
     let title = if end >= 2 {
-        Some(scalar_text(&args[1], "title")?)
+        Some(scalar_text(&args[1], "title", invalid_argument)?)
     } else {
         None
     };
     let default_path = if end >= 3 {
-        Some(PathBuf::from(scalar_text(&args[2], "defaultName")?))
+        Some(PathBuf::from(scalar_text(
+            &args[2],
+            "defaultName",
+            invalid_argument,
+        )?))
     } else {
         None
     };
@@ -381,75 +389,13 @@ fn parse_options(args: &[Value]) -> BuiltinResult<UigetfileOptions> {
     })
 }
 
-fn parse_filter_spec(value: &Value) -> BuiltinResult<Vec<OpenFileDialogFilter>> {
-    match value {
-        Value::Cell(cell) => parse_filter_cell(cell),
-        other => {
-            let text = scalar_text(other, "filter")?;
-            Ok(vec![filter_from_pattern(&text, None)])
-        }
-    }
-}
-
-fn parse_filter_cell(cell: &CellArray) -> BuiltinResult<Vec<OpenFileDialogFilter>> {
-    if cell.data.is_empty() {
-        return Ok(default_filters());
-    }
-    if cell.cols == 0 || cell.cols > 2 {
-        return Err(invalid_argument(
-            "filter cell array must have one or two columns",
-        ));
-    }
-    let mut filters = Vec::with_capacity(cell.rows);
-    for row in 0..cell.rows {
-        let pattern_value = cell.get(row, 0).map_err(invalid_argument)?;
-        let pattern = scalar_text(&pattern_value, "filter pattern")?;
-        let description = if cell.cols == 2 {
-            let description_value = cell.get(row, 1).map_err(invalid_argument)?;
-            Some(scalar_text(&description_value, "filter description")?)
-        } else {
-            None
-        };
-        filters.push(filter_from_pattern(&pattern, description));
-    }
-    Ok(filters)
-}
-
-fn filter_from_pattern(pattern: &str, description: Option<String>) -> OpenFileDialogFilter {
-    let patterns = split_filter_patterns(pattern);
-    OpenFileDialogFilter {
-        patterns,
-        description,
-    }
-}
-
-fn split_filter_patterns(pattern: &str) -> Vec<String> {
-    let mut patterns = pattern
-        .split(';')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    if patterns.is_empty() {
-        patterns.push("*.*".to_string());
-    }
-    patterns
-}
-
-fn default_filters() -> Vec<OpenFileDialogFilter> {
-    vec![OpenFileDialogFilter {
-        patterns: vec!["*.*".to_string()],
-        description: Some("All Files".to_string()),
-    }]
-}
-
 fn parse_multiselect(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(enabled) => Ok(*enabled),
         Value::Num(number) if number.is_finite() => Ok(*number != 0.0),
         Value::Int(int) => Ok(!int.is_zero()),
         other => {
-            let text = scalar_text(other, "MultiSelect value")?;
+            let text = scalar_text(other, "MultiSelect value", invalid_argument)?;
             match text.trim().to_ascii_lowercase().as_str() {
                 "on" | "true" | "yes" => Ok(true),
                 "off" | "false" | "no" => Ok(false),
@@ -459,23 +405,6 @@ fn parse_multiselect(value: &Value) -> BuiltinResult<bool> {
             }
         }
     }
-}
-
-fn try_scalar_text(value: &Value) -> BuiltinResult<Option<String>> {
-    match value {
-        Value::String(text) => Ok(Some(text.clone())),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(Some(chars.data.iter().collect())),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(Some(array.data[0].clone())),
-        _ => Ok(None),
-    }
-}
-
-fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
-    try_scalar_text(value)?.ok_or_else(|| {
-        invalid_argument(format!(
-            "{context} must be a character vector or string scalar"
-        ))
-    })
 }
 
 fn outputs_for_selection(
@@ -519,14 +448,14 @@ fn selected_outputs(
         ));
     }
 
-    let first_path = selected_path_parts(&selection.paths[0])?;
+    let first_path = selected_path_parts(&selection.paths[0], invalid_selection)?;
     let directory = first_path.directory;
     if options.request.multiselect && selection.paths.len() > 1 {
-        ensure_same_directory(&selection.paths, &directory)?;
+        ensure_same_directory(&selection.paths, &directory, invalid_selection)?;
         let mut names = Vec::with_capacity(selection.paths.len());
         for path in &selection.paths {
             names.push(Value::CharArray(CharArray::new_row(
-                &selected_path_parts(path)?.file_name,
+                &selected_path_parts(path, invalid_selection)?.file_name,
             )));
         }
         let file_count = names.len();
@@ -545,53 +474,6 @@ fn selected_outputs(
     ])
 }
 
-fn ensure_same_directory(paths: &[PathBuf], expected: &str) -> BuiltinResult<()> {
-    for path in paths.iter().skip(1) {
-        if selected_path_parts(path)?.directory != expected {
-            return Err(invalid_selection(
-                "multiple selected files must be in the same directory",
-            ));
-        }
-    }
-    Ok(())
-}
-
-struct SelectedPathParts {
-    directory: String,
-    file_name: String,
-}
-
-fn selected_path_parts(path: &Path) -> BuiltinResult<SelectedPathParts> {
-    let text = path.to_string_lossy();
-    if text.is_empty() {
-        return Err(invalid_selection("selected path has no file name"));
-    }
-
-    let separator = text
-        .char_indices()
-        .rev()
-        .find(|(_, ch)| *ch == '/' || *ch == '\\');
-
-    let (directory, file_name) = match separator {
-        Some((index, separator)) => {
-            let file_start = index + separator.len_utf8();
-            if file_start >= text.len() {
-                return Err(invalid_selection("selected path has no file name"));
-            }
-            (
-                text[..file_start].to_string(),
-                text[file_start..].to_string(),
-            )
-        }
-        None => (String::new(), text.into_owned()),
-    };
-
-    Ok(SelectedPathParts {
-        directory,
-        file_name,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -599,6 +481,7 @@ mod tests {
     use runmat_builtins::Tensor;
     use runmat_filesystem::{DirEntry, FileHandle, FsMetadata, FsProvider, OpenFlags};
     use std::io::{self, ErrorKind};
+    use std::path::Path;
     use std::sync::{Arc, Mutex};
 
     fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {

@@ -9,9 +9,6 @@
     "elementwise"
   ],
   "summary": "Generate sampled rectangular pulses.",
-  "references": [
-    "title: \"MATLAB rectpuls documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -8,7 +8,6 @@
     "graphics handles"
   ],
   "summary": "Clear figure contents in MATLAB and RunMat plotting.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

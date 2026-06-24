@@ -9,7 +9,6 @@
     "complex"
   ],
   "summary": "Compute element-wise exponential values in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,
