@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Compute modulus values with MATLAB semantics in RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

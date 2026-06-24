@@ -9,7 +9,6 @@
     "like"
   ],
   "summary": "Create arrays filled with zero values using MATLAB-compatible size, class, and `like` forms.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

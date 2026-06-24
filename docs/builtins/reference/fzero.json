@@ -9,7 +9,6 @@
     "optimization"
   ],
   "summary": "Find scalar function zeros with bracketed root-finding in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

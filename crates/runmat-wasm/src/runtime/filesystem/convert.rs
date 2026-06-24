@@ -1,6 +1,7 @@
 use js_sys::{Array, ArrayBuffer, Object, Reflect, Uint8Array};
 use runmat_filesystem::{
     DirEntry, FsFileType, FsMetadata, OpenFileDialogRequest, OpenFileDialogSelection,
+    SaveFileDialogRequest, SaveFileDialogSelection,
 };
 use std::ffi::OsString;
 use std::io::{self, ErrorKind};
@@ -130,39 +131,60 @@ pub(super) fn parse_dir_entries(value: JsValue) -> io::Result<Vec<DirEntry>> {
 pub(super) fn open_file_request_to_js(request: &OpenFileDialogRequest) -> io::Result<JsValue> {
     let object = Object::new();
     if let Some(title) = &request.title {
-        set_js_prop(&object, "title", &JsValue::from_str(title))?;
+        set_js_prop(
+            "selectFileOpen",
+            &object,
+            "title",
+            &JsValue::from_str(title),
+        )?;
     }
     if let Some(default_path) = &request.default_path {
         set_js_prop(
+            "selectFileOpen",
             &object,
             "defaultPath",
             &JsValue::from_str(&path_to_string(default_path)),
         )?;
     }
     set_js_prop(
+        "selectFileOpen",
         &object,
         "multiselect",
         &JsValue::from_bool(request.multiselect),
     )?;
+    set_js_prop(
+        "selectFileOpen",
+        &object,
+        "filters",
+        &filters_to_js("selectFileOpen", &request.filters)?,
+    )?;
+    Ok(object.into())
+}
 
-    let filters = Array::new();
-    for filter in &request.filters {
-        let filter_object = Object::new();
-        let patterns = Array::new();
-        for pattern in &filter.patterns {
-            patterns.push(&JsValue::from_str(pattern));
-        }
-        set_js_prop(&filter_object, "patterns", &patterns.into())?;
-        if let Some(description) = &filter.description {
-            set_js_prop(
-                &filter_object,
-                "description",
-                &JsValue::from_str(description),
-            )?;
-        }
-        filters.push(&filter_object.into());
+pub(super) fn save_file_request_to_js(request: &SaveFileDialogRequest) -> io::Result<JsValue> {
+    let object = Object::new();
+    if let Some(title) = &request.title {
+        set_js_prop(
+            "selectFileSave",
+            &object,
+            "title",
+            &JsValue::from_str(title),
+        )?;
     }
-    set_js_prop(&object, "filters", &filters.into())?;
+    if let Some(default_path) = &request.default_path {
+        set_js_prop(
+            "selectFileSave",
+            &object,
+            "defaultPath",
+            &JsValue::from_str(&path_to_string(default_path)),
+        )?;
+    }
+    set_js_prop(
+        "selectFileSave",
+        &object,
+        "filters",
+        &filters_to_js("selectFileSave", &request.filters)?,
+    )?;
     Ok(object.into())
 }
 
@@ -180,7 +202,7 @@ pub(super) fn parse_open_file_selection(
         return Ok(Some(selection_from_paths(paths, None)?));
     }
     if value.is_object() {
-        let filter_index = optional_number_property(&value, "filterIndex")?;
+        let filter_index = optional_number_property("selectFileOpen", &value, "filterIndex")?;
         let paths = Reflect::get(&value, &JsValue::from_str("paths"))
             .ok()
             .filter(|paths| !paths.is_undefined() && !paths.is_null());
@@ -209,6 +231,36 @@ pub(super) fn parse_open_file_selection(
     ))
 }
 
+pub(super) fn parse_save_file_selection(
+    value: JsValue,
+) -> io::Result<Option<SaveFileDialogSelection>> {
+    if value.is_null() || value.is_undefined() || value.as_bool() == Some(false) {
+        return Ok(None);
+    }
+    if let Some(path) = value.as_string() {
+        return Ok(Some(SaveFileDialogSelection {
+            path: PathBuf::from(path),
+            filter_index: None,
+        }));
+    }
+    if value.is_object() {
+        let filter_index = optional_number_property("selectFileSave", &value, "filterIndex")?;
+        let path = Reflect::get(&value, &JsValue::from_str("path"))
+            .ok()
+            .and_then(|path| path.as_string());
+        if let Some(path) = path {
+            return Ok(Some(SaveFileDialogSelection {
+                path: PathBuf::from(path),
+                filter_index,
+            }));
+        }
+    }
+    Err(io::Error::new(
+        ErrorKind::InvalidData,
+        "selectFileSave must return null, false, a string path, or a selection object",
+    ))
+}
+
 fn map_file_type(text: String) -> Option<FsFileType> {
     match text.as_str() {
         "file" => Some(FsFileType::File),
@@ -223,14 +275,39 @@ pub(super) fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn set_js_prop(object: &Object, key: &str, value: &JsValue) -> io::Result<()> {
+fn filters_to_js(
+    op: &'static str,
+    filters: &[runmat_filesystem::OpenFileDialogFilter],
+) -> io::Result<JsValue> {
+    let js_filters = Array::new();
+    for filter in filters {
+        let filter_object = Object::new();
+        let patterns = Array::new();
+        for pattern in &filter.patterns {
+            patterns.push(&JsValue::from_str(pattern));
+        }
+        set_js_prop(op, &filter_object, "patterns", &patterns.into())?;
+        if let Some(description) = &filter.description {
+            set_js_prop(
+                op,
+                &filter_object,
+                "description",
+                &JsValue::from_str(description),
+            )?;
+        }
+        js_filters.push(&filter_object.into());
+    }
+    Ok(js_filters.into())
+}
+
+fn set_js_prop(op: &'static str, object: &Object, key: &str, value: &JsValue) -> io::Result<()> {
     let did_set = Reflect::set(object, &JsValue::from_str(key), value)
-        .map_err(|err| map_js_error("selectFileOpen", err))?;
+        .map_err(|err| map_js_error(op, err))?;
     if did_set {
         Ok(())
     } else {
         Err(io::Error::other(format!(
-            "selectFileOpen: failed to set request property {key}"
+            "{op}: failed to set request property {key}"
         )))
     }
 }
@@ -250,22 +327,26 @@ fn parse_string_array(value: &JsValue, context: &str) -> io::Result<Vec<String>>
     Ok(paths)
 }
 
-fn optional_number_property(value: &JsValue, key: &str) -> io::Result<Option<usize>> {
-    let property = Reflect::get(value, &JsValue::from_str(key))
-        .map_err(|err| map_js_error("selectFileOpen", err))?;
+fn optional_number_property(
+    op: &'static str,
+    value: &JsValue,
+    key: &str,
+) -> io::Result<Option<usize>> {
+    let property =
+        Reflect::get(value, &JsValue::from_str(key)).map_err(|err| map_js_error(op, err))?;
     if property.is_undefined() || property.is_null() {
         return Ok(None);
     }
     let Some(number) = property.as_f64() else {
         return Err(io::Error::new(
             ErrorKind::InvalidData,
-            format!("selectFileOpen.{key} must be a positive integer"),
+            format!("{op}.{key} must be a positive integer"),
         ));
     };
     if !number.is_finite() || number.fract() != 0.0 || number < 1.0 {
         return Err(io::Error::new(
             ErrorKind::InvalidData,
-            format!("selectFileOpen.{key} must be a positive integer"),
+            format!("{op}.{key} must be a positive integer"),
         ));
     }
     Ok(Some(number as usize))

@@ -9,9 +9,6 @@
     "complex"
   ],
   "summary": "Construct analytic signals with the Hilbert transform.",
-  "references": [
-    "title: \"MATLAB hilbert documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -20,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "GPU inputs are accepted through the active provider gather path. The host implementation computes the FFT-domain analytic signal and returns a complex host tensor."
+    "notes": "Providers can execute real GPU inputs through the resident `signal_hilbert` hook. Unsupported providers gather to host, compute the FFT-domain analytic signal, and return a complex host tensor."
   },
   "fusion": {
     "elementwise": false,
@@ -81,7 +78,7 @@
     },
     {
       "question": "Does `hilbert` run on GPU tensors?",
-      "answer": "GPU tensors are supported as inputs. The current implementation gathers through the active provider, computes the analytic signal with the host FFT path, and returns a complex host tensor."
+      "answer": "Yes. Providers with `signal_hilbert` support keep real GPU tensor inputs resident and return a complex GPU tensor. Providers without that hook fall back to the host FFT path."
     }
   ],
   "links": [
@@ -114,10 +111,10 @@
     "label": "`crates/runmat-runtime/src/builtins/math/signal/hilbert.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/hilbert.rs"
   },
-  "gpu_residency": "`hilbert` accepts GPU tensors through the normal gather path. Because the result is complex and the runtime currently materializes complex analytic signals on the host, downstream GPU residency resumes only after an explicit `gpuArray` or another operation that uploads the result.",
+  "gpu_residency": "`hilbert` keeps real GPU tensors resident when the active provider implements `signal_hilbert`, returning a complex-interleaved GPU tensor. Unsupported providers retain the host fallback path.",
   "gpu_behavior": [
-    "GPU inputs are downloaded through the active provider with dtype normalization.",
-    "The host FFT implementation then applies MATLAB-compatible analytic-signal weighting.",
-    "The output is a complex host value, matching the runtime's current complex tensor representation."
+    "The WGPU provider computes FFT, analytic-signal weighting, and inverse FFT without gathering the source tensor to host.",
+    "The output handle is marked as complex-interleaved GPU storage for downstream resident complex operations.",
+    "If the provider hook is unavailable or the requested transform length is zero, the runtime gathers and uses the MATLAB-compatible host FFT implementation."
   ]
 }

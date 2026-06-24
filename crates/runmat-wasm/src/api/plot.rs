@@ -34,16 +34,21 @@ use runmat_runtime::builtins::plotting::{
     install_surface as runtime_install_surface,
     invalidate_surface_revisions as runtime_invalidate_surface_revisions,
     new_figure_handle as runtime_new_figure_handle,
+    pick_geometry_scene_region as runtime_pick_geometry_scene_region,
     present_figure_on_surface as runtime_present_figure_on_surface,
+    present_geometry_scene_on_surface as runtime_present_geometry_scene_on_surface,
     present_surface as runtime_present_surface,
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
     render_figure_snapshot_with_camera_state as runtime_render_figure_snapshot_with_camera_state,
+    render_geometry_scene_snapshot as runtime_render_geometry_scene_snapshot,
     reset_plot_state as runtime_reset_plot_state,
     reset_surface_camera as runtime_reset_surface_camera, resize_surface as runtime_resize_surface,
-    select_figure as runtime_select_figure, set_hold as runtime_set_hold,
-    set_plot_theme_config as runtime_set_plot_theme_config,
+    select_figure as runtime_select_figure,
+    set_geometry_scene_presentation as runtime_set_geometry_scene_presentation,
+    set_hold as runtime_set_hold, set_plot_theme_config as runtime_set_plot_theme_config,
     set_surface_camera_state as runtime_set_surface_camera_state,
+    take_surface_host_actions as runtime_take_surface_host_actions,
     web_renderer_ready as runtime_plot_renderer_ready, FigureAxesState, FigureError,
     FigureEventKind, FigureEventView, FigureHandle, HoldMode, PlotSurfaceCameraState,
 };
@@ -116,6 +121,33 @@ pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> Result<(), JsV
     runtime_present_figure_on_surface(surface_id, handle).map_err(|err| runtime_error_to_js(&err))
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = presentGeometrySceneOnSurface)]
+pub fn present_geometry_scene_on_surface(surface_id: u32, handle: u32) -> Result<(), JsValue> {
+    runtime_present_geometry_scene_on_surface(surface_id, handle)
+        .map_err(|err| runtime_error_to_js(&err))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = setGeometryScenePresentation)]
+pub fn set_geometry_scene_presentation(
+    surface_id: u32,
+    presentation: JsValue,
+) -> Result<(), JsValue> {
+    let presentation: runmat_plot::GeometryScenePresentation =
+        serde_wasm_bindgen::from_value(presentation).map_err(|err| js_error(&err.to_string()))?;
+    runtime_set_geometry_scene_presentation(surface_id, presentation)
+        .map_err(|err| runtime_error_to_js(&err))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = pickGeometrySceneRegion)]
+pub fn pick_geometry_scene_region(surface_id: u32, x: f32, y: f32) -> Result<JsValue, JsValue> {
+    let result = runtime_pick_geometry_scene_region(surface_id, x, y)
+        .map_err(|err| runtime_error_to_js(&err))?;
+    serde_wasm_bindgen::to_value(&result).map_err(|err| js_error(&err.to_string()))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PlotSurfaceEventPayload {
@@ -128,6 +160,8 @@ struct PlotSurfaceEventPayload {
     dy: f32,
     #[serde(default)]
     button: i32,
+    #[serde(default)]
+    buttons: u32,
     #[serde(default)]
     wheel_delta_x: f32,
     #[serde(default)]
@@ -181,6 +215,7 @@ pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), 
         "mouseMove" => PlotEvent::MouseMove {
             position,
             delta,
+            buttons: payload.buttons,
             modifiers,
         },
         "wheel" => {
@@ -241,6 +276,14 @@ pub fn set_plot_surface_camera_state(surface_id: u32, state: JsValue) -> Result<
     let parsed: PlotSurfaceCameraState =
         serde_wasm_bindgen::from_value(state).map_err(|err| js_error(&err.to_string()))?;
     runtime_set_surface_camera_state(surface_id, parsed).map_err(|err| runtime_error_to_js(&err))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = "takePlotSurfaceHostActions")]
+pub fn take_plot_surface_host_actions(surface_id: u32) -> Result<JsValue, JsValue> {
+    let actions =
+        runtime_take_surface_host_actions(surface_id).map_err(|err| runtime_error_to_js(&err))?;
+    serde_wasm_bindgen::to_value(&actions).map_err(|err| js_error(&err.to_string()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -405,6 +448,30 @@ pub async fn wasm_render_figure_image_with_textmark(
     textmark: Option<String>,
 ) -> Result<Uint8Array, JsValue> {
     wasm_render_figure_image(handle, width, height, textmark).await
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = renderGeometrySceneImage)]
+pub async fn wasm_render_geometry_scene_image(
+    handle: u32,
+    width: Option<u32>,
+    height: Option<u32>,
+    view: Option<String>,
+) -> Result<Uint8Array, JsValue> {
+    const DEFAULT_PREVIEW_WIDTH: u32 = 1024;
+    const DEFAULT_PREVIEW_HEIGHT: u32 = 768;
+    let _ = shared_webgpu_context();
+    let normalized_width = width.unwrap_or(0).max(1);
+    let normalized_height = height.unwrap_or(0).max(1);
+    let (render_width, render_height) = if normalized_width == 1 && normalized_height == 1 {
+        (DEFAULT_PREVIEW_WIDTH, DEFAULT_PREVIEW_HEIGHT)
+    } else {
+        (normalized_width, normalized_height)
+    };
+    let bytes = runtime_render_geometry_scene_snapshot(handle, render_width, render_height, view)
+        .await
+        .map_err(runtime_flow_to_js)?;
+    Ok(Uint8Array::from(bytes.as_slice()))
 }
 
 #[cfg(target_arch = "wasm32")]

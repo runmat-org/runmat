@@ -9,10 +9,6 @@
     "gpu"
   ],
   "summary": "Evaluate polynomials at specified points in MATLAB and RunMat.",
-  "references": [
-    "title: \"MATLAB polyval documentation\"",
-    "title: \"Numerical Recipes: Polynomial fitting and evaluation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

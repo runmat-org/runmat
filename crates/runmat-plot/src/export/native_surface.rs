@@ -1,6 +1,7 @@
 use std::{any::Any, panic, sync::Arc};
 
 use crate::core::{Camera, PlotRenderConfig, PlotRenderer, RenderResult};
+use crate::geometry_scene::{GeometryScene, GeometryScenePresentation};
 use crate::gpu::util::map_read_async;
 use crate::plots::Figure;
 #[cfg(feature = "egui-overlay")]
@@ -26,7 +27,16 @@ pub struct NativeSurfaceRenderContext {
     background_policy: BackgroundPolicy,
     textmark: Option<String>,
     #[cfg(feature = "egui-overlay")]
+    host_actions: Vec<NativeSurfaceHostAction>,
+    #[cfg(feature = "egui-overlay")]
+    pending_overlay_events: Vec<crate::core::PlotEvent>,
+    #[cfg(feature = "egui-overlay")]
     overlay: Option<NativeOverlayState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeSurfaceHostAction {
+    CreateFeaStudy,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -40,6 +50,15 @@ struct NativeOverlayState {
     egui_ctx: egui::Context,
     egui_renderer: egui_wgpu::Renderer,
     plot_overlay: PlotOverlay,
+    wants_pointer_input: bool,
+    capture_regions_px: Vec<[f32; 4]>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NativeSurfaceCameraState {
+    pub active_camera: Camera,
+    pub axes_cameras: Vec<Camera>,
+    pub axes_camera_user_controlled: Vec<bool>,
 }
 
 impl NativeSurfaceRenderContext {
@@ -83,6 +102,8 @@ impl NativeSurfaceRenderContext {
                 egui_ctx,
                 egui_renderer,
                 plot_overlay: PlotOverlay::new(),
+                wants_pointer_input: false,
+                capture_regions_px: Vec::new(),
             })
         };
 
@@ -92,6 +113,10 @@ impl NativeSurfaceRenderContext {
             pixels_per_point: 1.0,
             background_policy: BackgroundPolicy::ThemeDriven,
             textmark: None,
+            #[cfg(feature = "egui-overlay")]
+            host_actions: Vec::new(),
+            #[cfg(feature = "egui-overlay")]
+            pending_overlay_events: Vec::new(),
             #[cfg(feature = "egui-overlay")]
             overlay,
         })
@@ -125,6 +150,80 @@ impl NativeSurfaceRenderContext {
             .map(ToOwned::to_owned);
     }
 
+    pub fn camera_state(&self) -> NativeSurfaceCameraState {
+        let mut axes_cameras = Vec::new();
+        let mut index = 0;
+        while let Some(camera) = self.renderer.axes_camera(index) {
+            axes_cameras.push(camera.clone());
+            index += 1;
+        }
+        if axes_cameras.is_empty() {
+            axes_cameras.push(self.renderer.camera().clone());
+        }
+        let active_camera = axes_cameras
+            .first()
+            .cloned()
+            .unwrap_or_else(|| self.renderer.camera().clone());
+        let mut axes_camera_user_controlled =
+            self.renderer.axes_camera_interaction_flags().to_vec();
+        axes_camera_user_controlled.resize(axes_cameras.len().max(1), false);
+        NativeSurfaceCameraState {
+            active_camera,
+            axes_cameras,
+            axes_camera_user_controlled,
+        }
+    }
+
+    pub fn overlay_wants_pointer_input(&self) -> bool {
+        #[cfg(feature = "egui-overlay")]
+        {
+            self.overlay
+                .as_ref()
+                .map(|overlay| overlay.wants_pointer_input)
+                .unwrap_or(false)
+        }
+
+        #[cfg(not(feature = "egui-overlay"))]
+        {
+            false
+        }
+    }
+
+    pub fn overlay_capture_regions_px(&self) -> Vec<[f32; 4]> {
+        #[cfg(feature = "egui-overlay")]
+        {
+            self.overlay
+                .as_ref()
+                .map(|overlay| overlay.capture_regions_px.clone())
+                .unwrap_or_default()
+        }
+
+        #[cfg(not(feature = "egui-overlay"))]
+        {
+            Vec::new()
+        }
+    }
+
+    pub fn take_host_actions(&mut self) -> Vec<NativeSurfaceHostAction> {
+        #[cfg(feature = "egui-overlay")]
+        {
+            std::mem::take(&mut self.host_actions)
+        }
+
+        #[cfg(not(feature = "egui-overlay"))]
+        {
+            Vec::new()
+        }
+    }
+
+    #[cfg(feature = "egui-overlay")]
+    pub fn push_overlay_events(
+        &mut self,
+        events: impl IntoIterator<Item = crate::core::PlotEvent>,
+    ) {
+        self.pending_overlay_events.extend(events);
+    }
+
     /// Render a figure directly into an externally-owned texture view.
     pub fn render_to_view(
         &mut self,
@@ -149,6 +248,41 @@ impl NativeSurfaceRenderContext {
         let mut encoder = self.renderer.wgpu_renderer.device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
                 label: Some("Native Surface Render Encoder"),
+            },
+        );
+
+        let render_result = self.render_scene_with_overlay(&mut encoder, view)?;
+
+        self.renderer
+            .wgpu_renderer
+            .queue
+            .submit(std::iter::once(encoder.finish()));
+
+        Ok(render_result)
+    }
+
+    /// Render a chunked geometry scene directly into an externally-owned texture view.
+    pub fn render_geometry_scene_to_view(
+        &mut self,
+        scene: &GeometryScene,
+        view: &wgpu::TextureView,
+        camera: Option<&Camera>,
+    ) -> Result<RenderResult, String> {
+        self.render_geometry_scene_to_view_with_presentation(scene, view, camera, None)
+    }
+
+    pub fn render_geometry_scene_to_view_with_presentation(
+        &mut self,
+        scene: &GeometryScene,
+        view: &wgpu::TextureView,
+        camera: Option<&Camera>,
+        presentation: Option<&GeometryScenePresentation>,
+    ) -> Result<RenderResult, String> {
+        self.prepare_geometry_scene(scene, camera, presentation);
+
+        let mut encoder = self.renderer.wgpu_renderer.device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: Some("Native Geometry Scene Render Encoder"),
             },
         );
 
@@ -284,6 +418,92 @@ impl NativeSurfaceRenderContext {
         Ok(pixels)
     }
 
+    pub async fn render_geometry_scene_to_rgba(
+        &mut self,
+        scene: &GeometryScene,
+        camera: Option<&Camera>,
+    ) -> Result<Vec<u8>, String> {
+        self.prepare_geometry_scene(scene, camera, None);
+
+        let width = self.config.width.max(1);
+        let height = self.config.height.max(1);
+        let format = self.renderer.wgpu_renderer.surface_config.format;
+        let device = self.renderer.wgpu_renderer.device.clone();
+        let queue = self.renderer.wgpu_renderer.queue.clone();
+
+        let color_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("native_surface_geometry_offscreen_color"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Native Geometry Surface RGBA Render Encoder"),
+        });
+        self.render_scene_with_overlay(&mut encoder, &color_view)?;
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let bytes_per_pixel = 4u32;
+        let padded_bytes_per_row = (width * bytes_per_pixel).div_ceil(256) * 256;
+        let output_buffer_size = (padded_bytes_per_row * height) as wgpu::BufferAddress;
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("native_surface_geometry_offscreen_readback"),
+            size: output_buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut copy_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Native Geometry Surface RGBA Copy Encoder"),
+        });
+        copy_encoder.copy_texture_to_buffer(
+            crate::wgpu_compat::TexelCopyTextureInfo {
+                texture: &color_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            crate::wgpu_compat::TexelCopyBufferInfo {
+                buffer: &output_buffer,
+                layout: crate::wgpu_compat::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(copy_encoder.finish()));
+
+        let slice = output_buffer.slice(..);
+        map_read_async(device.as_ref(), &slice).await?;
+        let data = slice.get_mapped_range();
+        let mut pixels = vec![0u8; (width * height * 4) as usize];
+        for row in 0..height as usize {
+            let src_start = row * padded_bytes_per_row as usize;
+            let dst_start = row * width as usize * 4;
+            pixels[dst_start..dst_start + width as usize * 4]
+                .copy_from_slice(&data[src_start..src_start + width as usize * 4]);
+        }
+        drop(data);
+        output_buffer.unmap();
+        Ok(pixels)
+    }
+
     fn prepare_scene(
         &mut self,
         figure: &Figure,
@@ -324,6 +544,28 @@ impl NativeSurfaceRenderContext {
         }
     }
 
+    fn prepare_geometry_scene(
+        &mut self,
+        scene: &GeometryScene,
+        camera: Option<&Camera>,
+        presentation: Option<&GeometryScenePresentation>,
+    ) {
+        self.background_policy = BackgroundPolicy::ThemeDriven;
+        self.apply_background_policy();
+        self.config.show_grid = scene.show_grid;
+        self.config.show_title = scene.title.is_some();
+
+        if let Some(presentation) = presentation {
+            self.renderer
+                .set_geometry_scene_with_presentation(scene.clone(), presentation.clone());
+        } else {
+            self.renderer.set_geometry_scene(scene.clone());
+        }
+        if let Some(camera) = camera {
+            *self.renderer.camera_mut() = camera.clone();
+        }
+    }
+
     fn render_scene_with_overlay(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -359,93 +601,92 @@ impl NativeSurfaceRenderContext {
                     (self.config.height.max(1) as f32) / ppp,
                 ),
             );
-            let full_output = overlay.egui_ctx.run(
-                egui::RawInput {
-                    screen_rect: Some(screen_rect),
-                    viewports: std::iter::once((
-                        egui::ViewportId::ROOT,
-                        egui::ViewportInfo {
-                            native_pixels_per_point: Some(ppp),
-                            inner_rect: Some(screen_rect),
-                            outer_rect: Some(screen_rect),
-                            focused: Some(true),
-                            ..Default::default()
-                        },
-                    ))
-                    .collect(),
-                    ..Default::default()
-                },
-                |ctx| {
-                    overlay
-                        .plot_overlay
-                        .set_theme_config(self.renderer.theme.clone());
-                    overlay.plot_overlay.apply_theme(ctx);
-                    let overlay_config = OverlayConfig {
-                        // Let plot renderer own grid drawing semantics.
-                        show_grid: false,
-                        // Toolbar actions are surfaced by host UI, not native overlay.
-                        show_toolbar: false,
-                        font_scale: 1.25,
-                        show_axes: true,
-                        show_title: true,
-                        title: self
-                            .renderer
-                            .overlay_title()
-                            .cloned()
-                            .or(Some("Plot".to_string())),
-                        x_label: self
-                            .renderer
-                            .overlay_x_label()
-                            .cloned()
-                            .or(Some("X".to_string())),
-                        y_label: self
-                            .renderer
-                            .overlay_y_label()
-                            .cloned()
-                            .or(Some("Y".to_string())),
-                        show_sidebar: false,
-                        ..Default::default()
-                    };
-                    let overlay_metrics = OverlayMetrics {
-                        vertex_count: scene_stats.total_vertices,
-                        triangle_count: scene_stats.total_triangles,
-                        render_time_ms: 0.0,
-                        fps: 60.0,
-                    };
-                    let frame_info = overlay.plot_overlay.render(
-                        ctx,
-                        &self.renderer,
-                        &overlay_config,
-                        overlay_metrics,
-                    );
-                    if let Some(textmark) = self.textmark.as_deref() {
-                        let screen = ctx.screen_rect();
-                        let anchor = egui::pos2(screen.max.x - 8.0, screen.max.y - 6.0);
-                        let font =
-                            egui::FontId::proportional(11.0 * overlay_config.font_scale.max(0.8));
-                        let layer = egui::LayerId::new(
-                            egui::Order::Foreground,
-                            egui::Id::new("runmat_export_textmark"),
-                        );
-                        let painter = ctx.layer_painter(layer);
-                        painter.text(
-                            anchor + egui::vec2(1.0, 1.0),
-                            egui::Align2::RIGHT_BOTTOM,
-                            textmark,
-                            font.clone(),
-                            egui::Color32::from_rgba_premultiplied(0, 0, 0, 72),
-                        );
-                        painter.text(
-                            anchor,
-                            egui::Align2::RIGHT_BOTTOM,
-                            textmark,
-                            font,
-                            egui::Color32::from_rgba_premultiplied(226, 234, 245, 96),
-                        );
-                    }
-                    plot_area_points = frame_info.plot_area;
-                },
+            let raw_input = crate::core::interaction::egui_raw_input_from_plot_events(
+                screen_rect,
+                ppp,
+                std::mem::take(&mut self.pending_overlay_events),
             );
+            let full_output = overlay.egui_ctx.run(raw_input, |ctx| {
+                overlay
+                    .plot_overlay
+                    .set_theme_config(self.renderer.theme.clone());
+                overlay.plot_overlay.apply_theme(ctx);
+                let overlay_config = OverlayConfig {
+                    // Let plot renderer own grid drawing semantics.
+                    show_grid: false,
+                    // Toolbar actions are surfaced by host UI, not native overlay.
+                    show_toolbar: false,
+                    font_scale: 1.25,
+                    show_axes: true,
+                    show_title: self.renderer.geometry_overlay().is_none(),
+                    title: self
+                        .renderer
+                        .overlay_title()
+                        .cloned()
+                        .or(Some("Plot".to_string())),
+                    x_label: self
+                        .renderer
+                        .overlay_x_label()
+                        .cloned()
+                        .or(Some("X".to_string())),
+                    y_label: self
+                        .renderer
+                        .overlay_y_label()
+                        .cloned()
+                        .or(Some("Y".to_string())),
+                    show_sidebar: false,
+                    ..Default::default()
+                };
+                let overlay_metrics = OverlayMetrics {
+                    vertex_count: scene_stats.total_vertices,
+                    triangle_count: scene_stats.total_triangles,
+                    render_time_ms: 0.0,
+                    fps: 60.0,
+                };
+                let frame_info = overlay.plot_overlay.render(
+                    ctx,
+                    &self.renderer,
+                    &overlay_config,
+                    overlay_metrics,
+                );
+                if let Some(textmark) = self.textmark.as_deref() {
+                    let screen = ctx.screen_rect();
+                    let anchor = egui::pos2(screen.max.x - 8.0, screen.max.y - 6.0);
+                    let font =
+                        egui::FontId::proportional(11.0 * overlay_config.font_scale.max(0.8));
+                    let layer = egui::LayerId::new(
+                        egui::Order::Foreground,
+                        egui::Id::new("runmat_export_textmark"),
+                    );
+                    let painter = ctx.layer_painter(layer);
+                    painter.text(
+                        anchor + egui::vec2(1.0, 1.0),
+                        egui::Align2::RIGHT_BOTTOM,
+                        textmark,
+                        font.clone(),
+                        egui::Color32::from_rgba_premultiplied(0, 0, 0, 72),
+                    );
+                    painter.text(
+                        anchor,
+                        egui::Align2::RIGHT_BOTTOM,
+                        textmark,
+                        font,
+                        egui::Color32::from_rgba_premultiplied(226, 234, 245, 96),
+                    );
+                }
+                plot_area_points = frame_info.plot_area;
+            });
+
+            let cad_actions = overlay.plot_overlay.take_cad_actions();
+            self.host_actions
+                .extend(apply_cad_overlay_actions(&mut self.renderer, cad_actions));
+            overlay.wants_pointer_input = overlay.plot_overlay.overlay_pointer_captured();
+            overlay.capture_regions_px = overlay
+                .plot_overlay
+                .overlay_capture_regions()
+                .into_iter()
+                .map(|[x0, y0, x1, y1]| [x0 * ppp, y0 * ppp, x1 * ppp, y1 * ppp])
+                .collect();
 
             let paint_jobs = overlay
                 .egui_ctx
@@ -486,6 +727,7 @@ impl NativeSurfaceRenderContext {
             let vy = vy.min(max_h.saturating_sub(1));
             let vw = vw.max(1).min(max_w.saturating_sub(vx).max(1));
             let vh = vh.max(1).min(max_h.saturating_sub(vy).max(1));
+            let mut axes_viewports_px = vec![(vx, vy, vw, vh)];
 
             if vw > 0 && vh > 0 {
                 self.renderer
@@ -588,6 +830,7 @@ impl NativeSurfaceRenderContext {
                     "runmat-plot: native_surface.render_scene_with_overlay.subplot_viewports_ready count={}",
                     viewports.len()
                 );
+                axes_viewports_px = viewports.clone();
                 let axes_plot_sizes_px: Vec<(u32, u32)> = viewports
                     .iter()
                     .map(|&(_, _, w, h)| (w.max(1), h.max(1)))
@@ -698,6 +941,7 @@ impl NativeSurfaceRenderContext {
             Ok(RenderResult {
                 success: true,
                 data_bounds: self.renderer.data_bounds(),
+                axes_viewports_px,
                 vertex_count: scene_stats.total_vertices,
                 triangle_count: scene_stats.total_triangles,
                 render_time_ms: start_time.elapsed().as_secs_f64() * 1000.0,
@@ -869,6 +1113,56 @@ pub async fn render_figure_rgba_bytes_interactive_and_theme(
     context.render_to_rgba(&figure, None, None).await
 }
 
+pub async fn render_geometry_scene_rgba_bytes_interactive_with_camera_and_theme(
+    scene: GeometryScene,
+    width: u32,
+    height: u32,
+    camera: &Camera,
+    theme: PlotThemeConfig,
+) -> Result<Vec<u8>, String> {
+    let mut context = create_headless_context(width.max(1), height.max(1)).await?;
+    context.set_theme_config(theme);
+    context
+        .render_geometry_scene_to_rgba(&scene, Some(camera))
+        .await
+}
+
+pub async fn render_geometry_scene_rgba_bytes_interactive_and_theme(
+    scene: GeometryScene,
+    width: u32,
+    height: u32,
+    theme: PlotThemeConfig,
+) -> Result<Vec<u8>, String> {
+    let mut context = create_headless_context(width.max(1), height.max(1)).await?;
+    context.set_theme_config(theme);
+    context.render_geometry_scene_to_rgba(&scene, None).await
+}
+
+pub async fn render_geometry_scene_png_bytes_interactive_with_camera_and_theme(
+    scene: GeometryScene,
+    width: u32,
+    height: u32,
+    camera: &Camera,
+    theme: PlotThemeConfig,
+) -> Result<Vec<u8>, String> {
+    let rgba = render_geometry_scene_rgba_bytes_interactive_with_camera_and_theme(
+        scene, width, height, camera, theme,
+    )
+    .await?;
+    encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
+pub async fn render_geometry_scene_png_bytes_interactive_and_theme(
+    scene: GeometryScene,
+    width: u32,
+    height: u32,
+    theme: PlotThemeConfig,
+) -> Result<Vec<u8>, String> {
+    let rgba =
+        render_geometry_scene_rgba_bytes_interactive_and_theme(scene, width, height, theme).await?;
+    encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
 fn encode_png_bytes(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     use image::{ImageBuffer, ImageFormat, Rgba};
 
@@ -1037,6 +1331,33 @@ pub async fn render_figure_png_bytes_interactive_with_axes_cameras_and_theme_and
         rgba.len()
     );
     encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
+#[cfg(feature = "egui-overlay")]
+fn apply_cad_overlay_actions(
+    renderer: &mut PlotRenderer,
+    actions: crate::overlay::cad_overlay::CadOverlayActions,
+) -> Vec<NativeSurfaceHostAction> {
+    let mut host_actions = Vec::new();
+    if actions.reset_view {
+        renderer.reset_geometry_view();
+    }
+    if actions.create_fea_study {
+        host_actions.push(NativeSurfaceHostAction::CreateFeaStudy);
+    }
+    if let Some(preset) = actions.view_preset {
+        renderer.set_camera_view_preset(preset);
+    }
+    if let Some(enabled) = actions.grid_enabled {
+        renderer.set_overlay_grid_enabled(enabled);
+    }
+    if let Some(enabled) = actions.xray_enabled {
+        renderer.set_geometry_xray_enabled(enabled);
+    }
+    for (owner_id, visible) in actions.owner_visibility {
+        renderer.set_geometry_owner_visible(owner_id, visible);
+    }
+    host_actions
 }
 
 #[cfg(test)]

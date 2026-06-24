@@ -16,13 +16,19 @@ export HOME="${EXPECTED_HOME}"
 RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-1.90.0-x86_64-unknown-linux-gnu}"
 CARGO_HOME="${CARGO_HOME:-${HOME}/.cargo}"
 RUSTUP_HOME="${RUSTUP_HOME:-${HOME}/.rustup}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PACKAGES=(
   build-essential
   ca-certificates
+  cmake
   curl
+  autoconf
+  autoconf-archive
+  automake
   gdb
   git
+  libtool
   libdbus-1-dev
   libegl1-mesa-dev
   libgl1-mesa-dev
@@ -41,8 +47,10 @@ PACKAGES=(
   libxkbcommon-x11-0
   libxrandr-dev
   libzmq3-dev
+  ninja-build
   pkg-config
   unzip
+  zip
 )
 
 echo "Installing Linux system packages used by the self-hosted build-and-test job"
@@ -88,12 +96,17 @@ if [[ "$(command -v cargo || true)" != "${CARGO_HOME}/bin/cargo" ]]; then
   exit 1
 fi
 pkg-config --modversion libzmq
+cmake --version >/dev/null
 if [[ -z "${LDCONFIG_BIN}" ]]; then
   echo "ldconfig was not found on PATH or at /usr/sbin/ldconfig" >&2
   exit 1
 fi
 "${LDCONFIG_BIN}" -p | grep -q 'libopenblas\.so'
 "${LDCONFIG_BIN}" -p | grep -q 'liblapack\.so'
+RUNMAT_VCPKG_REF="${RUNMAT_VCPKG_REF:-2026.06.01}" \
+RUNMAT_VCPKG_ROOT="${RUNMAT_VCPKG_ROOT:-${HOME}/vcpkg-runmat}" \
+RUNMAT_VCPKG_TRIPLET="${RUNMAT_VCPKG_TRIPLET:-x64-linux-runmat-dynamic-release}" \
+  "${SCRIPT_DIR}/ensure-linux-vcpkg-occt.sh"
 gdb --version >/dev/null
 node --version >/dev/null
 npm --version >/dev/null

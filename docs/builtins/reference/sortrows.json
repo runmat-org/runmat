@@ -8,7 +8,6 @@
     "gpu"
   ],
   "summary": "Sort matrix rows lexicographically with MATLAB-compatible column selection and direction controls.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

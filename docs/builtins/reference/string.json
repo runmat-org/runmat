@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Convert numeric, logical, character, and text inputs into MATLAB-compatible string arrays.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

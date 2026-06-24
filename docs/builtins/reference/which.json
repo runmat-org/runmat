@@ -9,7 +9,6 @@
     "variable shadowing"
   ],
   "summary": "Resolve which variable, builtin, file, or class matches a given name.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

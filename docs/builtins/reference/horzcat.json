@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Concatenate arrays horizontally in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -1,6 +1,6 @@
 [package]
 name = "runmat-core"
-version = "0.5.0"
+version = "0.5.3"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -36,6 +36,8 @@ default-features = false
 [features]
 default = ["jit"]
 jit = ["dep:runmat-turbine"]
+occt-native = ["runmat-runtime/occt-native"]
+occt-wasm-host = ["runmat-runtime/occt-wasm-host"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 runmat-runtime = { workspace = true, features = ["plot-core"] }

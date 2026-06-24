@@ -9,7 +9,6 @@
     "gpuArray ge"
   ],
   "summary": "Compute element-wise greater-than-or-equal comparisons in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

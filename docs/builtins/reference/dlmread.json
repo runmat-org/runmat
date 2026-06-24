@@ -9,7 +9,6 @@
     "range"
   ],
   "summary": "Read numeric data from delimiter-separated text files in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

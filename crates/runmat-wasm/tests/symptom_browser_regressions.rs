@@ -28,6 +28,12 @@ fn init_options(enable_gpu: bool) -> JsValue {
         &JsValue::from_bool(enable_gpu),
     )
     .expect("set enableGpu");
+    js_sys::Reflect::set(
+        &options,
+        &JsValue::from_str("fsProvider"),
+        &shared::test_fs_provider(),
+    )
+    .expect("set fsProvider");
     options.into()
 }
 
@@ -142,6 +148,11 @@ async fn tic_toc_loop_executes_without_runtime_error() {
 #[wasm_bindgen_test(async)]
 async fn symbolic_limit_workflow_executes_without_runtime_error() {
     shared::assert_symbolic_limit_workflow_executes_without_runtime_error().await;
+}
+
+#[wasm_bindgen_test(async)]
+async fn signal_compatibility_harness_executes_without_runtime_error() {
+    shared::assert_signal_compatibility_harness_executes_without_runtime_error().await;
 }
 
 #[wasm_bindgen_test(async)]

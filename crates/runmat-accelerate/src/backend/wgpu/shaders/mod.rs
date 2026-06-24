@@ -1,6 +1,7 @@
 pub mod bandwidth;
 pub mod centered_gram;
 pub mod circshift;
+pub mod comms;
 pub mod conv;
 pub mod creation;
 pub mod diag;
@@ -31,6 +32,7 @@ pub mod reduction;
 pub mod repmat;
 pub mod scan;
 pub mod scatter;
+pub mod signal;
 pub mod solve;
 pub mod stochastic_evolution;
 pub mod sub2ind;

@@ -124,6 +124,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::poly::roots"
 )]
 async fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {
+    roots_value(coefficients).await
+}
+
+pub(crate) async fn roots_value(coefficients: Value) -> crate::BuiltinResult<Value> {
     let coeffs = coefficients_to_complex(coefficients).await?;
     let trimmed = trim_leading_zeros(coeffs);
     if trimmed.is_empty() || trimmed.len() == 1 {

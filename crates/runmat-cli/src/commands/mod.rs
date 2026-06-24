@@ -1,7 +1,9 @@
 pub mod accel;
 pub mod benchmark;
 pub mod bytecode;
+pub mod check;
 pub mod config;
+pub mod fea;
 pub mod gc;
 pub mod repl;
 pub mod script;

@@ -4,6 +4,7 @@
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 pub mod abi;
+mod diagnostic_path;
 mod error;
 mod execution;
 mod fusion;
@@ -31,9 +32,6 @@ pub use workspace::*;
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-pub(crate) static TEST_PROCESS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Test-only helper that executes a text source via `ExecutionRequest`.
 #[cfg(not(target_arch = "wasm32"))]

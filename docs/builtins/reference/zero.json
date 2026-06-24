@@ -1,0 +1,92 @@
+{
+  "title": "zero",
+  "category": "control",
+  "keywords": [
+    "zero",
+    "zeros",
+    "control system",
+    "transfer function",
+    "tf"
+  ],
+  "summary": "Return zeros of SISO transfer-function models.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`zero` computes roots from host-side numerator metadata."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`zero` is model analysis and is not fused."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::zero::tests",
+    "integration": "crates/runmat-vm/tests/control.rs"
+  },
+  "description": "`zero(sys)` returns the roots of the numerator polynomial for a supported SISO `tf` model.",
+  "behaviors": [
+    "Supports SISO `tf` objects.",
+    "Returns an `N x 1` real vector when all zeros are real.",
+    "Returns an `N x 1` complex vector when any zero has a nonzero imaginary part.",
+    "Static-gain models return an empty zero vector.",
+    "`ss` transmission zeros are not implemented yet; use `tf` models for this builtin."
+  ],
+  "examples": [
+    {
+      "description": "Second-order zeros",
+      "input": "H = tf([1 3 2], [1 4]);\nzero(H)",
+      "output": "ans = [-1; -2]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `zero` cancel pole-zero pairs?",
+      "answer": "No. It returns roots of the stored numerator polynomial for the supplied transfer-function model."
+    },
+    {
+      "question": "Is this the same as `zeros`?",
+      "answer": "No. `zero` analyzes control models. `zeros` constructs numeric arrays."
+    }
+  ],
+  "links": [
+    {
+      "label": "pole",
+      "url": "./pole"
+    },
+    {
+      "label": "roots",
+      "url": "./roots"
+    },
+    {
+      "label": "tf",
+      "url": "./tf"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/zero.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/zero.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "z = zero(sys)",
+      "output": "z is a column vector."
+    },
+    "points": [
+      "`sys` must be a SISO `tf` object."
+    ]
+  },
+  "validation": {
+    "summary": "`zero` validates the input model and computes numerator roots through the shared control polynomial root path. Tests cover real, complex-conjugate, and static-gain zero vectors plus VM integration.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/control/zero.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/zero.rs"
+    }
+  },
+  "gpu_residency": "`zero` returns host-resident vectors."
+}

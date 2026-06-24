@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Extract upper-triangular portions of matrices with optional diagonal offsets.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

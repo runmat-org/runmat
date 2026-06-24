@@ -10,7 +10,6 @@
     "regex load"
   ],
   "summary": "Load variables from MAT-files in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -39,8 +38,8 @@
     "`load(filename, 'A', 'B')` restricts the operation to the listed variable names. String scalars, char vectors, string arrays, or cell arrays of character vectors are accepted.",
     "`load(filename, '-regexp', '^foo', 'bar$')` selects variables whose names match any of the supplied regular expressions.",
     "Repeated names are deduplicated so that the last occurrence wins, mirroring MATLAB's behavior.",
-    "Unsupported data classes trigger descriptive errors. RunMat currently supports double and complex numeric arrays, logical arrays, character arrays, string arrays (stored as cell-of-char data), structs, and cells whose elements are composed of the supported types.",
-    "Files saved on platforms that produce little-endian Level-5 MAT-files (MATLAB's default) are supported. Big-endian and compressed (`miCOMPRESSED`) files currently report an error."
+    "Unsupported data classes trigger descriptive errors. RunMat supports Level-5 double and complex numeric arrays, supported scalar integer classes, single/uint8/uint16 tensors, logical arrays, character arrays, string arrays (stored as cell-of-char data), scalar structs, real sparse matrices, and cells whose elements are composed of the supported types.",
+    "Little-endian, big-endian, and compressed (`miCOMPRESSED`) Level-5 MAT-files are supported. MATLAB v7.3 MAT-files are HDF5-backed and currently report an explicit unsupported-version error."
   ],
   "examples": [
     {
@@ -79,7 +78,7 @@
     },
     {
       "question": "How are structures handled?",
-      "answer": "Structure scalars are reconstructed as `struct` values whose fields match the MAT-file content. Nested structs, cells, logical arrays, and numeric data are all supported."
+      "answer": "Structure scalars are reconstructed as `struct` values whose fields match the MAT-file content. Nested scalar structs, cells, logical arrays, sparse matrices, and numeric data are supported. Struct arrays report an explicit unsupported-data error until RunMat has a first-class struct-array value."
     },
     {
       "question": "Will `load` overwrite existing variables?",

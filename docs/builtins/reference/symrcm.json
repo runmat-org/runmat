@@ -10,9 +10,6 @@
     "gpu"
   ],
   "summary": "Compute symmetric reverse Cuthill-McKee permutations that reduce matrix bandwidth.",
-  "references": [
-    "Alan George and Joseph W. Liu, 'Computer Solution of Large Sparse Positive Definite Systems', Prentice Hall, 1981."
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

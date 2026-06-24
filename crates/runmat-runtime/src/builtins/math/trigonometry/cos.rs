@@ -224,10 +224,19 @@ async fn cos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    cos_tensor(tensor).map(tensor::tensor_into_value)
+    match gathered {
+        Value::Complex(re, im) => Ok(Value::Complex(
+            cos_complex_re(re, im),
+            cos_complex_im(re, im),
+        )),
+        Value::ComplexTensor(ct) => cos_complex_tensor(ct),
+        Value::Tensor(tensor) => cos_tensor(tensor).map(tensor::tensor_into_value),
+        Value::Num(n) => Ok(Value::Num(n.cos())),
+        other => cos_real(other),
+    }
 }
 
 fn cos_real(value: Value) -> BuiltinResult<Value> {
@@ -314,16 +323,21 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
     match template {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => match proto {
-            Value::GpuTensor(_) => convert_to_gpu(value),
+            Value::GpuTensor(handle) => {
+                if runmat_accelerate_api::handle_storage(handle)
+                    == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                {
+                    convert_to_gpu_complex(value).await
+                } else {
+                    convert_to_gpu(value)
+                }
+            }
             Value::Tensor(_)
             | Value::Num(_)
             | Value::Int(_)
             | Value::Bool(_)
             | Value::LogicalArray(_) => convert_to_host_like(value).await,
-            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(cos_error_with_detail(
-                &COS_ERROR_LIKE_PROTOTYPE,
-                "complex prototypes for 'like' are not supported yet",
-            )),
+            Value::Complex(_, _) | Value::ComplexTensor(_) => convert_to_host_complex(value).await,
             _ => Err(cos_error_with_detail(
                 &COS_ERROR_LIKE_PROTOTYPE,
                 "unsupported prototype; provide a numeric or gpuArray prototype",
@@ -374,6 +388,78 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     }
 }
 
+#[async_recursion::async_recursion(?Send)]
+async fn convert_to_gpu_complex(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_storage(&handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                Ok(Value::GpuTensor(handle))
+            } else if let Some(handle_provider) =
+                runmat_accelerate_api::provider_for_handle(&handle)
+            {
+                match handle_provider.complex_from_real(&handle).await {
+                    Ok(out) => Ok(Value::GpuTensor(out)),
+                    Err(_) => {
+                        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+                            .await
+                            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+                        convert_to_gpu_complex(gathered).await
+                    }
+                }
+            } else {
+                Err(cos_error_with_detail(
+                    &COS_ERROR_GPU_UNAVAILABLE,
+                    "complex GPU output requested but the input handle has no provider",
+                ))
+            }
+        }
+        Value::Complex(re, im) => {
+            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                cos_error_with_detail(
+                    &COS_ERROR_GPU_UNAVAILABLE,
+                    "complex GPU output requested via 'like' but no acceleration provider is active",
+                )
+            })?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
+            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
+                .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
+            Ok(Value::GpuTensor(handle))
+        }
+        Value::ComplexTensor(tensor) => {
+            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                cos_error_with_detail(
+                    &COS_ERROR_GPU_UNAVAILABLE,
+                    "complex GPU output requested via 'like' but no acceleration provider is active",
+                )
+            })?;
+            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
+                .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
+            Ok(Value::GpuTensor(handle))
+        }
+        Value::Num(n) => convert_to_gpu_complex(Value::Complex(n, 0.0)).await,
+        Value::Tensor(tensor) => {
+            let data = tensor.data.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
+            let complex = ComplexTensor::new(data, tensor.shape.clone())
+                .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
+            convert_to_gpu_complex(Value::ComplexTensor(complex)).await
+        }
+        Value::LogicalArray(logical) => {
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
+            convert_to_gpu_complex(Value::Tensor(tensor)).await
+        }
+        Value::Int(i) => convert_to_gpu_complex(Value::Num(i.to_f64())).await,
+        Value::Bool(b) => convert_to_gpu_complex(Value::Num(if b { 1.0 } else { 0.0 })).await,
+        other => Err(cos_error_with_detail(
+            &COS_ERROR_INTERNAL,
+            format!("cannot convert value {other:?} to complex GPU output via 'like'"),
+        )),
+    }
+}
+
 async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
@@ -384,6 +470,37 @@ async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
     }
 }
 
+#[async_recursion::async_recursion(?Send)]
+async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
+        Value::Num(n) => Ok(Value::Complex(n, 0.0)),
+        Value::Tensor(tensor) => {
+            let data = tensor.data.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
+            let complex = ComplexTensor::new(data, tensor.shape.clone())
+                .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
+            Ok(complex_tensor_into_value(complex))
+        }
+        Value::GpuTensor(handle) => {
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+            convert_to_host_complex(gathered).await
+        }
+        Value::LogicalArray(logical) => {
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
+            convert_to_host_complex(Value::Tensor(tensor)).await
+        }
+        Value::Int(i) => convert_to_host_complex(Value::Num(i.to_f64())).await,
+        Value::Bool(b) => convert_to_host_complex(Value::Num(if b { 1.0 } else { 0.0 })).await,
+        other => Err(cos_error_with_detail(
+            &COS_ERROR_INTERNAL,
+            format!("cannot convert value {other:?} to complex output via 'like'"),
+        )),
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -391,7 +508,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, ResolveContext, StringArray, Tensor, Type};
 
-    use crate::builtins::common::test_support;
+    use crate::builtins::common::{gpu_helpers, test_support};
 
     fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::cos_builtin(value, rest))
@@ -535,14 +652,118 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn cos_like_complex_prototype_errors() {
-        let err = cos_builtin(
+    fn cos_like_complex_prototype_returns_complex() {
+        let result = cos_builtin(
             Value::Num(1.0),
             vec![Value::from("like"), Value::Complex(0.0, 1.0)],
         )
-        .expect_err("expected error");
-        let message = error_message(err);
-        assert!(message.contains("complex prototypes"));
+        .expect("cos");
+        match result {
+            Value::Complex(re, im) => {
+                assert!((re - 1.0_f64.cos()).abs() < 1e-12);
+                assert!(im.abs() < 1e-12);
+            }
+            other => panic!("expected complex result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cos_gpu_complex_input_preserves_complex_output() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new(vec![(0.5, 0.75), (2.0, -0.25)], vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &input).expect("upload");
+            let result = cos_builtin(Value::GpuTensor(handle), Vec::new()).expect("cos");
+            let out = match result {
+                Value::GpuTensor(handle) => {
+                    assert_eq!(
+                        runmat_accelerate_api::handle_storage(&handle),
+                        runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                    );
+                    match block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(handle)))
+                        .expect("gather")
+                    {
+                        Value::ComplexTensor(out) => out,
+                        other => panic!("expected gathered complex tensor, got {other:?}"),
+                    }
+                }
+                Value::ComplexTensor(out) => out,
+                other => panic!("expected complex output, got {other:?}"),
+            };
+            assert_eq!(out.shape, vec![1, 2]);
+            for (idx, &(re, im)) in input.data.iter().enumerate() {
+                assert!((out.data[idx].0 - cos_complex_re(re, im)).abs() < 1e-12);
+                assert!((out.data[idx].1 - cos_complex_im(re, im)).abs() < 1e-12);
+            }
+        });
+    }
+
+    #[test]
+    fn cos_like_complex_gpu_prototype_uploads_complex_result() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
+            let proto_tensor = ComplexTensor::new(vec![(0.0, 1.0)], vec![1, 1]).unwrap();
+            let proto = gpu_helpers::upload_complex_tensor(provider, &proto_tensor)
+                .expect("upload complex prototype");
+            let result = cos_builtin(
+                Value::Tensor(input.clone()),
+                vec![Value::from("like"), Value::GpuTensor(proto)],
+            )
+            .expect("cos");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected complex gpu tensor, got {result:?}");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&handle),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(handle))).unwrap();
+            let Value::ComplexTensor(out) = gathered else {
+                panic!("expected gathered complex tensor, got {gathered:?}");
+            };
+            assert_eq!(out.shape, vec![2, 1]);
+            for (idx, &re) in input.data.iter().enumerate() {
+                assert!((out.data[idx].0 - re.cos()).abs() < 1e-12);
+                assert!(out.data[idx].1.abs() < 1e-12);
+            }
+        });
+    }
+
+    #[test]
+    fn cos_like_complex_gpu_prototype_converts_resident_real_gpu_result() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
+            let input_view = HostTensorView {
+                data: &input.data,
+                shape: &input.shape,
+            };
+            let input_handle = provider.upload(&input_view).expect("upload input");
+            let proto_tensor = ComplexTensor::new(vec![(0.0, 1.0)], vec![1, 1]).unwrap();
+            let proto = gpu_helpers::upload_complex_tensor(provider, &proto_tensor)
+                .expect("upload complex prototype");
+            let result = cos_builtin(
+                Value::GpuTensor(input_handle),
+                vec![Value::from("like"), Value::GpuTensor(proto)],
+            )
+            .expect("cos");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected complex gpu tensor, got {result:?}");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&handle),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(handle))).unwrap();
+            let Value::ComplexTensor(out) = gathered else {
+                panic!("expected gathered complex tensor, got {gathered:?}");
+            };
+            assert_eq!(out.shape, vec![2, 1]);
+            for (idx, &re) in input.data.iter().enumerate() {
+                assert!((out.data[idx].0 - re.cos()).abs() < 1e-12);
+                assert!(out.data[idx].1.abs() < 1e-12);
+            }
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

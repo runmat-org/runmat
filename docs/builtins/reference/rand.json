@@ -9,7 +9,6 @@
     "like"
   ],
   "summary": "Generate uniformly distributed pseudorandom numbers on the open interval (0, 1) with MATLAB-compatible syntax.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

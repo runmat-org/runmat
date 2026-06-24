@@ -5,6 +5,7 @@
 //! platform graphics stack panics during setup.
 
 use crate::core::Camera;
+use crate::geometry_scene::GeometryScene;
 use crate::plots::Figure;
 use crate::styling::PlotThemeConfig;
 use std::io::Cursor;
@@ -219,6 +220,63 @@ impl ImageExporter {
                 .await
             }
             Err(err) => Err(err),
+        }
+    }
+
+    /// Render a geometry scene into a PNG buffer using an explicit camera.
+    pub async fn render_geometry_scene_png_bytes_with_camera(
+        &self,
+        scene: &GeometryScene,
+        camera: &Camera,
+    ) -> Result<Vec<u8>, String> {
+        let width = self.settings.width.max(1);
+        let height = self.settings.height.max(1);
+        if let Some(theme) = &self.theme {
+            crate::export::native_surface::render_geometry_scene_png_bytes_interactive_with_camera_and_theme(
+                scene.clone(),
+                width,
+                height,
+                camera,
+                theme.clone(),
+            )
+            .await
+        } else {
+            let rgba =
+                crate::export::native_surface::render_geometry_scene_rgba_bytes_interactive_with_camera_and_theme(
+                    scene.clone(),
+                    width,
+                    height,
+                    camera,
+                    PlotThemeConfig::default(),
+                )
+                .await?;
+            self.encode_png_bytes(&rgba)
+        }
+    }
+
+    /// Render a geometry scene into a PNG buffer using the default scene camera.
+    pub async fn render_geometry_scene_png_bytes(
+        &self,
+        scene: &GeometryScene,
+    ) -> Result<Vec<u8>, String> {
+        let width = self.settings.width.max(1);
+        let height = self.settings.height.max(1);
+        if let Some(theme) = &self.theme {
+            crate::export::native_surface::render_geometry_scene_png_bytes_interactive_and_theme(
+                scene.clone(),
+                width,
+                height,
+                theme.clone(),
+            )
+            .await
+        } else {
+            crate::export::native_surface::render_geometry_scene_png_bytes_interactive_and_theme(
+                scene.clone(),
+                width,
+                height,
+                PlotThemeConfig::default(),
+            )
+            .await
         }
     }
 

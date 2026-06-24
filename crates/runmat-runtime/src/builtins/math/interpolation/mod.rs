@@ -6,4 +6,4 @@ pub mod pchip;
 pub mod ppval;
 pub mod spline;
 
-mod pp;
+pub(crate) mod pp;

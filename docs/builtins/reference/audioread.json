@@ -1,0 +1,96 @@
+{
+  "title": "audioread",
+  "category": "io/audio",
+  "keywords": [
+    "audioread",
+    "audio",
+    "read audio",
+    "wav",
+    "rf64",
+    "pcm",
+    "float",
+    "sample rate",
+    "channels"
+  ],
+  "summary": "Read audio samples from a file.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`audioread` performs host-side filesystem I/O and CPU decoding. Results are host tensors; wrap with `gpuArray` if device residency is needed after import."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::audio::tests",
+    "integration": [
+      "builtins::io::audio::tests::audioread_reads_mono_pcm16_as_normalized_double",
+      "builtins::io::audio::tests::audioread_stereo_output_is_column_major_by_channel",
+      "builtins::io::audio::tests::audioread_sample_range_is_one_based_inclusive_and_returns_fs",
+      "builtins::io::audio::tests::audioread_native_uint8_preserves_dtype_and_values",
+      "builtins::io::audio::tests::audioread_reads_float32_wave",
+      "builtins::io::audio::tests::audioread_reads_via_active_filesystem_provider"
+    ]
+  },
+  "description": "`audioread(filename)` decodes audio samples into an N-by-C tensor, where rows are sample frames and columns are channels. `[y, Fs] = audioread(filename)` also returns the sample rate in Hz.",
+  "behaviors": [
+    "Accepts scalar string, scalar string-array, or row character-vector filenames and reads through RunMat's filesystem abstraction.",
+    "Supports WAV/RF64 containers with PCM 8-bit unsigned, PCM 16/24/32-bit signed, IEEE float 32-bit, IEEE float 64-bit, and WAVE_FORMAT_EXTENSIBLE PCM/float subformats.",
+    "By default, PCM samples are returned as normalized double values. Unsigned 8-bit PCM maps around zero, and signed PCM maps by the signed full-scale denominator.",
+    "The optional sample range is a two-element one-based inclusive frame range: `audioread(filename, [first last])`.",
+    "The optional datatype argument supports `\"double\"` and `\"native\"`. Native output preserves `uint8` and `single` dtype tags where RunMat can represent them; other decoded classes keep host f64 storage with raw source values.",
+    "Compressed containers such as FLAC, MP3, Ogg/Vorbis, and AIFF metadata are recognized by `audioinfo`; sample decoding for those codecs is not currently implemented."
+  ],
+  "examples": [
+    {
+      "description": "Read samples and sample rate",
+      "input": "[y, Fs] = audioread(\"speech.wav\");\nsize(y)"
+    },
+    {
+      "description": "Read a frame range",
+      "input": "clip = audioread(\"speech.wav\", [16001 32000]);"
+    },
+    {
+      "description": "Preserve native representable class",
+      "input": "raw = audioread(\"tones.wav\", \"native\");\nclass(raw)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What shape does `audioread` return?",
+      "answer": "It returns an N-by-C tensor where N is the number of decoded frames and C is the number of channels. Mono audio is N-by-1."
+    },
+    {
+      "question": "Does `audioread` use the active filesystem provider?",
+      "answer": "Yes. The implementation reads bytes through RunMat's filesystem abstraction, so sandbox, remote, and native providers can all supply audio files."
+    },
+    {
+      "question": "Does `audioread` decode MP3 or FLAC samples?",
+      "answer": "Not yet. RunMat currently parses metadata for those containers through `audioinfo`; `audioread` decodes WAV/RF64 PCM and IEEE-float audio samples."
+    }
+  ],
+  "links": [
+    {
+      "label": "audioinfo",
+      "url": "./audioinfo"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/audio/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/audio/mod.rs"
+  },
+  "gpu_residency": "`audioread` always returns host-resident tensors because file I/O and audio decoding occur on the CPU. Use `gpuArray` after reading if later processing should use device residency.",
+  "gpu_behavior": [
+    "`audioread` does not dispatch provider kernels and is not fusion eligible. GPU-resident scalar string inputs are gathered before decoding, and decoded sample tensors remain on the host."
+  ]
+}

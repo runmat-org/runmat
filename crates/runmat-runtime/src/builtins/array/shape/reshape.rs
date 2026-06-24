@@ -1,5 +1,6 @@
 //! MATLAB-compatible `reshape` builtin with GPU-aware semantics for RunMat.
 
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::shape::value_numel;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -383,15 +384,30 @@ fn reshape_gpu_tensor(
     handle: runmat_accelerate_api::GpuTensorHandle,
     dims: &[usize],
 ) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        provider
+    let complex_storage = runmat_accelerate_api::handle_storage(&handle)
+        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
+    if let Some(provider) =
+        runmat_accelerate_api::provider_for_handle(&handle).or_else(runmat_accelerate_api::provider)
+    {
+        let reshaped = provider
             .reshape(&handle, dims)
-            .map(Value::GpuTensor)
-            .map_err(|e| reshape_error(format!("reshape: {e}")))
+            .map_err(|e| reshape_error(format!("reshape: {e}")))?;
+        if complex_storage
+            || runmat_accelerate_api::handle_storage(&reshaped)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            Ok(gpu_helpers::complex_gpu_value(reshaped))
+        } else {
+            Ok(gpu_helpers::resident_gpu_value(reshaped))
+        }
     } else {
         let mut updated = handle;
         updated.shape = dims.to_vec();
-        Ok(Value::GpuTensor(updated))
+        if complex_storage {
+            Ok(gpu_helpers::complex_gpu_value(updated))
+        } else {
+            Ok(Value::GpuTensor(updated))
+        }
     }
 }
 
@@ -563,6 +579,8 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
 
     fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::reshape_builtin(value, rest))
@@ -743,6 +761,45 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn reshape_complex_gpu_preserves_storage_and_data() {
+        test_support::with_test_provider(|provider| {
+            let complex = ComplexTensor::new(
+                vec![
+                    (1.0, -1.0),
+                    (2.0, -2.0),
+                    (3.0, -3.0),
+                    (4.0, -4.0),
+                    (5.0, -5.0),
+                    (6.0, -6.0),
+                ],
+                vec![2, 3],
+            )
+            .unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+            let result = reshape_builtin(
+                Value::GpuTensor(handle.clone()),
+                vec![Value::from(3.0), Value::from(2.0)],
+            )
+            .expect("reshape");
+            let Value::GpuTensor(reshaped) = result else {
+                panic!("expected gpu tensor");
+            };
+            assert_eq!(reshaped.buffer_id, handle.buffer_id);
+            assert_eq!(reshaped.shape, vec![3, 2]);
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&reshaped),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(
+                crate::builtins::math::fft::common::gather_gpu_complex_tensor(&reshaped, "reshape"),
+            )
+            .expect("gather complex");
+            assert_eq!(gathered.shape, vec![3, 2]);
+            assert_eq!(gathered.data, complex.data);
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
@@ -750,8 +807,10 @@ pub(crate) mod tests {
         use runmat_accelerate::backend::wgpu::provider::{
             register_wgpu_provider, WgpuProviderOptions,
         };
-        let _ = register_wgpu_provider(WgpuProviderOptions::default());
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
         let data: Vec<f64> = (1..=12).map(|v| v as f64).collect();
         let tensor = tensor_from_slice(&data, &[3, 4]);
         let view = runmat_accelerate_api::HostTensorView {
@@ -771,6 +830,55 @@ pub(crate) mod tests {
         let host = block_on(download_handle_async(provider, &reshaped)).expect("download");
         assert_eq!(host.shape, vec![2, 6]);
         assert_eq!(host.data, tensor.data);
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn reshape_wgpu_complex_updates_provider_shape_and_storage() {
+        use runmat_accelerate::backend::wgpu::provider::{
+            register_wgpu_provider, WgpuProviderOptions,
+        };
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let complex = ComplexTensor::new(
+            vec![
+                (1.0, -1.0),
+                (2.0, -2.0),
+                (3.0, -3.0),
+                (4.0, -4.0),
+                (5.0, -5.0),
+                (6.0, -6.0),
+            ],
+            vec![2, 3],
+        )
+        .unwrap();
+        let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+        let result = reshape_builtin(
+            Value::GpuTensor(handle.clone()),
+            vec![Value::from(3.0), Value::from(2.0)],
+        )
+        .expect("reshape");
+        let Value::GpuTensor(reshaped) = result else {
+            panic!("expected gpu tensor");
+        };
+        assert_eq!(reshaped.buffer_id, handle.buffer_id);
+        assert_eq!(reshaped.shape, vec![3, 2]);
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&reshaped),
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        );
+        let host = block_on(download_handle_async(provider, &reshaped)).expect("download");
+        assert_eq!(host.shape, vec![3, 2]);
+        assert_eq!(
+            host.storage,
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        );
+        assert_eq!(
+            host.data,
+            vec![1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, -4.0, 5.0, -5.0, 6.0, -6.0]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

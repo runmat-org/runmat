@@ -621,20 +621,21 @@ struct DynamicSourceContext {
 fn install_dynamic_source_context(
     context: &DynamicSourceContext,
 ) -> runmat_runtime::source_context::SourceCatalogGuard {
-    let mut entries = runmat_runtime::source_context::source_catalog_entries();
-    entries.retain(|(source_id, _, _)| *source_id != context.source_id);
+    let mut entries = runmat_runtime::source_context::source_catalog_entries_with_fullpaths();
+    entries.retain(|(source_id, _, _, _)| *source_id != context.source_id);
     entries.push((
         context.source_id,
         context.name.clone(),
+        None,
         context.text.clone(),
     ));
-    runmat_runtime::source_context::replace_source_catalog(entries)
+    runmat_runtime::source_context::replace_source_catalog_with_fullpaths(entries)
 }
 
 fn next_dynamic_source_id() -> runmat_hir::SourceId {
-    runmat_runtime::source_context::source_catalog_entries()
+    runmat_runtime::source_context::source_catalog_entries_with_fullpaths()
         .into_iter()
-        .map(|(source_id, _, _)| source_id.0)
+        .map(|(source_id, _, _, _)| source_id.0)
         .max()
         .map(|id| runmat_hir::SourceId(id + 1))
         .unwrap_or(runmat_hir::SourceId(0))

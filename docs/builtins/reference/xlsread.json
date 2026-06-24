@@ -1,0 +1,95 @@
+{
+  "title": "xlsread",
+  "category": "io/tabular",
+  "keywords": [
+    "xlsread",
+    "xls",
+    "xlsx",
+    "spreadsheet",
+    "excel",
+    "numeric import"
+  ],
+  "summary": "Read numeric, text, and raw data from spreadsheet files.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Spreadsheet files are read on the host. Results are CPU-resident values."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::tabular::xlsread::tests",
+    "integration": [
+      "builtins::io::tabular::xlsread::tests::xlsread_reads_numeric_range_as_default_output",
+      "builtins::io::tabular::xlsread::tests::xlsread_returns_text_and_raw_outputs"
+    ]
+  },
+  "description": "`xlsread` imports spreadsheet data using MATLAB's legacy call forms. The first output is a dense double matrix; optional second and third outputs return text cells and raw cells.",
+  "behaviors": [
+    "`xlsread(filename)` reads the first worksheet. If the filename has no extension, `.xlsx` is appended.",
+    "`xlsread(filename, range)` reads an Excel A1 range such as `\"C4:C19\"` from the first worksheet.",
+    "`xlsread(filename, sheet)` selects a worksheet by name or one-based numeric index.",
+    "`xlsread(filename, sheet, range)` combines worksheet and range selection.",
+    "The legacy `'-basic'` mode flag is accepted as a no-op because RunMat always uses its host spreadsheet parser rather than Excel COM automation.",
+    "The numeric output trims leading and trailing rows/columns that contain no numeric cells, then fills nonnumeric cells inside the numeric rectangle with `NaN`.",
+    "`[num, txt, raw] = xlsread(...)` returns text cells in `txt` and mixed number/string/logical cells in `raw`.",
+    "Excel callback/process-function modes are not supported and raise a descriptive argument error."
+  ],
+  "examples": [
+    {
+      "description": "Read one spreadsheet column",
+      "input": "V = xlsread('diod.xlsx', 'C4:C19');\nplot(V)"
+    },
+    {
+      "description": "Read a named worksheet and range",
+      "input": "I = xlsread('measurements.xlsx', 'Data', 'D4:D19');"
+    },
+    {
+      "description": "Capture numeric, text, and raw outputs",
+      "input": "[num, txt, raw] = xlsread('measurements.xlsx', 'A1:C10');"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which spreadsheet formats are supported?",
+      "answer": "RunMat uses the same spreadsheet reader as `readtable`, covering common Excel/OpenDocument formats handled by the runtime parser, including `.xls`, `.xlsx`, `.xlsm`, `.xlsb`, and `.ods`."
+    },
+    {
+      "question": "Does `xlsread` use Microsoft Excel?",
+      "answer": "No. RunMat reads spreadsheets directly on the host. The `'-basic'` compatibility flag is accepted, but COM automation and Excel callback processing are not part of RunMat's runtime model."
+    },
+    {
+      "question": "What should I use for new code?",
+      "answer": "`xlsread` exists for legacy MATLAB compatibility. For new mixed-type imports, prefer `readtable`; for numeric matrices, `readmatrix` is the modern MATLAB API."
+    }
+  ],
+  "links": [
+    {
+      "label": "readmatrix",
+      "url": "./readmatrix"
+    },
+    {
+      "label": "readtable",
+      "url": "./readtable"
+    },
+    {
+      "label": "spreadsheetImportOptions",
+      "url": "./spreadsheetImportOptions"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/tabular/xlsread.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/xlsread.rs"
+  },
+  "gpu_residency": "`xlsread` always creates host values. Move the numeric output to the GPU explicitly with `gpuArray` if later computation should run on the active acceleration provider.",
+  "gpu_behavior": [
+    "`xlsread` performs file I/O and spreadsheet parsing on the CPU. It is not fusible and does not call acceleration provider hooks."
+  ]
+}

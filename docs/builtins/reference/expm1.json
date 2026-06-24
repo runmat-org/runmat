@@ -10,7 +10,6 @@
     "precision"
   ],
   "summary": "Compute exp(x)-1 element-wise with near-zero accuracy in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

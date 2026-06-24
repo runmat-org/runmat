@@ -93,6 +93,8 @@ pub struct RunMatSession {
     error_namespace: String,
     /// Active source name for diagnostics (set from execution requests).
     active_source_name: String,
+    /// Resolved active source path for file-aware builtins and source discovery.
+    active_source_fullpath_name: Option<String>,
     pub(crate) telemetry_consent: bool,
     pub(crate) telemetry_client_id: Option<String>,
     pub(crate) telemetry_platform: TelemetryPlatformInfo,

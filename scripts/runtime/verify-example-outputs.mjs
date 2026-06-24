@@ -1,0 +1,1528 @@
+#!/usr/bin/env node
+// @ts-check
+
+import { createServer } from "http";
+import { spawn } from "child_process";
+import {
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    readdirSync,
+    statSync,
+    unlinkSync,
+    writeFileSync
+} from "fs";
+import { basename, dirname, extname, join, resolve } from "path";
+import { fileURLToPath } from "url";
+
+/**
+ * @typedef {import("../metadata/BuiltinMetadataSpecification").BuiltinMetadata} BuiltinMetadata
+ * @typedef {import("../metadata/BuiltinMetadataSpecification").Example} BuiltinExample
+ */
+
+/**
+ * @typedef {object} ExampleCase
+ * @property {number} id
+ * @property {string} builtin
+ * @property {string} file
+ * @property {string} description
+ * @property {string} input
+ * @property {string} expectedOutput
+ * @property {boolean} hasExpectedOutput
+ * @property {number} exampleIndex
+ * @property {string} category
+ * @property {boolean} isPlotExample
+ */
+
+/**
+ * @typedef {object} RunnerResult
+ * @property {number} id
+ * @property {string} stdoutText
+ * @property {string} valueText
+ * @property {string} errorText
+ * @property {string} [figurePngBase64]
+ * @property {string} [figureImageError]
+ */
+
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const repoRoot = findRepoRoot(scriptDir);
+const builtinsDir = join(repoRoot, "docs", "builtins", "reference");
+const outputDir = join(repoRoot, "scripts", "example-output-reports");
+const imageOutputDir = join(outputDir, "plot-example-images");
+const reportPath = join(outputDir, "example-output-report.html");
+const markdownReportPath = join(outputDir, "example-output-report.md");
+const chromeWrapper = join(repoRoot, "scripts", "runtime", "chrome-headless.sh");
+const wasmModule = join(repoRoot, "bindings", "ts", "dist", "pkg-web", "runmat_wasm_web.js");
+const wasmBinary = join(repoRoot, "bindings", "ts", "dist", "pkg-web", "runmat_wasm_web_bg.wasm");
+
+if (!existsSync(wasmModule) || !existsSync(wasmBinary)) {
+    console.error("Missing wasm artifacts. Build bindings/ts dist before running this script.");
+    console.error(`Expected: ${wasmModule}`);
+    console.error(`Expected: ${wasmBinary}`);
+    process.exit(1);
+}
+
+const cases = collectCases(builtinsDir);
+if (cases.length === 0) {
+    console.log("No examples found to run.");
+    process.exit(0);
+}
+
+const timeoutMs = resolveTimeoutMs();
+const concurrency = resolveConcurrency();
+const overallTimeoutMs = resolveOverallTimeoutMs(timeoutMs, concurrency, cases.length);
+const logIntervalMs = resolveLogIntervalMs();
+const reportMode = resolveReportMode();
+const runnerHtml = createRunnerHtml(timeoutMs, concurrency, logIntervalMs);
+const casesJson = JSON.stringify(cases);
+
+const results = await runHeadlessChrome({
+    repoRoot,
+    chromeWrapper,
+    runnerHtml,
+    casesJson,
+    overallTimeoutMs
+});
+
+const resultsById = new Map(results.map((result) => [result.id, result]));
+
+mkdirSync(outputDir, { recursive: true });
+mkdirSync(imageOutputDir, { recursive: true });
+
+const rows = cases.map((testCase) => {
+    const result = resultsById.get(testCase.id);
+    const wasmOutput = formatWasmOutput(result);
+    const normalizedExpected = normalizeOutput(testCase.expectedOutput);
+    const normalizedWasm = normalizeOutput(wasmOutput);
+    const imageRelPath = writePlotImageArtifact(imageOutputDir, testCase, result);
+    const captureError = result && typeof result.figureImageError === "string" ? result.figureImageError : "";
+    const executionError = result && typeof result.errorText === "string" ? result.errorText : "";
+    const imageError = captureError || (executionError ? "image capture skipped because example execution returned an error" : "");
+    const hasExecutionError = Boolean(result && typeof result.errorText === "string" && result.errorText.trim().length > 0);
+    return {
+        testCase,
+        normalizedExpected,
+        normalizedWasm,
+        imageRelPath,
+        imageError,
+        matches: testCase.hasExpectedOutput ? normalizedExpected === normalizedWasm : !hasExecutionError
+    };
+});
+
+const plotImageErrors = rows
+    .filter((row) => row.testCase.isPlotExample && !row.imageRelPath)
+    .map((row) => {
+        const why = row.imageError && row.imageError.trim().length > 0 ? row.imageError.trim() : "(no error message)";
+        return `#${row.testCase.id} ${row.testCase.file} example ${row.testCase.exampleIndex + 1}\n${why}`;
+    });
+if (plotImageErrors.length > 0) {
+    writeFileSync(join(outputDir, "plot-image-capture-errors.txt"), `${plotImageErrors.join("\n\n")}\n`, "utf8");
+} else {
+    const captureErrorsPath = join(outputDir, "plot-image-capture-errors.txt");
+    if (existsSync(captureErrorsPath)) {
+        unlinkSync(captureErrorsPath);
+    }
+}
+
+const reportRows = filterReportRows(rows, reportMode);
+const reportHtml = buildReportHtml(rows, reportRows, reportMode);
+writeFileSync(reportPath, reportHtml, "utf8");
+
+const reportMarkdown = buildReportMarkdown(rows, reportRows, reportMode);
+writeFileSync(markdownReportPath, reportMarkdown, "utf8");
+
+console.log(`Wrote consolidated reports to:
+  HTML: ${reportPath}
+  Markdown: ${markdownReportPath}`);
+
+function findRepoRoot(startDir) {
+    let current = startDir;
+    while (true) {
+      if (existsSync(join(current, "rust-toolchain.toml"))) {
+            return current;
+        }
+        const parent = dirname(current);
+        if (parent === current) {
+            return startDir;
+        }
+        current = parent;
+    }
+}
+
+/**
+ * @param {string} dir
+ * @returns {ExampleCase[]}
+ */
+function collectCases(dir) {
+    const entries = readdirSync(dir, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+        .map((entry) => entry.name)
+        .sort((a, b) => a.localeCompare(b));
+    /** @type {ExampleCase[]} */
+    const cases = [];
+    let id = 1;
+
+    for (const file of entries) {
+        const filePath = join(dir, file);
+        const raw = readFileSync(filePath, "utf8");
+        /** @type {BuiltinMetadata} */
+        const parsed = JSON.parse(raw);
+        const category = typeof parsed.category === "string" ? parsed.category : "";
+        if (category.startsWith("io/net")) {
+            continue;
+        }
+        const examples = Array.isArray(parsed.examples) ? parsed.examples : [];
+        for (let i = 0; i < examples.length; i += 1) {
+            const example = examples[i];
+            if (!example || typeof example.input !== "string" || example.input.trim().length === 0) {
+                continue;
+            }
+            const isPlotExample = is_plot_example(category);
+            const hasExpectedOutput = typeof example.output === "string";
+            if (!hasExpectedOutput && !isPlotExample) {
+                continue;
+            }
+            if (hasExpectedOutput && is_comment_only_output(example.output)) {
+                continue;
+            }
+            const description = typeof example.description === "string" && example.description.trim().length > 0
+                ? example.description.trim()
+                : `${parsed.title ?? basename(file, ".json")} example ${i + 1}`;
+            cases.push({
+                id: id++,
+                builtin: parsed.title ?? basename(file, ".json"),
+                file,
+                description,
+                input: example.input,
+                expectedOutput: hasExpectedOutput ? example.output : "",
+                hasExpectedOutput,
+                exampleIndex: i,
+                category,
+                isPlotExample
+            });
+        }
+    }
+
+    const filtered = applyCaseFilter(cases);
+    return applyCaseLimit(filtered);
+}
+
+/**
+ * @param {ExampleCase[]} cases
+ */
+function applyCaseFilter(cases) {
+    const raw = process.env.RUNMAT_EXAMPLE_FILTER;
+    if (!raw || raw.trim().length === 0) {
+        return cases;
+    }
+    const needle = raw.toLowerCase();
+    return cases.filter((testCase) => {
+        const hay = `${testCase.builtin}\n${testCase.file}\n${testCase.description}\n${testCase.input}\n${testCase.category}`.toLowerCase();
+        return hay.includes(needle);
+    });
+}
+
+/**
+ * @param {ExampleCase[]} cases
+ */
+function applyCaseLimit(cases) {
+    const raw = process.env.RUNMAT_EXAMPLE_LIMIT;
+    if (!raw) {
+        return cases;
+    }
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n) || n <= 0) {
+        return cases;
+    }
+    return cases.slice(0, n);
+}
+
+/**
+ * @param {string} category
+ */
+function is_plot_example(category) {
+    return category === "plotting" || category.startsWith("plotting/");
+}
+
+/**
+ * Treat examples with only comment lines as documentation-only.
+ * @param {string} output
+ */
+function is_comment_only_output(output) {
+    const lines = output.split(/\r?\n/);
+    let saw_comment = false;
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            continue;
+        }
+        if (trimmed.startsWith("%")) {
+            saw_comment = true;
+            continue;
+        }
+        return false;
+    }
+    return saw_comment;
+}
+
+function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
+    const workerSource = [
+        "self.onmessage = async (event) => {",
+        "  const testCase = event.data;",
+        "  const wasmModuleUrl = testCase.wasmModuleUrl;",
+        "  const createInMemoryFsProvider = () => {",
+        "    const entries = new Map();",
+        "    const now = () => Date.now();",
+        "    const toUint8Array = (value) => {",
+        "      if (value instanceof Uint8Array) return value;",
+        "      if (value instanceof ArrayBuffer) return new Uint8Array(value);",
+        "      if (ArrayBuffer.isView(value)) {",
+        "        return new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));",
+        "      }",
+        "      return new Uint8Array();",
+        "    };",
+        "    const normalize = (input) => {",
+        "      let path = String(input || \"\");",
+        "      path = path.replace(/\\\\/g, \"/\");",
+        "      const parts = [];",
+        "      for (const part of path.split(\"/\")) {",
+        "        if (!part || part === \".\") continue;",
+        "        if (part === \"..\") { parts.pop(); continue; }",
+        "        parts.push(part);",
+        "      }",
+        "      return \"/\" + parts.join(\"/\");",
+        "    };",
+        "    const notFound = (path) => {",
+        "      const err = new Error(`NotFound: ${path}`);",
+        "      err.code = \"NotFound\";",
+        "      err.name = \"NotFoundError\";",
+        "      return err;",
+        "    };",
+        "    const makeDirEntry = () => ({ kind: \"dir\", children: new Set(), readonly: false, modified: now() });",
+        "    entries.set(\"/\", makeDirEntry());",
+        "    const getEntry = (path) => entries.get(path);",
+        "    const getDir = (path) => {",
+        "      const entry = getEntry(path);",
+        "      if (!entry || entry.kind !== \"dir\") throw notFound(path);",
+        "      return entry;",
+        "    };",
+        "    const getParentDir = (path) => getDir(normalize(path).split(\"/\").slice(0, -1).join(\"/\") || \"/\");",
+        "    const createDirAll = (path) => {",
+        "      const normalized = normalize(path);",
+        "      if (normalized === \"/\") return;",
+        "      const parts = normalized.split(\"/\").filter(Boolean);",
+        "      let current = \"\";",
+        "      for (const part of parts) {",
+        "        current = `${current}/${part}`;",
+        "        if (!entries.has(current)) {",
+        "          const parent = getDir(normalize(current).split(\"/\").slice(0, -1).join(\"/\") || \"/\");",
+        "          parent.children.add(part);",
+        "          entries.set(current, makeDirEntry());",
+        "        }",
+        "      }",
+        "    };",
+        "    const createDir = (path) => {",
+        "      const normalized = normalize(path);",
+        "      if (entries.has(normalized)) {",
+        "        const existing = entries.get(normalized);",
+        "        if (!existing || existing.kind !== \"dir\") throw new Error(`File exists at ${normalized}`);",
+        "        return;",
+        "      }",
+        "      const parent = getParentDir(normalized);",
+        "      parent.children.add(normalized.split(\"/\").pop());",
+        "      entries.set(normalized, makeDirEntry());",
+        "    };",
+        "    const writeFile = (path, data) => {",
+        "      const normalized = normalize(path);",
+        "      const parent = getParentDir(normalized);",
+        "      const name = normalized.split(\"/\").pop();",
+        "      parent.children.add(name);",
+        "      entries.set(normalized, { kind: \"file\", data: toUint8Array(data), readonly: false, modified: now() });",
+        "    };",
+        "    const readFile = (path) => {",
+        "      const normalized = normalize(path);",
+        "      const entry = getEntry(normalized);",
+        "      if (!entry || entry.kind !== \"file\") throw notFound(normalized);",
+        "      return entry.data.slice();",
+        "    };",
+        "    const removeFile = (path) => {",
+        "      const normalized = normalize(path);",
+        "      const entry = getEntry(normalized);",
+        "      if (!entry || entry.kind !== \"file\") throw notFound(normalized);",
+        "      entries.delete(normalized);",
+        "      const parent = getParentDir(normalized);",
+        "      parent.children.delete(normalized.split(\"/\").pop());",
+        "    };",
+        "    const metadata = (path) => {",
+        "      const normalized = normalize(path);",
+        "      const entry = getEntry(normalized);",
+        "      if (!entry) throw notFound(normalized);",
+        "      return {",
+        "        fileType: entry.kind === \"dir\" ? \"directory\" : \"file\",",
+        "        len: entry.kind === \"file\" ? entry.data.length : 0,",
+        "        modified: entry.modified,",
+        "        readonly: entry.readonly",
+        "      };",
+        "    };",
+        "    const readDir = (path) => {",
+        "      const normalized = normalize(path);",
+        "      const entry = getDir(normalized);",
+        "      return Array.from(entry.children).sort().map((name) => {",
+        "        const childPath = normalized === \"/\" ? `/${name}` : `${normalized}/${name}`;",
+        "        const child = entries.get(childPath);",
+        "        return {",
+        "          path: childPath,",
+        "          fileName: name,",
+        "          fileType: child && child.kind === \"dir\" ? \"directory\" : \"file\"",
+        "        };",
+        "      });",
+        "    };",
+        "    const removeDir = (path) => {",
+        "      const normalized = normalize(path);",
+        "      if (normalized === \"/\") throw new Error(\"Cannot remove root\");",
+        "      const entry = getDir(normalized);",
+        "      if (entry.children.size > 0) throw new Error(\"Directory not empty\");",
+        "      entries.delete(normalized);",
+        "      const parent = getParentDir(normalized);",
+        "      parent.children.delete(normalized.split(\"/\").pop());",
+        "    };",
+        "    const removeDirAll = (path) => {",
+        "      const normalized = normalize(path);",
+        "      if (normalized === \"/\") throw new Error(\"Cannot remove root\");",
+        "      for (const key of Array.from(entries.keys())) {",
+        "        if (key === normalized || key.startsWith(`${normalized}/`)) {",
+        "          entries.delete(key);",
+        "        }",
+        "      }",
+        "      const parent = getParentDir(normalized);",
+        "      parent.children.delete(normalized.split(\"/\").pop());",
+        "    };",
+        "    const rename = (from, to) => {",
+        "      const src = normalize(from);",
+        "      const dst = normalize(to);",
+        "      const entry = getEntry(src);",
+        "      if (!entry) throw notFound(src);",
+        "      entries.delete(src);",
+        "      entries.set(dst, entry);",
+        "      const srcParent = getParentDir(src);",
+        "      srcParent.children.delete(src.split(\"/\").pop());",
+        "      const dstParent = getParentDir(dst);",
+        "      dstParent.children.add(dst.split(\"/\").pop());",
+        "    };",
+        "    const setReadonly = (path, readonly) => {",
+        "      const normalized = normalize(path);",
+        "      const entry = getEntry(normalized);",
+        "      if (!entry) throw notFound(normalized);",
+        "      entry.readonly = Boolean(readonly);",
+        "    };",
+        "    return {",
+        "      readFile,",
+        "      writeFile,",
+        "      removeFile,",
+        "      metadata,",
+        "      symlinkMetadata: metadata,",
+        "      readDir,",
+        "      canonicalize: normalize,",
+        "      createDir,",
+        "      createDirAll,",
+        "      removeDir,",
+        "      removeDirAll,",
+        "      rename,",
+        "      setReadonly",
+        "    };",
+        "  };",
+        "  let stdoutText = \"\";",
+        "  let valueText = \"\";",
+        "  let errorText = \"\";",
+        "  let figurePngBase64 = \"\";",
+        "  let figureImageError = \"\";",
+        "  let plotSurfaceId = null;",
+        "  const normalizeErrorText = (errorValue) => {",
+        "    if (typeof errorValue === \"string\") return errorValue;",
+        "    if (!errorValue || typeof errorValue !== \"object\") return String(errorValue || \"\");",
+        "    if (typeof errorValue.message === \"string\" && errorValue.message.length > 0) {",
+        "      return errorValue.message;",
+        "    }",
+        "    try {",
+        "      return JSON.stringify(errorValue);",
+        "    } catch (err) {",
+        "      return String(errorValue);",
+        "    }",
+        "  };",
+        "  const patchWebGpuRequestDevice = () => {",
+        "    if (typeof navigator !== \"object\" || !navigator || !navigator.gpu) return;",
+        "    const ctor = typeof GPUAdapter === \"function\" ? GPUAdapter : null;",
+        "    const proto = ctor && ctor.prototype ? ctor.prototype : null;",
+        "    if (!proto) return;",
+        "    const current = proto.requestDevice;",
+        "    if (typeof current !== \"function\" || current.__runmatPatched) return;",
+        "    const wrapped = function(descriptor) {",
+        "      if (!descriptor || typeof descriptor !== \"object\") {",
+        "        return current.call(this, descriptor);",
+        "      }",
+        "      const safeDescriptor = { ...descriptor };",
+        "      if (safeDescriptor.requiredLimits && typeof safeDescriptor.requiredLimits === \"object\") {",
+        "        const limits = { ...safeDescriptor.requiredLimits };",
+        "        delete limits.maxInterStageShaderComponents;",
+        "        safeDescriptor.requiredLimits = limits;",
+        "      }",
+        "      return current.call(this, safeDescriptor);",
+        "    };",
+        "    wrapped.__runmatPatched = true;",
+        "    proto.requestDevice = wrapped;",
+        "  };",
+        "  try {",
+        "    patchWebGpuRequestDevice();",
+        "    if (typeof self.process !== \"object\" || !self.process) {",
+        "      self.process = { env: {} };",
+        "    }",
+        "    if (!self.process.env) {",
+        "      self.process.env = {};",
+        "    }",
+        "    if (!self.process.env.HOME) {",
+        "      self.process.env.HOME = \"/\";",
+        "    }",
+        "    const module = await import(wasmModuleUrl);",
+        "    if (typeof module.default === \"function\") {",
+        "      await module.default();",
+        "    }",
+        "    let fsProvider = null;",
+        "    fsProvider = createInMemoryFsProvider();",
+        "    if (fsProvider) {",
+        "      const encoder = new TextEncoder();",
+        "      const input = String(testCase.input || \"\");",
+        "      const cwdBase = \"/\";",
+        "      // Root directory exists by default",
+        "      fsProvider.createDirAll(cwdBase);",
+        "      fsProvider.createDirAll(\"/tmp\");",
+        "      fsProvider.writeFile(`${cwdBase}/README.md`, encoder.encode(\"RunMat\"));",
+        "      if (input.includes(\"*.m\")) {",
+        "        fsProvider.writeFile(`${cwdBase}/solver.m`, encoder.encode(\"% solver\"));",
+        "        fsProvider.writeFile(`${cwdBase}/test_helper.m`, encoder.encode(\"% helper\"));",
+        "      }",
+        "      if (input.includes(\"assets\") || input.includes(\".png\")) {",
+        "        fsProvider.createDirAll(`${cwdBase}/assets`);",
+        "        fsProvider.writeFile(`${cwdBase}/assets/logo.png`, new Uint8Array([0]));",
+        "        fsProvider.writeFile(`${cwdBase}/assets/splash.png`, new Uint8Array([0]));",
+        "      }",
+        "      if (input.includes(\"tmp\") || input.includes(\"tempname\") || input.includes(\"tempdir\")) {",
+        "        fsProvider.createDirAll(`${cwdBase}/tmp/subdir`);",
+        "        fsProvider.writeFile(`${cwdBase}/tmp/tmpfile.txt`, encoder.encode(\"tmp\"));",
+        "      }",
+        "      if (input.includes(\"fileread\") || input.includes(\"filewrite\") || input.includes(\"fwrite\")) {",
+        "        fsProvider.createDirAll(`${cwdBase}/data`);",
+        "        fsProvider.createDirAll(`${cwdBase}/fixtures`);",
+        "        fsProvider.writeFile(`${cwdBase}/LICENSE.md`, encoder.encode(\"Character vector containing the full license text\"));",
+        "        fsProvider.writeFile(`${cwdBase}/data/config.json`, encoder.encode(\"Returns the JSON file contents as a character vector\"));",
+        "        fsProvider.writeFile(`${cwdBase}/fixtures/high_ascii.txt`, new Uint8Array([65, 66, 67]));",
+        "        fsProvider.writeFile(`${cwdBase}/README.md`, encoder.encode(\"RunMat docs\"));",
+        "        fsProvider.writeFile(`${cwdBase}/data/report.txt`, encoder.encode(\"Character vector decoded using UTF-8.\"));",
+        "      }",
+        "    }",
+        "    if (fsProvider && typeof module.registerFsProvider === \"function\") {",
+        "      module.registerFsProvider(fsProvider);",
+        "    }",
+        "    const session = await module.initRunMat({",
+        "      telemetryConsent: false,",
+        "      enableGpu: true,",
+        "      languageCompat: \"matlab\",",
+        "      fsProvider: fsProvider || undefined",
+        "    });",
+        "    try {",
+        "      if (typeof OffscreenCanvas !== \"undefined\" && typeof module.createPlotSurface === \"function\") {",
+        "        const bootstrapCanvas = new OffscreenCanvas(16, 16);",
+        "        plotSurfaceId = await Promise.resolve(module.createPlotSurface(bootstrapCanvas));",
+        "        if (typeof module.resizePlotSurface === \"function\" && typeof plotSurfaceId === \"number\") {",
+        "          await Promise.resolve(module.resizePlotSurface(plotSurfaceId, 16, 16, 1));",
+        "        }",
+        "      }",
+        "    } catch (_surfaceErr) {",
+        "      plotSurfaceId = null;",
+        "    }",
+        "    try {",
+        "      try {",
+        "        await Promise.resolve(session.execute(\"cd('/')\"));",
+        "      } catch (err) {}",
+        "      const execResult = await Promise.resolve(session.execute(testCase.input));",
+        "      if (execResult && Array.isArray(execResult.stdout)) {",
+        "        stdoutText = execResult.stdout.map((entry) => entry.text || \"\").join(\"\\n\");",
+        "      }",
+        "      if (execResult && typeof execResult.valueText === \"string\") {",
+        "        valueText = execResult.valueText;",
+        "      }",
+        "      if (execResult && execResult.error != null) {",
+        "        errorText = normalizeErrorText(execResult.error);",
+        "      }",
+        "      if (testCase.isPlotExample === true) {",
+        "        try {",
+        "          if (typeof module.renderFigureImage === \"function\") {",
+        "            const handle = typeof module.currentFigureHandle === \"function\" ? await Promise.resolve(module.currentFigureHandle()) : undefined;",
+        "            const numericHandle = typeof handle === \"number\" && Number.isFinite(handle) ? handle : undefined;",
+        "            if (typeof plotSurfaceId === \"number\" && Number.isFinite(plotSurfaceId) && typeof numericHandle === \"number\" && typeof module.presentFigureOnSurface === \"function\") {",
+        "              try { await Promise.resolve(module.presentFigureOnSurface(plotSurfaceId, numericHandle)); } catch (_presentErr) {}",
+        "            }",
+        "            const pngBytes = await Promise.resolve(module.renderFigureImage(numericHandle, 1280, 720));",
+        "            const bytes = pngBytes instanceof Uint8Array ? pngBytes : new Uint8Array(pngBytes || []);",
+        "            if (bytes.length > 0) {",
+        "              let binary = \"\";",
+        "              const chunkSize = 0x8000;",
+        "              for (let offset = 0; offset < bytes.length; offset += chunkSize) {",
+        "                const chunk = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length));",
+        "                binary += String.fromCharCode(...chunk);",
+        "              }",
+        "              figurePngBase64 = btoa(binary);",
+        "            } else {",
+        "              figureImageError = \"renderFigureImage returned no bytes\";",
+        "            }",
+        "          }",
+        "        } catch (err) {",
+        "          let extra = \"\";",
+        "          try { extra = JSON.stringify(err); } catch (_e) {}",
+        "          figureImageError = normalizeErrorText(err) + (extra ? ` :: ${extra}` : \"\");",
+        "        }",
+        "      }",
+        "    } finally {",
+        "      try {",
+        "        if (typeof plotSurfaceId === \"number\" && Number.isFinite(plotSurfaceId) && typeof module.destroyPlotSurface === \"function\") {",
+        "          module.destroyPlotSurface(plotSurfaceId);",
+        "        }",
+        "      } catch (_destroyErr) {}",
+        "      if (typeof session.dispose === \"function\") {",
+        "        session.dispose();",
+        "      }",
+        "    }",
+        "  } catch (err) {",
+        "    errorText = err instanceof Error ? err.message : String(err);",
+        "  }",
+        "  self.postMessage({ id: testCase.id, stdoutText, valueText, errorText, figurePngBase64, figureImageError });",
+        "};"
+    ].join("\n");
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>RunMat Builtins Output Runner</title>
+  </head>
+  <body>
+    <main id="status">Loading...</main>
+    <script type="module">
+      const statusEl = document.getElementById("status");
+
+      const sendLog = async (payload) => {
+        const body = JSON.stringify(payload);
+        // Always try fetch first if it's a critical log, or use beacon for background logs.
+        const isCritical = payload.type === "worker-snapshot" && payload.reason === "timeout";
+        
+        if (!isCritical && navigator && typeof navigator.sendBeacon === "function") {
+          try {
+            if (navigator.sendBeacon("/__runner__/log", body)) return;
+          } catch (err) {}
+        }
+
+        try {
+          await fetch("/__runner__/log", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body,
+            keepalive: true
+          });
+        } catch (err) {}
+      };
+
+      const TIMEOUT_MS = ${timeoutMs};
+      const CONCURRENCY = Math.max(1, ${concurrency});
+      const LOG_INTERVAL_MS = ${logIntervalMs};
+      const nowMs = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+      const wasmModuleUrl = new URL("/bindings/ts/dist/pkg-web/runmat_wasm_web.js", location.href).href;
+
+      sendLog({
+        type: "runner-script-start",
+        href: location.href,
+        ua: navigator && navigator.userAgent ? navigator.userAgent : "unknown"
+      });
+
+      window.addEventListener("error", (event) => {
+        logWorkerSnapshot("error");
+        sendLog({
+          type: "runner-error",
+          message: event && event.message ? event.message : "unknown error"
+        });
+      });
+
+      window.addEventListener("unhandledrejection", (event) => {
+        logWorkerSnapshot("error");
+        const reason = event && event.reason ? event.reason : "unknown rejection";
+        sendLog({
+          type: "runner-unhandled-rejection",
+          message: reason && reason.message ? reason.message : String(reason)
+        });
+      });
+
+      async function run() {
+        sendLog({ type: "runner-fetch-cases-start" });
+        let cases = [];
+        try {
+          const response = await fetch("/__runner__/cases.json");
+          if (!response.ok) {
+            throw new Error("cases.json status " + response.status);
+          }
+          cases = await response.json();
+        } catch (err) {
+          sendLog({
+            type: "runner-fetch-cases-error",
+            message: err && err.message ? err.message : String(err)
+          });
+          throw err;
+        }
+        statusEl.textContent = "Loaded " + cases.length + " cases. Starting workers...";
+        sendLog({
+          type: "runner-start",
+          cases: cases.length,
+          timeoutMs: TIMEOUT_MS,
+          concurrency: CONCURRENCY
+        });
+
+        const workerSource = ${JSON.stringify(workerSource)};
+        const workerUrl = URL.createObjectURL(new Blob([workerSource], { type: "text/javascript" }));
+
+        const results = [];
+        const pending = cases.slice();
+        let completed = 0;
+        const startTime = nowMs();
+        let activeWorkers = 0;
+        let startedWorkers = 0;
+        const activeWorkerRecords = new Map();
+        const shouldRetry = (errorText) => {
+          if (typeof errorText !== "string" || errorText.trim().length === 0) {
+            return false;
+          }
+          const lowered = errorText.toLowerCase();
+          return lowered.includes("unreachable") ||
+            lowered.includes("memory access out of bounds") ||
+            lowered.includes("timeout") ||
+            lowered.includes("worker error");
+        };
+
+        const logWorkerSnapshot = (reason) => {
+          const entries = Array.from(activeWorkerRecords.entries())
+            .map(([id, record]) => ({
+              id,
+              caseId: record.caseId,
+              elapsedMs: Math.round(nowMs() - record.startedAt)
+            }))
+            .sort((a, b) => b.elapsedMs - a.elapsedMs);
+
+          const payload = {
+            type: "worker-snapshot",
+            reason,
+            active: entries.length,
+            workers: entries,
+            timestamp: nowMs(),
+            completed,
+            total: cases.length
+          };
+          
+          sendLog(payload);
+        };
+
+        // Aggressive 2s heartbeat for snapshots
+        setInterval(() => {
+          logWorkerSnapshot("heartbeat");
+        }, 2000);
+
+        const watchdogIntervalMs = 500;
+        setInterval(() => {
+          const now = nowMs();
+          let anyTimedOut = false;
+          for (const record of activeWorkerRecords.values()) {
+            if (now - record.startedAt > TIMEOUT_MS) {
+              anyTimedOut = true;
+              record.forceTimeout();
+            }
+          }
+          if (anyTimedOut) {
+            logWorkerSnapshot("timeout");
+          }
+        }, watchdogIntervalMs);
+
+        const runCase = (testCase) => new Promise((resolve) => {
+          let worker = null;
+          let settled = false;
+          let localWorkerId = 0;
+          const startedAt = nowMs();
+
+          const finalize = (result) => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+
+            if (localWorkerId > 0) {
+              activeWorkerRecords.delete(localWorkerId);
+              activeWorkers -= 1;
+              sendLog({
+                type: "worker-finish",
+                workerId: localWorkerId,
+                caseId: testCase.id,
+                active: activeWorkers,
+                elapsedMs: Math.round(nowMs() - startTime)
+              });
+            }
+
+            if (worker) {
+              try {
+                worker.terminate();
+              } catch (err) {}
+              worker = null;
+            }
+
+            resolve(result);
+          };
+
+          const forceTimeout = () => {
+            finalize({
+              id: testCase.id,
+              stdoutText: "",
+              valueText: "",
+              errorText: "Timeout after " + TIMEOUT_MS + "ms"
+            });
+          };
+
+          try {
+            localWorkerId = ++startedWorkers;
+            worker = new Worker(workerUrl, { type: "module" });
+            activeWorkers += 1;
+            activeWorkerRecords.set(localWorkerId, {
+              worker,
+              caseId: testCase.id,
+              startedAt,
+              forceTimeout
+            });
+          } catch (err) {
+            finalize({
+              id: testCase.id,
+              stdoutText: "",
+              valueText: "",
+              errorText: "Worker init error: " + (err && err.message ? err.message : String(err))
+            });
+            return;
+          }
+
+          sendLog({
+            type: "worker-start",
+            workerId: localWorkerId,
+            caseId: testCase.id,
+            active: activeWorkers,
+            description: testCase.description
+          });
+
+          worker.onmessage = (event) => {
+            finalize(event.data);
+          };
+
+          worker.onerror = (event) => {
+            finalize({
+              id: testCase.id,
+              stdoutText: "",
+              valueText: "",
+              errorText: "Worker error: " + (event && event.message ? event.message : "unknown")
+            });
+          };
+
+          worker.onmessageerror = () => {
+            finalize({
+              id: testCase.id,
+              stdoutText: "",
+              valueText: "",
+              errorText: "Worker message error"
+            });
+          };
+
+          try {
+            worker.postMessage({ ...testCase, wasmModuleUrl });
+          } catch (err) {
+            finalize({
+              id: testCase.id,
+              stdoutText: "",
+              valueText: "",
+              errorText: "Worker postMessage error: " + (err && err.message ? err.message : String(err))
+            });
+          }
+        });
+
+        const workerLoop = async () => {
+          while (pending.length > 0) {
+            const testCase = pending.shift();
+            if (!testCase) {
+              return;
+            }
+            statusEl.textContent = "Running " + (completed + 1) + " / " + cases.length + ": " + testCase.description;
+            let result = await runCase(testCase);
+            if (shouldRetry(result.errorText)) {
+              result = await runCase(testCase);
+            }
+            results.push(result);
+            completed += 1;
+          }
+        };
+
+        const postResults = async (payload) => {
+          await fetch("/__runner__/results", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+        };
+
+        try {
+          const workers = [];
+          const workerCount = Math.min(CONCURRENCY, cases.length);
+          for (let i = 0; i < workerCount; i += 1) {
+            workers.push(workerLoop());
+            // More aggressive stagger to prevent blocking the main thread
+            await new Promise((r) => setTimeout(r, 50));
+          }
+          await Promise.all(workers);
+          statusEl.textContent = "Posting results...";
+          await postResults({ results });
+          statusEl.textContent = "Done.";
+        } catch (err) {
+          statusEl.textContent = "Runner failed: " + (err && err.message ? err.message : String(err));
+          try {
+            await postResults({ results, error: err && err.message ? err.message : String(err) });
+          } catch (postErr) {
+            // Ignore post failures; the server timeout will surface the issue.
+          }
+        }
+      }
+
+      run();
+    </script>
+  </body>
+</html>`;
+}
+
+function resolveTimeoutMs() {
+    const raw = process.env.RUNMAT_EXAMPLE_TIMEOUT_MS;
+    if (!raw) {
+        return 15000;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return 15000;
+    }
+    return Math.floor(parsed);
+}
+
+function resolveConcurrency() {
+    const raw = process.env.RUNMAT_EXAMPLE_CONCURRENCY;
+    if (!raw) {
+        return 4;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return 4;
+    }
+    return Math.floor(parsed);
+}
+
+function resolveOverallTimeoutMs(perCaseMs, concurrency, totalCases) {
+    const raw = process.env.RUNMAT_EXAMPLE_TOTAL_TIMEOUT_MS;
+    if (raw) {
+        const parsed = Number(raw);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            return Math.floor(parsed);
+        }
+    }
+    const safeConcurrency = Math.max(1, concurrency);
+    const batches = Math.ceil(totalCases / safeConcurrency);
+    const estimated = batches * perCaseMs + 120000; // Increased buffer
+    return Math.max(1200000, estimated);
+}
+
+function resolveLogIntervalMs() {
+    const raw = process.env.RUNMAT_EXAMPLE_LOG_INTERVAL_MS;
+    if (!raw) {
+        return 2000;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+        return 2000;
+    }
+    return Math.floor(parsed);
+}
+
+function resolveReportMode() {
+    const args = new Set(process.argv.slice(2));
+    if (args.has("--errors-only")) {
+        return "errors-only";
+    }
+    if (args.has("--all")) {
+        return "all";
+    }
+    const raw = process.env.RUNMAT_EXAMPLE_REPORT_MODE;
+    if (!raw) {
+        return "all";
+    }
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "errors-only" || normalized === "errors" || normalized === "mismatches") {
+        return "errors-only";
+    }
+    return "all";
+}
+
+/**
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} rows
+ * @param {"all" | "errors-only"} reportMode
+ */
+function filterReportRows(rows, reportMode) {
+    if (reportMode === "errors-only") {
+        return rows.filter((row) => !row.matches);
+    }
+    return rows;
+}
+
+/**
+ * @param {string} text
+ */
+function normalizeOutput(text) {
+    if (typeof text !== "string") {
+        return "";
+    }
+    const lines = text.replace(/\r\n/g, "\n").split("\n");
+    const stripped = lines.map((line) =>
+        line.replace(/^\s*Columns?\s+\d+\s+through\s+\d+\s*$/i, "")
+            .replace(/^\s*Column\s+\d+\s*$/i, "")
+            .replace(/^\s*\d+(?:\s*[x×]\s*\d+)+\s+\w+(?:\s+\w+)*(?:\s+array)?\s*$/i, "")
+            .replace(/^\s*\d+(?:\s*[x×]\s*\d+)+\s*$/i, "")
+            .replace(/^\s*(?:[A-Za-z_]\w*)?\(\s*:\s*,\s*:\s*(?:,\s*\d+\s*)+\)\s*=\s*$/i, "")
+            .replace(/^\s*[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/, "")
+    );
+    const joined = stripped.join(" ");
+    const separatedAssignments = joined.replace(/(\d)([A-Za-z_]\w*\s*=\s*)/g, "$1 $2");
+    const withoutAssignments = separatedAssignments.replace(
+        /\b[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/g,
+        ""
+    );
+    const withoutInlineDims = withoutAssignments.replace(
+        /(^|\s)\d+\s*[x×]\s*\d+(?:\s*[x×]\s*\d+)*\s+(?=(?:[-+]?(?:\d|\.\d)|NaN|Inf|-Inf))/gi,
+        "$1"
+    );
+    const withoutHeaders = withoutInlineDims.replace(
+        /\b\d+\s*[x×]\s*\d+(?:\s*[x×]\s*\d+)*\s+(?:gpuArray\s*)?(?:sparse\s+)?(?:complex\s+)?(?:logical\s+)?(?:logical|double|single|char|string|cell|struct|table|categorical|datetime|duration)(?:\s+array)?\b/gi,
+        " "
+    );
+    const withoutBrackets = withoutHeaders.replace(/[\[\]{};,]/g, " ");
+    const withoutQuotes = withoutBrackets.replace(/["']/g, " ");
+    const normalizedBooleans = withoutQuotes
+        .replace(/\btrue\b/gi, "1")
+        .replace(/\bfalse\b/gi, "0")
+        .replace(/\blogical\((0|1)\)\b/gi, "$1");
+    const normalizedConstants = normalizedBooleans
+        .replace(/\bpi\b/gi, String(Math.PI));
+    const strippedMetadata = normalizedConstants
+        .replace(/(?:GpuTensor|Tensor|ComplexTensor)\(\s*(?:shape\s*=\s*)?[^)]*\)/g, " ")
+        .replace(/\b\d+(?:\s*[x×]\s*\d+)+\s*(?:gpuArray\s*)?(?:logical|double|single|char|string|cell)?\s*array\b/gi, " ")
+        .replace(/\b(?:gpuArray|logical|double|single|string|char|cell|Tensor|ComplexTensor|GpuTensor)\b/gi, " ");
+    const normalizedComplex = strippedMetadata
+        .replace(/(\d+\.\d+)(\d+\.\d+[ij])/g, "$1+$2")
+        .replace(/(\d)\s*([+-])\s*(?=(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?[ij]\b)/g, "$1$2")
+        .replace(/\+\s*-/g, "-")
+        .replace(/-\s*\+/g, "-")
+        .replace(/\+\s*\+/g, "+");
+    const normalizedNumbers = normalizedComplex.replace(
+        /[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g,
+        (match) => {
+            if (!/[.eE]/.test(match)) {
+                return match;
+            }
+            const value = Number(match);
+            if (!Number.isFinite(value)) {
+                return match;
+            }
+            let formatted = value.toFixed(4);
+            formatted = formatted.replace(/\.?0+$/, "");
+            if (formatted === "-0") {
+                formatted = "0";
+            }
+            // Preserve leading + sign for positive numbers (important for complex imaginary parts)
+            if (match.startsWith('+') && !formatted.startsWith('-')) {
+                formatted = '+' + formatted;
+            }
+            return formatted;
+        }
+    );
+    const withoutZeroPlus = normalizedNumbers.replace(/\b0\s*\+\s*/g, "");
+    const withoutZeroMinus = withoutZeroPlus.replace(/\b0-(?=\d+(?:\.\d+)?[ij]\b)/g, "-");
+    const withoutImaginaryZero = withoutZeroMinus
+        .replace(/\s*[+-]\s*0[ij]\b/g, "")
+        .replace(/\b0[ij]\b/g, "0");
+    const compact = withoutImaginaryZero.trim().replace(/\s+/g, " ");
+    const fixedZeroConcat = compact
+        .replace(/(?<![0-9.])0(?=\d+(?:\.\d+)?[ij]\b)/g, "")
+        .replace(/(?<![0-9.])0(?=0[ij]\b)/g, "")
+        .replace(/(\d+\.\d+)0[ij]\b/g, "$1")
+        .replace(/\b0[ij]\b/g, "0")
+        .replace(/\s+/g, " ")
+        .trim();
+    return fixedZeroConcat;
+}
+
+/**
+ * @param {RunnerResult | undefined} result
+ */
+function formatWasmOutput(result) {
+    if (!result) {
+        return "";
+    }
+    if (result.errorText) {
+        return result.errorText;
+    }
+    if (result.stdoutText && result.valueText) {
+        const normalizedStdout = normalizeOutput(result.stdoutText);
+        const normalizedValue = normalizeOutput(result.valueText);
+        if (!normalizedValue) {
+            return result.stdoutText;
+        }
+        if (normalizedStdout && normalizedStdout === normalizedValue) {
+            return result.valueText;
+        }
+        if (normalizedStdout) {
+            const suffixIndex = normalizedStdout.lastIndexOf(normalizedValue);
+            const isSuffix = suffixIndex >= 0
+                && suffixIndex + normalizedValue.length === normalizedStdout.length
+                && (suffixIndex === 0 || normalizedStdout[suffixIndex - 1] === " ");
+            if (isSuffix) {
+                return result.stdoutText;
+            }
+        }
+        return `${result.stdoutText}\n${result.valueText}`;
+    }
+    return result.stdoutText || result.valueText || "";
+}
+
+/**
+ * @param {ExampleCase} testCase
+ */
+/**
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, imageRelPath: string, imageError: string, matches: boolean }[]} rows
+ */
+function buildReportHtml(allRows, reportRows, reportMode) {
+    const title = "RunMat Builtins Example Output Report";
+    const totalCount = allRows.length;
+    const errorCount = allRows.filter((row) => !row.matches).length;
+    const successCount = totalCount - errorCount;
+    const successPercent = totalCount === 0 ? "0.0" : ((successCount / totalCount) * 100).toFixed(1);
+    const renderedRows = reportRows.map((row) => {
+        const statusClass = row.matches ? "status-ok" : "status-bad";
+        const statusSymbol = row.matches ? "&#10003;" : "X";
+        const statusLabel = row.matches ? "Match" : "Mismatch";
+        const description = escapeHtml(row.testCase.description);
+        const sourceInfo = escapeHtml(
+            `${row.testCase.file} (example ${row.testCase.exampleIndex + 1})`
+        );
+        const input = escapeHtml(row.testCase.input ?? "");
+        const expected = escapeHtml(row.testCase.hasExpectedOutput ? row.normalizedExpected : "(execution-only: no expected output)");
+        const actual = escapeHtml(row.normalizedWasm);
+        const imageCell = row.testCase.isPlotExample
+            ? row.imageRelPath
+                ? `<a href="${escapeHtml(row.imageRelPath)}" target="_blank" rel="noopener"><img src="${escapeHtml(row.imageRelPath)}" alt="${escapeHtml(row.testCase.builtin)} plot image" class="plot-preview" /></a>`
+                : `<div class="meta">No image captured</div>${row.imageError ? `<pre>${escapeHtml(row.imageError)}</pre>` : ""}`
+            : `<div class="meta">N/A</div>`;
+        return `<tr>
+      <td>
+        <div class="status ${statusClass}" title="${statusLabel}">${statusSymbol}</div>
+        <div class="meta">${description}</div>
+        <div class="meta">${sourceInfo}</div>
+        <pre>${input}</pre>
+      </td>
+      <td><pre>${expected}</pre></td>
+      <td><pre>${actual}</pre></td>
+      <td>${imageCell}</td>
+    </tr>`;
+    }).join("");
+
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(title)}</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      body {
+        margin: 24px;
+        font-family: "Helvetica Neue", Arial, sans-serif;
+        color: #111;
+      }
+      .meta {
+        color: #555;
+        font-size: 13px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        table-layout: fixed;
+      }
+      th, td {
+        border: 1px solid #ddd;
+        padding: 12px;
+        vertical-align: top;
+      }
+      th {
+        text-align: left;
+        background: #f6f7f9;
+        font-weight: 600;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      td {
+        background: #fff;
+      }
+      .status {
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+      .status-ok {
+        color: #0a7c3a;
+      }
+      .status-bad {
+        color: #b42318;
+      }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+        font-size: 13px;
+      }
+      .plot-preview {
+        width: 100%;
+        max-width: 360px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        background: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>${escapeHtml(title)}</h1>
+    <p class="meta">Results: ${successCount}/${totalCount} succeeded (${successPercent}%).</p>
+    <p class="meta">${
+        reportMode === "errors-only"
+            ? `Showing ${reportRows.length} mismatch(es) out of ${totalCount} example(s).`
+            : `Showing all ${reportRows.length} example(s).`
+    }</p>
+    ${
+        reportRows.length === 0
+            ? "<p class=\"meta\">No mismatches detected.</p>"
+            : `<table>
+      <thead>
+        <tr>
+          <th>Input</th>
+          <th>Normalized JSON Output</th>
+          <th>Normalized WASM Output</th>
+          <th>Plot Image</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${renderedRows}
+      </tbody>
+    </table>`
+    }
+  </body>
+</html>`;
+}
+
+/**
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, imageRelPath: string, imageError: string, matches: boolean }[]} allRows
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, imageRelPath: string, imageError: string, matches: boolean }[]} reportRows
+ * @param {"all" | "errors-only"} reportMode
+ */
+function buildReportMarkdown(allRows, reportRows, reportMode) {
+    const totalCount = allRows.length;
+    const errorCount = allRows.filter((row) => !row.matches).length;
+    const successCount = totalCount - errorCount;
+    const successPercent = totalCount === 0 ? "0.0" : ((successCount / totalCount) * 100).toFixed(1);
+    const summary = reportMode === "errors-only"
+        ? `Showing ${reportRows.length} mismatch(es) out of ${totalCount} example(s).`
+        : `Showing all ${reportRows.length} example(s).`;
+    const tableHeader = "| Status | Description / Input | Expected | Actual | Plot Image |\n| :--- | :--- | :--- | :--- | :--- |\n";
+    const tableRows = reportRows.map((row) => {
+        const status = row.matches ? "✅" : "❌";
+        const description = row.testCase.description;
+        const sourceInfo = `${row.testCase.file} (example ${row.testCase.exampleIndex + 1})`;
+        // Escape pipe characters in markdown cells and use <br> for newlines in table cells
+        const input = (row.testCase.input ?? "").replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+        const expectedRaw = row.testCase.hasExpectedOutput ? row.normalizedExpected : "(execution-only: no expected output)";
+        const expected = expectedRaw.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+        const actual = row.normalizedWasm.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+        const imageCell = row.testCase.isPlotExample
+            ? row.imageRelPath
+                ? `[image](${row.imageRelPath.replace(/\|/g, "\\|")})`
+                : row.imageError
+                    ? `(no image captured: ${row.imageError.replace(/\|/g, "\\|")})`
+                    : "(no image captured)"
+            : "N/A";
+
+        return `| ${status} | **${description}**<br>${sourceInfo}<br>\`${input}\` | \`${expected}\` | \`${actual}\` | ${imageCell} |`;
+    }).join("\n");
+
+    const header = `Results: ${successCount}/${totalCount} succeeded (${successPercent}%).\n${summary}\n\n`;
+    if (!tableRows) {
+        return `${header}No mismatches detected.\n`;
+    }
+    return header + tableHeader + tableRows;
+}
+
+/**
+ * @param {string} value
+ */
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+/**
+ * @param {string} outDir
+ * @param {ExampleCase} testCase
+ * @param {RunnerResult | undefined} result
+ */
+function writePlotImageArtifact(outDir, testCase, result) {
+    if (!testCase.isPlotExample || !result || typeof result.figurePngBase64 !== "string" || result.figurePngBase64.length === 0) {
+        return "";
+    }
+    try {
+        const stem = `${String(testCase.id).padStart(4, "0")}-${sanitizeFileStem(testCase.builtin)}-ex${testCase.exampleIndex + 1}`;
+        const fileName = `${stem}.png`;
+        const absPath = join(outDir, fileName);
+        writeFileSync(absPath, Buffer.from(result.figurePngBase64, "base64"));
+        return join("plot-example-images", fileName).replace(/\\/g, "/");
+    } catch (_err) {
+        return "";
+    }
+}
+
+/**
+ * @param {string} value
+ */
+function sanitizeFileStem(value) {
+    return String(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 60) || "plot";
+}
+
+/**
+ * @param {{ repoRoot: string, chromeWrapper: string, runnerHtml: string, casesJson: string, overallTimeoutMs?: number }} options
+ * @returns {Promise<RunnerResult[]>}
+ */
+async function runHeadlessChrome(options) {
+    if (!existsSync(options.chromeWrapper) || !statSync(options.chromeWrapper).isFile()) {
+        throw new Error(`Chrome wrapper not found: ${options.chromeWrapper}`);
+    }
+
+    let resolveResults;
+    let rejectResults;
+    /** @type {Promise<RunnerResult[]>} */
+    const resultsPromise = new Promise((resolve, reject) => {
+        resolveResults = resolve;
+        rejectResults = reject;
+    });
+
+    let lastSnapshotLogTime = 0;
+    const server = createServer((req, res) => {
+        if (!req.url) {
+            res.statusCode = 400;
+            res.end("Missing URL");
+            return;
+        }
+        const urlPath = req.url.split("?")[0];
+        if (urlPath === "/__runner__/runner.html") {
+            console.log("[runner] request runner.html");
+            res.statusCode = 200;
+            res.setHeader("content-type", "text/html; charset=utf-8");
+            res.end(options.runnerHtml);
+            return;
+        }
+        if (urlPath === "/__runner__/cases.json") {
+            console.log("[runner] request cases.json");
+            res.statusCode = 200;
+            res.setHeader("content-type", "application/json");
+            res.end(options.casesJson);
+            return;
+        }
+        if (urlPath === "/__runner__/log" && req.method === "POST") {
+            let body = "";
+            req.setEncoding("utf8");
+            req.on("data", (chunk) => {
+                body += chunk;
+            });
+            req.on("end", () => {
+                try {
+                    const payload = JSON.parse(body);
+                    if (payload && payload.type === "worker-snapshot") {
+                        const isTimeout = payload.reason === "timeout";
+                        const now = Date.now();
+
+                        // Log every 2s as requested, or immediately on timeout
+                        if (isTimeout || now - lastSnapshotLogTime >= 2000) {
+                            lastSnapshotLogTime = now;
+                            const workerList = (payload.workers || [])
+                                .map((w) => `[W${w.id}: case ${w.caseId}, ${Math.round(w.elapsedMs / 1000)}s]`)
+                                .join(" ");
+
+                            const label = isTimeout ? "WATCHDOG KILL" : "SUPERVISOR REPORT";
+                            console.log(
+                                `[runner] ${label} - progress: ${payload.completed}/${payload.total} active: ${payload.active} ${
+                                    workerList ? "\n         stalled: " + workerList : ""
+                                }`
+                            );
+                        }
+                    } else if (payload && payload.type === "runner-start") {
+                        console.log(`[runner] started: ${payload.cases} cases, concurrency=${payload.concurrency}`);
+                    } else if (payload && payload.type === "worker-start") {
+                        // Log every start during ramp-up
+                        console.log(`[runner] W${payload.workerId} start: case ${payload.caseId} (${payload.description})`);
+                    } else if (payload && payload.type === "worker-finish") {
+                        if (payload.caseId % 50 === 0) {
+                            console.log(`[runner] progress: ${payload.caseId}/${cases.length}...`);
+                        }
+                    } else if (payload && payload.type === "worker-start") {
+                        // Suppress start logs to reduce noise unless critical
+                    } else if (payload && payload.type === "runner-fetch-cases-error") {
+                        console.error(`[runner] error fetching cases: ${payload.message}`);
+                    } else if (payload && payload.type === "runner-error") {
+                        console.error(`[runner] error: ${payload.message}`);
+                    } else if (payload && payload.type === "runner-unhandled-rejection") {
+                        console.error(`[runner] unhandled rejection: ${payload.message}`);
+                    }
+                    res.statusCode = 200;
+                    res.end("ok");
+                } catch (err) {
+                    res.statusCode = 400;
+                    res.end("invalid log payload");
+                }
+            });
+            return;
+        }
+        if (urlPath === "/__runner__/results" && req.method === "POST") {
+            console.log("[runner] receiving results...");
+            let body = "";
+            req.setEncoding("utf8");
+            req.on("data", (chunk) => {
+                body += chunk;
+            });
+            req.on("end", () => {
+                try {
+                    const payload = JSON.parse(body);
+                    if (!payload || !Array.isArray(payload.results)) {
+                        throw new Error("Malformed results payload");
+                    }
+                    console.log(`[runner] received ${payload.results.length} results.`);
+                    resolveResults(payload.results);
+                    res.statusCode = 200;
+                    res.end("ok");
+                } catch (err) {
+                    console.error(`[runner] failed to parse results: ${err.message}`);
+                    res.statusCode = 400;
+                    res.end("invalid results");
+                    rejectResults(err);
+                }
+            });
+            return;
+        }
+
+        serveStaticFile(options.repoRoot, urlPath, res);
+    });
+
+    const port = await new Promise((resolvePort, rejectPort) => {
+        server.listen(0, "127.0.0.1", () => {
+            const address = server.address();
+            if (!address || typeof address === "string") {
+                rejectPort(new Error("Unable to bind server"));
+                return;
+            }
+            resolvePort(address.port);
+        });
+    });
+
+    const url = `http://127.0.0.1:${port}/__runner__/runner.html`;
+    const chrome = spawn(options.chromeWrapper, [url], {
+        cwd: options.repoRoot,
+        stdio: "ignore"
+    });
+
+    const timeoutMs = options.overallTimeoutMs ?? 600000;
+    const timeout = setTimeout(() => {
+        rejectResults(new Error(`Timed out after ${timeoutMs}ms waiting for results`));
+    }, timeoutMs);
+
+    let results;
+    try {
+        results = await resultsPromise;
+    } finally {
+        clearTimeout(timeout);
+        chrome.kill("SIGTERM");
+        server.close();
+    }
+
+    return results;
+}
+
+/**
+ * @param {string} root
+ * @param {string} urlPath
+ * @param {import("http").ServerResponse} res
+ */
+function serveStaticFile(root, urlPath, res) {
+    const safePath = resolve(root, `.${urlPath}`);
+    if (!safePath.startsWith(root)) {
+        res.statusCode = 403;
+        res.end("Forbidden");
+        return;
+    }
+    if (!existsSync(safePath) || !statSync(safePath).isFile()) {
+        res.statusCode = 404;
+        res.end("Not found");
+        return;
+    }
+    const extension = extname(safePath);
+    const contentType = contentTypeForExtension(extension);
+    if (contentType) {
+        res.setHeader("content-type", contentType);
+    }
+    const data = readFileSync(safePath);
+    res.statusCode = 200;
+    res.end(data);
+}
+
+/**
+ * @param {string} extension
+ */
+function contentTypeForExtension(extension) {
+    switch (extension) {
+        case ".html":
+            return "text/html; charset=utf-8";
+        case ".js":
+            return "text/javascript";
+        case ".json":
+            return "application/json";
+        case ".wasm":
+            return "application/wasm";
+        case ".css":
+            return "text/css";
+        case ".map":
+            return "application/json";
+        default:
+            return "application/octet-stream";
+    }
+}

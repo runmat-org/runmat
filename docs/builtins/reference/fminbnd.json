@@ -10,7 +10,6 @@
     "optimization"
   ],
   "summary": "Find bounded scalar minima with Brent's method in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -71,6 +70,10 @@
     }
   ],
   "links": [
+    {
+      "label": "fminunc",
+      "url": "./fminunc"
+    },
     {
       "label": "fzero",
       "url": "./fzero"

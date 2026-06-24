@@ -16,7 +16,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+pub mod analysis;
 pub mod dispatcher;
+pub mod geometry;
+pub mod operations;
 
 pub mod callsite;
 pub mod console;

@@ -9,7 +9,6 @@
     "gpu"
   ],
   "summary": "Compute inverses of square matrices in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

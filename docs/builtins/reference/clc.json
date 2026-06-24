@@ -9,7 +9,6 @@
     "screen"
   ],
   "summary": "Clear the visible command window or console display in MATLAB and RunMat hosts.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

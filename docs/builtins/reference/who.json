@@ -9,7 +9,6 @@
     "mat-file"
   ],
   "summary": "List variable names in workspaces or MAT-files using MATLAB-compatible filtering forms.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -10,7 +10,6 @@
     "padding"
   ],
   "summary": "Apply linear image filters in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

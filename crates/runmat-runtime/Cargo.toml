@@ -1,6 +1,6 @@
 [package]
 name = "runmat-runtime"
-version = "0.5.0"
+version = "0.5.3"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
@@ -23,9 +23,16 @@ runmat-accelerate-api = { workspace = true, features = ["wgpu"] }
 runmat-gc = { workspace = true }
 runmat-gc-api = { workspace = true }
 runmat-filesystem = { workspace = true }
+runmat-geometry-core = { workspace = true }
+runmat-geometry-io = { workspace = true }
+runmat-geometry-ops = { workspace = true }
+runmat-analysis-core = { workspace = true }
+runmat-analysis-fea = { workspace = true }
+runmat-meshing-core = { workspace = true }
 runmat-time = { workspace = true }
 runmat-thread-local = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+serde_yaml = "0.9"
 glam = "0.24"
 once_cell = "1.19"
 encoding_rs = "0.8.35"
@@ -34,11 +41,13 @@ libc = "0.2"
 log = { workspace = true }
 tracing = "0.1"
 num-complex = "0.4"
+num-bigint = "0.4"
 num-traits = "0.2"
 nalgebra = "0.32"
 rustfft = "6.2"
 futures = "0.3"
 async-recursion = "1.1"
+flate2 = "1.1"
 
 # BLAS/LAPACK bindings for high-performance linear algebra (optional)
 blas = { version = "0.22", optional = true }
@@ -50,6 +59,7 @@ base64 = "0.22"
 sha2 = "0.10"
 image = { version = "0.24", default-features = false, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp", "ico"] }
 calamine = { version = "0.35.0", features = ["chrono"] }
+zip = { version = "7.2.0", default-features = false, features = ["deflate"] }
 
 # Platform-specific BLAS/LAPACK implementations
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -107,6 +117,11 @@ wgpu = []
 # Internal helper to make stdin/key prompts behave interactively during tests.
 interaction-test-hooks = []
 
+# Optional CAD topology import through OpenCascade. The native feature links OCCT
+# through runmat-geometry-io; the wasm feature expects a host-provided sidecar.
+occt-native = ["runmat-geometry-io/occt-native"]
+occt-wasm-host = ["runmat-geometry-io/occt-wasm-host"]
+
 [dev-dependencies]
 async-trait = "0.1"
 runmat-macros = { workspace = true } 
@@ -117,7 +132,6 @@ serde = { version = "1.0", features = ["derive"] }
 pollster = "0.3"
 wgpu = "0.19"
 wasm-bindgen-test = "0.3"
-zip = { version = "7.2.0", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 axum = "0.7"

@@ -9,7 +9,6 @@
     "MATLAB isnan"
   ],
   "summary": "Test NaN values element-wise in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

@@ -2,7 +2,7 @@ use anyhow::Result;
 use runmat_config::runtime::RunMatRuntimeConfig;
 
 use crate::cli::{Cli, Commands};
-use crate::commands::{accel, benchmark, config, gc, repl, script, snapshot, version};
+use crate::commands::{accel, benchmark, check, config, gc, repl, script, snapshot, version};
 use crate::remote;
 
 pub async fn dispatch(cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
@@ -43,10 +43,18 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             repl_config.runtime.verbose = verbose || config.runtime.verbose;
             repl::execute_repl(&repl_config).await
         }
-        Commands::Run { file, args } => {
-            script::execute_script_with_args(file, args, cli.emit_bytecode.clone(), cli, config)
-                .await
+        Commands::Run { file, json, args } => {
+            script::execute_script_with_args(
+                file,
+                args,
+                cli.emit_bytecode.clone(),
+                cli,
+                config,
+                json,
+            )
+            .await
         }
+        Commands::Check { file, json } => check::execute_check(file, cli, config, json).await,
         Commands::Version { detailed } => {
             version::show_version(detailed);
             Ok(())

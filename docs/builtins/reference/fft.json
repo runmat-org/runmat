@@ -9,9 +9,6 @@
     "gpu"
   ],
   "summary": "Compute discrete Fourier transforms in MATLAB and RunMat.",
-  "references": [
-    "title: \"MATLAB fft documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

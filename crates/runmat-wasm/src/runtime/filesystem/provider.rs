@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use runmat_filesystem::{
     DirEntry, FileHandle, FsMetadata, FsProvider, OpenFileDialogRequest, OpenFileDialogSelection,
-    OpenFlags, ReadManyEntry,
+    OpenFlags, ReadManyEntry, SaveFileDialogRequest, SaveFileDialogSelection,
 };
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -110,6 +110,13 @@ impl FsProvider for JsFsProvider {
         request: &OpenFileDialogRequest,
     ) -> io::Result<Option<OpenFileDialogSelection>> {
         self.funcs.select_file_open_async(request).await
+    }
+
+    async fn select_file_save(
+        &self,
+        request: &SaveFileDialogRequest,
+    ) -> io::Result<Option<SaveFileDialogSelection>> {
+        self.funcs.select_file_save_async(request).await
     }
 }
 

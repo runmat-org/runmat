@@ -10,7 +10,6 @@
     "header"
   ],
   "summary": "Read numeric data from CSV files in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

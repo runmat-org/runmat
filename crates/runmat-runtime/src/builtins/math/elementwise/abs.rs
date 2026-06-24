@@ -30,7 +30,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers may execute abs in-place; the runtime gathers to host when unary_abs is unavailable or when complex magnitudes are required.",
+    notes: "Providers may execute abs on-device for real tensors and produce real magnitudes from complex-interleaved GPU tensors; the runtime gathers only when unary_abs is unavailable or host-only conversions are required.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::abs")]
@@ -183,6 +183,15 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+
+    #[cfg(feature = "wgpu")]
+    fn register_wgpu_provider_available() -> bool {
+        runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_ok()
+            && runmat_accelerate_api::provider().is_some()
+    }
     use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
 
     fn abs_builtin(value: Value) -> BuiltinResult<Value> {
@@ -327,11 +336,33 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn abs_complex_gpu_provider_stays_resident() {
+        test_support::with_test_provider(|provider| {
+            let complex = ComplexTensor::new(vec![(3.0, 4.0), (1.0, -1.0)], vec![2, 1]).unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+            let result = abs_builtin(Value::GpuTensor(handle)).expect("abs");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&out),
+                runmat_accelerate_api::GpuTensorStorage::Real
+            );
+            let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
+            assert_eq!(gathered.shape, vec![2, 1]);
+            assert!((gathered.data[0] - 5.0).abs() < 1e-12);
+            assert!((gathered.data[1] - (2f64).sqrt()).abs() < 1e-12);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     #[cfg(feature = "wgpu")]
     fn abs_wgpu_matches_cpu_elementwise() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
         let tensor = Tensor::new(vec![-3.0, -1.0, 0.5, -0.25], vec![4, 1]).unwrap();
         let cpu = abs_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
@@ -357,5 +388,53 @@ pub(crate) mod tests {
             }
             _ => panic!("unexpected result shape"),
         }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn abs_wgpu_complex_matches_cpu() {
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let complex = ComplexTensor::new(vec![(3.0, 4.0), (1.0, -1.0)], vec![2, 1]).unwrap();
+        let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+        let gpu = block_on(abs_gpu(handle)).unwrap();
+        let Value::GpuTensor(out) = gpu else {
+            panic!("expected gpu tensor");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&out),
+            runmat_accelerate_api::GpuTensorStorage::Real
+        );
+        let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
+        assert!((gathered.data[0] - 5.0).abs() < tol);
+        assert!((gathered.data[1] - (2f64).sqrt()).abs() < tol);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn abs_wgpu_complex_preserves_infinity_with_nan_lane() {
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let complex = ComplexTensor::new(
+            vec![(f64::INFINITY, f64::NAN), (f64::NAN, f64::NEG_INFINITY)],
+            vec![2, 1],
+        )
+        .unwrap();
+        let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+        let gpu = block_on(abs_gpu(handle)).unwrap();
+        let gathered = test_support::gather(gpu).expect("gather");
+        assert_eq!(gathered.shape, vec![2, 1]);
+        assert!(gathered.data[0].is_infinite() && gathered.data[0].is_sign_positive());
+        assert!(gathered.data[1].is_infinite() && gathered.data[1].is_sign_positive());
     }
 }

@@ -1,6 +1,5 @@
 //! MATLAB-compatible `fsolve` builtin for nonlinear systems.
 
-use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -15,6 +14,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::math::optim::common::{
     call_function, initial_guess, option_f64, option_string, option_usize, value_to_real_vector,
     vector_to_value,
+};
+use crate::builtins::math::optim::least_squares::{
+    solve_least_squares, LeastSquaresBounds, LeastSquaresEvaluator, LeastSquaresOptions,
+    ResidualFuture,
 };
 use crate::builtins::math::optim::type_resolvers::nonlinear_solve_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -242,170 +245,79 @@ impl FsolveOptions {
 
 async fn solve(
     function: &Value,
-    mut x: Vec<f64>,
+    x: Vec<f64>,
     shape: &[usize],
     scalar: bool,
     options: &FsolveOptions,
 ) -> BuiltinResult<Vec<f64>> {
-    let n = x.len();
-    if n == 0 {
-        return Err(fsolve_error_with_detail(
-            &FSOLVE_ERROR_INVALID_INPUT,
-            "initial guess cannot be empty",
-        ));
-    }
-
-    let mut residual = eval_residual(function, &x, shape, scalar).await?;
-    let mut evals = 1usize;
-    let mut lambda = 1.0e-3;
-
-    if residual_norm_inf(&residual) <= options.tol_fun {
-        return Ok(x);
-    }
-
-    for _ in 0..options.max_iter {
-        if evals >= options.max_fun_evals {
-            return Err(fsolve_error_with_detail(
-                &FSOLVE_ERROR_INVALID_INPUT,
-                "exceeded maximum function evaluations",
-            ));
-        }
-        let jacobian =
-            finite_difference_jacobian(function, &x, shape, scalar, &residual, &mut evals, options)
-                .await?;
-        let j = DMatrix::from_row_slice(residual.len(), n, &jacobian);
-        let f = DVector::from_column_slice(&residual);
-        let gradient = j.transpose() * &f;
-        let mut accepted = false;
-
-        for _ in 0..8 {
-            let normal = j.transpose() * &j + DMatrix::<f64>::identity(n, n) * lambda;
-            let rhs = -&gradient;
-            let Some(delta) = normal.lu().solve(&rhs) else {
-                lambda *= 10.0;
-                continue;
-            };
-            let trial = x
-                .iter()
-                .zip(delta.iter())
-                .map(|(xi, di)| xi + di)
-                .collect::<Vec<_>>();
-            let trial_residual = eval_residual(function, &trial, shape, scalar).await?;
-            evals += 1;
-
-            if norm2(&trial_residual) < norm2(&residual) {
-                let step_norm = delta
-                    .iter()
-                    .fold(0.0_f64, |acc, value| acc.max(value.abs()));
-                let x_norm = x.iter().fold(0.0_f64, |acc, value| acc.max(value.abs()));
-                x = trial;
-                residual = trial_residual;
-                lambda = (lambda * 0.3).max(1.0e-12);
-                accepted = true;
-                if residual_norm_inf(&residual) <= options.tol_fun
-                    || step_norm <= options.tol_x * (1.0 + x_norm)
-                {
-                    return Ok(x);
-                }
-                break;
-            }
-
-            lambda *= 10.0;
-            if evals >= options.max_fun_evals {
-                return Err(fsolve_error_with_detail(
-                    &FSOLVE_ERROR_INVALID_INPUT,
-                    "exceeded maximum function evaluations",
-                ));
-            }
-        }
-
-        if !accepted {
-            return Err(fsolve_error_with_detail(
-                &FSOLVE_ERROR_INVALID_INPUT,
-                "iteration stalled before convergence",
-            ));
-        }
-    }
-
-    Err(fsolve_error_with_detail(
-        &FSOLVE_ERROR_INVALID_INPUT,
-        "exceeded maximum iterations",
-    ))
-}
-
-async fn eval_residual(
-    function: &Value,
-    x: &[f64],
-    shape: &[usize],
-    scalar: bool,
-) -> BuiltinResult<Vec<f64>> {
-    let arg = if scalar {
-        Value::Num(x[0])
-    } else {
-        Value::Tensor(
-            runmat_builtins::Tensor::new(x.to_vec(), shape.to_vec())
-                .map_err(|e| fsolve_error_with_detail(&FSOLVE_ERROR_INVALID_INPUT, e))?,
-        )
+    let mut evaluator = FsolveEvaluator {
+        function,
+        shape: shape.to_vec(),
+        scalar,
     };
-    let value = call_function(function, vec![arg]).await?;
-    let residual = value_to_real_vector(NAME, value).await?;
-    if residual.is_empty() {
+    let variable_len = x.len();
+    let result = solve_least_squares(
+        NAME,
+        &mut evaluator,
+        x,
+        &LeastSquaresBounds::unbounded(variable_len),
+        &LeastSquaresOptions {
+            tol_x: options.tol_x,
+            tol_fun: options.tol_fun,
+            max_iter: options.max_iter,
+            max_fun_evals: options.max_fun_evals,
+            final_jacobian: false,
+        },
+    )
+    .await?;
+    if result.exitflag > 0
+        && result
+            .residual
+            .iter()
+            .fold(0.0_f64, |acc, value| acc.max(value.abs()))
+            <= options.tol_fun
+    {
+        Ok(result.x)
+    } else {
         Err(fsolve_error_with_detail(
             &FSOLVE_ERROR_INVALID_INPUT,
-            "function value must not be empty",
+            format!(
+                "{} Final residual norm is above function tolerance.",
+                result.message
+            ),
         ))
-    } else {
-        Ok(residual)
     }
 }
 
-async fn finite_difference_jacobian(
-    function: &Value,
-    x: &[f64],
-    shape: &[usize],
+struct FsolveEvaluator<'a> {
+    function: &'a Value,
+    shape: Vec<usize>,
     scalar: bool,
-    residual: &[f64],
-    evals: &mut usize,
-    options: &FsolveOptions,
-) -> BuiltinResult<Vec<f64>> {
-    let m = residual.len();
-    let n = x.len();
-    let mut jacobian = vec![0.0; m * n];
+}
 
-    for col in 0..n {
-        if *evals >= options.max_fun_evals {
-            return Err(fsolve_error_with_detail(
-                &FSOLVE_ERROR_INVALID_INPUT,
-                "exceeded maximum function evaluations",
-            ));
-        }
-        let mut perturbed = x.to_vec();
-        let step = f64::EPSILON.sqrt() * (x[col].abs() + 1.0);
-        perturbed[col] += step;
-        let next = eval_residual(function, &perturbed, shape, scalar).await?;
-        *evals += 1;
-        if next.len() != m {
-            return Err(fsolve_error_with_detail(
-                &FSOLVE_ERROR_INVALID_INPUT,
-                "function output size changed during finite differencing",
-            ));
-        }
-        for row in 0..m {
-            jacobian[row * n + col] = (next[row] - residual[row]) / step;
-        }
+impl LeastSquaresEvaluator for FsolveEvaluator<'_> {
+    fn residual<'a>(&'a mut self, x: &'a [f64]) -> ResidualFuture<'a> {
+        Box::pin(async move {
+            let arg = if self.scalar {
+                Value::Num(x[0])
+            } else {
+                Value::Tensor(
+                    runmat_builtins::Tensor::new(x.to_vec(), self.shape.clone())
+                        .map_err(|e| fsolve_error_with_detail(&FSOLVE_ERROR_INVALID_INPUT, e))?,
+                )
+            };
+            let value = call_function(self.function, vec![arg]).await?;
+            let residual = value_to_real_vector(NAME, value).await?;
+            if residual.is_empty() {
+                Err(fsolve_error_with_detail(
+                    &FSOLVE_ERROR_INVALID_INPUT,
+                    "function value must not be empty",
+                ))
+            } else {
+                Ok(residual)
+            }
+        })
     }
-
-    Ok(jacobian)
-}
-
-fn norm2(values: &[f64]) -> f64 {
-    values.iter().map(|value| value * value).sum::<f64>().sqrt()
-}
-
-fn residual_norm_inf(values: &[f64]) -> f64 {
-    values
-        .iter()
-        .fold(0.0_f64, |acc, value| acc.max(value.abs()))
 }
 
 #[cfg(test)]
@@ -427,6 +339,30 @@ mod tests {
             Value::Num(n) => assert!((n - std::f64::consts::PI).abs() < 1.0e-5),
             other => panic!("unexpected value {other:?}"),
         }
+    }
+
+    #[test]
+    fn fsolve_rejects_stationary_non_root_residual() {
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |_function, args, _requested_outputs| {
+                let x = match &args[0] {
+                    Value::Num(value) => *value,
+                    other => panic!("expected scalar numeric argument, got {other:?}"),
+                };
+                Box::pin(async move { Ok(Value::Num(x * x + 1.0)) })
+            },
+        )));
+        let err = block_on(fsolve_builtin(
+            Value::BoundFunctionHandle {
+                name: "no_real_root".to_string(),
+                function: 44,
+            },
+            Value::Num(0.0),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:fsolve:InvalidInput"));
+        assert!(err.message().contains("Final residual norm"));
     }
 
     #[test]

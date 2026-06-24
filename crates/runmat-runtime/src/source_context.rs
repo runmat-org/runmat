@@ -8,6 +8,7 @@ use std::sync::Arc;
 pub struct SourceInfo {
     pub source_id: Option<SourceId>,
     pub name: Arc<str>,
+    pub fullpath_name: Option<Arc<str>>,
     pub text: Arc<str>,
 }
 
@@ -57,6 +58,7 @@ pub fn replace_current_source_context(
     let next = source.map(|text| SourceInfo {
         source_id: None,
         name: Arc::<str>::from(name.unwrap_or_default()),
+        fullpath_name: None,
         text: Arc::<str>::from(text),
     });
     let prev = CURRENT_SOURCE.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next));
@@ -71,14 +73,26 @@ pub fn replace_current_source_id(source_id: Option<SourceId>) -> SourceContextGu
 }
 
 pub fn replace_source_catalog(entries: Vec<(SourceId, String, String)>) -> SourceCatalogGuard {
+    replace_source_catalog_with_fullpaths(
+        entries
+            .into_iter()
+            .map(|(source_id, name, text)| (source_id, name, None, text))
+            .collect(),
+    )
+}
+
+pub fn replace_source_catalog_with_fullpaths(
+    entries: Vec<(SourceId, String, Option<String>, String)>,
+) -> SourceCatalogGuard {
     let next = entries
         .into_iter()
-        .map(|(source_id, name, text)| {
+        .map(|(source_id, name, fullpath_name, text)| {
             (
                 source_id,
                 SourceInfo {
                     source_id: Some(source_id),
                     name: Arc::<str>::from(name),
+                    fullpath_name: fullpath_name.map(Arc::<str>::from),
                     text: Arc::<str>::from(text),
                 },
             )
@@ -89,12 +103,24 @@ pub fn replace_source_catalog(entries: Vec<(SourceId, String, String)>) -> Sourc
 }
 
 pub fn source_catalog_entries() -> Vec<(SourceId, String, String)> {
+    source_catalog_entries_with_fullpaths()
+        .into_iter()
+        .map(|(source_id, name, _fullpath_name, text)| (source_id, name, text))
+        .collect()
+}
+
+pub fn source_catalog_entries_with_fullpaths() -> Vec<(SourceId, String, Option<String>, String)> {
     SOURCE_CATALOG.with(|catalog| {
         catalog
             .borrow()
             .iter()
             .map(|(source_id, source)| {
-                (*source_id, source.name.to_string(), source.text.to_string())
+                (
+                    *source_id,
+                    source.name.to_string(),
+                    source.fullpath_name.as_ref().map(ToString::to_string),
+                    source.text.to_string(),
+                )
             })
             .collect()
     })

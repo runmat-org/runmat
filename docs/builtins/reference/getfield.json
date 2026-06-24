@@ -9,7 +9,6 @@
     "metadata"
   ],
   "summary": "Access struct or object fields in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

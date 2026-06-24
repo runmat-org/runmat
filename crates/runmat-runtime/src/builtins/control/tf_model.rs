@@ -14,6 +14,7 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, dispatcher, BuiltinResult, RuntimeError};
 
 pub const TF_CLASS: &str = "tf";
+pub const SS_CLASS: &str = "ss";
 pub const DEFAULT_CONTINUOUS_VARIABLE: &str = "s";
 pub const DEFAULT_DISCRETE_VARIABLE: &str = "z";
 pub const EPS: f64 = 1.0e-12;
@@ -409,6 +410,10 @@ impl TfModel {
         polynomial_roots(&self.denominator, "pole")
     }
 
+    pub fn zeros(&self) -> BuiltinResult<Vec<Complex64>> {
+        polynomial_roots(&self.numerator, "zero")
+    }
+
     pub fn dc_gain(&self) -> BuiltinResult<Complex64> {
         let point = if self.is_discrete() {
             Complex64::new(1.0, 0.0)
@@ -789,6 +794,85 @@ pub fn output_complex_column(
     }
 }
 
+pub fn ss_poles_from_object(
+    object: &ObjectInstance,
+    builtin: &'static str,
+) -> BuiltinResult<(Vec<Complex64>, f64)> {
+    let a = ss_state_matrix_property(object, "A", builtin)?;
+    let sample_time = scalar_property(object, "Ts", builtin)?;
+    validate_sample_time(sample_time, builtin)?;
+    let eigenvalues = a.eigenvalues().ok_or_else(|| {
+        control_error(
+            builtin,
+            internal_identifier(builtin),
+            format!("{builtin}: failed to compute state matrix eigenvalues"),
+        )
+    })?;
+    Ok((eigenvalues.iter().copied().collect(), sample_time))
+}
+
+fn ss_state_matrix_property(
+    object: &ObjectInstance,
+    name: &'static str,
+    builtin: &'static str,
+) -> BuiltinResult<DMatrix<Complex64>> {
+    let value = object.properties.get(name).ok_or_else(|| {
+        control_error(
+            builtin,
+            invalid_model_identifier(builtin),
+            format!("{builtin}: ss object is missing {name}"),
+        )
+    })?;
+    let tensor = match value {
+        Value::Tensor(tensor) => tensor.clone(),
+        Value::Num(n) => Tensor::new(vec![*n], vec![1, 1]).map_err(|err| {
+            control_error(
+                builtin,
+                internal_identifier(builtin),
+                format!("{builtin}: failed to build scalar matrix: {err}"),
+            )
+        })?,
+        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|err| {
+            control_error(
+                builtin,
+                internal_identifier(builtin),
+                format!("{builtin}: failed to build scalar matrix: {err}"),
+            )
+        })?,
+        other => {
+            return Err(control_error(
+                builtin,
+                unsupported_model_identifier(builtin),
+                format!("{builtin}: ss {name} must be a finite real matrix, got {other:?}"),
+            ));
+        }
+    };
+    if tensor.shape.len() > 2 || tensor.rows != tensor.cols {
+        return Err(control_error(
+            builtin,
+            invalid_model_identifier(builtin),
+            format!(
+                "{builtin}: ss {name} must be square, got {:?}",
+                tensor.shape
+            ),
+        ));
+    }
+    if tensor.data.iter().any(|value| !value.is_finite()) {
+        return Err(control_error(
+            builtin,
+            unsupported_model_identifier(builtin),
+            format!("{builtin}: ss {name} must contain only finite real values"),
+        ));
+    }
+    let mut matrix = DMatrix::<Complex64>::zeros(tensor.rows, tensor.cols);
+    for col in 0..tensor.cols {
+        for row in 0..tensor.rows {
+            matrix[(row, col)] = Complex64::new(tensor.data[row + col * tensor.rows], 0.0);
+        }
+    }
+    Ok(matrix)
+}
+
 pub fn polynomial_roots(
     coeffs: &[Complex64],
     builtin: &'static str,
@@ -1056,6 +1140,8 @@ fn invalid_argument_identifier(builtin: &str) -> &'static str {
         "stepinfo" => "RunMat:stepinfo:InvalidArgument",
         "dcgain" => "RunMat:dcgain:InvalidArgument",
         "pole" => "RunMat:pole:InvalidArgument",
+        "zero" => "RunMat:zero:InvalidArgument",
+        "damp" => "RunMat:damp:InvalidModel",
         "rlocus" => "RunMat:rlocus:InvalidArgument",
         "isstable" => "RunMat:isstable:InvalidArgument",
         _ => "RunMat:tf:InvalidArgument",
@@ -1068,6 +1154,8 @@ fn invalid_coefficients_identifier(builtin: &str) -> &'static str {
         "stepinfo" => "RunMat:stepinfo:InvalidData",
         "dcgain" => "RunMat:dcgain:InvalidModel",
         "pole" => "RunMat:pole:InvalidModel",
+        "zero" => "RunMat:zero:InvalidModel",
+        "damp" => "RunMat:damp:InvalidModel",
         "rlocus" => "RunMat:rlocus:InvalidModel",
         "isstable" => "RunMat:isstable:InvalidModel",
         _ => "RunMat:tf:InvalidCoefficients",
@@ -1080,6 +1168,8 @@ fn invalid_sample_time_identifier(builtin: &str) -> &'static str {
         "stepinfo" => "RunMat:stepinfo:InvalidArgument",
         "dcgain" => "RunMat:dcgain:InvalidModel",
         "pole" => "RunMat:pole:InvalidModel",
+        "zero" => "RunMat:zero:InvalidModel",
+        "damp" => "RunMat:damp:InvalidModel",
         "rlocus" => "RunMat:rlocus:InvalidModel",
         "isstable" => "RunMat:isstable:InvalidModel",
         _ => "RunMat:tf:InvalidSampleTime",
@@ -1092,6 +1182,8 @@ fn invalid_model_identifier(builtin: &str) -> &'static str {
         "stepinfo" => "RunMat:stepinfo:InvalidSystem",
         "dcgain" => "RunMat:dcgain:InvalidModel",
         "pole" => "RunMat:pole:InvalidModel",
+        "zero" => "RunMat:zero:InvalidModel",
+        "damp" => "RunMat:damp:InvalidModel",
         "rlocus" => "RunMat:rlocus:InvalidModel",
         "isstable" => "RunMat:isstable:InvalidModel",
         _ => "RunMat:tf:InvalidModel",
@@ -1104,6 +1196,8 @@ fn unsupported_model_identifier(builtin: &str) -> &'static str {
         "stepinfo" => "RunMat:stepinfo:UnsupportedModel",
         "dcgain" => "RunMat:dcgain:UnsupportedModel",
         "pole" => "RunMat:pole:UnsupportedModel",
+        "zero" => "RunMat:zero:UnsupportedModel",
+        "damp" => "RunMat:damp:UnsupportedModel",
         "rlocus" => "RunMat:rlocus:UnsupportedModel",
         "isstable" => "RunMat:isstable:UnsupportedModel",
         _ => "RunMat:tf:UnsupportedModel",
@@ -1116,6 +1210,8 @@ fn internal_identifier(builtin: &str) -> &'static str {
         "stepinfo" => "RunMat:stepinfo:Internal",
         "dcgain" => "RunMat:dcgain:Internal",
         "pole" => "RunMat:pole:Internal",
+        "zero" => "RunMat:zero:Internal",
+        "damp" => "RunMat:damp:Internal",
         "rlocus" => "RunMat:rlocus:Internal",
         "isstable" => "RunMat:isstable:Internal",
         _ => "RunMat:tf:Internal",

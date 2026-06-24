@@ -394,6 +394,15 @@ impl Scene {
         self.nodes.get_mut(&id)
     }
 
+    /// Visit all nodes mutably. Rendering code uses this for view-state changes
+    /// such as CAD display modes that should not rebuild the scene graph.
+    pub fn for_each_node_mut(&mut self, mut visit: impl FnMut(&mut SceneNode)) {
+        for node in self.nodes.values_mut() {
+            visit(node);
+        }
+        self.bounds_dirty = true;
+    }
+
     /// Update world transform for a node and its children
     pub fn update_transforms(&mut self, root_transform: Mat4) {
         for &root_id in &self.root_nodes.clone() {

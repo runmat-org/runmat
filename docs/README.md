@@ -2,7 +2,7 @@
 
 RunMat is a high-performance runtime for MATLAB-syntax code.
 
-This is the technical documentation for the runtime: the compiler pipeline, virtual machine, GPU and JIT tiers, session engine, plotting, and the host integration surfaces. For the MATLAB function reference and product pages, see [runmat.com](https://runmat.com).
+This is the technical documentation for the runtime: the compiler pipeline, virtual machine, GPU and JIT tiers, session engine, plotting, analysis/simulation, and the host integration surfaces. For the MATLAB function reference and product pages, see [runmat.com](https://runmat.com).
 
 ## Start Here
 
@@ -102,6 +102,20 @@ If you want to understand how the runtime works internally, start with the [Comp
 - [Execution](./execution/index.md)
 - [Async Execution](./execution/async.md)
 - [Errors & Diagnostics](./execution/errors.md)
+
+## FEA on Geometry
+
+- [FEA on Geometry](./fea/index.md)
+- [Using FEA](./fea/using-fea.md)
+- [Geometry](./fea/geometry.md)
+- [Models](./fea/models.md)
+- [Physics Families](./fea/physics.md)
+- [Solves, Studies, and Sweeps](./fea/solves.md)
+- [Evidence & Artifacts](./fea/evidence.md)
+- [Verification & Validation](./fea/validation.md)
+- [Results & Trust](./fea/trust.md)
+- [Current Status](./fea/status.md)
+- [Operation Reference](./fea/operation-reference.md)
 
 ## Filesystem
 

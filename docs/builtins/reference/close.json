@@ -9,7 +9,6 @@
     "networking"
   ],
   "summary": "Close figures or networking resources in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -10,9 +10,6 @@
     "signal processing"
   ],
   "summary": "Generate pulse trains from named pulse functions, function handles, or sampled prototype pulses.",
-  "references": [
-    "title: \"MATLAB pulstran documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

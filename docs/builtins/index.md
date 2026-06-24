@@ -66,10 +66,16 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | Status | Path | Names | GPU | Fusion | Backend | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | done | `math/fft` | `fft`, `ifft`, `fft2`, `ifft2`, `fftshift`, `ifftshift` | yes | P | FFT | Fourier transforms through host or device FFT providers. |
-| done | `math/signal` | `conv`, `conv2`, `deconv`, `filter`, `filtfilt`, `butter`, `fir1`, `freqz` | yes | S | - | Convolution, filter design/analysis, causal and zero-phase filtering; large convolution may use FFT paths. |
+| done | `math/signal` | `conv`, `conv2`, `deconv`, `filter`, `filtfilt`, `butter`, `fir1`, `freqz`, `envelope` | yes | S | FFT | Convolution, filter design/analysis, causal and zero-phase filtering, and signal envelopes; large convolution may use FFT paths. |
 | done | `image/filters` | `fspecial` | host | - | - | Filter kernel generation. |
 | done | `image/filters` | `imfilter`, `filter2` | yes | S | - | Linear image filters and padding modes. |
 | done | `image/color` | `rgb2gray`, `gray2rgb`, `ind2rgb`, `im2double`, `im2uint8`, `im2uint16`, `rgb2hsv`, `hsv2rgb`, `rgb2lab`, `lab2rgb` | host | - | - | Image color and class conversions. |
+
+## Communications
+
+| Status | Path | Names | GPU | Fusion | Backend | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| done | `comms/modulation` | `qammod`, `pskmod` | yes | - | - | Integer-symbol gpuArray inputs produce complex-interleaved GPU constellations through provider hooks; bit-symbol paths validate on host and re-upload when GPU residency is requested. |
 
 ## Polynomials and Fitting
 
@@ -146,7 +152,9 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `io/filetext` | `fileread`, `filewrite`, `fopen`, `fclose`, `fread`, `fwrite`, `feof`, `fgetl`, `fgets`, `fprintf` | host | - | - | Text and binary file I/O. |
 | done | `io/core` | `disp` | host | - | - | Display output sink. |
 | done | `io/interactive` | `input` | host | - | - | Prompted input, including text mode. |
-| done | `io/tabular` | `readtable`, `spreadsheetImportOptions`, `readmatrix`, `writematrix`, `csvread`, `csvwrite`, `dlmread`, `dlmwrite` | host | - | - | Tabular I/O; `readtable` imports delimited text and spreadsheet files as table variables with sheet/range/name/type options. |
+| done | `io/import` | `importdata`, `textscan` | host | - | - | Legacy text import with delimiter detection, formatted parsing, header text, column headers, and row labels. |
+| done | `io/audio` | `audioinfo` | host | - | - | Audio metadata inspection for WAV/RF64, FLAC, AIFF/AIFC, Ogg/Vorbis, and MP3 frame headers. |
+| done | `io/tabular` | `readtable`, `detectImportOptions`, `spreadsheetImportOptions`, `readmatrix`, `writematrix`, `writecell`, `csvread`, `csvwrite`, `dlmread`, `dlmwrite` | host | - | - | Tabular I/O; `readtable` imports delimited text and spreadsheet files as table variables with sheet/range/name/type options, and `writecell` exports heterogeneous cells to text or spreadsheets. |
 | done | `io/mat` | `save`, `load` | host | - | - | MAT-like persistence. |
 
 ## I/O - JSON, Networking, and Images

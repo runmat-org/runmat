@@ -9,9 +9,6 @@
     "tf"
   ],
   "summary": "Test stability of SISO transfer-function models.",
-  "references": [
-    "title: \"MATLAB isstable documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

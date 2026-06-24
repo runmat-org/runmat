@@ -2358,6 +2358,17 @@ fn eig_builtin_multi_assign_execute() {
 }
 
 #[test]
+fn eig_generalized_builtin_execute() {
+    let bytecode =
+        compile_source("A = [2 0; 0 9]; B = [1 0; 0 3]; d = eig(A, B); z = d(1) + d(2);").unwrap();
+    let vars = interpret(&bytecode).expect("generalized eig should execute");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+}
+
+#[test]
 fn fprintf_inline_cast_argument_does_not_stack_underflow() {
     let program = r#"
         x = single(3.14);

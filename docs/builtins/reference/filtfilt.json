@@ -10,9 +10,6 @@
     "gpu"
   ],
   "summary": "Apply zero-phase forward-backward digital filtering.",
-  "references": [
-    "title: \"MATLAB filtfilt documentation\""
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

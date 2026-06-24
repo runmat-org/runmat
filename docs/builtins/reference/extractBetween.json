@@ -10,7 +10,6 @@
     "string array"
   ],
   "summary": "Extract substrings between boundary markers in MATLAB and RunMat.",
-  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

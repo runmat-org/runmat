@@ -1,4 +1,8 @@
 use super::*;
+use runmat_accelerate_api::{
+    ProviderBitModulationRequest, ProviderEnvelopeRequest, ProviderEnvelopeResult,
+    ProviderHilbertRequest, ProviderModulationRequest,
+};
 
 impl AccelProvider for WgpuProvider {
     fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {
@@ -316,6 +320,35 @@ impl AccelProvider for WgpuProvider {
         })
     }
 
+    fn complex_from_real<'a>(
+        &'a self,
+        real: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.complex_from_real_exec(real) })
+    }
+
+    fn complex_from_real_imag<'a>(
+        &'a self,
+        real: &'a GpuTensorHandle,
+        imag: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.complex_from_real_imag_exec(real, imag) })
+    }
+
+    fn modulate_constellation<'a>(
+        &'a self,
+        request: ProviderModulationRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.modulate_constellation_exec(&request).await })
+    }
+
+    fn modulate_bits_constellation<'a>(
+        &'a self,
+        request: ProviderBitModulationRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.modulate_bits_constellation_exec(&request).await })
+    }
+
     fn elem_ge<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
@@ -421,18 +454,14 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn unary_sin<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sin, a) },
-        )
+        Box::pin(async move { self.unary_sin_exec(a) })
     }
 
     fn unary_sinc<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sinc, a) },
-        )
+        Box::pin(async move { self.unary_sinc_exec(a) })
     }
 
     fn unary_gamma<'a>(
@@ -466,18 +495,14 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sinh, a) },
-        )
+        Box::pin(async move { self.unary_sinh_exec(a) })
     }
 
     fn unary_cosh<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Cosh, a) },
-        )
+        Box::pin(async move { self.unary_cosh_exec(a) })
     }
 
     fn unary_asin<'a>(
@@ -508,9 +533,7 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn unary_tan<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Tan, a) },
-        )
+        Box::pin(async move { self.unary_tan_exec(a) })
     }
 
     fn unary_tanh<'a>(
@@ -564,15 +587,25 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn unary_cos<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Cos, a) },
-        )
+        Box::pin(async move { self.unary_cos_exec(a) })
+    }
+
+    fn unary_angle<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.unary_angle_exec(a) })
     }
 
     fn unary_abs<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Abs, a) },
-        )
+        Box::pin(async move { self.unary_abs_exec(a) })
+    }
+
+    fn unary_sign<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.unary_sign_exec(a) })
     }
 
     fn unary_heaviside<'a>(
@@ -588,9 +621,21 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Conj, a) },
-        )
+        Box::pin(async move { self.unary_conj_exec(a) })
+    }
+
+    fn unary_imag<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.unary_imag_exec(a) })
+    }
+
+    fn unary_real<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.unary_real_exec(a) })
     }
 
     fn unary_exp<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
@@ -741,6 +786,24 @@ impl AccelProvider for WgpuProvider {
         options: ProviderIirFilterOptions,
     ) -> AccelProviderFuture<'a, ProviderIirFilterResult> {
         Box::pin(async move { self.iir_filter_exec(b, a, x, options).await })
+    }
+    fn uniform_spectral_estimate<'a>(
+        &'a self,
+        request: &'a ProviderSpectralRequest<'a>,
+    ) -> AccelProviderFuture<'a, ProviderSpectralResult> {
+        Box::pin(async move { self.uniform_spectral_estimate_exec(request).await })
+    }
+    fn signal_envelope<'a>(
+        &'a self,
+        request: &'a ProviderEnvelopeRequest<'a>,
+    ) -> AccelProviderFuture<'a, ProviderEnvelopeResult> {
+        Box::pin(async move { self.signal_envelope_exec(request).await })
+    }
+    fn signal_hilbert<'a>(
+        &'a self,
+        request: &'a ProviderHilbertRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.signal_hilbert_exec(request).await })
     }
     fn conv2d(
         &self,

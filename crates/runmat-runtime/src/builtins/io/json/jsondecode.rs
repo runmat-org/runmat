@@ -196,7 +196,7 @@ fn extract_text(value: Value) -> BuiltinResult<String> {
     }
 }
 
-fn value_from_json(value: &JsonValue) -> BuiltinResult<Value> {
+pub(crate) fn value_from_json(value: &JsonValue) -> BuiltinResult<Value> {
     match value {
         JsonValue::Null => empty_double(),
         JsonValue::Bool(b) => Ok(Value::Bool(*b)),

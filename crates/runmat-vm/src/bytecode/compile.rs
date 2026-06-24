@@ -990,6 +990,19 @@ mod tests {
     };
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_csv_temp_path(prefix: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "runmat_{prefix}_{}_{}.csv",
+            std::process::id(),
+            nanos
+        ))
+    }
 
     #[test]
     fn compile_attaches_derived_layout() {
@@ -2756,6 +2769,31 @@ mod tests {
     }
 
     #[test]
+    fn compile_interprets_uiputfile_cancel_destructuring() {
+        let ast = runmat_parser::parse("[file, path] = uiputfile('*.xlsx', 'Save spreadsheet');")
+            .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let file_slot = bytecode
+            .var_names
+            .iter()
+            .find_map(|(slot, name)| (name == "file").then_some(*slot))
+            .expect("file slot");
+        let path_slot = bytecode
+            .var_names
+            .iter()
+            .find_map(|(slot, name)| (name == "path").then_some(*slot))
+            .expect("path slot");
+
+        assert_eq!(vars[file_slot], Value::Num(0.0));
+        assert_eq!(vars[path_slot], Value::Num(0.0));
+    }
+
+    #[test]
     fn compile_interprets_matrix_literal_assignment() {
         let ast = runmat_parser::parse("x = [1 2; 3 4];").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -3616,12 +3654,7 @@ mod tests {
 
     #[test]
     fn compile_interprets_readtable_weekly_groupsummary_workflow() {
-        let mut path = std::env::temp_dir();
-        path.push(format!(
-            "runmat_readtable_weekly_{}_{}.csv",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
+        let path = unique_csv_temp_path("readtable_weekly");
         std::fs::write(
             &path,
             "Date,Orders,Revenue\n2024-03-11,10,100\n2024-03-12,20,300\n2024-03-18,6,90\n",
