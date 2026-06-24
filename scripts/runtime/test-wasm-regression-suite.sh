@@ -36,22 +36,22 @@ regenerate_wasm_registry() {
 }
 
 run_symptom_closure_suite() {
-  echo "==> wasm-pack test --node --test symptom_node_regressions"
-  wasm-pack test --node --test symptom_node_regressions
+  echo "==> wasm-pack test --node --test symptom_node_regressions --features occt-wasm-host"
+  wasm-pack test --node . --features occt-wasm-host --test symptom_node_regressions
 
-  echo "==> wasm-pack test --chrome --headless --test symptom_browser_regressions"
-  wasm-pack test --chrome --headless "${WASM_PACK_CHROMEDRIVER_ARGS[@]}" --test symptom_browser_regressions
+  echo "==> wasm-pack test --chrome --headless --test symptom_browser_regressions --features occt-wasm-host"
+  wasm-pack test --chrome --headless "${WASM_PACK_CHROMEDRIVER_ARGS[@]}" . --features occt-wasm-host --test symptom_browser_regressions
 }
 
 run_replay_smoke_suite() {
-  echo "==> wasm-pack test --chrome --headless --test replay_smoke"
-  wasm-pack test --chrome --headless "${WASM_PACK_CHROMEDRIVER_ARGS[@]}" --test replay_smoke
+  echo "==> wasm-pack test --chrome --headless --test replay_smoke --features occt-wasm-host"
+  wasm-pack test --chrome --headless "${WASM_PACK_CHROMEDRIVER_ARGS[@]}" . --features occt-wasm-host --test replay_smoke
 }
 
 run_runtime_suite() {
-  echo "==> wasm-pack test runmat-runtime --no-default-features --features plot-web"
+  echo "==> wasm-pack test runmat-runtime --no-default-features --features plot-web,occt-wasm-host"
   pushd "${REPO_ROOT}/crates/runmat-runtime" >/dev/null
-  wasm-pack test --chrome --headless "${WASM_PACK_CHROMEDRIVER_ARGS[@]}" -- --no-default-features --features plot-web
+  wasm-pack test --chrome --headless "${WASM_PACK_CHROMEDRIVER_ARGS[@]}" . --no-default-features --features plot-web,occt-wasm-host
   popd >/dev/null
 }
 

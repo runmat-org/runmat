@@ -144,7 +144,7 @@ jobs:
         run: scripts/regenerate-wasm-registry.sh
 
       - name: Build wasm32 target
-        run: cargo build -p runmat-wasm --target wasm32-unknown-unknown
+        run: cargo build -p runmat-wasm --target wasm32-unknown-unknown --features occt-wasm-host
 
       - name: Run wasm headless tests
         env:
