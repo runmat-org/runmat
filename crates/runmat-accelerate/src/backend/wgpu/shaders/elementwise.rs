@@ -98,6 +98,29 @@ fn isfinite_complex_unary(x: {ty}) -> bool {{
     return (x == x) && (abs(x) < MAX_FINITE_COMPLEX_UNARY);
 }}
 
+fn signum_nonzero_complex_unary(x: {ty}) -> {ty} {{
+    return select(-{ty}(1.0), {ty}(1.0), x > {ty}(0.0));
+}}
+
+fn finite_product_complex_unary(a: {ty}, b: {ty}) -> {ty} {{
+    if a == {ty}(0.0) || b == {ty}(0.0) {{
+        return {ty}(0.0);
+    }}
+    let product = a * b;
+    if isfinite_complex_unary(product) || product != product {{
+        return product;
+    }}
+    return signum_nonzero_complex_unary(a) * signum_nonzero_complex_unary(b) * MAX_FINITE_COMPLEX_UNARY;
+}}
+
+fn finite_sum_complex_unary(a: {ty}, b: {ty}) -> {ty} {{
+    let sum = a + b;
+    if isfinite_complex_unary(sum) || sum != sum {{
+        return sum;
+    }}
+    return signum_nonzero_complex_unary(a) * MAX_FINITE_COMPLEX_UNARY;
+}}
+
 fn sinc_real_complex_unary(x: {ty}) -> {ty} {{
     if x == {ty}(0.0) {{
         return {ty}(1.0);
@@ -123,11 +146,17 @@ fn sinc_complex_lane(out_idx: u32) -> {ty} {{
 
     let scaled_re = PI_COMPLEX_UNARY * re;
     let scaled_im = PI_COMPLEX_UNARY * im;
-    let num_re = sin(scaled_re) * cosh(scaled_im);
-    let num_im = cos(scaled_re) * sinh(scaled_im);
+    let num_re = finite_product_complex_unary(sin(scaled_re), cosh(scaled_im));
+    let num_im = finite_product_complex_unary(cos(scaled_re), sinh(scaled_im));
     let denom_norm = (scaled_re * scaled_re) + (scaled_im * scaled_im);
-    let out_re = ((num_re * scaled_re) + (num_im * scaled_im)) / denom_norm;
-    let out_im = ((num_im * scaled_re) - (num_re * scaled_im)) / denom_norm;
+    let out_re = finite_sum_complex_unary(
+        finite_product_complex_unary(num_re, scaled_re),
+        finite_product_complex_unary(num_im, scaled_im),
+    ) / denom_norm;
+    let out_im = finite_sum_complex_unary(
+        finite_product_complex_unary(num_im, scaled_re),
+        -finite_product_complex_unary(num_re, scaled_im),
+    ) / denom_norm;
     return select(out_re, out_im, (out_idx % 2u) == 1u);
 }}
 "#,
@@ -140,19 +169,33 @@ fn sinc_complex_lane(out_idx: u32) -> {ty} {{
         | ComplexUnaryOp::Cosh
         | ComplexUnaryOp::Tan => format!(
             r#"
-fn zero_safe_mul_complex_unary(a: {ty}, b: {ty}) -> {ty} {{
-    if a == {ty}(0.0) {{
+const MAX_FINITE_COMPLEX_UNARY: {ty} = {ty}({max_finite});
+
+fn isfinite_complex_unary(x: {ty}) -> bool {{
+    return (x == x) && (abs(x) < MAX_FINITE_COMPLEX_UNARY);
+}}
+
+fn signum_nonzero_complex_unary(x: {ty}) -> {ty} {{
+    return select(-{ty}(1.0), {ty}(1.0), x > {ty}(0.0));
+}}
+
+fn finite_product_complex_unary(a: {ty}, b: {ty}) -> {ty} {{
+    if a == {ty}(0.0) || b == {ty}(0.0) {{
         return {ty}(0.0);
     }}
-    return a * b;
+    let product = a * b;
+    if isfinite_complex_unary(product) || product != product {{
+        return product;
+    }}
+    return signum_nonzero_complex_unary(a) * signum_nonzero_complex_unary(b) * MAX_FINITE_COMPLEX_UNARY;
 }}
 
 fn sin_complex_lane(out_idx: u32) -> {ty} {{
     let elem = out_idx / 2u;
     let re = A.data[elem * 2u];
     let im = A.data[elem * 2u + 1u];
-    let out_re = zero_safe_mul_complex_unary(sin(re), cosh(im));
-    let out_im = zero_safe_mul_complex_unary(cos(re), sinh(im));
+    let out_re = finite_product_complex_unary(sin(re), cosh(im));
+    let out_im = finite_product_complex_unary(cos(re), sinh(im));
     return select(out_re, out_im, (out_idx % 2u) == 1u);
 }}
 
@@ -160,8 +203,8 @@ fn cos_complex_lane(out_idx: u32) -> {ty} {{
     let elem = out_idx / 2u;
     let re = A.data[elem * 2u];
     let im = A.data[elem * 2u + 1u];
-    let out_re = zero_safe_mul_complex_unary(cos(re), cosh(im));
-    let out_im = -zero_safe_mul_complex_unary(sin(re), sinh(im));
+    let out_re = finite_product_complex_unary(cos(re), cosh(im));
+    let out_im = -finite_product_complex_unary(sin(re), sinh(im));
     return select(out_re, out_im, (out_idx % 2u) == 1u);
 }}
 
@@ -169,8 +212,8 @@ fn sinh_complex_lane(out_idx: u32) -> {ty} {{
     let elem = out_idx / 2u;
     let re = A.data[elem * 2u];
     let im = A.data[elem * 2u + 1u];
-    let out_re = zero_safe_mul_complex_unary(sinh(re), cos(im));
-    let out_im = zero_safe_mul_complex_unary(cosh(re), sin(im));
+    let out_re = finite_product_complex_unary(sinh(re), cos(im));
+    let out_im = finite_product_complex_unary(cosh(re), sin(im));
     return select(out_re, out_im, (out_idx % 2u) == 1u);
 }}
 
@@ -178,8 +221,8 @@ fn cosh_complex_lane(out_idx: u32) -> {ty} {{
     let elem = out_idx / 2u;
     let re = A.data[elem * 2u];
     let im = A.data[elem * 2u + 1u];
-    let out_re = zero_safe_mul_complex_unary(cosh(re), cos(im));
-    let out_im = zero_safe_mul_complex_unary(sinh(re), sin(im));
+    let out_re = finite_product_complex_unary(cosh(re), cos(im));
+    let out_im = finite_product_complex_unary(sinh(re), sin(im));
     return select(out_re, out_im, (out_idx % 2u) == 1u);
 }}
 
@@ -200,6 +243,7 @@ fn tan_complex_lane(out_idx: u32) -> {ty} {{
 }}
 "#,
             ty = ty,
+            max_finite = max_finite,
         ),
         ComplexUnaryOp::Sign => format!(
             r#"

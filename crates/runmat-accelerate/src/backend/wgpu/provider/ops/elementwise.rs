@@ -2128,32 +2128,53 @@ mod tests {
         };
         let input = [
             (0.0, 90.0),
+            (0.0, -90.0),
             (std::f64::consts::FRAC_PI_2, 90.0),
+            (std::f64::consts::FRAC_PI_2, -90.0),
+            (0.25, 90.0),
+            (-0.25, -90.0),
+            (90.0, 0.0),
+            (-90.0, 0.0),
             (0.0, 50.0),
         ];
         let real = input.iter().map(|&(re, _)| re).collect::<Vec<_>>();
         let imag = input.iter().map(|&(_, im)| im).collect::<Vec<_>>();
-        let handle = complex_pair(provider, &real, &imag, &[3, 1]).await;
+        let shape = [input.len(), 1];
+        let handle = complex_pair(provider, &real, &imag, &shape).await;
 
         let sin = provider.unary_sin(&handle).await.expect("complex sin");
+        let sinc = provider.unary_sinc(&handle).await.expect("complex sinc");
         let cos = provider.unary_cos(&handle).await.expect("complex cos");
+        let sinh = provider.unary_sinh(&handle).await.expect("complex sinh");
+        let cosh = provider.unary_cosh(&handle).await.expect("complex cosh");
         let tan = provider.unary_tan(&handle).await.expect("complex tan");
 
         let sin_host = provider.download(&sin).await.expect("download sin");
+        let sinc_host = provider.download(&sinc).await.expect("download sinc");
         let cos_host = provider.download(&cos).await.expect("download cos");
+        let sinh_host = provider.download(&sinh).await.expect("download sinh");
+        let cosh_host = provider.download(&cosh).await.expect("download cosh");
         let tan_host = provider.download(&tan).await.expect("download tan");
-        assert_eq!(sin_host.shape, vec![3, 1]);
-        assert_eq!(cos_host.shape, vec![3, 1]);
-        assert_eq!(tan_host.shape, vec![3, 1]);
+        assert_eq!(sin_host.shape, vec![9, 1]);
+        assert_eq!(sinc_host.shape, vec![9, 1]);
+        assert_eq!(cos_host.shape, vec![9, 1]);
+        assert_eq!(sinh_host.shape, vec![9, 1]);
+        assert_eq!(cosh_host.shape, vec![9, 1]);
+        assert_eq!(tan_host.shape, vec![9, 1]);
 
         assert_eq!(sin_host.data[0], 0.0, "sin(0 + 90i) real lane");
         assert!(
-            !sin_host.data[1].is_nan(),
-            "sin(0 + 90i) imag lane must not be NaN"
+            sin_host.data[1].is_finite(),
+            "sin(0 + 90i) imag lane must be finite"
+        );
+        assert_eq!(sin_host.data[2], 0.0, "sin(0 - 90i) real lane");
+        assert!(
+            sin_host.data[3].is_finite(),
+            "sin(0 - 90i) imag lane must be finite"
         );
         assert!(
-            !cos_host.data[0].is_nan(),
-            "cos(0 + 90i) real lane must not be NaN"
+            cos_host.data[0].is_finite(),
+            "cos(0 + 90i) real lane must be finite"
         );
         assert!(
             cos_host.data[1].abs() < 1e-5,
@@ -2161,23 +2182,35 @@ mod tests {
             cos_host.data[1]
         );
         assert!(
-            tan_host.data[4].abs() < 1e-5,
-            "tan(0 + 50i) real lane got {}",
-            tan_host.data[4]
+            cos_host.data[2].is_finite(),
+            "cos(0 - 90i) real lane must be finite"
         );
         assert!(
-            (tan_host.data[5] - 1.0).abs() < 1e-5,
+            cos_host.data[3].abs() < 1e-5,
+            "cos(0 - 90i) imag lane got {}",
+            cos_host.data[3]
+        );
+        assert!(
+            tan_host.data[16].abs() < 1e-5,
+            "tan(0 + 50i) real lane got {}",
+            tan_host.data[16]
+        );
+        assert!(
+            (tan_host.data[17] - 1.0).abs() < 1e-5,
             "tan(0 + 50i) imag lane got {}",
-            tan_host.data[5]
+            tan_host.data[17]
         );
         for (idx, lane) in sin_host
             .data
             .iter()
+            .chain(sinc_host.data.iter())
             .chain(cos_host.data.iter())
+            .chain(sinh_host.data.iter())
+            .chain(cosh_host.data.iter())
             .chain(tan_host.data.iter())
             .enumerate()
         {
-            assert!(!lane.is_nan(), "lane {idx} was NaN");
+            assert!(lane.is_finite(), "lane {idx} was not finite");
         }
     }
 
