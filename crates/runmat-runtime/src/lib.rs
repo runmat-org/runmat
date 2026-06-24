@@ -15,7 +15,10 @@ use runmat_builtins::{BuiltinErrorDescriptor, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_gc_api::GcPtr;
 
+pub mod analysis;
 pub mod dispatcher;
+pub mod geometry;
+pub mod operations;
 
 pub mod callsite;
 pub mod console;

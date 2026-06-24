@@ -4010,6 +4010,7 @@ mod tests {
     #[test]
     fn tx_create_resize_fill_and_delete_array() {
         let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("tx-ops.data").to_string_lossy().to_string();
 

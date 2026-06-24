@@ -326,10 +326,7 @@ fn validate_uniform_spectral_request(request: &ProviderSpectralRequest<'_>) -> a
     let invalid_frame_mode = matches!(
         request.frame_mode,
         ProviderSpectralFrameMode::Sliding { hop: 0 }
-            | ProviderSpectralFrameMode::ColumnSliding {
-                hop: 0,
-                ..
-            }
+            | ProviderSpectralFrameMode::ColumnSliding { hop: 0, .. }
     );
     let invalid_input_coverage = match request.frame_mode {
         ProviderSpectralFrameMode::Sliding { hop } => {
@@ -353,7 +350,11 @@ fn validate_uniform_spectral_request(request: &ProviderSpectralRequest<'_>) -> a
                 let segment = last_frame % frames_per_column;
                 source_col
                     .checked_mul(input_rows)
-                    .and_then(|base| segment.checked_mul(hop).and_then(|step| base.checked_add(step)))
+                    .and_then(|base| {
+                        segment
+                            .checked_mul(hop)
+                            .and_then(|step| base.checked_add(step))
+                    })
                     .and_then(|offset| offset.checked_add(request.window.len()))
                     .is_none_or(|required| required > request.input_len)
             }

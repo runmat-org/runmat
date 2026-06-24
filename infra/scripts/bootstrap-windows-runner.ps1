@@ -155,7 +155,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
     Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
 }
-choco install -y git pkgconfiglite 7zip strawberryperl
+choco install -y git pkgconfiglite 7zip strawberryperl cmake --installargs 'ADD_CMAKE_TO_PATH=System'
 
 Write-Host 'Installing Rust toolchain'
 $env:CARGO_HOME = $cargoHome
@@ -182,7 +182,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host 'Cloning and bootstrapping vcpkg'
 if (-not (Test-Path $VcpkgRoot)) {
-    git clone https://github.com/microsoft/vcpkg.git $VcpkgRoot
+    git clone --depth 1 --branch 2026.06.01 https://github.com/microsoft/vcpkg.git $VcpkgRoot
     if ($LASTEXITCODE -ne 0) {
         throw "git clone of vcpkg failed with exit code $LASTEXITCODE"
     }
@@ -192,6 +192,50 @@ if ($LASTEXITCODE -ne 0) {
     throw "bootstrap-vcpkg.bat failed with exit code $LASTEXITCODE"
 }
 
+$finder = Join-Path $VcpkgRoot 'scripts\cmake\vcpkg_find_fortran.cmake'
+$content = Get-Content -LiteralPath $finder -Raw
+$needle = '    include(CMakeDetermineFortranCompiler)'
+$replacement = @'
+    include(CMakeDetermineFortranCompiler)
+
+    if(CMAKE_HOST_WIN32 AND "${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}" STREQUAL "" AND
+       ("${VCPKG_TARGET_ARCHITECTURE}" STREQUAL "x86" OR "${VCPKG_TARGET_ARCHITECTURE}" STREQUAL "x64"))
+        if(CMAKE_Fortran_COMPILER)
+            message(STATUS "Ignoring ambient Fortran compiler '${CMAKE_Fortran_COMPILER}' so vcpkg uses internal MinGW gfortran")
+            unset(CMAKE_Fortran_COMPILER)
+            unset(CMAKE_Fortran_COMPILER CACHE)
+        endif()
+    endif()
+'@
+if (-not $content.Contains($replacement)) {
+    if (-not $content.Contains($needle)) {
+        throw "Could not find expected CMakeDetermineFortranCompiler hook in $finder"
+    }
+    Set-Content -LiteralPath $finder -Value $content.Replace($needle, $replacement) -NoNewline
+}
+
+$keptPath = [System.Collections.Generic.List[string]]::new()
+foreach ($entry in ($env:Path -split ';')) {
+    if ([string]::IsNullOrWhiteSpace($entry)) {
+        continue
+    }
+    $expanded = [Environment]::ExpandEnvironmentVariables($entry.Trim('"'))
+    $hasFortran = $false
+    foreach ($compiler in @('flang.exe', 'flang-new.exe', 'gfortran.exe', 'ifort.exe', 'ifx.exe')) {
+        if (Test-Path -LiteralPath (Join-Path $expanded $compiler)) {
+            $hasFortran = $true
+            break
+        }
+    }
+    if (-not $hasFortran) {
+        $keptPath.Add($entry)
+    }
+}
+Remove-Item Env:FC -ErrorAction SilentlyContinue
+Remove-Item Env:F77 -ErrorAction SilentlyContinue
+Remove-Item Env:F90 -ErrorAction SilentlyContinue
+$env:Path = [string]::Join(';', $keptPath)
+
 Write-Host 'Installing vcpkg packages used by Windows CI'
 & (Join-Path $VcpkgRoot 'vcpkg.exe') install "openblas:$Triplet"
 if ($LASTEXITCODE -ne 0) {
@@ -200,6 +244,10 @@ if ($LASTEXITCODE -ne 0) {
 & (Join-Path $VcpkgRoot 'vcpkg.exe') install "zeromq:$Triplet"
 if ($LASTEXITCODE -ne 0) {
     throw "vcpkg install zeromq failed with exit code $LASTEXITCODE"
+}
+& (Join-Path $VcpkgRoot 'vcpkg.exe') install "opencascade:$Triplet"
+if ($LASTEXITCODE -ne 0) {
+    throw "vcpkg install opencascade failed with exit code $LASTEXITCODE"
 }
 
 Write-Host 'Writing machine-wide environment variables'
@@ -211,11 +259,17 @@ Write-Host 'Writing machine-wide environment variables'
 [Environment]::SetEnvironmentVariable('BLAS_LIB_DIR', (Join-Path $vcpkgInstalled 'lib'), 'Machine')
 [Environment]::SetEnvironmentVariable('BLAS_LIBS', 'openblas', 'Machine')
 [Environment]::SetEnvironmentVariable('LAPACK_LIB_DIR', (Join-Path $vcpkgInstalled 'lib'), 'Machine')
-[Environment]::SetEnvironmentVariable('LAPACK_LIBS', 'openblas', 'Machine')
+$lapackLibs = if (Test-Path (Join-Path $vcpkgInstalled 'lib\libf2c.lib')) { 'lapack;libf2c;openblas' } else { 'lapack;openblas' }
+[Environment]::SetEnvironmentVariable('LAPACK_LIBS', $lapackLibs, 'Machine')
 [Environment]::SetEnvironmentVariable('ZMQ_PATH', $vcpkgInstalled, 'Machine')
 [Environment]::SetEnvironmentVariable('ZMQ_INCLUDE_DIR', (Join-Path $vcpkgInstalled 'include'), 'Machine')
 [Environment]::SetEnvironmentVariable('ZMQ_LIB_DIR', (Join-Path $vcpkgInstalled 'lib'), 'Machine')
 [Environment]::SetEnvironmentVariable('PKG_CONFIG_PATH', (Join-Path $vcpkgInstalled 'lib\pkgconfig'), 'Machine')
+[Environment]::SetEnvironmentVariable('RUNMAT_OCCT_ROOT', $vcpkgInstalled, 'Machine')
+[Environment]::SetEnvironmentVariable('RUNMAT_OCCT_INCLUDE_DIR', (Join-Path $vcpkgInstalled 'include\opencascade'), 'Machine')
+[Environment]::SetEnvironmentVariable('RUNMAT_OCCT_LIB_DIR', (Join-Path $vcpkgInstalled 'lib'), 'Machine')
+[Environment]::SetEnvironmentVariable('RUNMAT_OCCT_BIN_DIR', (Join-Path $vcpkgInstalled 'bin'), 'Machine')
+[Environment]::SetEnvironmentVariable('RUNMAT_OCCT_LINK_MODE', 'dylib', 'Machine')
 [Environment]::SetEnvironmentVariable('PERL', $perlExe, 'Machine')
 
 Add-MachinePathEntry $VcpkgRoot
@@ -260,7 +314,9 @@ if (-not [string]::Equals($resolvedCargo, $expectedCargo, [System.StringComparis
 
 $requiredPaths = @(
     (Join-Path $vcpkgInstalled 'include\zmq.h'),
+    (Join-Path $vcpkgInstalled 'include\opencascade'),
     (Join-Path $vcpkgInstalled 'lib\openblas.lib'),
+    (Join-Path $vcpkgInstalled 'lib\TKBRep.lib'),
     (Join-Path $vcpkgInstalled 'lib\pkgconfig\libzmq.pc')
 )
 foreach ($path in $requiredPaths) {

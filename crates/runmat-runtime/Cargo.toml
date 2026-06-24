@@ -23,9 +23,16 @@ runmat-accelerate-api = { workspace = true, features = ["wgpu"] }
 runmat-gc = { workspace = true }
 runmat-gc-api = { workspace = true }
 runmat-filesystem = { workspace = true }
+runmat-geometry-core = { workspace = true }
+runmat-geometry-io = { workspace = true }
+runmat-geometry-ops = { workspace = true }
+runmat-analysis-core = { workspace = true }
+runmat-analysis-fea = { workspace = true }
+runmat-meshing-core = { workspace = true }
 runmat-time = { workspace = true }
 runmat-thread-local = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+serde_yaml = "0.9"
 glam = "0.24"
 once_cell = "1.19"
 encoding_rs = "0.8.35"
@@ -108,6 +115,11 @@ wgpu = []
 
 # Internal helper to make stdin/key prompts behave interactively during tests.
 interaction-test-hooks = []
+
+# Optional CAD topology import through OpenCascade. The native feature links OCCT
+# through runmat-geometry-io; the wasm feature expects a host-provided sidecar.
+occt-native = ["runmat-geometry-io/occt-native"]
+occt-wasm-host = ["runmat-geometry-io/occt-wasm-host"]
 
 [dev-dependencies]
 async-trait = "0.1"

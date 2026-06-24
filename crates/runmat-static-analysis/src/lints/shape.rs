@@ -1,5 +1,5 @@
 use runmat_builtins::{BuiltinSemanticKind, ConcatKind, ShapeTransformKind};
-use runmat_hir::{BindingId, HirDiagnostic, HirDiagnosticSeverity, OperatorKind, Span};
+use runmat_hir::{BindingId, HirDiagnostic, HirDiagnosticSeverity, IndexKind, OperatorKind, Span};
 use runmat_mir::analysis::{AnalysisStore, MirLocalKey};
 use std::collections::HashMap;
 
@@ -50,6 +50,7 @@ struct ShapeLintContext {
     local_env: HashMap<MirLocalKey, Shape>,
     number_env: HashMap<MirLocalKey, f64>,
     int_vector_env: HashMap<MirLocalKey, Vec<usize>>,
+    logical_env: HashMap<MirLocalKey, bool>,
     diagnostics: Vec<HirDiagnostic>,
 }
 
@@ -58,6 +59,7 @@ struct MirShapeValue {
     shape: Option<Shape>,
     number: Option<f64>,
     int_vector: Option<Vec<usize>>,
+    logical: bool,
 }
 
 impl ShapeLintContext {
@@ -126,6 +128,11 @@ impl ShapeLintContext {
         if let Some(vector) = value.int_vector {
             self.int_vector_env.insert(key, vector);
         }
+        if value.logical {
+            self.logical_env.insert(key, true);
+        } else {
+            self.logical_env.remove(&key);
+        }
     }
 
     fn infer_mir_rvalue(
@@ -146,6 +153,7 @@ impl ShapeLintContext {
                     shape: inner.shape,
                     number,
                     int_vector: None,
+                    logical: matches!(op, OperatorKind::Not),
                 }
             }
             runmat_mir::MirRvalue::Binary(left, op, right) => {
@@ -155,6 +163,7 @@ impl ShapeLintContext {
                     shape: self.infer_mir_binary(span, lhs.shape.as_ref(), op, rhs.shape.as_ref()),
                     number: None,
                     int_vector: None,
+                    logical: is_logical_operator(op),
                 }
             }
             runmat_mir::MirRvalue::ShortCircuit {
@@ -163,7 +172,7 @@ impl ShapeLintContext {
                 right,
                 ..
             } => {
-                self.infer_mir_operand(body, left);
+                let left_value = self.infer_mir_operand(body, left);
                 for stmt in right_temps {
                     match &stmt.kind {
                         runmat_mir::MirStmtKind::Assign { place, value } => {
@@ -181,8 +190,13 @@ impl ShapeLintContext {
                         | runmat_mir::MirStmtKind::EnvironmentEffect(_) => {}
                     }
                 }
-                self.infer_mir_operand(body, right);
-                MirShapeValue::default()
+                let right_value = self.infer_mir_operand(body, right);
+                MirShapeValue {
+                    shape: left_value.shape.or(right_value.shape),
+                    number: None,
+                    int_vector: None,
+                    logical: true,
+                }
             }
             runmat_mir::MirRvalue::Range { start, step, end } => {
                 let start = self.infer_mir_operand(body, start).number;
@@ -198,6 +212,7 @@ impl ShapeLintContext {
                     shape: Some(Shape(vec![Some(1), width])),
                     number: None,
                     int_vector: None,
+                    logical: false,
                 }
             }
             runmat_mir::MirRvalue::Call(call) => self.infer_mir_call(body, span, call),
@@ -215,6 +230,7 @@ impl ShapeLintContext {
                     shape: Some(Shape(vec![Some(1), Some(1)])),
                     number: None,
                     int_vector: None,
+                    logical: false,
                 }
             }
             runmat_mir::MirRvalue::ObjectLiteral { fields, .. } => {
@@ -225,27 +241,37 @@ impl ShapeLintContext {
                     shape: Some(Shape(vec![Some(1), Some(1)])),
                     number: None,
                     int_vector: None,
+                    logical: false,
                 }
             }
             runmat_mir::MirRvalue::Index { base, indexing } => {
                 let base_shape = self.infer_mir_operand(body, base).shape;
+                let mut component_values = Vec::new();
                 for component in &indexing.components {
                     match component {
                         runmat_mir::MirIndexComponent::Expr(operand) => {
-                            let idx_shape = self.infer_mir_operand(body, operand).shape;
-                            if indexing.components.len() == 1 {
+                            let idx_value = self.infer_mir_operand(body, operand);
+                            if indexing.components.len() == 1 && idx_value.logical {
                                 self.check_logical_index(
                                     span,
                                     base_shape.as_ref(),
-                                    idx_shape.as_ref(),
+                                    idx_value.shape.as_ref(),
                                 );
                             }
+                            component_values.push(Some(idx_value));
                         }
                         runmat_mir::MirIndexComponent::Colon
-                        | runmat_mir::MirIndexComponent::End { .. } => {}
+                        | runmat_mir::MirIndexComponent::End { .. } => {
+                            component_values.push(None);
+                        }
                     }
                 }
-                MirShapeValue::default()
+                MirShapeValue {
+                    shape: infer_mir_index_shape(base_shape.as_ref(), indexing, &component_values),
+                    number: None,
+                    int_vector: None,
+                    logical: false,
+                }
             }
             runmat_mir::MirRvalue::Member { base, .. } => self.infer_mir_operand(body, base),
             runmat_mir::MirRvalue::DynamicMember { base, member } => {
@@ -277,8 +303,15 @@ impl ShapeLintContext {
                     shape: Some(Shape(vec![Some(1), Some(1)])),
                     number: value.parse().ok(),
                     int_vector: None,
+                    logical: false,
                 }
             }
+            runmat_mir::MirOperand::Constant(runmat_mir::MirConstant::Bool(_)) => MirShapeValue {
+                shape: Some(Shape(vec![Some(1), Some(1)])),
+                number: None,
+                int_vector: None,
+                logical: true,
+            },
             runmat_mir::MirOperand::Local(local) => {
                 let key = MirLocalKey {
                     function: body.function,
@@ -288,6 +321,7 @@ impl ShapeLintContext {
                     shape: self.local_env.get(&key).cloned(),
                     number: self.number_env.get(&key).copied(),
                     int_vector: self.int_vector_env.get(&key).cloned(),
+                    logical: self.logical_env.get(&key).copied().unwrap_or(false),
                 }
             }
             runmat_mir::MirOperand::Constant(_) | runmat_mir::MirOperand::FunctionHandle(_) => {
@@ -333,7 +367,9 @@ impl ShapeLintContext {
             | OperatorKind::Less
             | OperatorKind::LessEqual
             | OperatorKind::Equal
-            | OperatorKind::NotEqual => {
+            | OperatorKind::NotEqual
+            | OperatorKind::ElementwiseAnd
+            | OperatorKind::ElementwiseOr => {
                 if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
                     if !broadcast_compatible(lhs, rhs) {
                         self.warn(
@@ -422,6 +458,7 @@ impl ShapeLintContext {
             shape,
             number: None,
             int_vector,
+            logical: false,
         }
     }
 
@@ -555,6 +592,7 @@ impl ShapeLintContext {
             shape,
             number: None,
             int_vector: None,
+            logical: false,
         }
     }
 
@@ -665,6 +703,23 @@ fn number_to_int(value: f64) -> Option<usize> {
     }
 }
 
+fn is_logical_operator(op: &OperatorKind) -> bool {
+    matches!(
+        op,
+        OperatorKind::Not
+            | OperatorKind::Greater
+            | OperatorKind::GreaterEqual
+            | OperatorKind::Less
+            | OperatorKind::LessEqual
+            | OperatorKind::Equal
+            | OperatorKind::NotEqual
+            | OperatorKind::ShortCircuitAnd
+            | OperatorKind::ShortCircuitOr
+            | OperatorKind::ElementwiseAnd
+            | OperatorKind::ElementwiseOr
+    )
+}
+
 fn mir_parse_dim(value: &MirShapeValue) -> Dim {
     match value.number {
         Some(-1.0) => Dim::Infer,
@@ -743,6 +798,65 @@ fn vector_len(shape: &Shape) -> Option<usize> {
     } else {
         None
     }
+}
+
+fn infer_mir_index_shape(
+    base: Option<&Shape>,
+    indexing: &runmat_mir::MirIndexing,
+    component_values: &[Option<MirShapeValue>],
+) -> Option<Shape> {
+    if indexing.kind != IndexKind::Paren {
+        return None;
+    }
+    if indexing.components.is_empty() {
+        return base.cloned();
+    }
+    if indexing.plan == runmat_mir::MirIndexPlan::Scalar {
+        return Some(Shape(vec![Some(1), Some(1)]));
+    }
+    if indexing.components.len() == 1 {
+        return match indexing.components.first()? {
+            runmat_mir::MirIndexComponent::Colon => base.cloned(),
+            runmat_mir::MirIndexComponent::End { .. } => Some(Shape(vec![Some(1), Some(1)])),
+            runmat_mir::MirIndexComponent::Expr(_) => {
+                let value = component_values.first()?.as_ref()?;
+                if value.logical {
+                    None
+                } else if value.number.is_some() {
+                    Some(Shape(vec![Some(1), Some(1)]))
+                } else {
+                    value.shape.clone()
+                }
+            }
+        };
+    }
+
+    let dims = indexing
+        .components
+        .iter()
+        .enumerate()
+        .map(|(idx, component)| match component {
+            runmat_mir::MirIndexComponent::Colon => {
+                base.and_then(|shape| shape.0.get(idx).copied().flatten())
+            }
+            runmat_mir::MirIndexComponent::End { .. } => Some(1),
+            runmat_mir::MirIndexComponent::Expr(_) => component_values
+                .get(idx)
+                .and_then(|value| value.as_ref())
+                .and_then(numeric_index_component_len),
+        })
+        .collect();
+    Some(Shape(dims))
+}
+
+fn numeric_index_component_len(value: &MirShapeValue) -> Option<usize> {
+    if value.logical {
+        return None;
+    }
+    if value.number.is_some() {
+        return Some(1);
+    }
+    value.shape.as_ref().and_then(vector_len)
 }
 
 fn broadcast_compatible(left: &Shape, right: &Shape) -> bool {

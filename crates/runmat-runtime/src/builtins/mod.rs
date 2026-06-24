@@ -12,6 +12,8 @@ pub mod control;
 pub mod datetime;
 pub mod diagnostics;
 pub mod duration;
+pub mod fea;
+pub mod geometry;
 pub mod image;
 pub mod introspection;
 pub mod io;

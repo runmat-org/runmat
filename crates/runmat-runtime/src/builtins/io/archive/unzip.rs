@@ -363,9 +363,9 @@ async fn local_archive_to_temp_file(path: &Path) -> BuiltinResult<TempArchive> {
         if read == 0 {
             break;
         }
-        copied = copied.checked_add(read as u64).ok_or_else(|| {
-            unzip_error_with(&UNZIP_ERROR_IO, "unzip: archive is too large")
-        })?;
+        copied = copied
+            .checked_add(read as u64)
+            .ok_or_else(|| unzip_error_with(&UNZIP_ERROR_IO, "unzip: archive is too large"))?;
         ensure_compressed_size_within_limit(copied)?;
         out.write_all(&buffer[..read]).map_err(|err| {
             unzip_error_with_source(

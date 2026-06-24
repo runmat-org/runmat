@@ -54,11 +54,11 @@ jobs:
           cargo="${cargo_bin}/cargo"
 
           if [[ ! -x "${rustup}" ]]; then
-            echo "Missing rustup at ${rustup}. Provision the runner with scripts/bootstrap-linux-runner.sh." >&2
+            echo "Missing rustup at ${rustup}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
             exit 1
           fi
           if [[ ! -x "${cargo}" ]]; then
-            echo "Missing cargo at ${cargo}. Provision the runner with scripts/bootstrap-linux-runner.sh." >&2
+            echo "Missing cargo at ${cargo}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
             exit 1
           fi
 
@@ -73,7 +73,7 @@ jobs:
           installed_components="$("${rustup}" component list --toolchain "${toolchain}" --installed)"
           for component in ${RUST_COMPONENTS}; do
             if ! grep -q "^${component}-" <<<"${installed_components}"; then
-              echo "Missing Rust component '${component}' for toolchain ${toolchain}. Provision the runner with scripts/bootstrap-linux-runner.sh." >&2
+              echo "Missing Rust component '${component}' for toolchain ${toolchain}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
               exit 1
             fi
           done
@@ -98,9 +98,14 @@ jobs:
           packages=(
             build-essential
             ca-certificates
+            cmake
             curl
+            autoconf
+            autoconf-archive
+            automake
             gdb
             git
+            libtool
             libdbus-1-dev
             libegl1-mesa-dev
             libgl1-mesa-dev
@@ -117,8 +122,10 @@ jobs:
             libxkbcommon-x11-0
             libxrandr-dev
             libzmq3-dev
+            ninja-build
             pkg-config
             unzip
+            zip
           )
 
           missing=()
@@ -135,11 +142,20 @@ jobs:
           if ! command -v pkg-config >/dev/null 2>&1; then
             missing+=('pkg-config(binary)')
           fi
+          if ! command -v cmake >/dev/null 2>&1; then
+            missing+=('cmake(binary)')
+          fi
           if ! command -v gdb >/dev/null 2>&1; then
             missing+=('gdb(binary)')
           fi
           if ! command -v unzip >/dev/null 2>&1; then
             missing+=('unzip(binary)')
+          fi
+          if ! command -v zip >/dev/null 2>&1; then
+            missing+=('zip(binary)')
+          fi
+          if ! command -v ninja >/dev/null 2>&1; then
+            missing+=('ninja(binary)')
           fi
           if ! pkg-config --exists libzmq; then
             missing+=('libzmq(pkg-config)')
@@ -156,9 +172,17 @@ jobs:
           if ((${#missing[@]} > 0)); then
             printf 'Missing Linux runner prerequisites:\n' >&2
             printf '  %s\n' "${missing[@]}" >&2
-            echo "Provision the runner with scripts/bootstrap-linux-runner.sh." >&2
+            echo "Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
             exit 1
           fi
+
+      - name: Ensure pinned Linux OpenCASCADE (vcpkg)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          RUNMAT_VCPKG_REF: 2026.06.01
+          RUNMAT_VCPKG_TRIPLET: x64-linux-runmat-dynamic-release
+        run: infra/scripts/ensure-linux-vcpkg-occt.sh
 
       - name: Install macOS dependencies (ZMQ)
         if: runner.os == 'macOS'
@@ -168,6 +192,9 @@ jobs:
 
       - name: Format
         run: cargo fmt -- --check
+
+      - name: Validate public FEA field ids
+        run: python3 scripts/fea/governance/validate_public_field_ids.py
 
       - name: Clippy (Unix)
         run: cargo clippy --all-targets --all-features -- -D warnings
@@ -193,6 +220,14 @@ jobs:
         run: |
           set -o pipefail
           cargo test --all-targets --all-features 2>&1 | tee test.log
+
+      - name: Upload analysis benchmark artifacts
+        if: always() && ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/'))) || (github.event_name == 'pull_request' && failure()))
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysis-benchmark-${{ matrix.name }}
+          path: target/runmat-analysis-artifacts/*.json
+          if-no-files-found: warn
 
       - name: Test Summary
         if: always() && github.event_name == 'pull_request' && hashFiles('test.log') != ''
@@ -234,6 +269,634 @@ jobs:
               console.log(body);
             }
 
+  fea-conformance:
+    if: >
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/')))
+    name: fea-conformance
+    runs-on: ubuntu-latest-gpu
+    env:
+      RUST_BACKTRACE: 1
+      RUNMAT_ANALYSIS_ENFORCE_BASELINE_ON_PROTECTED: "true"
+      RUNMAT_ANALYSIS_PROTECTED_BRANCHES: "main,master,release"
+      RUNMAT_ANALYSIS_BASELINE_DIR: ${{ github.workspace }}/target/runmat-analysis-artifacts/rolling
+      RUNMAT_FEA_BASELINE_DIR: ${{ github.workspace }}/target/runmat-analysis-artifacts/rolling
+      RUNMAT_ANALYSIS_BASELINE_WINDOW: "12"
+      RUNMAT_ANALYSIS_MAX_SLOWDOWN_RATIO: "1.35"
+      RUNMAT_ANALYSIS_MAX_COST_SLOWDOWN_RATIO: "1.5"
+      RUNMAT_ANALYSIS_MIN_SPEEDUP_RETENTION: "0.8"
+      RUNMAT_ANALYSIS_ARTIFACT_PATH: ${{ github.workspace }}/target/runmat-analysis-artifacts/analysis_benchmark_report.json
+      RUNMAT_FEA_ARTIFACT_PATH: ${{ github.workspace }}/target/runmat-analysis-artifacts/analysis_benchmark_report.json
+      RUNMAT_ANALYSIS_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-analysis-artifacts
+      RUNMAT_FEA_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-analysis-artifacts
+      RUNMAT_THERMO_FIELD_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-analysis-artifacts/thermo-fields
+      RUNMAT_GEOMETRY_PREP_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-prep-artifacts
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.90.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux system dependencies (BLAS/LAPACK, ZMQ, OpenSSL)
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            libopenblas-dev liblapack-dev libssl-dev \
+            libzmq3-dev pkg-config ca-certificates
+
+      - name: Run FEA package tests
+        run: cargo test -p runmat-analysis-core -p runmat-analysis-fea
+
+      - name: Run FEA runtime contract tests
+        run: cargo test -p runmat-runtime --test geometry_prep_conformance --test prep_solve_conformance --test operation_contracts
+
+      - name: Run FEA benchmark conformance
+        id: fea_benchmark_conformance
+        run: cargo test -p runmat-runtime --test analysis
+
+      - name: Verify filesystem artifact replay stability
+        env:
+          RUNMAT_ANALYSIS_ARTIFACT_STORE: filesystem
+          RUNMAT_ANALYSIS_ARTIFACT_ROOT: target/runmat-analysis-store
+          RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS: "0"
+          RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND: "0"
+        run: cargo test -p runmat-runtime analysis::tests::analysis_results_by_run_id_filesystem_replay_is_stable
+
+      - name: Mark artifact replay verification passed
+        if: success()
+        run: echo "RUNMAT_RELEASE_READINESS_ARTIFACT_REPLAY_OK=true" >> "$GITHUB_ENV"
+
+      - name: Validate FEA conformance report keys
+        run: python3 scripts/fea/governance/validate_fea_conformance_report.py
+
+      - name: Enforce thermo summary presence on thermo-gated branches
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/')
+        env:
+          RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY: "true"
+          RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY: "true"
+          RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY: "true"
+          RUNMAT_VALIDATE_REQUIRE_PLASTIC_SUMMARY: "true"
+          RUNMAT_VALIDATE_REQUIRE_CONTACT_SUMMARY: "true"
+        run: python3 scripts/fea/governance/validate_fea_conformance_report.py
+
+      - name: Enforce non-default thermo signing key on release branches
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/')
+        env:
+          RUNMAT_THERMO_FIELD_SIGNING_KEY: ${{ secrets.RUNMAT_THERMO_FIELD_SIGNING_KEY }}
+        run: |
+          if [ -z "${RUNMAT_THERMO_FIELD_SIGNING_KEY}" ]; then
+            echo "RUNMAT_THERMO_FIELD_SIGNING_KEY secret is required on release branches"
+            exit 1
+          fi
+          if [ "${RUNMAT_THERMO_FIELD_SIGNING_KEY}" = "runmat-dev-thermo-signing-key" ]; then
+            echo "default dev signing key is not allowed on release branches"
+            exit 1
+          fi
+
+      - name: Verify thermo field artifact trust chain
+        id: thermo_field_trust
+        if: always() && steps.fea_benchmark_conformance.outcome == 'success'
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          artifacts = sorted(Path("target/runmat-analysis-artifacts/thermo-fields").glob("*.json"))
+          report = {
+              "schema_version": "thermo-field-trust-report/v1",
+              "artifact_count": len(artifacts),
+              "artifacts": [],
+              "passed": bool(artifacts),
+          }
+          lines = ["## Thermo Field Trust Report", "", f"Artifacts: `{len(artifacts)}`"]
+          if not artifacts:
+              lines.append("")
+              lines.append("No thermo field artifacts were found; compatibility verification is unverified.")
+          for artifact in artifacts:
+              proc = subprocess.run(
+                  ["python3", "scripts/fea/thermo_artifacts/validate_thermo_field_artifact.py", str(artifact)],
+                  capture_output=True,
+                  text=True,
+              )
+              ok = proc.returncode == 0
+              report["artifacts"].append(
+                  {
+                      "path": str(artifact),
+                      "valid": ok,
+                      "stdout": proc.stdout.strip(),
+                      "stderr": proc.stderr.strip(),
+                  }
+              )
+              lines.append(f"- `{artifact}`: {'ok' if ok else 'invalid'}")
+              if not ok:
+                  report["passed"] = False
+          out_json = Path("target/runmat-analysis-artifacts/thermo_field_trust_report.json")
+          out_md = Path("thermo-field-trust-report.md")
+          out_json.parent.mkdir(parents=True, exist_ok=True)
+          out_json.write_text(json.dumps(report, indent=2) + "\n")
+          out_md.write_text("\n".join(lines) + "\n")
+          print(out_md.read_text())
+          if not report["passed"]:
+              raise SystemExit(1)
+          PY
+          cat thermo-field-trust-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Mark artifact compatibility verification passed
+        if: always() && steps.thermo_field_trust.outcome == 'success'
+        run: echo "RUNMAT_RELEASE_READINESS_ARTIFACT_COMPAT_OK=true" >> "$GITHUB_ENV"
+
+      - name: Test FEA script logic
+        run: scripts/test-fea-scripts.sh
+
+      - name: Validate prep calibration evidence
+        run: python3 scripts/fea/prep_calibration/validate_prep_calibration_evidence.py
+
+      - name: Generate prep calibration recommendations
+        env:
+          RUNMAT_RELEASE_READINESS_PREP_RETRAIN_TRIGGER_DRIFT: "0.1"
+        run: python3 scripts/fea/prep_calibration/generate_prep_calibration_recommendations.py
+
+      - name: Verify governance artifacts exist
+        run: |
+          test -f target/runmat-analysis-artifacts/prep_calibration_evidence_validation.json
+          test -f target/runmat-analysis-artifacts/prep_calibration_recommendations.json
+
+      - name: Validate prep calibration evidence promotion
+        env:
+          RUNMAT_PREP_CALIBRATION_EVIDENCE_CANDIDATE: scripts/fea/prep_calibration/evidence/prep_calibration_evidence.json
+          RUNMAT_PREP_CALIBRATION_EVIDENCE_APPROVED: target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
+          RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT: target/runmat-analysis-artifacts/prep_calibration_recommendations.json
+          RUNMAT_PREP_CALIBRATION_PROMOTION_MAX_RECOMMENDATIONS: "64"
+        run: python3 scripts/fea/prep_calibration/promote_prep_calibration_evidence.py
+
+      - name: Verify promotion artifact exists
+        run: test -f target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
+
+      - name: Analyze nonlinear rolling trends
+        if: always()
+        env:
+          RUNMAT_ANALYSIS_TREND_WINDOW: "8"
+          RUNMAT_ANALYSIS_TREND_MAX_SLOWDOWN_RATIO: "1.25"
+        run: |
+          python3 scripts/fea/reporting/analyze_nonlinear_trends.py | tee nonlinear-trends.md
+          cat nonlinear-trends.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize FEA conformance report
+        if: always()
+        run: |
+          python3 scripts/fea/reporting/summarize_analysis_report.py | tee fea-conformance-summary.md
+          cat fea-conformance-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize prep artifact SLO
+        if: always()
+        env:
+          RUNMAT_PREP_SLO_WARN_ARTIFACT_COUNT: "64"
+          RUNMAT_PREP_SLO_FAIL_ARTIFACT_COUNT: "128"
+          RUNMAT_PREP_SLO_WARN_P95_AGE_SECONDS: "604800"
+          RUNMAT_PREP_SLO_FAIL_P95_AGE_SECONDS: "1209600"
+        run: |
+          python3 scripts/fea/prep_calibration/summarize_prep_artifacts.py | tee prep-artifact-slo.md
+          cat prep-artifact-slo.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate promotion threshold calibration
+        if: always()
+        run: python3 scripts/fea/governance/generate_promotion_threshold_calibration.py
+
+      - name: Validate promotion threshold calibration
+        if: always()
+        env:
+          RUNMAT_VALIDATE_PROMOTION_CALIBRATION_ENFORCE: "true"
+          RUNMAT_VALIDATE_PROMOTION_CALIBRATION_REQUIRE_CADENCE: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/') }}
+          RUNMAT_VALIDATE_PROMOTION_CALIBRATION_MIN_SOURCE_REPORTS: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/')) && '4' || '0' }}
+          RUNMAT_PROMOTION_THRESHOLD_CALIBRATION_INPUT: target/runmat-analysis-artifacts/promotion_threshold_calibration.json
+        run: python3 scripts/fea/governance/validate_promotion_threshold_calibration.py
+
+      - name: Generate external reference benchmark artifact
+        if: always()
+        env:
+          RUNMAT_EXTERNAL_REFERENCE_REPORT_PATH: target/runmat-analysis-artifacts/analysis_benchmark_report.json
+          RUNMAT_EXTERNAL_REFERENCE_BASELINE_PATH: scripts/fea/reference_data/fea_l2_external_reference_baseline.json
+          RUNMAT_EXTERNAL_REFERENCE_BENCHMARK_PATH: target/runmat-analysis-artifacts/external_reference_benchmark.json
+        run: python3 scripts/fea/governance/generate_external_reference_benchmark.py
+
+      - name: Validate external reference benchmark artifact
+        if: always()
+        env:
+          RUNMAT_EXTERNAL_REFERENCE_BENCHMARK_PATH: target/runmat-analysis-artifacts/external_reference_benchmark.json
+          RUNMAT_VALIDATE_EXTERNAL_REFERENCE_ENFORCE: "true"
+          RUNMAT_VALIDATE_EXTERNAL_REFERENCE_REQUIRE_PASS: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/') }}
+        run: python3 scripts/fea/governance/validate_external_reference_benchmark.py
+
+      - name: Evaluate FEA release readiness
+        if: always()
+        env:
+          RUNMAT_RELEASE_READINESS_MAX_SLOWDOWN_RATIO: "1.25"
+          RUNMAT_RELEASE_READINESS_PREP_WARN_ARTIFACT_COUNT: "64"
+          RUNMAT_RELEASE_READINESS_PREP_FAIL_ARTIFACT_COUNT: "128"
+          RUNMAT_RELEASE_READINESS_PREP_WARN_P95_AGE_SECONDS: "604800"
+          RUNMAT_RELEASE_READINESS_PREP_FAIL_P95_AGE_SECONDS: "1209600"
+          RUNMAT_RELEASE_READINESS_PREP_MAX_REJECT_RATE: "0.25"
+          RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT: "true"
+          RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS: "14"
+          RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/') }}
+          RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_CALIBRATION: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/') }}
+          RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION: target/runmat-analysis-artifacts/promotion_threshold_calibration.json
+          RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT: target/runmat-analysis-artifacts/prep_calibration_recommendations.json
+          RUNMAT_THERMO_FIELD_SIGNING_KEY: ${{ secrets.RUNMAT_THERMO_FIELD_SIGNING_KEY }}
+        run: |
+          python3 scripts/fea/governance/release_readiness_fea.py | tee fea-release-readiness.md
+          cat fea-release-readiness.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate threshold ratchet report
+        if: always()
+        run: |
+          python3 scripts/fea/governance/generate_threshold_ratchet_report.py | tee threshold-ratchet.md
+          cat threshold-ratchet.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate threshold ratchet report
+        if: always()
+        env:
+          RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE: "true"
+          RUNMAT_VALIDATE_THRESHOLD_RATCHET_REQUIRE_OBSERVED: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/') }}
+        run: python3 scripts/fea/governance/validate_threshold_ratchet_report.py
+
+      - name: Summarize governance artifacts
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          rec_path = Path("target/runmat-analysis-artifacts/prep_calibration_recommendations.json")
+          ready_path = Path("target/runmat-analysis-artifacts/fea_release_readiness.json")
+          ratchet_path = Path("target/runmat-analysis-artifacts/threshold_ratchet_report.json")
+          promotion_calib_path = Path("target/runmat-analysis-artifacts/promotion_threshold_calibration.json")
+          external_ref_path = Path("target/runmat-analysis-artifacts/external_reference_benchmark.json")
+          lines = ["## Tier 7.5 Governance", ""]
+          if rec_path.exists():
+              rec = json.loads(rec_path.read_text())
+              lines.append(f"- Recommendation count: {rec.get('recommendation_count', 0)}")
+          else:
+              lines.append("- Recommendation artifact: missing")
+          if ready_path.exists():
+              ready = json.loads(ready_path.read_text())
+              lines.append(f"- Governance profile: {ready.get('governance_profile', 'unknown')}")
+              lines.append(f"- Readiness verdict: {ready.get('verdict', 'unknown')}")
+              thermo_enabled_rate = ready.get('thermo_coupling_enabled_rate')
+              thermo_max_transient = ready.get('thermo_max_transient_severity')
+              thermo_max_nonlinear = ready.get('thermo_max_nonlinear_severity')
+              thermo_max_spread = ready.get('thermo_max_spread_ratio')
+              thermo_spread_threshold = ready.get('thermo_max_spread_ratio_threshold')
+              thermo_max_heterogeneity = ready.get('thermo_max_heterogeneity_index')
+              thermo_min_field_coverage = ready.get('thermo_min_field_coverage_ratio')
+              thermo_field_coverage_threshold = ready.get('thermo_min_field_coverage_ratio_threshold')
+              thermo_max_field_extrapolation = ready.get('thermo_max_field_extrapolation_ratio')
+              thermo_field_extrapolation_threshold = ready.get('thermo_max_field_extrapolation_ratio_threshold')
+              thermo_field_coverage_drop_trend_ratio = ready.get('thermo_field_coverage_drop_trend_ratio')
+              thermo_field_coverage_drop_trend_threshold = ready.get('thermo_max_field_coverage_drop_trend_ratio')
+              thermo_field_extrapolation_trend_ratio = ready.get('thermo_field_extrapolation_trend_ratio')
+              thermo_field_extrapolation_trend_threshold = ready.get('thermo_max_field_extrapolation_trend_ratio')
+              thermo_require_artifact_backed = ready.get('thermo_require_artifact_backed')
+              thermo_field_artifact_max_age_days = ready.get('thermo_field_artifact_max_age_days')
+              thermo_spread_breach_rate = ready.get('thermo_spread_breach_rate')
+              thermo_heterogeneity_breach_rate = ready.get('thermo_heterogeneity_breach_rate')
+              electro_enabled_rate = ready.get('electro_coupling_enabled_rate')
+              electro_max_transient = ready.get('electro_max_transient_severity')
+              electro_max_nonlinear = ready.get('electro_max_nonlinear_severity')
+              electro_max_joule = ready.get('electro_max_joule_heating_scale')
+              electro_joule_threshold = ready.get('electro_max_joule_heating_scale_threshold')
+              electro_max_spread = ready.get('electro_max_conductivity_spread_ratio')
+              electro_spread_threshold = ready.get('electro_max_conductivity_spread_ratio_threshold')
+              electro_joule_breach_rate = ready.get('electro_joule_breach_rate')
+              electro_spread_breach_rate = ready.get('electro_spread_breach_rate')
+              electro_joule_trend_ratio = ready.get('electro_joule_trend_ratio')
+              electro_spread_trend_ratio = ready.get('electro_spread_trend_ratio')
+              plastic_max_severity = ready.get('plastic_max_nonlinear_severity')
+              plastic_severity_threshold = ready.get('plastic_max_nonlinear_severity_threshold')
+              plastic_breach_rate = ready.get('plastic_breach_rate')
+              plastic_trend_ratio = ready.get('plastic_trend_ratio')
+              plastic_reference_trend_ratio = ready.get('plastic_reference_trend_ratio')
+              plastic_reference_trend_threshold = ready.get('plastic_reference_max_trend_ratio_threshold')
+              contact_max_severity = ready.get('contact_max_nonlinear_severity')
+              contact_severity_threshold = ready.get('contact_max_nonlinear_severity_threshold')
+              contact_breach_rate = ready.get('contact_breach_rate')
+              contact_trend_ratio = ready.get('contact_trend_ratio')
+              contact_reference_trend_ratio = ready.get('contact_reference_trend_ratio')
+              contact_reference_trend_threshold = ready.get('contact_reference_max_trend_ratio_threshold')
+              require_promotion_ready = ready.get('require_promotion_ready')
+              plastic_promotion_ready = ready.get('plastic_promotion_ready')
+              plastic_promotion_sample_count = ready.get('plastic_promotion_sample_count')
+              plastic_promotion_min_samples = ready.get('plastic_promotion_min_samples')
+              plastic_promotion_blockers = ready.get('plastic_promotion_blockers')
+              plastic_promotion_blocker_count = ready.get('plastic_promotion_blocker_count')
+              plastic_promotion_max_blockers = ready.get('plastic_promotion_max_blockers')
+              plastic_promotion_blocker_regression = ready.get('plastic_promotion_blocker_regression')
+              contact_promotion_ready = ready.get('contact_promotion_ready')
+              contact_promotion_sample_count = ready.get('contact_promotion_sample_count')
+              contact_promotion_min_samples = ready.get('contact_promotion_min_samples')
+              contact_promotion_blockers = ready.get('contact_promotion_blockers')
+              contact_promotion_blocker_count = ready.get('contact_promotion_blocker_count')
+              contact_promotion_max_blockers = ready.get('contact_promotion_max_blockers')
+              contact_promotion_blocker_regression = ready.get('contact_promotion_blocker_regression')
+              promotion_max_blocker_regression = ready.get('promotion_max_blocker_regression')
+              promotion_calibration_applied = ready.get('promotion_calibration_applied')
+              require_promotion_calibration = ready.get('require_promotion_calibration')
+              promotion_calibration_age_days = ready.get('promotion_calibration_age_days')
+              promotion_calibration_max_age_days = ready.get('promotion_calibration_max_age_days')
+              promotion_history_sufficient = ready.get('promotion_history_sufficient')
+              promotion_min_rolling_reports = ready.get('promotion_min_rolling_reports')
+              reference_trend_ratcheted = ready.get('reference_trend_ratcheted')
+              reference_trend_rationale = ready.get('reference_trend_rationale')
+              rolling_report_count = ready.get('rolling_report_count')
+              lines.append(
+                  "- Thermo coupling enabled-rate: "
+                  f"{thermo_enabled_rate if thermo_enabled_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo max transient severity: "
+                  f"{thermo_max_transient if thermo_max_transient is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo max nonlinear severity: "
+                  f"{thermo_max_nonlinear if thermo_max_nonlinear is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo max spread ratio: "
+                  f"{thermo_max_spread if thermo_max_spread is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo spread ratio threshold: "
+                  f"{thermo_spread_threshold if thermo_spread_threshold is not None else '-'}"
+              )
+              if ready.get('governance_profile') == 'feature':
+                  lines.append(
+                      "- Feature-profile posture: allows thermo spread up to 1.6 to absorb pathological fixture variance"
+                  )
+              lines.append(
+                  "- Thermo max heterogeneity index: "
+                  f"{thermo_max_heterogeneity if thermo_max_heterogeneity is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo min field coverage ratio: "
+                  f"{thermo_min_field_coverage if thermo_min_field_coverage is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo field coverage threshold: "
+                  f"{thermo_field_coverage_threshold if thermo_field_coverage_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo max field extrapolation ratio: "
+                  f"{thermo_max_field_extrapolation if thermo_max_field_extrapolation is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo field extrapolation threshold: "
+                  f"{thermo_field_extrapolation_threshold if thermo_field_extrapolation_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo field coverage drop trend ratio: "
+                  f"{thermo_field_coverage_drop_trend_ratio if thermo_field_coverage_drop_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo field coverage drop trend threshold: "
+                  f"{thermo_field_coverage_drop_trend_threshold if thermo_field_coverage_drop_trend_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo field extrapolation trend ratio: "
+                  f"{thermo_field_extrapolation_trend_ratio if thermo_field_extrapolation_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo field extrapolation trend threshold: "
+                  f"{thermo_field_extrapolation_trend_threshold if thermo_field_extrapolation_trend_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo artifact-backed required: "
+                  f"{thermo_require_artifact_backed if thermo_require_artifact_backed is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo field artifact max age days: "
+                  f"{thermo_field_artifact_max_age_days if thermo_field_artifact_max_age_days is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo spread breach rate: "
+                  f"{thermo_spread_breach_rate if thermo_spread_breach_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo heterogeneity breach rate: "
+                  f"{thermo_heterogeneity_breach_rate if thermo_heterogeneity_breach_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal coupling enabled-rate: "
+                  f"{electro_enabled_rate if electro_enabled_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal max transient severity: "
+                  f"{electro_max_transient if electro_max_transient is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal max nonlinear severity: "
+                  f"{electro_max_nonlinear if electro_max_nonlinear is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal max Joule heating scale: "
+                  f"{electro_max_joule if electro_max_joule is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal Joule threshold: "
+                  f"{electro_joule_threshold if electro_joule_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal max conductivity spread ratio: "
+                  f"{electro_max_spread if electro_max_spread is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal spread threshold: "
+                  f"{electro_spread_threshold if electro_spread_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal Joule breach rate: "
+                  f"{electro_joule_breach_rate if electro_joule_breach_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal spread breach rate: "
+                  f"{electro_spread_breach_rate if electro_spread_breach_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal Joule trend ratio: "
+                  f"{electro_joule_trend_ratio if electro_joule_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal spread trend ratio: "
+                  f"{electro_spread_trend_ratio if electro_spread_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic max nonlinear severity: "
+                  f"{plastic_max_severity if plastic_max_severity is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic severity threshold: "
+                  f"{plastic_severity_threshold if plastic_severity_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic breach rate: "
+                  f"{plastic_breach_rate if plastic_breach_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic trend ratio: "
+                  f"{plastic_trend_ratio if plastic_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic reference trend ratio: "
+                  f"{plastic_reference_trend_ratio if plastic_reference_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic reference trend threshold: "
+                  f"{plastic_reference_trend_threshold if plastic_reference_trend_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact max nonlinear severity: "
+                  f"{contact_max_severity if contact_max_severity is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact severity threshold: "
+                  f"{contact_severity_threshold if contact_severity_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact breach rate: "
+                  f"{contact_breach_rate if contact_breach_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact trend ratio: "
+                  f"{contact_trend_ratio if contact_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact reference trend ratio: "
+                  f"{contact_reference_trend_ratio if contact_reference_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact reference trend threshold: "
+                  f"{contact_reference_trend_threshold if contact_reference_trend_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Promotion-ready required: "
+                  f"{require_promotion_ready if require_promotion_ready is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic promotion ready: "
+                  f"{plastic_promotion_ready if plastic_promotion_ready is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic promotion samples/min: "
+                  f"{plastic_promotion_sample_count if plastic_promotion_sample_count is not None else '-'}/{plastic_promotion_min_samples if plastic_promotion_min_samples is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic promotion blockers: "
+                  f"{', '.join(plastic_promotion_blockers) if isinstance(plastic_promotion_blockers, list) and plastic_promotion_blockers else '-'}"
+              )
+              lines.append(
+                  "- Plastic blocker count/max: "
+                  f"{plastic_promotion_blocker_count if plastic_promotion_blocker_count is not None else '-'}/{plastic_promotion_max_blockers if plastic_promotion_max_blockers is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic blocker regression/allowed: "
+                  f"{plastic_promotion_blocker_regression if plastic_promotion_blocker_regression is not None else '-'}/{promotion_max_blocker_regression if promotion_max_blocker_regression is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact promotion ready: "
+                  f"{contact_promotion_ready if contact_promotion_ready is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact promotion samples/min: "
+                  f"{contact_promotion_sample_count if contact_promotion_sample_count is not None else '-'}/{contact_promotion_min_samples if contact_promotion_min_samples is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact promotion blockers: "
+                  f"{', '.join(contact_promotion_blockers) if isinstance(contact_promotion_blockers, list) and contact_promotion_blockers else '-'}"
+              )
+              lines.append(
+                  "- Contact blocker count/max: "
+                  f"{contact_promotion_blocker_count if contact_promotion_blocker_count is not None else '-'}/{contact_promotion_max_blockers if contact_promotion_max_blockers is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact blocker regression/allowed: "
+                  f"{contact_promotion_blocker_regression if contact_promotion_blocker_regression is not None else '-'}/{promotion_max_blocker_regression if promotion_max_blocker_regression is not None else '-'}"
+              )
+              lines.append(
+                  "- Promotion calibration applied/required: "
+                  f"{promotion_calibration_applied if promotion_calibration_applied is not None else '-'}/{require_promotion_calibration if require_promotion_calibration is not None else '-'}"
+              )
+              lines.append(
+                  "- Promotion calibration age/max days: "
+                  f"{promotion_calibration_age_days if promotion_calibration_age_days is not None else '-'}/{promotion_calibration_max_age_days if promotion_calibration_max_age_days is not None else '-'}"
+              )
+              lines.append(
+                  "- Promotion history sufficient: "
+                  f"{promotion_history_sufficient if promotion_history_sufficient is not None else '-'} (rolling={rolling_report_count if rolling_report_count is not None else '-'}, min={promotion_min_rolling_reports if promotion_min_rolling_reports is not None else '-'})"
+              )
+              lines.append(
+                  "- Reference trend ratchet active: "
+                  f"{reference_trend_ratcheted if reference_trend_ratcheted is not None else '-'}"
+              )
+              lines.append(
+                  "- Reference trend ratchet basis: "
+                  f"{reference_trend_rationale if reference_trend_rationale is not None else '-'}"
+              )
+              lines.append(
+                  "- Rolling report count used for ratchet: "
+                  f"{rolling_report_count if rolling_report_count is not None else '-'}"
+              )
+              if ratchet_path.exists():
+                  ratchet = json.loads(ratchet_path.read_text())
+                  lines.append(
+                      "- Ratchet entries: "
+                      f"{len(ratchet.get('entries', []))}"
+                  )
+              else:
+                  lines.append("- Ratchet report: missing")
+              lines.append(
+                  "- Promotion calibration artifact: "
+                  f"{'present' if promotion_calib_path.exists() else 'missing'}"
+              )
+              lines.append(
+                  "- External reference benchmark artifact: "
+                  f"{'present' if external_ref_path.exists() else 'missing'}"
+              )
+          else:
+              lines.append("- Readiness artifact: missing")
+          out = Path("tier75-governance-summary.md")
+          out.write_text("\n".join(lines) + "\n")
+          print(out.read_text())
+          PY
+          cat tier75-governance-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload FEA conformance artifacts
+        if: always() && (failure() || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/'))
+        uses: actions/upload-artifact@v4
+        with:
+          name: fea-conformance-${{ github.run_id }}
+          path: |
+            target/runmat-analysis-artifacts/analysis_benchmark_report.json
+            target/runmat-analysis-artifacts/fea_release_readiness.json
+            target/runmat-analysis-artifacts/threshold_ratchet_report.json
+            target/runmat-analysis-artifacts/threshold_ratchet_report.md
+            target/runmat-analysis-artifacts/promotion_threshold_calibration.json
+            target/runmat-analysis-artifacts/external_reference_benchmark.json
+            target/runmat-analysis-artifacts/prep_calibration_evidence_validation.json
+            target/runmat-analysis-artifacts/prep_calibration_recommendations.json
+            target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
+            target/runmat-analysis-artifacts/rolling/*.json
+            target/runmat-prep-artifacts/prep/*.json
+            fea-conformance-summary.md
+            fea-release-readiness.md
+            nonlinear-trends.md
+            thermo-field-trust-report.md
+            prep-artifact-slo.md
+            tier75-governance-summary.md
+            target/runmat-analysis-artifacts/thermo_field_trust_report.json
+          if-no-files-found: warn
+
   cross-build:
     # Build all release targets so failures are caught before tagging
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
@@ -268,19 +931,20 @@ jobs:
         if: runner.os == 'Linux' && matrix.platform.os != 'ubuntu-latest-arm-l'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
+          sudo apt-get install -y cmake libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
 
       - name: Install macOS dependencies (ZMQ)
         if: runner.os == 'macOS'
         run: |
           brew update
+          brew list cmake >/dev/null 2>&1 || brew install cmake
           brew install zeromq
 
       - name: Install Windows MSVC dependencies (ZMQ, vcpkg + OpenBLAS/LAPACK)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
         run: |
-          choco install -y pkgconfiglite strawberryperl
+          choco install -y pkgconfiglite strawberryperl cmake --installargs 'ADD_CMAKE_TO_PATH=System'
 
           Write-Host "Fetching prebuilt ZeroMQ for Windows (MSVC)"
           curl -L -o libzmq.zip https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.zip
@@ -292,7 +956,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_PATH=$($zmq)"
           Add-Content -Path $env:GITHUB_ENV -Value "PKG_CONFIG_PATH=$($zmq)\lib\pkgconfig"
 
-          Write-Host "Cloning vcpkg and installing OpenBLAS/CLAPACK"
+          Write-Host "Cloning vcpkg and installing OpenBLAS/CLAPACK/OpenCASCADE"
           $vcpkgRoot = Join-Path $pwd "vcpkg"
           $vcpkgRevision = "a7eda31dc16994fcaa8587982eb833a8695f1b6f"
           git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
@@ -301,6 +965,50 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "git checkout of vcpkg revision $vcpkgRevision failed with exit code $LASTEXITCODE" }
           & "$vcpkgRoot\bootstrap-vcpkg.bat"
           if ($LASTEXITCODE -ne 0) { throw "bootstrap-vcpkg.bat failed with exit code $LASTEXITCODE" }
+
+          $finder = Join-Path $vcpkgRoot "scripts\cmake\vcpkg_find_fortran.cmake"
+          $content = Get-Content -LiteralPath $finder -Raw
+          $needle = "    include(CMakeDetermineFortranCompiler)"
+          $replacement = @'
+              include(CMakeDetermineFortranCompiler)
+
+              if(CMAKE_HOST_WIN32 AND "${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}" STREQUAL "" AND
+                 ("${VCPKG_TARGET_ARCHITECTURE}" STREQUAL "x86" OR "${VCPKG_TARGET_ARCHITECTURE}" STREQUAL "x64"))
+                  if(CMAKE_Fortran_COMPILER)
+                      message(STATUS "Ignoring ambient Fortran compiler '${CMAKE_Fortran_COMPILER}' so vcpkg uses internal MinGW gfortran")
+                      unset(CMAKE_Fortran_COMPILER)
+                      unset(CMAKE_Fortran_COMPILER CACHE)
+                  endif()
+              endif()
+          '@
+          if (-not $content.Contains($replacement)) {
+            if (-not $content.Contains($needle)) {
+              throw "Could not find expected CMakeDetermineFortranCompiler hook in $finder"
+            }
+            Set-Content -LiteralPath $finder -Value $content.Replace($needle, $replacement) -NoNewline
+          }
+
+          $keptPath = [System.Collections.Generic.List[string]]::new()
+          foreach ($entry in ($env:Path -split ";")) {
+            if ([string]::IsNullOrWhiteSpace($entry)) {
+              continue
+            }
+            $expanded = [Environment]::ExpandEnvironmentVariables($entry.Trim('"'))
+            $hasFortran = $false
+            foreach ($compiler in @("flang.exe", "flang-new.exe", "gfortran.exe", "ifort.exe", "ifx.exe")) {
+              if (Test-Path -LiteralPath (Join-Path $expanded $compiler)) {
+                $hasFortran = $true
+                break
+              }
+            }
+            if (-not $hasFortran) {
+              $keptPath.Add($entry)
+            }
+          }
+          Remove-Item Env:FC -ErrorAction SilentlyContinue
+          Remove-Item Env:F77 -ErrorAction SilentlyContinue
+          Remove-Item Env:F90 -ErrorAction SilentlyContinue
+          $env:Path = [string]::Join(";", $keptPath)
 
           # Compute vcpkg triplet based on target
           if (Test-Path env:MatrixPlatformTarget) { Remove-Item env:MatrixPlatformTarget }
@@ -318,6 +1026,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "vcpkg install openblas failed with exit code $LASTEXITCODE" }
           & "$vcpkgRoot\vcpkg.exe" install "clapack:$triplet"
           if ($LASTEXITCODE -ne 0) { throw "vcpkg install clapack failed with exit code $LASTEXITCODE" }
+          if ($triplet -eq "arm64-windows") {
+            & "$vcpkgRoot\vcpkg.exe" install "opencascade:$triplet" --allow-unsupported
+          } else {
+            & "$vcpkgRoot\vcpkg.exe" install "opencascade:$triplet"
+          }
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install opencascade failed with exit code $LASTEXITCODE" }
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
           Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\$triplet\bin"
 
@@ -327,15 +1041,22 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;libf2c;openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_ROOT=$vcpkgRoot\installed\$triplet"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_INCLUDE_DIR=$vcpkgRoot\installed\$triplet\include\opencascade"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_BIN_DIR=$vcpkgRoot\installed\$triplet\bin"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUNMAT_OCCT_LINK_MODE=dylib"
 
       - name: Cross build (linux-x86_64)
         if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
         uses: houseabsolute/actions-rust-cross@v0
+        env:
+          RUNMAT_OCCT_LINK_MODE: static
         with:
           command: ${{ matrix.platform.command }}
           target: ${{ matrix.platform.target }}
           # Build all targets with full BLAS+LAPACK
-          args: "--locked --release --bin runmat --features blas-lapack"
+          args: "--locked --release --bin runmat --features blas-lapack,occt-native"
           strip: false
 
       - name: Cross build (other targets)
@@ -344,9 +1065,10 @@ jobs:
         env:
           OPENSSL_NO_PKG_CONFIG: '1'
           OPENSSL_STATIC: '1'
+          RUNMAT_OCCT_LINK_MODE: ${{ runner.os == 'Windows' && 'dylib' || 'static' }}
         with:
           command: ${{ matrix.platform.command }}
           target: ${{ matrix.platform.target }}
           # Build all targets with full BLAS+LAPACK
-          args: "--locked --release --bin runmat --features blas-lapack,vendored-openssl"
+          args: "--locked --release --bin runmat --features blas-lapack,vendored-openssl,occt-native"
           strip: false

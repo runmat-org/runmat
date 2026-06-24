@@ -40,3 +40,7 @@ pub fn is_cancelled() -> bool {
             .unwrap_or(false)
     })
 }
+
+pub fn current_interrupt() -> Option<Arc<AtomicBool>> {
+    INTERRUPT_HANDLE.with(|slot| slot.borrow().clone())
+}

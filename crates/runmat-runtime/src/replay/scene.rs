@@ -173,6 +173,9 @@ async fn hydrate_scene_data_refs_async(payload: &mut Value) -> Result<(), Runtim
                 hydrate_plot_field_async(plot, "colorsRgba").await?;
                 hydrate_plot_field_async(plot, "pointSizes").await?;
             }
+            "mesh" => {
+                hydrate_plot_field_async(plot, "vertices").await?;
+            }
             _ => {}
         }
     }

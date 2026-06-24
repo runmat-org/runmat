@@ -350,13 +350,15 @@ pub fn workspace_clear() -> Result<(), String> {
             .ok_or_else(|| "clear: workspace state unavailable".to_string())?;
         let ws = &mut frame.state;
         let vars = unsafe { &mut *frame.vars_ptr };
-        vars.clear();
-        frame.vars_snapshot.clear();
         for (name, idx) in ws.names.clone() {
+            if let Some(value) = vars.get_mut(idx) {
+                *value = Value::Num(0.0);
+            }
             mark_slot_unassigned(ws, idx, name);
         }
         ws.names.clear();
         ws.assigned.clear();
+        frame.vars_snapshot = vars.clone();
         ws.data_ptr = vars.as_ptr();
         ws.len = vars.len();
         Ok(())
@@ -572,6 +574,32 @@ mod tests {
         assert!(report.ids.contains(&0));
         assert!(report.removed_names.contains("x"));
         assert!(report.removed_ids.contains(&0));
+    }
+
+    #[test]
+    fn clear_preserves_active_frame_slots() {
+        let _ = take_updated_workspace_state();
+        let mut vars = vec![Value::Num(11.0), Value::Num(0.0), Value::Num(0.0)];
+        let mut names = HashMap::new();
+        names.insert("x".to_string(), 0);
+        let assigned = HashSet::from(["x".to_string()]);
+
+        {
+            let _guard = set_workspace_state(names, assigned, &mut vars);
+            workspace_clear().unwrap();
+
+            assert_eq!(vars.len(), 3);
+            assert_eq!(vars[0], Value::Num(0.0));
+            assert_eq!(vars[1], Value::Num(0.0));
+            assert_eq!(vars[2], Value::Num(0.0));
+            assert_eq!(workspace_lookup("x"), None);
+            assert_eq!(workspace_slot_assigned(0), Some(false));
+        }
+
+        let snapshot = take_updated_workspace_state().expect("workspace state should be recorded");
+        assert_eq!(snapshot.vars.len(), 3);
+        assert!(snapshot.names.is_empty());
+        assert!(snapshot.assigned.is_empty());
     }
 
     #[test]
