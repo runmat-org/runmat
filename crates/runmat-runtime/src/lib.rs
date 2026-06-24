@@ -713,7 +713,15 @@ pub(crate) async fn notify_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     let key_ptr: usize = match &target {
-        Value::HandleObject(h) => runmat_gc::gc_handle_addr(&h.target),
+        Value::HandleObject(h) => {
+            if !crate::is_handle_valid(h) {
+                return Err(build_runtime_error("notify: target handle is invalid")
+                    .with_builtin("notify")
+                    .with_identifier("RunMat:NotifyTargetInvalid")
+                    .build());
+            }
+            runmat_gc::gc_handle_addr(&h.target)
+        }
         Value::Object(_) => {
             return Err(
                 build_runtime_error("notify: target object must be a handle object")
@@ -937,10 +945,18 @@ pub async fn call_super_constructor(
                 }
             }
             Value::HandleObject(parent_handle) => {
-                if !is_handle_target_valid(&parent_handle) {
-                    if owner.is_some() {
-                        return Ok(());
+                if let Some(owner) = owner {
+                    if parent_handle.target == *owner {
+                        if parent_handle.valid {
+                            return Ok(());
+                        }
+                        return Err(build_runtime_error(
+                            "super constructor returned invalid parent handle",
+                        )
+                        .build());
                     }
+                }
+                if !is_handle_valid(&parent_handle) {
                     return Err(build_runtime_error(
                         "super constructor returned invalid parent handle",
                     )

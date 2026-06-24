@@ -99,6 +99,35 @@ pub fn set_dynamic_eval_options(
     });
 }
 
+pub struct DynamicEvalOptionsGuard {
+    previous: DynamicEvalOptions,
+}
+
+impl Drop for DynamicEvalOptionsGuard {
+    fn drop(&mut self) {
+        let previous = self.previous;
+        DYNAMIC_EVAL_OPTIONS.with(|slot| {
+            *slot.borrow_mut() = previous;
+        });
+    }
+}
+
+pub fn push_dynamic_eval_options(
+    compat_mode: CompatMode,
+    runmat_extensions_enabled: bool,
+    top_level_await_enabled: bool,
+    dynamic_eval_enabled: bool,
+) -> DynamicEvalOptionsGuard {
+    let previous = current_dynamic_eval_options();
+    set_dynamic_eval_options(
+        compat_mode,
+        runmat_extensions_enabled,
+        top_level_await_enabled,
+        dynamic_eval_enabled,
+    );
+    DynamicEvalOptionsGuard { previous }
+}
+
 fn current_dynamic_eval_options() -> DynamicEvalOptions {
     DYNAMIC_EVAL_OPTIONS.with(|slot| *slot.borrow())
 }

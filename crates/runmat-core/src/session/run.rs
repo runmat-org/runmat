@@ -274,6 +274,7 @@ impl RunMatSession {
         // blocking async-yielding prompt code on that local executor, native
         // prompt eval deliberately disables top-level await.
         let compat = self.compat_mode;
+        let dynamic_eval_enabled = self.dynamic_eval_enabled;
         #[cfg(target_arch = "wasm32")]
         let top_level_await_enabled = self.top_level_await_enabled;
         let source_name_for_eval_hook = self.current_source_name().to_string();
@@ -340,6 +341,12 @@ impl RunMatSession {
                         const INPUT_EVAL_STACK_BYTES: usize = 16 * 1024 * 1024;
                         Box::pin(async move {
                             stacker::grow(INPUT_EVAL_STACK_BYTES, || {
+                                let _dynamic_eval_guard = runmat_vm::push_dynamic_eval_options(
+                                    compat,
+                                    compat.allows_runmat_extensions(),
+                                    false,
+                                    dynamic_eval_enabled,
+                                );
                                 futures::executor::block_on(eval_expr(
                                     expr,
                                     compat,

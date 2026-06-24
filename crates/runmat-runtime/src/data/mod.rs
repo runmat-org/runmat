@@ -1164,6 +1164,24 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn transaction_registry_scope_survives_await() {
+        with_tx_registry_scope(async {
+            let tx_id = start_tx("/datasets/task-local.data".to_string(), 11).expect("start tx");
+            tokio::task::yield_now().await;
+            let status = with_tx(&tx_id, |tx| Ok(tx.status.clone())).expect("tx lookup");
+            assert_eq!(status, TxnStatus::Open);
+            remove_tx(&tx_id).expect("remove tx");
+            let err = with_tx(&tx_id, |_| Ok(())).expect_err("expected missing tx");
+            assert_eq!(
+                err.identifier(),
+                Some(DATA_TRANSACTION_NOT_FOUND_IDENTIFIER)
+            );
+        })
+        .await;
+    }
+
     #[test]
     fn sha256_hash_format_matches_expected_prefix() {
         let hash = sha256_hex(b"runmat");

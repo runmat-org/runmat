@@ -1265,8 +1265,7 @@ fn format_general_body(value: f64, precision: usize, alternate: bool, uppercase:
     }
 
     let exponent = abs_val.log10().floor() as i32;
-    let force_exponent = uppercase && alternate;
-    let use_exponent = force_exponent || exponent < -4 || exponent >= effective_precision as i32;
+    let use_exponent = exponent < -4 || exponent >= effective_precision as i32;
     let mut s = if use_exponent {
         let frac = effective_precision.saturating_sub(1);
         let mut out = format!("{:.*e}", frac, abs_val);
@@ -1440,7 +1439,7 @@ pub(crate) mod tests {
         assert_eq!(fmt(12345.0, "%.3g"), "1.23e+04");
         assert_eq!(fmt(1.5, "%#.0f"), "2.");
         assert_eq!(fmt(1.5, "%#.2e"), "1.50e+00");
-        assert_eq!(fmt(1.5, "%#.2G"), "1.5E+00");
+        assert_eq!(fmt(1.5, "%#.2G"), "1.5");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -3,6 +3,10 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    atomic::{AtomicBool, Ordering as AtomicOrdering},
+    Arc,
+};
 
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -10,6 +14,7 @@ use runmat_builtins::{
     CharArray, ClassDef, HandleRef, IntValue, LogicalArray, MethodDef, ObjectInstance, PropertyDef,
     StructValue, Tensor, Value,
 };
+use runmat_gc::{GcHandle, GcRoot, RootId, Trace, Tracer};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::keyword_of;
@@ -428,6 +433,98 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 thread_local! {
     static MAP_REGISTRY: RefCell<HashMap<u64, MapStore>> = RefCell::new(HashMap::new());
     static CONTAINERS_MAP_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
+    static MAP_ROOT_STATE: RefCell<Option<MapRootState>> = const { RefCell::new(None) };
+}
+
+struct MapRootState {
+    _root_id: RootId,
+    active: Arc<AtomicBool>,
+}
+
+struct MapRegistryRoot {
+    active: Arc<AtomicBool>,
+}
+
+impl GcRoot for MapRegistryRoot {
+    fn scan(&self) -> Vec<GcHandle> {
+        struct RootCollector {
+            roots: Vec<GcHandle>,
+        }
+
+        impl Tracer for RootCollector {
+            fn mark(&mut self, handle: GcHandle) {
+                self.roots.push(handle);
+            }
+        }
+
+        MAP_REGISTRY.with(|registry| {
+            let registry = registry.borrow();
+            let mut collector = RootCollector { roots: Vec::new() };
+            for store in registry.values() {
+                if let Some(storage) = store.storage {
+                    collector.mark(storage);
+                }
+                for entry in &store.entries {
+                    entry.key_value.trace(&mut collector);
+                    entry.value.trace(&mut collector);
+                }
+            }
+            collector.roots
+        })
+    }
+
+    fn description(&self) -> String {
+        "containers.Map registry values".to_string()
+    }
+
+    fn is_active(&self) -> bool {
+        self.active.load(AtomicOrdering::Acquire)
+            && MAP_REGISTRY.with(|registry| !registry.borrow().is_empty())
+    }
+}
+
+fn ensure_map_registry_root_registered(builtin: &'static str) -> BuiltinResult<()> {
+    MAP_ROOT_STATE.with(|state| {
+        if state
+            .borrow()
+            .as_ref()
+            .is_some_and(|state| state.active.load(AtomicOrdering::Acquire))
+        {
+            return Ok(());
+        }
+
+        let active = Arc::new(AtomicBool::new(true));
+        let root_id = runmat_gc::gc_register_root(Box::new(MapRegistryRoot {
+            active: Arc::clone(&active),
+        }))
+        .map_err(|e| {
+            map_internal(
+                format!("containers.Map: failed to register GC root: {e}"),
+                builtin,
+            )
+        })?;
+        *state.borrow_mut() = Some(MapRootState {
+            _root_id: root_id,
+            active,
+        });
+        Ok(())
+    })
+}
+
+fn deactivate_map_registry_root_if_empty() {
+    let empty = MAP_REGISTRY.with(|registry| {
+        registry
+            .try_borrow()
+            .map(|registry| registry.is_empty())
+            .unwrap_or(false)
+    });
+    if empty {
+        MAP_ROOT_STATE.with(|state| {
+            if let Some(state) = state.borrow().as_ref() {
+                state.active.store(false, AtomicOrdering::Release);
+            }
+        });
+    }
 }
 
 fn ensure_containers_map_class_registered() {
@@ -616,6 +713,7 @@ struct MapEntry {
 }
 
 struct MapStore {
+    storage: Option<GcHandle>,
     key_type: KeyType,
     value_type: ValueType,
     uniform_values: bool,
@@ -627,6 +725,7 @@ struct MapStore {
 impl MapStore {
     fn new(key_type: KeyType, value_type: ValueType, uniform_values: bool) -> Self {
         Self {
+            storage: None,
             key_type,
             value_type,
             uniform_values,
@@ -1160,6 +1259,7 @@ fn allocate_handle(store: MapStore, builtin: &'static str) -> BuiltinResult<Valu
     ensure_containers_map_class_registered();
 
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    ensure_map_registry_root_registered(builtin)?;
     MAP_REGISTRY.with(|registry| {
         registry
             .try_borrow_mut()
@@ -1179,9 +1279,20 @@ fn allocate_handle(store: MapStore, builtin: &'static str) -> BuiltinResult<Valu
                     registry.remove(&id);
                 }
             });
+            deactivate_map_registry_root_if_empty();
             return Err(map_error(format!("containers.Map: {e}"), builtin));
         }
     };
+    MAP_REGISTRY.with(|registry| {
+        let mut registry = registry
+            .try_borrow_mut()
+            .map_err(|_| map_internal("containers.Map: registry is already borrowed", builtin))?;
+        let store = registry
+            .get_mut(&id)
+            .ok_or_else(|| map_internal("containers.Map: internal storage not found", builtin))?;
+        store.storage = Some(gc);
+        Ok::<(), RuntimeError>(())
+    })?;
     Ok(Value::HandleObject(HandleRef {
         class_name: CLASS_NAME.to_string(),
         target: gc,
@@ -1282,7 +1393,7 @@ fn map_id(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<u64> {
             }
         }
         Some(Value::Num(n)) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0 => {
-            if *n > u64::MAX as f64 {
+            if *n >= u64::MAX as f64 {
                 Err(map_internal(
                     "containers.Map: map identifier out of range",
                     builtin,
@@ -2356,7 +2467,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn map_id_rejects_corrupted_numeric_identifiers() {
-        for id_value in [Value::Num(1.9), Value::Num(f64::INFINITY)] {
+        for id_value in [
+            Value::Num(1.9),
+            Value::Num(f64::INFINITY),
+            Value::Num(u64::MAX as f64),
+        ] {
             let mut storage = ObjectInstance::new(CLASS_NAME.to_string());
             storage.properties.insert("id".to_string(), id_value);
             let target = runmat_gc::gc_allocate(Value::Object(storage)).expect("storage");

@@ -344,6 +344,7 @@ impl GenerationalAllocator {
         self.live_epochs.insert(raw, epoch);
 
         // Update statistics
+        self.total_allocations.fetch_add(1, Ordering::Relaxed);
         stats.record_allocation(size);
 
         value_handle_from_ptr(ptr.cast::<Value>(), epoch)

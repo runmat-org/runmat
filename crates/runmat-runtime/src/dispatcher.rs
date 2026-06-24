@@ -510,29 +510,44 @@ fn normalize_constructor_result(
                 Ok(Value::Object(object))
             }
             Value::HandleObject(handle) => {
+                enum ConstructorMergeStatus {
+                    Merged,
+                    InvalidHandle,
+                    NonObject,
+                }
+
                 let merged = runmat_gc::gc_with_value_mut(&handle.target, |target| {
                     if let Value::Object(object) = target {
                         if !crate::object_handle_flag_valid(object) {
-                            return false;
+                            return ConstructorMergeStatus::InvalidHandle;
                         }
                         for (field, value) in struct_value.fields {
                             runmat_gc::gc_record_handle_write(&handle.target, &value);
                             object.properties.insert(field, value);
                         }
-                        true
+                        ConstructorMergeStatus::Merged
                     } else {
-                        false
+                        ConstructorMergeStatus::NonObject
                     }
                 })
                 .map_err(|e| {
                     build_runtime_error(format!("constructor result handle target invalid: {e}"))
                         .build()
                 })?;
-                if !merged {
-                    return Err(build_runtime_error(
-                        "constructor result handle target is not an object",
-                    )
-                    .build());
+                match merged {
+                    ConstructorMergeStatus::Merged => {}
+                    ConstructorMergeStatus::InvalidHandle => {
+                        return Err(build_runtime_error(
+                            "constructor result handle target is invalid",
+                        )
+                        .build());
+                    }
+                    ConstructorMergeStatus::NonObject => {
+                        return Err(build_runtime_error(
+                            "constructor result handle target is not an object",
+                        )
+                        .build());
+                    }
                 }
                 Ok(Value::HandleObject(handle))
             }

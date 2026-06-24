@@ -128,6 +128,9 @@ pub struct GarbageCollector {
     /// Collection state
     collection_in_progress: AtomicBool,
 
+    /// Active allocations whose just-created handles have not been returned or rooted.
+    allocation_in_progress: AtomicUsize,
+
     /// Active guarded value borrows. Collection is skipped while this is nonzero.
     active_value_borrows: AtomicUsize,
 
@@ -234,6 +237,7 @@ impl GarbageCollector {
             collector: Mutex::new(collector),
             root_ptrs: Mutex::new(HashMap::new()),
             collection_in_progress: AtomicBool::new(false),
+            allocation_in_progress: AtomicUsize::new(0),
             active_value_borrows: AtomicUsize::new(0),
             active_value_mut_borrow: AtomicBool::new(false),
             value_access: RwLock::new(()),
@@ -241,13 +245,7 @@ impl GarbageCollector {
         })
     }
 
-    /// Allocate a new Value object
-    pub fn allocate(&self, value: Value) -> Result<GcHandle> {
-        // Check if collection is needed
-        if self.should_collect() {
-            let _ = self.collect_minor();
-        }
-
+    fn allocate_inner(&self, value: Value) -> Result<(GcHandle, bool)> {
         // Capture GPU handle if present to attach a finalizer after allocation
         let gpu_handle: Option<runmat_accelerate_api::GpuTensorHandle> =
             if let Value::GpuTensor(h) = &value {
@@ -286,7 +284,23 @@ impl GarbageCollector {
         if usage > cfg.minor_gc_threshold
             || (cfg.minor_gc_threshold <= 0.35 && alloc_count > 0 && alloc_count.is_multiple_of(32))
         {
+            return Ok((ptr, true));
+        }
+        Ok((ptr, false))
+    }
+
+    /// Allocate a new Value object
+    pub fn allocate(&self, value: Value) -> Result<GcHandle> {
+        // Check if collection is needed
+        if self.should_collect() {
+            let _ = self.collect_minor();
+        }
+
+        let gate = AllocationGate::enter(self);
+        let (ptr, should_collect) = self.allocate_inner(value)?;
+        if should_collect {
             self.add_root(ptr)?;
+            drop(gate);
             let collect_result = self.collect_minor();
             let remove_result = self.remove_root(ptr);
             collect_result?;
@@ -429,6 +443,9 @@ impl GarbageCollector {
             return Ok(0);
         }
         let _collection_guard = CollectionInProgressGuard::new(&self.collection_in_progress);
+        if self.allocation_in_progress.load(Ordering::Acquire) != 0 {
+            return Ok(0);
+        }
         if self.active_value_borrows.load(Ordering::Acquire) != 0 {
             return Ok(0);
         }
@@ -495,6 +512,9 @@ impl GarbageCollector {
             return Ok(0);
         }
         let _collection_guard = CollectionInProgressGuard::new(&self.collection_in_progress);
+        if self.allocation_in_progress.load(Ordering::Acquire) != 0 {
+            return Ok(0);
+        }
         if self.active_value_borrows.load(Ordering::Acquire) != 0 {
             return Ok(0);
         }
@@ -729,36 +749,37 @@ impl Drop for CollectionInProgressGuard<'_> {
     }
 }
 
-struct CollectionGate<'a> {
-    active: &'a AtomicBool,
+struct AllocationGate<'a> {
+    gc: &'a GarbageCollector,
 }
 
-impl<'a> CollectionGate<'a> {
+impl<'a> AllocationGate<'a> {
     fn enter(gc: &'a GarbageCollector) -> Self {
-        while gc
-            .collection_in_progress
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            std::thread::yield_now();
-        }
-
-        Self {
-            active: &gc.collection_in_progress,
+        loop {
+            while gc.collection_in_progress.load(Ordering::Acquire) {
+                std::thread::yield_now();
+            }
+            gc.allocation_in_progress.fetch_add(1, Ordering::AcqRel);
+            if !gc.collection_in_progress.load(Ordering::Acquire) {
+                return Self { gc };
+            }
+            gc.allocation_in_progress.fetch_sub(1, Ordering::AcqRel);
         }
     }
 }
 
-impl Drop for CollectionGate<'_> {
+impl Drop for AllocationGate<'_> {
     fn drop(&mut self) {
-        self.active.store(false, Ordering::Release);
+        self.gc
+            .allocation_in_progress
+            .fetch_sub(1, Ordering::AcqRel);
     }
 }
 
 /// Allocate a GC value and register it as an explicit root before collection can run.
 pub fn gc_allocate_rooted(value: Value) -> Result<ExplicitRoot> {
-    let _gate = CollectionGate::enter(&GC);
-    let handle = GC.allocate(value)?;
+    let _gate = AllocationGate::enter(&GC);
+    let (handle, _) = GC.allocate_inner(value)?;
     GC.add_root(handle)?;
     Ok(ExplicitRoot {
         handle: Some(handle),
@@ -937,6 +958,7 @@ pub fn gc_reset_for_test() -> Result<()> {
 
     // Ensure collection is not in progress
     GC.collection_in_progress.store(false, Ordering::Relaxed);
+    GC.allocation_in_progress.store(0, Ordering::Relaxed);
     GC.active_value_borrows.store(0, Ordering::Relaxed);
     GC.active_value_mut_borrow.store(false, Ordering::Relaxed);
 

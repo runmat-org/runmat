@@ -774,7 +774,7 @@ fn property_name(value: &Value, builtin: &'static str) -> BuiltinResult<String> 
 fn canonical_property_name(name: &str) -> Cow<'_, str> {
     match name.to_ascii_lowercase().as_str() {
         "textcolor" => Cow::Borrowed("textcolor"),
-        "color" | "backgroundcolor" => Cow::Borrowed("color"),
+        "color" => Cow::Borrowed("color"),
         "fontsize" => Cow::Borrowed("fontsize"),
         "fontweight" => Cow::Borrowed("fontweight"),
         "fontangle" => Cow::Borrowed("fontangle"),

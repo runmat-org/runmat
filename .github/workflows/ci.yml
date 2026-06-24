@@ -294,35 +294,17 @@ jobs:
 
           Write-Host "Cloning vcpkg and installing OpenBLAS/LAPACK"
           $vcpkgRoot = Join-Path $pwd "vcpkg"
-          git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
-          & "$vcpkgRoot\bootstrap-vcpkg.bat"
 
           # Compute vcpkg triplet based on target
           if (Test-Path env:MatrixPlatformTarget) { Remove-Item env:MatrixPlatformTarget }
           $env:MatrixPlatformTarget = "${{ matrix.platform.target }}"
           if ($env:MatrixPlatformTarget -eq "aarch64-pc-windows-msvc") { $triplet = "arm64-windows" } else { $triplet = "x64-windows" }
 
-          # Ensure triplet in env
-          Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot"
-          Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
-          Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
-
-          # Install OpenBLAS and LAPACK provider; on arm64-windows use --allow-unsupported for gfortran
-          & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet"
-          if ($triplet -eq "arm64-windows") {
-            & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet" --allow-unsupported
-          } else {
-            & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet"
-          }
-          Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
-          Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\$triplet\bin"
-
-          # Hint BLAS/LAPACK discovery for blas-sys/lapack-sys
-          Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
-          Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIBS=openblas"
-          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
-          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
-          Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
+          & ".\scripts\install-windows-blas-lapack.ps1" `
+            -VcpkgRoot $vcpkgRoot `
+            -Triplet $triplet `
+            -AllowUnsupportedLapack:($triplet -eq "arm64-windows") `
+            -ExportGitHubEnvironment
 
       - name: Cross build (linux-x86_64)
         if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
