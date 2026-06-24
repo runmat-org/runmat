@@ -2,7 +2,9 @@
 
 use std::f64::consts::TAU;
 
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{
+    GpuTensorHandle, ProviderBitModulationRequest, ProviderModulationRequest,
+};
 use runmat_builtins::{ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
@@ -24,12 +26,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[ProviderHook::Custom("pskmod")],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Accepts gpuArray inputs by gathering through the active provider and returning a host ComplexTensor; complex GPU handles are not yet represented by the runtime.",
+    notes: "Uses provider-side constellation modulation for integer and bit gpuArray inputs and returns complex-interleaved GPU storage; providers without the hook fall back to host-compatible validation and re-upload.",
 };
 
 fn pskmod_error(message: impl Into<String>) -> RuntimeError {
@@ -73,9 +75,49 @@ async fn pskmod_gpu(
     order: usize,
     options: ParsedOptions,
 ) -> BuiltinResult<Value> {
+    let provider = runmat_accelerate_api::provider_for_handle(&handle)
+        .or_else(runmat_accelerate_api::provider)
+        .ok_or_else(|| pskmod_error("pskmod: no acceleration provider registered"))?;
+    let constellation = constellation_table(order, &options)?;
+    if runmat_accelerate_api::handle_is_logical(&handle)
+        && !matches!(options.input_type, InputType::Bit)
+    {
+        return Err(pskmod_error("pskmod: logical X requires InputType='bit'"));
+    }
+    match options.input_type {
+        InputType::Integer => {
+            let request = ProviderModulationRequest {
+                input: &handle,
+                constellation: &constellation,
+            };
+            if let Ok(out) = provider.modulate_constellation(request).await {
+                return Ok(gpu_helpers::complex_gpu_value(out));
+            }
+        }
+        InputType::Bit => {
+            let input_rows = handle.shape.first().copied().unwrap_or(0);
+            if input_rows > 0 {
+                let request = ProviderBitModulationRequest {
+                    input: &handle,
+                    input_rows,
+                    bits_per_symbol: bits_per_symbol(order)?,
+                    constellation: &constellation,
+                };
+                if let Ok(out) = provider.modulate_bits_constellation(request).await {
+                    return Ok(gpu_helpers::complex_gpu_value(out));
+                }
+            }
+        }
+    }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let symbols = SymbolInput::from_tensor(tensor, order, options.input_type)?;
-    modulate_symbols(symbols, order, &options)
+    let result = modulate_symbols(symbols, order, &options)?;
+    let Value::ComplexTensor(tensor) = result else {
+        return Err(pskmod_error("pskmod: expected complex modulation output"));
+    };
+    let out = gpu_helpers::upload_complex_tensor(provider, &tensor)
+        .map_err(|err| pskmod_error(format!("pskmod: {err}")))?;
+    Ok(gpu_helpers::complex_gpu_value(out))
 }
 
 #[derive(Clone, Debug)]
@@ -329,29 +371,39 @@ fn modulate_symbols(
     options: &ParsedOptions,
 ) -> BuiltinResult<Value> {
     validate_symbol_range(&symbols.data, order)?;
-    let inverse_mapping = match &options.mapping {
-        SymbolMapping::Binary => None,
-        SymbolMapping::Gray => Some(invert_mapping(&gray_symbol_order(order)?, order)?),
-        SymbolMapping::Custom(mapping) => Some(invert_mapping(mapping, order)?),
-    };
-
+    let constellation = constellation_table(order, options)?;
     let mut out = Vec::with_capacity(symbols.data.len());
     for symbol in symbols.data {
-        let point_index = inverse_mapping
-            .as_ref()
-            .map(|inverse| inverse[symbol])
-            .unwrap_or(symbol);
-        let theta = TAU * point_index as f64 / order as f64 + options.phase_offset;
-        let point = (theta.cos(), theta.sin());
-        out.push(match options.output_dtype {
-            OutputDType::Double => point,
-            OutputDType::Single => ((point.0 as f32) as f64, (point.1 as f32) as f64),
-        });
+        let point = symbol * 2;
+        out.push((constellation[point], constellation[point + 1]));
     }
 
     let tensor =
         ComplexTensor::new(out, symbols.shape).map_err(|e| pskmod_error(format!("pskmod: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
+}
+
+fn constellation_table(order: usize, options: &ParsedOptions) -> BuiltinResult<Vec<f64>> {
+    let inverse_mapping = match &options.mapping {
+        SymbolMapping::Binary => None,
+        SymbolMapping::Gray => Some(invert_mapping(&gray_symbol_order(order)?, order)?),
+        SymbolMapping::Custom(mapping) => Some(invert_mapping(mapping, order)?),
+    };
+    let mut table = Vec::with_capacity(order * 2);
+    for symbol in 0..order {
+        let point_index = inverse_mapping
+            .as_ref()
+            .map(|inverse| inverse[symbol])
+            .unwrap_or(symbol);
+        let theta = TAU * point_index as f64 / order as f64 + options.phase_offset;
+        let point = match options.output_dtype {
+            OutputDType::Double => (theta.cos(), theta.sin()),
+            OutputDType::Single => ((theta.cos() as f32) as f64, (theta.sin() as f32) as f64),
+        };
+        table.push(point.0);
+        table.push(point.1);
+    }
+    Ok(table)
 }
 
 fn gray_symbol_order(order: usize) -> BuiltinResult<Vec<usize>> {
@@ -572,6 +624,7 @@ fn is_name_value_key(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
 
     fn pskmod(x: Value, order: usize, rest: Vec<Value>) -> ComplexTensor {
@@ -726,6 +779,152 @@ mod tests {
         );
         assert_eq!(out.shape, vec![1, 2]);
         assert_complex_close(&out.data, &[(1.0, 0.0), (-1.0, 0.0)]);
+    }
+
+    #[test]
+    fn pskmod_inprocess_gpu_bit_input_returns_complex_resident_output() {
+        use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
+
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![0.0, 0.0, 1.0, 1.0], vec![2, 2]).unwrap();
+            let expected = pskmod(
+                Value::Tensor(input.clone()),
+                4,
+                vec![Value::from("InputType"), Value::from("bit")],
+            );
+            let input_handle = provider
+                .upload(&HostTensorView {
+                    data: &input.data,
+                    shape: &input.shape,
+                })
+                .expect("upload");
+            let result = block_on(super::pskmod_builtin(
+                Value::GpuTensor(input_handle.clone()),
+                Value::Num(4.0),
+                vec![Value::from("InputType"), Value::from("bit")],
+            ))
+            .expect("gpu pskmod bit");
+            let Value::GpuTensor(output_handle) = result else {
+                panic!("expected resident gpu output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&output_handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(crate::dispatcher::gather_if_needed_async(
+                &Value::GpuTensor(output_handle.clone()),
+            ))
+            .expect("gather output");
+            let Value::ComplexTensor(actual) = gathered else {
+                panic!("expected gathered complex tensor");
+            };
+            assert_eq!(actual.shape, expected.shape);
+            assert_complex_close(&actual.data, &expected.data);
+            provider.free(&input_handle).ok();
+            provider.free(&output_handle).ok();
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn pskmod_wgpu_input_returns_complex_resident_output() {
+        use runmat_accelerate_api::{AccelProvider, GpuTensorStorage, HostTensorView};
+
+        match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) {
+            Ok(provider) => {
+                let input = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).unwrap();
+                let expected = pskmod(Value::Tensor(input.clone()), 4, vec![]);
+                let view = HostTensorView {
+                    data: &input.data,
+                    shape: &input.shape,
+                };
+                let input_handle = provider.upload(&view).expect("upload");
+                let result = block_on(super::pskmod_builtin(
+                    Value::GpuTensor(input_handle.clone()),
+                    Value::Num(4.0),
+                    vec![],
+                ))
+                .expect("gpu pskmod");
+                let Value::GpuTensor(output_handle) = result else {
+                    panic!("expected resident gpu output");
+                };
+                assert_eq!(
+                    runmat_accelerate_api::handle_storage(&output_handle),
+                    GpuTensorStorage::ComplexInterleaved
+                );
+                let gathered = block_on(crate::dispatcher::gather_if_needed_async(
+                    &Value::GpuTensor(output_handle.clone()),
+                ))
+                .expect("gather output");
+                let Value::ComplexTensor(actual) = gathered else {
+                    panic!("expected gathered complex tensor");
+                };
+                assert_eq!(actual.shape, expected.shape);
+                assert_complex_close(&actual.data, &expected.data);
+                provider.free(&input_handle).ok();
+                provider.free(&output_handle).ok();
+            }
+            Err(err) => {
+                tracing::warn!("Skipping pskmod_wgpu_input_returns_complex_resident_output: {err}");
+            }
+        }
+        runmat_accelerate::simple_provider::register_inprocess_provider();
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn pskmod_wgpu_bit_input_returns_complex_resident_output() {
+        use runmat_accelerate_api::{AccelProvider, GpuTensorStorage, HostTensorView};
+
+        match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) {
+            Ok(provider) => {
+                let input = Tensor::new(vec![0.0, 0.0, 1.0, 1.0], vec![2, 2]).unwrap();
+                let expected = pskmod(
+                    Value::Tensor(input.clone()),
+                    4,
+                    vec![Value::from("InputType"), Value::from("bit")],
+                );
+                let view = HostTensorView {
+                    data: &input.data,
+                    shape: &input.shape,
+                };
+                let input_handle = provider.upload(&view).expect("upload");
+                let result = block_on(super::pskmod_builtin(
+                    Value::GpuTensor(input_handle.clone()),
+                    Value::Num(4.0),
+                    vec![Value::from("InputType"), Value::from("bit")],
+                ))
+                .expect("gpu pskmod bit");
+                let Value::GpuTensor(output_handle) = result else {
+                    panic!("expected resident gpu output");
+                };
+                assert_eq!(
+                    runmat_accelerate_api::handle_storage(&output_handle),
+                    GpuTensorStorage::ComplexInterleaved
+                );
+                let gathered = block_on(crate::dispatcher::gather_if_needed_async(
+                    &Value::GpuTensor(output_handle.clone()),
+                ))
+                .expect("gather output");
+                let Value::ComplexTensor(actual) = gathered else {
+                    panic!("expected gathered complex tensor");
+                };
+                assert_eq!(actual.shape, expected.shape);
+                assert_complex_close(&actual.data, &expected.data);
+                provider.free(&input_handle).ok();
+                provider.free(&output_handle).ok();
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "Skipping pskmod_wgpu_bit_input_returns_complex_resident_output: {err}"
+                );
+            }
+        }
+        runmat_accelerate::simple_provider::register_inprocess_provider();
     }
 
     #[test]

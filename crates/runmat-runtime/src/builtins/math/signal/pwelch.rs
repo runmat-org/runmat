@@ -1,6 +1,9 @@
 //! MATLAB-compatible Welch power spectral density estimate.
 
 use num_complex::Complex;
+use runmat_accelerate_api::{
+    ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
+};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -11,10 +14,10 @@ use rustfft::FftPlanner;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::math::signal::common::{
-    parse_nonnegative_integer, parse_scalar_f64, value_to_complex_vector,
+    gpu_matrix_shape, parse_nonnegative_integer, parse_scalar_f64, value_to_complex_vector,
 };
 use crate::builtins::math::signal::type_resolvers::pwelch_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -30,14 +33,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("welch-psd"),
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
+    provider_hooks: &[ProviderHook::Custom("uniform_spectral_estimate")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Welch spectral estimation runs on the host; GPU-resident inputs are gathered automatically.",
+    notes: "Uniform-grid Welch spectral estimation stays GPU-resident for input framing, FFTs, power scaling, and segment averaging; explicit-frequency forms fall back to host.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::pwelch")]
@@ -292,6 +295,16 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     if rest.len() > 7 {
         return Err(pwelch_error(&PWELCH_ERROR_ARG_COUNT));
     }
+    if let Value::GpuTensor(handle) = &x {
+        let (rows, cols) = gpu_matrix_shape(BUILTIN_NAME, "x", handle)
+            .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INVALID_SIGNAL, err.message()))?;
+        let complex_input = runmat_accelerate_api::handle_storage(handle)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
+        let options = parse_options(rest, rows, complex_input).await?;
+        if let Ok(value) = output_gpu(handle, rows, cols, &options).await {
+            return Ok(value);
+        }
+    }
     let input = value_to_signal_columns(x).await?;
     if input.rows == 0 || input.cols == 0 {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_SIGNAL));
@@ -316,6 +329,154 @@ fn output_eval(eval: PwelchEvaluation) -> BuiltinResult<Value> {
         if out_count == 1 {
             return Ok(Value::OutputList(vec![pxx]));
         }
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            vec![pxx, f],
+        ));
+    }
+    Ok(pxx)
+}
+
+fn same_gpu_handle(
+    a: &runmat_accelerate_api::GpuTensorHandle,
+    b: &runmat_accelerate_api::GpuTensorHandle,
+) -> bool {
+    a.device_id == b.device_id && a.buffer_id == b.buffer_id
+}
+
+fn free_if_distinct(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    freed: &[&runmat_accelerate_api::GpuTensorHandle],
+) {
+    if !freed.iter().any(|other| same_gpu_handle(handle, other)) {
+        provider.free(handle).ok();
+    }
+}
+
+async fn output_gpu(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    rows: usize,
+    cols: usize,
+    options: &PwelchOptions,
+) -> BuiltinResult<Value> {
+    let FrequencyGrid::Uniform { nfft } = options.grid else {
+        return Err(pwelch_error(&PWELCH_ERROR_INTERNAL));
+    };
+    let window_len = options.window.len();
+    let step = window_len - options.noverlap;
+    let starts = segment_starts(rows, window_len, step);
+    let segment_count = starts.len();
+    let window_energy = options.window.iter().map(|v| v * v).sum::<f64>();
+    if window_energy <= 0.0 || !window_energy.is_finite() {
+        return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
+    }
+    let denominator = match options.scale {
+        SpectrumScale::Psd => options.fs.unwrap_or(2.0 * std::f64::consts::PI) * window_energy,
+        SpectrumScale::Power => window_energy,
+    };
+    let input_len = rows
+        .checked_mul(cols)
+        .ok_or_else(|| pwelch_error(&PWELCH_ERROR_INTERNAL))?;
+    let frame_count = segment_count
+        .checked_mul(cols)
+        .ok_or_else(|| pwelch_error(&PWELCH_ERROR_INTERNAL))?;
+    let range = gpu_range(options.range);
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
+        return Err(pwelch_error(&PWELCH_ERROR_INTERNAL));
+    };
+    let request = ProviderSpectralRequest {
+        input: handle,
+        input_len,
+        input_complex: runmat_accelerate_api::handle_storage(handle)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+        window: &options.window,
+        nfft,
+        frame_count,
+        frame_mode: ProviderSpectralFrameMode::ColumnSliding {
+            hop: step,
+            input_rows: rows,
+            frames_per_column: segment_count,
+        },
+        range,
+        denominator,
+    };
+    let estimate = provider
+        .uniform_spectral_estimate(&request)
+        .await
+        .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, err.to_string()))?;
+
+    let ps_frames = match provider.reshape(&estimate.ps, &[estimate.rows, segment_count, cols]) {
+        Ok(ps_frames) => ps_frames,
+        Err(err) => {
+            provider.free(&estimate.s).ok();
+            provider.free(&estimate.ps).ok();
+            return Err(pwelch_error_with_detail(
+                &PWELCH_ERROR_INTERNAL,
+                err.to_string(),
+            ));
+        }
+    };
+    let ps_mean = match provider.reduce_mean_nd(&ps_frames, &[1]).await {
+        Ok(ps_mean) => ps_mean,
+        Err(err) => {
+            provider.free(&estimate.s).ok();
+            provider.free(&estimate.ps).ok();
+            free_if_distinct(provider, &ps_frames, &[&estimate.ps]);
+            return Err(pwelch_error_with_detail(
+                &PWELCH_ERROR_INTERNAL,
+                err.to_string(),
+            ));
+        }
+    };
+    let pxx = match provider.reshape(&ps_mean, &[estimate.rows, cols]) {
+        Ok(pxx) => pxx,
+        Err(err) => {
+            provider.free(&estimate.s).ok();
+            provider.free(&estimate.ps).ok();
+            free_if_distinct(provider, &ps_frames, &[&estimate.ps]);
+            free_if_distinct(provider, &ps_mean, &[&estimate.ps, &ps_frames]);
+            return Err(pwelch_error_with_detail(
+                &PWELCH_ERROR_INTERNAL,
+                err.to_string(),
+            ));
+        }
+    };
+
+    provider.free(&estimate.s).ok();
+    provider.free(&estimate.ps).ok();
+    free_if_distinct(provider, &ps_frames, &[&estimate.ps]);
+    free_if_distinct(provider, &ps_mean, &[&estimate.ps, &ps_frames, &pxx]);
+
+    let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(pxx);
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            if let Value::GpuTensor(handle) = &pxx {
+                provider.free(handle).ok();
+            }
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![pxx]));
+        }
+        let f_values = frequency_vector(nfft, options.fs, options.range);
+        let f_shape = [estimate.rows, 1usize];
+        let f = match provider.upload(&runmat_accelerate_api::HostTensorView {
+            data: &f_values,
+            shape: &f_shape,
+        }) {
+            Ok(f) => f,
+            Err(err) => {
+                if let Value::GpuTensor(handle) = &pxx {
+                    provider.free(handle).ok();
+                }
+                return Err(pwelch_error_with_detail(
+                    &PWELCH_ERROR_INTERNAL,
+                    err.to_string(),
+                ));
+            }
+        };
+        let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f);
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
             vec![pxx, f],
@@ -842,6 +1003,18 @@ fn select_range(
     }
 }
 
+fn frequency_vector(nfft: usize, fs: Option<f64>, range: FrequencyRange) -> Vec<f64> {
+    select_range(vec![0.0; nfft], nfft, fs, range).f
+}
+
+fn gpu_range(range: FrequencyRange) -> ProviderSpectralRange {
+    match range {
+        FrequencyRange::Onesided => ProviderSpectralRange::Onesided,
+        FrequencyRange::Twosided => ProviderSpectralRange::Twosided,
+        FrequencyRange::Centered => ProviderSpectralRange::Centered,
+    }
+}
+
 fn segment_starts(signal_len: usize, window_len: usize, step: usize) -> Vec<usize> {
     if signal_len <= window_len {
         return vec![0];
@@ -909,6 +1082,8 @@ fn keyword(value: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::builtin_function_by_name;
 
     fn call(x: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
@@ -1149,6 +1324,78 @@ mod tests {
         let (psd, _) = output_pair(psd);
         let (power, _) = output_pair(power);
         assert!((power[0] / psd[0] - 8.0).abs() < 1e-12);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn pwelch_wgpu_keeps_uniform_outputs_resident_and_matches_cpu() {
+        let _guard = crate::builtins::common::test_support::accel_test_lock();
+        let Some(provider) = runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider()
+            .expect("wgpu provider")
+        else {
+            return;
+        };
+        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+
+        let rows = 64usize;
+        let mut data = Vec::with_capacity(rows * 2);
+        data.extend(
+            (0..rows).map(|idx| (2.0 * std::f64::consts::PI * 4.0 * idx as f64 / 32.0).sin()),
+        );
+        data.extend(std::iter::repeat_n(1.0, rows));
+        let cpu_x = Tensor::new(data.clone(), vec![rows, 2]).unwrap();
+        let cpu = call(
+            Value::Tensor(cpu_x),
+            &[
+                Value::Num(16.0),
+                Value::Num(8.0),
+                Value::Num(32.0),
+                Value::Num(32.0),
+            ],
+            Some(2),
+        )
+        .expect("pwelch cpu");
+        let (cpu_pxx, cpu_f) = output_pair(cpu);
+
+        let shape = [rows, 2usize];
+        let handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &data,
+                shape: &shape,
+            })
+            .expect("upload");
+        let gpu = call(
+            Value::GpuTensor(handle.clone()),
+            &[
+                Value::Num(16.0),
+                Value::Num(8.0),
+                Value::Num(32.0),
+                Value::Num(32.0),
+            ],
+            Some(2),
+        )
+        .expect("pwelch gpu");
+        let Value::OutputList(values) = gpu else {
+            panic!("expected output list");
+        };
+        for value in &values {
+            assert!(matches!(value, Value::GpuTensor(_)));
+        }
+        let gpu_pxx =
+            crate::builtins::common::test_support::gather(values[0].clone()).expect("gather pxx");
+        let gpu_f =
+            crate::builtins::common::test_support::gather(values[1].clone()).expect("gather f");
+
+        assert_eq!(gpu_pxx.shape, vec![17, 2]);
+        assert_eq!(gpu_f.shape, vec![17, 1]);
+        assert_eq!(gpu_f.data, cpu_f);
+        for (actual, expected) in gpu_pxx.data.iter().zip(cpu_pxx.iter()) {
+            assert!(
+                (actual - expected).abs() <= 1.0e-5,
+                "actual={actual} expected={expected}"
+            );
+        }
+        provider.free(&handle).ok();
     }
 
     #[test]

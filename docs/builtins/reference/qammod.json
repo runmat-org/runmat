@@ -11,7 +11,7 @@
     "constellation",
     "gpu"
   ],
-  "summary": "Map integers to QAM constellation points in MATLAB and RunMat.",
+  "summary": "Map integer or bit symbols to QAM constellation points in MATLAB and RunMat.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -22,7 +22,7 @@
       "bool"
     ],
     "broadcasting": "none",
-    "notes": "gpuArray inputs are gathered through the active provider and modulated on the host because RunMat does not yet represent complex-valued GPU tensor handles. The result is a host ComplexTensor."
+    "notes": "Integer-symbol and bit-input gpuArrays use the active provider's modulation hooks to produce complex-interleaved GPU storage directly. Providers without those hooks fall back to host-compatible validation and re-upload."
   },
   "fusion": {
     "elementwise": false,
@@ -34,16 +34,17 @@
   "tested": {
     "unit": "builtins::comms::qammod::tests"
   },
-  "description": "`qammod(X, M)` maps integer symbols `X` to complex QAM constellation points for modulation order `M`. Gray, binary, and custom symbol-ordering behavior follow MATLAB semantics.",
+  "description": "`qammod(X, M)` maps integer symbols or bit groups `X` to complex QAM constellation points for modulation order `M`. Gray, binary, and custom symbol-ordering behavior follow MATLAB semantics.",
   "behaviors": [
     "`X` must contain finite integer values in the inclusive range `[0, M-1]`.",
+    "`InputType='bit'` groups rows of `X` in `log2(M)` chunks per column/channel and maps each bit group to one symbol.",
     "`M` must be a power-of-two integer greater than one.",
     "Square QAM orders such as 4, 16, 64, and 256 use symmetric odd integer amplitudes with minimum distance two.",
     "Non-square power-of-two orders use a rectangular grid with the larger dimension on the in-phase axis.",
     "The default `'gray'` order applies Gray coding independently to the in-phase and quadrature grid indexes.",
     "`'UnitAveragePower', true` scales the complete constellation so its average power is one.",
-    "`'OutputDataType', 'single'` rounds the real and imaginary samples through single precision before returning the host complex tensor.",
-    "`'PlotConstellation', true` and `InputType='bit'` are not implemented yet."
+    "`'OutputDataType', 'single'` rounds the real and imaginary samples through single precision before returning the complex tensor or resident complex gpuArray output.",
+    "`'PlotConstellation', true` is not implemented yet."
   ],
   "examples": [
     {
@@ -60,16 +61,21 @@
       "description": "Unit-average-power 16-QAM",
       "input": "y = qammod(0:15, 16, 'UnitAveragePower', true);\nmean(abs(y).^2)",
       "output": "ans = 1"
+    },
+    {
+      "description": "Bit input for 16-QAM",
+      "input": "bits = [0 1; 0 1; 0 1; 0 1];\ny = qammod(bits, 16, 'InputType', 'bit')",
+      "output": "y = [-3+3i 1-1i]"
     }
   ],
   "faqs": [
     {
       "question": "Does qammod execute on the GPU?",
-      "answer": "It accepts gpuArray inputs, but the current runtime gathers them to host memory and returns a host ComplexTensor because complex GPU tensor handles are not yet part of RunMat's value model."
+      "answer": "Yes when the active provider implements the modulation hooks. It maps resident integer-symbol and bit-input gpuArrays directly to complex-interleaved gpuArray outputs."
     },
     {
       "question": "Is bit input supported?",
-      "answer": "Not in this first implementation. Use integer symbols or convert bit groups to integer symbols before calling qammod."
+      "answer": "Yes. `InputType='bit'` accepts numeric 0/1 or logical inputs and groups rows in `log2(M)` chunks for each column/channel."
     }
   ],
   "links": [
@@ -86,9 +92,9 @@
     "label": "`crates/runmat-runtime/src/builtins/comms/qammod.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/comms/qammod.rs"
   },
-  "gpu_residency": "The builtin declares `GatherImmediately` residency. A gpuArray input is downloaded once through the dispatcher and then mapped to complex host output.",
+  "gpu_residency": "The builtin declares `NewHandle` residency for gpuArray inputs. Integer-symbol and bit-input gpuArrays stay resident through provider-side constellation modulation when provider support is available.",
   "gpu_behavior": [
-    "RunMat's current accelerator API stores real-valued GPU buffers. Since `qammod` necessarily produces complex-valued samples, the GPU-aware implementation preserves correctness by gathering device input and producing a `ComplexTensor` on the host.",
-    "The registered GPU metadata advertises the supported input scalar classes and the provider hook name future accelerators can use once complex GPU outputs are represented."
+    "RunMat represents complex GPU tensors as interleaved real/imaginary buffers with complex storage metadata, so downstream GPU-aware FFT and signal paths can consume the modulation output without a host result.",
+    "The provider hooks receive a validated constellation table and write the complex output on device. They read back only a compact validation state for MATLAB-compatible symbol or bit errors."
   ]
 }

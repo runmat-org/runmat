@@ -578,7 +578,7 @@ pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     Ok(handle)
 }
 
-fn build_line_plot(
+pub(super) fn build_line_plot(
     x: Vec<f64>,
     y: Vec<f64>,
     label: &str,

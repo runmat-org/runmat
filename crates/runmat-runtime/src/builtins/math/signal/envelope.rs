@@ -1,6 +1,9 @@
 //! MATLAB-compatible `envelope` builtin for signal upper/lower envelopes.
 
 use num_complex::Complex;
+use runmat_accelerate_api::{
+    ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderEnvelopeResult,
+};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -11,7 +14,7 @@ use rustfft::FftPlanner;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::interpolation::pp::{
@@ -30,14 +33,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("signal-envelope"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
+    provider_hooks: &[ProviderHook::Custom("signal_envelope")],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Computes analytic, RMS, and peak envelopes on the CPU reference path after gathering GPU inputs.",
+    notes: "Uses provider-side resident analytic and RMS envelope kernels for real GPU tensors; peak mode gathers because extrema selection plus spline interpolation is sparse and irregular.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::envelope")]
@@ -255,27 +258,36 @@ fn envelope_error_with_message(
     builtin_path = "crate::builtins::math::signal::envelope"
 )]
 async fn envelope_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let input = value_to_signal_input(x).await?;
     let options = parse_options(&rest)?;
-    let eval = evaluate(input, &options)?;
 
     if crate::output_context::requested_output_count() == Some(0)
         && crate::output_count::current_output_count().is_none()
     {
+        let input = value_to_signal_input(x).await?;
+        let eval = evaluate(input, &options)?;
         render_envelope_plot(&eval).await?;
         return Ok(Value::OutputList(Vec::new()));
     }
 
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
+            let input = value_to_signal_input(x).await?;
+            let eval = evaluate(input, &options)?;
             render_envelope_plot(&eval).await?;
             return Ok(Value::OutputList(Vec::new()));
         }
-        if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.upper_value()?]));
-        }
         if out_count > 2 {
             return Err(envelope_error(&ENVELOPE_ERROR_TOO_MANY_OUTPUTS));
+        }
+        if let Value::GpuTensor(handle) = &x {
+            if let Some(value) = try_gpu_envelope(handle, &options, Some(out_count)).await? {
+                return Ok(value);
+            }
+        }
+        let input = value_to_signal_input(x).await?;
+        let eval = evaluate(input, &options)?;
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![eval.upper_value()?]));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
@@ -283,7 +295,99 @@ async fn envelope_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
 
+    if let Value::GpuTensor(handle) = &x {
+        if let Some(value) = try_gpu_envelope(handle, &options, None).await? {
+            return Ok(value);
+        }
+    }
+    let input = value_to_signal_input(x).await?;
+    let eval = evaluate(input, &options)?;
     eval.upper_value()
+}
+
+async fn try_gpu_envelope(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    options: &EnvelopeOptions,
+    out_count: Option<usize>,
+) -> BuiltinResult<Option<Value>> {
+    let Some(method) = provider_envelope_method(options) else {
+        return Ok(None);
+    };
+    let Some((channel_len, channel_count, output_shape)) = gpu_signal_shape(handle)? else {
+        return Ok(None);
+    };
+    let request = ProviderEnvelopeRequest {
+        input: handle,
+        channel_len,
+        channel_count,
+        output_shape: &output_shape,
+        method,
+    };
+    let result = match runmat_accelerate_api::signal_envelope(request).await {
+        Ok(result) => result,
+        Err(_) => return Ok(None),
+    };
+    Ok(Some(gpu_envelope_value(result, out_count)))
+}
+
+fn provider_envelope_method(options: &EnvelopeOptions) -> Option<ProviderEnvelopeMethod> {
+    match options.method {
+        EnvelopeMethod::Analytic => Some(match options.parameter {
+            Some(filter_len) => ProviderEnvelopeMethod::AnalyticFir { filter_len },
+            None => ProviderEnvelopeMethod::Analytic,
+        }),
+        EnvelopeMethod::Rms => Some(ProviderEnvelopeMethod::Rms {
+            window_len: options.parameter.unwrap_or(1),
+        }),
+        EnvelopeMethod::Peak => None,
+    }
+}
+
+fn gpu_signal_shape(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+) -> BuiltinResult<Option<(usize, usize, Vec<usize>)>> {
+    if handle.shape.is_empty() || handle.shape.len() > 2 {
+        return Ok(None);
+    }
+    let Some(handle_len) = handle
+        .shape
+        .iter()
+        .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+    else {
+        return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
+    };
+    let output_shape = tensor::default_shape_for(&handle.shape, handle_len);
+    let Some(total_len) = output_shape
+        .iter()
+        .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+    else {
+        return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
+    };
+    if total_len == 0 {
+        return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
+    }
+    let rows = output_shape.first().copied().unwrap_or(total_len);
+    let cols = output_shape.get(1).copied().unwrap_or(1);
+    if rows == 0 || cols == 0 {
+        return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
+    }
+    if rows == 1 || cols == 1 {
+        Ok(Some((total_len, 1, output_shape)))
+    } else {
+        Ok(Some((rows, cols, output_shape)))
+    }
+}
+
+fn gpu_envelope_value(result: ProviderEnvelopeResult, out_count: Option<usize>) -> Value {
+    let upper = gpu_helpers::resident_gpu_value(result.upper);
+    match out_count {
+        None => upper,
+        Some(1) => Value::OutputList(vec![upper]),
+        Some(count) => crate::output_count::output_list_with_padding(
+            count,
+            vec![upper, gpu_helpers::resident_gpu_value(result.lower)],
+        ),
+    }
 }
 
 async fn value_to_signal_input(value: Value) -> BuiltinResult<SignalInput> {
@@ -901,6 +1005,85 @@ mod tests {
                 .zip(fir.iter())
                 .any(|(left, right)| (left - right).abs() > 1.0e-6),
             "filter-length analytic form should not silently use the DFT path"
+        );
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn assert_gpu_envelope_matches_cpu(values: Vec<f64>, shape: Vec<usize>, rest: Vec<Value>) {
+        use crate::builtins::common::test_support;
+        use runmat_accelerate::backend::wgpu::provider::{
+            register_wgpu_provider, WgpuProviderOptions,
+        };
+        use runmat_accelerate_api::HostTensorView;
+
+        let _guard = test_support::accel_test_lock();
+        if register_wgpu_provider(WgpuProviderOptions::default()).is_err() {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let tensor = Tensor::new(values.clone(), shape.clone()).expect("cpu tensor");
+        let expected =
+            output_list(call(Value::Tensor(tensor), rest.clone(), Some(2)).expect("cpu envelope"));
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &shape,
+            })
+            .expect("upload");
+        let actual = output_list(
+            call(Value::GpuTensor(handle.clone()), rest, Some(2)).expect("gpu envelope"),
+        );
+        let (Value::GpuTensor(upper_handle), Value::GpuTensor(lower_handle)) =
+            (actual[0].clone(), actual[1].clone())
+        else {
+            panic!("expected resident gpu outputs, got {actual:?}");
+        };
+        let upper = test_support::gather(Value::GpuTensor(upper_handle.clone())).expect("upper");
+        let lower = test_support::gather(Value::GpuTensor(lower_handle.clone())).expect("lower");
+        let expected_upper = tensor_data(expected[0].clone());
+        let expected_lower = tensor_data(expected[1].clone());
+        assert_eq!(upper.shape, shape);
+        assert_eq!(lower.shape, shape);
+        for (actual, expected) in upper.data.iter().zip(expected_upper.iter()) {
+            assert!((actual - expected).abs() < 1.0e-5, "{actual} != {expected}");
+        }
+        for (actual, expected) in lower.data.iter().zip(expected_lower.iter()) {
+            assert!((actual - expected).abs() < 1.0e-5, "{actual} != {expected}");
+        }
+        provider.free(&handle).ok();
+        provider.free(&upper_handle).ok();
+        provider.free(&lower_handle).ok();
+        runmat_accelerate::simple_provider::register_inprocess_provider();
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn analytic_envelope_wgpu_stays_resident_and_matches_cpu() {
+        let values = (0..16)
+            .map(|idx| (idx as f64 * 0.7).sin() + 0.25)
+            .collect::<Vec<_>>();
+        assert_gpu_envelope_matches_cpu(values, vec![1, 16], Vec::new());
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn analytic_fir_envelope_wgpu_stays_resident_and_matches_cpu() {
+        let values = vec![0.0, 1.0, 0.0, -0.5, 0.0, 0.25, 0.0, -0.125];
+        assert_gpu_envelope_matches_cpu(
+            values,
+            vec![8, 1],
+            vec![Value::Num(5.0), Value::String("analytic".to_string())],
+        );
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn rms_envelope_wgpu_stays_resident_and_matches_cpu() {
+        let values = vec![0.0, 3.0, 4.0, 0.0, 1.0, -2.0, 0.5, 0.25];
+        assert_gpu_envelope_matches_cpu(
+            values,
+            vec![4, 2],
+            vec![Value::Num(3.0), Value::String("rms".to_string())],
         );
     }
 

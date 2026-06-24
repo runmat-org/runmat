@@ -1,8 +1,8 @@
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::cast_slice;
 use runmat_accelerate_api::{
-    GpuTensorHandle, ProviderConv1dOptions, ProviderConvMode, ProviderPolyderQuotient,
-    ProviderPolyfitResult, ProviderPolyvalOptions,
+    GpuTensorHandle, GpuTensorStorage, ProviderConv1dOptions, ProviderConvMode,
+    ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions,
 };
 use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider;
 use std::sync::Arc;
@@ -196,58 +196,101 @@ impl WgpuProvider {
             "polyint: precision mismatch between tensor and provider"
         );
         let orientation = polynomial_orientation(&entry.shape)?;
+        let storage = if runmat_accelerate_api::handle_storage(polynomial)
+            == GpuTensorStorage::ComplexInterleaved
+        {
+            GpuTensorStorage::ComplexInterleaved
+        } else {
+            entry.storage.clone()
+        };
+        let storage_factor = match storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
+        ensure!(
+            entry.len.is_multiple_of(storage_factor),
+            "polyint: storage length does not match tensor storage"
+        );
+        let input_len = entry.len / storage_factor;
 
         if entry.len == 0 {
             let shape = shape_for_orientation(orientation, 1);
-            let buffer = match self.precision {
-                NumericPrecision::F64 => Arc::new(self.device.create_buffer_init(
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some("runmat-polyint-const-f64"),
-                        contents: cast_slice(&[constant]),
-                        usage: wgpu::BufferUsages::STORAGE
-                            | wgpu::BufferUsages::COPY_DST
-                            | wgpu::BufferUsages::COPY_SRC,
-                    },
-                )),
-                NumericPrecision::F32 => {
-                    let value = constant as f32;
-                    Arc::new(
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("runmat-polyint-const-f32"),
-                                contents: cast_slice(&[value]),
+            let output_len = storage_factor;
+            let buffer =
+                match self.precision {
+                    NumericPrecision::F64 => {
+                        let values = if storage_factor == 1 {
+                            vec![constant]
+                        } else {
+                            vec![constant, 0.0]
+                        };
+                        Arc::new(self.device.create_buffer_init(
+                            &wgpu::util::BufferInitDescriptor {
+                                label: Some("runmat-polyint-const-f64"),
+                                contents: cast_slice(&values),
                                 usage: wgpu::BufferUsages::STORAGE
                                     | wgpu::BufferUsages::COPY_DST
                                     | wgpu::BufferUsages::COPY_SRC,
-                            }),
-                    )
-                }
-            };
-            return Ok(self.register_existing_buffer(buffer, shape, 1));
+                            },
+                        ))
+                    }
+                    NumericPrecision::F32 => {
+                        let values = if storage_factor == 1 {
+                            vec![constant as f32]
+                        } else {
+                            vec![constant as f32, 0.0]
+                        };
+                        Arc::new(self.device.create_buffer_init(
+                            &wgpu::util::BufferInitDescriptor {
+                                label: Some("runmat-polyint-const-f32"),
+                                contents: cast_slice(&values),
+                                usage: wgpu::BufferUsages::STORAGE
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::COPY_SRC,
+                            },
+                        ))
+                    }
+                };
+            return Ok(
+                self.register_existing_buffer_with_storage(buffer, shape, output_len, storage)
+            );
         }
 
         ensure!(
-            entry.len <= u32::MAX as usize,
+            input_len <= u32::MAX as usize,
             "polyint: polynomial length exceeds GPU limits"
         );
 
-        let output_len = entry.len + 1;
+        let output_logical_len = input_len + 1;
+        let output_len = output_logical_len
+            .checked_mul(storage_factor)
+            .ok_or_else(|| anyhow!("polyint: output length exceeds GPU limits"))?;
+        ensure!(
+            output_len <= u32::MAX as usize,
+            "polyint: output length exceeds GPU limits"
+        );
         let out_buffer = self.create_storage_buffer_checked(output_len, "runmat-polyint-out")?;
         let params_buffer = match self.precision {
             NumericPrecision::F64 => {
                 let params = PolyintParamsF64 {
-                    input_len: entry.len as u32,
+                    input_len: input_len as u32,
                     output_len: output_len as u32,
+                    storage_factor: storage_factor as u32,
+                    _pad0: 0,
                     constant,
                 };
                 self.uniform_buffer(&params, "runmat-polyint-params-f64")
             }
             NumericPrecision::F32 => {
                 let params = PolyintParamsF32 {
-                    input_len: entry.len as u32,
+                    input_len: input_len as u32,
                     output_len: output_len as u32,
+                    storage_factor: storage_factor as u32,
+                    _pad0: 0,
                     constant: constant as f32,
-                    _pad0: 0.0,
+                    _pad1: 0.0,
+                    _pad2: 0.0,
+                    _pad3: 0.0,
                 };
                 self.uniform_buffer(&params, "runmat-polyint-params-f32")
             }
@@ -292,8 +335,8 @@ impl WgpuProvider {
         }
         self.submit(encoder);
 
-        let out_shape = shape_for_orientation(orientation, output_len);
-        Ok(self.register_existing_buffer(out_buffer, out_shape, output_len))
+        let out_shape = shape_for_orientation(orientation, output_logical_len);
+        Ok(self.register_existing_buffer_with_storage(out_buffer, out_shape, output_len, storage))
     }
     pub(crate) async fn polyder_exec(
         &self,

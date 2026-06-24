@@ -13,9 +13,12 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": [],
+    "precisions": [
+      "f32",
+      "f64"
+    ],
     "broadcasting": "none",
-    "notes": "Welch spectral estimation runs on the host. GPU-resident signal and window inputs are gathered automatically before FFT processing."
+    "notes": "Uniform-grid Welch spectral estimation keeps GPU-resident signals on device through segment framing, FFTs, power scaling, averaging, and frequency-grid generation. Explicit-frequency forms fall back to host execution."
   },
   "fusion": {
     "elementwise": false,

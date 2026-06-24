@@ -1,5 +1,6 @@
 //! MATLAB-compatible scalar `sym` builtin for symbolic variables and constants.
 
+use num_bigint::BigInt;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -92,6 +93,9 @@ async fn sym_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         if is_valid_identifier(trimmed) {
             return Ok(Value::Symbolic(SymbolicExpr::variable(trimmed)));
         }
+        if let Some(expr) = parse_rational_literal(trimmed) {
+            return Ok(symbolic_expr_to_value(expr));
+        }
         if let Ok(value) = trimmed.parse::<f64>() {
             if value.is_finite() {
                 return Ok(symbolic_expr_to_value(SymbolicExpr::constant(value)));
@@ -108,6 +112,16 @@ fn sym_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
+}
+
+fn parse_rational_literal(text: &str) -> Option<SymbolicExpr> {
+    let (lhs, rhs) = text.split_once('/')?;
+    if rhs.contains('/') {
+        return None;
+    }
+    let numerator = lhs.trim().parse::<BigInt>().ok()?;
+    let denominator = rhs.trim().parse::<BigInt>().ok()?;
+    SymbolicExpr::rational(numerator, denominator)
 }
 
 #[cfg(test)]
@@ -129,6 +143,27 @@ mod tests {
             Value::Symbolic(expr) => assert_eq!(expr.constant_value(), Some(3.5)),
             other => panic!("expected symbolic constant, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn creates_symbolic_rational_from_text() {
+        let value = futures::executor::block_on(sym_builtin(Value::from(" 2 / 6 "), Vec::new()))
+            .expect("sym");
+        assert_eq!(value.to_string(), "1/3");
+        match value {
+            Value::Symbolic(expr) => assert_eq!(expr.numeric_constant_value(), Some(1.0 / 3.0)),
+            other => panic!("expected symbolic rational, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn creates_symbolic_rational_from_extreme_signed_text() {
+        let value = futures::executor::block_on(sym_builtin(
+            Value::from("-170141183460469231731687303715884105728 / -1"),
+            Vec::new(),
+        ))
+        .expect("sym");
+        assert_eq!(value.to_string(), "170141183460469231731687303715884105728");
     }
 
     #[test]

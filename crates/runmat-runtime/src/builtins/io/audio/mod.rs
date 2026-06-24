@@ -1,11 +1,11 @@
-//! Audio file metadata builtins.
+//! Audio file metadata and sample decoding builtins.
 
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Value,
+    NumericDType, StructValue, Tensor, Value,
 };
 use runmat_filesystem as fs;
 use runmat_macros::runtime_builtin;
@@ -17,7 +17,8 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const BUILTIN_NAME: &str = "audioinfo";
+const AUDIOINFO_BUILTIN_NAME: &str = "audioinfo";
+const AUDIOREAD_BUILTIN_NAME: &str = "audioread";
 
 const AUDIOINFO_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "info",
@@ -97,6 +98,155 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not eligible for fusion; performs host-side file I/O.",
 };
 
+const AUDIOREAD_OUTPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Decoded samples as an N-by-C matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "Fs",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Sample rate in Hz.",
+    },
+];
+const AUDIOREAD_OUTPUTS_SAMPLES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Decoded samples as an N-by-C matrix.",
+}];
+const AUDIOREAD_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "filename",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Audio file path.",
+}];
+const AUDIOREAD_INPUTS_RANGE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Audio file path.",
+    },
+    BuiltinParamDescriptor {
+        name: "samples",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "One-based inclusive frame range [first last].",
+    },
+];
+const AUDIOREAD_INPUTS_RANGE_NATIVE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Audio file path.",
+    },
+    BuiltinParamDescriptor {
+        name: "samples",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "One-based inclusive frame range [first last].",
+    },
+    BuiltinParamDescriptor {
+        name: "datatype",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Output class; \"native\" preserves representable source classes.",
+    },
+];
+const AUDIOREAD_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "y = audioread(filename)",
+        inputs: &AUDIOREAD_INPUTS_FILENAME,
+        outputs: &AUDIOREAD_OUTPUTS_SAMPLES,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y, Fs] = audioread(filename)",
+        inputs: &AUDIOREAD_INPUTS_FILENAME,
+        outputs: &AUDIOREAD_OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = audioread(filename, samples)",
+        inputs: &AUDIOREAD_INPUTS_RANGE,
+        outputs: &AUDIOREAD_OUTPUTS_SAMPLES,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y, Fs] = audioread(filename, samples, datatype)",
+        inputs: &AUDIOREAD_INPUTS_RANGE_NATIVE,
+        outputs: &AUDIOREAD_OUTPUTS,
+    },
+];
+const AUDIOREAD_ERROR_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.AUDIOREAD.ARGUMENT",
+    identifier: Some("RunMat:audioread:InvalidArgument"),
+    when: "Filename, sample range, datatype, or output count is invalid.",
+    message: "audioread: invalid argument",
+};
+const AUDIOREAD_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.AUDIOREAD.IO",
+    identifier: Some("RunMat:audioread:Io"),
+    when: "The audio file cannot be read.",
+    message: "audioread: unable to read file",
+};
+const AUDIOREAD_ERROR_FORMAT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.AUDIOREAD.FORMAT",
+    identifier: Some("RunMat:audioread:UnsupportedFormat"),
+    when: "The file is not a supported audio container, uses unsupported audio coding, or is malformed.",
+    message: "audioread: unsupported or invalid audio file",
+};
+const AUDIOREAD_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    AUDIOREAD_ERROR_ARGUMENT,
+    AUDIOREAD_ERROR_IO,
+    AUDIOREAD_ERROR_FORMAT,
+];
+
+pub const AUDIOREAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &AUDIOREAD_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &AUDIOREAD_ERRORS,
+};
+
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::audio")]
+pub const AUDIOREAD_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: "audioread",
+    op_kind: GpuOpKind::Custom("io-audioread"),
+    supported_precisions: &[],
+    broadcast: BroadcastSemantics::None,
+    provider_hooks: &[],
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    residency: ResidencyPolicy::GatherImmediately,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: None,
+    workgroup_size: None,
+    accepts_nan_mode: false,
+    notes: "Runs on the host; file I/O and audio decoding are not acceleration operations.",
+};
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::audio")]
+pub const AUDIOREAD_FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
+    name: "audioread",
+    shape: ShapeRequirements::Any,
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    elementwise: None,
+    reduction: None,
+    emits_nan: false,
+    notes: "Not eligible for fusion; performs host-side file I/O and decoding.",
+};
+
 fn audioinfo_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     audioinfo_error_with(error, error.message)
 }
@@ -105,7 +255,7 @@ fn audioinfo_error_with(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
 ) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    let mut builder = build_runtime_error(message).with_builtin(AUDIOINFO_BUILTIN_NAME);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -121,7 +271,7 @@ where
     E: std::error::Error + Send + Sync + 'static,
 {
     let mut builder = build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
+        .with_builtin(AUDIOINFO_BUILTIN_NAME)
         .with_source(source);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
@@ -129,11 +279,55 @@ where
     builder.build()
 }
 
-fn map_control_flow(err: RuntimeError) -> RuntimeError {
+fn audioread_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    audioread_error_with(error, error.message)
+}
+
+fn audioread_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(AUDIOREAD_BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn audioread_error_with_source<E>(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+    source: E,
+) -> RuntimeError
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    let mut builder = build_runtime_error(message)
+        .with_builtin(AUDIOREAD_BUILTIN_NAME)
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_audioinfo_control_flow(err: RuntimeError) -> RuntimeError {
     let identifier = err.identifier().map(|value| value.to_string());
     let message = err.message().to_string();
     let mut builder = build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
+        .with_builtin(AUDIOINFO_BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_audioread_control_flow(err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(|value| value.to_string());
+    let message = err.message().to_string();
+    let mut builder = build_runtime_error(message)
+        .with_builtin(AUDIOREAD_BUILTIN_NAME)
         .with_source(err);
     if let Some(identifier) = identifier {
         builder = builder.with_identifier(identifier);
@@ -154,8 +348,8 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 async fn audioinfo_builtin(filename: Value) -> BuiltinResult<Value> {
     let filename = gather_if_needed_async(&filename)
         .await
-        .map_err(map_control_flow)?;
-    let path = resolve_path(&filename)?;
+        .map_err(map_audioinfo_control_flow)?;
+    let path = resolve_audioinfo_path(&filename)?;
     let bytes = fs::read_async(&path).await.map_err(|err| {
         audioinfo_error_with_source(
             &AUDIOINFO_ERROR_IO,
@@ -169,6 +363,56 @@ async fn audioinfo_builtin(filename: Value) -> BuiltinResult<Value> {
     Ok(Value::Struct(
         metadata.into_struct(&path, bytes.len() as f64),
     ))
+}
+
+#[runtime_builtin(
+    name = "audioread",
+    category = "io/audio",
+    summary = "Read audio samples from a file.",
+    keywords = "audioread,audio,wav,rf64,pcm,float,sample rate,channels",
+    accel = "cpu",
+    type_resolver(crate::builtins::io::type_resolvers::audioread_type),
+    descriptor(crate::builtins::io::audio::AUDIOREAD_DESCRIPTOR),
+    builtin_path = "crate::builtins::io::audio"
+)]
+async fn audioread_builtin(filename: Value, args: Vec<Value>) -> BuiltinResult<Value> {
+    let filename = gather_if_needed_async(&filename)
+        .await
+        .map_err(map_audioread_control_flow)?;
+    let mut gathered_args = Vec::with_capacity(args.len());
+    for arg in args {
+        gathered_args.push(
+            gather_if_needed_async(&arg)
+                .await
+                .map_err(map_audioread_control_flow)?,
+        );
+    }
+    let options = parse_audioread_options(&gathered_args)?;
+    let path = resolve_audioread_path(&filename)?;
+    let bytes = fs::read_async(&path).await.map_err(|err| {
+        audioread_error_with_source(
+            &AUDIOREAD_ERROR_IO,
+            format!("audioread: unable to read \"{}\" ({err})", path.display()),
+            err,
+        )
+    })?;
+    let decoded = decode_audio_samples(&bytes, options).map_err(|message| {
+        audioread_error_with(&AUDIOREAD_ERROR_FORMAT, format!("audioread: {message}"))
+    })?;
+
+    match crate::output_count::current_output_count() {
+        None => Ok(Value::Tensor(decoded.samples)),
+        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(1) => Ok(Value::OutputList(vec![Value::Tensor(decoded.samples)])),
+        Some(2) => Ok(Value::OutputList(vec![
+            Value::Tensor(decoded.samples),
+            Value::Num(decoded.sample_rate),
+        ])),
+        Some(_) => Err(audioread_error_with(
+            &AUDIOREAD_ERROR_ARGUMENT,
+            "audioread: too many output arguments",
+        )),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -241,54 +485,357 @@ impl AudioMetadata {
 }
 
 fn parse_wave(bytes: &[u8]) -> Result<AudioMetadata, String> {
+    let parsed = parse_wave_container(bytes)?;
+    let total_samples = if parsed.format.block_align > 0 {
+        Some(parsed.data_len as u64 / parsed.format.block_align as u64)
+    } else {
+        None
+    };
+    Ok(AudioMetadata {
+        format: "WAV",
+        compression_method: wave_compression_name(parsed.format.effective_format_tag()).to_string(),
+        num_channels: parsed.format.channels,
+        sample_rate: parsed.format.sample_rate as f64,
+        total_samples,
+        bits_per_sample: Some(
+            parsed
+                .format
+                .valid_bits_per_sample
+                .unwrap_or(parsed.format.bits_per_sample),
+        ),
+        bit_rate: Some(parsed.format.byte_rate as f64 * 8.0),
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AudioreadOptions {
+    range: Option<(usize, usize)>,
+    native: bool,
+}
+
+#[derive(Debug, Clone)]
+struct DecodedAudio {
+    samples: Tensor,
+    sample_rate: f64,
+}
+
+fn parse_audioread_options(args: &[Value]) -> BuiltinResult<AudioreadOptions> {
+    let mut range = None;
+    let mut native = false;
+    match args {
+        [] => {}
+        [single] => {
+            if let Some(text) = scalar_text(single) {
+                native = parse_audioread_datatype(&text)?;
+            } else {
+                range = Some(parse_sample_range(single)?);
+            }
+        }
+        [samples, datatype] => {
+            range = Some(parse_sample_range(samples)?);
+            let text = scalar_text(datatype).ok_or_else(|| {
+                audioread_error_with(
+                    &AUDIOREAD_ERROR_ARGUMENT,
+                    "audioread: datatype must be \"native\" or \"double\"",
+                )
+            })?;
+            native = parse_audioread_datatype(&text)?;
+        }
+        _ => {
+            return Err(audioread_error_with(
+                &AUDIOREAD_ERROR_ARGUMENT,
+                "audioread: too many input arguments",
+            ));
+        }
+    }
+    Ok(AudioreadOptions { range, native })
+}
+
+fn parse_audioread_datatype(value: &str) -> BuiltinResult<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "double" => Ok(false),
+        "native" => Ok(true),
+        _ => Err(audioread_error_with(
+            &AUDIOREAD_ERROR_ARGUMENT,
+            "audioread: datatype must be \"native\" or \"double\"",
+        )),
+    }
+}
+
+fn parse_sample_range(value: &Value) -> BuiltinResult<(usize, usize)> {
+    let data: Vec<f64> = match value {
+        Value::Tensor(t) => t.data.clone(),
+        Value::Num(n) => vec![*n],
+        Value::Int(i) => vec![i.to_f64()],
+        _ => {
+            return Err(audioread_error_with(
+                &AUDIOREAD_ERROR_ARGUMENT,
+                "audioread: sample range must be a two-element numeric vector",
+            ));
+        }
+    };
+    if data.len() != 2 {
+        return Err(audioread_error_with(
+            &AUDIOREAD_ERROR_ARGUMENT,
+            "audioread: sample range must be [first last]",
+        ));
+    }
+    let first = parse_positive_integer(data[0], "first sample")?;
+    let last = parse_positive_integer(data[1], "last sample")?;
+    if first > last {
+        return Err(audioread_error_with(
+            &AUDIOREAD_ERROR_ARGUMENT,
+            "audioread: sample range first sample must be less than or equal to last sample",
+        ));
+    }
+    Ok((first, last))
+}
+
+fn parse_positive_integer(value: f64, label: &str) -> BuiltinResult<usize> {
+    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
+        return Err(audioread_error_with(
+            &AUDIOREAD_ERROR_ARGUMENT,
+            format!("audioread: {label} must be a positive integer"),
+        ));
+    }
+    if value > usize::MAX as f64 {
+        return Err(audioread_error_with(
+            &AUDIOREAD_ERROR_ARGUMENT,
+            format!("audioread: {label} is too large"),
+        ));
+    }
+    Ok(value as usize)
+}
+
+fn scalar_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) => Some(s.clone()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
+        _ => None,
+    }
+}
+
+fn decode_audio_samples(bytes: &[u8], options: AudioreadOptions) -> Result<DecodedAudio, String> {
+    if bytes.starts_with(b"RIFF") || bytes.starts_with(b"RF64") {
+        decode_wave_samples(bytes, options)
+    } else if bytes.starts_with(b"fLaC")
+        || bytes.starts_with(b"FORM")
+        || bytes.starts_with(b"OggS")
+        || parse_mp3(bytes).is_some()
+    {
+        Err("sample decoding is currently implemented for WAV/RF64 PCM and IEEE-float audio; compressed containers are metadata-only".to_string())
+    } else {
+        Err("unsupported audio format".to_string())
+    }
+}
+
+fn decode_wave_samples(bytes: &[u8], options: AudioreadOptions) -> Result<DecodedAudio, String> {
+    let parsed = parse_wave_container(bytes)?;
+    let fmt = parsed.format;
+    let channels = fmt.channels as usize;
+    let block_align = fmt.block_align as usize;
+    let bytes_per_channel = usize::from(fmt.bits_per_sample.div_ceil(8));
+    if channels == 0 || block_align == 0 || bytes_per_channel == 0 {
+        return Err("WAVE fmt chunk has invalid sample layout".to_string());
+    }
+    let minimum_block_align = channels
+        .checked_mul(bytes_per_channel)
+        .ok_or_else(|| "WAVE channel layout overflows platform limits".to_string())?;
+    if block_align < minimum_block_align {
+        return Err("WAVE block alignment is smaller than the channel sample width".to_string());
+    }
+    if parsed.data_len % block_align != 0 {
+        return Err("WAVE data chunk is not aligned to whole sample frames".to_string());
+    }
+    let total_frames = parsed.data_len / block_align;
+    let (start_frame, end_frame_exclusive) = match options.range {
+        Some((first, last)) => {
+            if last > total_frames {
+                return Err("sample range exceeds the available audio frames".to_string());
+            }
+            (first - 1, last)
+        }
+        None => (0, total_frames),
+    };
+    let frame_count = end_frame_exclusive - start_frame;
+    let sample_count = frame_count
+        .checked_mul(channels)
+        .ok_or_else(|| "decoded audio dimensions overflow platform limits".to_string())?;
+    let mut out = Vec::with_capacity(sample_count);
+    let data = &bytes[parsed.data_offset..parsed.data_offset + parsed.data_len];
+    let native_dtype = if options.native {
+        native_wave_dtype(fmt)
+    } else {
+        NumericDType::F64
+    };
+    for channel in 0..channels {
+        for frame in start_frame..end_frame_exclusive {
+            let sample_offset = frame
+                .checked_mul(block_align)
+                .and_then(|base| base.checked_add(channel * bytes_per_channel))
+                .ok_or_else(|| "sample offset overflows platform limits".to_string())?;
+            let sample_bytes = &data[sample_offset..sample_offset + bytes_per_channel];
+            let value = decode_wave_sample(sample_bytes, fmt, options.native)?;
+            out.push(value);
+        }
+    }
+    let samples = Tensor::new_with_dtype(out, vec![frame_count, channels], native_dtype)
+        .map_err(|err| format!("decoded audio tensor shape is invalid: {err}"))?;
+    Ok(DecodedAudio {
+        samples,
+        sample_rate: fmt.sample_rate as f64,
+    })
+}
+
+fn native_wave_dtype(fmt: WaveFormat) -> NumericDType {
+    match (fmt.effective_format_tag(), fmt.effective_bits_per_sample()) {
+        (0x0001, 8) => NumericDType::U8,
+        (0x0003, 32) => NumericDType::F32,
+        _ => NumericDType::F64,
+    }
+}
+
+fn decode_wave_sample(bytes: &[u8], fmt: WaveFormat, native: bool) -> Result<f64, String> {
+    match (fmt.effective_format_tag(), fmt.effective_bits_per_sample()) {
+        (0x0001, 8) => {
+            let raw = bytes[0] as f64;
+            Ok(if native { raw } else { (raw - 128.0) / 128.0 })
+        }
+        (0x0001, 16) => {
+            let raw = i16::from_le_bytes([bytes[0], bytes[1]]);
+            Ok(if native {
+                raw as f64
+            } else {
+                raw as f64 / 32768.0
+            })
+        }
+        (0x0001, 24) => {
+            let raw = sign_extend_24(bytes);
+            Ok(if native {
+                raw as f64
+            } else {
+                raw as f64 / 8_388_608.0
+            })
+        }
+        (0x0001, 32) => {
+            let raw = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+            Ok(if native {
+                raw as f64
+            } else {
+                raw as f64 / 2_147_483_648.0
+            })
+        }
+        (0x0003, 32) => Ok(f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64),
+        (0x0003, 64) => Ok(f64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])),
+        (tag, bits) => Err(format!(
+            "unsupported WAVE sample encoding tag 0x{tag:04x} with {bits} bits per sample"
+        )),
+    }
+}
+
+fn sign_extend_24(bytes: &[u8]) -> i32 {
+    let mut value = ((bytes[2] as i32) << 16) | ((bytes[1] as i32) << 8) | bytes[0] as i32;
+    if value & 0x0080_0000 != 0 {
+        value |= !0x00ff_ffff;
+    }
+    value
+}
+
+#[derive(Debug, Clone, Copy)]
+struct WaveContainer {
+    format: WaveFormat,
+    data_offset: usize,
+    data_len: usize,
+}
+
+fn parse_wave_container(bytes: &[u8]) -> Result<WaveContainer, String> {
     if bytes.len() < 12 || &bytes[8..12] != b"WAVE" {
         return Err("RIFF/RF64 file is not a WAVE container".to_string());
     }
+    let is_rf64 = bytes.starts_with(b"RF64");
     let mut pos = 12usize;
     let mut fmt: Option<WaveFormat> = None;
-    let mut data_bytes: Option<u64> = None;
-    while pos + 8 <= bytes.len() {
-        let id = &bytes[pos..pos + 4];
-        let size = read_u32_le(bytes, pos + 4)? as usize;
-        pos += 8;
-        if pos + size > bytes.len() {
+    let mut data: Option<(usize, usize)> = None;
+    let mut rf64_data_size: Option<u64> = None;
+    while pos.checked_add(8).is_some_and(|end| end <= bytes.len()) {
+        let id_end = pos
+            .checked_add(4)
+            .ok_or_else(|| "WAVE chunk offset overflows platform limits".to_string())?;
+        let size_offset = pos
+            .checked_add(4)
+            .ok_or_else(|| "WAVE chunk offset overflows platform limits".to_string())?;
+        let id = &bytes[pos..id_end];
+        let declared_size = read_u32_le(bytes, size_offset)?;
+        pos = pos
+            .checked_add(8)
+            .ok_or_else(|| "WAVE chunk offset overflows platform limits".to_string())?;
+        let size = if is_rf64 && id == b"data" && declared_size == u32::MAX {
+            let actual = rf64_data_size.ok_or_else(|| {
+                "RF64 data chunk uses sentinel size without ds64 metadata".to_string()
+            })?;
+            usize::try_from(actual)
+                .map_err(|_| "RF64 data chunk is too large for this platform".to_string())?
+        } else {
+            declared_size as usize
+        };
+        let chunk_end = pos
+            .checked_add(size)
+            .ok_or_else(|| "WAVE chunk size overflows platform limits".to_string())?;
+        if chunk_end > bytes.len() {
             return Err("WAVE chunk extends past end of file".to_string());
         }
         match id {
-            b"fmt " => fmt = Some(parse_wave_fmt(&bytes[pos..pos + size])?),
-            b"data" => data_bytes = Some(size as u64),
+            b"ds64" if is_rf64 => {
+                if size < 24 {
+                    return Err("RF64 ds64 chunk is too short".to_string());
+                }
+                rf64_data_size = Some(read_u64_le(bytes, pos + 8)?);
+            }
+            b"fmt " => fmt = Some(parse_wave_fmt(&bytes[pos..chunk_end])?),
+            b"data" => data = Some((pos, size)),
             _ => {}
         }
-        pos += size + (size % 2);
+        let padded_size = size
+            .checked_add(size % 2)
+            .ok_or_else(|| "WAVE padded chunk size overflows platform limits".to_string())?;
+        pos = pos
+            .checked_add(padded_size)
+            .ok_or_else(|| "WAVE chunk offset overflows platform limits".to_string())?;
     }
 
     let fmt = fmt.ok_or_else(|| "WAVE file is missing a fmt chunk".to_string())?;
-    let total_samples = data_bytes.and_then(|len| {
-        if fmt.block_align > 0 {
-            Some(len / fmt.block_align as u64)
-        } else {
-            None
-        }
-    });
-    Ok(AudioMetadata {
-        format: "WAV",
-        compression_method: wave_compression_name(fmt.format_tag).to_string(),
-        num_channels: fmt.channels,
-        sample_rate: fmt.sample_rate as f64,
-        total_samples,
-        bits_per_sample: Some(fmt.bits_per_sample),
-        bit_rate: Some(fmt.byte_rate as f64 * 8.0),
+    let (data_offset, data_len) =
+        data.ok_or_else(|| "WAVE file is missing a data chunk".to_string())?;
+    Ok(WaveContainer {
+        format: fmt,
+        data_offset,
+        data_len,
     })
 }
 
 #[derive(Debug, Clone, Copy)]
 struct WaveFormat {
     format_tag: u16,
+    subformat_tag: Option<u16>,
     channels: u16,
     sample_rate: u32,
     byte_rate: u32,
     block_align: u16,
     bits_per_sample: u16,
+    valid_bits_per_sample: Option<u16>,
+}
+
+impl WaveFormat {
+    fn effective_format_tag(self) -> u16 {
+        self.subformat_tag.unwrap_or(self.format_tag)
+    }
+
+    fn effective_bits_per_sample(self) -> u16 {
+        self.valid_bits_per_sample.unwrap_or(self.bits_per_sample)
+    }
 }
 
 fn parse_wave_fmt(chunk: &[u8]) -> Result<WaveFormat, String> {
@@ -301,16 +848,35 @@ fn parse_wave_fmt(chunk: &[u8]) -> Result<WaveFormat, String> {
     let byte_rate = u32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
     let block_align = u16::from_le_bytes([chunk[12], chunk[13]]);
     let bits_per_sample = u16::from_le_bytes([chunk[14], chunk[15]]);
-    if channels == 0 || sample_rate == 0 {
-        return Err("WAVE fmt chunk has invalid channel count or sample rate".to_string());
+    if channels == 0 || sample_rate == 0 || block_align == 0 {
+        return Err(
+            "WAVE fmt chunk has invalid channel count, sample rate, or block alignment".to_string(),
+        );
+    }
+
+    let mut subformat_tag = None;
+    let mut valid_bits_per_sample = None;
+    if format_tag == 0xFFFE {
+        if chunk.len() < 40 {
+            return Err("WAVE extensible fmt chunk is too short".to_string());
+        }
+        let cb_size = u16::from_le_bytes([chunk[16], chunk[17]]);
+        if cb_size < 22 {
+            return Err("WAVE extensible fmt chunk has invalid extension size".to_string());
+        }
+        let valid = u16::from_le_bytes([chunk[18], chunk[19]]);
+        valid_bits_per_sample = if valid == 0 { None } else { Some(valid) };
+        subformat_tag = wave_extensible_subformat_tag(&chunk[24..40]);
     }
     Ok(WaveFormat {
         format_tag,
+        subformat_tag,
         channels,
         sample_rate,
         byte_rate,
         block_align,
         bits_per_sample,
+        valid_bits_per_sample,
     })
 }
 
@@ -322,6 +888,17 @@ fn wave_compression_name(tag: u16) -> &'static str {
         0x0007 => "mu-law",
         0xFFFE => "Extensible",
         _ => "Unknown",
+    }
+}
+
+fn wave_extensible_subformat_tag(guid: &[u8]) -> Option<u16> {
+    const BASE_TAIL: [u8; 12] = [
+        0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
+    ];
+    if guid.len() == 16 && guid[2..4] == [0x00, 0x00] && guid[4..16] == BASE_TAIL {
+        Some(u16::from_le_bytes([guid[0], guid[1]]))
+    } else {
+        None
     }
 }
 
@@ -685,27 +1262,51 @@ fn read_ieee_extended_80(bytes: &[u8]) -> Result<f64, String> {
     Ok(sign * fraction * 2f64.powi(exponent as i32 - 16383))
 }
 
-fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
+fn resolve_audioinfo_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
-        Value::String(s) => normalize_path(s),
+        Value::String(s) => normalize_audioinfo_path(s),
         Value::CharArray(ca) if ca.rows == 1 => {
             let text: String = ca.data.iter().collect();
-            normalize_path(&text)
+            normalize_audioinfo_path(&text)
         }
-        Value::StringArray(sa) if sa.data.len() == 1 => normalize_path(&sa.data[0]),
+        Value::StringArray(sa) if sa.data.len() == 1 => normalize_audioinfo_path(&sa.data[0]),
         _ => Err(audioinfo_error(&AUDIOINFO_ERROR_ARGUMENT)),
     }
 }
 
-fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
+fn normalize_audioinfo_path(raw: &str) -> BuiltinResult<PathBuf> {
     if raw.trim().is_empty() {
         return Err(audioinfo_error_with(
             &AUDIOINFO_ERROR_ARGUMENT,
             "audioinfo: filename must not be empty",
         ));
     }
-    let expanded = expand_user_path(raw, BUILTIN_NAME)
+    let expanded = expand_user_path(raw, AUDIOINFO_BUILTIN_NAME)
         .map_err(|msg| audioinfo_error_with(&AUDIOINFO_ERROR_ARGUMENT, msg))?;
+    Ok(Path::new(&expanded).to_path_buf())
+}
+
+fn resolve_audioread_path(value: &Value) -> BuiltinResult<PathBuf> {
+    match value {
+        Value::String(s) => normalize_audioread_path(s),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            let text: String = ca.data.iter().collect();
+            normalize_audioread_path(&text)
+        }
+        Value::StringArray(sa) if sa.data.len() == 1 => normalize_audioread_path(&sa.data[0]),
+        _ => Err(audioread_error(&AUDIOREAD_ERROR_ARGUMENT)),
+    }
+}
+
+fn normalize_audioread_path(raw: &str) -> BuiltinResult<PathBuf> {
+    if raw.trim().is_empty() {
+        return Err(audioread_error_with(
+            &AUDIOREAD_ERROR_ARGUMENT,
+            "audioread: filename must not be empty",
+        ));
+    }
+    let expanded = expand_user_path(raw, AUDIOREAD_BUILTIN_NAME)
+        .map_err(|msg| audioread_error_with(&AUDIOREAD_ERROR_ARGUMENT, msg))?;
     Ok(Path::new(&expanded).to_path_buf())
 }
 
@@ -718,6 +1319,22 @@ fn read_u32_le(bytes: &[u8], pos: usize) -> Result<u32, String> {
         bytes[pos + 1],
         bytes[pos + 2],
         bytes[pos + 3],
+    ]))
+}
+
+fn read_u64_le(bytes: &[u8], pos: usize) -> Result<u64, String> {
+    if pos + 8 > bytes.len() {
+        return Err("unexpected end of file".to_string());
+    }
+    Ok(u64::from_le_bytes([
+        bytes[pos],
+        bytes[pos + 1],
+        bytes[pos + 2],
+        bytes[pos + 3],
+        bytes[pos + 4],
+        bytes[pos + 5],
+        bytes[pos + 6],
+        bytes[pos + 7],
     ]))
 }
 
@@ -746,6 +1363,7 @@ mod tests {
     use runmat_time::unix_timestamp_ms;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -772,6 +1390,20 @@ mod tests {
             .unwrap_or_else(|| panic!("missing {name}"))
     }
 
+    fn tensor(value: Value) -> Tensor {
+        match value {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    fn output_list(value: Value) -> Vec<Value> {
+        match value {
+            Value::OutputList(values) => values,
+            other => panic!("expected output list, got {other:?}"),
+        }
+    }
+
     fn wav_fixture(sample_rate: u32, channels: u16, bits: u16, frames: u32) -> Vec<u8> {
         let block_align = channels * (bits / 8);
         let byte_rate = sample_rate * block_align as u32;
@@ -792,6 +1424,92 @@ mod tests {
         bytes.extend_from_slice(b"data");
         bytes.extend_from_slice(&data_size.to_le_bytes());
         bytes.resize(bytes.len() + data_size as usize, 0);
+        bytes
+    }
+
+    fn wav_with_payload(
+        sample_rate: u32,
+        channels: u16,
+        bits: u16,
+        format_tag: u16,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        let block_align = channels * (bits / 8);
+        let byte_rate = sample_rate * block_align as u32;
+        let riff_size = 36 + payload.len() as u32;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&riff_size.to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"fmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&format_tag.to_le_bytes());
+        bytes.extend_from_slice(&channels.to_le_bytes());
+        bytes.extend_from_slice(&sample_rate.to_le_bytes());
+        bytes.extend_from_slice(&byte_rate.to_le_bytes());
+        bytes.extend_from_slice(&block_align.to_le_bytes());
+        bytes.extend_from_slice(&bits.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(payload);
+        if !payload.len().is_multiple_of(2) {
+            bytes.push(0);
+        }
+        bytes
+    }
+
+    fn pcm16_wav(sample_rate: u32, channels: u16, samples_interleaved: &[i16]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        for sample in samples_interleaved {
+            payload.extend_from_slice(&sample.to_le_bytes());
+        }
+        wav_with_payload(sample_rate, channels, 16, 1, &payload)
+    }
+
+    fn pcm8_wav(sample_rate: u32, channels: u16, samples_interleaved: &[u8]) -> Vec<u8> {
+        wav_with_payload(sample_rate, channels, 8, 1, samples_interleaved)
+    }
+
+    fn float32_wav(sample_rate: u32, channels: u16, samples_interleaved: &[f32]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        for sample in samples_interleaved {
+            payload.extend_from_slice(&sample.to_le_bytes());
+        }
+        wav_with_payload(sample_rate, channels, 32, 3, &payload)
+    }
+
+    fn rf64_pcm16_wav(sample_rate: u32, channels: u16, samples_interleaved: &[i16]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        for sample in samples_interleaved {
+            payload.extend_from_slice(&sample.to_le_bytes());
+        }
+        let bits = 16u16;
+        let block_align = channels * (bits / 8);
+        let byte_rate = sample_rate * block_align as u32;
+        let data_size = payload.len() as u64;
+        let riff_size = 36u64 + data_size;
+        let sample_count = data_size / block_align as u64;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RF64");
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"ds64");
+        bytes.extend_from_slice(&28u32.to_le_bytes());
+        bytes.extend_from_slice(&riff_size.to_le_bytes());
+        bytes.extend_from_slice(&data_size.to_le_bytes());
+        bytes.extend_from_slice(&sample_count.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(b"fmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&channels.to_le_bytes());
+        bytes.extend_from_slice(&sample_rate.to_le_bytes());
+        bytes.extend_from_slice(&byte_rate.to_le_bytes());
+        bytes.extend_from_slice(&block_align.to_le_bytes());
+        bytes.extend_from_slice(&bits.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(&payload);
         bytes
     }
 
@@ -823,7 +1541,27 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn audioread_descriptor_covers_core_forms() {
+        let labels: Vec<&str> = AUDIOREAD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "y = audioread(filename)",
+                "[y, Fs] = audioread(filename)",
+                "y = audioread(filename, samples)",
+                "[y, Fs] = audioread(filename, samples, datatype)",
+            ]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn audioinfo_reads_wav_metadata() {
+        let _lock = runmat_filesystem::provider_override_lock();
         let path = temp_path("wav");
         fs::write(&path, wav_fixture(44_100, 2, 16, 4)).expect("write fixture");
 
@@ -846,7 +1584,183 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn audioread_reads_mono_pcm16_as_normalized_double() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, pcm16_wav(8_000, 1, &[-32768, 0, 32767])).expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                Vec::new(),
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(y.shape, vec![3, 1]);
+        assert_eq!(y.dtype, NumericDType::F64);
+        assert_eq!(y.data[0], -1.0);
+        assert_eq!(y.data[1], 0.0);
+        assert!((y.data[2] - (32767.0 / 32768.0)).abs() < 1e-12);
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_stereo_output_is_column_major_by_channel() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(
+            &path,
+            pcm16_wav(
+                44_100,
+                2,
+                &[
+                    32767, -32768, // frame 1: left, right
+                    0, 16384, // frame 2: left, right
+                ],
+            ),
+        )
+        .expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                Vec::new(),
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(y.shape, vec![2, 2]);
+        assert!((y.data[0] - (32767.0 / 32768.0)).abs() < 1e-12);
+        assert_eq!(y.data[1], 0.0);
+        assert_eq!(y.data[2], -1.0);
+        assert_eq!(y.data[3], 0.5);
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_sample_range_is_one_based_inclusive_and_returns_fs() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, pcm16_wav(22_050, 1, &[-32768, -16384, 0, 16384])).expect("write fixture");
+        let _guard = crate::output_count::push_output_count(Some(2));
+
+        let outputs = output_list(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![Value::Tensor(
+                    Tensor::new(vec![2.0, 3.0], vec![1, 2]).expect("range"),
+                )],
+            ))
+            .expect("audioread"),
+        );
+
+        let y = tensor(outputs[0].clone());
+        assert_eq!(outputs[1], Value::Num(22_050.0));
+        assert_eq!(y.shape, vec![2, 1]);
+        assert_eq!(y.data, vec![-0.5, 0.0]);
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_native_uint8_preserves_dtype_and_values() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, pcm8_wav(11_025, 1, &[0, 128, 255])).expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![Value::from("native")],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(y.dtype, NumericDType::U8);
+        assert_eq!(y.data, vec![0.0, 128.0, 255.0]);
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_reads_float32_wave() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, float32_wav(48_000, 1, &[-0.25, 0.0, 0.5])).expect("write fixture");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                Vec::new(),
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(y.shape, vec![3, 1]);
+        assert_eq!(y.data, vec![-0.25, 0.0, 0.5]);
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_reads_rf64_data_size_from_ds64() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, rf64_pcm16_wav(32_000, 1, &[0, 16384])).expect("write fixture");
+
+        let outputs = {
+            let _guard = crate::output_count::push_output_count(Some(2));
+            output_list(
+                block_on(audioread_builtin(
+                    Value::from(path.to_string_lossy().into_owned()),
+                    Vec::new(),
+                ))
+                .expect("audioread"),
+            )
+        };
+
+        let y = tensor(outputs[0].clone());
+        assert_eq!(outputs[1], Value::Num(32_000.0));
+        assert_eq!(y.shape, vec![2, 1]);
+        assert_eq!(y.data, vec![0.0, 0.5]);
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn audioread_reads_via_active_filesystem_provider() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let provider =
+            runmat_filesystem::SandboxFsProvider::new(dir.path().to_path_buf()).expect("sandbox");
+        let _guard = runmat_filesystem::replace_provider(Arc::new(provider));
+        block_on(runmat_filesystem::write_async(
+            "/audio.wav",
+            pcm16_wav(16_000, 1, &[0, 16384]),
+        ))
+        .expect("provider write");
+
+        let outputs = {
+            let _out_guard = crate::output_count::push_output_count(Some(2));
+            output_list(
+                block_on(audioread_builtin(Value::from("/audio.wav"), Vec::new()))
+                    .expect("audioread"),
+            )
+        };
+
+        let y = tensor(outputs[0].clone());
+        assert_eq!(outputs[1], Value::Num(16_000.0));
+        assert_eq!(y.shape, vec![2, 1]);
+        assert_eq!(y.data, vec![0.0, 0.5]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn audioinfo_reads_flac_streaminfo() {
+        let _lock = runmat_filesystem::provider_override_lock();
         let path = temp_path("flac");
         fs::write(&path, flac_fixture(48_000, 2, 24, 96_000)).expect("write fixture");
 
@@ -867,6 +1781,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn audioinfo_rejects_unknown_data() {
+        let _lock = runmat_filesystem::provider_override_lock();
         let path = temp_path("bin");
         fs::write(&path, b"not audio").expect("write fixture");
 

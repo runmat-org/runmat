@@ -10,6 +10,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -115,7 +116,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers implement the polyint hook for real coefficient vectors; complex inputs fall back to the host.",
+    notes: "Providers implement the polyint hook for real and complex-interleaved coefficient vectors; complex integration constants fall back to host integration and re-upload.",
 };
 
 fn polyint_error(message: impl Into<String>) -> RuntimeError {
@@ -173,14 +174,17 @@ async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResul
         }
     }
 
-    let was_gpu = matches!(coeffs, Value::GpuTensor(_));
-    polyint_host_value(coeffs, constant, was_gpu).await
+    let source_gpu = match &coeffs {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
+    };
+    polyint_host_value(coeffs, constant, source_gpu).await
 }
 
 async fn polyint_host_value(
     coeffs: Value,
     constant: Complex64,
-    was_gpu: bool,
+    source_gpu: Option<runmat_accelerate_api::GpuTensorHandle>,
 ) -> BuiltinResult<Value> {
     let polynomial = parse_polynomial(coeffs).await?;
     let mut integrated = integrate_coeffs(&polynomial.coeffs);
@@ -190,7 +194,7 @@ async fn polyint_host_value(
         *last += constant;
     }
     let value = coeffs_to_value(&integrated, polynomial.orientation)?;
-    maybe_return_gpu(value, was_gpu)
+    maybe_return_gpu(value, source_gpu.as_ref())
 }
 
 fn try_polyint_gpu(
@@ -201,7 +205,9 @@ fn try_polyint_gpu(
         return Ok(None);
     }
     ensure_vector_shape(&handle.shape)?;
-    let Some(provider) = runmat_accelerate_api::provider() else {
+    let Some(provider) =
+        runmat_accelerate_api::provider_for_handle(handle).or_else(runmat_accelerate_api::provider)
+    else {
         return Ok(None);
     };
     match provider.polyint(handle, constant.re) {
@@ -230,13 +236,17 @@ fn integrate_coeffs(coeffs: &[Complex64]) -> Vec<Complex64> {
     result
 }
 
-fn maybe_return_gpu(value: Value, was_gpu: bool) -> BuiltinResult<Value> {
-    if !was_gpu {
+fn maybe_return_gpu(
+    value: Value,
+    source_gpu: Option<&runmat_accelerate_api::GpuTensorHandle>,
+) -> BuiltinResult<Value> {
+    let Some(source_gpu) = source_gpu else {
         return Ok(value);
-    }
+    };
+    let provider = runmat_accelerate_api::provider_for_handle(source_gpu);
     match value {
         Value::Tensor(tensor) => {
-            if let Some(provider) = runmat_accelerate_api::provider() {
+            if let Some(provider) = provider {
                 let view = HostTensorView {
                     data: &tensor.data,
                     shape: &tensor.shape,
@@ -251,6 +261,21 @@ fn maybe_return_gpu(value: Value, was_gpu: bool) -> BuiltinResult<Value> {
                 trace!("polyint: no provider available to re-upload result");
             }
             Ok(Value::Tensor(tensor))
+        }
+        Value::ComplexTensor(tensor) => {
+            if let Some(provider) = provider {
+                match gpu_helpers::upload_complex_tensor(provider, &tensor) {
+                    Ok(handle) => return Ok(gpu_helpers::complex_gpu_value(handle)),
+                    Err(err) => {
+                        warn!(
+                            "polyint: provider complex upload failed, keeping result on host: {err}"
+                        );
+                    }
+                }
+            } else {
+                trace!("polyint: no provider available to re-upload complex result");
+            }
+            Ok(Value::ComplexTensor(tensor))
         }
         other => Ok(other),
     }
@@ -420,8 +445,11 @@ impl Orientation {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::gpu_helpers;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::LogicalArray;
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
@@ -664,7 +692,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn polyint_gpu_complex_constant_falls_back_to_host() {
+    fn polyint_gpu_complex_constant_reuploads_complex_result() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
             let view = HostTensorView {
@@ -675,7 +703,17 @@ pub(crate) mod tests {
             let result = polyint_builtin(Value::GpuTensor(handle), vec![Value::Complex(0.0, 2.0)])
                 .expect("polyint");
             match result {
-                Value::ComplexTensor(ct) => {
+                Value::GpuTensor(handle) => {
+                    assert_eq!(
+                        runmat_accelerate_api::handle_storage(&handle),
+                        runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                    );
+                    let gathered =
+                        block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(handle)))
+                            .expect("gather");
+                    let Value::ComplexTensor(ct) = gathered else {
+                        panic!("expected complex tensor");
+                    };
                     assert_eq!(ct.shape, vec![1, 3]);
                     let expected = [(0.5, 0.0), (0.0, 0.0), (0.0, 2.0)];
                     assert!(ct
@@ -686,8 +724,39 @@ pub(crate) mod tests {
                             (lre - rre).abs() < 1e-12 && (lim - rim).abs() < 1e-12
                         }));
                 }
-                other => panic!("expected complex tensor fall-back, got {other:?}"),
+                other => panic!("expected complex gpu tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[test]
+    fn polyint_complex_gpu_coefficients_stay_resident() {
+        test_support::with_test_provider(|provider| {
+            let coeffs = ComplexTensor::new(vec![(1.0, 1.0), (2.0, -1.0)], vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_complex_tensor(provider, &coeffs).expect("upload");
+            let result =
+                polyint_builtin(Value::GpuTensor(handle), vec![Value::Num(2.0)]).expect("polyint");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected complex gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&handle),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(handle)))
+                .expect("gather");
+            let Value::ComplexTensor(ct) = gathered else {
+                panic!("expected complex tensor");
+            };
+            assert_eq!(ct.shape, vec![1, 3]);
+            let expected = [(0.5, 0.5), (2.0, -1.0), (2.0, 0.0)];
+            assert!(ct
+                .data
+                .iter()
+                .zip(expected.iter())
+                .all(|((lre, lim), (rre, rim))| {
+                    (lre - rre).abs() < 1e-12 && (lim - rim).abs() < 1e-12
+                }));
         });
     }
 
@@ -733,10 +802,12 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn polyint_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        ) else {
+            return;
+        };
         let tensor = Tensor::new(vec![3.0, -2.0, 5.0, 7.0], vec![1, 4]).unwrap();
         let view = HostTensorView {
             data: &tensor.data,
@@ -762,6 +833,54 @@ pub(crate) mod tests {
             .iter()
             .zip(expected.data.iter())
             .for_each(|(lhs, rhs)| assert!((lhs - rhs).abs() < tol));
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn polyint_wgpu_complex_coefficients_match_cpu() {
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let coeffs =
+            ComplexTensor::new(vec![(3.0, 1.5), (-2.0, 0.5), (5.0, -1.0)], vec![1, 3]).unwrap();
+        let cpu_value =
+            polyint_builtin(Value::ComplexTensor(coeffs.clone()), vec![Value::Num(2.0)])
+                .expect("polyint cpu");
+        let cpu = match cpu_value {
+            Value::ComplexTensor(t) => t,
+            other => panic!("unexpected cpu result {other:?}"),
+        };
+
+        let handle = gpu_helpers::upload_complex_tensor(provider, &coeffs).expect("upload");
+        let gpu_value =
+            polyint_builtin(Value::GpuTensor(handle), vec![Value::Num(2.0)]).expect("polyint gpu");
+        let Value::GpuTensor(handle) = gpu_value else {
+            panic!("expected gpu tensor");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&handle),
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        );
+        let gathered =
+            block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(handle))).expect("gather");
+        let Value::ComplexTensor(gpu) = gathered else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(gpu.shape, cpu.shape);
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
+        gpu.data
+            .iter()
+            .zip(cpu.data.iter())
+            .for_each(|((lre, lim), (rre, rim))| {
+                assert!((lre - rre).abs() < tol);
+                assert!((lim - rim).abs() < tol);
+            });
     }
 
     fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

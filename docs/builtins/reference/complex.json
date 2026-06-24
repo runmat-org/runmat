@@ -11,11 +11,14 @@
   ],
   "summary": "Construct complex values from real and imaginary parts in MATLAB and RunMat.",
   "gpu_support": {
-    "elementwise": false,
+    "elementwise": true,
     "reduction": false,
-    "precisions": [],
+    "precisions": [
+      "f32",
+      "f64"
+    ],
     "broadcasting": "scalar-only",
-    "notes": "Complex tensors are currently host-resident in RunMat. GPU tensor inputs are not accepted by this constructor until native complex GPU buffers are wired through the runtime."
+    "notes": "When a provider exposes complex_from_real / complex_from_real_imag, gpuArray inputs stay resident and return complex-interleaved GPU storage. The runtime gathers only when the hook is unavailable or a host-only conversion is required."
   },
   "fusion": {
     "elementwise": false,
@@ -34,7 +37,8 @@
     "Integer and logical inputs are promoted to double precision before constructing the complex result.",
     "String and character inputs are rejected because the constructor accepts numeric inputs only.",
     "Unary `complex(a)` preserves existing complex scalars and complex tensors. Real inputs become complex values with zero imaginary parts.",
-    "Empty real tensors preserve their empty shape and return empty complex tensors."
+    "Empty real tensors preserve their empty shape and return empty complex tensors.",
+    "Real gpuArray inputs remain device-resident when the active provider supports complex construction; two-argument GPU construction preserves MATLAB scalar expansion rules and rejects complex operands."
   ],
   "examples": [
     {
@@ -95,7 +99,7 @@
     },
     {
       "question": "Can `complex` run on GPU arrays?",
-      "answer": "Not yet. RunMat's complex tensor representation is currently host-resident, so this builtin does not accept `gpuArray` inputs."
+      "answer": "Yes. Real gpuArray inputs are interleaved on the provider into complex GPU storage. Unary `complex(A)` adds a zero imaginary lane; binary `complex(A,B)` combines real and imaginary operands with scalar expansion. Complex operands are still rejected in the two-argument form, matching MATLAB's real-input requirement."
     }
   ],
   "links": [
@@ -136,8 +140,10 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/complex.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/complex.rs"
   },
-  "gpu_residency": "No. `complex` returns host-resident `Value::Complex` or `Value::ComplexTensor` values today. Use `gather` before construction if values are currently device-resident.",
+  "gpu_residency": "`complex` keeps real gpuArray inputs resident when the active provider supports `complex_from_real` and `complex_from_real_imag`. Outputs use complex-interleaved GPU storage so downstream GPU-aware operations can consume them without a host round trip.",
   "gpu_behavior": [
-    "RunMat rejects `gpuArray` inputs for `complex` today because the active GPU providers expose real-valued tensor buffers, while this constructor creates complex storage. Native complex GPU residency can be added later without changing the public call forms."
+    "Unary `complex(A)` on a real gpuArray writes `[real, 0]` interleaved lanes on the device and marks the handle as complex storage.",
+    "Binary `complex(A, B)` accepts real gpuArray and host real operands, uploading host operands as needed, then uses the provider hook to interleave the output on-device with scalar expansion.",
+    "If either two-argument operand is already complex, RunMat raises the same real-input error as the host path."
   ]
 }

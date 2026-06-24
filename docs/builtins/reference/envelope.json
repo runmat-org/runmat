@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "`envelope` accepts GPU tensors through the normal gather path. Analytic, RMS, and peak interpolation currently execute on the host reference path."
+    "notes": "Analytic, analytic-FIR, and RMS envelope modes keep real GPU tensors resident through provider-side kernels. Peak interpolation gathers because extrema selection plus spline interpolation is sparse and irregular."
   },
   "fusion": {
     "elementwise": false,

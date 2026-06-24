@@ -2,7 +2,8 @@ use glam::Vec4;
 use once_cell::sync::OnceCell;
 use runmat_builtins::Tensor;
 use runmat_plot::plots::{
-    surface::ColorMap, surface::ShadingMode, Figure, LegendStyle, LineStyle, PlotElement, TextStyle,
+    surface::ColorMap, surface::ShadingMode, AxesKind, Figure, LegendStyle, LineStyle, PlotElement,
+    TextStyle,
 };
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
@@ -2372,6 +2373,9 @@ where
             state.figure.set_active_axes_index(axes_index);
             if should_clear {
                 state.figure.clear_axes(axes_index);
+                state.figure.set_axes_kind(axes_index, AxesKind::Cartesian);
+                state.figure.set_axes_limits(axes_index, None, None);
+                state.figure.set_axes_z_limits(axes_index, None);
                 state.reset_cycle(axes_index);
             }
         }

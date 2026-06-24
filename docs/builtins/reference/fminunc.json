@@ -1,0 +1,85 @@
+{
+  "title": "fminunc",
+  "category": "math/optim",
+  "keywords": [
+    "fminunc",
+    "unconstrained minimization",
+    "optimization",
+    "BFGS",
+    "quasi-Newton",
+    "line search"
+  ],
+  "summary": "Find unconstrained local minima in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "The BFGS optimization loop runs on the host. Objective callbacks may still call GPU-aware builtins, but objective values and gradients are gathered for the iterative solve."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::optim::fminunc::tests",
+    "options": "builtins::math::optim::optimoptions::tests::optimoptions_fminunc_defaults_match_solver"
+  },
+  "description": "`x = fminunc(fun, x0)` minimizes a finite real scalar objective starting from `x0`. Scalar guesses return scalars, and vector or array guesses return solutions with the same shape as `x0`.",
+  "behaviors": [
+    "Uses a host-side BFGS quasi-Newton method with a strong-Wolfe line search.",
+    "When `SpecifyObjectiveGradient` is false or omitted, gradients are estimated with forward finite differences.",
+    "When `SpecifyObjectiveGradient` is true, the objective callback is called as `[f, g] = fun(x)` and `g` must contain one gradient entry per element of `x`.",
+    "Options are supplied as a struct, usually from `optimoptions` or `optimset`. `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, `Display`, `Algorithm`, and `SpecifyObjectiveGradient` are accepted.",
+    "Supported `Algorithm` values are `'quasi-newton'` and `'bfgs'`; trust-region mode is not enabled in this implementation.",
+    "Multi-output forms return `x`, `fval`, `exitflag`, `output`, `grad`, and an approximate Hessian."
+  ],
+  "examples": [
+    {
+      "description": "Minimize a quadratic vector objective",
+      "input": "fun = @(x) sum((x - [1; 2; 3]).^2);\nx = fminunc(fun, [0; 0; 0])",
+      "output": "x =\n    1.0000\n    2.0000\n    3.0000"
+    },
+    {
+      "description": "Use an objective gradient",
+      "input": "fun = @(x) deal(sum((x - [1; 2]).^2), 2*(x - [1; 2]));\nopts = optimoptions('fminunc', 'SpecifyObjectiveGradient', true);\n[x, fval, exitflag, output, grad] = fminunc(fun, [0; 0], opts)",
+      "output": "x =\n    1.0000\n    2.0000\n\nfval = 0\nexitflag = 1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does fminunc use the GPU?",
+      "answer": "The optimizer state and line search run on the host because the solver repeatedly invokes user callbacks. The callback itself can use GPU-aware operations."
+    },
+    {
+      "question": "What is in the output struct?",
+      "answer": "`output` contains `iterations`, `funcCount`, `algorithm`, `firstorderopt`, `stepsize`, and `message` fields."
+    }
+  ],
+  "links": [
+    {
+      "label": "fminbnd",
+      "url": "./fminbnd"
+    },
+    {
+      "label": "fsolve",
+      "url": "./fsolve"
+    },
+    {
+      "label": "optimset",
+      "url": "./optimset"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/optim/fminunc.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/fminunc.rs"
+  },
+  "gpu_residency": "`fminunc` is a host-side optimization sink. GPU-resident initial guesses are gathered before the solve, and objective callbacks may opt back into GPU work internally.",
+  "gpu_behavior": [
+    "The builtin registers `ResidencyPolicy::GatherImmediately` because BFGS iterations need scalar objective values, gradient vectors, and adaptive line-search decisions on the CPU.",
+    "Providers do not implement a direct `fminunc` hook; acceleration remains available inside user callback computations."
+  ]
+}

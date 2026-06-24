@@ -30,7 +30,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers implement unary_angle to evaluate atan2(imag(x), real(x)) on device; the runtime gathers to host whenever the hook is unavailable or when complex tensors need host conversion.",
+    notes: "Providers implement unary_angle to evaluate atan2(imag(x), real(x)) on device for real and complex-interleaved gpuArrays; the runtime gathers to host only when the hook is unavailable or host-only conversion is required.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::angle")]
@@ -55,7 +55,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     }),
     reduction: None,
     emits_nan: false,
-    notes: "Fusion assumes real-valued inputs (imaginary part zero). Complex tensors are gathered to the host until GPU complex storage lands.",
+    notes: "Fusion assumes real-valued inputs (imaginary part zero). Complex-interleaved gpuArrays use the provider unary_angle hook outside generic real-valued fusion.",
 };
 
 const BUILTIN_NAME: &str = "angle";
@@ -136,15 +136,21 @@ async fn angle_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn angle_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+    if let Some(provider) =
+        runmat_accelerate_api::provider_for_handle(&handle).or_else(runmat_accelerate_api::provider)
+    {
         if let Ok(device_result) = provider.unary_angle(&handle).await {
             return Ok(Value::GpuTensor(device_result));
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
         .await
         .map_err(|err| builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, err.to_string()))?;
-    Ok(tensor::tensor_into_value(angle_tensor(tensor)?))
+    match gathered {
+        Value::Complex(re, im) => Ok(Value::Num(angle_scalar(re, im))),
+        Value::ComplexTensor(ct) => angle_complex_tensor(ct),
+        other => angle_real(other),
+    }
 }
 
 fn angle_real(value: Value) -> BuiltinResult<Value> {
@@ -191,6 +197,15 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+
+    #[cfg(feature = "wgpu")]
+    fn register_wgpu_provider_available() -> bool {
+        runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_ok()
+            && runmat_accelerate_api::provider().is_some()
+    }
     use runmat_builtins::{IntValue, LogicalArray, ResolveContext, StringArray, Type};
     use std::f64::consts::PI;
 
@@ -344,6 +359,26 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn angle_complex_gpu_provider_roundtrip() {
+        test_support::with_test_provider(|provider| {
+            let complex = ComplexTensor::new(
+                vec![(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)],
+                vec![2, 2],
+            )
+            .unwrap();
+            let handle =
+                gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload complex");
+            let result = angle_builtin(Value::GpuTensor(handle)).expect("angle");
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.shape, complex.shape);
+            for (actual, (re, im)) in gathered.data.iter().zip(complex.data.iter()) {
+                assert!((actual - im.atan2(*re)).abs() < 1e-12);
+            }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn angle_dimensionless_int_input() {
         let result = angle_builtin(Value::Int(IntValue::I32(-10))).expect("angle");
         if let Value::Num(val) = result {
@@ -386,9 +421,10 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn angle_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
         let tensor = Tensor::new(vec![1.0, -1.0, 0.5, -0.5], vec![2, 2]).unwrap();
         let cpu = angle_tensor(tensor.clone()).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
@@ -413,6 +449,33 @@ pub(crate) mod tests {
                 }
             }
             _ => panic!("unexpected shapes"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn angle_wgpu_complex_matches_cpu() {
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let complex = ComplexTensor::new(
+            vec![(3.0, 4.0), (-2.0, 5.0), (-1.5, -0.5), (2.5, -6.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+        let result = block_on(angle_gpu(handle)).unwrap();
+        let gathered = test_support::gather(result).expect("gather");
+        assert_eq!(gathered.shape, complex.shape);
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
+        for (actual, (re, im)) in gathered.data.iter().zip(complex.data.iter()) {
+            assert!((actual - im.atan2(*re)).abs() < tol);
         }
     }
 }

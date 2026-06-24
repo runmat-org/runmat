@@ -245,7 +245,9 @@ fn evaluate_limit(
     }
 
     match expr {
-        SymbolicExpr::Constant(_) => Ok(expr.clone()),
+        SymbolicExpr::Constant(_)
+        | SymbolicExpr::Rational { .. }
+        | SymbolicExpr::DecimalLiteral { .. } => Ok(expr.clone()),
         SymbolicExpr::Variable(name) if name == variable => Ok(point_expr),
         SymbolicExpr::Variable(_) => Ok(expr.clone()),
         SymbolicExpr::FunctionReference(name, parameters) => {
@@ -347,7 +349,10 @@ fn contains_formal_symbolic_function(expr: &SymbolicExpr) -> bool {
             contains_formal_symbolic_function(expr)
         }
         SymbolicExpr::Function(_, expr) => contains_formal_symbolic_function(expr),
-        SymbolicExpr::Constant(_) | SymbolicExpr::Variable(_) => false,
+        SymbolicExpr::Constant(_)
+        | SymbolicExpr::Rational { .. }
+        | SymbolicExpr::DecimalLiteral { .. }
+        | SymbolicExpr::Variable(_) => false,
     }
 }
 

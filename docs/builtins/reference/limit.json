@@ -63,6 +63,14 @@
     {
       "label": "syms",
       "url": "./syms"
+    },
+    {
+      "label": "int",
+      "url": "./int"
+    },
+    {
+      "label": "vpa",
+      "url": "./vpa"
     }
   ],
   "source": {
